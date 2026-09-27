@@ -54,6 +54,11 @@ export function PostSetupApiRecovery({
             First chat is complete, but the WebUI needs a working server key
             before it can add sources.
           </p>
+          <p className="mt-2 text-sm text-text-muted">
+            If automatic WebUI access is disabled or unavailable, enter the
+            SINGLE_USER_API_KEY configured for this server. Find it in the
+            server&apos;s environment configuration or ask its operator.
+          </p>
         </div>
       </div>
 

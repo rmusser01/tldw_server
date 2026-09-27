@@ -1,0 +1,129 @@
+{
+  "microphone_used": false,
+  "external_provider_used": false,
+  "selection": "parakeet-onnx",
+  "device": "cpu",
+  "model": "istupakov/parakeet-tdt-0.6b-v3-onnx",
+  "snapshots": [
+    {
+      "type": "partial",
+      "text": "",
+      "history": "",
+      "snapshot": ""
+    },
+    {
+      "type": "partial",
+      "text": "",
+      "history": "",
+      "snapshot": ""
+    },
+    {
+      "type": "partial",
+      "text": "",
+      "history": "",
+      "snapshot": ""
+    },
+    {
+      "type": "partial",
+      "text": "",
+      "history": "",
+      "snapshot": ""
+    },
+    {
+      "type": "partial",
+      "text": "Ha ha",
+      "history": "Ha ha",
+      "snapshot": "Ha ha"
+    },
+    {
+      "type": "partial",
+      "text": "Say the same.",
+      "history": "Say the same.",
+      "snapshot": "Say the same."
+    },
+    {
+      "type": "partial",
+      "text": "Say the blue note.",
+      "history": "Say the blue note.",
+      "snapshot": "Say the blue note."
+    },
+    {
+      "type": "partial",
+      "text": "Say the blue notebook is red.",
+      "history": "Say the blue notebook is red.",
+      "snapshot": "Say the blue notebook is red."
+    },
+    {
+      "type": "partial",
+      "text": "Say the Blue Notebook is ready.",
+      "history": "Say the Blue Notebook is ready.",
+      "snapshot": "Say the Blue Notebook is ready."
+    },
+    {
+      "type": "partial",
+      "text": "Say the Blue Notebook is ready.",
+      "history": "Say the Blue Notebook is ready.",
+      "snapshot": "Say the Blue Notebook is ready."
+    },
+    {
+      "type": "partial",
+      "text": "Say the Blue Notebook is ready.",
+      "history": "Say the Blue Notebook is ready.",
+      "snapshot": "Say the Blue Notebook is ready."
+    },
+    {
+      "type": "partial",
+      "text": "Say the blue notebook is ready.",
+      "history": "Say the blue notebook is ready.",
+      "snapshot": "Say the blue notebook is ready."
+    },
+    {
+      "type": "partial",
+      "text": "Say the Blue Notebook is ready.",
+      "history": "Say the Blue Notebook is ready.",
+      "snapshot": "Say the Blue Notebook is ready."
+    }
+  ],
+  "callback_duration_ms": [
+    0.015,
+    0.017,
+    0.018,
+    0.055,
+    0.016,
+    0.044,
+    0.017,
+    0.048,
+    0.018,
+    0.051,
+    0.02,
+    0.053,
+    0.017,
+    0.048,
+    0.02,
+    0.066,
+    0.056,
+    0.021,
+    0.05,
+    0.018,
+    0.018,
+    0.053,
+    0.021,
+    0.022,
+    0.063,
+    0.03,
+    0.025,
+    0.061,
+    0.026,
+    0.025,
+    0.076,
+    0.028,
+    0.04
+  ],
+  "silence_frame_count": 0,
+  "silence_history": "",
+  "source_sha256": {
+    "tldw_Server_API/app/core/Persona/turn_transcriber.py": "4a5e95fb199166617ff6b95be4b5d5f6b1099d952b66cd5d4dc447b1526ee5d3",
+    "tldw_Server_API/app/core/Persona/parakeet_transcriber.py": "c1fe60b844a623cae3ef07a92bc6262d2e20cc61037017efcb15a8c976fe10bb",
+    "tldw_Server_API/app/core/Persona/live_stt.py": "a113fadcb10237675691bea9c132f984ed0a1af3dcef4a050ddc1c9934fbba11"
+  }
+}

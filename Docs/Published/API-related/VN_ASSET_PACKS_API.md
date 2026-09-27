@@ -76,6 +76,7 @@ Dry-run cleanup requests are intentionally not persisted as idempotent mutations
 | `POST` | `/packs/{pack_id}/prompt-preview` | Preview assembled prompt text and truncation diagnostics. |
 | `POST` | `/packs/{pack_id}/generate` | Enqueue a parent generation batch job. |
 | `GET` | `/packs/{pack_id}/generation` | Read latest generation batch status. |
+| `GET` | `/packs/{pack_id}/generation/preflight` | Inspect advisory local generation configuration. |
 | `POST` | `/packs/{pack_id}/generation/cancel` | Request cancellation for active generation. |
 | `POST` | `/packs/{pack_id}/slots/{slot_id}/retry` | Retry generation for one slot. |
 | `POST` | `/packs/{pack_id}/items/{item_id}/regenerate` | Regenerate one item variant. |
@@ -162,6 +163,33 @@ Response:
 Do not log full prompt previews in production logs; world-book and scenario content may contain private user data.
 
 ## Generation Lifecycle
+
+Before queuing work, `GET /packs/{pack_id}/generation/preflight` reports the
+effective backend/model for each slot. Backend selection uses the slot override,
+then pack default, then configured server backend. Model selection uses the slot
+override, then pack default, then the adapter's environment/configured/built-in
+default, using the same resolver as generation. Backends without a determinable
+public model identifier return `null`; local model file paths are not exposed.
+Each slot reports `configured`,
+`missing_configuration`, `unavailable`, or `unknown`, with guidance when needed.
+This read requires pack ownership and creates no jobs.
+The named `vn_assets.preflight` policy applies the standard per-user rate class
+(120 requests/minute, burst 240 per API process); stricter user or role limits still apply.
+Rate-limited responses use HTTP 429 with `Retry-After`.
+
+The response has `scope: "api_process_configuration"` and
+`worker_health: "unknown"`. `local_workers_enabled` only reports the two local
+worker flags, not liveness. Separate workers may have different settings.
+These checks neither contact a provider nor prove credentials, GPU availability
+or worker health; they are advisory and do not block generation on another host.
+
+The WebUI supplies an idempotency key for Start and each slot Retry. An ambiguous
+failure retains that operation's key while the page remains mounted, so clicking
+the same action again replays the request safely. Active generation progress
+refreshes automatically; the refresh control also retries a failed status or
+configuration check. Refreshing/reopening the entire page does not preserve
+unacknowledged client keys. Durable recipe snapshots and worker crash-replay
+hardening remain tracked in issue #2021.
 
 Start generation:
 

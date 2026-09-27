@@ -5,9 +5,13 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.http_client import create_client
+from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
+    encode_huggingface_model_path,
+    resolve_runtime_embedding_base_url,
+)
 from tldw_Server_API.app.core.testing import is_truthy
 
-from .base import EmbeddingsProvider
+from .base import EmbeddingsAdapterUnavailableError, EmbeddingsProvider
 
 
 class HuggingFaceEmbeddingsAdapter(EmbeddingsProvider):
@@ -73,9 +77,35 @@ class HuggingFaceEmbeddingsAdapter(EmbeddingsProvider):
         if inputs is None or not model:
             raise ValueError("Embeddings: 'input' and 'model' are required")
 
+        if request.get("credentials_resolved") is True and not (
+            isinstance(api_key, str) and api_key.strip()
+        ):
+            raw_base_url = request.get("base_url")
+            if not (isinstance(raw_base_url, str) and raw_base_url.strip()):
+                raise EmbeddingsAdapterUnavailableError(
+                    "Resolved keyless Hugging Face embeddings require local fallback."
+                )
+
+            from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+
+            raise ChatConfigurationError(
+                provider=self.name,
+                message="Hugging Face embedding credentials are not configured.",
+            )
+
         # Native HTTP path via centralized client (mock-friendly)
         if self._use_native_http():
-            url = f"{self._base_url()}/{model}"
+            base_url = resolve_runtime_embedding_base_url(request, provider=self.name)
+            try:
+                model_path = encode_huggingface_model_path(model)
+            except ValueError:
+                from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+
+                raise ChatBadRequestError(
+                    provider=self.name,
+                    message="Invalid provider model identifier.",
+                ) from None
+            url = f"{base_url or self._base_url()}/{model_path}"
             headers = self._headers(api_key)
             payload: dict[str, Any]
             if isinstance(inputs, list):
@@ -84,6 +114,7 @@ class HuggingFaceEmbeddingsAdapter(EmbeddingsProvider):
             else:
                 payload = {"inputs": inputs, "options": {"wait_for_model": True}}
                 multi = False
+            provider_error: Exception | None = None
             try:
                 with create_client(timeout=timeout or 60.0) as client:
                     resp = client.post(url, headers=headers, json=payload)
@@ -91,9 +122,15 @@ class HuggingFaceEmbeddingsAdapter(EmbeddingsProvider):
                         resp.raise_for_status()
                     data = resp.json()
                 return self._normalize(data, multi=multi)
-            except Exception as e:
+            except Exception:  # noqa: BLE001 - sanitize arbitrary provider transport failures
                 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
-                raise ChatProviderError(provider=self.name, message=str(e)) from e
+
+                provider_error = ChatProviderError(
+                    provider=self.name,
+                    message="Embedding provider request failed.",
+                )
+            if provider_error is not None:
+                raise provider_error
 
         # Fallback: do not attempt legacy path; endpoint will fall back
         msg = (
@@ -101,5 +138,4 @@ class HuggingFaceEmbeddingsAdapter(EmbeddingsProvider):
             "(set LLM_EMBEDDINGS_NATIVE_HTTP_HUGGINGFACE=1 to enable)"
         )
         logger.debug(msg)
-        from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
-        raise ChatProviderError(provider=self.name, message=msg)
+        raise EmbeddingsAdapterUnavailableError(msg)

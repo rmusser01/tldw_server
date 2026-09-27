@@ -112,3 +112,13 @@ export function replaceThinkTagToEM(text: string): string {
     .replaceAll("<think>", "")
     .replaceAll("</think>", "")
 }
+
+export const MISSING_FINAL_ANSWER_MESSAGE =
+  "No final answer was generated. Retry or continue to request an answer."
+
+/** A settled reasoning trace without any user-facing answer text. */
+export function isReasoningOnlyResponse(text: string): boolean {
+  const parts = parseReasoning(text)
+  return isReasoningStarted(text) &&
+    !parts.some(part => part.type === "text" && part.content.trim().length > 0)
+}

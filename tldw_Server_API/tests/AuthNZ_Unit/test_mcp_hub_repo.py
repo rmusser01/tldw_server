@@ -115,6 +115,9 @@ async def test_repo_external_server_secret_is_stored_separately(tmp_path, monkey
 
 @pytest.mark.asyncio
 async def test_repo_ensure_tables_requires_governance_pack_distribution_tables(tmp_path, monkeypatch) -> None:
+    import sqlite3
+    from contextlib import closing
+
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
@@ -133,8 +136,11 @@ async def test_repo_ensure_tables_requires_governance_pack_distribution_tables(t
     repo = McpHubRepo(pool)
     await repo.ensure_tables()
 
-    await pool.execute("DROP TABLE mcp_governance_pack_source_candidates", ())
-    await pool.execute("DROP TABLE mcp_governance_pack_trust_policy", ())
+    # Corrupt only the disposable fixture schema; managed runtime DDL stays guarded.
+    with closing(sqlite3.connect(db_path)) as conn:
+        conn.execute("DROP TABLE mcp_governance_pack_source_candidates")
+        conn.execute("DROP TABLE mcp_governance_pack_trust_policy")
+        conn.commit()
 
     with pytest.raises(RuntimeError, match="mcp_governance_pack_source_candidates"):
         await repo.ensure_tables()

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { RecentStudySessions } from "../RecentStudySessions"
@@ -103,6 +103,27 @@ describe("RecentStudySessions", () => {
       isLoading: false,
       isFetching: false
     })
+  })
+
+  it("renders an accessible session list without deprecated-component diagnostics", () => {
+    const consoleError = vi.spyOn(console, "error")
+    try {
+      render(
+        <RecentStudySessions
+          deckId={12}
+          selectedSessionId={null}
+          onOpenSession={sessionsMock}
+          isActive
+        />
+      )
+
+      expect(consoleError).not.toHaveBeenCalled()
+      const list = screen.getByRole("list", { name: "Recent study sessions" })
+      expect(within(list).getAllByRole("listitem")).toHaveLength(1)
+      expect(within(list).getByRole("button", { name: "View completed session" })).toBeInTheDocument()
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 
   it("lists completed sessions and reopens the selected snapshot when clicked", () => {

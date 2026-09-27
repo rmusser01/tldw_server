@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from typer.testing import CliRunner
-
 from tldw_Server_API.cli.wizard.cli import app
 from tldw_Server_API.cli.wizard.utils import env as env_utils
+from tldw_Server_API.tests.wizard.cli_runner import CliRunner
 from tldw_Server_API.tests.wizard.helpers import assert_action_field, assert_wizard_json
-
 
 runner = CliRunner()
 

@@ -109,13 +109,34 @@ export interface VNAssetItem {
 }
 
 export interface VNAssetGenerationRequest {
+  idempotency_key?: string;
+  source_batch_id?: number | null;
   slot_ids?: number[];
   variant_count?: number | null;
   options?: Record<string, unknown>;
 }
 
+export interface VNAssetGenerationPreflight {
+  scope: 'api_process_configuration';
+  worker_health: 'unknown';
+  local_workers_enabled: boolean;
+  warnings: string[];
+  slots: Array<{
+    slot_id: number;
+    backend: string | null;
+    model: string | null;
+    status: 'configured' | 'missing_configuration' | 'unavailable' | 'unknown';
+    message: string | null;
+  }>;
+}
+
 export interface VNAssetGenerationStatus {
   batch_id?: number | null;
+  source_batch_id?: number | null;
+  recipe_available?: boolean | null;
+  selected_slot_ids?: number[];
+  failed_slot_batch_ids?: Record<number, number>;
+  failed_slot_recipe_available?: Record<number, boolean>;
   job_batch_id?: string | null;
   status: string;
   total_slots?: number;

@@ -2755,5 +2755,8 @@
   },
   "header_connectionCard_connectedCaption": {
     "message": "Le chat et les outils sont maintenant disponibles dans les Paramètres et la barre latérale."
+  },
+  "notesSearch_offlineSaveUnavailable": {
+    "message": "L’enregistrement hors ligne est indisponible tant que votre compte et le stockage local ne sont pas confirmés. Vos modifications ne sont pas enregistrées."
   }
 }

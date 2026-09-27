@@ -1,5 +1,5 @@
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from tldw_Server_API.app.api.v1.endpoints.sync import _core_envelope_from_api
 from tldw_Server_API.app.api.v1.schemas import sync_v2_models as api_sync_models
@@ -19,15 +19,21 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncBlobUploadCreateRequest,
     SyncBlobUploadSessionResponse,
     SyncCapabilitiesResponse,
+    SyncConflictListResponse,
     SyncConflictResolveRequest,
     SyncDatasetEnrollRequest,
     SyncKeyRecoveryBundleRecord,
     SyncKeyRecoveryBundleRequest,
+    SyncPersonalContextActivationAcknowledgeRequest,
+    SyncPersonalContextPurgeRequest,
     SyncPushRequest,
     SyncPushResponse,
     SyncRestoreCompletenessResponse,
     SyncV2Envelope,
 )
+
+ATTACHMENT_INTENT_ID = "2c4cb609-c4db-44f9-8e35-f078bd36d6b2"
+ATTACHMENT_INTENT_NOTE_ID = "a1677eb1-1f41-4c86-a8dd-1eaa14b014e2"
 from tldw_Server_API.app.core.Sync.v2 import models as core_sync_models
 from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelope as CoreSyncEnvelope
 
@@ -35,7 +41,31 @@ M1_DOMAINS = ["notes.note", "chat.conversation", "chat.message", "attachment.ref
 WORKSPACE_DOMAINS = ["workspaces.workspace", "workspaces.source_ref"]
 SOURCE_CACHE_DOMAINS = ["source_cache.entry"]
 MEDIA_DOMAINS = ["media.item", "media.keyword", "media.keyword_link"]
-SUPPORTED_DOMAINS = M1_DOMAINS + WORKSPACE_DOMAINS + SOURCE_CACHE_DOMAINS + MEDIA_DOMAINS
+NOTES_ORGANIZATION_DOMAINS = (
+    "notes.keyword",
+    "notes.keyword_link",
+    "notes.keyword_collection",
+    "notes.keyword_collection_link",
+    "notes.folder",
+    "notes.folder_link",
+)
+NOTES_LINK_DOMAINS = ["notes.link"]
+PERSONAL_CONTEXT_DOMAINS = [
+    "personal_context.manifest",
+    "personal_context.scope",
+    "personal_context.record",
+    "personal_context.proposal",
+    "personal_context.purge",
+]
+SUPPORTED_DOMAINS = (
+    M1_DOMAINS
+    + WORKSPACE_DOMAINS
+    + SOURCE_CACHE_DOMAINS
+    + MEDIA_DOMAINS
+    + list(NOTES_ORGANIZATION_DOMAINS)
+    + NOTES_LINK_DOMAINS
+    + PERSONAL_CONTEXT_DOMAINS
+)
 
 
 def _encryption_policy_model_classes():
@@ -45,6 +75,84 @@ def _encryption_policy_model_classes():
         api_sync_models.SyncEncryptionPolicyMetadata,
         core_sync_models.SyncEncryptionPolicyMetadata,
     )
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ({"object_revision": 7}, 7),
+        ({"object_revision": True}, None),
+        ({"object_revision": 0}, None),
+        ({"object_revision": 2**63}, None),
+        ({}, 1),
+        (
+            {
+                "base_server_cursor": 8,
+                "base_object_revision": 4,
+                "base_object_hash": "sha256:base",
+                "base_version": "record-v4",
+            },
+            5,
+        ),
+        ({"base_server_cursor": 8}, None),
+        (
+            {
+                "base_server_cursor": True,
+                "base_object_revision": 4,
+                "base_object_hash": "sha256:base",
+            },
+            None,
+        ),
+        (
+            {
+                "base_server_cursor": 8,
+                "base_object_revision": 0,
+                "base_object_hash": "sha256:base",
+            },
+            None,
+        ),
+        (
+            {
+                "base_server_cursor": 8,
+                "base_object_revision": 2**63 - 1,
+                "base_object_hash": "sha256:base",
+            },
+            None,
+        ),
+        (
+            {
+                "base_server_cursor": 8,
+                "base_object_revision": 4,
+                "base_object_hash": "",
+            },
+            None,
+        ),
+        (
+            {
+                "base_server_cursor": 8,
+                "base_object_revision": 4,
+                "base_object_hash": "sha256:base",
+                "base_version": 3,
+            },
+            None,
+        ),
+        ({"base_version": "unexpected-genesis-base"}, None),
+    ],
+)
+def test_personal_context_ingress_result_revision_is_strict(
+    values: dict[str, object],
+    expected: int | None,
+) -> None:
+    fields: dict[str, object] = {
+        "object_revision": None,
+        "base_server_cursor": None,
+        "base_object_revision": None,
+        "base_object_hash": None,
+        "base_version": None,
+    }
+    fields.update(values)
+
+    assert core_sync_models.resolve_personal_context_ingress_result_revision(**fields) == expected
 
 
 def _m1_envelope_payload(**overrides):
@@ -63,7 +171,12 @@ def _m1_envelope_payload(**overrides):
         "operation": "upsert",
         "parent_id": None,
         "schema_version": 1,
-        "payload": {"title": "Research note"},
+        "payload": {
+            "title": "Research note",
+            "content": "Canonical Markdown",
+            "conversation_id": None,
+            "message_id": None,
+        },
         "payload_hash": "sha256:test",
         "object_revision": None,
         "created_at_client": "2026-05-23T18:12:44Z",
@@ -91,12 +204,316 @@ def test_capabilities_advertise_personal_and_workspace_domains_with_server_trust
         "media.item": ["upsert", "tombstone"],
         "media.keyword": ["upsert", "tombstone"],
         "media.keyword_link": ["upsert", "tombstone"],
+        "notes.keyword": ["upsert", "tombstone"],
+        "notes.keyword_link": ["upsert", "tombstone"],
+        "notes.keyword_collection": ["upsert", "tombstone"],
+        "notes.keyword_collection_link": ["upsert", "tombstone"],
+        "notes.folder": ["upsert", "tombstone"],
+        "notes.folder_link": ["upsert", "tombstone"],
+        "notes.link": ["upsert", "tombstone"],
+        "personal_context.manifest": ["upsert"],
+        "personal_context.scope": ["upsert"],
+        "personal_context.record": ["upsert", "tombstone"],
+        "personal_context.proposal": ["upsert"],
+        "personal_context.purge": ["tombstone"],
     }
     assert capabilities.encryption["policy"] == "server_trusted_v1"
     assert capabilities.encryption["ready"] is True
     assert capabilities.encryption_policies == ["server_trusted_v1"]
     assert capabilities.blob_transfer == {"supported": False}
+    assert capabilities.domain_schemas["notes.note"] == {
+        "schema_version": 1,
+        "encryption_policy": "server_trusted_v1",
+        "upsert": {
+            "required": ["title", "content"],
+            "properties": {
+                "title": {"type": "string", "max_length": 255},
+                "content": {"type": "string", "max_length": 5_000_000},
+                "conversation_id": {"type": ["string", "null"]},
+                "message_id": {"type": ["string", "null"]},
+            },
+            "additional_properties": False,
+        },
+        "tombstone": {"operation": "tombstone"},
+        "restore": {
+            "operation": "upsert",
+            "routing_metadata": {"restore_intent": True},
+            "requires_current_base": True,
+        },
+    }
     assert "client_private_v1" not in capabilities.model_dump_json()
+
+
+def test_personal_context_capability_contract_is_typed_and_bounded() -> None:
+    capabilities = SyncCapabilitiesResponse()
+
+    assert set(PERSONAL_CONTEXT_DOMAINS).issubset(capabilities.domains)
+    assert capabilities.personal_context.model_dump() == {
+        "available": False,
+        "blockers": ["personal_context_profile_key_unavailable"],
+        "ongoing_sync_version": 0,
+        "ongoing_sync_blockers": [],
+        "activation_epoch": None,
+        "continuity_token": None,
+        "authorization_policy": "server_trusted_v1",
+        "min_schema_version": 1,
+        "max_schema_version": 1,
+        "integrity_algorithm": "hmac-sha256-v1",
+        "integrity_key_distribution": "wrapped-bootstrap-v1",
+        "privacy_cleanup_ack": "personal-context-cleanup-v1",
+        "purge_generation": "personal-context-purge-v1",
+        "max_record_bytes": 16_384,
+        "max_search_results": 20,
+        "max_proposals_per_turn": 5,
+        "max_proposals_per_session": 25,
+        "max_unresolved_proposals": 200,
+    }
+    assert all(
+        capabilities.supported_adapter_versions[domain] == []
+        for domain in PERSONAL_CONTEXT_DOMAINS
+    )
+
+
+def test_personal_context_domains_match_core_and_api_literals() -> None:
+    expected = tuple(PERSONAL_CONTEXT_DOMAINS)
+
+    assert expected == core_sync_models.PERSONAL_CONTEXT_SYNC_DOMAINS
+    assert expected == api_sync_models.PERSONAL_CONTEXT_SYNC_DOMAINS
+    assert set(expected).issubset(core_sync_models.SyncDomain.__args__)
+    assert set(expected).issubset(api_sync_models.SyncDomain.__args__)
+    assert core_sync_models.PERSONAL_CONTEXT_SYNC_OPERATIONS == {
+        "personal_context.manifest": ["upsert"],
+        "personal_context.scope": ["upsert"],
+        "personal_context.record": ["upsert", "tombstone"],
+        "personal_context.proposal": ["upsert"],
+        "personal_context.purge": ["tombstone"],
+    }
+    assert api_sync_models.PERSONAL_CONTEXT_SYNC_OPERATIONS == (
+        core_sync_models.PERSONAL_CONTEXT_SYNC_OPERATIONS
+    )
+
+
+@pytest.mark.parametrize(
+    ("domain", "operations"),
+    [
+        ("personal_context.manifest", {"upsert"}),
+        ("personal_context.scope", {"upsert"}),
+        ("personal_context.record", {"upsert", "tombstone"}),
+        ("personal_context.proposal", {"upsert"}),
+        ("personal_context.purge", {"tombstone"}),
+    ],
+)
+def test_personal_context_schema_is_discoverable(
+    domain: str,
+    operations: set[str],
+) -> None:
+    schema = core_sync_models.sync_v2_domain_schemas()[domain]
+
+    assert schema["schema_version"] == 1
+    assert schema["encryption_policy"] == "server_trusted_v1"
+    assert operations.issubset(schema)
+    assert SyncCapabilitiesResponse().domain_schemas[domain] == schema
+
+
+@pytest.mark.parametrize("domain", NOTES_ORGANIZATION_DOMAINS)
+def test_notes_organization_schema_is_server_trusted_v1(domain: str) -> None:
+    assert domain in core_sync_models.SyncDomain.__args__
+    schema = core_sync_models.sync_v2_domain_schemas()[domain]
+    assert schema["schema_version"] == 1
+    assert schema["encryption_policy"] == "server_trusted_v1"
+    assert {"upsert", "tombstone"}.issubset(schema)
+
+    capability_schema = SyncCapabilitiesResponse().domain_schemas[domain]
+    assert capability_schema == schema
+
+
+def test_notes_link_schema_is_server_trusted_v1_and_separate_from_organization() -> None:
+    assert "notes.link" in core_sync_models.SyncDomain.__args__
+    assert "notes.link" not in core_sync_models.NOTES_ORGANIZATION_DOMAINS
+    assert core_sync_models.NOTES_LINK_DOMAINS == ("notes.link",)
+    assert core_sync_models.NOTES_LINK_SYNC_OPERATIONS == {
+        "notes.link": ["upsert", "tombstone"]
+    }
+
+    schema = core_sync_models.sync_v2_domain_schemas()["notes.link"]
+    assert schema["schema_version"] == 1
+    assert schema["encryption_policy"] == "server_trusted_v1"
+    assert set(schema) >= {"upsert", "tombstone"}
+    upsert = schema["upsert"]
+    assert upsert["properties"]["source_note_id"] == {
+        "type": "string",
+        "format": "uuid4",
+        "canonical_lowercase": True,
+    }
+    assert upsert["properties"]["target_note_id"] == {
+        "type": "string",
+        "format": "uuid4",
+        "canonical_lowercase": True,
+    }
+    assert upsert["constraints"] == {
+        "distinct_endpoints": True,
+        "undirected_endpoint_order": "source_note_id <= target_note_id",
+    }
+    assert schema["tombstone"]["constraints"] == upsert["constraints"]
+    assert schema["tombstone"]["properties"]["reason"]["max_length"] == 256
+    assert SyncCapabilitiesResponse().domain_schemas["notes.link"] == schema
+
+
+def test_notes_task_domains_are_known_internally_but_not_supported_or_public() -> None:
+    dormant = {"notes.task", "notes.task_activity"}
+
+    assert dormant.issubset(set(core_sync_models.SyncDomain.__args__))
+    assert dormant.isdisjoint(core_sync_models.SYNC_V2_SUPPORTED_DOMAINS)
+    assert dormant.isdisjoint(core_sync_models.SYNC_V2_SUPPORTED_OPERATIONS)
+    assert dormant.isdisjoint(core_sync_models.sync_v2_domain_schemas())
+    assert dormant.isdisjoint(core_sync_models.sync_v2_server_supported_adapter_versions())
+    assert dormant.isdisjoint(core_sync_models.sync_v2_dataset_writable_adapter_versions())
+
+    private_schemas = core_sync_models._sync_v2_internal_domain_schemas()
+    assert set(private_schemas) >= dormant
+    assert private_schemas["notes.task"]["schema_version"] == 1
+    assert private_schemas["notes.task"]["operations"] == ["upsert", "tombstone"]
+    assert private_schemas["notes.task_activity"]["schema_version"] == 1
+    assert private_schemas["notes.task_activity"]["operations"] == [
+        "upsert",
+        "tombstone",
+    ]
+
+
+def test_notes_moodboard_studio_domains_are_known_but_strictly_dormant() -> None:
+    dormant = {
+        "notes.moodboard",
+        "notes.moodboard_note",
+        "notes.studio_document",
+    }
+
+    assert core_sync_models.NOTES_MOODBOARD_STUDIO_DOMAINS == (
+        "notes.moodboard",
+        "notes.moodboard_note",
+        "notes.studio_document",
+    )
+    assert dormant.issubset(set(core_sync_models.SyncDomain.__args__))
+    assert dormant.issubset(core_sync_models.SYNC_V2_KNOWN_DOMAINS)
+    assert dormant.issubset(core_sync_models.SYNC_V2_INTERNAL_OPERATIONS)
+    assert dormant.isdisjoint(core_sync_models.SYNC_V2_SUPPORTED_DOMAINS)
+    assert dormant.isdisjoint(core_sync_models.SYNC_V2_SUPPORTED_OPERATIONS)
+    assert dormant.isdisjoint(core_sync_models.sync_v2_domain_schemas())
+    assert dormant.isdisjoint(core_sync_models.sync_v2_server_supported_adapter_versions())
+    assert dormant.isdisjoint(core_sync_models.sync_v2_dataset_writable_adapter_versions())
+
+    private_schemas = core_sync_models._sync_v2_internal_domain_schemas()
+    assert dormant.issubset(private_schemas)
+    for domain in dormant:
+        assert private_schemas[domain]["schema_version"] == 1
+        assert private_schemas[domain]["operations"] == ["upsert", "tombstone"]
+
+    assert dormant.isdisjoint(SyncCapabilitiesResponse().domains)
+    assert dormant.isdisjoint(SyncCapabilitiesResponse().operations)
+    assert dormant.isdisjoint(SyncCapabilitiesResponse().domain_schemas)
+
+    with pytest.raises(ValidationError):
+        api_sync_models.SyncDeviceRegisterRequest.model_validate(
+            {
+                "display_name": "Premature client",
+                "supported_domains": ["notes.moodboard"],
+            }
+        )
+    with pytest.raises(ValidationError):
+        api_sync_models.SyncProfileBootstrapRequest.model_validate(
+            {
+                "mode": "offline_sync",
+                "requested_domains": ["notes.studio_document"],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("domain", "payload"),
+    [
+        (
+            "notes.keyword_link",
+            {
+                "subject_type": "note",
+                "subject_id": "11111111-1111-4111-8111-111111111111",
+                "keyword_sync_id": "22222222-2222-4222-8222-222222222222",
+            },
+        ),
+        (
+            "notes.keyword_collection_link",
+            {
+                "collection_sync_id": "33333333-3333-4333-8333-333333333333",
+                "keyword_sync_id": "22222222-2222-4222-8222-222222222222",
+            },
+        ),
+        (
+            "notes.folder_link",
+            {
+                "note_id": "11111111-1111-4111-8111-111111111111",
+                "folder_sync_id": "44444444-4444-4444-8444-444444444444",
+            },
+        ),
+    ],
+)
+def test_link_tombstone_capability_payload_parses_strictly(
+    domain: str,
+    payload: dict[str, object],
+) -> None:
+    from tldw_Server_API.app.core.Sync.v2.notes_organization import (
+        parse_notes_organization_payload,
+    )
+
+    descriptor = SyncCapabilitiesResponse().domain_schemas[domain]["tombstone"]
+    derived_payload = {field: payload[field] for field in descriptor["required"]}
+
+    assert parse_notes_organization_payload(
+        domain, "tombstone", derived_payload
+    ) == payload
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "title": 42,
+            "content": "Markdown",
+            "conversation_id": None,
+            "message_id": None,
+        },
+        {
+            "title": "Research note",
+            "content": ["not", "text"],
+            "conversation_id": None,
+            "message_id": None,
+        },
+        {
+            "title": "x" * 256,
+            "content": "Markdown",
+            "conversation_id": None,
+            "message_id": None,
+        },
+        {
+            "title": "Research note",
+            "content": "x" * 5_000_001,
+            "conversation_id": None,
+            "message_id": None,
+        },
+        {
+            "title": "Research note",
+            "content": "Markdown",
+            "conversation_id": 17,
+            "message_id": None,
+        },
+        {
+            "title": "Research note",
+            "content": "Markdown",
+            "conversation_id": None,
+            "message_id": {"id": "message-1"},
+        },
+    ],
+)
+def test_notes_note_upsert_schema_rejects_wrong_types_and_oversized_payloads(payload):
+    with pytest.raises(ValidationError):
+        SyncV2Envelope.model_validate(_m1_envelope_payload(payload=payload))
 
 
 def test_capabilities_normalize_legacy_supported_domains_to_supported_defaults():
@@ -488,7 +905,10 @@ def test_sync_envelope_accepts_m1_fields_and_legacy_transition_aliases():
             object_id=None,
             server_sequence=101,
             payload=None,
-            payload_clear={"title": "Legacy payload alias"},
+            payload_clear={
+                "title": "Legacy payload alias",
+                "content": "Canonical note body",
+            },
         )
     )
 
@@ -496,10 +916,156 @@ def test_sync_envelope_accepts_m1_fields_and_legacy_transition_aliases():
     assert envelope.entity_id == "note-from-old-client"
     assert envelope.server_cursor == 101
     assert envelope.server_sequence == 101
-    assert envelope.payload == {"title": "Legacy payload alias"}
-    assert envelope.payload_clear == {"title": "Legacy payload alias"}
+    assert envelope.payload == {
+        "title": "Legacy payload alias",
+        "content": "Canonical note body",
+    }
+    assert envelope.payload_clear == envelope.payload
     assert envelope.client_sequence == 17
     assert envelope.encryption_metadata == {"policy": "server_trusted_v1"}
+
+
+@pytest.mark.parametrize(("value", "expected_type"), [("version-1", str), (1, int)])
+def test_sync_envelope_entity_version_preserves_wire_type(
+    value: object,
+    expected_type: type,
+) -> None:
+    api_envelope = SyncV2Envelope.model_validate(
+        _m1_envelope_payload(entity_version=value)
+    )
+
+    assert type(api_envelope.entity_version) is expected_type
+    assert type(_core_envelope_from_api(api_envelope).entity_version) is expected_type
+
+
+@pytest.mark.parametrize("value", [True, 1.0])
+def test_sync_envelope_entity_version_rejects_coercible_non_wire_types(
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        SyncV2Envelope.model_validate(_m1_envelope_payload(entity_version=value))
+
+
+def test_core_sync_mutation_group_metadata_round_trips() -> None:
+    expected_sha256 = "a" * 64
+    create = core_sync_models.SyncEnvelopeCreate(
+        dataset_id="dataset-1",
+        client_envelope_id="env-group-0",
+        domain="notes.note",
+        operation="upsert",
+        object_id="note-1",
+        mutation_group_id="mutation-group-1",
+        mutation_step=0,
+        mutation_step_count=3,
+        mutation_plan_hash=expected_sha256,
+    )
+    envelope = CoreSyncEnvelope(
+        dataset_id=create.dataset_id,
+        client_envelope_id=create.client_envelope_id,
+        domain=create.domain,
+        operation=create.operation,
+        object_id=create.object_id,
+        server_cursor=101,
+        mutation_group_id=create.mutation_group_id,
+        mutation_step=create.mutation_step,
+        mutation_step_count=create.mutation_step_count,
+        mutation_plan_hash=create.mutation_plan_hash,
+    )
+
+    assert envelope.mutation_group_id == "mutation-group-1"
+    assert envelope.mutation_step == 0
+    assert envelope.mutation_step_count == 3
+    assert envelope.mutation_plan_hash == expected_sha256
+
+
+def test_core_sync_mutation_group_metadata_allows_legacy_absence() -> None:
+    create = core_sync_models.SyncEnvelopeCreate(
+        dataset_id="dataset-1",
+        client_envelope_id="env-legacy",
+        domain="notes.note",
+        operation="upsert",
+        object_id="note-1",
+    )
+    envelope = CoreSyncEnvelope(
+        dataset_id=create.dataset_id,
+        client_envelope_id=create.client_envelope_id,
+        domain=create.domain,
+        operation=create.operation,
+        object_id=create.object_id,
+        server_cursor=101,
+    )
+
+    assert create.mutation_group_id is None
+    assert create.mutation_step is None
+    assert create.mutation_step_count is None
+    assert create.mutation_plan_hash is None
+    assert envelope.mutation_group_id is None
+    assert envelope.mutation_step is None
+    assert envelope.mutation_step_count is None
+    assert envelope.mutation_plan_hash is None
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"mutation_group_id": "group-1"},
+        {
+            "mutation_group_id": "   ",
+            "mutation_step": 0,
+            "mutation_step_count": 1,
+            "mutation_plan_hash": "a" * 64,
+        },
+        {
+            "mutation_group_id": "group-1",
+            "mutation_step": -1,
+            "mutation_step_count": 1,
+            "mutation_plan_hash": "a" * 64,
+        },
+        {
+            "mutation_group_id": "group-1",
+            "mutation_step": 1,
+            "mutation_step_count": 1,
+            "mutation_plan_hash": "a" * 64,
+        },
+        {
+            "mutation_group_id": "group-1",
+            "mutation_step": 0,
+            "mutation_step_count": 0,
+            "mutation_plan_hash": "a" * 64,
+        },
+        {
+            "mutation_group_id": "group-1",
+            "mutation_step": 0,
+            "mutation_step_count": 1,
+            "mutation_plan_hash": "A" * 64,
+        },
+        {
+            "mutation_group_id": "group-1",
+            "mutation_step": 0,
+            "mutation_step_count": 1,
+            "mutation_plan_hash": "a" * 63,
+        },
+    ],
+)
+@pytest.mark.parametrize("stored", [False, True])
+def test_core_sync_mutation_group_metadata_rejects_partial_or_invalid_values(
+    overrides: dict[str, object],
+    stored: bool,
+) -> None:
+    values = {
+        "dataset_id": "dataset-1",
+        "client_envelope_id": "env-group-0",
+        "domain": "notes.note",
+        "operation": "upsert",
+        "object_id": "note-1",
+        **overrides,
+    }
+    model = CoreSyncEnvelope if stored else core_sync_models.SyncEnvelopeCreate
+    if stored:
+        values["server_cursor"] = 101
+
+    with pytest.raises(ValueError, match="mutation group"):
+        model(**values)
 
 
 def test_sync_envelope_accepts_source_cache_entry_domain():
@@ -694,6 +1260,32 @@ def test_core_envelope_mapping_strips_api_only_server_fields_before_persistence(
     assert core_envelope.apply_status == "pending"
 
 
+def test_api_sync_responses_accept_terminal_superseded_apply_status():
+    envelope = SyncV2Envelope.model_validate(
+        _m1_envelope_payload(
+            envelope_id="srv_env_000000000001",
+            server_cursor=1,
+            status="accepted",
+            apply_status="superseded",
+        )
+    )
+    response = SyncPushResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "accepted": [
+                {
+                    "client_envelope_id": "env-1",
+                    "server_cursor": 1,
+                    "apply_status": "superseded",
+                }
+            ],
+        }
+    )
+
+    assert envelope.apply_status == "superseded"
+    assert response.accepted[0].apply_status == "superseded"
+
+
 def test_conflict_resolution_request_uses_locked_m1_batch_shape():
     request = SyncConflictResolveRequest.model_validate(
         {
@@ -800,6 +1392,34 @@ def test_conflict_resolution_request_rejects_skip_with_resolution_envelope():
         )
 
 
+def test_conflict_resolution_rejects_client_home_authority_claim() -> None:
+    with pytest.raises(ValidationError, match="home authority"):
+        SyncConflictResolveRequest.model_validate(
+            {
+                "dataset_id": "dataset-1",
+                "device_id": "device-1",
+                "resolutions": [
+                    {
+                        "conflict_id": "conflict-1",
+                        "action": "duplicate_rename",
+                        "resolution_envelope": _m1_envelope_payload(
+                            client_envelope_id="env-resolution-home-authority",
+                            domain="personal_context.record",
+                            object_id="note-copy",
+                            authority={
+                                "role": "home_authority",
+                                "publication_batch_id": "batch_0123456789abcdef",
+                                "profile_publication_sequence": 1,
+                                "batch_ordinal": 0,
+                                "batch_size": 1,
+                            },
+                        ),
+                    }
+                ],
+            }
+        )
+
+
 def test_conflict_batch_endpoint_resolves_locked_m1_request_shape():
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
     from tldw_Server_API.app.api.v1.endpoints.sync import resolve_sync_v2_conflicts
@@ -809,33 +1429,49 @@ def test_conflict_batch_endpoint_resolves_locked_m1_request_shape():
         def __init__(self):
             self.calls = []
 
-        def resolve_conflict(self, **kwargs):
-            self.calls.append(kwargs)
-            public_action = kwargs["action"]
-            server_cursor = 123 if public_action == "duplicate_rename" else 12
-            envelope_id = (
-                "srv_env_000000000123"
-                if public_action == "duplicate_rename"
-                else kwargs.get("resolved_by_envelope_id")
-            )
-            return SyncConflict(
-                conflict_id=kwargs["conflict_id"],
-                dataset_id="dataset-1",
-                domain="notes.note",
-                object_id="note-1",
-                conflict_type="version_divergence",
-                status="dismissed" if public_action == "skip" else "resolved",
-                base_envelope_id=None,
-                local_envelope_id=None,
-                remote_envelope_id=None,
-                server_cursor=server_cursor,
-                metadata={},
-                created_at="2026-05-23T18:12:44Z",
-                resolved_at="2026-05-23T18:13:44Z",
-                resolved_by_device_id=kwargs["resolved_by_device_id"],
-                resolved_by_envelope_id=envelope_id,
-                resolution_action=public_action,
-            )
+        def resolve_conflicts_batch(self, **kwargs):
+            results = []
+            for index, resolution in enumerate(kwargs["resolutions"]):
+                conflict_id, public_action, resolution_envelope, *_fields = resolution
+                call = {
+                    "conflict_id": conflict_id,
+                    "dataset_id": kwargs["dataset_id"],
+                    "action": public_action,
+                    "resolution_envelope": resolution_envelope,
+                }
+                self.calls.append(call)
+                server_cursor = 123 if public_action == "duplicate_rename" else 12
+                envelope_id = (
+                    "srv_env_000000000123"
+                    if public_action == "duplicate_rename"
+                    else None
+                )
+                results.append(
+                    (
+                        index,
+                        SyncConflict(
+                            conflict_id=conflict_id,
+                            dataset_id="dataset-1",
+                            domain="notes.note",
+                            object_id="note-1",
+                            conflict_type="version_divergence",
+                            status=(
+                                "dismissed" if public_action == "skip" else "resolved"
+                            ),
+                            base_envelope_id=None,
+                            local_envelope_id=None,
+                            remote_envelope_id=None,
+                            server_cursor=server_cursor,
+                            metadata={},
+                            created_at="2026-05-23T18:12:44Z",
+                            resolved_at="2026-05-23T18:13:44Z",
+                            resolved_by_device_id=kwargs["device_id"],
+                            resolved_by_envelope_id=envelope_id,
+                            resolution_action=public_action,
+                        ),
+                    )
+                )
+            return results, [], None
 
     service = FakeSyncService()
     request = SyncConflictResolveRequest.model_validate(
@@ -938,6 +1574,30 @@ def test_push_request_allows_dataset_mismatch_for_per_envelope_outcomes():
     assert request.envelopes[0].dataset_id == "dataset-2"
 
 
+def test_push_request_cannot_set_server_assigned_mutation_group_metadata() -> None:
+    request = SyncPushRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "envelopes": [
+                _m1_envelope_payload(
+                    mutation_group_id="client-group",
+                    mutation_step=0,
+                    mutation_step_count=1,
+                    mutation_plan_hash="a" * 64,
+                )
+            ],
+        }
+    )
+
+    core = _core_envelope_from_api(request.envelopes[0])
+
+    assert core.mutation_group_id is None
+    assert core.mutation_step is None
+    assert core.mutation_step_count is None
+    assert core.mutation_plan_hash is None
+
+
 def test_push_request_rejects_oversized_envelope_batches():
     envelopes = [
         _m1_envelope_payload(client_envelope_id=f"env-{index}")
@@ -960,6 +1620,157 @@ def test_push_request_requires_top_level_device_id():
             {
                 "dataset_id": "dataset-1",
                 "envelopes": [_m1_envelope_payload()],
+            }
+        )
+
+
+def _ongoing_exchange_proof() -> dict[str, object]:
+    return {
+        "ongoing_sync_version": 1,
+        "activation_epoch": "epoch_0123456789abcdef",
+        "continuity_token": "continuity_0123456789abcdef",
+    }
+
+
+def test_ongoing_sync_models_preserve_version_zero_until_readiness() -> None:
+    capabilities = api_sync_models.PersonalContextSyncCapabilitiesResponse()
+
+    assert capabilities.ongoing_sync_version == 0
+    assert capabilities.ongoing_sync_blockers == []
+    assert capabilities.activation_epoch is None
+    assert capabilities.continuity_token is None
+
+    with pytest.raises(ValidationError):
+        api_sync_models.PersonalContextSyncCapabilitiesResponse.model_validate(
+            {
+                "ongoing_sync_version": 1,
+                "activation_epoch": "epoch_0123456789abcdef",
+                "continuity_token": "continuity_0123456789abcdef",
+                "ongoing_sync_blockers": ["personal_context_transport_unavailable"],
+            }
+        )
+
+
+def test_ongoing_exchange_shapes_are_available_on_sync_boundaries() -> None:
+    proof = _ongoing_exchange_proof()
+    push = SyncPushRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "personal_context_exchange": proof,
+        }
+    )
+    pull = api_sync_models.SyncPullResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "personal_context_relay": {
+                "state": "personal_context_relay_pending",
+                "scan_watermark": "cursor_0123456789abcdef",
+            },
+            "personal_context_exchange": proof,
+        }
+    )
+    response = SyncPushResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "personal_context_exchange": proof,
+        }
+    )
+
+    assert push.personal_context_exchange is not None
+    assert pull.personal_context_relay is not None
+    assert response.personal_context_exchange == push.personal_context_exchange
+
+
+def test_personal_context_conflict_list_response_requires_a_proof() -> None:
+    proof = _ongoing_exchange_proof()
+    response = SyncConflictListResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "conflicts": [],
+            "personal_context_exchange": proof,
+        }
+    )
+
+    assert response.personal_context_exchange.ongoing_sync_version == 1
+    with pytest.raises(ValidationError):
+        SyncConflictListResponse.model_validate(
+            {"dataset_id": "dataset-1", "conflicts": []}
+        )
+
+
+def test_conflict_request_defers_personal_context_shape_to_loaded_conflict() -> None:
+    proof = _ongoing_exchange_proof()
+    request = SyncConflictResolveRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "personal_context_exchange": proof,
+            "resolutions": [
+                {
+                    "conflict_id": "conflict_0123456789abcdef",
+                    "action": "skip",
+                }
+            ],
+        }
+    )
+    unproven = SyncConflictResolveRequest.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "resolutions": [
+                {
+                    "conflict_id": "conflict_0123456789abcdef",
+                    "action": "skip",
+                    "expected_local_envelope_id": "local_0123456789abcdef",
+                    "expected_remote_envelope_id": "remote_0123456789abcdef",
+                    "idempotency_key": "resolve_0123456789abcdef",
+                }
+            ],
+        }
+    )
+
+    assert request.resolutions[0].idempotency_key is None
+    assert unproven.resolutions[0].idempotency_key == "resolve_0123456789abcdef"
+
+
+def test_ongoing_activation_and_purge_requests_are_strict() -> None:
+    proof = _ongoing_exchange_proof()
+    acknowledgment = SyncPersonalContextActivationAcknowledgeRequest.model_validate(
+        {
+            "dataset_id": "dataset_0123456789abcdef",
+            "device_id": "device_0123456789abcdef",
+            "activation_id": "activation_0123456789abcdef",
+            "baseline_digest": "a" * 64,
+            "local_receipt_id": "receipt_0123456789abcdef",
+            "personal_context_exchange": proof,
+        }
+    )
+    purge = SyncPersonalContextPurgeRequest.model_validate(
+        {
+            "dataset_id": "dataset_0123456789abcdef",
+            "device_id": "device_0123456789abcdef",
+            "request_id": "request_0123456789abcdef",
+            "expected_purge_generation": 0,
+            "idempotency_key": "purge_0123456789abcdef",
+            "signature": "s" * 32,
+        }
+    )
+
+    assert acknowledgment.personal_context_exchange.ongoing_sync_version == 1
+    assert purge.expected_purge_generation == 0
+    with pytest.raises(ValidationError):
+        SyncPersonalContextActivationAcknowledgeRequest.model_validate(
+            {
+                **acknowledgment.model_dump(),
+                "baseline_digest": "!" + "a" * 64,
+            }
+        )
+    with pytest.raises(ValidationError):
+        SyncPersonalContextPurgeRequest.model_validate(
+            {
+                **purge.model_dump(),
+                "unexpected": "field",
             }
         )
 
@@ -1007,8 +1818,8 @@ def test_m2_blob_protocol_models_validate_session_manifest_and_restore_completen
         {
             "dataset_id": "dataset-1",
             "device_id": "device-1",
-            "domain": "attachment.ref",
-            "object_id": "attachment-1",
+            "domain": "notes.note",
+            "object_id": "note-1",
             "attachment_id": "attachment-1",
             "content_type": "application/octet-stream",
             "size_bytes": 4096,
@@ -1104,7 +1915,7 @@ def test_m2_blob_protocol_models_validate_session_manifest_and_restore_completen
     )
 
     assert create_request.encryption_policy == "server_trusted_v1"
-    assert create_request.entity_id == "attachment-1"
+    assert create_request.entity_id == "note-1"
     assert session_response.missing_chunks == [2, 3]
     assert chunk_response.chunk_index == 2
     assert complete_response.status == "available"
@@ -1127,6 +1938,79 @@ def test_m2_blob_upload_rejects_non_sha256_hashes():
                 "chunk_count": 4,
             }
         )
+
+
+def test_attachment_intent_schema_accepts_strict_create_and_replace_models():
+    from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
+        SyncNotesAttachmentCreateIntent,
+        SyncNotesAttachmentReplaceIntent,
+    )
+
+    create = SyncNotesAttachmentCreateIntent.model_validate(
+        {
+            "intent": "create",
+            "note_id": ATTACHMENT_INTENT_NOTE_ID,
+            "attachment_id": ATTACHMENT_INTENT_ID,
+            "file_name": " Report.PDF ",
+        }
+    )
+    replace = SyncNotesAttachmentReplaceIntent.model_validate(
+        {
+            "intent": "replace",
+            "note_id": ATTACHMENT_INTENT_NOTE_ID,
+            "attachment_id": ATTACHMENT_INTENT_ID,
+            "base_server_cursor": 12,
+            "base_object_revision": 3,
+            "base_object_hash": "sha256:" + "a" * 64,
+        }
+    )
+
+    assert create.file_name == "Report.pdf"
+    assert replace.base_object_hash == "sha256:" + "a" * 64
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "intent": "create",
+            "note_id": ATTACHMENT_INTENT_NOTE_ID,
+            "attachment_id": ATTACHMENT_INTENT_ID,
+            "file_name": "report.pdf",
+            "base_server_cursor": 1,
+        },
+        {
+            "intent": "replace",
+            "note_id": ATTACHMENT_INTENT_NOTE_ID,
+            "attachment_id": ATTACHMENT_INTENT_ID,
+            "base_server_cursor": 1,
+            "base_object_revision": 1,
+            "base_object_hash": "sha256:" + "a" * 64,
+            "file_name": "report.pdf",
+        },
+        {
+            "intent": "replace",
+            "note_id": ATTACHMENT_INTENT_NOTE_ID,
+            "attachment_id": ATTACHMENT_INTENT_ID,
+            "base_server_cursor": 0,
+            "base_object_revision": 1,
+            "base_object_hash": "sha256:" + "a" * 64,
+        },
+    ],
+)
+def test_attachment_intent_schema_rejects_unknown_fields_and_invalid_base(payload):
+    from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
+        SyncNotesAttachmentCreateIntent,
+        SyncNotesAttachmentReplaceIntent,
+    )
+
+    model = (
+        SyncNotesAttachmentCreateIntent
+        if payload["intent"] == "create"
+        else SyncNotesAttachmentReplaceIntent
+    )
+    with pytest.raises(ValidationError):
+        model.model_validate(payload)
 
 
 def test_capabilities_accept_m2_blob_transfer_and_quota_details():
@@ -1156,3 +2040,310 @@ def test_capabilities_accept_m2_blob_transfer_and_quota_details():
     assert capabilities.blob_transfer["supported"] is True
     assert capabilities.blob_transfer["full_checksum"] == "sha256"
     assert capabilities.quota["max_chunk_bytes"] == 4194304
+
+
+def test_capabilities_advertise_supported_and_writable_adapter_versions_separately() -> None:
+    capabilities = SyncCapabilitiesResponse()
+
+    assert capabilities.supported_adapter_versions["attachment.ref"] == [1, 2]
+    assert capabilities.writable_adapter_versions["attachment.ref"] == []
+    assert capabilities.supported_adapter_versions["notes.note"] == [1]
+    assert capabilities.writable_adapter_versions["notes.note"] == []
+
+
+def test_device_adapter_version_omission_means_version_one() -> None:
+    request = api_sync_models.SyncDeviceRegisterRequest.model_validate(
+        {
+            "display_name": "Legacy device",
+            "supported_domains": ["notes.note", "attachment.ref"],
+        }
+    )
+
+    assert request.supported_adapter_versions == {
+        "notes.note": [1],
+        "attachment.ref": [1],
+    }
+    assert request.capabilities["supported_adapter_versions"] == {
+        "notes.note": [1],
+        "attachment.ref": [1],
+    }
+    assert request.capabilities["requested_domains"] == [
+        "notes.note",
+        "attachment.ref",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("requested_domains", "message"),
+    [
+        (["unknown.domain"], "unknown Sync domain"),
+        (["notes.note"] * 101, "at most 100 domains"),
+    ],
+)
+def test_adapter_version_omission_still_validates_requested_domains(
+    requested_domains: list[str],
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        core_sync_models.normalize_supported_adapter_versions(
+            None,
+            requested_domains=requested_domains,
+        )
+
+
+def test_profile_bootstrap_adapter_version_omission_means_version_one() -> None:
+    request = api_sync_models.SyncProfileBootstrapRequest.model_validate(
+        {
+            "mode": "offline_sync",
+            "requested_domains": ["notes.note", "attachment.ref"],
+        }
+    )
+
+    assert request.supported_adapter_versions == {
+        "notes.note": [1],
+        "attachment.ref": [1],
+    }
+    assert request.client_instance["supported_adapter_versions"] == {
+        "notes.note": [1],
+        "attachment.ref": [1],
+    }
+
+
+@pytest.mark.parametrize(
+    ("request_model", "version_container"),
+    [
+        (api_sync_models.SyncDeviceRegisterRequest, "capabilities"),
+        (api_sync_models.SyncProfileBootstrapRequest, "client_instance"),
+    ],
+)
+def test_partial_adapter_version_map_defaults_omitted_requested_domains_to_v1(
+    request_model: type[BaseModel],
+    version_container: str,
+) -> None:
+    payload: dict[str, object] = {
+        "supported_adapter_versions": {"attachment.ref": [2]},
+    }
+    if request_model is api_sync_models.SyncDeviceRegisterRequest:
+        payload.update(
+            display_name="Versioned device",
+            supported_domains=["notes.note", "attachment.ref"],
+        )
+    else:
+        payload.update(
+            mode="offline_sync",
+            requested_domains=["notes.note", "attachment.ref"],
+        )
+
+    request = request_model.model_validate(payload)
+
+    expected = {"notes.note": [1], "attachment.ref": [2]}
+    assert request.supported_adapter_versions == expected
+    assert getattr(request, version_container)["supported_adapter_versions"] == expected
+
+
+@pytest.mark.parametrize(
+    ("version_map", "message"),
+    [
+        (
+            {f"unknown-{index}": [1] for index in range(101)},
+            "at most 100 domains",
+        ),
+        ({"attachment.ref": list(range(1, 10))}, "at most 8 versions"),
+        ({"attachment.ref": [1, 1]}, "duplicate adapter versions"),
+        ({"attachment.ref": []}, "non-empty"),
+        ({"attachment.ref": [0]}, "positive integers"),
+        ({"attachment.ref": [-1]}, "positive integers"),
+        ({"attachment.ref": [True]}, "valid integer"),
+        ({"attachment.ref": ["2"]}, "valid integer"),
+        ({"unknown.domain": [1]}, "unknown Sync domain"),
+    ],
+)
+def test_device_adapter_version_map_is_bounded_and_strict(
+    version_map: dict[str, list[object]],
+    message: str,
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        api_sync_models.SyncDeviceRegisterRequest.model_validate(
+            {
+                "display_name": "Versioned device",
+                "supported_domains": ["attachment.ref"],
+                "supported_adapter_versions": version_map,
+            }
+        )
+
+
+def test_device_adapter_version_map_accepts_eight_sorted_versions() -> None:
+    request = api_sync_models.SyncDeviceRegisterRequest.model_validate(
+        {
+            "display_name": "Versioned device",
+            "supported_domains": ["attachment.ref"],
+            "supported_adapter_versions": {
+                "attachment.ref": [8, 3, 1, 2, 4, 5, 6, 7],
+            },
+        }
+    )
+
+    assert request.supported_adapter_versions == {
+        "attachment.ref": [1, 2, 3, 4, 5, 6, 7, 8]
+    }
+
+
+def test_attachment_ref_v2_api_envelope_carries_adapter_version() -> None:
+    from tldw_Server_API.app.core.Sync.v2 import attachment_refs_v2
+
+    payload = {
+        "attachment_id": "a1111111-1111-4111-8111-111111111111",
+        "parent_domain": "notes.note",
+        "parent_object_id": "b2222222-2222-4222-8222-222222222222",
+        "file_name": "diagram.png",
+        "original_file_name": "diagram.png",
+        "content_type": "image/png",
+        "size_bytes": 512,
+        "blob_hash": "sha256:" + "a" * 64,
+        "created_at": "2026-08-11T20:30:00+00:00",
+        "last_modified": "2026-08-11T20:30:00+00:00",
+        "created_by": "device-1",
+    }
+    request = SyncV2Envelope.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "client_envelope_id": "attachment-v2-create",
+            "device_id": "device-1",
+            "domain": "attachment.ref",
+            "operation": "upsert",
+            "object_id": payload["attachment_id"],
+            "schema_version": 2,
+            "adapter_version": 2,
+            "object_revision": 1,
+            "payload": payload,
+            "payload_hash": attachment_refs_v2.attachment_ref_v2_object_hash(
+                "upsert",
+                payload,
+                object_revision=1,
+            ),
+            "created_at_client": "2026-08-11T20:30:00Z",
+        }
+    )
+
+    assert request.adapter_version == 2
+    assert _core_envelope_from_api(request).adapter_version == 2
+
+
+def test_attachment_ref_v2_capability_schema_advertises_strict_tombstones() -> None:
+    from tldw_Server_API.app.core.Sync.v2.attachment_refs_v2 import (
+        AttachmentRefV2Payload,
+        AttachmentRefV2TombstonePayload,
+    )
+
+    schema = SyncCapabilitiesResponse().domain_schemas["attachment.ref"]
+
+    assert schema["tombstone"]["required"] == [
+        *schema["upsert"]["required"],
+        "deleted_at",
+    ]
+    assert schema["tombstone"]["properties"]["reason"] == {
+        "type": ["string", "null"],
+        "max_length": 256,
+    }
+    assert schema["tombstone"]["additional_properties"] is False
+    for operation, model in (
+        ("upsert", AttachmentRefV2Payload),
+        ("tombstone", AttachmentRefV2TombstonePayload),
+    ):
+        generated = model.model_json_schema()
+        advertised = schema[operation]
+        assert advertised["required"] == generated["required"]
+        assert advertised["additional_properties"] is generated["additionalProperties"]
+        for field_name, field_schema in generated["properties"].items():
+            if "minLength" in field_schema:
+                assert advertised["properties"][field_name]["min_length"] == field_schema[
+                    "minLength"
+                ]
+
+
+def test_version_ack_api_defaults_adapter_version_to_one() -> None:
+    request = api_sync_models.SyncDeviceDomainAckRequest.model_validate(
+        {
+            "domain": "notes.note",
+            "through_server_sequence": 7,
+            "applied_at": "2026-08-11T20:30:00Z",
+        }
+    )
+    response = api_sync_models.SyncDeviceDomainAckResponse.model_validate(
+        {
+            "dataset_id": "dataset-1",
+            "device_id": "device-1",
+            "domain": "notes.note",
+            "through_server_sequence": 7,
+            "applied_at": "2026-08-11T20:30:00Z",
+            "updated_at": "2026-08-11T20:30:00Z",
+        }
+    )
+
+    assert request.adapter_version == 1
+    assert response.adapter_version == 1
+
+
+def test_blob_id_ack_api_is_separate_from_legacy_attachment_ack() -> None:
+    digest = "sha256:" + "a" * 64
+    v2 = api_sync_models.SyncDeviceBlobIdAckRequest.model_validate(
+        {
+            "blob_id": "blob-immutable-1",
+            "payload_hash": digest,
+            "verified_at": "2026-08-11T20:30:00Z",
+        }
+    )
+
+    with pytest.raises(ValidationError):
+        api_sync_models.SyncDeviceBlobAckRequest.model_validate(
+            {
+                "blob_id": "blob-immutable-1",
+                "payload_hash": digest,
+                "verified_at": "2026-08-11T20:30:00Z",
+            }
+        )
+
+    assert v2.blob_id == "blob-immutable-1"
+
+
+def test_blob_id_ack_batch_is_bounded_and_omitted_by_default() -> None:
+    digest = "sha256:" + "a" * 64
+    base = {
+        "dataset_id": "dataset-1",
+        "device_id": "device-1",
+    }
+
+    omitted = api_sync_models.SyncDeviceAcknowledgmentsRequest.model_validate(base)
+    assert omitted.blob_id_acks == []
+
+    with pytest.raises(ValidationError):
+        api_sync_models.SyncDeviceAcknowledgmentsRequest.model_validate(
+            {
+                **base,
+                "blob_id_acks": [
+                    {
+                        "blob_id": f"blob-{index}",
+                        "payload_hash": digest,
+                        "verified_at": "2026-08-11T20:30:00Z",
+                    }
+                    for index in range(801)
+                ],
+            }
+        )
+
+
+def test_blob_id_ack_endpoint_keeps_legacy_and_v2_inputs_distinct() -> None:
+    from pathlib import Path
+
+    endpoint_source = Path(
+        "tldw_Server_API/app/api/v1/endpoints/sync.py"
+    ).read_text(encoding="utf-8")
+    acknowledgment_block = endpoint_source.split(
+        "def acknowledge_sync_v2_device_state", 1
+    )[1].split("@router.", 1)[0]
+
+    assert "SyncDeviceBlobAckCreate" in acknowledgment_block
+    assert "attachment_id=ack.attachment_id" in acknowledgment_block
+    assert "SyncDeviceBlobIdAckCreate" in acknowledgment_block
+    assert "blob_id=ack.blob_id" in acknowledgment_block
+    assert "blob_id=ack.attachment_id" not in acknowledgment_block

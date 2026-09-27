@@ -4,7 +4,6 @@ from unittest.mock import patch
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -64,6 +63,33 @@ async def test_orchestrator_preserves_message_order():
 def test_orchestrator_emits_stream_chunks_in_order():
     chunks = list(run_stream_stub())
     assert chunks == sorted(chunks, key=lambda c: c["index"])
+
+
+def test_legacy_orchestrator_forwards_authoritative_credential_marker():
+    from tldw_Server_API.app.core.Chat.chat_orchestrator import chat_api_call
+
+    captured: dict[str, Any] = {}
+
+    def _fake_dispatch(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {"ok": True}
+
+    with patch(
+        "tldw_Server_API.app.core.Chat.chat_orchestrator.perform_chat_api_call",
+        side_effect=_fake_dispatch,
+    ):
+        chat_api_call(
+            api_endpoint="openai",
+            messages_payload=[{"role": "user", "content": "hello"}],
+            api_key=None,
+            app_config={"openai_api": {}},
+            credentials_resolved=True,
+            streaming=False,
+        )
+
+    assert captured["api_key"] is None
+    assert captured["app_config"] == {"openai_api": {}}
+    assert captured["credentials_resolved"] is True
 
 
 def test_provider_resolution_applies_default_provider_when_missing():

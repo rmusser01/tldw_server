@@ -1,4 +1,5 @@
 import time
+
 import pytest
 
 psycopg = pytest.importorskip("psycopg")
@@ -30,3 +31,55 @@ def test_poison_quarantine_on_retries_postgres(monkeypatch, jobs_pg_dsn):
     assert ok2 is True
     row = jm.get_job(int(j["id"]))
     assert row and row.get("status") == "quarantined"
+
+
+def test_error_code_change_restarts_streak_without_quarantining_postgres(
+    monkeypatch,
+    jobs_pg_dsn,
+):
+    monkeypatch.setenv("JOBS_QUARANTINE_THRESHOLD", "2")
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    jm = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    job = jm.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={},
+        owner_user_id="owner-1",
+        idempotency_key="slides:v1:" + "2" * 64,
+    )
+    acquired = jm.acquire_next_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        lease_seconds=30,
+        worker_id="slides-worker",
+    )
+    assert acquired is not None
+    with psycopg.connect(jobs_pg_dsn) as connection, connection.cursor() as cursor:
+        cursor.execute(
+            "UPDATE jobs SET failure_streak_code=%s, failure_streak_count=%s WHERE id=%s",
+            ("old_error", 1, int(job["id"])),
+        )
+
+    assert jm.fail_job(
+        int(job["id"]),
+        error="bounded retry detail",
+        retryable=True,
+        backoff_seconds=1,
+        worker_id="slides-worker",
+        lease_id=str(acquired["lease_id"]),
+        error_code="new_error",
+    )
+
+    stored = jm.get_job(int(job["id"]))
+    assert stored["status"] == "queued"
+    assert stored["failure_streak_code"] == "new_error"
+    assert stored["failure_streak_count"] == 1
+    assert stored["quarantined_at"] is None
+    stats = jm.get_queue_stats(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+    )
+    assert stats and stats[0]["quarantined"] == 0

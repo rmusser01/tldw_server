@@ -14,6 +14,7 @@ class _FakeResp:
 
     def __exit__(self, exc_type, exc, tb):
         self._captured["response_exited"] = True
+        self.close()
         return False
 
     def raise_for_status(self):

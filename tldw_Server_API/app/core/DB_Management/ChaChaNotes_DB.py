@@ -38,21 +38,28 @@ changes in the `sync_log` and in individual records.
 # Imports
 import hashlib  # noqa: E402
 import json  # noqa: E402
+import math  # noqa: E402
 import re  # noqa: E402
 import sqlite3  # noqa: E402
+import sys  # noqa: E402
 import tempfile  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
 import unicodedata  # noqa: E402
 import uuid  # noqa: E402
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
+from functools import wraps  # noqa: E402
 from pathlib import Path  # noqa: E402
-from typing import Any, Callable, ClassVar, Protocol, TypeAlias  # noqa: E402
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Protocol, TypeAlias  # noqa: E402
 
 from loguru import logger  # noqa: E402
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.api.v1.schemas.quizzes import OsceQuizExportV2
+    from tldw_Server_API.app.core.Sharing.clone_models import WorkspaceCloneSnapshot
 
 try:  # Prefer psycopg v3 sql helper, fall back to psycopg2 if available
     from psycopg import sql as psycopg_sql  # type: ignore
@@ -68,13 +75,13 @@ except ImportError:  # pragma: no cover - compatibility fallback
 #
 import contextlib  # noqa: E402
 
-from tldw_Server_API.app.core.config import load_comprehensive_config, settings  # noqa: E402
-from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements  # noqa: E402
+from tldw_Server_API.app.core.config import load_comprehensive_config  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.backends.base import (  # noqa: E402
     BackendType,
     DatabaseBackend,
     DatabaseConfig,
     QueryResult,
+    UniqueConstraintError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import (  # noqa: E402
     DatabaseError as BackendDatabaseError,
@@ -86,7 +93,10 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import (  # noqa: E
 )
 from tldw_Server_API.app.core.DB_Management.backends.fts_translator import FTSQueryTranslator  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (  # noqa: E402
+    build_chacha_rls_sql,
+    build_shared_workspace_chat_rls_sql,
     build_source_review_rls_sql,
+    build_web_clipper_rls_sql,
     build_workspace_source_saved_view_rls_sql,
 )
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noqa: E402
@@ -96,29 +106,21 @@ from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noq
     replace_insert_or_ignore,
     transform_sqlite_query_for_postgres,
 )
-from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (  # noqa: E402
+    ClosedChaChaOperationError,
+    ConnectionState,
+    current_connection_state,
+)
 from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths  # noqa: E402
+from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate_if_needed  # noqa: E402
+from tldw_Server_API.app.core.exceptions import NotesTaskContractError  # noqa: E402
 from tldw_Server_API.app.core.Flashcards.asset_refs import (  # noqa: E402
     extract_flashcard_asset_uuids,
     sanitize_flashcard_text_for_search,
-)
-from tldw_Server_API.app.core.Flashcards.source_review import (  # noqa: E402
-    build_source_review_launch_metadata,
-)
-from tldw_Server_API.app.core.Flashcards.scheduler_sm2 import (  # noqa: E402
-    MATURE_INTERVAL_DAYS,
-    SchedulerSettingsError,
-    build_next_interval_previews,
-    coerce_queue_state,
-    get_default_scheduler_settings,
-    normalize_scheduler_settings,
-    parse_iso_datetime,
-    scheduler_settings_to_json,
-    simulate_review_transition,
-    to_iso_z,
 )
 from tldw_Server_API.app.core.Flashcards.scheduler_fsrs import (  # noqa: E402
     FsrsSettingsError,
@@ -126,7 +128,50 @@ from tldw_Server_API.app.core.Flashcards.scheduler_fsrs import (  # noqa: E402
     normalize_fsrs_settings,
     simulate_fsrs_review_transition,
 )
-from tldw_Server_API.app.core.Persona.buddy import resolve_persona_buddy_profile  # noqa: E402
+from tldw_Server_API.app.core.Flashcards.scheduler_sm2 import (  # noqa: E402
+    MATURE_INTERVAL_DAYS,
+    SchedulerSettingsError,
+    build_next_interval_previews,
+    coerce_queue_state,
+    normalize_scheduler_settings,
+    scheduler_settings_to_json,
+    simulate_review_transition,
+    to_iso_z,
+)
+from tldw_Server_API.app.core.Flashcards.source_review import (  # noqa: E402
+    build_source_review_launch_metadata,
+)
+from tldw_Server_API.app.core.Sync.v2.models import validate_notes_note_upsert_payload  # noqa: E402
+from tldw_Server_API.app.core.Sync.v2.notes_link import (  # noqa: E402
+    NOTES_LINK_LABEL_MAX_CHARS,
+    NOTES_LINK_WEIGHT_MAX,
+    NotesLinkValidationError,
+    validate_notes_link_object_id,
+    validate_notes_link_properties,
+)
+from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (  # noqa: E402
+    SYNC_ENVELOPE_MAX_BYTES,
+    NotesMoodboardStudioContractError,
+    notes_moodboard_note_object_hash,
+    notes_moodboard_object_hash,
+    notes_studio_document_object_hash,
+    parse_notes_moodboard_note_v1,
+    parse_notes_moodboard_v1,
+    parse_notes_studio_document_v1,
+    placement_object_id,
+    studio_result_hash,
+)
+from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+    canonical_json_bytes as canonical_moodboard_studio_json_bytes,
+)
+from tldw_Server_API.app.core.Sync.v2.notes_moodboard_studio_contract import (
+    legacy_source_diagnostic as moodboard_studio_legacy_source_diagnostic,
+)
+from tldw_Server_API.app.core.Sync.v2.notes_task_contract import (  # noqa: E402
+    canonical_json_bytes,
+    notes_task_object_hash,
+    parse_notes_task_v1,
+)
 from tldw_Server_API.app.core.Workspaces.file_inventory_models import (  # noqa: E402
     bounded_inventory_diagnostics,
     decode_inventory_cursor,
@@ -438,25 +483,61 @@ class BackendCursorAdapter:
         self.description = None
 
 
+def _owned_database_call(method):
+    """Keep the complete DB command, including transaction decisions, in use."""
+    @wraps(method)
+    def guarded(self, *args, **kwargs):
+        state = self._connection_state()
+        with state.use() if isinstance(state, ConnectionState) else contextlib.nullcontext():
+            return method(self, *args, **kwargs)
+    return guarded
+
+
+def _owned_wrapper_call(method):
+    """Reject escaped wrappers and retain a checkout through direct commands."""
+    @wraps(method)
+    def guarded(self, *args, **kwargs):
+        state = self._operation_state
+        if state is not None and current_connection_state(self._db) is not state:
+            raise ClosedChaChaOperationError("The connection belongs to another ChaCha operation")
+        with state.use() if state is not None else contextlib.nullcontext():
+            if state is not None and state.conn is not self._connection:
+                raise ClosedChaChaOperationError("The ChaCha checkout has been returned")
+            return method(self, *args, **kwargs)
+    return guarded
+
+
 class BackendCursorWrapper:
     """Cursor wrapper that routes operations through the configured backend."""
 
-    def __init__(self, db: CharactersRAGDB, connection, backend: DatabaseBackend):
+    def __init__(
+        self,
+        db: CharactersRAGDB,
+        connection,
+        backend: DatabaseBackend,
+        *,
+        log_errors: bool = True,
+    ):
         self._db = db
         self._connection = connection
         self._backend = backend
+        self._operation_state = current_connection_state(db) if backend.backend_type == BackendType.POSTGRESQL else None
+        self._log_errors = log_errors
         self._result: QueryResult | None = None
         self._adapter: BackendCursorAdapter | None = None
         self.rowcount: int = -1
         self.lastrowid: int | None = None
         self.description = None
 
+    @_owned_wrapper_call
     def execute(self, query: str, params: tuple | list | dict | None = None):
         prepared_query, prepared_params = self._db._prepare_backend_statement(query, params)
+        backend_options = {} if self._log_errors else {"log_errors": False}
         self._result = self._backend.execute(
             prepared_query,
             prepared_params,
             connection=self._connection,
+            **backend_options,
         )
         self._adapter = BackendCursorAdapter(self._result)
         self.rowcount = self._result.rowcount
@@ -464,6 +545,7 @@ class BackendCursorWrapper:
         self.description = self._result.description
         return self
 
+    @_owned_wrapper_call
     def executemany(self, query: str, params_list: list[tuple | list | dict]):
         prepared_query, prepared_params_list = self._db._prepare_backend_many_statement(query, params_list)
         self._result = self._backend.execute_many(
@@ -511,30 +593,42 @@ class BackendConnectionWrapper:
         self._db = db
         self._connection = connection
         self._backend = backend
+        self._operation_state = current_connection_state(db) if backend.backend_type == BackendType.POSTGRESQL else None
 
-    def cursor(self):
+    @_owned_wrapper_call
+    def cursor(self, *, log_errors: bool = True):
         if self._backend.backend_type == BackendType.SQLITE:
             return self._connection.cursor()
-        return BackendCursorWrapper(self._db, self._connection, self._backend)
+        return BackendCursorWrapper(
+            self._db,
+            self._connection,
+            self._backend,
+            log_errors=log_errors,
+        )
 
+    @_owned_wrapper_call
     def execute(self, query: str, params: tuple | list | dict | None = None):
         cursor = self.cursor()
         return cursor.execute(query, params)
 
+    @_owned_wrapper_call
     def executemany(self, query: str, params_list: list[tuple | list | dict]):
         cursor = self.cursor()
         return cursor.executemany(query, params_list)
 
-    def executescript(self, script: str):
+    @_owned_wrapper_call
+    def executescript(self, script: str, *, log_errors: bool = True):
         statements = [stmt.strip() for stmt in script.split(';') if stmt.strip()]
-        cursor = self.cursor()
+        cursor = self.cursor(log_errors=log_errors)
         for stmt in statements:
             cursor.execute(stmt)
         return cursor
 
+    @_owned_wrapper_call
     def commit(self):
         return self._connection.commit()
 
+    @_owned_wrapper_call
     def rollback(self):
         return self._connection.rollback()
 
@@ -574,13 +668,21 @@ class BackendManagedTransaction:
         self._depth = 0
 
     def __enter__(self):
-        self._raw_conn = self._db._get_thread_connection()
-        self._depth = getattr(self._db._local, "tx_depth", 0)
-        self._managed = self._depth == 0
-        self._db._local.tx_depth = self._depth + 1
-        backend = self._db._get_pinned_backend() or self._db.backend
-        self._wrapper = BackendConnectionWrapper(self._db, self._raw_conn, backend)
-        return self._wrapper
+        self._state = self._db._connection_state()
+        self._use = self._state.use() if isinstance(self._state, ConnectionState) else contextlib.nullcontext()
+        self._use.__enter__()
+        self._depth = getattr(self._state, "tx_depth", 0)
+        try:
+            self._raw_conn = self._db._get_thread_connection()
+            self._managed = self._depth == 0
+            self._state.tx_depth = self._depth + 1
+            backend = self._db._get_pinned_backend() or self._db.backend
+            self._wrapper = BackendConnectionWrapper(self._db, self._raw_conn, backend)
+            return self._wrapper
+        except BaseException:
+            self._state.tx_depth = self._depth
+            self._use.__exit__(*sys.exc_info())
+            raise
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         try:
@@ -616,9 +718,11 @@ class BackendManagedTransaction:
                             exc_info=True,
                         )
         finally:
-            self._db._local.tx_depth = self._depth
+            self._state.tx_depth = self._depth
             self._wrapper = None
             self._raw_conn = None
+            cleanup_error = sys.exc_info()
+            self._use.__exit__(*(cleanup_error if cleanup_error[0] is not None else (exc_type, exc_val, exc_tb)))
         return False
 
 
@@ -648,16 +752,41 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 54  # Schema v54 adds workspace source saved views
+    _CURRENT_SCHEMA_VERSION = 72  # Native fork storage after Persona and history projections
+    _POSTGRES_SCHEMA_VERSION = 76
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
-    _SQLITE_SCHEMA_INIT_LOCKS_GUARD: ClassVar[threading.RLock] = threading.RLock()
-    _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[dict[str, threading.RLock]] = {}
+    _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
+    _NOTE_TASK_V60_TABLES = (
+        "note_tasks",
+        "task_note_projections",
+        "task_events",
+        "task_event_read_state",
+        "note_task_reconciliation_state",
+        "task_projection_drifts",
+    )
+    _NOTE_TASK_SCOPE_AUTHORITY_TABLE = "note_task_scope_authority"
+    _NOTE_TASK_V60_RELATIONS = (*_NOTE_TASK_V60_TABLES, _NOTE_TASK_SCOPE_AUTHORITY_TABLE)
+    _NOTES_MOODBOARD_STUDIO_V61_RELATIONS = (
+        _NOTE_TASK_SCOPE_AUTHORITY_TABLE,
+        "moodboards",
+        "moodboard_notes",
+        "note_studio_documents",
+    )
+    _NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE = 128
+    _NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SECONDS = 25.0
+    _NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT = "5s"
+    _NOTES_MOODBOARD_STUDIO_V61_POSTGRES_STATEMENT_TIMEOUT = "30s"
+    _NOTES_MOODBOARD_STUDIO_V61_MIGRATION_ID = "notes_moodboard_studio_v60_to_v61"
+    _SQLITE_SCHEMA_INIT_LOCKS: ClassVar[tuple[threading.RLock, ...]] = tuple(
+        threading.RLock() for _ in range(64)
+    )
     _SQLITE_CORE_SCHEMA_TABLES = frozenset(
         {
             "character_cards",
             "conversations",
             "messages",
             "notes",
+            "note_attachments",
         }
     )
     _ALLOWED_CONVERSATION_STATES: tuple[str, ...] = ("in-progress", "resolved", "backlog", "non-viable")
@@ -678,6 +807,8 @@ class CharactersRAGDB:
     _ALLOWED_CONVERSATION_ASSISTANT_KINDS: tuple[str, ...] = ("character", "persona")
     _ALLOWED_PERSONA_MEMORY_MODES: tuple[str, ...] = ("read_only", "read_write")
     _WORKSPACE_ACTIVITY_MAX_METADATA_BYTES = 16 * 1024
+    _WORKSPACE_CLONE_OPERATION_KIND = "shared_workspace_clone"
+    _WORKSPACE_CLONE_RECONCILIATION_MAX = 100
     _WORKSPACE_ACTIVITY_SECRET_KEY_RE = re.compile(
         r"(^|[_\-.])("
         r"api[_\-.]?key|access[_\-.]?key|secret|token|password|passwd|pwd|"
@@ -759,12 +890,18 @@ class CharactersRAGDB:
         "persona_memory_entries": "PRAGMA table_info('persona_memory_entries')",
         "persona_visual_candidates": "PRAGMA table_info('persona_visual_candidates')",
         "quiz_questions": "PRAGMA table_info('quiz_questions')",
+        "keywords": "PRAGMA table_info('keywords')",
+        "keyword_collections": "PRAGMA table_info('keyword_collections')",
+        "note_folders": "PRAGMA table_info('note_folders')",
     }
     _SQLITE_SCHEMA_INDEX_LIST_STATEMENTS: dict[str, str] = {
         "persona_profiles": "PRAGMA index_list('persona_profiles')",
         "persona_memory_entries": "PRAGMA index_list('persona_memory_entries')",
         "persona_visual_packs": "PRAGMA index_list('persona_visual_packs')",
         "persona_visual_assets": "PRAGMA index_list('persona_visual_assets')",
+        "keywords": "PRAGMA index_list('keywords')",
+        "keyword_collections": "PRAGMA index_list('keyword_collections')",
+        "note_folders": "PRAGMA index_list('note_folders')",
     }
     _ALLOWED_WORKSPACE_ARTIFACT_REVIEW_STATES: tuple[str, ...] = (
         "draft",
@@ -836,7 +973,7 @@ class CharactersRAGDB:
 
     _POSTGRES_SEQUENCE_TABLES: tuple[tuple[str, str], ...] = (
         ("character_cards", "id"),
-        ("keywords", "id"),
+        ("chacha_keywords", "id"),
         ("keyword_collections", "id"),
         ("sync_log", "change_id"),
         ("moodboards", "id"),
@@ -847,6 +984,8 @@ class CharactersRAGDB:
         ("quizzes", "id"),
         ("quiz_questions", "id"),
         ("quiz_attempts", "id"),
+        ("osce_stations", "id"),
+        ("osce_practice_attempts", "id"),
         ("study_packs", "id"),
         ("study_pack_cards", "id"),
         ("flashcard_citations", "id"),
@@ -1090,6 +1229,7 @@ CREATE INDEX IF NOT EXISTS idx_message_images_message ON message_images(message_
 ----------------------------------------------------------------*/
 CREATE TABLE IF NOT EXISTS keywords(
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  sync_id       TEXT    NOT NULL,
   keyword       TEXT    UNIQUE NOT NULL COLLATE NOCASE,
   created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_modified DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1097,6 +1237,8 @@ CREATE TABLE IF NOT EXISTS keywords(
   client_id     TEXT     NOT NULL DEFAULT 'unknown',
   version       INTEGER  NOT NULL DEFAULT 1
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_keywords_sync_id_unique ON keywords(sync_id);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS keywords_fts
 USING fts5(
@@ -1145,6 +1287,7 @@ END;
 ----------------------------------------------------------------*/
 CREATE TABLE IF NOT EXISTS keyword_collections(
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  sync_id       TEXT    NOT NULL,
   name          TEXT    UNIQUE NOT NULL COLLATE NOCASE,
   parent_id     INTEGER REFERENCES keyword_collections(id)
                          ON DELETE SET NULL ON UPDATE CASCADE,
@@ -1154,6 +1297,8 @@ CREATE TABLE IF NOT EXISTS keyword_collections(
   client_id     TEXT     NOT NULL DEFAULT 'unknown',
   version       INTEGER  NOT NULL DEFAULT 1
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_keyword_collections_sync_id_unique ON keyword_collections(sync_id);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS keyword_collections_fts
 USING fts5(
@@ -1176,7 +1321,8 @@ END;
 CREATE TRIGGER keyword_collections_au
 AFTER UPDATE ON keyword_collections BEGIN
   INSERT INTO keyword_collections_fts(keyword_collections_fts,rowid,name)
-  VALUES('delete',old.id,old.name);
+  SELECT 'delete',old.id,old.name
+  WHERE old.deleted = 0;
 
   INSERT INTO keyword_collections_fts(rowid,name)
   SELECT new.id,new.name
@@ -1186,7 +1332,8 @@ END;
 CREATE TRIGGER keyword_collections_ad
 AFTER DELETE ON keyword_collections BEGIN
   INSERT INTO keyword_collections_fts(keyword_collections_fts,rowid,name)
-  VALUES('delete',old.id,old.name);
+  SELECT 'delete',old.id,old.name
+  WHERE old.deleted = 0;
 END;
 
 /*----------------------------------------------------------------
@@ -5884,6 +6031,92 @@ UPDATE db_schema_version
    AND version < 51;
 """
 
+    _CHAT_MACROS_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS chat_macro_registry (
+  id                TEXT PRIMARY KEY,
+  user_id           TEXT NOT NULL,
+  name              TEXT NOT NULL,
+  command           TEXT NOT NULL,
+  description       TEXT,
+  enabled           BOOLEAN NOT NULL DEFAULT 1,
+  source            TEXT NOT NULL,
+  builtin_version   INTEGER,
+  schema_version    INTEGER NOT NULL,
+  digest            TEXT NOT NULL,
+  validation_status TEXT NOT NULL,
+  validation_error  TEXT,
+  updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at        DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS chat_macro_settings (
+  user_id       TEXT PRIMARY KEY,
+  settings_json TEXT NOT NULL DEFAULT '{}',
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS chat_macro_runs (
+  run_id               TEXT PRIMARY KEY,
+  user_id              TEXT NOT NULL,
+  macro_name           TEXT NOT NULL,
+  macro_command        TEXT NOT NULL,
+  macro_source         TEXT,
+  macro_version        INTEGER,
+  macro_digest         TEXT,
+  status               TEXT NOT NULL DEFAULT 'pending',
+  surface              TEXT,
+  conversation_id      TEXT,
+  workspace_id         TEXT,
+  acp_session_id       TEXT,
+  normalized_args      TEXT NOT NULL DEFAULT '{}',
+  output_profile       TEXT,
+  context_snapshot     TEXT,
+  model_selection      TEXT,
+  status_message_id    TEXT,
+  final_message_id     TEXT,
+  final_output         TEXT,
+  final_output_format  TEXT,
+  final_post_status    TEXT,
+  post_idempotency_key TEXT,
+  cancel_requested_at  DATETIME,
+  error_code           TEXT,
+  error_message        TEXT,
+  created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at           DATETIME,
+  completed_at         DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS chat_macro_run_branches (
+  branch_id            TEXT PRIMARY KEY,
+  run_id               TEXT NOT NULL REFERENCES chat_macro_runs(run_id) ON DELETE CASCADE,
+  step_id              TEXT NOT NULL,
+  label                TEXT,
+  status               TEXT NOT NULL DEFAULT 'pending',
+  attempt_count        INTEGER NOT NULL DEFAULT 0,
+  prompt_digest        TEXT,
+  output_text          TEXT,
+  citations            TEXT NOT NULL DEFAULT '[]',
+  usage                TEXT NOT NULL DEFAULT '{}',
+  acp_child_session_id TEXT,
+  retained             BOOLEAN NOT NULL DEFAULT 0,
+  error_code           TEXT,
+  error_message        TEXT,
+  created_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at         DATETIME
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_macro_registry_user_command
+  ON chat_macro_registry(user_id, command);
+CREATE INDEX IF NOT EXISTS idx_chat_macro_runs_user_status_created
+  ON chat_macro_runs(user_id, status, created_at);
+DROP INDEX IF EXISTS idx_chat_macro_runs_post_idempotency_key_unique;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_macro_runs_run_post_idempotency_key_unique
+  ON chat_macro_runs(run_id, post_idempotency_key)
+  WHERE post_idempotency_key IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_macro_run_branches_run_step
+  ON chat_macro_run_branches(run_id, step_id);
+"""
+
     _MIGRATION_SQL_V51_TO_V52 = """
 /*───────────────────────────────────────────────────────────────
   Migration to Version 52 - Source review plan storage (2026-07-09)
@@ -6409,6 +6642,865 @@ UPDATE db_schema_version
    AND version < 53;
 """
 
+    _MIGRATION_SQL_V60_TO_V61 = """
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS shared_workspace_chat_threads (
+  recipient_user_id TEXT NOT NULL CHECK(length(trim(recipient_user_id)) > 0),
+  share_id INTEGER NOT NULL CHECK(share_id > 0),
+  conversation_id TEXT NOT NULL UNIQUE REFERENCES conversations(id) ON DELETE CASCADE,
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  workspace_id TEXT NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (recipient_user_id, share_id),
+  UNIQUE (recipient_user_id, share_id, conversation_id)
+);
+
+CREATE TABLE IF NOT EXISTS shared_workspace_chat_requests (
+  recipient_user_id TEXT NOT NULL CHECK(length(trim(recipient_user_id)) > 0),
+  share_id INTEGER NOT NULL CHECK(share_id > 0),
+  request_id TEXT NOT NULL,
+  request_fingerprint TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('in_progress','retryable','completed','conflicted')),
+  lease_epoch INTEGER NOT NULL DEFAULT 1 CHECK(lease_epoch >= 1),
+  lease_token TEXT,
+  lease_expires_at DATETIME,
+  source_mode TEXT CHECK(source_mode IN ('all','include')),
+  source_ids_json TEXT,
+  source_snapshot_hash TEXT,
+  provider TEXT,
+  model TEXT,
+  user_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+  assistant_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+  error_code TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at DATETIME,
+  PRIMARY KEY (recipient_user_id, share_id, request_id),
+  FOREIGN KEY (recipient_user_id, share_id, conversation_id)
+    REFERENCES shared_workspace_chat_threads(recipient_user_id, share_id, conversation_id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_threads_conversation
+  ON shared_workspace_chat_threads(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_requests_status_lease
+  ON shared_workspace_chat_requests(status, lease_expires_at);
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_requests_status_updated
+  ON shared_workspace_chat_requests(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_requests_share_updated
+  ON shared_workspace_chat_requests(share_id, updated_at);
+
+UPDATE db_schema_version
+   SET version = 61
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version = 60;
+"""
+
+    _MIGRATION_SQL_V61_TO_V62 = """
+ALTER TABLE workspaces ADD COLUMN system_operation_id TEXT;
+ALTER TABLE workspaces ADD COLUMN system_operation_kind TEXT
+  CHECK(system_operation_kind IS NULL OR system_operation_kind = 'shared_workspace_clone');
+ALTER TABLE workspaces ADD COLUMN system_operation_state TEXT
+  CHECK(system_operation_state IS NULL OR system_operation_state IN ('staged', 'publication_pending'));
+ALTER TABLE workspaces ADD COLUMN system_request_fingerprint TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_workspaces_system_operation
+  ON workspaces(system_operation_kind, system_operation_state, system_operation_id);
+"""
+
+    _MIGRATION_SQL_V60_TO_V61_POSTGRES = """
+CREATE TABLE IF NOT EXISTS shared_workspace_chat_threads (
+  recipient_user_id TEXT NOT NULL CHECK(char_length(btrim(recipient_user_id)) > 0),
+  share_id BIGINT NOT NULL CHECK(share_id > 0),
+  conversation_id TEXT NOT NULL UNIQUE REFERENCES conversations(id) ON DELETE CASCADE,
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  workspace_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (recipient_user_id, share_id),
+  UNIQUE (recipient_user_id, share_id, conversation_id)
+);
+
+CREATE TABLE IF NOT EXISTS shared_workspace_chat_requests (
+  recipient_user_id TEXT NOT NULL CHECK(char_length(btrim(recipient_user_id)) > 0),
+  share_id BIGINT NOT NULL CHECK(share_id > 0),
+  request_id TEXT NOT NULL,
+  request_fingerprint TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('in_progress','retryable','completed','conflicted')),
+  lease_epoch INTEGER NOT NULL DEFAULT 1 CHECK(lease_epoch >= 1),
+  lease_token TEXT,
+  lease_expires_at TIMESTAMPTZ,
+  source_mode TEXT CHECK(source_mode IN ('all','include')),
+  source_ids_json TEXT,
+  source_snapshot_hash TEXT,
+  provider TEXT,
+  model TEXT,
+  user_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+  assistant_message_id TEXT REFERENCES messages(id) ON DELETE SET NULL,
+  error_code TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TIMESTAMPTZ,
+  PRIMARY KEY (recipient_user_id, share_id, request_id),
+  FOREIGN KEY (recipient_user_id, share_id, conversation_id)
+    REFERENCES shared_workspace_chat_threads(recipient_user_id, share_id, conversation_id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_threads_conversation
+  ON shared_workspace_chat_threads(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_requests_status_lease
+  ON shared_workspace_chat_requests(status, lease_expires_at);
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_requests_status_updated
+  ON shared_workspace_chat_requests(status, updated_at);
+CREATE INDEX IF NOT EXISTS idx_shared_workspace_chat_requests_share_updated
+  ON shared_workspace_chat_requests(share_id, updated_at);
+"""
+
+    _MIGRATION_SQL_V61_TO_V62_POSTGRES = """
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS system_operation_id TEXT;
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS system_operation_kind TEXT
+  CHECK (system_operation_kind IS NULL OR system_operation_kind = 'shared_workspace_clone');
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS system_operation_state TEXT
+  CHECK (system_operation_state IS NULL OR system_operation_state IN ('staged', 'publication_pending'));
+ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS system_request_fingerprint TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_workspaces_system_operation
+  ON workspaces(system_operation_kind, system_operation_state, system_operation_id);
+"""
+
+    _MIGRATION_SQL_V63_TO_V64 = """
+CREATE TABLE note_graph_suggestion_operation_receipts(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  operation_kind TEXT NOT NULL CHECK(operation_kind IN ('run_admit', 'run_cancel', 'suggestion_accept', 'suggestion_reject', 'rejections_reset')),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  source_note_id TEXT NOT NULL,
+  resource_identity TEXT NOT NULL CHECK(length(trim(resource_identity)) > 0),
+  idempotency_key_digest TEXT NOT NULL CHECK(length(trim(idempotency_key_digest)) > 0),
+  request_fingerprint TEXT NOT NULL CHECK(length(trim(request_fingerprint)) > 0),
+  state TEXT NOT NULL CHECK(state IN ('in_progress', 'completed', 'failed')),
+  http_status INTEGER CHECK(http_status BETWEEN 100 AND 599),
+  replay_envelope TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at DATETIME,
+  expires_at DATETIME NOT NULL,
+  UNIQUE(owner_user_id, dataset_id, id),
+  UNIQUE(owner_user_id, dataset_id, operation_kind, resource_identity, idempotency_key_digest),
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE note_graph_suggestion_runs(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  source_note_id TEXT NOT NULL,
+  source_fingerprint TEXT NOT NULL CHECK(length(trim(source_fingerprint)) > 0),
+  admission_receipt_id TEXT,
+  provider TEXT NOT NULL CHECK(length(trim(provider)) > 0),
+  model TEXT NOT NULL CHECK(length(trim(model)) > 0),
+  capability_revision TEXT NOT NULL CHECK(length(trim(capability_revision)) > 0),
+  prompt_contract_version TEXT NOT NULL CHECK(length(trim(prompt_contract_version)) > 0),
+  job_id TEXT,
+  expected_completion_token TEXT,
+  state TEXT NOT NULL CHECK(state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing', 'succeeded', 'failed', 'cancelled', 'stale')),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  maintenance_lease_token TEXT CHECK(maintenance_lease_token IS NULL OR length(trim(maintenance_lease_token)) > 0),
+  maintenance_lease_expires_at DATETIME,
+  result_digest TEXT,
+  suggestion_count INTEGER NOT NULL DEFAULT 0 CHECK(suggestion_count >= 0),
+  related_note_count INTEGER NOT NULL DEFAULT 0 CHECK(related_note_count >= 0),
+  tag_count INTEGER NOT NULL DEFAULT 0 CHECK(tag_count >= 0),
+  invalid_item_count INTEGER NOT NULL DEFAULT 0 CHECK(invalid_item_count >= 0),
+  error_code TEXT,
+  guidance_key TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at DATETIME,
+  completed_at DATETIME,
+  expires_at DATETIME NOT NULL,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, dataset_id, admission_receipt_id)
+    REFERENCES note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, id)
+    ON DELETE NO ACTION ON UPDATE CASCADE,
+  CHECK(
+    (maintenance_lease_token IS NULL AND maintenance_lease_expires_at IS NULL)
+    OR (maintenance_lease_token IS NOT NULL AND maintenance_lease_expires_at IS NOT NULL)
+  )
+);
+
+CREATE TABLE note_graph_suggestion_rejection_sets(
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  source_note_id TEXT NOT NULL,
+  source_fingerprint TEXT NOT NULL CHECK(length(trim(source_fingerprint)) > 0),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  rejection_count INTEGER NOT NULL DEFAULT 0 CHECK(rejection_count >= 0),
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id, dataset_id, source_note_id, source_fingerprint),
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE note_graph_suggestions(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  run_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  kind TEXT NOT NULL CHECK(kind IN ('related_note', 'tag')),
+  source_note_id TEXT NOT NULL,
+  source_fingerprint TEXT NOT NULL CHECK(length(trim(source_fingerprint)) > 0),
+  target_note_id TEXT,
+  target_fingerprint TEXT,
+  normalized_tag TEXT,
+  display_tag TEXT,
+  keyword_sync_id TEXT,
+  match_strength TEXT CHECK(match_strength IN ('strong', 'possible')),
+  rationale TEXT CHECK(rationale IS NULL OR length(rationale) <= 240),
+  state TEXT NOT NULL CHECK(state IN ('staged', 'pending', 'accepting', 'accepted', 'rejected', 'stale')),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  decision_reason TEXT,
+  accepted_resource_identity TEXT,
+  decision_at DATETIME,
+  acceptance_lease_token TEXT,
+  acceptance_lease_expires_at DATETIME,
+  decision_receipt_id TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id, run_id)
+    REFERENCES note_graph_suggestion_runs(owner_user_id, dataset_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, target_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, dataset_id, decision_receipt_id)
+    REFERENCES note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, id)
+    ON DELETE NO ACTION ON UPDATE CASCADE,
+  CHECK(
+    (kind = 'related_note' AND target_note_id IS NOT NULL AND target_fingerprint IS NOT NULL AND normalized_tag IS NULL AND display_tag IS NULL)
+    OR (kind = 'tag' AND target_note_id IS NULL AND target_fingerprint IS NULL AND normalized_tag IS NOT NULL AND display_tag IS NOT NULL)
+  )
+);
+
+CREATE TABLE note_graph_suggestion_evidence(
+  suggestion_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  side TEXT NOT NULL CHECK(side IN ('source', 'target')),
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  note_id TEXT NOT NULL,
+  field TEXT NOT NULL CHECK(field IN ('title', 'content')),
+  content_fingerprint TEXT NOT NULL CHECK(length(trim(content_fingerprint)) > 0),
+  start_offset INTEGER NOT NULL CHECK(start_offset >= 0),
+  end_offset INTEGER NOT NULL CHECK(end_offset > start_offset),
+  PRIMARY KEY(suggestion_id, side, ordinal),
+  FOREIGN KEY(owner_user_id, dataset_id, suggestion_id)
+    REFERENCES note_graph_suggestions(owner_user_id, dataset_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE INDEX idx_note_graph_suggestion_runs_owner_dataset_note_state
+  ON note_graph_suggestion_runs(owner_user_id, dataset_id, source_note_id, state, created_at DESC);
+CREATE UNIQUE INDEX idx_note_graph_suggestion_runs_active_source
+  ON note_graph_suggestion_runs(
+    owner_user_id, dataset_id, source_note_id, source_fingerprint,
+    provider, model, prompt_contract_version
+  )
+  WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing');
+CREATE INDEX idx_note_graph_suggestion_runs_retention
+  ON note_graph_suggestion_runs(state, expires_at);
+CREATE INDEX idx_note_graph_suggestion_runs_maintenance
+  ON note_graph_suggestion_runs(
+    owner_user_id, dataset_id, state, maintenance_lease_expires_at, created_at, id
+  )
+  WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing');
+CREATE INDEX idx_note_graph_suggestion_operation_receipts_retention
+  ON note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, state, expires_at);
+CREATE INDEX idx_note_graph_suggestions_owner_dataset_source_state
+  ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, state, updated_at DESC);
+CREATE INDEX idx_note_graph_suggestions_target_state
+  ON note_graph_suggestions(owner_user_id, dataset_id, target_note_id, state);
+CREATE INDEX idx_note_graph_suggestions_suppression_related
+  ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, target_note_id, target_fingerprint);
+CREATE INDEX idx_note_graph_suggestions_suppression_tag
+  ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, normalized_tag);
+CREATE UNIQUE INDEX idx_note_graph_suggestions_canonical_related_identity
+  ON note_graph_suggestions(
+    owner_user_id, dataset_id,
+    CASE WHEN source_note_id < target_note_id THEN source_note_id ELSE target_note_id END,
+    CASE WHEN source_note_id < target_note_id THEN target_note_id ELSE source_note_id END,
+    CASE WHEN source_note_id < target_note_id THEN source_fingerprint ELSE target_fingerprint END,
+    CASE WHEN source_note_id < target_note_id THEN target_fingerprint ELSE source_fingerprint END
+  )
+  WHERE kind = 'related_note' AND state IN ('pending', 'rejected');
+CREATE UNIQUE INDEX idx_note_graph_suggestions_canonical_tag_identity
+  ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, normalized_tag)
+  WHERE kind = 'tag' AND state IN ('pending', 'rejected');
+CREATE UNIQUE INDEX idx_note_graph_suggestions_staged_related_identity
+  ON note_graph_suggestions(
+    owner_user_id, dataset_id, run_id,
+    CASE WHEN source_note_id < target_note_id THEN source_note_id ELSE target_note_id END,
+    CASE WHEN source_note_id < target_note_id THEN target_note_id ELSE source_note_id END,
+    CASE WHEN source_note_id < target_note_id THEN source_fingerprint ELSE target_fingerprint END,
+    CASE WHEN source_note_id < target_note_id THEN target_fingerprint ELSE source_fingerprint END
+  )
+  WHERE kind = 'related_note' AND state = 'staged';
+CREATE UNIQUE INDEX idx_note_graph_suggestions_staged_tag_identity
+  ON note_graph_suggestions(owner_user_id, dataset_id, run_id, source_note_id, source_fingerprint, normalized_tag)
+  WHERE kind = 'tag' AND state = 'staged';
+CREATE INDEX idx_note_graph_suggestions_acceptance_lease
+  ON note_graph_suggestions(state, acceptance_lease_expires_at);
+CREATE INDEX idx_note_graph_suggestions_retention
+  ON note_graph_suggestions(state, expires_at);
+CREATE INDEX idx_note_graph_suggestion_evidence_note
+  ON note_graph_suggestion_evidence(owner_user_id, dataset_id, note_id);
+"""
+
+    _MIGRATION_SQL_V63_TO_V64_POSTGRES = """
+CREATE TABLE IF NOT EXISTS note_graph_suggestion_operation_receipts(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  operation_kind TEXT NOT NULL CHECK(operation_kind IN ('run_admit', 'run_cancel', 'suggestion_accept', 'suggestion_reject', 'rejections_reset')),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  source_note_id TEXT NOT NULL,
+  resource_identity TEXT NOT NULL CHECK(char_length(btrim(resource_identity)) > 0),
+  idempotency_key_digest TEXT NOT NULL CHECK(char_length(btrim(idempotency_key_digest)) > 0),
+  request_fingerprint TEXT NOT NULL CHECK(char_length(btrim(request_fingerprint)) > 0),
+  state TEXT NOT NULL CHECK(state IN ('in_progress', 'completed', 'failed')),
+  http_status INTEGER CHECK(http_status BETWEEN 100 AND 599),
+  replay_envelope TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  completed_at TIMESTAMPTZ,
+  expires_at TIMESTAMPTZ NOT NULL,
+  UNIQUE(owner_user_id, dataset_id, id),
+  UNIQUE(owner_user_id, dataset_id, operation_kind, resource_identity, idempotency_key_digest),
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE TABLE IF NOT EXISTS note_graph_suggestion_runs(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  source_note_id TEXT NOT NULL,
+  source_fingerprint TEXT NOT NULL CHECK(char_length(btrim(source_fingerprint)) > 0),
+  admission_receipt_id TEXT,
+  provider TEXT NOT NULL CHECK(char_length(btrim(provider)) > 0),
+  model TEXT NOT NULL CHECK(char_length(btrim(model)) > 0),
+  capability_revision TEXT NOT NULL CHECK(char_length(btrim(capability_revision)) > 0),
+  prompt_contract_version TEXT NOT NULL CHECK(char_length(btrim(prompt_contract_version)) > 0),
+  job_id TEXT, expected_completion_token TEXT,
+  state TEXT NOT NULL CHECK(state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing', 'succeeded', 'failed', 'cancelled', 'stale')),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  maintenance_lease_token TEXT CHECK(maintenance_lease_token IS NULL OR char_length(btrim(maintenance_lease_token)) > 0),
+  maintenance_lease_expires_at TIMESTAMPTZ,
+  result_digest TEXT,
+  suggestion_count INTEGER NOT NULL DEFAULT 0 CHECK(suggestion_count >= 0),
+  related_note_count INTEGER NOT NULL DEFAULT 0 CHECK(related_note_count >= 0),
+  tag_count INTEGER NOT NULL DEFAULT 0 CHECK(tag_count >= 0),
+  invalid_item_count INTEGER NOT NULL DEFAULT 0 CHECK(invalid_item_count >= 0),
+  error_code TEXT, guidance_key TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  started_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, expires_at TIMESTAMPTZ NOT NULL,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, dataset_id, admission_receipt_id)
+    REFERENCES note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, id)
+    ON DELETE NO ACTION ON UPDATE CASCADE,
+  CHECK(
+    (maintenance_lease_token IS NULL AND maintenance_lease_expires_at IS NULL)
+    OR (maintenance_lease_token IS NOT NULL AND maintenance_lease_expires_at IS NOT NULL)
+  )
+);
+CREATE TABLE IF NOT EXISTS note_graph_suggestion_rejection_sets(
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  source_note_id TEXT NOT NULL,
+  source_fingerprint TEXT NOT NULL CHECK(char_length(btrim(source_fingerprint)) > 0),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  rejection_count INTEGER NOT NULL DEFAULT 0 CHECK(rejection_count >= 0),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id, dataset_id, source_note_id, source_fingerprint),
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE TABLE IF NOT EXISTS note_graph_suggestions(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  run_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  kind TEXT NOT NULL CHECK(kind IN ('related_note', 'tag')),
+  source_note_id TEXT NOT NULL,
+  source_fingerprint TEXT NOT NULL CHECK(char_length(btrim(source_fingerprint)) > 0),
+  target_note_id TEXT,
+  target_fingerprint TEXT, normalized_tag TEXT, display_tag TEXT, keyword_sync_id TEXT,
+  match_strength TEXT CHECK(match_strength IN ('strong', 'possible')),
+  rationale TEXT CHECK(rationale IS NULL OR char_length(rationale) <= 240),
+  state TEXT NOT NULL CHECK(state IN ('staged', 'pending', 'accepting', 'accepted', 'rejected', 'stale')),
+  revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
+  decision_reason TEXT, accepted_resource_identity TEXT, decision_at TIMESTAMPTZ,
+  acceptance_lease_token TEXT, acceptance_lease_expires_at TIMESTAMPTZ,
+  decision_receipt_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at TIMESTAMPTZ,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id, run_id)
+    REFERENCES note_graph_suggestion_runs(owner_user_id, dataset_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, source_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, target_note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, dataset_id, decision_receipt_id)
+    REFERENCES note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, id)
+    ON DELETE NO ACTION ON UPDATE CASCADE,
+  CHECK((kind = 'related_note' AND target_note_id IS NOT NULL AND target_fingerprint IS NOT NULL AND normalized_tag IS NULL AND display_tag IS NULL) OR (kind = 'tag' AND target_note_id IS NULL AND target_fingerprint IS NULL AND normalized_tag IS NOT NULL AND display_tag IS NOT NULL))
+);
+CREATE TABLE IF NOT EXISTS note_graph_suggestion_evidence(
+  suggestion_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  side TEXT NOT NULL CHECK(side IN ('source', 'target')),
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  note_id TEXT NOT NULL,
+  field TEXT NOT NULL CHECK(field IN ('title', 'content')),
+  content_fingerprint TEXT NOT NULL CHECK(char_length(btrim(content_fingerprint)) > 0),
+  start_offset INTEGER NOT NULL CHECK(start_offset >= 0),
+  end_offset INTEGER NOT NULL CHECK(end_offset > start_offset),
+  PRIMARY KEY(suggestion_id, side, ordinal),
+  FOREIGN KEY(owner_user_id, dataset_id, suggestion_id)
+    REFERENCES note_graph_suggestions(owner_user_id, dataset_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, note_id) REFERENCES notes(client_id, id)
+    ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_owner_dataset_note_state ON note_graph_suggestion_runs(owner_user_id, dataset_id, source_note_id, state, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_active_source
+  ON note_graph_suggestion_runs(
+    owner_user_id, dataset_id, source_note_id, source_fingerprint,
+    provider, model, prompt_contract_version
+  )
+  WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing');
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_retention ON note_graph_suggestion_runs(state, expires_at);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_runs_maintenance
+  ON note_graph_suggestion_runs(
+    owner_user_id, dataset_id, state, maintenance_lease_expires_at, created_at, id
+  )
+  WHERE state IN ('admitting', 'queued', 'running', 'cancelling', 'publishing');
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_operation_receipts_retention ON note_graph_suggestion_operation_receipts(owner_user_id, dataset_id, state, expires_at);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_owner_dataset_source_state ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, state, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_target_state ON note_graph_suggestions(owner_user_id, dataset_id, target_note_id, state);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_suppression_related ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, target_note_id, target_fingerprint);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_suppression_tag ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, normalized_tag);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestions_canonical_related_identity
+  ON note_graph_suggestions(
+    owner_user_id, dataset_id,
+    (CASE WHEN source_note_id < target_note_id THEN source_note_id ELSE target_note_id END),
+    (CASE WHEN source_note_id < target_note_id THEN target_note_id ELSE source_note_id END),
+    (CASE WHEN source_note_id < target_note_id THEN source_fingerprint ELSE target_fingerprint END),
+    (CASE WHEN source_note_id < target_note_id THEN target_fingerprint ELSE source_fingerprint END)
+  )
+  WHERE kind = 'related_note' AND state IN ('pending', 'rejected');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestions_canonical_tag_identity
+  ON note_graph_suggestions(owner_user_id, dataset_id, source_note_id, source_fingerprint, normalized_tag)
+  WHERE kind = 'tag' AND state IN ('pending', 'rejected');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestions_staged_related_identity
+  ON note_graph_suggestions(
+    owner_user_id, dataset_id, run_id,
+    (CASE WHEN source_note_id < target_note_id THEN source_note_id ELSE target_note_id END),
+    (CASE WHEN source_note_id < target_note_id THEN target_note_id ELSE source_note_id END),
+    (CASE WHEN source_note_id < target_note_id THEN source_fingerprint ELSE target_fingerprint END),
+    (CASE WHEN source_note_id < target_note_id THEN target_fingerprint ELSE source_fingerprint END)
+  )
+  WHERE kind = 'related_note' AND state = 'staged';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_graph_suggestions_staged_tag_identity
+  ON note_graph_suggestions(owner_user_id, dataset_id, run_id, source_note_id, source_fingerprint, normalized_tag)
+  WHERE kind = 'tag' AND state = 'staged';
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_acceptance_lease ON note_graph_suggestions(state, acceptance_lease_expires_at);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestions_retention ON note_graph_suggestions(state, expires_at);
+CREATE INDEX IF NOT EXISTS idx_note_graph_suggestion_evidence_note ON note_graph_suggestion_evidence(owner_user_id, dataset_id, note_id);
+
+ALTER TABLE note_graph_suggestion_operation_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_graph_suggestion_operation_receipts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_graph_suggestion_operation_receipts_tenant_isolation ON note_graph_suggestion_operation_receipts;
+CREATE POLICY note_graph_suggestion_operation_receipts_tenant_isolation ON note_graph_suggestion_operation_receipts USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_graph_suggestion_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_graph_suggestion_runs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_graph_suggestion_runs_tenant_isolation ON note_graph_suggestion_runs;
+CREATE POLICY note_graph_suggestion_runs_tenant_isolation ON note_graph_suggestion_runs USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_graph_suggestion_rejection_sets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_graph_suggestion_rejection_sets FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_graph_suggestion_rejection_sets_tenant_isolation ON note_graph_suggestion_rejection_sets;
+CREATE POLICY note_graph_suggestion_rejection_sets_tenant_isolation ON note_graph_suggestion_rejection_sets USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_graph_suggestions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_graph_suggestions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_graph_suggestions_tenant_isolation ON note_graph_suggestions;
+CREATE POLICY note_graph_suggestions_tenant_isolation ON note_graph_suggestions USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_graph_suggestion_evidence ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_graph_suggestion_evidence FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_graph_suggestion_evidence_tenant_isolation ON note_graph_suggestion_evidence;
+CREATE POLICY note_graph_suggestion_evidence_tenant_isolation ON note_graph_suggestion_evidence USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+"""
+
+    _NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_SQLITE_TRIGGER_SQL = """
+CREATE TRIGGER note_graph_suggestion_operation_receipts_clear_references
+BEFORE DELETE ON note_graph_suggestion_operation_receipts
+BEGIN
+  UPDATE note_graph_suggestion_runs
+     SET admission_receipt_id = NULL
+   WHERE owner_user_id = OLD.owner_user_id
+     AND dataset_id = OLD.dataset_id
+     AND admission_receipt_id = OLD.id
+     AND EXISTS (
+       SELECT 1 FROM notes
+        WHERE client_id = OLD.owner_user_id AND id = OLD.source_note_id
+     );
+
+  UPDATE note_graph_suggestions
+     SET decision_receipt_id = NULL
+   WHERE owner_user_id = OLD.owner_user_id
+     AND dataset_id = OLD.dataset_id
+     AND decision_receipt_id = OLD.id
+     AND EXISTS (
+       SELECT 1 FROM notes
+        WHERE client_id = OLD.owner_user_id AND id = OLD.source_note_id
+     );
+END;
+"""
+
+    _NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_POSTGRES_TRIGGER_STATEMENTS = (
+        """
+        CREATE OR REPLACE FUNCTION note_graph_suggestion_clear_receipt_references()
+        RETURNS trigger AS $$
+        BEGIN
+          UPDATE note_graph_suggestion_runs
+             SET admission_receipt_id = NULL
+           WHERE owner_user_id = OLD.owner_user_id
+             AND dataset_id = OLD.dataset_id
+             AND admission_receipt_id = OLD.id
+             AND EXISTS (
+               SELECT 1 FROM notes
+                WHERE client_id = OLD.owner_user_id AND id = OLD.source_note_id
+             );
+
+          UPDATE note_graph_suggestions
+             SET decision_receipt_id = NULL
+           WHERE owner_user_id = OLD.owner_user_id
+             AND dataset_id = OLD.dataset_id
+             AND decision_receipt_id = OLD.id
+             AND EXISTS (
+               SELECT 1 FROM notes
+                WHERE client_id = OLD.owner_user_id AND id = OLD.source_note_id
+             );
+          RETURN OLD;
+        END;
+        $$ LANGUAGE plpgsql
+        """,
+        "DROP TRIGGER IF EXISTS note_graph_suggestion_operation_receipts_clear_references "
+        "ON note_graph_suggestion_operation_receipts",
+        "CREATE TRIGGER note_graph_suggestion_operation_receipts_clear_references "
+        "BEFORE DELETE ON note_graph_suggestion_operation_receipts "
+        "FOR EACH ROW EXECUTE FUNCTION note_graph_suggestion_clear_receipt_references()",
+    )
+
+    _SHARED_WORKSPACE_CHAT_V61_POSTGRES_VERIFY_SQL = """
+DO $shared_workspace_chat_v61_verify$
+BEGIN
+  IF (
+    SELECT count(*)
+      FROM pg_class AS relation
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+     WHERE namespace.nspname = current_schema()
+       AND relation.relname IN (
+         'shared_workspace_chat_threads',
+         'shared_workspace_chat_requests'
+       )
+       AND relation.relrowsecurity
+       AND relation.relforcerowsecurity
+  ) <> 2 THEN
+    RAISE EXCEPTION 'Shared workspace chat v61 relations require forced RLS';
+  END IF;
+
+  IF (
+    SELECT count(*)
+      FROM pg_policies
+     WHERE schemaname = current_schema()
+       AND (tablename, policyname) IN (
+         (
+           'shared_workspace_chat_threads',
+           'shared_workspace_chat_threads_tenant_isolation'
+         ),
+         (
+           'shared_workspace_chat_requests',
+           'shared_workspace_chat_requests_tenant_isolation'
+         )
+       )
+       AND qual IS NOT NULL
+       AND with_check IS NOT NULL
+  ) <> 2 THEN
+    RAISE EXCEPTION 'Shared workspace chat v61 policy catalog is incomplete';
+  END IF;
+END;
+$shared_workspace_chat_v61_verify$;
+"""
+
+    _MIGRATION_SQL_V64_TO_V65 = """
+CREATE TABLE conversation_behavior_snapshots(
+  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK(status IN ('valid','missing','invalid')),
+  schema_version INTEGER,
+  canonical_json TEXT,
+  digest TEXT,
+  size_bytes INTEGER,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK(
+    (
+      status = 'valid'
+      AND schema_version IS NOT NULL
+      AND schema_version >= 1
+      AND canonical_json IS NOT NULL
+      AND digest IS NOT NULL
+      AND length(digest) = 71
+      AND substr(digest, 1, 7) = 'sha256:'
+      AND substr(digest, 8) NOT GLOB '*[^0-9a-f]*'
+      AND size_bytes IS NOT NULL
+      AND size_bytes >= 1
+      AND length(CAST(canonical_json AS BLOB)) = size_bytes
+    )
+    OR
+    (
+      status IN ('missing','invalid')
+      AND schema_version IS NULL
+      AND canonical_json IS NULL
+      AND digest IS NULL
+      AND size_bytes IS NULL
+    )
+  )
+);
+CREATE INDEX idx_conversation_behavior_snapshots_status
+  ON conversation_behavior_snapshots(status);
+CREATE INDEX idx_conversation_behavior_snapshots_digest
+  ON conversation_behavior_snapshots(digest);
+ALTER TABLE conversations
+  ADD COLUMN history_version INTEGER NOT NULL DEFAULT 1 CHECK(history_version >= 1);
+ALTER TABLE conversation_settings
+  ADD COLUMN settings_version INTEGER NOT NULL DEFAULT 1 CHECK(settings_version >= 1);
+
+UPDATE db_schema_version
+   SET version = 65
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version = 64;
+"""
+
+    _MIGRATION_SQL_V64_TO_V65_POSTGRES = """
+CREATE TABLE conversation_behavior_snapshots(
+  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK(status IN ('valid','missing','invalid')),
+  schema_version INTEGER,
+  canonical_json TEXT,
+  digest TEXT,
+  size_bytes INTEGER,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK(
+    (
+      status = 'valid'
+      AND schema_version IS NOT NULL
+      AND schema_version >= 1
+      AND canonical_json IS NOT NULL
+      AND digest IS NOT NULL
+      AND digest ~ '^sha256:[0-9a-f]{64}$'
+      AND size_bytes IS NOT NULL
+      AND size_bytes >= 1
+      AND octet_length(canonical_json) = size_bytes
+    )
+    OR
+    (
+      status IN ('missing','invalid')
+      AND schema_version IS NULL
+      AND canonical_json IS NULL
+      AND digest IS NULL
+      AND size_bytes IS NULL
+    )
+  )
+);
+CREATE INDEX idx_conversation_behavior_snapshots_status
+  ON conversation_behavior_snapshots(status);
+CREATE INDEX idx_conversation_behavior_snapshots_digest
+  ON conversation_behavior_snapshots(digest);
+ALTER TABLE conversations
+  ADD COLUMN history_version INTEGER NOT NULL DEFAULT 1
+  CHECK (history_version >= 1);
+ALTER TABLE conversation_settings
+  ADD COLUMN settings_version INTEGER NOT NULL DEFAULT 1
+  CHECK (settings_version >= 1);
+
+UPDATE db_schema_version
+   SET version = 65
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version = 64;
+"""
+
+    _MIGRATION_SQL_V66_TO_V67 = """
+ALTER TABLE quizzes
+  ADD COLUMN activity_type TEXT NOT NULL DEFAULT 'questions'
+  CHECK (activity_type IN ('questions', 'osce'));
+ALTER TABLE quizzes
+  ADD COLUMN generation_profile TEXT;
+ALTER TABLE quizzes
+  ADD COLUMN total_stations INTEGER NOT NULL DEFAULT 0
+  CHECK (total_stations >= 0);
+
+CREATE TABLE osce_stations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  quiz_id INTEGER NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
+  schema_version TEXT NOT NULL CHECK (schema_version = 'osce.station.v1'),
+  content_json TEXT NOT NULL,
+  order_index INTEGER NOT NULL CHECK (order_index >= 0),
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  origin TEXT NOT NULL CHECK (origin IN ('generated', 'manual')),
+  provenance_json TEXT,
+  source_bundle_json TEXT,
+  verification_state TEXT NOT NULL
+    CHECK (verification_state IN ('source_verified', 'modified_after_verification', 'manually_authored')),
+  verification_timestamp TEXT,
+  verification_summary TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE osce_practice_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  station_id INTEGER NOT NULL REFERENCES osce_stations(id) ON DELETE CASCADE,
+  quiz_id INTEGER NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
+  client_attempt_id TEXT NOT NULL,
+  station_snapshot_json TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('in_progress', 'self_assessment', 'completed')),
+  candidate_notes TEXT NOT NULL DEFAULT '' CHECK (length(candidate_notes) <= 10000),
+  checklist_selections_json TEXT NOT NULL DEFAULT '{}',
+  rubric_selections_json TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT NOT NULL,
+  self_assessment_started_at TEXT,
+  completed_at TEXT,
+  frozen_elapsed_seconds INTEGER CHECK (frozen_elapsed_seconds IS NULL OR frozen_elapsed_seconds >= 0),
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  last_modified_at TEXT NOT NULL,
+  UNIQUE (station_id, client_attempt_id)
+);
+
+CREATE INDEX idx_osce_stations_quiz_active_order
+  ON osce_stations(quiz_id, deleted, order_index);
+CREATE INDEX idx_osce_attempts_station_state_modified
+  ON osce_practice_attempts(station_id, state, last_modified_at DESC);
+CREATE INDEX idx_osce_attempts_quiz_state_modified
+  ON osce_practice_attempts(quiz_id, state, last_modified_at DESC);
+
+UPDATE db_schema_version
+   SET version = 67
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version = 66;
+"""
+
+    _MIGRATION_SQL_V66_TO_V67_POSTGRES = """
+ALTER TABLE quizzes
+  ADD COLUMN IF NOT EXISTS activity_type TEXT NOT NULL DEFAULT 'questions';
+ALTER TABLE quizzes
+  ADD COLUMN IF NOT EXISTS generation_profile TEXT;
+ALTER TABLE quizzes
+  ADD COLUMN IF NOT EXISTS total_stations INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE quizzes
+  ADD CONSTRAINT quizzes_activity_type_check CHECK (activity_type IN ('questions', 'osce'));
+ALTER TABLE quizzes
+  ADD CONSTRAINT quizzes_total_stations_check CHECK (total_stations >= 0);
+
+CREATE TABLE osce_stations (
+  id BIGSERIAL PRIMARY KEY,
+  quiz_id BIGINT NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
+  schema_version TEXT NOT NULL CHECK (schema_version = 'osce.station.v1'),
+  content_json TEXT NOT NULL,
+  order_index INTEGER NOT NULL CHECK (order_index >= 0),
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  origin TEXT NOT NULL CHECK (origin IN ('generated', 'manual')),
+  provenance_json TEXT,
+  source_bundle_json TEXT,
+  verification_state TEXT NOT NULL
+    CHECK (verification_state IN ('source_verified', 'modified_after_verification', 'manually_authored')),
+  verification_timestamp TIMESTAMPTZ,
+  verification_summary TEXT,
+  deleted BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE osce_practice_attempts (
+  id BIGSERIAL PRIMARY KEY,
+  station_id BIGINT NOT NULL REFERENCES osce_stations(id) ON DELETE CASCADE,
+  quiz_id BIGINT NOT NULL REFERENCES quizzes(id) ON DELETE CASCADE,
+  client_attempt_id TEXT NOT NULL,
+  station_snapshot_json TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('in_progress', 'self_assessment', 'completed')),
+  candidate_notes TEXT NOT NULL DEFAULT '' CHECK (char_length(candidate_notes) <= 10000),
+  checklist_selections_json TEXT NOT NULL DEFAULT '{}',
+  rubric_selections_json TEXT NOT NULL DEFAULT '{}',
+  started_at TIMESTAMPTZ NOT NULL,
+  self_assessment_started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  frozen_elapsed_seconds INTEGER CHECK (frozen_elapsed_seconds IS NULL OR frozen_elapsed_seconds >= 0),
+  version INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
+  last_modified_at TIMESTAMPTZ NOT NULL,
+  UNIQUE (station_id, client_attempt_id)
+);
+
+CREATE INDEX idx_osce_stations_quiz_active_order
+  ON osce_stations(quiz_id, deleted, order_index);
+CREATE INDEX idx_osce_attempts_station_state_modified
+  ON osce_practice_attempts(station_id, state, last_modified_at DESC);
+CREATE INDEX idx_osce_attempts_quiz_state_modified
+  ON osce_practice_attempts(quiz_id, state, last_modified_at DESC);
+
+UPDATE db_schema_version
+   SET version = 67
+ WHERE schema_name = 'rag_char_chat_schema'
+   AND version = 66;
+"""
+
+    _MIGRATION_SQL_V68_TO_V69 = """
+ALTER TABLE workspaces ADD COLUMN assistant_defaults_explicit_none INTEGER NOT NULL DEFAULT 0
+    CHECK (assistant_defaults_explicit_none IN (0, 1));
+UPDATE workspaces SET assistant_defaults_explicit_none = 1 WHERE assistant_defaults_json IS NULL;
+UPDATE db_schema_version SET version = 69 WHERE schema_name = 'rag_char_chat_schema' AND version = 68;
+"""
+
+    _MIGRATION_SQL_V72_TO_V73_POSTGRES = """
+ALTER TABLE workspaces ADD COLUMN assistant_defaults_explicit_none BOOLEAN NOT NULL DEFAULT FALSE;
+UPDATE workspaces SET assistant_defaults_explicit_none = TRUE WHERE assistant_defaults_json IS NULL;
+UPDATE db_schema_version SET version = 73 WHERE schema_name = 'rag_char_chat_schema' AND version = 72;
+"""
+
+    _MIGRATION_SQL_V69_TO_V70 = """
+ALTER TABLE conversations ADD COLUMN assistant_startup_json TEXT
+    CHECK (assistant_startup_json IS NULL OR length(CAST(assistant_startup_json AS BLOB)) <= 1024);
+UPDATE db_schema_version SET version = 70 WHERE schema_name = 'rag_char_chat_schema' AND version = 69;
+"""
+
+    _MIGRATION_SQL_V73_TO_V74_POSTGRES = """
+ALTER TABLE conversations ADD COLUMN assistant_startup_json TEXT
+    CHECK (assistant_startup_json IS NULL OR octet_length(assistant_startup_json) <= 1024);
+UPDATE db_schema_version SET version = 74 WHERE schema_name = 'rag_char_chat_schema' AND version = 73;
+"""
+
     _MIGRATION_SQL_V10_TO_V11_POSTGRES = """
 ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 """
@@ -6476,7 +7568,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         *,
         backend: DatabaseBackend | None = None,
         config: ConfigParser | None = None,
-    ):
+        owner_user_id: str | None = None,
+    ) -> None:
         """
         Initializes the CharactersRAGDB instance.
 
@@ -6488,6 +7581,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                      or ":memory:" for an in-memory database.
             client_id: A unique identifier for this client instance. Used for
                        tracking changes in the sync log and records. Must not be empty.
+            owner_user_id: Canonical owner supplied by trusted dependency construction,
+                           never request metadata. Defaults to the initial client_id
+                           for standalone callers that already use it as their owner.
 
         Raises:
             ValueError: If `client_id` is empty or None.
@@ -6505,6 +7601,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not client_id:
             raise ValueError("Client ID cannot be empty or None.")  # noqa: TRY003
         self.client_id = client_id
+        self._owner_user_id = str(client_id if owner_user_id is None else owner_user_id)
         self._local = threading.local()
         self._schema_lock = threading.RLock()
         self._bootstrapped_backend_targets: set[str] = set()
@@ -6521,6 +7618,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.character_store import (
             CharacterStore,
         )
+        from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
+            ConversationResumeStore,
+        )
         from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import (
             ConversationStore,
         )
@@ -6530,19 +7630,46 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.message_store import (
             MessageStore,
         )
+        from tldw_Server_API.app.core.DB_Management.chacha.moodboard_sync_store import (
+            MoodboardSyncStore,
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.native_chat_asset_store import NativeChatAssetStore
+        from tldw_Server_API.app.core.DB_Management.chacha.native_fork_store import NativeForkStore
+        from tldw_Server_API.app.core.DB_Management.chacha.note_attachment_store import (
+            NoteAttachmentStore,
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.note_graph_projection_store import (
+            NoteGraphProjectionStore,
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.note_graph_suggestion_store import (
+            NoteGraphSuggestionStore,
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
         from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
         from tldw_Server_API.app.core.DB_Management.chacha.persona_state_store import (
             PersonaStateStore,
+        )
+        from tldw_Server_API.app.core.DB_Management.chacha.shared_workspace_chat_store import (
+            SharedWorkspaceChatStore,
         )
         from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskStore
 
         self.character_store = CharacterStore(self)
         self.conversation_store = ConversationStore(self)
+        self.native_forks = NativeForkStore(self)
+        self.native_assets = NativeChatAssetStore(self)
+        self.conversation_resume_store = ConversationResumeStore(self)
         self.message_store = MessageStore(self)
         self.note_store = NoteStore(self)
+        self.moodboard_sync_store = MoodboardSyncStore(self)
+        self.note_attachment_store = NoteAttachmentStore(self)
+        self.notes_link_store = NotesLinkStore(self)
+        self.note_graph_projection_store = NoteGraphProjectionStore(self)
+        self.note_graph_suggestion_store = NoteGraphSuggestionStore(self)
         self.task_store = TaskStore(self)
         self.keyword_store = KeywordStore(self)
         self.persona_state_store = PersonaStateStore(self)
+        self.shared_workspace_chat_store = SharedWorkspaceChatStore(self)
 
         if self.backend_type != BackendType.SQLITE:
             self.is_memory_db = False
@@ -6578,6 +7705,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             exc_info=True)
             self.close_connection()
             raise CharactersRAGDBError(f"Unexpected database initialization error: {e}") from e  # noqa: TRY003
+
+    @property
+    def owner_user_id(self) -> str:
+        """Return construction-time ownership, independent of writer attribution."""
+        return self._owner_user_id
 
     # --- Backend Resolution Helpers ---
     def _resolve_backend(
@@ -6634,8 +7766,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return str(config.sqlite_path)
         return f"sqlite:{id(backend)}"
 
+    def _connection_state(self) -> Any:
+        """Use an explicit PostgreSQL operation, retaining legacy/SQLite state."""
+        if self._backend.backend_type == BackendType.POSTGRESQL:
+            state = current_connection_state(self)
+            if state is not None:
+                return state
+        return self._local
+
     def _get_pinned_backend(self) -> DatabaseBackend | None:
-        return getattr(self._local, "backend_ref", None)
+        return getattr(self._connection_state(), "backend_ref", None)
 
     def _mark_backend_bootstrapped(self, backend: DatabaseBackend | None) -> None:
         key = self._backend_target_key(backend)
@@ -6865,7 +8005,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         For SQLite we maintain a single `sqlite3.Connection` per thread and ensure it
         stays usable (re-opening on failure). For PostgreSQL we borrow a pooled
-        connection and cache it per thread until explicitly released.
+        connection owned by the active operation, or by the legacy thread when
+        no operation was established.
 
         Returns:
             Backend-specific connection handle suitable for use with
@@ -6874,7 +8015,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         Raises:
             CharactersRAGDBError: If acquiring a connection from the backend fails.
         """
-        conn = getattr(self._local, 'conn', None)
+        state = self._connection_state()
+        with getattr(state, 'allocation_lock', contextlib.nullcontext()):
+            return self._get_connection_for_state(state)
+
+    def _get_connection_for_state(self, state: Any) -> Any:
+        conn = getattr(state, 'conn', None)
         backend = self._get_pinned_backend() or self.backend
 
         if backend.backend_type == BackendType.SQLITE:
@@ -6900,11 +8046,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         # Best-effort; ignore if pool doesn't expose the helper
                         pass
                     conn = None
-                    self._local.conn = None
+                    state.conn = None
 
             if conn is None:
                 conn = self._open_new_connection(backend)
-                self._local.conn = conn
+                state.conn = conn
                 logger.debug(
                     'Opened/Reopened SQLite connection to {} for thread {}',
                     self.db_path_str,
@@ -6914,16 +8060,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         # Non-SQLite backend: reuse connection if still open, otherwise borrow anew.
         if conn is not None and getattr(conn, "closed", False):
+            if getattr(state, "borrowed", False):
+                raise CharactersRAGDBError("The borrowed database connection is closed")
             self._release_connection(conn, backend=backend)
             conn = None
-            self._local.conn = None
-            self._local.backend_ref = None
+            state.conn = None
+            state.backend_ref = None
             backend = self.backend
 
         if conn is None:
             conn = self._open_new_connection(backend)
-            self._local.conn = conn
-            self._local.backend_ref = backend
+            state.conn = conn
+            state.backend_ref = backend
             logger.debug(
                 'Acquired backend connection ({}) for thread {}',
                 backend.backend_type.value,
@@ -6931,6 +8079,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         return conn
 
+    @_owned_database_call
     def get_connection(self) -> Any:
         """Return the active connection wrapper for the current thread."""
         raw_conn = self._get_thread_connection()
@@ -6949,6 +8098,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         If a transaction is active and uncommitted on this connection, it attempts a rollback.
         Clears the connection reference from `threading.local` for the current thread.
         """
+        state = self._connection_state()
+        if state is not self._local:
+            state.release()
+            return
         conn = getattr(self._local, 'conn', None)
         if conn is None:
             return
@@ -7116,6 +8269,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             # and should not be closed here to allow continued use of the DB instance.
 
     # --- Query Execution ---
+    @_owned_database_call
     def execute_query(
         self,
         query: str,
@@ -7123,6 +8277,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         *,
         commit: bool = False,
         script: bool = False,
+        log_params: bool = True,
+        log_errors: bool = True,
+        read_only: bool = False,
     ) -> Any:
         """
         Executes a single SQL query or an entire SQL script.
@@ -7136,6 +8293,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     Defaults to False.
             script: If True, executes the query string as an SQL script using `executescript`.
                     `params` are ignored if `script` is True. Defaults to False.
+            log_params: Whether debug logs may include bounded parameter values.
+                    Sensitive query paths set this to False. Defaults to True.
+            log_errors: Whether driver errors may be logged verbatim. Sensitive
+                    source reads set this to False. Defaults to True.
+            read_only: Opt in a known side-effect-free read to completing its own
+                    PostgreSQL transaction. Pre-existing or explicitly managed
+                    transactions and SQLite are unchanged. Defaults to False.
 
         Returns:
             The sqlite3.Cursor object after execution.
@@ -7145,21 +8309,40 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For other SQLite errors or general query execution failures.
         """
         conn = self.get_connection()
+        read_scope: contextlib.AbstractContextManager[Any] = contextlib.nullcontext()
+        if read_only and self.backend_type == BackendType.POSTGRESQL:
+            raw_conn = conn._connection
+            backend = conn._backend
+            status = getattr(getattr(raw_conn, "info", None), "transaction_status", None)
+            if (
+                getattr(status, "name", None) == "IDLE"
+                and getattr(self._connection_state(), "tx_depth", 0) == 0
+                and backend._tx_depth(raw_conn) == 0
+            ):
+                # Own only this new read; never settle an existing caller's work.
+                read_scope = backend.transaction(connection=raw_conn)
         try:
             logger.debug(
                 'Executing SQL (script={}, backend={}): {}... Params: {}...',
                 script,
                 self.backend_type.value,
                 query[:300],
-                str(params)[:200],
+                str(params)[:200] if log_params else "[redacted]",
             )
 
-            if script:
-                cursor = conn.executescript(query)
-            else:
-                prepared_query, prepared_params = self._prepare_backend_statement(query, params)
-                cursor = conn.cursor()
-                cursor.execute(prepared_query, prepared_params or ())
+            with read_scope:
+                if script:
+                    if self.backend_type == BackendType.SQLITE:
+                        cursor = conn.executescript(query)
+                    else:
+                        cursor = conn.executescript(query, log_errors=log_errors)
+                else:
+                    prepared_query, prepared_params = self._prepare_backend_statement(query, params)
+                    if self.backend_type == BackendType.SQLITE:
+                        cursor = conn.cursor()
+                    else:
+                        cursor = conn.cursor(log_errors=log_errors)
+                    cursor.execute(prepared_query, prepared_params or ())
 
             if commit:
                 try:
@@ -7170,6 +8353,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     else:
                         conn.commit()
                 except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+                    if not log_errors:
+                        logger.error(
+                            'Redacted commit failure after execute_query ({})',
+                            type(exc).__name__,
+                        )
+                        raise CharactersRAGDBError("Database commit failed.") from None
                     logger.error(
                         'Commit failed after execute_query on backend {}: {}',
                         self.backend_type.value,
@@ -7179,6 +8368,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     raise CharactersRAGDBError(f"Database commit failed: {exc}") from exc  # noqa: TRY003
             return cursor  # noqa: TRY300
         except sqlite3.IntegrityError as e:
+            if not log_errors:
+                logger.warning("Redacted SQLite integrity failure ({})", type(e).__name__)
+                raise CharactersRAGDBError("Database constraint violation.") from None
             logger.warning(f"Integrity constraint violation: {query[:300]}... Error: {e}")
             # Distinguish unique constraint from other integrity errors if possible
             if "unique constraint failed" in str(e).lower():
@@ -7186,9 +8378,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise CharactersRAGDBError(  # noqa: TRY003
                 f"Database constraint violation: {e}") from e  # Broader for other integrity issues
         except sqlite3.Error as e:
+            if not log_errors:
+                logger.error("Redacted SQLite query failure ({})", type(e).__name__)
+                raise CharactersRAGDBError("Query execution failed.") from None
             logger.error(f"Query execution failed: {query[:300]}... Error: {e}", exc_info=True)
             raise CharactersRAGDBError(f"Query execution failed: {e}") from e  # noqa: TRY003
         except BackendDatabaseError as exc:
+            if not log_errors:
+                logger.error("Redacted backend query failure ({})", type(exc).__name__)
+                raise CharactersRAGDBError("Query execution failed.") from None
             msg = str(exc).lower()
             if "duplicate key" in msg or "unique constraint" in msg:
                 raise ConflictError(message=f"Database constraint violation: {exc}") from exc
@@ -7264,6 +8462,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             commit=True,
         )
 
+    @_owned_database_call
     def execute_many(
         self,
         query: str,
@@ -7428,6 +8627,24 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (51, "_migrate_from_v51_to_v52"),
             (52, "_migrate_from_v52_to_v53"),
             (53, "_migrate_from_v53_to_v54"),
+            (54, "_migrate_from_v54_to_v55"),
+            (55, "_migrate_from_v55_to_v56"),
+            (56, "_migrate_from_v56_to_v57"),
+            (57, "_migrate_from_v57_to_v58"),
+            (58, "_migrate_from_v58_to_v59"),
+            (59, "_migrate_from_v59_to_v60_sqlite"),
+            (60, "_migrate_from_v60_to_v61_sqlite"),
+            (61, "_migrate_from_v61_to_v62_sqlite"),
+            (62, "_migrate_from_v62_to_v63_sqlite"),
+            (63, "_migrate_from_v63_to_v64_sqlite"),
+            (64, "_migrate_from_v64_to_v65"),
+            (65, "_migrate_from_v65_to_v66"),
+            (66, "_migrate_from_v66_to_v67"),
+            (67, "_migrate_from_v67_to_v68"),
+            (68, "_migrate_from_v68_to_v69"),
+            (69, "_migrate_from_v69_to_v70"),
+            (70, "_migrate_from_v70_to_v71"),
+            (71, "_migrate_from_v71_to_v72"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -8912,6 +10129,7944 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 f"Unexpected error migrating to V54 for '{self._SCHEMA_NAME}': {exc}"
             ) from exc  # noqa: TRY003
 
+    def _migrate_from_v54_to_v55(self, conn: sqlite3.Connection) -> None:
+        """Migrate organization resources to stable, unique UUIDv4 identities."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V54 to V55 for DB: {self.db_path_str}...")
+        try:
+            from tldw_Server_API.app.core.Sync.v2.notes_organization import new_organization_sync_id
+
+            if "note_folders" not in self._sqlite_table_names(conn):
+                self._ensure_note_folder_schema_sqlite(conn)
+            else:
+                self._ensure_note_folder_sync_suppression_schema_sqlite(conn)
+            table_indexes = (
+                ("keywords", "idx_keywords_sync_id_unique"),
+                ("keyword_collections", "idx_keyword_collections_sync_id_unique"),
+                ("note_folders", "idx_note_folders_sync_id_unique"),
+            )
+            for table_name, index_name in table_indexes:
+                columns = self._sqlite_column_names(conn, table_name)
+                if "sync_id" not in columns:
+                    conn.execute(
+                        f"ALTER TABLE {table_name} "  # nosec B608
+                        "ADD COLUMN sync_id TEXT NOT NULL DEFAULT ''"
+                    )
+                rows = conn.execute(
+                    f"SELECT id FROM {table_name} WHERE sync_id = ''"  # nosec B608
+                ).fetchall()
+                for row in rows:
+                    conn.execute(
+                        f"UPDATE {table_name} SET sync_id = ? WHERE id = ?"  # nosec B608
+                        ,
+                        (new_organization_sync_id(), row["id"]),
+                    )
+
+                invalid = conn.execute(
+                    f"SELECT COUNT(*) FROM {table_name} WHERE sync_id IS NULL OR sync_id = ''"  # nosec B608
+                ).fetchone()[0]
+                duplicates = conn.execute(
+                    f"SELECT COUNT(*) FROM ("  # nosec B608
+                    f"SELECT sync_id FROM {table_name} GROUP BY sync_id HAVING COUNT(*) > 1)"
+                ).fetchone()[0]
+                if invalid or duplicates:
+                    raise SchemaError(  # noqa: TRY003
+                        f"Cannot migrate {table_name} stable identities: "
+                        f"invalid={invalid}, duplicates={duplicates}."
+                    )
+                conn.execute(
+                    f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON {table_name}(sync_id)"  # nosec B608
+                )
+
+            conn.execute("DROP TRIGGER IF EXISTS keyword_collections_au")
+            conn.execute("DROP TRIGGER IF EXISTS keyword_collections_ad")
+            conn.execute(
+                """
+                CREATE TRIGGER keyword_collections_au
+                AFTER UPDATE ON keyword_collections BEGIN
+                  INSERT INTO keyword_collections_fts(keyword_collections_fts,rowid,name)
+                  SELECT 'delete',old.id,old.name WHERE old.deleted = 0;
+                  INSERT INTO keyword_collections_fts(rowid,name)
+                  SELECT new.id,new.name WHERE new.deleted = 0;
+                END
+                """
+            )
+            conn.execute(
+                """
+                CREATE TRIGGER keyword_collections_ad
+                AFTER DELETE ON keyword_collections BEGIN
+                  INSERT INTO keyword_collections_fts(keyword_collections_fts,rowid,name)
+                  SELECT 'delete',old.id,old.name WHERE old.deleted = 0;
+                END
+                """
+            )
+
+            conn.execute(
+                "UPDATE db_schema_version SET version = 55 WHERE schema_name = ? AND version < 55",
+                (self._SCHEMA_NAME,),
+            )
+            final_version = self._get_db_version(conn)
+            if final_version != 55:
+                raise SchemaError(  # noqa: TRY003
+                    f"[{self._SCHEMA_NAME}] Migration V54->V55 failed version check. Expected 55, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V55 completed.")
+        except sqlite3.Error as exc:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V54->V55 failed: {exc}", exc_info=True)
+            raise SchemaError(f"Migration V54->V55 failed for '{self._SCHEMA_NAME}': {exc}") from exc  # noqa: TRY003
+        except SchemaError:
+            raise
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            logger.error(f"[{self._SCHEMA_NAME}] Unexpected error during migration V54->V55: {exc}", exc_info=True)
+            raise SchemaError(
+                f"Unexpected error migrating to V55 for '{self._SCHEMA_NAME}': {exc}"
+            ) from exc  # noqa: TRY003
+
+    def _migrate_from_v54_to_v55_postgres(self, conn: Any) -> None:
+        """Backfill stable organization identities inside the caller's transaction."""
+        from tldw_Server_API.app.core.Sync.v2.notes_organization import new_organization_sync_id
+
+        self._ensure_note_folder_sync_suppression_schema_postgres(conn)
+        table_indexes = (
+            ("chacha_keywords", "idx_keywords_sync_id_unique"),
+            ("keyword_collections", "idx_keyword_collections_sync_id_unique"),
+            ("note_folders", "idx_note_folders_sync_id_unique"),
+        )
+        for table_name, index_name in table_indexes:
+            self.backend.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS sync_id TEXT",  # nosec B608
+                connection=conn,
+            )
+            rows = self.backend.execute(
+                f"SELECT id FROM {table_name} WHERE sync_id IS NULL OR sync_id = %s ORDER BY id",  # nosec B608
+                ("",),
+                connection=conn,
+            ).rows
+            for row in rows:
+                self.backend.execute(
+                    f"UPDATE {table_name} SET sync_id = %s WHERE id = %s",  # nosec B608
+                    (new_organization_sync_id(), int(row["id"])),
+                    connection=conn,
+                )
+
+            invalid = self.backend.execute(
+                f"SELECT COUNT(*) FROM {table_name} WHERE sync_id IS NULL OR sync_id = %s",  # nosec B608
+                ("",),
+                connection=conn,
+            ).scalar
+            duplicates = self.backend.execute(
+                f"SELECT COUNT(*) FROM ("  # nosec B608
+                f"SELECT sync_id FROM {table_name} GROUP BY sync_id HAVING COUNT(*) > 1"
+                ") duplicate_sync_ids",
+                connection=conn,
+            ).scalar
+            if int(invalid or 0) or int(duplicates or 0):
+                raise SchemaError(  # noqa: TRY003
+                    f"Cannot migrate {table_name} stable identities: "
+                    f"invalid={int(invalid or 0)}, duplicates={int(duplicates or 0)}."
+                )
+
+            self.backend.execute(
+                f"ALTER TABLE {table_name} ALTER COLUMN sync_id SET NOT NULL",  # nosec B608
+                connection=conn,
+            )
+            self.backend.execute(
+                f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON {table_name}(sync_id)",  # nosec B608
+                connection=conn,
+            )
+
+        self._set_schema_version_postgres(conn, 55)
+
+    @staticmethod
+    def _web_clipper_v56_rekey_plan(rows: list[Any]) -> list[tuple[str, str, str]]:
+        """Validate legacy clip mappings and return ``(clip, old, new)`` rekeys."""
+        plan: list[tuple[str, str, str]] = []
+        targets: set[str] = set()
+        for row in rows:
+            clip_id = str(row["clip_id"])
+            note_id = str(row["note_id"])
+            if row["existing_note_id"] is None:
+                raise SchemaError(f"WebClipper mapping '{clip_id}' references a missing note.")  # noqa: TRY003
+            if clip_id != note_id:
+                raise SchemaError(f"WebClipper v55 mapping '{clip_id}' has inconsistent identities.")  # noqa: TRY003
+            try:
+                parsed = uuid.UUID(note_id)
+            except ValueError:
+                digest = hashlib.sha256(
+                    f"web-clipper-migration:notes.note:{clip_id}".encode()
+                ).hexdigest()
+                replacement = str(uuid.UUID(digest[:32], version=4))
+                if replacement in targets:
+                    raise SchemaError("WebClipper note rekey collision detected.") from None  # noqa: TRY003
+                targets.add(replacement)
+                plan.append((clip_id, note_id, replacement))
+                continue
+            if parsed.version != 4 or str(parsed) != note_id:
+                raise SchemaError(  # noqa: TRY003
+                    f"WebClipper note '{note_id}' is a noncanonical UUID; explicit migration is required."
+                )
+        return plan
+
+    @staticmethod
+    def _quoted_sqlite_identifier(value: str) -> str:
+        """Quote an identifier obtained from SQLite schema metadata."""
+        return '"' + value.replace('"', '""') + '"'
+
+    def _migrate_from_v55_to_v56(self, conn: sqlite3.Connection) -> None:
+        """Decouple public WebClipper keys and atomically rekey legacy notes."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V55 to V56 for DB: {self.db_path_str}...")
+        try:
+            tables = self._sqlite_table_names(conn)
+            if "note_clipper_documents" not in tables:
+                self._ensure_web_clipper_schema_sqlite(conn)
+                conn.execute(
+                    "UPDATE db_schema_version SET version = 56 WHERE schema_name = ? AND version < 56",
+                    (self._SCHEMA_NAME,),
+                )
+                return
+
+            rows = conn.execute(
+                """
+                SELECT d.clip_id, d.note_id, n.id AS existing_note_id
+                  FROM note_clipper_documents d
+                  LEFT JOIN notes n ON n.id = d.note_id
+                 ORDER BY d.clip_id
+                """
+            ).fetchall()
+            plan = self._web_clipper_v56_rekey_plan(rows)
+            old_ids = [old_id for _, old_id, _ in plan]
+
+            for _, old_id, replacement in plan:
+                if conn.execute("SELECT 1 FROM notes WHERE id = ?", (replacement,)).fetchone():
+                    raise SchemaError(  # noqa: TRY003
+                        f"WebClipper note rekey target '{replacement}' already exists."
+                    )
+                if conn.execute(
+                    "SELECT 1 FROM sync_log "
+                    "WHERE entity = 'notes' AND entity_id = ? LIMIT 1",
+                    (replacement,),
+                ).fetchone():
+                    raise SchemaError(  # noqa: TRY003
+                        f"WebClipper note rekey target '{replacement}' already has Sync history."
+                    )
+                invalid_payloads = conn.execute(
+                    "SELECT COUNT(*) FROM sync_log "
+                    "WHERE entity = 'notes' AND entity_id = ? "
+                    "AND CASE WHEN json_valid(payload) "
+                    "THEN json_type(payload) <> 'object' "
+                    "OR (SELECT COUNT(*) FROM json_each(sync_log.payload) "
+                    "WHERE key = 'id') <> 1 "
+                    "OR COALESCE(json_type(payload, '$.id'), '') <> 'text' "
+                    "OR COALESCE(CAST(json_extract(payload, '$.id') AS TEXT), '') <> ? "
+                    "ELSE 1 END",
+                    (old_id, old_id),
+                ).fetchone()[0]
+                if invalid_payloads:
+                    raise SchemaError("WebClipper legacy sync_log payload cannot be verified.")  # noqa: TRY003
+
+            for table_name, id_column in (
+                ("sync_envelopes", "entity_id"),
+                ("sync_object_state", "object_id"),
+            ):
+                if not old_ids or table_name not in tables:
+                    continue
+                columns = {
+                    str(row[1])
+                    for row in conn.execute(
+                        f"PRAGMA table_info({self._quoted_sqlite_identifier(table_name)})"  # nosec B608
+                    ).fetchall()
+                }
+                if "domain" not in columns or id_column not in columns:
+                    raise SchemaError("Co-located canonical Sync history cannot be verified.")  # noqa: TRY003
+                for old_id in old_ids:
+                    found = conn.execute(
+                        f"SELECT 1 FROM {self._quoted_sqlite_identifier(table_name)} "  # nosec B608
+                        f"WHERE domain = ? AND {self._quoted_sqlite_identifier(id_column)} = ? LIMIT 1",
+                        ("notes.note", old_id),
+                    ).fetchone()
+                    if found:
+                        raise SchemaError(  # noqa: TRY003
+                            f"WebClipper note '{old_id}' has canonical Sync history; explicit migration is required."
+                        )
+                for _, _, replacement in plan:
+                    found = conn.execute(
+                        f"SELECT 1 FROM {self._quoted_sqlite_identifier(table_name)} "  # nosec B608
+                        f"WHERE domain = ? AND {self._quoted_sqlite_identifier(id_column)} = ? LIMIT 1",
+                        ("notes.note", replacement),
+                    ).fetchone()
+                    if found:
+                        raise SchemaError(  # noqa: TRY003
+                            f"WebClipper note rekey target '{replacement}' already has canonical Sync history."
+                        )
+
+            if old_ids:
+                for table_name in tables:
+                    if table_name.startswith("sqlite_"):
+                        continue
+                    quoted_table = self._quoted_sqlite_identifier(table_name)
+                    for foreign_key in conn.execute(
+                        f"PRAGMA foreign_key_list({quoted_table})"  # nosec B608
+                    ).fetchall():
+                        if str(foreign_key["table"]) != "notes":
+                            continue
+                        if str(foreign_key["on_update"]).upper() == "CASCADE":
+                            continue
+                        column_name = str(foreign_key["from"] or "")
+                        if not column_name:
+                            raise SchemaError("A Notes foreign-key reference cannot be verified.")  # noqa: TRY003
+                        quoted_column = self._quoted_sqlite_identifier(column_name)
+                        for old_id in old_ids:
+                            referenced = conn.execute(
+                                f"SELECT 1 FROM {quoted_table} WHERE {quoted_column} = ? LIMIT 1",  # nosec B608
+                                (old_id,),
+                            ).fetchone()
+                            if referenced:
+                                raise SchemaError(  # noqa: TRY003
+                                    f"Cannot rekey WebClipper note '{old_id}': live non-cascading reference "
+                                    f"from {table_name}.{column_name}."
+                                )
+
+            for table_name in tables:
+                if table_name.startswith("sqlite_") or table_name in {
+                    "note_clipper_documents",
+                    "note_clipper_workspace_placements",
+                }:
+                    continue
+                quoted_table = self._quoted_sqlite_identifier(table_name)
+                for foreign_key in conn.execute(
+                    f"PRAGMA foreign_key_list({quoted_table})"  # nosec B608
+                ).fetchall():
+                    if str(foreign_key["table"]) in {
+                        "note_clipper_documents",
+                        "note_clipper_workspace_placements",
+                    }:
+                        raise SchemaError(  # noqa: TRY003
+                            f"Cannot rebuild WebClipper sidecars while {table_name} declares an external reference."
+                        )
+
+            legacy_documents = "note_clipper_documents_v55"
+            legacy_placements = "note_clipper_workspace_placements_v55"
+            if legacy_documents in tables or legacy_placements in tables:
+                raise SchemaError("WebClipper v56 temporary migration tables already exist.")  # noqa: TRY003
+            has_placements = "note_clipper_workspace_placements" in tables
+            if has_placements:
+                conn.execute(
+                    "ALTER TABLE note_clipper_workspace_placements "
+                    "RENAME TO note_clipper_workspace_placements_v55"
+                )
+            conn.execute(
+                "ALTER TABLE note_clipper_documents RENAME TO note_clipper_documents_v55"
+            )
+            self._ensure_web_clipper_schema_sqlite(conn)
+            conn.execute(
+                """
+                INSERT INTO note_clipper_documents(
+                  clip_id, note_id, clip_type, source_url, source_title,
+                  capture_metadata_json, analysis_json, content_budget_json,
+                  source_note_version, created_at, last_modified, deleted
+                )
+                SELECT clip_id, note_id, clip_type, source_url, source_title,
+                       capture_metadata_json, analysis_json, content_budget_json,
+                       source_note_version, created_at, last_modified, deleted
+                  FROM note_clipper_documents_v55
+                """
+            )
+            if has_placements:
+                conn.execute(
+                    """
+                    INSERT INTO note_clipper_workspace_placements(
+                      clip_id, workspace_id, workspace_note_id, source_note_id,
+                      source_note_version, created_at, last_modified, deleted
+                    )
+                    SELECT clip_id, workspace_id, workspace_note_id, source_note_id,
+                           source_note_version, created_at, last_modified, deleted
+                      FROM note_clipper_workspace_placements_v55
+                    """
+                )
+            copied_documents = conn.execute(
+                "SELECT COUNT(*) FROM note_clipper_documents"
+            ).fetchone()[0]
+            legacy_document_count = conn.execute(
+                "SELECT COUNT(*) FROM note_clipper_documents_v55"
+            ).fetchone()[0]
+            copied_placements = conn.execute(
+                "SELECT COUNT(*) FROM note_clipper_workspace_placements"
+            ).fetchone()[0]
+            legacy_placement_count = (
+                conn.execute(
+                    "SELECT COUNT(*) FROM note_clipper_workspace_placements_v55"
+                ).fetchone()[0]
+                if has_placements
+                else 0
+            )
+            if copied_documents != legacy_document_count or copied_placements != legacy_placement_count:
+                raise SchemaError("WebClipper v56 sidecar copy count verification failed.")  # noqa: TRY003
+            if has_placements:
+                conn.execute("DROP TABLE note_clipper_workspace_placements_v55")
+            conn.execute("DROP TABLE note_clipper_documents_v55")
+            self._ensure_web_clipper_schema_sqlite(conn)
+
+            for clip_id, old_id, replacement in plan:
+                conn.execute("UPDATE notes SET id = ? WHERE id = ?", (replacement, old_id))
+                conn.execute(
+                    "UPDATE sync_log SET entity_id = ?, payload = json_set(payload, '$.id', ?) "
+                    "WHERE entity = 'notes' AND entity_id = ?",
+                    (replacement, replacement, old_id),
+                )
+                invalid_rewrites = conn.execute(
+                    "SELECT COUNT(*) FROM sync_log "
+                    "WHERE entity = 'notes' AND entity_id = ? "
+                    "AND CASE WHEN json_valid(payload) "
+                    "THEN json_type(payload) <> 'object' "
+                    "OR (SELECT COUNT(*) FROM json_each(sync_log.payload) "
+                    "WHERE key = 'id') <> 1 "
+                    "OR COALESCE(json_type(payload, '$.id'), '') <> 'text' "
+                    "OR COALESCE(CAST(json_extract(payload, '$.id') AS TEXT), '') <> ? "
+                    "ELSE 1 END",
+                    (replacement, replacement),
+                ).fetchone()[0]
+                if invalid_rewrites:
+                    raise SchemaError("WebClipper sync_log payload rewrite verification failed.")  # noqa: TRY003
+                mapping = conn.execute(
+                    "SELECT note_id FROM note_clipper_documents WHERE clip_id = ?",
+                    (clip_id,),
+                ).fetchone()
+                if mapping is None or str(mapping[0]) != replacement:
+                    raise SchemaError("WebClipper v56 mapping verification failed.")  # noqa: TRY003
+
+            mismatched_placements = conn.execute(
+                """
+                SELECT COUNT(*)
+                  FROM note_clipper_workspace_placements p
+                  JOIN note_clipper_documents d ON d.clip_id = p.clip_id
+                 WHERE p.source_note_id <> d.note_id
+                """
+            ).fetchone()[0]
+            if mismatched_placements:
+                raise SchemaError("WebClipper v56 placement verification failed.")  # noqa: TRY003
+            foreign_key_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
+            if foreign_key_errors:
+                raise SchemaError("WebClipper v56 foreign-key integrity verification failed.")  # noqa: TRY003
+            conn.execute(
+                "UPDATE db_schema_version SET version = 56 WHERE schema_name = ? AND version < 56",
+                (self._SCHEMA_NAME,),
+            )
+            if self._get_db_version(conn) != 56:
+                raise SchemaError("WebClipper V55->V56 migration failed version verification.")  # noqa: TRY003
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V56 completed.")
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Migration V55->V56 failed for '{self._SCHEMA_NAME}': {exc}") from exc  # noqa: TRY003
+
+    @staticmethod
+    def _quoted_postgres_identifier(value: str) -> str:
+        """Quote a simple PostgreSQL identifier obtained from catalog metadata."""
+        if not _SAFE_IDENTIFIER_RE.fullmatch(value):
+            raise SchemaError(f"Unsafe PostgreSQL schema identifier: {value!r}.")  # noqa: TRY003
+        return f'"{value}"'
+
+    def _migrate_from_v55_to_v56_postgres(self, conn: Any) -> None:
+        """Owner-scope and rekey WebClipper rows in one serialized transaction."""
+        backend = self.backend
+        if not backend.table_exists("note_clipper_documents", connection=conn):
+            self._ensure_web_clipper_schema_postgres(conn)
+            self._set_schema_version_postgres(conn, 56)
+            return
+
+        has_placements = backend.table_exists(
+            "note_clipper_workspace_placements", connection=conn
+        )
+        sync_tables = tuple(
+            table_name
+            for table_name in ("sync_envelopes", "sync_object_state")
+            if backend.table_exists(table_name, connection=conn)
+        )
+        lock_tables = ["notes", "workspaces", "sync_log", "note_clipper_documents"]
+        if has_placements:
+            lock_tables.append("note_clipper_workspace_placements")
+        lock_tables.extend(sync_tables)
+        backend.execute(
+            f"LOCK TABLE {', '.join(lock_tables)} IN ACCESS EXCLUSIVE MODE",  # nosec B608
+            connection=conn,
+        )
+
+        rls_state = backend.execute(
+            """
+            SELECT notes_table.relrowsecurity,
+                   notes_table.relforcerowsecurity,
+                   notes_table.relowner = current_user::regrole AS is_schema_owner
+              FROM pg_class notes_table
+             WHERE notes_table.oid = 'notes'::regclass
+            """,
+            connection=conn,
+        ).first
+        if rls_state is None or not bool(rls_state.get("is_schema_owner")):
+            raise SchemaError(  # noqa: TRY003
+                "WebClipper v56 requires the verified PostgreSQL schema-owner migration path."
+            )
+        rls_enabled = bool(rls_state.get("relrowsecurity"))
+        rls_forced = bool(rls_state.get("relforcerowsecurity"))
+        if rls_forced and not rls_enabled:
+            raise SchemaError("PostgreSQL notes RLS state cannot be verified.")  # noqa: TRY003
+        if rls_forced:
+            backend.execute(
+                "ALTER TABLE notes NO FORCE ROW LEVEL SECURITY",
+                connection=conn,
+            )
+
+        backend.execute(
+            "ALTER TABLE note_clipper_documents ADD COLUMN IF NOT EXISTS client_id TEXT",
+            connection=conn,
+        )
+        if has_placements:
+            backend.execute(
+                "ALTER TABLE note_clipper_workspace_placements "
+                "ADD COLUMN IF NOT EXISTS client_id TEXT",
+                connection=conn,
+            )
+
+        invalid_owners = backend.execute(
+            """
+            SELECT COUNT(*) AS invalid_owner_count
+              FROM note_clipper_documents document
+              LEFT JOIN notes note ON note.id = document.note_id
+             WHERE note.id IS NULL
+                OR note.client_id IS NULL
+                OR BTRIM(note.client_id) = ''
+                OR note.client_id <> BTRIM(note.client_id)
+                OR BTRIM(note.client_id) !~ '^[1-9][0-9]*$'
+                OR (
+                     document.client_id IS NOT NULL
+                     AND document.client_id IS DISTINCT FROM note.client_id
+                   )
+            """,
+            connection=conn,
+        ).scalar
+        if int(invalid_owners or 0):
+            raise SchemaError(  # noqa: TRY003
+                "Cannot migrate WebClipper mappings: an authoritative note owner is missing or invalid."
+            )
+
+        if has_placements:
+            invalid_placement_owners = backend.execute(
+                """
+                SELECT COUNT(*) AS invalid_owner_count
+                  FROM note_clipper_workspace_placements placement
+                  LEFT JOIN note_clipper_documents document
+                    ON document.clip_id = placement.clip_id
+                  LEFT JOIN notes owner_note
+                    ON owner_note.id = document.note_id
+                  LEFT JOIN notes source_note
+                    ON source_note.id = placement.source_note_id
+                  LEFT JOIN workspaces workspace
+                    ON workspace.id = placement.workspace_id
+                 WHERE document.clip_id IS NULL
+                    OR owner_note.id IS NULL
+                    OR placement.source_note_id IS DISTINCT FROM document.note_id
+                    OR source_note.client_id IS DISTINCT FROM owner_note.client_id
+                    OR workspace.client_id IS DISTINCT FROM owner_note.client_id
+                    OR (
+                         document.client_id IS NOT NULL
+                         AND document.client_id IS DISTINCT FROM owner_note.client_id
+                       )
+                    OR (
+                         placement.client_id IS NOT NULL
+                         AND placement.client_id IS DISTINCT FROM owner_note.client_id
+                       )
+                """,
+                connection=conn,
+            ).scalar
+            if int(invalid_placement_owners or 0):
+                raise SchemaError(  # noqa: TRY003
+                    "Cannot migrate WebClipper placements: owner relationships are invalid."
+                )
+
+        rows = backend.execute(
+            """
+            SELECT document.clip_id,
+                   document.note_id,
+                   note.id AS existing_note_id,
+                   note.client_id AS owner_client_id
+              FROM note_clipper_documents document
+              LEFT JOIN notes note ON note.id = document.note_id
+             ORDER BY note.client_id, document.clip_id
+            """,
+            connection=conn,
+        ).rows
+        plan = self._web_clipper_v56_rekey_plan(rows)
+        owner_by_clip_id = {
+            str(row["clip_id"]): str(row["owner_client_id"])
+            for row in rows
+        }
+        old_ids = [old_id for _, old_id, _ in plan]
+        for clip_id, _, replacement in plan:
+            collision = backend.execute(
+                "SELECT 1 FROM notes WHERE id = %s LIMIT 1",
+                (replacement,),
+                connection=conn,
+            ).first
+            if collision:
+                raise SchemaError(f"WebClipper note rekey target '{replacement}' already exists.")  # noqa: TRY003
+            owner_client_id = owner_by_clip_id[clip_id]
+            sync_log_collision = backend.execute(
+                "SELECT 1 FROM sync_log "
+                "WHERE client_id = %s AND entity = %s AND entity_id = %s LIMIT 1",
+                (owner_client_id, "notes", replacement),
+                connection=conn,
+            ).first
+            if sync_log_collision:
+                raise SchemaError(  # noqa: TRY003
+                    f"WebClipper note rekey target '{replacement}' already has Sync history."
+                )
+
+        for table_name, id_column in (
+            ("sync_envelopes", "entity_id"),
+            ("sync_object_state", "object_id"),
+        ):
+            if not old_ids or table_name not in sync_tables:
+                continue
+            for old_id in old_ids:
+                found = backend.execute(
+                    f"SELECT 1 FROM {table_name} "  # nosec B608
+                    f"WHERE domain = %s AND {id_column} = %s LIMIT 1",
+                    ("notes.note", old_id),
+                    connection=conn,
+                ).first
+                if found:
+                    raise SchemaError(  # noqa: TRY003
+                        f"WebClipper note '{old_id}' has canonical Sync history; explicit migration is required."
+                    )
+            for _, _, replacement in plan:
+                found = backend.execute(
+                    f"SELECT 1 FROM {table_name} "  # nosec B608
+                    f"WHERE domain = %s AND {id_column} = %s LIMIT 1",
+                    ("notes.note", replacement),
+                    connection=conn,
+                ).first
+                if found:
+                    raise SchemaError(  # noqa: TRY003
+                        f"WebClipper note rekey target '{replacement}' already has canonical Sync history."
+                    )
+
+        if old_ids:
+            foreign_keys = backend.execute(
+                """
+                SELECT c.conname,
+                       ns.nspname AS table_schema,
+                       rel.relname AS table_name,
+                       att.attname AS column_name,
+                       c.confupdtype AS on_update
+                  FROM pg_constraint c
+                  JOIN pg_class rel ON rel.oid = c.conrelid
+                  JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+                  JOIN LATERAL unnest(c.conkey) AS key(attnum) ON TRUE
+                  JOIN pg_attribute att
+                    ON att.attrelid = c.conrelid AND att.attnum = key.attnum
+                 WHERE c.contype = 'f' AND c.confrelid = 'notes'::regclass
+                """,
+                connection=conn,
+            ).rows
+            for foreign_key in foreign_keys:
+                if str(foreign_key["on_update"]) == "c":
+                    continue
+                schema_name = str(foreign_key["table_schema"])
+                table_name = str(foreign_key["table_name"])
+                column_name = str(foreign_key["column_name"])
+                qualified_table = (
+                    f"{self._quoted_postgres_identifier(schema_name)}."
+                    f"{self._quoted_postgres_identifier(table_name)}"
+                )
+                quoted_column = self._quoted_postgres_identifier(column_name)
+                for old_id in old_ids:
+                    found = backend.execute(
+                        f"SELECT 1 FROM {qualified_table} WHERE {quoted_column} = %s LIMIT 1",  # nosec B608
+                        (old_id,),
+                        connection=conn,
+                    ).first
+                    if found:
+                        raise SchemaError(  # noqa: TRY003
+                            f"Cannot rekey WebClipper note '{old_id}': live non-cascading reference "
+                            f"from {table_name}.{column_name}."
+                        )
+
+        constraints = backend.execute(
+            """
+            SELECT c.conname,
+                   c.contype,
+                   pg_get_constraintdef(c.oid) AS definition,
+                   ARRAY(
+                     SELECT a.attname
+                       FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ord)
+                       JOIN pg_attribute a
+                         ON a.attrelid = c.conrelid AND a.attnum = key.attnum
+                      ORDER BY key.ord
+                   ) AS columns
+              FROM pg_constraint c
+             WHERE c.conrelid = 'note_clipper_documents'::regclass
+            """,
+            connection=conn,
+        ).rows
+        has_clip_primary_key = any(
+            str(constraint["contype"]) == "p"
+            and [str(column) for column in (constraint.get("columns") or [])] == ["clip_id"]
+            for constraint in constraints
+        )
+        has_unique_note_id = any(
+            str(constraint["contype"]) == "u"
+            and [str(column) for column in (constraint.get("columns") or [])] == ["note_id"]
+            for constraint in constraints
+        )
+        has_cascading_note_fk = any(
+            str(constraint["contype"]) == "f"
+            and [str(column) for column in (constraint.get("columns") or [])] == ["note_id"]
+            and re.search(
+                r"REFERENCES\s+(?:\w+\.)?notes\s*\(",
+                str(constraint.get("definition") or "").replace('"', ""),
+                re.IGNORECASE,
+            )
+            and "ON UPDATE CASCADE" in str(constraint.get("definition") or "").upper()
+            for constraint in constraints
+        )
+        if not (has_clip_primary_key and has_unique_note_id and has_cascading_note_fk):
+            raise SchemaError("WebClipper durable note mapping constraints cannot be verified.")  # noqa: TRY003
+
+        placement_constraints: list[Any] = []
+        if has_placements:
+            placement_constraints = backend.execute(
+                """
+                SELECT c.conname,
+                       c.contype,
+                       pg_get_constraintdef(c.oid) AS definition,
+                       ARRAY(
+                         SELECT a.attname
+                           FROM unnest(c.conkey) WITH ORDINALITY AS key(attnum, ord)
+                           JOIN pg_attribute a
+                             ON a.attrelid = c.conrelid AND a.attnum = key.attnum
+                          ORDER BY key.ord
+                       ) AS columns
+                  FROM pg_constraint c
+                 WHERE c.conrelid = 'note_clipper_workspace_placements'::regclass
+                """,
+                connection=conn,
+            ).rows
+            has_placement_primary_key = any(
+                str(constraint["contype"]) == "p"
+                and [str(column) for column in (constraint.get("columns") or [])]
+                == ["clip_id", "workspace_id"]
+                for constraint in placement_constraints
+            )
+            has_document_fk = any(
+                str(constraint["contype"]) == "f"
+                and [str(column) for column in (constraint.get("columns") or [])] == ["clip_id"]
+                and "REFERENCES note_clipper_documents" in str(
+                    constraint.get("definition") or ""
+                ).replace('"', "")
+                for constraint in placement_constraints
+            )
+            if not (has_placement_primary_key and has_document_fk):
+                raise SchemaError("WebClipper placement constraints cannot be verified.")  # noqa: TRY003
+
+        for constraint in placement_constraints:
+            constraint_type = str(constraint["contype"])
+            columns = [str(column) for column in (constraint.get("columns") or [])]
+            definition = str(constraint.get("definition") or "").replace('"', "")
+            if not (
+                (constraint_type == "p" and columns == ["clip_id", "workspace_id"])
+                or (
+                    constraint_type == "f"
+                    and columns == ["clip_id"]
+                    and "REFERENCES note_clipper_documents" in definition
+                )
+            ):
+                continue
+            backend.execute(
+                "ALTER TABLE note_clipper_workspace_placements DROP CONSTRAINT "
+                f"{self._quoted_postgres_identifier(str(constraint['conname']))}",  # nosec B608
+                connection=conn,
+            )
+
+        for constraint in constraints:
+            constraint_name = str(constraint["conname"])
+            constraint_type = str(constraint["contype"])
+            definition = str(constraint.get("definition") or "")
+            columns = [str(column) for column in (constraint.get("columns") or [])]
+            normalized_definition = definition.replace('"', "")
+            is_clip_fk = constraint_type == "f" and columns == ["clip_id"]
+            is_legacy_clip_fk = is_clip_fk and bool(
+                re.search(r"REFERENCES\s+(?:\w+\.)?notes\s*\(", normalized_definition, re.IGNORECASE)
+            )
+            if is_clip_fk and not is_legacy_clip_fk:
+                raise SchemaError("WebClipper clip_id has an unverifiable PostgreSQL reference.")  # noqa: TRY003
+            is_legacy_identity_check = constraint_type == "c" and bool(
+                re.search(
+                    r"(?:clip_id\s*=\s*note_id|note_id\s*=\s*clip_id)",
+                    normalized_definition,
+                )
+            )
+            if (
+                constraint_type == "c"
+                and "clip_id" in normalized_definition
+                and "note_id" in normalized_definition
+                and not is_legacy_identity_check
+            ):
+                raise SchemaError("WebClipper identity check constraint cannot be verified.")  # noqa: TRY003
+            should_drop = (
+                is_legacy_clip_fk
+                or is_legacy_identity_check
+                or (constraint_type == "p" and columns == ["clip_id"])
+                or (constraint_type == "u" and columns == ["note_id"])
+            )
+            if should_drop:
+                backend.execute(
+                    "ALTER TABLE note_clipper_documents DROP CONSTRAINT "
+                    f"{self._quoted_postgres_identifier(constraint_name)}",  # nosec B608
+                    connection=conn,
+                )
+
+        backend.execute(
+            """
+            UPDATE note_clipper_documents document
+               SET client_id = note.client_id
+              FROM notes note
+             WHERE note.id = document.note_id
+            """,
+            connection=conn,
+        )
+        backend.execute(
+            "ALTER TABLE note_clipper_documents ALTER COLUMN client_id SET NOT NULL",
+            connection=conn,
+        )
+        backend.execute(
+            "ALTER TABLE note_clipper_documents ADD CONSTRAINT "
+            "note_clipper_documents_pkey PRIMARY KEY (client_id, clip_id)",
+            connection=conn,
+        )
+        backend.execute(
+            "ALTER TABLE note_clipper_documents ADD CONSTRAINT "
+            "note_clipper_documents_client_note_key UNIQUE (client_id, note_id)",
+            connection=conn,
+        )
+
+        if has_placements:
+            backend.execute(
+                """
+                UPDATE note_clipper_workspace_placements placement
+                   SET client_id = document.client_id
+                  FROM note_clipper_documents document
+                 WHERE document.clip_id = placement.clip_id
+                """,
+                connection=conn,
+            )
+            backend.execute(
+                "ALTER TABLE note_clipper_workspace_placements "
+                "ALTER COLUMN client_id SET NOT NULL",
+                connection=conn,
+            )
+            backend.execute(
+                "ALTER TABLE note_clipper_workspace_placements ADD CONSTRAINT "
+                "note_clipper_workspace_placements_pkey "
+                "PRIMARY KEY (client_id, clip_id, workspace_id)",
+                connection=conn,
+            )
+            backend.execute(
+                "ALTER TABLE note_clipper_workspace_placements ADD CONSTRAINT "
+                "note_clipper_workspace_placements_document_fkey "
+                "FOREIGN KEY (client_id, clip_id) "
+                "REFERENCES note_clipper_documents(client_id, clip_id) "
+                "ON DELETE CASCADE ON UPDATE CASCADE",
+                connection=conn,
+            )
+
+        for index_name in (
+            "idx_note_clipper_documents_note_id",
+            "idx_note_clipper_workspace_placements_workspace",
+            "idx_note_clipper_workspace_placements_source_note",
+        ):
+            backend.execute(
+                f"DROP INDEX IF EXISTS {self._quoted_postgres_identifier(index_name)}",  # nosec B608
+                connection=conn,
+            )
+
+        for clip_id, old_id, replacement in plan:
+            owner_client_id = owner_by_clip_id[clip_id]
+            invalid_payloads = backend.execute(
+                "SELECT COUNT(*) FROM sync_log "
+                "WHERE client_id = %s AND entity = %s AND entity_id = %s "
+                "AND (jsonb_typeof(payload::jsonb) IS DISTINCT FROM 'object' "
+                "OR jsonb_typeof(payload::jsonb -> 'id') IS DISTINCT FROM 'string' "
+                "OR (payload::jsonb ->> 'id') IS DISTINCT FROM %s)",
+                (owner_client_id, "notes", old_id, old_id),
+                connection=conn,
+            ).scalar
+            if int(invalid_payloads or 0):
+                raise SchemaError("WebClipper legacy sync_log payload cannot be verified.")  # noqa: TRY003
+            backend.execute(
+                "UPDATE notes SET id = %s WHERE client_id = %s AND id = %s",
+                (replacement, owner_client_id, old_id),
+                connection=conn,
+            )
+            backend.execute(
+                "UPDATE sync_log SET entity_id = %s, "
+                "payload = jsonb_set(payload::jsonb, '{id}', to_jsonb(%s::text), true)::text "
+                "WHERE client_id = %s AND entity = %s AND entity_id = %s",
+                (replacement, replacement, owner_client_id, "notes", old_id),
+                connection=conn,
+            )
+            invalid_rewrites = backend.execute(
+                "SELECT COUNT(*) FROM sync_log "
+                "WHERE client_id = %s AND entity = %s AND entity_id = %s "
+                "AND (jsonb_typeof(payload::jsonb) IS DISTINCT FROM 'object' "
+                "OR jsonb_typeof(payload::jsonb -> 'id') IS DISTINCT FROM 'string' "
+                "OR (payload::jsonb ->> 'id') IS DISTINCT FROM %s)",
+                (owner_client_id, "notes", replacement, replacement),
+                connection=conn,
+            ).scalar
+            if int(invalid_rewrites or 0):
+                raise SchemaError("WebClipper sync_log payload rewrite verification failed.")  # noqa: TRY003
+            mapping = backend.execute(
+                "SELECT note_id FROM note_clipper_documents "
+                "WHERE client_id = %s AND clip_id = %s",
+                (owner_client_id, clip_id),
+                connection=conn,
+            ).first
+            if mapping is None or str(mapping["note_id"]) != replacement:
+                raise SchemaError("WebClipper v56 mapping verification failed.")  # noqa: TRY003
+
+        if has_placements:
+            mismatched = backend.execute(
+                """
+                SELECT COUNT(*)
+                  FROM note_clipper_workspace_placements placement
+                  JOIN note_clipper_documents document
+                    ON document.client_id = placement.client_id
+                   AND document.clip_id = placement.clip_id
+                 WHERE placement.source_note_id <> document.note_id
+                """,
+                connection=conn,
+            ).scalar
+            if int(mismatched or 0):
+                raise SchemaError("WebClipper v56 placement verification failed.")  # noqa: TRY003
+
+        if rls_forced:
+            backend.execute(
+                "ALTER TABLE notes FORCE ROW LEVEL SECURITY",
+                connection=conn,
+            )
+        self._ensure_web_clipper_schema_postgres(conn)
+        if has_placements:
+            backend.execute(
+                "ALTER TABLE note_clipper_workspace_placements VALIDATE CONSTRAINT "
+                "note_clipper_workspace_placements_document_fkey",
+                connection=conn,
+            )
+        self._set_schema_version_postgres(conn, 56)
+
+    def _migrate_from_v56_to_v57(self, conn: sqlite3.Connection) -> None:
+        """Advance per-user SQLite without applying shared PostgreSQL tenancy rules."""
+        try:
+            conn.execute(
+                "UPDATE db_schema_version SET version = 57 "
+                "WHERE schema_name = ? AND version < 57",
+                (self._SCHEMA_NAME,),
+            )
+            final_version = self._get_db_version(conn)
+            if final_version != 57:
+                raise SchemaError(  # noqa: TRY003
+                    f"[{self._SCHEMA_NAME}] Migration V56->V57 failed version check. "
+                    f"Expected 57, got: {final_version}"
+                )
+        except sqlite3.Error as exc:
+            raise SchemaError(
+                f"Migration V56->V57 failed for '{self._SCHEMA_NAME}': {exc}"
+            ) from exc  # noqa: TRY003
+
+    def _migrate_from_v56_to_v57_postgres(self, conn: Any) -> None:
+        """Owner-scope shared Notes organization uniqueness without guessing owners."""
+        backend = self.backend
+        locked_tables = (
+            "chacha_keywords",
+            "collection_keywords",
+            "conversation_keywords",
+            "conversations",
+            "keyword_collections",
+            "note_folder_memberships",
+            "note_folder_source_memberships",
+            "note_folder_sync_suppressions",
+            "note_folders",
+            "note_keywords",
+            "notes",
+        )
+        backend.execute(
+            """
+            LOCK TABLE
+              chacha_keywords,
+              collection_keywords,
+              conversation_keywords,
+              conversations,
+              keyword_collections,
+              note_folder_memberships,
+              note_folder_source_memberships,
+              note_folder_sync_suppressions,
+              note_folders,
+              note_keywords,
+              notes
+            IN SHARE ROW EXCLUSIVE MODE
+            """,
+            connection=conn,
+        )
+        rls_states = backend.execute(
+            """
+            SELECT table_row.relname AS table_name,
+                   table_row.relrowsecurity,
+                   table_row.relforcerowsecurity,
+                   table_row.relowner = current_user::regrole AS is_schema_owner
+              FROM pg_class AS table_row
+              JOIN pg_namespace AS namespace_row
+                ON namespace_row.oid = table_row.relnamespace
+             WHERE namespace_row.nspname = current_schema()
+               AND table_row.relkind IN ('r', 'p')
+               AND table_row.relname IN (
+                 'chacha_keywords',
+                 'collection_keywords',
+                 'conversation_keywords',
+                 'conversations',
+                 'keyword_collections',
+                 'note_folder_memberships',
+                 'note_folder_source_memberships',
+                 'note_folder_sync_suppressions',
+                 'note_folders',
+                 'note_keywords',
+                 'notes'
+               )
+            """,
+            connection=conn,
+        ).rows
+        state_by_table = {
+            str(row["table_name"]): row
+            for row in rls_states
+        }
+        if set(state_by_table) != set(locked_tables) or any(
+            not bool(state_by_table[table_name].get("is_schema_owner"))
+            for table_name in locked_tables
+        ):
+            raise SchemaError(  # noqa: TRY003
+                "Notes organization v57 requires the verified PostgreSQL "
+                "schema-owner migration path for every locked table."
+            )
+        forced_rls_tables: list[str] = []
+        for table_name in locked_tables:
+            state = state_by_table[table_name]
+            rls_enabled = bool(state.get("relrowsecurity"))
+            rls_forced = bool(state.get("relforcerowsecurity"))
+            if rls_forced and not rls_enabled:
+                raise SchemaError(  # noqa: TRY003
+                    f"PostgreSQL RLS state cannot be verified for {table_name}."
+                )
+            if not rls_forced:
+                continue
+            backend.execute(
+                f"ALTER TABLE {self._quoted_postgres_identifier(table_name)} "  # nosec B608
+                "NO FORCE ROW LEVEL SECURITY",
+                connection=conn,
+            )
+            forced_rls_tables.append(table_name)
+
+        resource_tables = (
+            "chacha_keywords",
+            "keyword_collections",
+            "note_folders",
+        )
+        for table_name in resource_tables:
+            invalid_owners = backend.execute(
+                f"""
+                SELECT COUNT(*)
+                  FROM {table_name}
+                 WHERE client_id IS NULL
+                    OR BTRIM(client_id) = ''
+                    OR client_id <> BTRIM(client_id)
+                    OR BTRIM(client_id) !~ '^[1-9][0-9]*$'
+                """,  # nosec B608 -- table names are fixed migration constants.
+                connection=conn,
+            ).scalar
+            if int(invalid_owners or 0):
+                raise SchemaError(  # noqa: TRY003
+                    f"Cannot migrate {table_name}: {int(invalid_owners)} row(s) lack "
+                    "a canonical authenticated owner. Refusing to infer ownership."
+                )
+
+        collision_checks = (
+            ("chacha_keywords", "sync_id", None),
+            ("chacha_keywords", "LOWER(keyword)", None),
+            ("keyword_collections", "sync_id", None),
+            ("keyword_collections", "LOWER(name)", None),
+            ("note_folders", "sync_id", None),
+            ("note_folders", "LOWER(path)", "deleted = FALSE"),
+        )
+        for table_name, key_expression, predicate in collision_checks:
+            where_clause = f" WHERE {predicate}" if predicate else ""
+            collisions = backend.execute(
+                f"""
+                SELECT COUNT(*)
+                  FROM (
+                    SELECT client_id, {key_expression}
+                      FROM {table_name}{where_clause}
+                     GROUP BY client_id, {key_expression}
+                    HAVING COUNT(*) > 1
+                  ) duplicate_owner_keys
+                """,  # nosec B608 -- all SQL fragments are fixed migration constants.
+                connection=conn,
+            ).scalar
+            if int(collisions or 0):
+                raise SchemaError(  # noqa: TRY003
+                    f"Cannot migrate {table_name} owner-scoped uniqueness: "
+                    f"{int(collisions)} colliding owner/key group(s)."
+                )
+
+        ownership_checks = (
+            (
+                "keyword collection hierarchy",
+                """
+                SELECT COUNT(*)
+                  FROM keyword_collections AS child
+                  JOIN keyword_collections AS parent ON parent.id = child.parent_id
+                 WHERE child.client_id IS DISTINCT FROM parent.client_id
+                """,
+            ),
+            (
+                "folder hierarchy",
+                """
+                SELECT COUNT(*)
+                  FROM note_folders AS child
+                  JOIN note_folders AS parent ON parent.id = child.parent_id
+                 WHERE child.client_id IS DISTINCT FROM parent.client_id
+                """,
+            ),
+            (
+                "note keyword link",
+                """
+                SELECT COUNT(*)
+                  FROM note_keywords AS link
+                  JOIN notes AS note ON note.id = link.note_id
+                  JOIN chacha_keywords AS keyword ON keyword.id = link.keyword_id
+                 WHERE note.client_id IS DISTINCT FROM keyword.client_id
+                """,
+            ),
+            (
+                "conversation keyword link",
+                """
+                SELECT COUNT(*)
+                  FROM conversation_keywords AS link
+                  JOIN conversations AS conversation ON conversation.id = link.conversation_id
+                  JOIN chacha_keywords AS keyword ON keyword.id = link.keyword_id
+                 WHERE conversation.client_id IS DISTINCT FROM keyword.client_id
+                """,
+            ),
+            (
+                "collection keyword link",
+                """
+                SELECT COUNT(*)
+                  FROM collection_keywords AS link
+                  JOIN keyword_collections AS collection ON collection.id = link.collection_id
+                  JOIN chacha_keywords AS keyword ON keyword.id = link.keyword_id
+                 WHERE collection.client_id IS DISTINCT FROM keyword.client_id
+                """,
+            ),
+            (
+                "note folder membership",
+                """
+                SELECT COUNT(*)
+                  FROM note_folder_memberships AS link
+                  JOIN notes AS note ON note.id = link.note_id
+                  JOIN note_folders AS folder ON folder.id = link.folder_id
+                 WHERE note.client_id IS DISTINCT FROM folder.client_id
+                """,
+            ),
+            (
+                "note folder source membership",
+                """
+                SELECT COUNT(*)
+                  FROM note_folder_source_memberships AS link
+                  JOIN notes AS note ON note.id = link.note_id
+                  JOIN note_folders AS folder ON folder.id = link.folder_id
+                 WHERE note.client_id IS DISTINCT FROM folder.client_id
+                """,
+            ),
+            (
+                "note folder suppression",
+                """
+                SELECT COUNT(*)
+                  FROM note_folder_sync_suppressions AS link
+                  JOIN notes AS note ON note.id = link.note_id
+                  JOIN note_folders AS folder ON folder.id = link.folder_id
+                 WHERE note.client_id IS DISTINCT FROM folder.client_id
+                """,
+            ),
+        )
+        for relationship_name, statement in ownership_checks:
+            cross_owner_rows = backend.execute(statement, connection=conn).scalar
+            if int(cross_owner_rows or 0):
+                raise SchemaError(  # noqa: TRY003
+                    f"Cannot migrate {relationship_name}: {int(cross_owner_rows)} "
+                    "cross-owner relation(s) require authoritative repair."
+                )
+
+        constraints = backend.execute(
+            """
+            SELECT rel.relname AS table_name,
+                   constraint_row.conname,
+                   ARRAY(
+                     SELECT attribute_row.attname
+                       FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key(attnum, ord)
+                       JOIN pg_attribute attribute_row
+                         ON attribute_row.attrelid = constraint_row.conrelid
+                        AND attribute_row.attnum = key.attnum
+                      ORDER BY key.ord
+                   ) AS columns
+              FROM pg_constraint constraint_row
+              JOIN pg_class rel ON rel.oid = constraint_row.conrelid
+              JOIN pg_namespace namespace_row ON namespace_row.oid = rel.relnamespace
+             WHERE constraint_row.contype = 'u'
+               AND namespace_row.nspname = current_schema()
+               AND rel.relname IN ('chacha_keywords', 'keyword_collections', 'note_folders')
+            """,
+            connection=conn,
+        ).rows
+        natural_key_columns = {
+            "chacha_keywords": ["keyword"],
+            "keyword_collections": ["name"],
+            "note_folders": ["path"],
+        }
+        for constraint in constraints:
+            table_name = str(constraint["table_name"])
+            columns = [str(column) for column in (constraint.get("columns") or [])]
+            if columns != natural_key_columns.get(table_name):
+                continue
+            quoted_table = self._quoted_postgres_identifier(table_name)
+            quoted_constraint = self._quoted_postgres_identifier(str(constraint["conname"]))
+            backend.execute(
+                f"ALTER TABLE {quoted_table} DROP CONSTRAINT IF EXISTS {quoted_constraint}",  # nosec B608
+                connection=conn,
+            )
+
+        for index_name in (
+            "idx_keywords_sync_id_unique",
+            "idx_keyword_collections_sync_id_unique",
+            "idx_note_folders_sync_id_unique",
+            "idx_note_folders_path_lower",
+        ):
+            backend.execute(
+                f"DROP INDEX IF EXISTS {self._quoted_postgres_identifier(index_name)}",  # nosec B608
+                connection=conn,
+            )
+
+        owner_indexes = (
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_keywords_sync_id_unique "
+            "ON chacha_keywords(client_id, sync_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_keywords_keyword_lower_unique "
+            "ON chacha_keywords(client_id, LOWER(keyword))",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_keyword_collections_sync_id_unique "
+            "ON keyword_collections(client_id, sync_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_keyword_collections_name_lower_unique "
+            "ON keyword_collections(client_id, LOWER(name))",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_sync_id_unique "
+            "ON note_folders(client_id, sync_id)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_path_lower "
+            "ON note_folders(client_id, LOWER(path)) WHERE deleted = FALSE",
+        )
+        for statement in owner_indexes:
+            backend.execute(statement, connection=conn)
+
+        for table_name in forced_rls_tables:
+            backend.execute(
+                f"ALTER TABLE {self._quoted_postgres_identifier(table_name)} "  # nosec B608
+                "FORCE ROW LEVEL SECURITY",
+                connection=conn,
+            )
+        self._set_schema_version_postgres(conn, 57)
+
+    @staticmethod
+    def _notes_link_v58_transform_row(
+        row: Mapping[str, Any],
+        *,
+        source_owner: object,
+        target_owner: object,
+    ) -> dict[str, Any]:
+        """Validate one legacy edge and return its canonical v58 values."""
+
+        try:
+            edge_id = validate_notes_link_object_id(str(row["edge_id"]))
+            source_note_id = validate_notes_link_object_id(str(row["from_note_id"]))
+            target_note_id = validate_notes_link_object_id(str(row["to_note_id"]))
+        except (KeyError, NotesLinkValidationError) as exc:
+            raise SchemaError(f"Notes link v58 requires canonical UUIDv4 identity: {exc}") from exc  # noqa: TRY003
+
+        owner = str(row.get("user_id") or "")
+        if not owner:
+            raise SchemaError("Notes link v58 requires a non-empty owner.")  # noqa: TRY003
+        if source_owner is None or target_owner is None:
+            raise SchemaError("Notes link v58 requires both note endpoints to exist.")  # noqa: TRY003
+        if str(source_owner) != owner or str(target_owner) != owner:
+            raise SchemaError("Notes link v58 requires both endpoints to have the same owner.")  # noqa: TRY003
+        if source_note_id == target_note_id:
+            raise SchemaError("Notes link v58 endpoints must differ.")  # noqa: TRY003
+        if row.get("type") != "manual":
+            raise SchemaError("Notes link v58 supports only manual explicit links.")  # noqa: TRY003
+
+        directed_value = row.get("directed")
+        if isinstance(directed_value, bool):
+            directed = directed_value
+        elif isinstance(directed_value, int) and directed_value in (0, 1):
+            directed = bool(directed_value)
+        else:
+            raise SchemaError("Notes link v58 directed must be a strict boolean.")  # noqa: TRY003
+        if not directed and source_note_id > target_note_id:
+            raise SchemaError("Notes link v58 undirected endpoints must use canonical order.")  # noqa: TRY003
+
+        weight_value = 1.0 if row.get("weight") is None else row.get("weight")
+        if isinstance(weight_value, bool):
+            raise SchemaError("Notes link v58 weight is invalid.")  # noqa: TRY003
+        try:
+            weight = float(weight_value)
+        except (TypeError, ValueError) as exc:
+            raise SchemaError("Notes link v58 weight is invalid.") from exc  # noqa: TRY003
+        if not math.isfinite(weight) or not 0 <= weight <= NOTES_LINK_WEIGHT_MAX:
+            raise SchemaError("Notes link v58 weight is outside the supported range.")  # noqa: TRY003
+
+        raw_metadata = row.get("metadata")
+        if raw_metadata is None:
+            properties: object = {}
+        elif isinstance(raw_metadata, str):
+            try:
+                properties = json.loads(raw_metadata)
+            except json.JSONDecodeError as exc:
+                raise SchemaError("Notes link v58 metadata must be valid JSON.") from exc  # noqa: TRY003
+        elif isinstance(raw_metadata, Mapping):
+            properties = dict(raw_metadata)
+        else:
+            raise SchemaError("Notes link v58 metadata must be a JSON object.")  # noqa: TRY003
+        if not isinstance(properties, dict):
+            raise SchemaError("Notes link v58 metadata must be a JSON object.")  # noqa: TRY003
+
+        raw_label = properties.get("label")
+        if raw_label is not None and not isinstance(raw_label, str):
+            raise SchemaError("Notes link v58 metadata.label must be a string or null.")  # noqa: TRY003
+        label = raw_label
+        if label is not None:
+            if len(label) > NOTES_LINK_LABEL_MAX_CHARS:
+                raise SchemaError("Notes link v58 label exceeds the supported bound.")  # noqa: TRY003
+            properties = dict(properties)
+            properties.pop("label")
+        try:
+            canonical_properties = validate_notes_link_properties(properties)
+        except NotesLinkValidationError as exc:
+            raise SchemaError(f"Notes link v58 properties are invalid: {exc}") from exc  # noqa: TRY003
+
+        created_at = row.get("created_at")
+        created_by = str(row.get("created_by") or "")
+        if created_at is None or not created_by:
+            raise SchemaError("Notes link v58 requires stable creation provenance.")  # noqa: TRY003
+        return {
+            "edge_id": edge_id,
+            "user_id": owner,
+            "from_note_id": source_note_id,
+            "to_note_id": target_note_id,
+            "type": "manual",
+            "directed": directed,
+            "weight": weight,
+            "label": label,
+            "properties": canonical_properties,
+            "created_at": created_at,
+            "last_modified": created_at,
+            "created_by": created_by,
+            "version": 1,
+            "deleted": False,
+            "deleted_at": None,
+        }
+
+    @staticmethod
+    def _validate_notes_link_v58_unique(rows: list[Mapping[str, Any]]) -> None:
+        """Fail closed when legacy rows collide under canonical logical identity."""
+
+        identities: set[tuple[str, str, bool, str, str]] = set()
+        edge_ids: set[str] = set()
+        for row in rows:
+            edge_id = str(row["edge_id"])
+            identity = (
+                str(row["user_id"]),
+                str(row["type"]),
+                bool(row["directed"]),
+                str(row["from_note_id"]),
+                str(row["to_note_id"]),
+            )
+            if edge_id in edge_ids or identity in identities:
+                raise SchemaError("Notes link v58 found a duplicate logical edge.")  # noqa: TRY003
+            edge_ids.add(edge_id)
+            identities.add(identity)
+
+    @staticmethod
+    def _notes_graph_schema_sqlite(conn: sqlite3.Connection) -> None:
+        """Create local derived graph state and conservative invalidation triggers."""
+
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS note_wikilink_edges(
+              source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              target_note_id TEXT NOT NULL,
+              source_version INTEGER NOT NULL CHECK(source_version >= 1),
+              parser_version INTEGER NOT NULL CHECK(parser_version >= 1),
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(source_note_id, target_note_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_note_wikilink_edges_target
+              ON note_wikilink_edges(target_note_id, source_note_id);
+
+            CREATE TABLE IF NOT EXISTS note_graph_note_state(
+              note_id TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              source_version INTEGER NOT NULL CHECK(source_version >= 1),
+              parser_version INTEGER NOT NULL CHECK(parser_version >= 1),
+              truncated INTEGER NOT NULL DEFAULT 0 CHECK(truncated IN (0, 1)),
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS note_graph_dirty(
+              note_id TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              generation INTEGER NOT NULL DEFAULT 1 CHECK(generation >= 1),
+              last_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS note_graph_projection_state(
+              singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+              parser_version INTEGER NOT NULL DEFAULT 1 CHECK(parser_version >= 1),
+              rebuild_state TEXT NOT NULL DEFAULT 'ready'
+                CHECK(rebuild_state IN ('ready', 'pending', 'running', 'failed')),
+              rebuild_cursor TEXT,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT OR IGNORE INTO note_graph_projection_state(singleton_id) VALUES (1);
+            CREATE TABLE IF NOT EXISTS note_graph_revisions(
+              singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+              revision INTEGER NOT NULL DEFAULT 0 CHECK(revision >= 0),
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT OR IGNORE INTO note_graph_revisions(singleton_id) VALUES (1);
+
+            DROP TRIGGER IF EXISTS notes_graph_notes_ai;
+            DROP TRIGGER IF EXISTS notes_graph_notes_au;
+            DROP TRIGGER IF EXISTS notes_graph_notes_ad;
+            DROP TRIGGER IF EXISTS notes_graph_edges_ai;
+            DROP TRIGGER IF EXISTS notes_graph_edges_au;
+            DROP TRIGGER IF EXISTS notes_graph_edges_ad;
+            DROP TRIGGER IF EXISTS notes_graph_keywords_ai;
+            DROP TRIGGER IF EXISTS notes_graph_keywords_au;
+            DROP TRIGGER IF EXISTS notes_graph_keywords_ad;
+            DROP TRIGGER IF EXISTS notes_graph_note_keywords_ai;
+            DROP TRIGGER IF EXISTS notes_graph_note_keywords_au;
+            DROP TRIGGER IF EXISTS notes_graph_note_keywords_ad;
+            DROP TRIGGER IF EXISTS notes_graph_conversations_ai;
+            DROP TRIGGER IF EXISTS notes_graph_conversations_au;
+            DROP TRIGGER IF EXISTS notes_graph_conversations_ad;
+
+            CREATE TRIGGER notes_graph_notes_ai AFTER INSERT ON notes BEGIN
+              INSERT INTO note_graph_dirty(note_id, generation, last_modified)
+              VALUES (new.id, 1, CURRENT_TIMESTAMP)
+              ON CONFLICT(note_id) DO UPDATE SET
+                generation = generation + 1, last_modified = CURRENT_TIMESTAMP;
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_notes_au
+            AFTER UPDATE OF title, content, conversation_id, created_at, last_modified, deleted ON notes BEGIN
+              INSERT INTO note_graph_dirty(note_id, generation, last_modified)
+              VALUES (new.id, 1, CURRENT_TIMESTAMP)
+              ON CONFLICT(note_id) DO UPDATE SET
+                generation = generation + 1, last_modified = CURRENT_TIMESTAMP;
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_notes_ad AFTER DELETE ON notes BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+
+            CREATE TRIGGER notes_graph_edges_ai AFTER INSERT ON note_edges BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_edges_au AFTER UPDATE ON note_edges BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_edges_ad AFTER DELETE ON note_edges BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+
+            CREATE TRIGGER notes_graph_keywords_ai AFTER INSERT ON keywords BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_keywords_au AFTER UPDATE OF keyword, deleted ON keywords BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_keywords_ad AFTER DELETE ON keywords BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+
+            CREATE TRIGGER notes_graph_note_keywords_ai AFTER INSERT ON note_keywords BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_note_keywords_au AFTER UPDATE ON note_keywords BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_note_keywords_ad AFTER DELETE ON note_keywords BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+
+            CREATE TRIGGER notes_graph_conversations_ai AFTER INSERT ON conversations BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_conversations_au
+            AFTER UPDATE OF source, external_ref, deleted ON conversations BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            CREATE TRIGGER notes_graph_conversations_ad AFTER DELETE ON conversations BEGIN
+              UPDATE note_graph_revisions SET revision = revision + 1,
+                updated_at = CURRENT_TIMESTAMP WHERE singleton_id = 1;
+            END;
+            """
+        )
+
+    def _migrate_from_v57_to_v58(self, conn: sqlite3.Connection) -> None:
+        """Canonicalize explicit Notes links and install local graph state."""
+
+        if self._get_db_version(conn) >= 58:
+            return
+        conn.executescript(
+            """
+            DROP TRIGGER IF EXISTS notes_graph_notes_ai;
+            DROP TRIGGER IF EXISTS notes_graph_notes_au;
+            DROP TRIGGER IF EXISTS notes_graph_notes_ad;
+            DROP TRIGGER IF EXISTS notes_graph_edges_ai;
+            DROP TRIGGER IF EXISTS notes_graph_edges_au;
+            DROP TRIGGER IF EXISTS notes_graph_edges_ad;
+            DROP TRIGGER IF EXISTS notes_graph_keywords_ai;
+            DROP TRIGGER IF EXISTS notes_graph_keywords_au;
+            DROP TRIGGER IF EXISTS notes_graph_keywords_ad;
+            DROP TRIGGER IF EXISTS notes_graph_note_keywords_ai;
+            DROP TRIGGER IF EXISTS notes_graph_note_keywords_au;
+            DROP TRIGGER IF EXISTS notes_graph_note_keywords_ad;
+            DROP TRIGGER IF EXISTS notes_graph_conversations_ai;
+            DROP TRIGGER IF EXISTS notes_graph_conversations_au;
+            DROP TRIGGER IF EXISTS notes_graph_conversations_ad;
+            """
+        )
+        raw_rows = [dict(row) for row in conn.execute("SELECT * FROM note_edges").fetchall()]
+        canonical_rows: list[dict[str, Any]] = []
+        for raw_row in raw_rows:
+            owners = conn.execute(
+                "SELECT source.client_id AS source_owner, target.client_id AS target_owner "
+                "FROM notes AS source JOIN notes AS target ON target.id = ? "
+                "WHERE source.id = ?",
+                (raw_row.get("to_note_id"), raw_row.get("from_note_id")),
+            ).fetchone()
+            canonical_rows.append(
+                self._notes_link_v58_transform_row(
+                    raw_row,
+                    source_owner=owners["source_owner"] if owners else None,
+                    target_owner=owners["target_owner"] if owners else None,
+                )
+            )
+        self._validate_notes_link_v58_unique(canonical_rows)
+
+        conn.execute("ALTER TABLE note_edges RENAME TO note_edges_v57")
+        conn.execute(
+            """
+            CREATE TABLE note_edges(
+              edge_id TEXT PRIMARY KEY,
+              user_id TEXT NOT NULL,
+              from_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              to_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              type TEXT NOT NULL CHECK(type = 'manual'),
+              directed INTEGER NOT NULL CHECK(directed IN (0, 1)),
+              weight REAL NOT NULL CHECK(weight >= 0 AND weight <= 1000000),
+              label TEXT CHECK(label IS NULL OR length(label) <= 256),
+              properties TEXT NOT NULL DEFAULT '{}'
+                CHECK(json_valid(properties) AND json_type(properties) = 'object'),
+              created_at TEXT NOT NULL,
+              last_modified TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              created_by TEXT NOT NULL CHECK(length(created_by) > 0),
+              version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+              deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0, 1)),
+              deleted_at TEXT,
+              metadata TEXT,
+              CHECK(from_note_id <> to_note_id),
+              UNIQUE(user_id, type, directed, from_note_id, to_note_id)
+            )
+            """
+        )
+        insert_sql = (
+            "INSERT INTO note_edges(edge_id, user_id, from_note_id, to_note_id, type, directed, "
+            "weight, label, properties, created_at, last_modified, created_by, version, deleted, "
+            "deleted_at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        for row in canonical_rows:
+            properties_json = json.dumps(
+                row["properties"],
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            conn.execute(
+                insert_sql,
+                (
+                    row["edge_id"], row["user_id"], row["from_note_id"], row["to_note_id"],
+                    row["type"], int(row["directed"]), row["weight"], row["label"],
+                    properties_json, row["created_at"], row["last_modified"], row["created_by"],
+                    row["version"], int(row["deleted"]), row["deleted_at"], properties_json,
+                ),
+            )
+        conn.execute("DROP TABLE note_edges_v57")
+        conn.executescript(
+            """
+            CREATE INDEX idx_note_edges_owner_live
+              ON note_edges(user_id, deleted, type, edge_id);
+            CREATE INDEX idx_note_edges_from_live
+              ON note_edges(user_id, from_note_id, edge_id) WHERE deleted = 0;
+            CREATE INDEX idx_note_edges_to_live
+              ON note_edges(user_id, to_note_id, edge_id) WHERE deleted = 0;
+            """
+        )
+        self._notes_graph_schema_sqlite(conn)
+        conn.execute(
+            "INSERT INTO note_graph_dirty(note_id, generation, last_modified) "
+            "SELECT id, 1, CURRENT_TIMESTAMP FROM notes WHERE TRUE "
+            "ON CONFLICT(note_id) DO UPDATE SET generation = generation + 1, "
+            "last_modified = CURRENT_TIMESTAMP"
+        )
+        conn.execute(
+            "UPDATE note_graph_projection_state SET parser_version = 1, "
+            "rebuild_state = 'pending', rebuild_cursor = NULL, updated_at = CURRENT_TIMESTAMP "
+            "WHERE singleton_id = 1 AND EXISTS (SELECT 1 FROM notes)"
+        )
+        conn.execute(
+            "UPDATE db_schema_version SET version = 58 WHERE schema_name = ? AND version = 57",
+            (self._SCHEMA_NAME,),
+        )
+        if self._get_db_version(conn) != 58:
+            raise SchemaError("Notes link v58 migration failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v57_to_v58_postgres(self, conn: Any) -> None:
+        """Migrate shared PostgreSQL Notes links under verified schema authority."""
+
+        backend = self.backend
+        locked_tables = (
+            "notes",
+            "note_edges",
+            "chacha_keywords",
+            "note_keywords",
+            "conversations",
+        )
+        backend.execute(
+            "LOCK TABLE notes, note_edges, chacha_keywords, note_keywords, conversations "
+            "IN ACCESS EXCLUSIVE MODE",
+            connection=conn,
+        )
+        states = backend.execute(
+            """
+            SELECT table_row.relname AS table_name,
+                   table_row.relrowsecurity,
+                   table_row.relforcerowsecurity,
+                   table_row.relowner = current_user::regrole AS is_schema_owner
+              FROM pg_class AS table_row
+              JOIN pg_namespace AS namespace_row ON namespace_row.oid = table_row.relnamespace
+             WHERE namespace_row.nspname = current_schema()
+               AND table_row.relkind IN ('r', 'p')
+               AND table_row.relname IN (
+                 'notes', 'note_edges', 'chacha_keywords', 'note_keywords', 'conversations'
+               )
+            """,
+            connection=conn,
+        ).rows
+        state_by_table = {str(row["table_name"]): row for row in states}
+        if set(state_by_table) != set(locked_tables) or any(
+            not bool(state_by_table[table]["is_schema_owner"]) for table in locked_tables
+        ):
+            raise SchemaError(  # noqa: TRY003
+                "Notes link v58 requires the verified PostgreSQL schema-owner migration path."
+            )
+        notes_state = state_by_table["notes"]
+        notes_forced = bool(notes_state["relforcerowsecurity"])
+        if notes_forced and not bool(notes_state["relrowsecurity"]):
+            raise SchemaError("Notes link v58 cannot verify the notes RLS state.")  # noqa: TRY003
+        if notes_forced:
+            backend.execute("ALTER TABLE notes NO FORCE ROW LEVEL SECURITY", connection=conn)
+
+        raw_rows = backend.execute(
+            """
+            SELECT edge.*,
+                   source_note.client_id AS source_owner,
+                   target_note.client_id AS target_owner
+              FROM note_edges AS edge
+              LEFT JOIN notes AS source_note ON source_note.id = edge.from_note_id
+              LEFT JOIN notes AS target_note ON target_note.id = edge.to_note_id
+             ORDER BY edge.edge_id
+            """,
+            connection=conn,
+        ).rows
+        canonical_rows = [
+            self._notes_link_v58_transform_row(
+                row,
+                source_owner=row.get("source_owner"),
+                target_owner=row.get("target_owner"),
+            )
+            for row in raw_rows
+        ]
+        self._validate_notes_link_v58_unique(canonical_rows)
+
+        backend.execute(
+            """
+            ALTER TABLE note_edges
+              ADD COLUMN IF NOT EXISTS label TEXT,
+              ADD COLUMN IF NOT EXISTS properties JSONB,
+              ADD COLUMN IF NOT EXISTS last_modified TIMESTAMPTZ,
+              ADD COLUMN IF NOT EXISTS version INTEGER,
+              ADD COLUMN IF NOT EXISTS deleted BOOLEAN,
+              ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ
+            """,
+            connection=conn,
+        )
+        canonical_payload = json.dumps(
+            [
+                {
+                    "edge_id": row["edge_id"],
+                    "weight": row["weight"],
+                    "label": row["label"],
+                    "properties": row["properties"],
+                }
+                for row in canonical_rows
+            ],
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        backend.execute(
+            """
+            UPDATE note_edges AS edge
+               SET weight = staged.weight,
+                   label = staged.label,
+                   properties = staged.properties,
+                   last_modified = edge.created_at,
+                   version = 1,
+                   deleted = FALSE,
+                   deleted_at = NULL
+              FROM jsonb_to_recordset(%s::jsonb) AS staged(
+                edge_id TEXT, weight DOUBLE PRECISION, label TEXT, properties JSONB
+              )
+             WHERE edge.edge_id = staged.edge_id
+            """,
+            (canonical_payload,),
+            connection=conn,
+        )
+        backend.execute(
+            """
+            ALTER TABLE note_edges
+              ALTER COLUMN properties SET DEFAULT '{}'::jsonb,
+              ALTER COLUMN properties SET NOT NULL,
+              ALTER COLUMN weight SET DEFAULT 1.0,
+              ALTER COLUMN weight SET NOT NULL,
+              ALTER COLUMN last_modified SET DEFAULT CURRENT_TIMESTAMP,
+              ALTER COLUMN last_modified SET NOT NULL,
+              ALTER COLUMN version SET DEFAULT 1,
+              ALTER COLUMN version SET NOT NULL,
+              ALTER COLUMN deleted SET DEFAULT FALSE,
+              ALTER COLUMN deleted SET NOT NULL
+            """,
+            connection=conn,
+        )
+        backend.execute(
+            "ALTER TABLE note_edges DROP CONSTRAINT IF EXISTS note_edges_source_note_fkey",
+            connection=conn,
+        )
+        backend.execute(
+            "ALTER TABLE note_edges DROP CONSTRAINT IF EXISTS note_edges_target_note_fkey",
+            connection=conn,
+        )
+        constraints = (
+            (
+                "note_edges_source_note_fkey",
+                "FOREIGN KEY (from_note_id) REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE",
+            ),
+            (
+                "note_edges_target_note_fkey",
+                "FOREIGN KEY (to_note_id) REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE",
+            ),
+            ("note_edges_manual_type_check", "CHECK (type = 'manual')"),
+            ("note_edges_directed_check", "CHECK (directed IN (0, 1))"),
+            (
+                "note_edges_weight_check",
+                "CHECK (weight >= 0 AND weight <= 1000000 AND weight NOT IN "
+                "('NaN'::float8, 'Infinity'::float8, '-Infinity'::float8))",
+            ),
+            ("note_edges_label_check", "CHECK (label IS NULL OR char_length(label) <= 256)"),
+            ("note_edges_self_link_check", "CHECK (from_note_id <> to_note_id)"),
+            ("note_edges_version_check", "CHECK (version >= 1)"),
+            (
+                "note_edges_id_check",
+                "CHECK (edge_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')",
+            ),
+            (
+                "note_edges_source_id_check",
+                "CHECK (from_note_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')",
+            ),
+            (
+                "note_edges_target_id_check",
+                "CHECK (to_note_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')",
+            ),
+            (
+                "note_edges_created_by_check",
+                "CHECK (created_by IS NOT NULL AND char_length(created_by) > 0)",
+            ),
+            (
+                "note_edges_logical_identity_key",
+                "UNIQUE (user_id, type, directed, from_note_id, to_note_id)",
+            ),
+        )
+        for constraint_name, definition in constraints:
+            backend.execute(
+                f"""
+                DO $migration$
+                BEGIN
+                  IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint
+                     WHERE conrelid = 'note_edges'::regclass
+                       AND conname = '{constraint_name}'
+                  ) THEN
+                    ALTER TABLE note_edges ADD CONSTRAINT {constraint_name} {definition};
+                  END IF;
+                END
+                $migration$
+                """,  # nosec B608 -- names and definitions are fixed migration constants.
+                connection=conn,
+            )
+        backend.execute(
+            "CREATE INDEX IF NOT EXISTS idx_note_edges_owner_live "
+            "ON note_edges(user_id, deleted, type, edge_id)",
+            connection=conn,
+        )
+        backend.execute(
+            "CREATE INDEX IF NOT EXISTS idx_note_edges_from_live "
+            "ON note_edges(user_id, from_note_id, edge_id) WHERE deleted = FALSE",
+            connection=conn,
+        )
+        backend.execute(
+            "CREATE INDEX IF NOT EXISTS idx_note_edges_to_live "
+            "ON note_edges(user_id, to_note_id, edge_id) WHERE deleted = FALSE",
+            connection=conn,
+        )
+        self._notes_graph_schema_postgres(conn)
+        backend.execute(
+            "INSERT INTO note_graph_dirty(owner_user_id, note_id, generation, last_modified) "
+            "SELECT client_id, id, 1, CURRENT_TIMESTAMP FROM notes "
+            "ON CONFLICT(owner_user_id, note_id) DO UPDATE SET "
+            "generation = note_graph_dirty.generation + 1, last_modified = CURRENT_TIMESTAMP",
+            connection=conn,
+        )
+        backend.execute(
+            "INSERT INTO note_graph_projection_state(owner_user_id, parser_version, rebuild_state, "
+            "rebuild_cursor, updated_at) "
+            "SELECT DISTINCT client_id, 1, 'pending', NULL, CURRENT_TIMESTAMP FROM notes "
+            "ON CONFLICT(owner_user_id) DO UPDATE SET parser_version = 1, "
+            "rebuild_state = 'pending', rebuild_cursor = NULL, updated_at = CURRENT_TIMESTAMP",
+            connection=conn,
+        )
+        if notes_forced:
+            backend.execute("ALTER TABLE notes FORCE ROW LEVEL SECURITY", connection=conn)
+        self._set_schema_version_postgres(conn, 58)
+
+    @staticmethod
+    def _note_attachment_uuid_check_sqlite(column_name: str) -> str:
+        """Return the fixed SQLite UUIDv4 check used by schema v59."""
+
+        if column_name not in {"attachment_id", "note_id"}:
+            raise ValueError("Unsupported attachment UUID column")
+        return (
+            f"length({column_name}) = 36 "  # nosec B608 - allowlisted schema identifier.
+            f"AND lower({column_name}) = {column_name} "
+            f"AND substr({column_name}, 9, 1) = '-' "
+            f"AND substr({column_name}, 14, 1) = '-' "
+            f"AND substr({column_name}, 15, 1) = '4' "
+            f"AND substr({column_name}, 19, 1) = '-' "
+            f"AND substr({column_name}, 20, 1) IN ('8', '9', 'a', 'b') "
+            f"AND substr({column_name}, 24, 1) = '-' "
+            f"AND length(replace({column_name}, '-', '')) = 32 "
+            f"AND replace({column_name}, '-', '') NOT GLOB '*[^0-9a-f]*'"
+        )
+
+    def _create_note_attachment_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Create the empty canonical attachment registry and fixed indexes."""
+
+        attachment_uuid = self._note_attachment_uuid_check_sqlite("attachment_id")
+        note_uuid = self._note_attachment_uuid_check_sqlite("note_id")
+        conn.execute(
+            f"""
+            CREATE TABLE note_attachments(
+              client_id TEXT NOT NULL CHECK(length(trim(client_id)) > 0),
+              dataset_id TEXT NOT NULL
+                CHECK(length(dataset_id) BETWEEN 1 AND 255 AND dataset_id = trim(dataset_id)),
+              attachment_id TEXT NOT NULL CHECK({attachment_uuid}),
+              note_id TEXT NOT NULL CHECK({note_uuid})
+                REFERENCES notes(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+              file_name TEXT NOT NULL CHECK(
+                length(file_name) BETWEEN 1 AND 180
+                AND file_name = trim(file_name)
+                AND file_name NOT IN ('.', '..')
+                AND instr(file_name, '/') = 0
+                AND instr(file_name, char(92)) = 0
+                AND instr(file_name, char(0)) = 0
+              ),
+              normalized_file_name TEXT NOT NULL CHECK(
+                length(normalized_file_name) BETWEEN 1 AND 180
+                AND instr(normalized_file_name, '/') = 0
+                AND instr(normalized_file_name, char(92)) = 0
+                AND instr(normalized_file_name, char(0)) = 0
+              ),
+              original_file_name TEXT NOT NULL CHECK(
+                length(original_file_name) BETWEEN 1 AND 255
+                AND length(CAST(original_file_name AS BLOB)) <= 1024
+                AND original_file_name = trim(original_file_name)
+                AND original_file_name NOT IN ('.', '..')
+                AND instr(original_file_name, '/') = 0
+                AND instr(original_file_name, char(92)) = 0
+                AND instr(original_file_name, char(0)) = 0
+              ),
+              content_type TEXT NOT NULL
+                CHECK(length(content_type) BETWEEN 1 AND 255 AND instr(content_type, '/') > 1),
+              size_bytes INTEGER NOT NULL
+                CHECK(typeof(size_bytes) = 'integer' AND size_bytes >= 1),
+              blob_hash TEXT NOT NULL CHECK(
+                length(blob_hash) = 71
+                AND substr(blob_hash, 1, 7) = 'sha256:'
+                AND substr(blob_hash, 8) NOT GLOB '*[^0-9a-f]*'
+              ),
+              object_hash TEXT NOT NULL CHECK(
+                length(object_hash) = 71
+                AND substr(object_hash, 1, 7) = 'sha256:'
+                AND substr(object_hash, 8) NOT GLOB '*[^0-9a-f]*'
+              ),
+              version INTEGER NOT NULL
+                CHECK(typeof(version) = 'integer' AND version >= 1),
+              deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0, 1)),
+              deleted_at TEXT,
+              delete_reason TEXT CHECK(delete_reason IS NULL OR length(delete_reason) <= 256),
+              created_at TEXT NOT NULL CHECK(length(created_at) > 0),
+              last_modified TEXT NOT NULL CHECK(length(last_modified) > 0),
+              created_by TEXT NOT NULL CHECK(length(trim(created_by)) > 0),
+              source_kind TEXT NOT NULL
+                CHECK(source_kind IN ('upload', 'sync', 'legacy_bootstrap')),
+              PRIMARY KEY(client_id, dataset_id, attachment_id),
+              CHECK(
+                (deleted = 0 AND deleted_at IS NULL AND delete_reason IS NULL)
+                OR (deleted = 1 AND deleted_at IS NOT NULL)
+              )
+            )
+            """  # nosec B608 - both interpolated checks use fixed allowlisted columns.
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX uq_note_attachments_live_name "
+            "ON note_attachments(client_id, dataset_id, note_id, normalized_file_name) "
+            "WHERE deleted = 0"
+        )
+        conn.execute(
+            "CREATE INDEX idx_note_attachments_owner_dataset_note_all_page "
+            "ON note_attachments(client_id, dataset_id, note_id, attachment_id)"
+        )
+        conn.execute(
+            "CREATE INDEX idx_note_attachments_owner_dataset_note_page "
+            "ON note_attachments(client_id, dataset_id, note_id, deleted, attachment_id)"
+        )
+        conn.execute(
+            "CREATE INDEX idx_note_attachments_owner_dataset_blob "
+            "ON note_attachments(client_id, dataset_id, blob_hash, attachment_id)"
+        )
+
+    def _migrate_from_v58_to_v59(self, conn: sqlite3.Connection) -> None:
+        """Create schema-v59 registry state without importing legacy attachment bytes."""
+
+        current_version = self._get_db_version(conn)
+        if current_version >= 59:
+            return
+        if current_version != 58:
+            raise SchemaError("Notes attachment v59 migration requires schema version 58.")  # noqa: TRY003
+        tables = self._sqlite_table_names(conn)
+        if "note_attachments" in tables:
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 registry collision requires explicit repair."
+            )
+        if "notes" not in tables:
+            raise SchemaError("Notes attachment v59 requires the canonical notes relation.")  # noqa: TRY003
+        self._create_note_attachment_schema_sqlite(conn)
+        cursor = conn.execute(
+            "UPDATE db_schema_version SET version = 59 WHERE schema_name = ? AND version = 58",
+            (self._SCHEMA_NAME,),
+        )
+        if cursor.rowcount != 1 or self._get_db_version(conn) != 59:
+            raise SchemaError("Notes attachment v59 migration failed version verification.")  # noqa: TRY003
+
+    @staticmethod
+    def _note_task_v60_migration_checkpoint(_stage: str) -> None:
+        """No-op seam used to prove rollback at each migration boundary."""
+
+    @staticmethod
+    def _note_task_v60_hash(value: object) -> str:
+        return "sha256:" + hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+    def _canonicalize_legacy_task_v60(
+        self, row: Mapping[str, Any], *, owner_user_id: str
+    ) -> tuple[str, str | None, str | None]:
+        """Hash representable task data canonically and retain bounded diagnostics otherwise."""
+        source = dict(row)
+        try:
+            metadata = json.loads(str(source.get("metadata_json") or "{}"))
+            if not isinstance(metadata, dict) or set(metadata) - {"due_date", "priority", "estimate"}:
+                raise NotesTaskContractError("legacy task metadata is not canonical")
+            parsed = parse_notes_task_v1(
+                {
+                    "task_id": source["id"], "note_id": source["note_id"],
+                    "title": source["text"], "description": None, "status": source["status"],
+                    "completed_at": source.get("completed_at"), "priority": metadata.get("priority"),
+                    "due_date": metadata.get("due_date"), "estimate": metadata.get("estimate"),
+                    "recurrence": None, "assignee_id": None, "tags": [], "custom": {},
+                },
+                owner_user_id=owner_user_id,
+            )
+            return (
+                notes_task_object_hash(
+                    parsed,
+                    revision=int(source.get("canonical_revision") or source["version"]),
+                    deleted=bool(source["deleted"]),
+                ),
+                None,
+                None,
+            )
+        except (NotesTaskContractError, TypeError, ValueError, json.JSONDecodeError):
+            source_hash = self._note_task_v60_hash({"source": source, "version": 1})
+            return source_hash, "legacy_task_payload_invalid", source_hash
+
+    @staticmethod
+    def _note_task_v60_postgres_ddl() -> tuple[str, ...]:
+        """Return the fixed task graph plus private scope-authority schema."""
+        return (
+            "CREATE UNIQUE INDEX uq_notes_owner_id ON notes(client_id,id)",
+            """
+            CREATE TABLE note_tasks_v60(
+              owner_user_id TEXT NOT NULL CONSTRAINT note_tasks_owner_user_id_check
+                CHECK(char_length(btrim(owner_user_id)) > 0),
+              dataset_id TEXT NOT NULL CONSTRAINT note_tasks_dataset_id_check
+                CHECK(char_length(btrim(dataset_id)) > 0),
+              id TEXT NOT NULL CONSTRAINT note_tasks_id_check CHECK(char_length(btrim(id)) > 0),
+              note_id TEXT NOT NULL CONSTRAINT note_tasks_note_id_check
+                CHECK(char_length(btrim(note_id)) > 0),
+              text TEXT NOT NULL CONSTRAINT note_tasks_text_check CHECK(char_length(text) > 0),
+              status TEXT NOT NULL CONSTRAINT note_tasks_status_check CHECK(status IN ('open','done')),
+              metadata_json TEXT NOT NULL DEFAULT '{}',
+              projection_status TEXT NOT NULL DEFAULT 'live'
+                CONSTRAINT note_tasks_projection_status_check
+                CHECK(projection_status IN ('live','unlinked','ambiguous','deleted')),
+              deleted BOOLEAN NOT NULL DEFAULT FALSE,
+              created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
+              completed_at TIMESTAMPTZ, client_id TEXT NOT NULL,
+              version BIGINT NOT NULL DEFAULT 1 CONSTRAINT note_tasks_version_check CHECK(version >= 1),
+              canonical_revision BIGINT NOT NULL DEFAULT 1
+                CONSTRAINT note_tasks_canonical_revision_check CHECK(canonical_revision >= 1),
+              canonical_hash TEXT NOT NULL CONSTRAINT note_tasks_canonical_hash_check
+                CHECK(canonical_hash ~ '^sha256:[0-9a-f]{64}$'),
+              source_diagnostic_code TEXT CONSTRAINT note_tasks_source_diagnostic_code_check
+                CHECK(source_diagnostic_code IS NULL OR source_diagnostic_code='legacy_task_payload_invalid'),
+              source_diagnostic_hash TEXT CONSTRAINT note_tasks_source_diagnostic_hash_check
+                CHECK(source_diagnostic_hash IS NULL OR source_diagnostic_hash ~ '^sha256:[0-9a-f]{64}$'),
+              CONSTRAINT note_tasks_pkey PRIMARY KEY(owner_user_id,dataset_id,id),
+              CONSTRAINT note_tasks_note_owner_fkey FOREIGN KEY(owner_user_id,note_id)
+                REFERENCES notes(client_id,id) ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE task_note_projections_v60(
+              owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL,
+              task_id TEXT NOT NULL, note_id TEXT NOT NULL,
+              note_version BIGINT NOT NULL CONSTRAINT task_note_projections_note_version_check CHECK(note_version>=1),
+              line_number BIGINT NOT NULL CONSTRAINT task_note_projections_line_number_check CHECK(line_number>=1),
+              start_offset BIGINT NOT NULL CONSTRAINT task_note_projections_start_offset_check CHECK(start_offset>=0),
+              end_offset BIGINT NOT NULL CONSTRAINT task_note_projections_end_offset_check CHECK(end_offset>=start_offset),
+              normalized_text_hash TEXT NOT NULL,
+              occurrence_index BIGINT NOT NULL CONSTRAINT task_note_projections_occurrence_index_check
+                CHECK(occurrence_index>=0),
+              block_fingerprint TEXT NOT NULL, raw_line TEXT NOT NULL,
+              has_child_content BOOLEAN NOT NULL DEFAULT FALSE,
+              projection_status TEXT NOT NULL DEFAULT 'live'
+                CONSTRAINT task_note_projections_projection_status_check
+                CHECK(projection_status IN ('live','unlinked','ambiguous','deleted')),
+              updated_at TIMESTAMPTZ NOT NULL,
+              CONSTRAINT task_note_projections_pkey PRIMARY KEY(owner_user_id,dataset_id,task_id),
+              CONSTRAINT task_note_projections_task_fkey FOREIGN KEY(owner_user_id,dataset_id,task_id)
+                REFERENCES note_tasks_v60(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE,
+              CONSTRAINT task_note_projections_note_owner_fkey FOREIGN KEY(owner_user_id,note_id)
+                REFERENCES notes(client_id,id) ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE task_events_v60(
+              owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL, id TEXT NOT NULL,
+              task_id TEXT, note_id TEXT NOT NULL CONSTRAINT task_events_note_id_check
+                CHECK(char_length(btrim(note_id)) > 0),
+              event_type TEXT NOT NULL, actor_type TEXT NOT NULL,
+              actor_id TEXT, tool_name TEXT, policy_mode TEXT, approval_id TEXT,
+              old_value_json TEXT, new_value_json TEXT, created_at TIMESTAMPTZ NOT NULL,
+              client_id TEXT NOT NULL,
+              sync_revision BIGINT NOT NULL DEFAULT 1 CONSTRAINT task_events_sync_revision_check
+                CHECK(sync_revision IN (1,2)),
+              sync_object_hash TEXT NOT NULL CONSTRAINT task_events_sync_object_hash_check
+                CHECK(sync_object_hash ~ '^sha256:[0-9a-f]{64}$'),
+              sync_server_cursor BIGINT CONSTRAINT task_events_sync_server_cursor_check
+                CHECK(sync_server_cursor IS NULL OR sync_server_cursor>=1),
+              source_device_id TEXT, client_occurred_at TIMESTAMPTZ NOT NULL,
+              source_kind TEXT NOT NULL DEFAULT 'trusted_bootstrap_v1'
+                CONSTRAINT task_events_source_kind_check CHECK(source_kind IN
+                  ('client','rest','mcp','markdown_reconciliation','repair','trusted_bootstrap_v1')),
+              corrects_activity_id TEXT,
+              deleted BOOLEAN NOT NULL DEFAULT FALSE, deleted_at TIMESTAMPTZ,
+              delete_reason TEXT CONSTRAINT task_events_delete_reason_check
+                CHECK(delete_reason IS NULL OR delete_reason IN ('user_request','correction','policy')),
+              source_diagnostic_code TEXT,
+              source_diagnostic_hash TEXT CONSTRAINT task_events_source_diagnostic_hash_check
+                CHECK(source_diagnostic_hash IS NULL OR source_diagnostic_hash ~ '^sha256:[0-9a-f]{64}$'),
+              CONSTRAINT task_events_deleted_lifecycle_check CHECK(
+                (deleted=FALSE AND deleted_at IS NULL AND delete_reason IS NULL) OR
+                (deleted=TRUE AND deleted_at IS NOT NULL AND delete_reason IS NOT NULL)),
+              CONSTRAINT task_events_pkey PRIMARY KEY(owner_user_id,dataset_id,id),
+              CONSTRAINT task_events_task_fkey FOREIGN KEY(owner_user_id,dataset_id,task_id)
+                REFERENCES note_tasks_v60(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE RESTRICT,
+              CONSTRAINT task_events_note_owner_fkey FOREIGN KEY(owner_user_id,note_id)
+                REFERENCES notes(client_id,id) ON UPDATE CASCADE ON DELETE RESTRICT,
+              CONSTRAINT task_events_correction_fkey FOREIGN KEY(owner_user_id,dataset_id,corrects_activity_id)
+                REFERENCES task_events_v60(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE RESTRICT
+            )
+            """,
+            """
+            CREATE TABLE task_event_read_state_v60(
+              owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL, event_id TEXT NOT NULL,
+              user_id TEXT NOT NULL CONSTRAINT task_event_read_state_user_check CHECK(user_id=owner_user_id),
+              read_at TIMESTAMPTZ, dismissed_at TIMESTAMPTZ,
+              CONSTRAINT task_event_read_state_pkey PRIMARY KEY(owner_user_id,dataset_id,event_id,user_id),
+              CONSTRAINT task_event_read_state_event_fkey FOREIGN KEY(owner_user_id,dataset_id,event_id)
+                REFERENCES task_events_v60(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE note_task_reconciliation_state_v60(
+              owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL, note_id TEXT NOT NULL,
+              note_version BIGINT NOT NULL CONSTRAINT note_task_reconciliation_note_version_check
+                CHECK(note_version>=1),
+              status TEXT NOT NULL, reconciled_at TIMESTAMPTZ NOT NULL,
+              item_count BIGINT NOT NULL DEFAULT 0 CONSTRAINT note_task_reconciliation_item_count_check
+                CHECK(item_count>=0),
+              warning_count BIGINT NOT NULL DEFAULT 0 CONSTRAINT note_task_reconciliation_warning_count_check
+                CHECK(warning_count>=0),
+              cursor TEXT,
+              CONSTRAINT note_task_reconciliation_state_pkey PRIMARY KEY(owner_user_id,dataset_id,note_id),
+              CONSTRAINT note_task_reconciliation_note_owner_fkey FOREIGN KEY(owner_user_id,note_id)
+                REFERENCES notes(client_id,id) ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE task_projection_drifts_v60(
+              owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL, id TEXT NOT NULL,
+              note_id TEXT NOT NULL, task_id TEXT NOT NULL,
+              marker_base_revision BIGINT NOT NULL CONSTRAINT task_projection_drifts_revision_check
+                CHECK(marker_base_revision>=1),
+              marker_base_hash TEXT NOT NULL, note_head_cursor BIGINT, note_head_hash TEXT,
+              task_head_cursor BIGINT, task_head_hash TEXT,
+              reason_code TEXT NOT NULL CONSTRAINT task_projection_drifts_reason_check CHECK(reason_code IN
+                ('missing_marker_base','malformed_marker','duplicate_marker','marker_scope_mismatch',
+                 'base_unavailable','both_changed','ambiguous_legacy_match','unsupported_markdown')),
+              status TEXT NOT NULL DEFAULT 'open' CONSTRAINT task_projection_drifts_status_check
+                CHECK(status IN ('open','resolved','dismissed')),
+              created_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
+              resolved_at TIMESTAMPTZ,
+              CONSTRAINT task_projection_drifts_pkey PRIMARY KEY(owner_user_id,dataset_id,id),
+              CONSTRAINT task_projection_drifts_task_fkey FOREIGN KEY(owner_user_id,dataset_id,task_id)
+                REFERENCES note_tasks_v60(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE,
+              CONSTRAINT task_projection_drifts_note_owner_fkey FOREIGN KEY(owner_user_id,note_id)
+                REFERENCES notes(client_id,id) ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE note_task_scope_authority_v60(
+              owner_user_id TEXT NOT NULL
+                CONSTRAINT note_task_scope_authority_owner_check
+                CHECK(char_length(btrim(owner_user_id)) > 0),
+              dataset_id TEXT NOT NULL
+                CONSTRAINT note_task_scope_authority_dataset_check
+                CHECK(char_length(btrim(dataset_id)) > 0
+                  AND dataset_id=btrim(dataset_id)
+                  AND dataset_id<>'local-unbound'),
+              CONSTRAINT note_task_scope_authority_pkey PRIMARY KEY(owner_user_id)
+            )
+            """,
+        )
+
+    @staticmethod
+    def _note_task_v60_postgres_indexes() -> tuple[str, ...]:
+        return (
+            "CREATE INDEX idx_note_tasks_scope_note_page ON note_tasks(owner_user_id,dataset_id,note_id,deleted,created_at,id)",
+            "CREATE INDEX idx_note_tasks_scope_status_page ON note_tasks(owner_user_id,dataset_id,deleted,status,updated_at,id)",
+            "CREATE INDEX idx_note_tasks_scope_projection ON note_tasks(owner_user_id,dataset_id,projection_status,deleted,id)",
+            "CREATE INDEX idx_task_projections_scope_note ON task_note_projections(owner_user_id,dataset_id,note_id,note_version,task_id)",
+            "CREATE INDEX idx_task_projections_scope_status ON task_note_projections(owner_user_id,dataset_id,projection_status,updated_at,task_id)",
+            "CREATE INDEX idx_task_events_scope_task_page ON task_events(owner_user_id,dataset_id,task_id,sync_server_cursor,id)",
+            "CREATE INDEX idx_task_events_scope_note_page ON task_events(owner_user_id,dataset_id,note_id,sync_server_cursor,id)",
+            "CREATE INDEX idx_task_events_scope_cursor ON task_events(owner_user_id,dataset_id,sync_server_cursor,id)",
+            "CREATE INDEX idx_task_events_scope_task_created ON task_events(owner_user_id,dataset_id,task_id,created_at,id)",
+            "CREATE INDEX idx_task_events_scope_note_created ON task_events(owner_user_id,dataset_id,note_id,created_at,id)",
+            "CREATE INDEX idx_task_events_scope_created ON task_events(owner_user_id,dataset_id,created_at,id)",
+            "CREATE INDEX idx_task_event_read_scope_user ON task_event_read_state(owner_user_id,dataset_id,user_id,read_at,dismissed_at,event_id)",
+            "CREATE INDEX idx_task_reconciliation_scope_status ON note_task_reconciliation_state(owner_user_id,dataset_id,status,reconciled_at,note_id)",
+            "CREATE INDEX idx_task_projection_drifts_scope_status ON task_projection_drifts(owner_user_id,dataset_id,status,updated_at,id)",
+            "CREATE INDEX idx_task_projection_drifts_scope_task ON task_projection_drifts(owner_user_id,dataset_id,task_id,status,id)",
+        )
+
+    @staticmethod
+    def _note_task_v59_postgres_constraint_collisions() -> tuple[tuple[str, str], ...]:
+        """Return the fixed v59 names that would collide with v60 constraints."""
+        return (
+            ("note_tasks", "note_tasks_pkey"),
+            ("note_tasks", "note_tasks_projection_status_check"),
+            ("note_tasks", "note_tasks_status_check"),
+            ("task_note_projections", "task_note_projections_pkey"),
+            ("task_note_projections", "task_note_projections_projection_status_check"),
+            ("task_events", "task_events_pkey"),
+            ("task_event_read_state", "task_event_read_state_pkey"),
+            ("note_task_reconciliation_state", "note_task_reconciliation_state_pkey"),
+        )
+
+    def _rename_note_task_v59_postgres_constraints(self, conn: Any) -> None:
+        """Free canonical constraint names only after v59 rows are validated."""
+        for table_name, constraint_name in self._note_task_v59_postgres_constraint_collisions():
+            self.backend.execute(
+                f"ALTER TABLE {table_name} RENAME CONSTRAINT {constraint_name} "
+                f"TO {constraint_name}_v59",
+                connection=conn,
+            )  # nosec B608 - identifiers are fixed migration constants.
+
+    def _create_note_task_schema_v60_postgres(self, conn: Any) -> None:
+        for statement in self._note_task_v60_postgres_ddl():
+            self.backend.execute(statement, connection=conn)
+
+    @staticmethod
+    def _normalize_postgres_catalog_expression(value: Any) -> str:
+        normalized = str(value or "").lower()
+        normalized = re.sub(r"::(?:pg_catalog\.)?(?:text|character varying|bigint|boolean)", "", normalized)
+        normalized = re.sub(r"\bas\b", "", normalized)
+        return re.sub(r'[\s()"]+', "", normalized)
+
+    @classmethod
+    def _note_task_v60_json_safe(cls, value: Any) -> Any:
+        if isinstance(value, datetime):
+            normalized = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+            return normalized.astimezone(timezone.utc).isoformat()
+        if isinstance(value, Mapping):
+            return {str(key): cls._note_task_v60_json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [cls._note_task_v60_json_safe(item) for item in value]
+        return value
+
+    @staticmethod
+    def _note_task_v60_postgres_columns() -> dict[str, tuple[tuple[str, str, bool, str | None], ...]]:
+        ts = "timestamp with time zone"
+        return {
+            "note_tasks": (
+                ("owner_user_id", "text", True, None), ("dataset_id", "text", True, None),
+                ("id", "text", True, None), ("note_id", "text", True, None),
+                ("text", "text", True, None), ("status", "text", True, None),
+                ("metadata_json", "text", True, "'{}'::text"),
+                ("projection_status", "text", True, "'live'::text"),
+                ("deleted", "boolean", True, "false"), ("created_at", ts, True, None),
+                ("updated_at", ts, True, None), ("completed_at", ts, False, None),
+                ("client_id", "text", True, None), ("version", "bigint", True, "1"),
+                ("canonical_revision", "bigint", True, "1"),
+                ("canonical_hash", "text", True, None),
+                ("source_diagnostic_code", "text", False, None),
+                ("source_diagnostic_hash", "text", False, None),
+            ),
+            "task_note_projections": (
+                ("owner_user_id", "text", True, None), ("dataset_id", "text", True, None),
+                ("task_id", "text", True, None), ("note_id", "text", True, None),
+                ("note_version", "bigint", True, None), ("line_number", "bigint", True, None),
+                ("start_offset", "bigint", True, None), ("end_offset", "bigint", True, None),
+                ("normalized_text_hash", "text", True, None),
+                ("occurrence_index", "bigint", True, None),
+                ("block_fingerprint", "text", True, None), ("raw_line", "text", True, None),
+                ("has_child_content", "boolean", True, "false"),
+                ("projection_status", "text", True, "'live'::text"),
+                ("updated_at", ts, True, None),
+            ),
+            "task_events": (
+                ("owner_user_id", "text", True, None), ("dataset_id", "text", True, None),
+                ("id", "text", True, None), ("task_id", "text", False, None),
+                ("note_id", "text", True, None), ("event_type", "text", True, None),
+                ("actor_type", "text", True, None), ("actor_id", "text", False, None),
+                ("tool_name", "text", False, None), ("policy_mode", "text", False, None),
+                ("approval_id", "text", False, None), ("old_value_json", "text", False, None),
+                ("new_value_json", "text", False, None), ("created_at", ts, True, None),
+                ("client_id", "text", True, None), ("sync_revision", "bigint", True, "1"),
+                ("sync_object_hash", "text", True, None),
+                ("sync_server_cursor", "bigint", False, None),
+                ("source_device_id", "text", False, None),
+                ("client_occurred_at", ts, True, None),
+                ("source_kind", "text", True, "'trusted_bootstrap_v1'::text"),
+                ("corrects_activity_id", "text", False, None),
+                ("deleted", "boolean", True, "false"), ("deleted_at", ts, False, None),
+                ("delete_reason", "text", False, None),
+                ("source_diagnostic_code", "text", False, None),
+                ("source_diagnostic_hash", "text", False, None),
+            ),
+            "task_event_read_state": (
+                ("owner_user_id", "text", True, None), ("dataset_id", "text", True, None),
+                ("event_id", "text", True, None), ("user_id", "text", True, None),
+                ("read_at", ts, False, None), ("dismissed_at", ts, False, None),
+            ),
+            "note_task_reconciliation_state": (
+                ("owner_user_id", "text", True, None), ("dataset_id", "text", True, None),
+                ("note_id", "text", True, None), ("note_version", "bigint", True, None),
+                ("status", "text", True, None), ("reconciled_at", ts, True, None),
+                ("item_count", "bigint", True, "0"), ("warning_count", "bigint", True, "0"),
+                ("cursor", "text", False, None),
+            ),
+            "task_projection_drifts": (
+                ("owner_user_id", "text", True, None), ("dataset_id", "text", True, None),
+                ("id", "text", True, None), ("note_id", "text", True, None),
+                ("task_id", "text", True, None), ("marker_base_revision", "bigint", True, None),
+                ("marker_base_hash", "text", True, None),
+                ("note_head_cursor", "bigint", False, None),
+                ("note_head_hash", "text", False, None),
+                ("task_head_cursor", "bigint", False, None),
+                ("task_head_hash", "text", False, None),
+                ("reason_code", "text", True, None),
+                ("status", "text", True, "'open'::text"),
+                ("created_at", ts, True, None), ("updated_at", ts, True, None),
+                ("resolved_at", ts, False, None),
+            ),
+            "note_task_scope_authority": (
+                ("owner_user_id", "text", True, None),
+                ("dataset_id", "text", True, None),
+            ),
+        }
+
+    @staticmethod
+    def _note_task_v60_policy_predicates() -> dict[str, str]:
+        return {
+            "note_tasks": """note_tasks.owner_user_id=current_setting('app.current_user_id',true)
+                AND note_tasks.dataset_id=current_setting('app.current_dataset_id',true)
+                AND EXISTS(SELECT 1 FROM notes AS note WHERE note.id=note_tasks.note_id
+                AND note.client_id=current_setting('app.current_user_id',true)
+                AND note.client_id=note_tasks.owner_user_id)""",
+            "task_note_projections": """task_note_projections.owner_user_id=current_setting('app.current_user_id',true)
+                AND task_note_projections.dataset_id=current_setting('app.current_dataset_id',true)
+                AND EXISTS(SELECT 1 FROM note_tasks AS task
+                WHERE task.owner_user_id=task_note_projections.owner_user_id
+                AND task.dataset_id=task_note_projections.dataset_id
+                AND task.id=task_note_projections.task_id AND task.note_id=task_note_projections.note_id)
+                AND EXISTS(SELECT 1 FROM notes AS note WHERE note.id=task_note_projections.note_id
+                AND note.client_id=current_setting('app.current_user_id',true)
+                AND note.client_id=task_note_projections.owner_user_id)""",
+            "task_events": """task_events.owner_user_id=current_setting('app.current_user_id',true)
+                AND task_events.dataset_id=current_setting('app.current_dataset_id',true)
+                AND EXISTS(SELECT 1 FROM notes AS note WHERE note.id=task_events.note_id
+                AND note.client_id=current_setting('app.current_user_id',true)
+                AND note.client_id=task_events.owner_user_id)
+                AND (task_events.task_id IS NULL OR EXISTS(SELECT 1 FROM note_tasks AS task
+                WHERE task.owner_user_id=task_events.owner_user_id
+                AND task.dataset_id=task_events.dataset_id AND task.id=task_events.task_id
+                AND task.note_id=task_events.note_id))""",
+            "task_event_read_state": """task_event_read_state.owner_user_id=current_setting('app.current_user_id',true)
+                AND task_event_read_state.dataset_id=current_setting('app.current_dataset_id',true)
+                AND task_event_read_state.user_id=task_event_read_state.owner_user_id
+                AND EXISTS(SELECT 1 FROM task_events AS event
+                WHERE event.owner_user_id=task_event_read_state.owner_user_id
+                AND event.dataset_id=task_event_read_state.dataset_id
+                AND event.id=task_event_read_state.event_id)""",
+            "note_task_reconciliation_state": """note_task_reconciliation_state.owner_user_id=current_setting('app.current_user_id',true)
+                AND note_task_reconciliation_state.dataset_id=current_setting('app.current_dataset_id',true)
+                AND EXISTS(SELECT 1 FROM notes AS note WHERE note.id=note_task_reconciliation_state.note_id
+                AND note.client_id=current_setting('app.current_user_id',true)
+                AND note.client_id=note_task_reconciliation_state.owner_user_id)""",
+            "task_projection_drifts": """task_projection_drifts.owner_user_id=current_setting('app.current_user_id',true)
+                AND task_projection_drifts.dataset_id=current_setting('app.current_dataset_id',true)
+                AND EXISTS(SELECT 1 FROM note_tasks AS task
+                WHERE task.owner_user_id=task_projection_drifts.owner_user_id
+                AND task.dataset_id=task_projection_drifts.dataset_id
+                AND task.id=task_projection_drifts.task_id AND task.note_id=task_projection_drifts.note_id)
+                AND EXISTS(SELECT 1 FROM notes AS note WHERE note.id=task_projection_drifts.note_id
+                AND note.client_id=current_setting('app.current_user_id',true)
+                AND note.client_id=task_projection_drifts.owner_user_id)""",
+            "note_task_scope_authority": """note_task_scope_authority.owner_user_id=
+                current_setting('app.current_user_id',true)""",
+        }
+
+    @staticmethod
+    def _note_task_v60_sqlite_ddl() -> tuple[str, ...]:
+        """Return the fixed task graph plus private scope-authority schema."""
+        return (
+            "CREATE UNIQUE INDEX uq_notes_owner_id ON notes(client_id,id)",
+            """
+            CREATE TABLE note_tasks_v60(
+              owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+              dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+              id TEXT NOT NULL CHECK(length(trim(id)) > 0),
+              note_id TEXT NOT NULL CHECK(length(trim(note_id)) > 0),
+              text TEXT NOT NULL CHECK(length(text) > 0),
+              status TEXT NOT NULL CHECK(status IN ('open','done')),
+              metadata_json TEXT NOT NULL DEFAULT '{}',
+              projection_status TEXT NOT NULL DEFAULT 'live'
+                CHECK(projection_status IN ('live','unlinked','ambiguous','deleted')),
+              deleted INTEGER NOT NULL DEFAULT 0 CHECK(typeof(deleted)='integer' AND deleted IN (0,1)),
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT,
+              client_id TEXT NOT NULL,
+              version INTEGER NOT NULL DEFAULT 1 CHECK(typeof(version)='integer' AND version>=1),
+              canonical_revision INTEGER NOT NULL DEFAULT 1
+                CHECK(typeof(canonical_revision)='integer' AND canonical_revision>=1),
+              canonical_hash TEXT NOT NULL CHECK(
+                length(canonical_hash)=71 AND substr(canonical_hash,1,7)='sha256:'
+                AND substr(canonical_hash,8) NOT GLOB '*[^0-9a-f]*'),
+              source_diagnostic_code TEXT CHECK(
+                source_diagnostic_code IS NULL OR source_diagnostic_code='legacy_task_payload_invalid'),
+              source_diagnostic_hash TEXT CHECK(source_diagnostic_hash IS NULL OR (
+                length(source_diagnostic_hash)=71 AND substr(source_diagnostic_hash,1,7)='sha256:'
+                AND substr(source_diagnostic_hash,8) NOT GLOB '*[^0-9a-f]*')),
+              PRIMARY KEY(owner_user_id,dataset_id,id),
+              FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE task_note_projections_v60(
+              owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL,
+              task_id TEXT NOT NULL, note_id TEXT NOT NULL,
+              note_version INTEGER NOT NULL CHECK(typeof(note_version)='integer' AND note_version>=1),
+              line_number INTEGER NOT NULL CHECK(typeof(line_number)='integer' AND line_number>=1),
+              start_offset INTEGER NOT NULL CHECK(typeof(start_offset)='integer' AND start_offset>=0),
+              end_offset INTEGER NOT NULL CHECK(typeof(end_offset)='integer' AND end_offset>=start_offset),
+              normalized_text_hash TEXT NOT NULL,
+              occurrence_index INTEGER NOT NULL CHECK(typeof(occurrence_index)='integer' AND occurrence_index>=0),
+              block_fingerprint TEXT NOT NULL, raw_line TEXT NOT NULL,
+              has_child_content INTEGER NOT NULL DEFAULT 0
+                CHECK(typeof(has_child_content)='integer' AND has_child_content IN (0,1)),
+              projection_status TEXT NOT NULL DEFAULT 'live'
+                CHECK(projection_status IN ('live','unlinked','ambiguous','deleted')),
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY(owner_user_id,dataset_id,task_id),
+              FOREIGN KEY(owner_user_id,dataset_id,task_id)
+                REFERENCES note_tasks_v60(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE,
+              FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE task_events_v60(
+              owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL, id TEXT NOT NULL,
+              task_id TEXT, note_id TEXT NOT NULL CHECK(length(trim(note_id)) > 0),
+              event_type TEXT NOT NULL, actor_type TEXT NOT NULL,
+              actor_id TEXT, tool_name TEXT, policy_mode TEXT, approval_id TEXT,
+              old_value_json TEXT, new_value_json TEXT, created_at TEXT NOT NULL, client_id TEXT NOT NULL,
+              sync_revision INTEGER NOT NULL DEFAULT 1
+                CHECK(typeof(sync_revision)='integer' AND sync_revision IN (1,2)),
+              sync_object_hash TEXT NOT NULL CHECK(
+                length(sync_object_hash)=71 AND substr(sync_object_hash,1,7)='sha256:'
+                AND substr(sync_object_hash,8) NOT GLOB '*[^0-9a-f]*'),
+              sync_server_cursor INTEGER CHECK(sync_server_cursor IS NULL OR
+                (typeof(sync_server_cursor)='integer' AND sync_server_cursor>=1)),
+              source_device_id TEXT, client_occurred_at TEXT NOT NULL,
+              source_kind TEXT NOT NULL DEFAULT 'trusted_bootstrap_v1' CHECK(source_kind IN
+                ('client','rest','mcp','markdown_reconciliation','repair','trusted_bootstrap_v1')),
+              corrects_activity_id TEXT,
+              deleted INTEGER NOT NULL DEFAULT 0 CHECK(typeof(deleted)='integer' AND deleted IN (0,1)),
+              deleted_at TEXT,
+              delete_reason TEXT CHECK(delete_reason IS NULL OR delete_reason IN
+                ('user_request','correction','policy')),
+              source_diagnostic_code TEXT,
+              source_diagnostic_hash TEXT CHECK(source_diagnostic_hash IS NULL OR (
+                length(source_diagnostic_hash)=71 AND substr(source_diagnostic_hash,1,7)='sha256:'
+                AND substr(source_diagnostic_hash,8) NOT GLOB '*[^0-9a-f]*')),
+              CHECK((deleted=0 AND deleted_at IS NULL AND delete_reason IS NULL) OR
+                    (deleted=1 AND deleted_at IS NOT NULL AND delete_reason IS NOT NULL)),
+              PRIMARY KEY(owner_user_id,dataset_id,id),
+              FOREIGN KEY(owner_user_id,dataset_id,task_id)
+                REFERENCES note_tasks_v60(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE RESTRICT,
+              FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id)
+                ON UPDATE CASCADE ON DELETE RESTRICT,
+              FOREIGN KEY(owner_user_id,dataset_id,corrects_activity_id)
+                REFERENCES task_events_v60(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE RESTRICT
+            )
+            """,
+            """
+            CREATE TABLE task_event_read_state_v60(
+              owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL, event_id TEXT NOT NULL,
+              user_id TEXT NOT NULL CHECK(user_id=owner_user_id), read_at TEXT, dismissed_at TEXT,
+              PRIMARY KEY(owner_user_id,dataset_id,event_id,user_id),
+              FOREIGN KEY(owner_user_id,dataset_id,event_id)
+                REFERENCES task_events_v60(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE note_task_reconciliation_state_v60(
+              owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL, note_id TEXT NOT NULL,
+              note_version INTEGER NOT NULL CHECK(typeof(note_version)='integer' AND note_version>=1),
+              status TEXT NOT NULL, reconciled_at TEXT NOT NULL,
+              item_count INTEGER NOT NULL DEFAULT 0 CHECK(typeof(item_count)='integer' AND item_count>=0),
+              warning_count INTEGER NOT NULL DEFAULT 0
+                CHECK(typeof(warning_count)='integer' AND warning_count>=0),
+              cursor TEXT, PRIMARY KEY(owner_user_id,dataset_id,note_id),
+              FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE task_projection_drifts_v60(
+              owner_user_id TEXT NOT NULL, dataset_id TEXT NOT NULL, id TEXT NOT NULL,
+              note_id TEXT NOT NULL, task_id TEXT NOT NULL,
+              marker_base_revision INTEGER NOT NULL
+                CHECK(typeof(marker_base_revision)='integer' AND marker_base_revision>=1),
+              marker_base_hash TEXT NOT NULL, note_head_cursor INTEGER, note_head_hash TEXT,
+              task_head_cursor INTEGER, task_head_hash TEXT,
+              reason_code TEXT NOT NULL CHECK(reason_code IN
+                ('missing_marker_base','malformed_marker','duplicate_marker','marker_scope_mismatch',
+                 'base_unavailable','both_changed','ambiguous_legacy_match','unsupported_markdown')),
+              status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','resolved','dismissed')),
+              created_at TEXT NOT NULL, updated_at TEXT NOT NULL, resolved_at TEXT,
+              PRIMARY KEY(owner_user_id,dataset_id,id),
+              FOREIGN KEY(owner_user_id,dataset_id,task_id)
+                REFERENCES note_tasks_v60(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE,
+              FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE note_task_scope_authority_v60(
+              owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+              dataset_id TEXT NOT NULL CHECK(
+                length(trim(dataset_id)) > 0
+                AND dataset_id=trim(dataset_id)
+                AND dataset_id<>'local-unbound'),
+              PRIMARY KEY(owner_user_id)
+            )
+            """,
+        )
+
+    def _create_note_task_schema_v60_sqlite(self, conn: sqlite3.Connection) -> None:
+        for statement in self._note_task_v60_sqlite_ddl():
+            conn.execute(statement)
+
+    @staticmethod
+    def _create_note_task_indexes_v60_sqlite(conn: sqlite3.Connection) -> None:
+        statements = (
+            "CREATE INDEX idx_note_tasks_scope_note_page ON note_tasks(owner_user_id,dataset_id,note_id,deleted,created_at,id)",
+            "CREATE INDEX idx_note_tasks_scope_status_page ON note_tasks(owner_user_id,dataset_id,deleted,status,updated_at,id)",
+            "CREATE INDEX idx_note_tasks_scope_projection ON note_tasks(owner_user_id,dataset_id,projection_status,deleted,id)",
+            "CREATE INDEX idx_task_projections_scope_note ON task_note_projections(owner_user_id,dataset_id,note_id,note_version,task_id)",
+            "CREATE INDEX idx_task_projections_scope_status ON task_note_projections(owner_user_id,dataset_id,projection_status,updated_at,task_id)",
+            "CREATE INDEX idx_task_events_scope_task_page ON task_events(owner_user_id,dataset_id,task_id,sync_server_cursor,id)",
+            "CREATE INDEX idx_task_events_scope_note_page ON task_events(owner_user_id,dataset_id,note_id,sync_server_cursor,id)",
+            "CREATE INDEX idx_task_events_scope_cursor ON task_events(owner_user_id,dataset_id,sync_server_cursor,id)",
+            "CREATE INDEX idx_task_events_scope_task_created ON task_events(owner_user_id,dataset_id,task_id,created_at)",
+            "CREATE INDEX idx_task_events_scope_note_created ON task_events(owner_user_id,dataset_id,note_id,created_at)",
+            "CREATE INDEX idx_task_events_scope_created ON task_events(owner_user_id,dataset_id,created_at,id)",
+            "CREATE INDEX idx_task_event_read_scope_user ON task_event_read_state(owner_user_id,dataset_id,user_id,read_at,dismissed_at,event_id)",
+            "CREATE INDEX idx_task_reconciliation_scope_status ON note_task_reconciliation_state(owner_user_id,dataset_id,status,reconciled_at,note_id)",
+            "CREATE INDEX idx_task_projection_drifts_scope_status ON task_projection_drifts(owner_user_id,dataset_id,status,updated_at,id)",
+            "CREATE INDEX idx_task_projection_drifts_scope_task ON task_projection_drifts(owner_user_id,dataset_id,task_id,status,id)",
+        )
+        for statement in statements:
+            conn.execute(statement)
+
+    def _copy_note_task_graph_v60_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Copy every v59 row into an owner-proven local-unbound scope."""
+        dataset_id = self._LOCAL_UNBOUND_TASK_DATASET_ID
+        task_rows = [dict(row) for row in conn.execute("SELECT * FROM note_tasks ORDER BY id")]
+        task_owners: dict[str, tuple[str, str]] = {}
+        for row in task_rows:
+            note = conn.execute("SELECT client_id FROM notes WHERE id=?", (row["note_id"],)).fetchone()
+            owner = str(note[0]).strip() if note is not None else ""
+            if not owner:
+                raise SchemaError("Notes task v60 migration could not prove a task owner.")  # noqa: TRY003
+            canonical_hash, diagnostic_code, diagnostic_hash = self._canonicalize_legacy_task_v60(
+                row, owner_user_id=owner
+            )
+            task_owners[str(row["id"])] = (owner, str(row["note_id"]))
+            conn.execute(
+                """
+                INSERT INTO note_tasks_v60(
+                  owner_user_id,dataset_id,id,note_id,text,status,metadata_json,projection_status,
+                  deleted,created_at,updated_at,completed_at,client_id,version,canonical_revision,
+                  canonical_hash,source_diagnostic_code,source_diagnostic_hash
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    owner, dataset_id, row["id"], row["note_id"], row["text"], row["status"],
+                    row["metadata_json"], row["projection_status"], row["deleted"], row["created_at"],
+                    row["updated_at"], row["completed_at"], row["client_id"], row["version"],
+                    row["version"], canonical_hash, diagnostic_code, diagnostic_hash,
+                ),
+            )
+
+        projection_rows = [dict(row) for row in conn.execute(
+            "SELECT * FROM task_note_projections ORDER BY task_id"
+        )]
+        for row in projection_rows:
+            scope = task_owners.get(str(row["task_id"]))
+            if scope is None or scope[1] != str(row["note_id"]):
+                raise SchemaError("Notes task v60 migration could not prove projection parents.")  # noqa: TRY003
+            conn.execute(
+                "INSERT INTO task_note_projections_v60 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (scope[0], dataset_id, *tuple(row.values())),
+            )
+
+        event_rows = [dict(row) for row in conn.execute("SELECT * FROM task_events ORDER BY id")]
+        migrated_event_rows: list[dict[str, Any]] = []
+        event_owners: dict[str, str] = {}
+        for row in event_rows:
+            task_scope = task_owners.get(str(row["task_id"])) if row["task_id"] is not None else None
+            derived_note_id = str(row["note_id"]) if row["note_id"] is not None else (
+                task_scope[1] if task_scope is not None else None
+            )
+            note_row = (
+                conn.execute("SELECT client_id FROM notes WHERE id=?", (derived_note_id,)).fetchone()
+                if derived_note_id is not None else None
+            )
+            note_owner = str(note_row[0]).strip() if note_row is not None else None
+            event_owner = task_scope[0] if task_scope is not None else note_owner
+            if not event_owner or not derived_note_id or note_owner != event_owner:
+                raise SchemaError("Notes task v60 migration could not prove event parents.")  # noqa: TRY003
+            if task_scope is not None and task_scope[1] != derived_note_id:
+                raise SchemaError("Notes task v60 migration found mismatched event parents.")  # noqa: TRY003
+            source_hash = self._note_task_v60_hash({"source": row, "version": 1})
+            event_owners[str(row["id"])] = event_owner
+            migrated_row = {**row, "note_id": derived_note_id}
+            migrated_event_rows.append(migrated_row)
+            conn.execute(
+                "INSERT INTO task_events_v60 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    event_owner, dataset_id, *tuple(migrated_row.values()), 1, source_hash, None, None,
+                    row["created_at"], "trusted_bootstrap_v1", None, 0, None, None,
+                    "legacy_task_activity_unverified", source_hash,
+                ),
+            )
+
+        read_rows = [dict(row) for row in conn.execute(
+            "SELECT * FROM task_event_read_state ORDER BY event_id,user_id"
+        )]
+        for row in read_rows:
+            read_owner = event_owners.get(str(row["event_id"]))
+            if read_owner is None or str(row["user_id"]) != read_owner:
+                raise SchemaError("Notes task v60 migration could not prove read-state ownership.")  # noqa: TRY003
+            conn.execute(
+                "INSERT INTO task_event_read_state_v60 VALUES (?,?,?,?,?,?)",
+                (read_owner, dataset_id, *tuple(row.values())),
+            )
+
+        reconciliation_rows = [dict(row) for row in conn.execute(
+            "SELECT * FROM note_task_reconciliation_state ORDER BY note_id"
+        )]
+        for row in reconciliation_rows:
+            note = conn.execute("SELECT client_id FROM notes WHERE id=?", (row["note_id"],)).fetchone()
+            reconciliation_owner = str(note[0]).strip() if note is not None else ""
+            if not reconciliation_owner:
+                raise SchemaError("Notes task v60 migration could not prove reconciliation ownership.")  # noqa: TRY003
+            conn.execute(
+                "INSERT INTO note_task_reconciliation_state_v60 VALUES (?,?,?,?,?,?,?,?,?)",
+                (reconciliation_owner, dataset_id, *tuple(row.values())),
+            )
+
+        source_sets = {
+            "note_tasks": task_rows, "task_note_projections": projection_rows,
+            "task_events": migrated_event_rows, "task_event_read_state": read_rows,
+            "note_task_reconciliation_state": reconciliation_rows,
+        }
+        ordering = {
+            "note_tasks": "id", "task_note_projections": "task_id", "task_events": "id",
+            "task_event_read_state": "event_id,user_id", "note_task_reconciliation_state": "note_id",
+        }
+        for table, source_rows in source_sets.items():
+            columns = tuple(source_rows[0]) if source_rows else tuple(
+                str(column[1]) for column in conn.execute(f"PRAGMA table_info({table})")
+            )
+            target_rows = [dict(row) for row in conn.execute(
+                f"SELECT {','.join(columns)} FROM {table}_v60 ORDER BY {ordering[table]}"  # nosec B608
+            )]
+            if len(source_rows) != len(target_rows) or self._note_task_v60_hash(source_rows) != self._note_task_v60_hash(target_rows):
+                raise SchemaError(f"Notes task v60 source verification failed for {table}.")  # noqa: TRY003
+
+    @staticmethod
+    def _normalize_sqlite_catalog_sql(sql: str | None) -> str | None:
+        return " ".join(sql.split()).lower() if sql is not None else None
+
+    def _note_task_catalog_snapshot_sqlite(self, conn: sqlite3.Connection) -> dict[str, Any]:
+        tables = self._NOTE_TASK_V60_RELATIONS
+        placeholders = ",".join("?" for _ in tables)
+        table_sql = {
+            str(row[0]): self._normalize_sqlite_catalog_sql(row[1])
+            for row in conn.execute(
+                f"SELECT name,sql FROM sqlite_master WHERE type='table' "  # nosec B608
+                f"AND name IN ({placeholders}) ORDER BY name",
+                tables,
+            )
+        }
+        explicit_index_sql = {
+            str(row[0]): (str(row[1]), self._normalize_sqlite_catalog_sql(row[2]))
+            for row in conn.execute(
+                f"SELECT name,tbl_name,sql FROM sqlite_master WHERE type='index' "  # nosec B608
+                f"AND tbl_name IN ({placeholders}) AND sql IS NOT NULL ORDER BY name",
+                tables,
+            )
+        }
+        table_details: dict[str, Any] = {}
+        for table in tables:
+            index_rows = [tuple(row) for row in conn.execute(f"PRAGMA index_list({table})")]  # nosec B608
+            table_details[table] = {
+                "xinfo": [tuple(row) for row in conn.execute(f"PRAGMA table_xinfo({table})")],  # nosec B608
+                "foreign_keys": [tuple(row) for row in conn.execute(f"PRAGMA foreign_key_list({table})")],  # nosec B608
+                "indexes": [
+                    (index_row, [tuple(row) for row in conn.execute(
+                        f"PRAGMA index_xinfo({index_row[1]})"  # nosec B608
+                    )])
+                    for index_row in index_rows
+                ],
+            }
+        note_index = conn.execute(
+            "SELECT tbl_name,sql FROM sqlite_master WHERE type='index' AND name='uq_notes_owner_id'"
+        ).fetchone()
+        related_objects = {
+            str(row[1]): (
+                str(row[0]),
+                str(row[2]),
+                self._normalize_sqlite_catalog_sql(row[3]),
+            )
+            for row in conn.execute(
+                "SELECT type,name,tbl_name,sql FROM sqlite_master "
+                "WHERE type IN ('trigger','view') ORDER BY type,name"
+            )
+            if str(row[2]) in tables
+            or any(
+                re.search(rf"\b{re.escape(table)}\b", str(row[3]), re.IGNORECASE)
+                for table in tables
+            )
+        }
+        return {
+            "table_sql": table_sql,
+            "explicit_index_sql": explicit_index_sql,
+            "table_details": table_details,
+            "related_objects": related_objects,
+            "note_index": None if note_index is None else (
+                str(note_index[0]),
+                self._normalize_sqlite_catalog_sql(note_index[1]),
+                [str(row[2]) for row in conn.execute("PRAGMA index_info(uq_notes_owner_id)")],
+            ),
+        }
+
+    def _expected_note_task_catalog_sqlite(self) -> dict[str, Any]:
+        expected = sqlite3.connect(":memory:")
+        try:
+            expected.execute("PRAGMA foreign_keys=ON")
+            expected.execute("CREATE TABLE notes(id TEXT PRIMARY KEY, client_id TEXT NOT NULL)")
+            self._create_note_task_schema_v60_sqlite(expected)
+            for table in self._NOTE_TASK_V60_RELATIONS:
+                expected.execute(f"ALTER TABLE {table}_v60 RENAME TO {table}")  # nosec B608
+            self._create_note_task_indexes_v60_sqlite(expected)
+            return self._note_task_catalog_snapshot_sqlite(expected)
+        finally:
+            expected.close()
+
+    def _note_task_v59_catalog_snapshot_sqlite(
+        self, conn: sqlite3.Connection
+    ) -> dict[str, Any]:
+        """Return the exact legacy task catalog consumed by the v60 migration."""
+        tables = self._NOTE_TASK_V60_TABLES[:-1]
+        placeholders = ",".join("?" for _ in tables)
+        table_sql = {
+            str(row[0]): self._normalize_sqlite_catalog_sql(row[1])
+            for row in conn.execute(
+                f"SELECT name,sql FROM sqlite_master WHERE type='table' "  # nosec B608
+                f"AND name IN ({placeholders}) ORDER BY name",
+                tables,
+            )
+        }
+        explicit_index_sql = {
+            str(row[0]): (str(row[1]), self._normalize_sqlite_catalog_sql(row[2]))
+            for row in conn.execute(
+                f"SELECT name,tbl_name,sql FROM sqlite_master WHERE type='index' "  # nosec B608
+                f"AND tbl_name IN ({placeholders}) AND sql IS NOT NULL ORDER BY name",
+                tables,
+            )
+        }
+        table_details: dict[str, Any] = {}
+        for table in tables:
+            index_rows = [
+                tuple(row) for row in conn.execute(f"PRAGMA index_list({table})")  # nosec B608
+            ]
+            table_details[table] = {
+                "xinfo": [
+                    tuple(row) for row in conn.execute(f"PRAGMA table_xinfo({table})")  # nosec B608
+                ],
+                "foreign_keys": [
+                    tuple(row) for row in conn.execute(f"PRAGMA foreign_key_list({table})")  # nosec B608
+                ],
+                "indexes": [
+                    (
+                        index_row,
+                        [
+                            tuple(row)
+                            for row in conn.execute(
+                                f"PRAGMA index_xinfo({index_row[1]})"  # nosec B608
+                            )
+                        ],
+                    )
+                    for index_row in index_rows
+                ],
+            }
+        related_objects = {
+            str(row[1]): (
+                str(row[0]),
+                str(row[2]),
+                self._normalize_sqlite_catalog_sql(row[3]),
+            )
+            for row in conn.execute(
+                "SELECT type,name,tbl_name,sql FROM sqlite_master "
+                "WHERE type IN ('table','trigger','view') ORDER BY type,name"
+            )
+            if not (str(row[0]) == "table" and str(row[1]) in tables)
+            and (
+                str(row[2]) in tables
+                or any(
+                    re.search(rf"\b{re.escape(table)}\b", str(row[3]), re.IGNORECASE)
+                    for table in tables
+                )
+            )
+        }
+        return {
+            "table_sql": table_sql,
+            "explicit_index_sql": explicit_index_sql,
+            "table_details": table_details,
+            "related_objects": related_objects,
+        }
+
+    def _expected_note_task_v59_catalog_sqlite(self) -> dict[str, Any]:
+        expected = sqlite3.connect(":memory:")
+        try:
+            expected.execute("PRAGMA foreign_keys=ON")
+            expected.execute("CREATE TABLE notes(id TEXT PRIMARY KEY)")
+            expected.execute(
+                "CREATE TABLE db_schema_version(schema_name TEXT PRIMARY KEY, version INTEGER)"
+            )
+            expected.execute(
+                "INSERT INTO db_schema_version(schema_name,version) VALUES (?,47)",
+                (self._SCHEMA_NAME,),
+            )
+            expected.executescript(self._MIGRATION_SQL_V47_TO_V48)
+            return self._note_task_v59_catalog_snapshot_sqlite(expected)
+        finally:
+            expected.close()
+
+    def _verify_note_task_v59_catalog_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Reject legacy task catalog drift before creating any v60 relation."""
+        if self._note_task_v59_catalog_snapshot_sqlite(
+            conn
+        ) != self._expected_note_task_v59_catalog_sqlite():
+            raise SchemaError("Notes task v59 SQLite source catalog drifted.")  # noqa: TRY003
+
+    def _verify_note_task_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Reject any current-v60 SQLite task catalog drift instead of repairing it."""
+        expected = self._expected_note_task_catalog_sqlite()
+        actual = self._note_task_catalog_snapshot_sqlite(conn)
+        if (
+            actual["table_sql"] != expected["table_sql"]
+            or set(actual["table_details"]) != set(expected["table_details"])
+            or any(
+                actual["table_details"][table][key] != expected["table_details"][table][key]
+                for table in self._NOTE_TASK_V60_RELATIONS
+                for key in ("xinfo", "foreign_keys")
+            )
+        ):
+            raise SchemaError("Notes task v60 SQLite table catalog drifted.")  # noqa: TRY003
+        if (
+            actual["explicit_index_sql"] != expected["explicit_index_sql"]
+            or actual["note_index"] != expected["note_index"]
+            or any(
+                actual["table_details"][table]["indexes"]
+                != expected["table_details"][table]["indexes"]
+                for table in self._NOTE_TASK_V60_RELATIONS
+            )
+        ):
+            raise SchemaError("Notes task v60 SQLite index catalog drifted.")  # noqa: TRY003
+        if actual["related_objects"] != expected["related_objects"]:
+            raise SchemaError("Notes task v60 SQLite related catalog drifted.")  # noqa: TRY003
+        if conn.execute("PRAGMA foreign_key_check").fetchall():
+            raise SchemaError("Notes task v60 SQLite foreign-key catalog is invalid.")  # noqa: TRY003
+
+    def _migrate_from_v59_to_v60_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Transactionally replace the legacy task graph with scoped v60 tables."""
+        if self._get_db_version(conn) != 59:
+            raise SchemaError("Notes task v60 migration requires exact schema version 59.")  # noqa: TRY003
+        source_tables = set(self._NOTE_TASK_V60_TABLES[:-1])
+        tables = self._sqlite_table_names(conn)
+        if not source_tables.issubset(tables):
+            raise SchemaError("Notes task v60 migration source catalog is incomplete.")  # noqa: TRY003
+        self._verify_note_task_v59_catalog_sqlite(conn)
+        targets = {f"{table}_v60" for table in self._NOTE_TASK_V60_RELATIONS}
+        if (
+            "task_projection_drifts" in tables
+            or self._NOTE_TASK_SCOPE_AUTHORITY_TABLE in tables
+            or tables.intersection(targets)
+        ):
+            raise SchemaError("Notes task v60 target-table collision requires explicit repair.")  # noqa: TRY003
+        self._create_note_task_schema_v60_sqlite(conn)
+        self._note_task_v60_migration_checkpoint("create")
+        self._copy_note_task_graph_v60_sqlite(conn)
+        self._note_task_v60_migration_checkpoint("copy")
+        for table in ("task_event_read_state","task_note_projections","note_task_reconciliation_state",
+                      "task_events","note_tasks"):
+            conn.execute(f"DROP TABLE {table}")  # nosec B608 - fixed relation names.
+        for table in self._NOTE_TASK_V60_RELATIONS:
+            conn.execute(f"ALTER TABLE {table}_v60 RENAME TO {table}")  # nosec B608
+        self._create_note_task_indexes_v60_sqlite(conn)
+        self._note_task_v60_migration_checkpoint("index")
+        self._verify_note_task_schema_sqlite(conn)
+        self._note_task_v60_migration_checkpoint("verify")
+        cursor = conn.execute(
+            "UPDATE db_schema_version SET version=60 WHERE schema_name=? AND version=59",
+            (self._SCHEMA_NAME,),
+        )
+        if cursor.rowcount != 1 or self._get_db_version(conn) != 60:
+            raise SchemaError("Notes task v60 migration failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v60_to_v61_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add recipient-owned shared workspace chat threads and receipts."""
+        if self._get_db_version(conn) != 60:
+            raise SchemaError("Shared workspace chat v61 migration requires schema version 60.")  # noqa: TRY003
+        try:
+            conn.executescript(self._MIGRATION_SQL_V60_TO_V61)
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Shared workspace chat v61 SQLite migration failed: {exc}") from exc
+        if self._get_db_version(conn) != 61:
+            raise SchemaError("Shared workspace chat v61 SQLite version verification failed.")  # noqa: TRY003
+
+    def _migrate_from_v61_to_v62_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add operation-fenced staged Workspace clone lifecycle markers."""
+        if self._get_db_version(conn) != 61:
+            raise SchemaError("Workspace clone lifecycle v62 migration requires schema version 61.")  # noqa: TRY003
+        savepoint = "workspace_clone_v62_migration"
+        savepoint_active = False
+        try:
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = True
+            for statement in split_sql_statements(self._MIGRATION_SQL_V61_TO_V62):
+                conn.execute(statement)
+            cursor = conn.execute(
+                "UPDATE db_schema_version SET version = ? WHERE schema_name = ? AND version = ?",
+                (62, self._SCHEMA_NAME, 61),
+            )
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 62:
+                raise SchemaError("Workspace clone lifecycle v62 SQLite version transition failed.")  # noqa: TRY003
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = False
+        except (SchemaError, sqlite3.Error) as exc:
+            if savepoint_active:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+                except sqlite3.Error as rollback_exc:
+                    raise SchemaError(  # noqa: TRY003
+                        "Workspace clone lifecycle v62 SQLite migration rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError(f"Workspace clone lifecycle v62 SQLite migration failed: {exc}") from exc
+
+    @staticmethod
+    def _notes_moodboard_studio_v61_migration_checkpoint(_stage: str) -> None:
+        """Fault-injection seam for the fixed transactional SQLite v61 migration."""
+
+    @staticmethod
+    def _notes_moodboard_studio_v61_sqlite_ddl() -> tuple[str, ...]:
+        """Return the fixed scoped product and sole-authority SQLite schema."""
+        return (
+            """
+            CREATE TABLE note_task_scope_authority_v61(
+              owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+              dataset_id TEXT NOT NULL CHECK(
+                length(trim(dataset_id)) > 0
+                AND dataset_id=trim(dataset_id)
+                AND dataset_id<>'local-unbound'),
+              task_graph_bound INTEGER NOT NULL DEFAULT 1
+                CHECK(typeof(task_graph_bound)='integer' AND task_graph_bound IN (0,1)),
+              moodboard_graph_bound INTEGER NOT NULL DEFAULT 0
+                CHECK(typeof(moodboard_graph_bound)='integer' AND moodboard_graph_bound IN (0,1)),
+              studio_graph_bound INTEGER NOT NULL DEFAULT 0
+                CHECK(typeof(studio_graph_bound)='integer' AND studio_graph_bound IN (0,1)),
+              PRIMARY KEY(owner_user_id)
+            )
+            """,
+            """
+            CREATE TABLE moodboards_v61(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+              dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+              sync_id TEXT NOT NULL CHECK(
+                sync_id GLOB
+                '[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f]-4[0-9a-f][0-9a-f][0-9a-f]-[89ab][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]'),
+              name TEXT NOT NULL CHECK(length(name) > 0),
+              description TEXT,
+              smart_rule_json TEXT,
+              canvas_json TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              last_modified TEXT NOT NULL,
+              deleted INTEGER NOT NULL DEFAULT 0
+                CHECK(typeof(deleted)='integer' AND deleted IN (0,1)),
+              client_id TEXT NOT NULL,
+              version INTEGER NOT NULL DEFAULT 1
+                CHECK(typeof(version)='integer' AND version>=1),
+              canonical_revision INTEGER NOT NULL DEFAULT 1
+                CHECK(typeof(canonical_revision)='integer' AND canonical_revision>=1),
+              canonical_hash TEXT NOT NULL CHECK(
+                length(canonical_hash)=71 AND substr(canonical_hash,1,7)='sha256:'
+                AND substr(canonical_hash,8) NOT GLOB '*[^0-9a-f]*'),
+              source_diagnostic_code TEXT CHECK(
+                source_diagnostic_code IS NULL OR length(source_diagnostic_code) BETWEEN 1 AND 64),
+              source_diagnostic_hash TEXT CHECK(source_diagnostic_hash IS NULL OR (
+                length(source_diagnostic_hash)=71 AND substr(source_diagnostic_hash,1,7)='sha256:'
+                AND substr(source_diagnostic_hash,8) NOT GLOB '*[^0-9a-f]*')),
+              UNIQUE(owner_user_id,dataset_id,id),
+              UNIQUE(owner_user_id,dataset_id,sync_id)
+            )
+            """,
+            """
+            CREATE TABLE moodboard_notes_v61(
+              owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+              dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+              moodboard_id INTEGER NOT NULL,
+              note_id TEXT NOT NULL CHECK(length(trim(note_id)) > 0),
+              placement_id TEXT NOT NULL CHECK(
+                length(placement_id)=92
+                AND substr(placement_id,1,28)='notes.moodboard_note:sha256:'
+                AND substr(placement_id,29) NOT GLOB '*[^0-9a-f]*'),
+              x INTEGER NOT NULL DEFAULT 0 CHECK(typeof(x)='integer'),
+              y INTEGER NOT NULL DEFAULT 0 CHECK(typeof(y)='integer'),
+              width INTEGER NOT NULL DEFAULT 320
+                CHECK(typeof(width)='integer' AND width BETWEEN 1 AND 1000000),
+              height INTEGER NOT NULL DEFAULT 220
+                CHECK(typeof(height)='integer' AND height BETWEEN 1 AND 1000000),
+              order_index INTEGER NOT NULL DEFAULT 0 CHECK(typeof(order_index)='integer'),
+              display_json TEXT NOT NULL DEFAULT '{}',
+              created_at TEXT NOT NULL,
+              last_modified TEXT NOT NULL,
+              deleted INTEGER NOT NULL DEFAULT 0
+                CHECK(typeof(deleted)='integer' AND deleted IN (0,1)),
+              version INTEGER NOT NULL DEFAULT 1
+                CHECK(typeof(version)='integer' AND version>=1),
+              canonical_revision INTEGER NOT NULL DEFAULT 1
+                CHECK(typeof(canonical_revision)='integer' AND canonical_revision>=1),
+              canonical_hash TEXT NOT NULL CHECK(
+                length(canonical_hash)=71 AND substr(canonical_hash,1,7)='sha256:'
+                AND substr(canonical_hash,8) NOT GLOB '*[^0-9a-f]*'),
+              source_diagnostic_code TEXT CHECK(
+                source_diagnostic_code IS NULL OR length(source_diagnostic_code) BETWEEN 1 AND 64),
+              source_diagnostic_hash TEXT CHECK(source_diagnostic_hash IS NULL OR (
+                length(source_diagnostic_hash)=71 AND substr(source_diagnostic_hash,1,7)='sha256:'
+                AND substr(source_diagnostic_hash,8) NOT GLOB '*[^0-9a-f]*')),
+              PRIMARY KEY(owner_user_id,dataset_id,moodboard_id,note_id),
+              UNIQUE(owner_user_id,dataset_id,placement_id),
+              FOREIGN KEY(owner_user_id,dataset_id,moodboard_id)
+                REFERENCES moodboards_v61(owner_user_id,dataset_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE,
+              FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TABLE note_studio_documents_v61(
+              owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+              dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+              note_id TEXT NOT NULL CHECK(length(trim(note_id)) > 0),
+              payload_json TEXT NOT NULL,
+              template_type TEXT NOT NULL CHECK(template_type IN ('lined','grid','cornell')),
+              handwriting_mode TEXT NOT NULL CHECK(handwriting_mode IN ('off','accented')),
+              source_note_id TEXT,
+              excerpt_snapshot TEXT,
+              excerpt_hash TEXT,
+              diagram_manifest_json TEXT,
+              companion_content_hash TEXT,
+              render_version INTEGER NOT NULL DEFAULT 1
+                CHECK(typeof(render_version)='integer' AND render_version>=1),
+              note_revision INTEGER NOT NULL DEFAULT 1
+                CHECK(typeof(note_revision)='integer' AND note_revision>=1),
+              note_hash TEXT NOT NULL CHECK(
+                length(note_hash)=71 AND substr(note_hash,1,7)='sha256:'
+                AND substr(note_hash,8) NOT GLOB '*[^0-9a-f]*'),
+              accepted_provenance_json TEXT NOT NULL,
+              created_at TEXT NOT NULL,
+              last_modified TEXT NOT NULL,
+              deleted INTEGER NOT NULL DEFAULT 0
+                CHECK(typeof(deleted)='integer' AND deleted IN (0,1)),
+              version INTEGER NOT NULL DEFAULT 1
+                CHECK(typeof(version)='integer' AND version>=1),
+              canonical_revision INTEGER NOT NULL DEFAULT 1
+                CHECK(typeof(canonical_revision)='integer' AND canonical_revision>=1),
+              canonical_hash TEXT NOT NULL CHECK(
+                length(canonical_hash)=71 AND substr(canonical_hash,1,7)='sha256:'
+                AND substr(canonical_hash,8) NOT GLOB '*[^0-9a-f]*'),
+              source_diagnostic_code TEXT CHECK(
+                source_diagnostic_code IS NULL OR length(source_diagnostic_code) BETWEEN 1 AND 64),
+              source_diagnostic_hash TEXT CHECK(source_diagnostic_hash IS NULL OR (
+                length(source_diagnostic_hash)=71 AND substr(source_diagnostic_hash,1,7)='sha256:'
+                AND substr(source_diagnostic_hash,8) NOT GLOB '*[^0-9a-f]*')),
+              PRIMARY KEY(owner_user_id,dataset_id,note_id),
+              FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id)
+                ON UPDATE CASCADE ON DELETE CASCADE
+            )
+            """,
+        )
+
+    def _create_notes_moodboard_studio_schema_v61_sqlite(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        for statement in self._notes_moodboard_studio_v61_sqlite_ddl():
+            conn.execute(statement)
+
+    @staticmethod
+    def _create_notes_moodboard_studio_indexes_v61_sqlite(
+        conn: sqlite3.Connection,
+    ) -> None:
+        statements = (
+            "CREATE INDEX idx_moodboards_scope_page ON moodboards(owner_user_id,dataset_id,deleted,last_modified,id)",
+            "CREATE INDEX idx_moodboards_scope_sync_id ON moodboards(owner_user_id,dataset_id,sync_id)",
+            "CREATE INDEX idx_moodboard_notes_scope_board_page ON moodboard_notes(owner_user_id,dataset_id,moodboard_id,deleted,order_index,placement_id)",
+            "CREATE INDEX idx_moodboard_notes_scope_note ON moodboard_notes(owner_user_id,dataset_id,note_id,deleted,moodboard_id)",
+            "CREATE INDEX idx_moodboard_notes_scope_placement ON moodboard_notes(owner_user_id,dataset_id,placement_id)",
+            "CREATE INDEX idx_note_studio_documents_scope_page ON note_studio_documents(owner_user_id,dataset_id,deleted,last_modified,note_id)",
+            "CREATE INDEX idx_note_studio_documents_scope_note ON note_studio_documents(owner_user_id,dataset_id,note_id)",
+            "CREATE INDEX idx_note_studio_documents_scope_source ON note_studio_documents(owner_user_id,dataset_id,source_note_id)",
+        )
+        for statement in statements:
+            conn.execute(statement)
+
+    @staticmethod
+    def _canonical_json_text_v61(value: object) -> str:
+        return canonical_moodboard_studio_json_bytes(value).decode("utf-8")
+
+    @staticmethod
+    def _legacy_sync_timestamp_v61(value: object) -> str:
+        text = str(value or "").strip()
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise SchemaError("Notes moodboard/Studio v61 migration found an invalid timestamp.") from exc  # noqa: TRY003
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        utc = parsed.astimezone(timezone.utc)
+        normalized = utc.isoformat(timespec="microseconds").replace("+00:00", "Z")
+        return normalized.replace(".000000Z", "Z")
+
+    @staticmethod
+    def _notes_studio_envelope_size_v61(
+        payload: Mapping[str, Any],
+        *,
+        revision: int,
+        deleted: bool,
+        canonical_hash: str,
+    ) -> int:
+        return len(
+            canonical_moodboard_studio_json_bytes(
+                {
+                    "domain": "notes.studio_document",
+                    "schema_version": 1,
+                    "operation": "tombstone" if deleted else "upsert",
+                    "object_id": payload["note_id"],
+                    "parent_id": payload["note_id"],
+                    "object_revision": revision,
+                    "payload_hash": canonical_hash,
+                    "payload": payload,
+                }
+            )
+        )
+
+    def _legacy_note_hash_v61(self, note: Mapping[str, Any]) -> str:
+        payload = validate_notes_note_upsert_payload(
+            {
+                "title": note.get("title"),
+                "content": note.get("content"),
+                "conversation_id": note.get("conversation_id"),
+                "message_id": note.get("message_id"),
+            }
+        )
+        encoded = json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), default=str
+        ).encode("utf-8")
+        return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+    def _prove_moodboard_collection_sync_ids_v61(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        *,
+        owner_user_id: str,
+        collection_sync_ids: Iterable[str],
+    ) -> None:
+        """Require each portable collection identity to resolve once for its owner."""
+        requested = sorted({str(value).strip() for value in collection_sync_ids})
+        if not requested:
+            return
+        resolved: dict[str, list[str]] = {sync_id: [] for sync_id in requested}
+        for offset in range(0, len(requested), 400):
+            batch = requested[offset : offset + 400]
+            placeholders = ",".join("?" for _ in batch)
+            query, params = self._prepare_backend_statement(
+                "SELECT sync_id,client_id FROM keyword_collections "
+                f"WHERE sync_id IN ({placeholders})",  # nosec B608 - placeholders only.
+                tuple(batch),
+            )
+            for row in conn.execute(query, params or ()).fetchall():
+                sync_id = str(row["sync_id"]).strip()
+                if sync_id in resolved:
+                    resolved[sync_id].append(str(row["client_id"]).strip())
+        for owners in resolved.values():
+            if owners != [owner_user_id]:
+                raise ValueError(
+                    "moodboard portable collection identity is unavailable"
+                )
+
+    def _legacy_moodboard_rule_v61(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        raw_value: object,
+        *,
+        owner_user_id: str,
+    ) -> tuple[dict[str, Any] | None, str | None, str | None]:
+        if raw_value is None:
+            return None, None, None
+        source = raw_value
+        try:
+            parsed = json.loads(str(raw_value)) if isinstance(raw_value, str) else raw_value
+            if not isinstance(parsed, Mapping):
+                raise ValueError("legacy moodboard smart rule is not an object")
+            allowed = {
+                "query", "keyword_tokens", "collection_ids", "notebook_collection_ids",
+                "collection_sync_ids", "sources", "updated", "updated_after", "updated_before",
+            }
+            if set(parsed) - allowed:
+                raise ValueError("legacy moodboard smart rule has unknown fields")
+            collection_sync_ids = list(parsed.get("collection_sync_ids") or [])
+            self._prove_moodboard_collection_sync_ids_v61(
+                conn,
+                owner_user_id=owner_user_id,
+                collection_sync_ids=collection_sync_ids,
+            )
+            legacy_collection_ids = list(parsed.get("collection_ids") or [])
+            legacy_collection_ids.extend(parsed.get("notebook_collection_ids") or [])
+            for collection_id in legacy_collection_ids:
+                rows = conn.execute(
+                    "SELECT sync_id FROM keyword_collections WHERE id=? AND client_id=?",
+                    (collection_id, owner_user_id),
+                ).fetchall()
+                if len(rows) != 1 or not str(rows[0]["sync_id"]).strip():
+                    raise ValueError("legacy moodboard collection identity is unavailable")
+                collection_sync_ids.append(str(rows[0]["sync_id"]))
+            self._prove_moodboard_collection_sync_ids_v61(
+                conn,
+                owner_user_id=owner_user_id,
+                collection_sync_ids=collection_sync_ids,
+            )
+            updated = parsed.get("updated")
+            if updated is None:
+                updated = {
+                    "after": parsed.get("updated_after"),
+                    "before": parsed.get("updated_before"),
+                }
+            canonical = {
+                "query": parsed.get("query"),
+                "keyword_tokens": list(parsed.get("keyword_tokens") or []),
+                "collection_sync_ids": collection_sync_ids,
+                "sources": list(parsed.get("sources") or []),
+                "updated": updated,
+            }
+            return canonical, None, None
+        except (LookupError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            try:
+                diagnostic = moodboard_studio_legacy_source_diagnostic(
+                    "legacy_moodboard_rule_invalid", {"smart_rule": source}
+                )
+            except NotesMoodboardStudioContractError as diagnostic_exc:
+                raise SchemaError(
+                    "Notes moodboard v61 migration found oversized canonical state."
+                ) from diagnostic_exc
+            logger.warning("Legacy moodboard smart rule blocked canonical readiness: {}", type(exc).__name__)
+            return None, diagnostic["code"], diagnostic["source_hash"]
+
+    def _validate_notes_moodboard_studio_v60_source_sqlite(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        if self._get_db_version(conn) != 62:
+            raise SchemaError("Notes moodboard/Studio v63 migration requires exact schema version 62.")  # noqa: TRY003
+        self._verify_note_task_schema_sqlite(conn)
+        expected_columns = {
+            "moodboards": (
+                "id", "name", "description", "smart_rule_json", "created_at",
+                "last_modified", "deleted", "client_id", "version",
+            ),
+            "moodboard_notes": ("moodboard_id", "note_id", "created_at"),
+        }
+        for table, columns in expected_columns.items():
+            actual = tuple(str(row[1]) for row in conn.execute(f"PRAGMA table_xinfo({table})"))  # nosec B608
+            if actual != columns:
+                raise SchemaError(f"Notes moodboard v60 SQLite source catalog drifted for {table}.")  # noqa: TRY003
+        if "note_studio_documents" in self._sqlite_table_names(conn):
+            studio_columns = tuple(
+                str(row[1]) for row in conn.execute("PRAGMA table_xinfo(note_studio_documents)")
+            )
+            expected_studio = (
+                "note_id", "payload_json", "template_type", "handwriting_mode",
+                "source_note_id", "excerpt_snapshot", "excerpt_hash",
+                "diagram_manifest_json", "companion_content_hash", "render_version",
+                "created_at", "last_modified",
+            )
+            if studio_columns != expected_studio:
+                raise SchemaError("Notes Studio v60 SQLite source catalog drifted.")  # noqa: TRY003
+
+        authorities: dict[str, str] = {}
+        for authority in conn.execute(
+            "SELECT owner_user_id,dataset_id FROM note_task_scope_authority ORDER BY owner_user_id"
+        ):
+            owner = str(authority[0]).strip()
+            dataset = str(authority[1]).strip()
+            if not owner or not dataset or dataset == self._LOCAL_UNBOUND_TASK_DATASET_ID:
+                raise SchemaError("Notes v61 scope authority is malformed.")  # noqa: TRY003
+            authorities[owner] = dataset
+
+        graph_scopes: dict[str, set[str]] = {}
+        for table in self._NOTE_TASK_V60_TABLES:
+            for row in conn.execute(
+                f"SELECT DISTINCT owner_user_id,dataset_id FROM {table}"  # nosec B608 - fixed migration table names.
+            ):
+                owner = str(row[0]).strip()
+                dataset = str(row[1]).strip()
+                if not owner or not dataset:
+                    raise SchemaError("Notes task graph scope is malformed.")  # noqa: TRY003
+                graph_scopes.setdefault(owner, set()).add(dataset)
+        for owner, datasets in graph_scopes.items():
+            authority_dataset = authorities.get(owner)
+            allowed = (
+                {self._LOCAL_UNBOUND_TASK_DATASET_ID}
+                if authority_dataset is None
+                else {authority_dataset}
+            )
+            if datasets - allowed:
+                raise SchemaError(
+                    "Notes task graph does not match existing scope authority."
+                )  # noqa: TRY003
+
+    def _notes_moodboard_studio_v61_streaming_rows_sqlite(
+        self,
+        conn: sqlite3.Connection,
+        query: str,
+        params: tuple[object, ...] = (),
+        *,
+        page_size: int | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield one bounded page at a time from an ordered migration query."""
+        size = page_size or self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE
+        if size < 1:
+            raise ValueError("migration page size must be positive")
+        cursor = conn.execute(query, params)
+        while True:
+            batch = cursor.fetchmany(size)
+            if not batch:
+                return
+            for row in batch:
+                yield dict(row)
+
+    def _notes_moodboard_studio_v61_streaming_query_proof_sqlite(
+        self,
+        conn: sqlite3.Connection,
+        query: str,
+        params: tuple[object, ...] = (),
+        *,
+        page_size: int | None = None,
+    ) -> tuple[int, str]:
+        """Return a count and incremental length-framed digest for ordered rows."""
+        digest = hashlib.sha256()
+        count = 0
+        for row in self._notes_moodboard_studio_v61_streaming_rows_sqlite(
+            conn,
+            query,
+            params,
+            page_size=page_size,
+        ):
+            encoded = json.dumps(
+                self._note_task_v60_json_safe(row),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+            count += 1
+        return count, f"sha256:{digest.hexdigest()}"
+
+    def _notes_moodboard_studio_v61_data_proof_sqlite(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        target: bool,
+    ) -> dict[str, tuple[int, str]]:
+        """Capture bounded count/hash proof without exposing product content."""
+        suffix = "_v61" if target else ""
+        orderings = {
+            "note_task_scope_authority": "owner_user_id",
+            "moodboards": "id",
+            "moodboard_notes": "moodboard_id,created_at,note_id",
+            "note_studio_documents": "note_id",
+        }
+        tables = self._sqlite_table_names(conn)
+        proof: dict[str, tuple[int, str]] = {}
+        for logical_name, ordering in orderings.items():
+            table = f"{logical_name}{suffix}"
+            proof[logical_name] = (
+                self._notes_moodboard_studio_v61_streaming_query_proof_sqlite(
+                    conn,
+                    f"SELECT * FROM {table} ORDER BY {ordering}",  # nosec B608 - fixed migration tables/orderings.
+                )
+                if table in tables
+                else (0, f"sha256:{hashlib.sha256().hexdigest()}")
+            )
+        return proof
+
+    def _notes_moodboard_studio_v61_semantic_proof_sqlite(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        target: bool,
+    ) -> dict[str, tuple[int, str]]:
+        """Fingerprint source/target fields whose values must survive conversion exactly."""
+        suffix = "_v61" if target else ""
+        queries = {
+            "note_task_scope_authority": (
+                "SELECT owner_user_id,dataset_id FROM "
+                f"note_task_scope_authority{suffix} ORDER BY owner_user_id"  # nosec B608 - suffix selects a fixed migration table.
+            ),
+            "moodboards": (
+                "SELECT id,name,description,created_at,last_modified,deleted,client_id,version "
+                f"FROM moodboards{suffix} ORDER BY id"  # nosec B608 - suffix selects a fixed migration table.
+            ),
+            "moodboard_notes": (
+                "SELECT moodboard_id,note_id,created_at "
+                f"FROM moodboard_notes{suffix} ORDER BY moodboard_id,created_at,note_id"  # nosec B608 - suffix selects a fixed migration table.
+            ),
+            "note_studio_documents": (
+                "SELECT note_id,template_type,handwriting_mode,source_note_id,render_version,"
+                f"created_at,last_modified FROM note_studio_documents{suffix} ORDER BY note_id"  # nosec B608 - suffix selects a fixed migration table.
+            ),
+        }
+        tables = self._sqlite_table_names(conn)
+        proof: dict[str, tuple[int, str]] = {}
+        for logical_name, query in queries.items():
+            table = f"{logical_name}{suffix}"
+            proof[logical_name] = (
+                self._notes_moodboard_studio_v61_streaming_query_proof_sqlite(
+                    conn, query
+                )
+                if table in tables
+                else (0, f"sha256:{hashlib.sha256().hexdigest()}")
+            )
+        return proof
+
+    def _verify_notes_moodboard_studio_v61_copy_sqlite(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        source_proof: dict[str, tuple[int, str]],
+        source_semantic_proof: dict[str, tuple[int, str]],
+        target_proof: dict[str, tuple[int, str]],
+    ) -> None:
+        """Verify source stability, exact copied aggregates, and graph relationships."""
+        if self._notes_moodboard_studio_v61_data_proof_sqlite(
+            conn, target=False
+        ) != source_proof:
+            raise SchemaError("Notes v61 source changed during copy verification.")  # noqa: TRY003
+        if self._notes_moodboard_studio_v61_data_proof_sqlite(
+            conn, target=True
+        ) != target_proof:
+            raise SchemaError("Notes v61 target failed copy verification.")  # noqa: TRY003
+        for table in source_proof:
+            if source_proof[table][0] != target_proof[table][0]:
+                raise SchemaError("Notes v61 source/target count copy verification failed.")  # noqa: TRY003
+        if self._notes_moodboard_studio_v61_semantic_proof_sqlite(
+            conn, target=True
+        ) != source_semantic_proof:
+            raise SchemaError(
+                "Notes v61 source/target semantic fingerprint copy verification failed."
+            )  # noqa: TRY003
+
+        relationship_queries = [
+            (
+                "SELECT owner_user_id,dataset_id FROM note_task_scope_authority",
+                "SELECT owner_user_id,dataset_id FROM note_task_scope_authority_v61 "
+                "WHERE task_graph_bound=1 AND moodboard_graph_bound=0 "
+                "AND studio_graph_bound=0",
+            ),
+            (
+                "SELECT id,client_id FROM moodboards",
+                "SELECT id,owner_user_id FROM moodboards_v61 "
+                "WHERE dataset_id='local-unbound' AND owner_user_id=client_id",
+            ),
+            (
+                "SELECT moodboard_id,note_id FROM moodboard_notes",
+                "SELECT p.moodboard_id,p.note_id FROM moodboard_notes_v61 p "
+                "JOIN moodboards_v61 b ON b.id=p.moodboard_id "
+                "AND b.owner_user_id=p.owner_user_id AND b.dataset_id=p.dataset_id "
+                "JOIN notes n ON n.id=p.note_id AND n.client_id=p.owner_user_id "
+                "WHERE p.dataset_id='local-unbound'",
+            ),
+        ]
+        if "note_studio_documents" in self._sqlite_table_names(conn):
+            relationship_queries.append(
+                (
+                    "SELECT note_id FROM note_studio_documents",
+                    "SELECT s.note_id FROM note_studio_documents_v61 s "
+                    "JOIN notes n ON n.id=s.note_id AND n.client_id=s.owner_user_id "
+                    "WHERE s.dataset_id='local-unbound' AND s.deleted=n.deleted",
+                )
+            )
+        else:
+            relationship_queries.append(
+                (
+                    "SELECT note_id FROM note_studio_documents_v61 WHERE 0",
+                    "SELECT note_id FROM note_studio_documents_v61",
+                )
+            )
+        for source_query, target_query in relationship_queries:
+            source_only = conn.execute(
+                f"SELECT 1 FROM ({source_query} EXCEPT {target_query}) LIMIT 1"  # nosec B608 - fixed migration queries.
+            ).fetchone()
+            target_only = conn.execute(
+                f"SELECT 1 FROM ({target_query} EXCEPT {source_query}) LIMIT 1"  # nosec B608 - fixed migration queries.
+            ).fetchone()
+            if source_only is not None or target_only is not None:
+                raise SchemaError("Notes v61 relationship copy verification failed.")  # noqa: TRY003
+
+    def _copy_notes_moodboard_studio_graph_v61_sqlite(
+        self, conn: sqlite3.Connection
+    ) -> dict[str, tuple[int, str]]:
+        local = self._LOCAL_UNBOUND_TASK_DATASET_ID
+        source_counts = {
+            table: (
+                int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])  # nosec B608 - fixed migration tables.
+                if table in self._sqlite_table_names(conn)
+                else 0
+            )
+            for table in (
+                "moodboards",
+                "moodboard_notes",
+                "note_studio_documents",
+            )
+        }
+        for row in self._notes_moodboard_studio_v61_streaming_rows_sqlite(
+            conn,
+            "SELECT owner_user_id,dataset_id FROM note_task_scope_authority ORDER BY owner_user_id",
+        ):
+            conn.execute(
+                "INSERT INTO note_task_scope_authority_v61("
+                "owner_user_id,dataset_id,task_graph_bound,moodboard_graph_bound,studio_graph_bound"
+                ") VALUES (?,?,?,?,?)",
+                (row["owner_user_id"], row["dataset_id"], 1, 0, 0),
+            )
+
+        board_scopes: dict[int, tuple[str, str]] = {}
+        board_sync_ids: dict[int, str] = {}
+        seen_sync_ids: set[tuple[str, str, str]] = set()
+        for row in self._notes_moodboard_studio_v61_streaming_rows_sqlite(
+            conn,
+            "SELECT * FROM moodboards ORDER BY id",
+        ):
+            owner = str(row.get("client_id") or "").strip()
+            if not owner:
+                raise SchemaError("Notes moodboard v61 migration could not prove board ownership.")  # noqa: TRY003
+            sync_id = str(uuid.uuid4())
+            sync_key = (owner, local, sync_id)
+            if sync_key in seen_sync_ids:
+                raise SchemaError("Notes moodboard v61 migration produced duplicate portable moodboard identity.")  # noqa: TRY003
+            seen_sync_ids.add(sync_key)
+            board_id = int(row["id"])
+            board_scopes[board_id] = (owner, local)
+            board_sync_ids[board_id] = sync_id
+            raw_rule = row.get("smart_rule_json")
+            rule, diagnostic_code, diagnostic_hash = self._legacy_moodboard_rule_v61(
+                conn, raw_rule, owner_user_id=owner
+            )
+            canvas = {"layout_mode": "masonry", "metadata": {}}
+            canonical_revision = max(1, int(row.get("version") or 1))
+            normalized_rule_json = raw_rule
+            try:
+                payload = parse_notes_moodboard_v1(
+                    {
+                        "moodboard_id": sync_id,
+                        "name": row["name"],
+                        "description": row.get("description"),
+                        "smart_rule": rule,
+                        "canvas": canvas,
+                    }
+                )
+                normalized_rule_json = (
+                    None
+                    if payload.smart_rule is None
+                    else self._canonical_json_text_v61(
+                        payload.smart_rule.model_dump(mode="json")
+                    )
+                )
+                canonical_hash = notes_moodboard_object_hash(
+                    payload,
+                    revision=canonical_revision,
+                    deleted=bool(row.get("deleted")),
+                )
+            except NotesMoodboardStudioContractError:
+                if diagnostic_code is None:
+                    diagnostic = moodboard_studio_legacy_source_diagnostic(
+                        "legacy_moodboard_payload_invalid", {"moodboard": row}
+                    )
+                    diagnostic_code, diagnostic_hash = diagnostic["code"], diagnostic["source_hash"]
+                canonical_hash = self._note_task_v60_hash(
+                    {"domain": "notes.moodboard", "source": row, "sync_id": sync_id}
+                )
+            conn.execute(
+                """
+                INSERT INTO moodboards_v61(
+                  id,owner_user_id,dataset_id,sync_id,name,description,smart_rule_json,
+                  canvas_json,created_at,last_modified,deleted,client_id,version,
+                  canonical_revision,canonical_hash,source_diagnostic_code,source_diagnostic_hash
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    board_id, owner, local, sync_id, row["name"], row.get("description"),
+                    normalized_rule_json, self._canonical_json_text_v61(canvas), row["created_at"],
+                    row["last_modified"], int(bool(row["deleted"])), row["client_id"],
+                    int(row["version"]), canonical_revision, canonical_hash,
+                    diagnostic_code, diagnostic_hash,
+                ),
+            )
+
+        board_order: Counter[int] = Counter()
+        for row in self._notes_moodboard_studio_v61_streaming_rows_sqlite(
+            conn,
+            "SELECT * FROM moodboard_notes ORDER BY moodboard_id,created_at,note_id",
+        ):
+            board_id = int(row["moodboard_id"])
+            board_scope = board_scopes.get(board_id)
+            note = conn.execute(
+                "SELECT * FROM notes WHERE id=?", (row["note_id"],)
+            ).fetchone()
+            note_owner = str(note["client_id"]).strip() if note is not None else ""
+            if board_scope is None or not note_owner or board_scope[0] != note_owner:
+                raise SchemaError(
+                    "Notes moodboard v61 migration could not prove placement owner consistency."
+                )  # noqa: TRY003
+            order_index = board_order[board_id]
+            board_order[board_id] += 1
+            placement_payload_source = {
+                "moodboard_id": board_sync_ids[board_id],
+                "note_id": str(row["note_id"]),
+                "x": 0,
+                "y": 0,
+                "width": 320,
+                "height": 220,
+                "order_index": order_index,
+                "display": {},
+            }
+            diagnostic_code = diagnostic_hash = None
+            try:
+                payload = parse_notes_moodboard_note_v1(placement_payload_source)
+                placement_id = placement_object_id(payload)
+                canonical_hash = notes_moodboard_note_object_hash(
+                    payload, revision=1, deleted=False
+                )
+            except NotesMoodboardStudioContractError:
+                diagnostic = moodboard_studio_legacy_source_diagnostic(
+                    "legacy_moodboard_placement_identity_invalid", placement_payload_source
+                )
+                diagnostic_code, diagnostic_hash = diagnostic["code"], diagnostic["source_hash"]
+                digest = hashlib.sha256(
+                    canonical_moodboard_studio_json_bytes(
+                        {
+                            "domain": "notes.moodboard_note",
+                            "members": [board_sync_ids[board_id], str(row["note_id"])],
+                            "schema_version": 1,
+                        }
+                    )
+                ).hexdigest()
+                placement_id = f"notes.moodboard_note:sha256:{digest}"
+                canonical_hash = self._note_task_v60_hash(
+                    {"domain": "notes.moodboard_note", "source": placement_payload_source}
+                )
+            conn.execute(
+                """
+                INSERT INTO moodboard_notes_v61(
+                  owner_user_id,dataset_id,moodboard_id,note_id,placement_id,x,y,width,
+                  height,order_index,display_json,created_at,last_modified,deleted,version,
+                  canonical_revision,canonical_hash,source_diagnostic_code,source_diagnostic_hash
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    board_scope[0], local, board_id, row["note_id"], placement_id,
+                    0, 0, 320, 220, order_index, "{}", row["created_at"], row["created_at"],
+                    0, 1, 1, canonical_hash, diagnostic_code, diagnostic_hash,
+                ),
+            )
+
+        studio_rows: Iterable[dict[str, Any]] = ()
+        if "note_studio_documents" in self._sqlite_table_names(conn):
+            studio_rows = self._notes_moodboard_studio_v61_streaming_rows_sqlite(
+                conn,
+                "SELECT * FROM note_studio_documents ORDER BY note_id",
+            )
+        for row in studio_rows:
+            note = conn.execute("SELECT * FROM notes WHERE id=?", (row["note_id"],)).fetchone()
+            owner = str(note["client_id"]).strip() if note is not None else ""
+            if not owner:
+                raise SchemaError("Notes Studio v61 migration could not prove sidecar ownership.")  # noqa: TRY003
+            note_row = dict(note)
+            accepted_at = self._legacy_sync_timestamp_v61(row["last_modified"])
+            accepted_time = datetime.fromisoformat(accepted_at.replace("Z", "+00:00"))
+            note_modified_time = datetime.fromisoformat(
+                self._legacy_sync_timestamp_v61(note_row["last_modified"]).replace(
+                    "Z", "+00:00"
+                )
+            )
+            legacy_companion_hash = row.get("companion_content_hash")
+            companion_hash = (
+                None
+                if legacy_companion_hash is None
+                else str(legacy_companion_hash).strip()
+            )
+            current_companion_hash = "sha256:" + hashlib.sha256(
+                str(note_row.get("content") or "")
+                .replace("\r\n", "\n")
+                .replace("\r", "\n")
+                .encode("utf-8")
+            ).hexdigest()
+            parent_changed_after_acceptance = note_modified_time > accepted_time
+            parent_lineage_proven = (
+                not parent_changed_after_acceptance
+                and companion_hash == current_companion_hash
+            )
+            note_revision = (
+                max(1, int(note_row.get("version") or 1))
+                if parent_lineage_proven
+                else 1
+            )
+            note_hash = (
+                self._legacy_note_hash_v61(note_row)
+                if parent_lineage_proven
+                else self._note_task_v60_hash(
+                    {
+                        "domain": "notes.studio_document.unproven_parent_lineage",
+                        "note_id": row["note_id"],
+                        "accepted_at": accepted_at,
+                        "companion_content_hash": companion_hash,
+                    }
+                )
+            )
+            source_note_id = row.get("source_note_id")
+            source_revision = None
+            source_hash = None
+            source_problem = False
+            source_changed_after_acceptance = False
+            source = None
+            if source_note_id is not None:
+                source = conn.execute("SELECT * FROM notes WHERE id=?", (source_note_id,)).fetchone()
+                if (
+                    source is None
+                    or str(source["client_id"]).strip() != owner
+                ):
+                    source_problem = True
+                else:
+                    source_modified_time = datetime.fromisoformat(
+                        self._legacy_sync_timestamp_v61(source["last_modified"]).replace(
+                            "Z", "+00:00"
+                        )
+                    )
+                    source_changed_after_acceptance = (
+                        source_modified_time > accepted_time or bool(source["deleted"])
+                    )
+            raw_payload = row["payload_json"]
+            raw_manifest = row.get("diagram_manifest_json")
+            diagnostic_code = diagnostic_hash = None
+            payload_json_text = str(raw_payload)
+            manifest_json_text = raw_manifest
+            excerpt_snapshot = (
+                None
+                if row.get("excerpt_snapshot") is None
+                else str(row["excerpt_snapshot"]).replace("\r\n", "\n").replace("\r", "\n")
+            )
+            excerpt_hash = (
+                None
+                if row.get("excerpt_hash") is None
+                else str(row["excerpt_hash"]).strip()
+            )
+            expected_excerpt_hash = (
+                None
+                if excerpt_snapshot is None
+                else "sha256:"
+                + hashlib.sha256(excerpt_snapshot.encode("utf-8")).hexdigest()
+            )
+            if source_note_id is not None:
+                source_revision = (
+                    max(1, int(source["version"] or 1))
+                    if source is not None and not source_problem and not source_changed_after_acceptance
+                    else 1
+                )
+                source_hash = (
+                    self._legacy_note_hash_v61(dict(source))
+                    if source is not None and not source_problem and not source_changed_after_acceptance
+                    else self._note_task_v60_hash(
+                        {
+                            "domain": "notes.studio_document.unproven_source_lineage",
+                            "note_id": source_note_id,
+                            "accepted_at": accepted_at,
+                            "excerpt_hash": excerpt_hash,
+                        }
+                    )
+                )
+            provenance: dict[str, Any]
+            failure_code = "legacy_studio_payload_invalid"
+            try:
+                payload_obj = json.loads(str(raw_payload))
+                if not isinstance(payload_obj, Mapping):
+                    raise ValueError("legacy Studio payload is not an object")
+                payload_obj = dict(payload_obj)
+                meta = payload_obj.pop("meta", None)
+                layout = payload_obj.pop("layout", None)
+                if set(payload_obj) != {"sections"}:
+                    raise ValueError("legacy Studio payload has unknown nested authority")
+                if meta is not None:
+                    if not isinstance(meta, Mapping) or set(meta) - {"title", "source_note_id"}:
+                        raise ValueError("legacy Studio metadata is not closed")
+                    if "title" in meta and meta["title"] != note_row["title"]:
+                        raise ValueError("legacy Studio title authority mismatches note")
+                    if "source_note_id" in meta and meta["source_note_id"] != source_note_id:
+                        raise ValueError("legacy Studio source authority mismatches sidecar")
+                if layout is not None:
+                    expected_layout = {
+                        "template_type": row["template_type"],
+                        "handwriting_mode": row["handwriting_mode"],
+                        "render_version": row["render_version"],
+                    }
+                    if (
+                        not isinstance(layout, Mapping)
+                        or set(layout) - set(expected_layout)
+                        or any(layout[key] != expected_layout[key] for key in layout)
+                    ):
+                        raise ValueError("legacy Studio layout authority mismatches sidecar")
+                if source_problem:
+                    raise ValueError("legacy Studio source ownership is unavailable")
+                if excerpt_snapshot is not None:
+                    if source_note_id is None or source is None:
+                        raise ValueError("legacy Studio excerpt source is unavailable")
+                    source_content = str(source["content"] or "").replace(
+                        "\r\n", "\n"
+                    ).replace("\r", "\n")
+                    if (
+                        not source_changed_after_acceptance
+                        and excerpt_snapshot not in source_content
+                    ):
+                        raise ValueError("legacy Studio excerpt is absent from source note")
+                    if excerpt_hash != expected_excerpt_hash:
+                        raise ValueError("legacy Studio excerpt hash mismatches excerpt")
+                manifest_obj = None if raw_manifest is None else json.loads(str(raw_manifest))
+                if manifest_obj is not None:
+                    if not isinstance(manifest_obj, Mapping):
+                        raise ValueError("legacy Studio diagram manifest is not an object")
+                    manifest_obj = dict(manifest_obj)
+                    manifest_obj.pop("cached_svg", None)
+                    if "canonical_source" in manifest_obj:
+                        if manifest_obj["canonical_source"] != manifest_obj.get("source_graph"):
+                            raise ValueError("legacy Studio canonical_source alias mismatches")
+                        manifest_obj.pop("canonical_source")
+                    if "generation_status" in manifest_obj:
+                        if manifest_obj["generation_status"] != manifest_obj.get("status"):
+                            raise ValueError("legacy Studio generation_status alias mismatches")
+                        manifest_obj.pop("generation_status")
+                content_state: dict[str, Any] = {
+                    "note_id": row["note_id"],
+                    "source_note_id": source_note_id,
+                    "payload_json": payload_obj,
+                    "template_type": row["template_type"],
+                    "handwriting_mode": row["handwriting_mode"],
+                    "excerpt_snapshot": excerpt_snapshot,
+                    "excerpt_hash": excerpt_hash,
+                    "diagram_manifest_json": manifest_obj,
+                    "companion_content_hash": companion_hash,
+                    "render_version": row["render_version"],
+                    "note_revision": note_revision,
+                    "note_hash": note_hash,
+                }
+                result_hash = studio_result_hash(content_state)
+                provenance = {
+                    "kind": "legacy_bootstrap",
+                    "attestation": "trusted_bootstrap_v1",
+                    "provider": None,
+                    "model": None,
+                    "accepted_at": accepted_at,
+                    "source_revision": source_revision,
+                    "source_hash": source_hash,
+                    "result_hash": result_hash,
+                }
+                if parent_changed_after_acceptance or source_changed_after_acceptance:
+                    failure_code = "legacy_studio_lineage_unproven"
+                    raise ValueError("legacy Studio historical lineage is unavailable")
+                if not parent_lineage_proven:
+                    raise ValueError("legacy Studio companion binding mismatches parent")
+                complete = {**content_state, "accepted_provenance": provenance}
+                parsed = parse_notes_studio_document_v1(
+                    complete,
+                    bound_attestation="trusted_bootstrap_v1",
+                    bound_accepted_at=accepted_at,
+                )
+                payload_json_text = self._canonical_json_text_v61(
+                    parsed.payload_json.model_dump(mode="json")
+                )
+                manifest_json_text = (
+                    None
+                    if parsed.diagram_manifest_json is None
+                    else self._canonical_json_text_v61(
+                        parsed.diagram_manifest_json.model_dump(mode="json")
+                    )
+                )
+                canonical_hash = notes_studio_document_object_hash(
+                    parsed,
+                    revision=1,
+                    deleted=bool(note_row.get("deleted")),
+                )
+                if self._notes_studio_envelope_size_v61(
+                    parsed.model_dump(mode="json"),
+                    revision=1,
+                    deleted=bool(note_row.get("deleted")),
+                    canonical_hash=canonical_hash,
+                ) > SYNC_ENVELOPE_MAX_BYTES:
+                    raise ValueError("legacy Studio canonical envelope is oversized")
+            except (NotesMoodboardStudioContractError, TypeError, ValueError, json.JSONDecodeError):
+                diagnostic = moodboard_studio_legacy_source_diagnostic(
+                    failure_code,
+                    {"sidecar": row, "note_id": row["note_id"]},
+                )
+                diagnostic_code, diagnostic_hash = diagnostic["code"], diagnostic["source_hash"]
+                provenance = {
+                    "kind": "legacy_bootstrap",
+                    "attestation": "trusted_bootstrap_v1",
+                    "provider": None,
+                    "model": None,
+                    "accepted_at": accepted_at,
+                    "source_revision": source_revision,
+                    "source_hash": source_hash,
+                    "result_hash": self._note_task_v60_hash(
+                        {"domain": "notes.studio_document.result", "source": row}
+                    ),
+                }
+                canonical_hash = self._note_task_v60_hash(
+                    {"domain": "notes.studio_document", "source": row}
+                )
+            conn.execute(
+                """
+                INSERT INTO note_studio_documents_v61(
+                  owner_user_id,dataset_id,note_id,payload_json,template_type,handwriting_mode,
+                  source_note_id,excerpt_snapshot,excerpt_hash,diagram_manifest_json,
+                  companion_content_hash,render_version,note_revision,note_hash,
+                  accepted_provenance_json,created_at,last_modified,deleted,version,
+                  canonical_revision,canonical_hash,source_diagnostic_code,source_diagnostic_hash
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    owner, local, row["note_id"], payload_json_text, row["template_type"],
+                    row["handwriting_mode"], source_note_id, excerpt_snapshot, excerpt_hash,
+                    manifest_json_text, companion_hash, int(row["render_version"]), note_revision,
+                    note_hash, self._canonical_json_text_v61(provenance), row["created_at"],
+                    row["last_modified"], int(bool(note_row.get("deleted"))), 1, 1,
+                    canonical_hash, diagnostic_code, diagnostic_hash,
+                ),
+            )
+
+        for table, expected_count in source_counts.items():
+            actual_count = int(conn.execute(f"SELECT COUNT(*) FROM {table}_v61").fetchone()[0])  # nosec B608
+            if actual_count != expected_count:
+                raise SchemaError(f"Notes v61 source verification failed for {table}.")  # noqa: TRY003
+        return self._notes_moodboard_studio_v61_data_proof_sqlite(conn, target=True)
+
+    def _notes_moodboard_studio_catalog_snapshot_sqlite(
+        self, conn: sqlite3.Connection
+    ) -> dict[str, Any]:
+        relations = self._NOTES_MOODBOARD_STUDIO_V61_RELATIONS
+        placeholders = ",".join("?" for _ in relations)
+        table_sql = {
+            str(row[0]): self._normalize_sqlite_catalog_sql(row[1])
+            for row in conn.execute(
+                f"SELECT name,sql FROM sqlite_master WHERE type='table' "  # nosec B608
+                f"AND name IN ({placeholders}) ORDER BY name",
+                relations,
+            )
+        }
+        explicit_indexes = {
+            str(row[0]): (str(row[1]), self._normalize_sqlite_catalog_sql(row[2]))
+            for row in conn.execute(
+                f"SELECT name,tbl_name,sql FROM sqlite_master WHERE type='index' "  # nosec B608
+                f"AND tbl_name IN ({placeholders}) AND sql IS NOT NULL ORDER BY name",
+                relations,
+            )
+        }
+        details: dict[str, Any] = {}
+        for table in relations:
+            indexes = [tuple(row) for row in conn.execute(f"PRAGMA index_list({table})")]  # nosec B608
+            details[table] = {
+                "xinfo": [tuple(row) for row in conn.execute(f"PRAGMA table_xinfo({table})")],  # nosec B608
+                "foreign_keys": [tuple(row) for row in conn.execute(f"PRAGMA foreign_key_list({table})")],  # nosec B608
+                "indexes": [
+                    (
+                        index,
+                        [tuple(row) for row in conn.execute(f"PRAGMA index_xinfo({index[1]})")],  # nosec B608
+                    )
+                    for index in indexes
+                ],
+            }
+        related = {
+            str(row[1]): (str(row[0]), str(row[2]), self._normalize_sqlite_catalog_sql(row[3]))
+            for row in conn.execute(
+                "SELECT type,name,tbl_name,sql FROM sqlite_master "
+                "WHERE type IN ('trigger','view') ORDER BY type,name"
+            )
+            if str(row[2]) in relations
+            or any(re.search(rf"\b{re.escape(table)}\b", str(row[3]), re.IGNORECASE) for table in relations)
+        }
+        return {
+            "table_sql": table_sql,
+            "explicit_indexes": explicit_indexes,
+            "details": details,
+            "related": related,
+        }
+
+    def _expected_notes_moodboard_studio_catalog_sqlite(self) -> dict[str, Any]:
+        expected = sqlite3.connect(":memory:")
+        expected.row_factory = sqlite3.Row
+        try:
+            expected.execute("PRAGMA foreign_keys=ON")
+            expected.execute("CREATE TABLE notes(id TEXT PRIMARY KEY,client_id TEXT NOT NULL)")
+            expected.execute("CREATE UNIQUE INDEX uq_notes_owner_id ON notes(client_id,id)")
+            self._create_notes_moodboard_studio_schema_v61_sqlite(expected)
+            for table in self._NOTES_MOODBOARD_STUDIO_V61_RELATIONS:
+                expected.execute(f"ALTER TABLE {table}_v61 RENAME TO {table}")  # nosec B608
+            self._create_notes_moodboard_studio_indexes_v61_sqlite(expected)
+            return self._notes_moodboard_studio_catalog_snapshot_sqlite(expected)
+        finally:
+            expected.close()
+
+    def _verify_note_task_tables_v61_sqlite(self, conn: sqlite3.Connection) -> None:
+        expected = self._expected_note_task_catalog_sqlite()
+        actual = self._note_task_catalog_snapshot_sqlite(conn)
+        for table in self._NOTE_TASK_V60_TABLES:
+            if actual["table_sql"].get(table) != expected["table_sql"].get(table):
+                raise SchemaError("Notes task v61 SQLite table catalog drifted.")  # noqa: TRY003
+            for key in ("xinfo", "foreign_keys"):
+                if actual["table_details"][table][key] != expected["table_details"][table][key]:
+                    raise SchemaError("Notes task v61 SQLite table catalog drifted.")  # noqa: TRY003
+            if actual["table_details"][table]["indexes"] != expected["table_details"][table]["indexes"]:
+                raise SchemaError("Notes task v61 SQLite index catalog drifted.")  # noqa: TRY003
+        expected_indexes = {
+            name: value
+            for name, value in expected["explicit_index_sql"].items()
+            if value[0] in self._NOTE_TASK_V60_TABLES
+        }
+        actual_indexes = {
+            name: value
+            for name, value in actual["explicit_index_sql"].items()
+            if value[0] in self._NOTE_TASK_V60_TABLES
+        }
+        if expected_indexes != actual_indexes or actual["note_index"] != expected["note_index"]:
+            raise SchemaError("Notes task v61 SQLite index catalog drifted.")  # noqa: TRY003
+        if actual["related_objects"] != expected["related_objects"]:
+            raise SchemaError("Notes task v61 SQLite related catalog drifted.")  # noqa: TRY003
+
+    def _verify_notes_moodboard_studio_schema_sqlite(
+        self, conn: sqlite3.Connection
+    ) -> None:
+        expected = self._expected_notes_moodboard_studio_catalog_sqlite()
+        actual = self._notes_moodboard_studio_catalog_snapshot_sqlite(conn)
+        if actual != expected:
+            raise SchemaError("Notes moodboard/Studio v61 SQLite catalog drifted.")  # noqa: TRY003
+        self._verify_note_task_tables_v61_sqlite(conn)
+        if conn.execute("PRAGMA foreign_key_check").fetchall():
+            raise SchemaError("Notes moodboard/Studio v61 SQLite foreign keys are invalid.")  # noqa: TRY003
+
+    def _migrate_from_v62_to_v63_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Transactionally upgrade scoped moodboard, placement, Studio, and authority storage."""
+        self._validate_notes_moodboard_studio_v60_source_sqlite(conn)
+        source_proof = self._notes_moodboard_studio_v61_data_proof_sqlite(
+            conn, target=False
+        )
+        source_semantic_proof = (
+            self._notes_moodboard_studio_v61_semantic_proof_sqlite(
+                conn, target=False
+            )
+        )
+        targets = {f"{table}_v61" for table in self._NOTES_MOODBOARD_STUDIO_V61_RELATIONS}
+        if self._sqlite_table_names(conn).intersection(targets):
+            raise SchemaError("Notes moodboard/Studio v61 target-table collision requires repair.")  # noqa: TRY003
+        self._create_notes_moodboard_studio_schema_v61_sqlite(conn)
+        self._notes_moodboard_studio_v61_migration_checkpoint("create")
+        target_proof = self._copy_notes_moodboard_studio_graph_v61_sqlite(conn)
+        self._notes_moodboard_studio_v61_migration_checkpoint("copy")
+        self._verify_notes_moodboard_studio_v61_copy_sqlite(
+            conn,
+            source_proof=source_proof,
+            source_semantic_proof=source_semantic_proof,
+            target_proof=target_proof,
+        )
+        self._notes_moodboard_studio_v61_migration_checkpoint("copy_verify")
+        for table in ("moodboard_notes", "note_studio_documents", "moodboards", "note_task_scope_authority"):
+            if table in self._sqlite_table_names(conn):
+                conn.execute(f"DROP TABLE {table}")  # nosec B608 - fixed migration relations.
+        for table in self._NOTES_MOODBOARD_STUDIO_V61_RELATIONS:
+            conn.execute(f"ALTER TABLE {table}_v61 RENAME TO {table}")  # nosec B608
+        self._create_notes_moodboard_studio_indexes_v61_sqlite(conn)
+        self._notes_moodboard_studio_v61_migration_checkpoint("index")
+        self._verify_notes_moodboard_studio_schema_sqlite(conn)
+        self._notes_moodboard_studio_v61_migration_checkpoint("verify")
+        cursor = conn.execute(
+            "UPDATE db_schema_version SET version=63 WHERE schema_name=? AND version=62",
+            (self._SCHEMA_NAME,),
+        )
+        if cursor.rowcount != 1 or self._get_db_version(conn) != 63:
+            raise SchemaError("Notes moodboard/Studio v63 migration failed version verification.")  # noqa: TRY003
+        self._notes_moodboard_studio_v61_migration_checkpoint("version")
+
+    def _migrate_from_v63_to_v64_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add durable, owner/dataset-scoped Notes graph suggestion storage."""
+        if self._get_db_version(conn) != 63:
+            raise SchemaError("Notes graph suggestion v64 migration requires schema version 63.")  # noqa: TRY003
+        savepoint = "note_graph_suggestion_v64_migration"
+        savepoint_active = False
+        try:
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = True
+            for statement in split_sql_statements(self._MIGRATION_SQL_V63_TO_V64):
+                conn.execute(statement)
+            conn.execute(self._NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_SQLITE_TRIGGER_SQL)
+            cursor = conn.execute(
+                "UPDATE db_schema_version SET version = ? WHERE schema_name = ? AND version = ?",
+                (64, self._SCHEMA_NAME, 63),
+            )
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 64:
+                raise SchemaError("Notes graph suggestion v64 SQLite version transition failed.")  # noqa: TRY003
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = False
+        except (SchemaError, sqlite3.Error) as exc:
+            if savepoint_active:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+                except sqlite3.Error as rollback_exc:
+                    raise SchemaError(
+                        "Notes graph suggestion v64 SQLite migration rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError(f"Notes graph suggestion v64 SQLite migration failed: {exc}") from exc
+
+    @staticmethod
+    def _notes_moodboard_studio_v61_postgres_checkpoint(_stage: str) -> None:
+        """Fault-injection seam after durable PostgreSQL v61 phase commits."""
+
+    def _begin_notes_moodboard_studio_v61_postgres_transaction(
+        self, conn: Any
+    ) -> int:
+        """Set bounded transaction timeouts and lock schema authority first."""
+        self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
+        return self._get_schema_version_postgres(conn, lock=True)
+
+    def _configure_notes_moodboard_studio_v61_postgres_transaction(
+        self, conn: Any
+    ) -> None:
+        """Apply the v61 lock budgets before a transaction acquires any lock."""
+        self.backend.execute(
+            "SELECT set_config('lock_timeout',%s,true)",
+            (self._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT,),
+            connection=conn,
+        )
+        self.backend.execute(
+            "SELECT set_config('statement_timeout',%s,true)",
+            (self._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_STATEMENT_TIMEOUT,),
+            connection=conn,
+        )
+
+    @staticmethod
+    def _postgres_v61_progress_fingerprint(
+        previous: str | None, rows: Iterable[Mapping[str, Any]]
+    ) -> tuple[int, str]:
+        """Extend the resumable length-framed aggregate without retaining content."""
+        fingerprint = previous or f"sha256:{hashlib.sha256().hexdigest()}"
+        count = 0
+        for row in rows:
+            encoded = json.dumps(
+                CharactersRAGDB._note_task_v60_json_safe(dict(row)),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+            digest = hashlib.sha256()
+            digest.update(fingerprint.encode("ascii"))
+            digest.update(len(encoded).to_bytes(8, "big"))
+            digest.update(encoded)
+            fingerprint = f"sha256:{digest.hexdigest()}"
+            count += 1
+        return count, fingerprint
+
+    def _postgres_v61_progress_row(self, conn: Any, phase: str) -> dict[str, Any]:
+        result = self.backend.execute(
+            "SELECT keyset_cursor,copied_count,aggregate_fingerprint,status "
+            "FROM chacha_schema_migration_progress "
+            "WHERE migration_id=%s AND phase=%s",
+            (self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_ID, phase),
+            connection=conn,
+        ).rows
+        if not result:
+            return {
+                "keyset_cursor": None,
+                "copied_count": 0,
+                "aggregate_fingerprint": f"sha256:{hashlib.sha256().hexdigest()}",
+                "status": "pending",
+            }
+        return dict(result[0])
+
+    def _upsert_postgres_v61_progress(
+        self,
+        conn: Any,
+        *,
+        phase: str,
+        cursor: object,
+        count: int,
+        fingerprint: str,
+        status: str,
+    ) -> None:
+        cursor_text = None if cursor is None else json.dumps(
+            cursor, ensure_ascii=True, separators=(",", ":")
+        )
+        self.backend.execute(
+            """
+            INSERT INTO chacha_schema_migration_progress(
+              migration_id,phase,keyset_cursor,copied_count,
+              aggregate_fingerprint,status,updated_at
+            ) VALUES (%s,%s,%s,%s,%s,%s,CURRENT_TIMESTAMP)
+            ON CONFLICT(migration_id,phase) DO UPDATE SET
+              keyset_cursor=EXCLUDED.keyset_cursor,
+              copied_count=EXCLUDED.copied_count,
+              aggregate_fingerprint=EXCLUDED.aggregate_fingerprint,
+              status=EXCLUDED.status,
+              updated_at=CURRENT_TIMESTAMP
+            """,
+            (
+                self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_ID,
+                phase,
+                cursor_text,
+                count,
+                fingerprint,
+                status,
+            ),
+            connection=conn,
+        )
+
+    def _postgres_v61_phase_is_complete(self, conn: Any, phase: str) -> bool:
+        """Return whether a durable metadata or verification phase completed."""
+        return self._postgres_v61_progress_row(conn, phase)["status"] == "complete"
+
+    def _complete_postgres_v61_phase(self, conn: Any, phase: str) -> None:
+        """Record a content-free completion marker in the migration transaction."""
+        self._upsert_postgres_v61_progress(
+            conn,
+            phase=phase,
+            cursor=None,
+            count=0,
+            fingerprint=f"sha256:{hashlib.sha256().hexdigest()}",
+            status="complete",
+        )
+
+    @staticmethod
+    def _notes_moodboard_studio_v61_postgres_schema_sql() -> tuple[str, ...]:
+        """Return additive PostgreSQL v61 structures used before bounded backfill."""
+        return (
+            """
+            CREATE TABLE IF NOT EXISTS chacha_schema_migration_progress(
+              migration_id TEXT NOT NULL,
+              phase TEXT NOT NULL,
+              keyset_cursor TEXT,
+              copied_count BIGINT NOT NULL DEFAULT 0 CHECK(copied_count>=0),
+              aggregate_fingerprint TEXT NOT NULL
+                CHECK(aggregate_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
+              status TEXT NOT NULL CHECK(status IN ('pending','running','complete')),
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(migration_id,phase)
+            )
+            """,
+            """
+            DO $migration_owner$
+            DECLARE
+              schema_owner name;
+              relation_name name;
+            BEGIN
+              SELECT r.rolname INTO STRICT schema_owner
+                FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner
+               WHERE n.nspname=current_schema();
+              FOREACH relation_name IN ARRAY ARRAY[
+                'chacha_schema_migration_progress',
+                'note_task_scope_authority',
+                'moodboards',
+                'moodboard_notes',
+                'note_studio_documents'
+              ] LOOP
+                EXECUTE format(
+                  'ALTER TABLE %I OWNER TO %I', relation_name, schema_owner
+                );
+              END LOOP;
+            END
+            $migration_owner$
+            """,
+            "REVOKE ALL ON TABLE chacha_schema_migration_progress FROM PUBLIC",
+            "ALTER TABLE note_task_scope_authority ADD COLUMN IF NOT EXISTS task_graph_bound BOOLEAN NOT NULL DEFAULT TRUE",
+            "ALTER TABLE note_task_scope_authority ADD COLUMN IF NOT EXISTS moodboard_graph_bound BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE note_task_scope_authority ADD COLUMN IF NOT EXISTS studio_graph_bound BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS owner_user_id TEXT",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS dataset_id TEXT",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS sync_id TEXT",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS canvas_json TEXT",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS canonical_revision INTEGER",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS canonical_hash TEXT",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS source_diagnostic_code TEXT",
+            "ALTER TABLE moodboards ADD COLUMN IF NOT EXISTS source_diagnostic_hash TEXT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS owner_user_id TEXT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS dataset_id TEXT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS placement_id TEXT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS x BIGINT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS y BIGINT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS width INTEGER",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS height INTEGER",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS order_index BIGINT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS display_json TEXT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS last_modified TIMESTAMPTZ",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS deleted BOOLEAN",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS version INTEGER",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS canonical_revision INTEGER",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS canonical_hash TEXT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS source_diagnostic_code TEXT",
+            "ALTER TABLE moodboard_notes ADD COLUMN IF NOT EXISTS source_diagnostic_hash TEXT",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS owner_user_id TEXT",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS dataset_id TEXT",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS note_revision INTEGER",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS note_hash TEXT",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS accepted_provenance_json TEXT",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS deleted BOOLEAN",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS version INTEGER",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS canonical_revision INTEGER",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS canonical_hash TEXT",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS source_diagnostic_code TEXT",
+            "ALTER TABLE note_studio_documents ADD COLUMN IF NOT EXISTS source_diagnostic_hash TEXT",
+            # A legacy source reference is advisory lineage, not a required live
+            # relationship. Unknown and cross-owner source IDs remain on the
+            # canonical row with a readiness-blocking diagnostic, so the old
+            # single-column FK cannot be part of the converged v61 catalog.
+            "ALTER TABLE note_studio_documents DROP CONSTRAINT IF EXISTS note_studio_documents_source_note_id_fkey",
+        )
+
+    def _postgres_v61_board_update(
+        self, conn: Any, row: Mapping[str, Any]
+    ) -> tuple[Any, ...]:
+        owner = str(row.get("client_id") or "").strip()
+        if not owner:
+            raise SchemaError("Notes moodboard v61 migration could not prove board ownership.")  # noqa: TRY003
+        sync_id = str(row.get("sync_id") or "").strip()
+        if not sync_id:
+            raise SchemaError(
+                "Notes moodboard v61 migration portable identity was not allocated."
+            )  # noqa: TRY003
+        canvas = {"layout_mode": "masonry", "metadata": {}}
+        raw_rule = row.get("smart_rule_json")
+        rule, diagnostic_code, diagnostic_hash = self._legacy_moodboard_rule_v61(
+            conn, raw_rule, owner_user_id=owner
+        )
+        revision = max(1, int(row.get("version") or 1))
+        try:
+            payload = parse_notes_moodboard_v1(
+                {
+                    "moodboard_id": sync_id,
+                    "name": row["name"],
+                    "description": row.get("description"),
+                    "smart_rule": rule,
+                    "canvas": canvas,
+                }
+            )
+            rule_text = None if payload.smart_rule is None else self._canonical_json_text_v61(
+                payload.smart_rule.model_dump(mode="json")
+            )
+            canonical_hash = notes_moodboard_object_hash(
+                payload, revision=revision, deleted=bool(row.get("deleted"))
+            )
+        except NotesMoodboardStudioContractError:
+            if diagnostic_code is None:
+                diagnostic = moodboard_studio_legacy_source_diagnostic(
+                    "legacy_moodboard_payload_invalid", {"moodboard": dict(row)}
+                )
+                diagnostic_code = diagnostic["code"]
+                diagnostic_hash = diagnostic["source_hash"]
+            rule_text = None if rule is None else self._canonical_json_text_v61(rule)
+            canonical_hash = self._note_task_v60_hash(
+                {"domain": "notes.moodboard", "source": dict(row), "sync_id": sync_id}
+            )
+        return (
+            owner,
+            self._LOCAL_UNBOUND_TASK_DATASET_ID,
+            sync_id,
+            rule_text,
+            self._canonical_json_text_v61(canvas),
+            revision,
+            canonical_hash,
+            diagnostic_code,
+            diagnostic_hash,
+            row["id"],
+        )
+
+    def _postgres_v61_source_page(
+        self, conn: Any, *, phase: str, progress: Mapping[str, Any]
+    ) -> tuple[list[dict[str, Any]], object | None]:
+        """Read one stable legacy-source page for copy or aggregate verification."""
+        page_size = self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE
+        cursor = json.loads(str(progress["keyset_cursor"])) if progress.get("keyset_cursor") else None
+        if phase == "moodboards":
+            after_owner, after_key = (cursor or ["", -1])
+            rows = [dict(row) for row in self.backend.execute(
+                "SELECT id,name,description,smart_rule_json,created_at,last_modified,"
+                "deleted,client_id,version,owner_user_id AS target_owner_user_id,"
+                "dataset_id AS target_dataset_id,sync_id,canvas_json,"
+                "canonical_revision,canonical_hash,source_diagnostic_code,"
+                "source_diagnostic_hash FROM moodboards "
+                "WHERE (client_id,id)>(%s,%s) ORDER BY client_id,id LIMIT %s",
+                (after_owner, after_key, page_size), connection=conn,
+            ).rows]
+            return rows, ([rows[-1]["client_id"], rows[-1]["id"]] if rows else cursor)
+        if phase == "moodboard_notes":
+            after_owner, after_board, after_created, after_note = (
+                cursor or ["", -1, "0001-01-01 00:00:00+00", ""]
+            )
+            rows = [dict(row) for row in self.backend.execute(
+                "WITH ranked AS ("
+                "SELECT b.client_id AS owner_user_id,p.moodboard_id,p.note_id,p.created_at,"
+                "b.sync_id,ROW_NUMBER() OVER(PARTITION BY b.client_id,p.moodboard_id "
+                "ORDER BY p.created_at,p.note_id)-1 AS legacy_order_index,"
+                "p.owner_user_id AS target_owner_user_id,"
+                "p.dataset_id AS target_dataset_id,p.placement_id,p.x,p.y,p.width,"
+                "p.height,p.order_index,p.display_json,p.last_modified,p.deleted,"
+                "p.version,p.canonical_revision,p.canonical_hash,"
+                "p.source_diagnostic_code,p.source_diagnostic_hash "
+                "FROM moodboard_notes p JOIN moodboards b ON b.id=p.moodboard_id "
+                "JOIN notes n ON n.id=p.note_id AND n.client_id=b.client_id"
+                ") SELECT * FROM ranked "
+                "WHERE (owner_user_id,moodboard_id,created_at,note_id)>(%s,%s,%s::timestamptz,%s) "
+                "ORDER BY owner_user_id,moodboard_id,created_at,note_id LIMIT %s",
+                (after_owner, after_board, after_created, after_note, page_size),
+                connection=conn,
+            ).rows]
+            return rows, (
+                [
+                    rows[-1]["owner_user_id"],
+                    rows[-1]["moodboard_id"],
+                    self._legacy_sync_timestamp_v61(rows[-1]["created_at"]),
+                    rows[-1]["note_id"],
+                ]
+                if rows
+                else cursor
+            )
+        after_owner, after_note = (cursor or ["", ""])
+        rows = [dict(row) for row in self.backend.execute(
+            "SELECT s.note_id,s.payload_json,s.template_type,s.handwriting_mode,"
+            "s.source_note_id,s.excerpt_snapshot,s.excerpt_hash,s.diagram_manifest_json,"
+            "s.companion_content_hash,s.render_version,s.created_at,s.last_modified,"
+            "n.client_id AS owner_user_id,n.title AS note_title,n.content AS note_content,"
+            "n.version AS parent_version,n.last_modified AS parent_modified,"
+            "n.deleted AS parent_deleted,s.owner_user_id AS target_owner_user_id,"
+            "s.dataset_id AS target_dataset_id,s.note_revision,s.note_hash,"
+            "s.accepted_provenance_json,s.deleted,s.version,s.canonical_revision,"
+            "s.canonical_hash,s.source_diagnostic_code,s.source_diagnostic_hash,"
+            "source.client_id AS source_owner_user_id,source.title AS source_title,"
+            "source.content AS source_content,"
+            "source.version AS source_version,source.last_modified AS source_modified,"
+            "source.deleted AS source_deleted "
+            "FROM note_studio_documents s JOIN notes n ON n.id=s.note_id "
+            "LEFT JOIN notes source ON source.id=s.source_note_id "
+            "WHERE (n.client_id,s.note_id)>(%s,%s) ORDER BY n.client_id,s.note_id LIMIT %s",
+            (after_owner, after_note, page_size), connection=conn,
+        ).rows]
+        return rows, ([rows[-1]["owner_user_id"], rows[-1]["note_id"]] if rows else cursor)
+
+    @staticmethod
+    def _postgres_v61_source_cursor(
+        phase: str, row: Mapping[str, Any]
+    ) -> list[Any]:
+        """Return the deterministic legacy keyset cursor for one source row."""
+        if phase == "moodboards":
+            return [row["client_id"], row["id"]]
+        if phase == "moodboard_notes":
+            return [
+                row["owner_user_id"],
+                row["moodboard_id"],
+                CharactersRAGDB._legacy_sync_timestamp_v61(row["created_at"]),
+                row["note_id"],
+            ]
+        return [row["owner_user_id"], row["note_id"]]
+
+    def _postgres_v61_fingerprint_phase_page(
+        self,
+        conn: Any,
+        *,
+        source_phase: str,
+        progress: Mapping[str, Any],
+        predict: bool,
+    ) -> dict[str, Any]:
+        """Fingerprint one soft-deadline page with at most one-row overshoot."""
+        source_rows, _ = self._postgres_v61_source_page(
+            conn, phase=source_phase, progress=progress
+        )
+        deadline = (
+            time.monotonic()
+            + self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SECONDS
+        )
+        fingerprint = str(progress["aggregate_fingerprint"])
+        total = int(progress["copied_count"])
+        cursor = (
+            json.loads(str(progress["keyset_cursor"]))
+            if progress.get("keyset_cursor")
+            else None
+        )
+        processed = 0
+        for source_row in source_rows:
+            # Always finish the first row so a single expensive legacy row cannot
+            # livelock the phase. The deadline bounds every subsequent row, so a
+            # transaction can overshoot by no more than one row's work.
+            if processed and time.monotonic() >= deadline:
+                break
+            fingerprint_row = (
+                self._postgres_v61_expected_row(
+                    conn, phase=source_phase, row=source_row
+                )
+                if predict
+                else source_row
+            )
+            added, fingerprint = self._postgres_v61_progress_fingerprint(
+                fingerprint, (fingerprint_row,)
+            )
+            total += added
+            processed += added
+            cursor = self._postgres_v61_source_cursor(source_phase, source_row)
+        exhausted = (
+            len(source_rows) < self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE
+            and processed == len(source_rows)
+        )
+        return {
+            "cursor": cursor,
+            "count": total,
+            "fingerprint": fingerprint,
+            "status": "complete" if exhausted else "running",
+            "processed_count": processed,
+        }
+
+    def _postgres_v61_studio_update(self, row: Mapping[str, Any]) -> dict[str, Any]:
+        """Canonicalize one legacy PostgreSQL Studio row without mutating it."""
+        owner = str(row["owner_user_id"]).strip()
+        accepted_at = self._legacy_sync_timestamp_v61(row["last_modified"])
+        accepted_time = datetime.fromisoformat(accepted_at.replace("Z", "+00:00"))
+        parent_modified = datetime.fromisoformat(
+            self._legacy_sync_timestamp_v61(row["parent_modified"]).replace("Z", "+00:00")
+        )
+        companion_hash = (
+            None
+            if row.get("companion_content_hash") is None
+            else str(row["companion_content_hash"]).strip()
+        )
+        current_companion_hash = "sha256:" + hashlib.sha256(
+            str(row.get("note_content") or "")
+            .replace("\r\n", "\n")
+            .replace("\r", "\n")
+            .encode("utf-8")
+        ).hexdigest()
+        parent_changed = parent_modified > accepted_time
+        parent_proven = not parent_changed and companion_hash == current_companion_hash
+        note_revision = max(1, int(row.get("parent_version") or 1)) if parent_proven else 1
+        parent = {
+            "id": row["note_id"],
+            "title": row["note_title"],
+            "content": row["note_content"],
+            "version": row["parent_version"],
+            "last_modified": row["parent_modified"],
+            "deleted": row["parent_deleted"],
+            "client_id": owner,
+        }
+        note_hash = (
+            self._legacy_note_hash_v61(parent)
+            if parent_proven
+            else self._note_task_v60_hash(
+                {
+                    "domain": "notes.studio_document.unproven_parent_lineage",
+                    "note_id": row["note_id"],
+                    "accepted_at": accepted_at,
+                    "companion_content_hash": companion_hash,
+                }
+            )
+        )
+        source_note_id = row.get("source_note_id")
+        source_problem = source_note_id is not None and (
+            not str(row.get("source_owner_user_id") or "").strip()
+            or str(row.get("source_owner_user_id") or "").strip() != owner
+        )
+        source_changed = False
+        if source_note_id is not None and not source_problem:
+            source_modified = datetime.fromisoformat(
+                self._legacy_sync_timestamp_v61(row["source_modified"]).replace("Z", "+00:00")
+            )
+            source_changed = source_modified > accepted_time or bool(row["source_deleted"])
+        source_revision = None
+        source_hash = None
+        if source_note_id is not None:
+            source_revision = (
+                max(1, int(row.get("source_version") or 1))
+                if not source_problem and not source_changed
+                else 1
+            )
+            source_hash = (
+                self._legacy_note_hash_v61(
+                    {
+                        "id": source_note_id,
+                        "title": row.get("source_title"),
+                        "content": row.get("source_content"),
+                        "version": row.get("source_version"),
+                        "last_modified": row.get("source_modified"),
+                        "deleted": row.get("source_deleted"),
+                        "client_id": row.get("source_owner_user_id"),
+                    }
+                )
+                if not source_problem and not source_changed
+                else self._note_task_v60_hash(
+                    {
+                        "domain": "notes.studio_document.unproven_source_lineage",
+                        "note_id": source_note_id,
+                        "accepted_at": accepted_at,
+                        "excerpt_hash": row.get("excerpt_hash"),
+                    }
+                )
+            )
+        excerpt_snapshot = (
+            None
+            if row.get("excerpt_snapshot") is None
+            else str(row["excerpt_snapshot"]).replace("\r\n", "\n").replace("\r", "\n")
+        )
+        excerpt_hash = (
+            None if row.get("excerpt_hash") is None else str(row["excerpt_hash"]).strip()
+        )
+        expected_excerpt_hash = (
+            None
+            if excerpt_snapshot is None
+            else "sha256:" + hashlib.sha256(excerpt_snapshot.encode("utf-8")).hexdigest()
+        )
+        payload_json_text = str(row["payload_json"])
+        manifest_json_text = row.get("diagram_manifest_json")
+        diagnostic_code = diagnostic_hash = None
+        failure_code = "legacy_studio_payload_invalid"
+        try:
+            payload_obj = json.loads(str(row["payload_json"]))
+            if not isinstance(payload_obj, Mapping):
+                raise ValueError("legacy Studio payload is not an object")
+            payload_obj = dict(payload_obj)
+            meta = payload_obj.pop("meta", None)
+            layout = payload_obj.pop("layout", None)
+            if set(payload_obj) != {"sections"}:
+                raise ValueError("legacy Studio payload has unknown nested authority")
+            if meta is not None:
+                if not isinstance(meta, Mapping) or set(meta) - {"title", "source_note_id"}:
+                    raise ValueError("legacy Studio metadata is not closed")
+                if "title" in meta and meta["title"] != row["note_title"]:
+                    raise ValueError("legacy Studio title authority mismatches note")
+                if "source_note_id" in meta and meta["source_note_id"] != source_note_id:
+                    raise ValueError("legacy Studio source authority mismatches sidecar")
+            if layout is not None:
+                expected_layout = {
+                    "template_type": row["template_type"],
+                    "handwriting_mode": row["handwriting_mode"],
+                    "render_version": row["render_version"],
+                }
+                if (
+                    not isinstance(layout, Mapping)
+                    or set(layout) - set(expected_layout)
+                    or any(layout[key] != expected_layout[key] for key in layout)
+                ):
+                    raise ValueError("legacy Studio layout authority mismatches sidecar")
+            if source_problem:
+                failure_code = "legacy_studio_lineage_unproven"
+                raise ValueError("legacy Studio source ownership is unavailable")
+            if excerpt_snapshot is not None:
+                if source_note_id is None or row.get("source_content") is None:
+                    raise ValueError("legacy Studio excerpt source is unavailable")
+                source_content = str(row["source_content"] or "").replace("\r\n", "\n").replace("\r", "\n")
+                if not source_changed and excerpt_snapshot not in source_content:
+                    raise ValueError("legacy Studio excerpt is absent from source note")
+                if excerpt_hash != expected_excerpt_hash:
+                    raise ValueError("legacy Studio excerpt hash mismatches excerpt")
+            manifest_obj = (
+                None
+                if row.get("diagram_manifest_json") is None
+                else json.loads(str(row["diagram_manifest_json"]))
+            )
+            if manifest_obj is not None:
+                if not isinstance(manifest_obj, Mapping):
+                    raise ValueError("legacy Studio diagram manifest is not an object")
+                manifest_obj = dict(manifest_obj)
+                manifest_obj.pop("cached_svg", None)
+                if "canonical_source" in manifest_obj:
+                    if manifest_obj["canonical_source"] != manifest_obj.get("source_graph"):
+                        raise ValueError("legacy Studio canonical_source alias mismatches")
+                    manifest_obj.pop("canonical_source")
+                if "generation_status" in manifest_obj:
+                    if manifest_obj["generation_status"] != manifest_obj.get("status"):
+                        raise ValueError("legacy Studio generation_status alias mismatches")
+                    manifest_obj.pop("generation_status")
+            content_state: dict[str, Any] = {
+                "note_id": row["note_id"],
+                "source_note_id": source_note_id,
+                "payload_json": payload_obj,
+                "template_type": row["template_type"],
+                "handwriting_mode": row["handwriting_mode"],
+                "excerpt_snapshot": excerpt_snapshot,
+                "excerpt_hash": excerpt_hash,
+                "diagram_manifest_json": manifest_obj,
+                "companion_content_hash": companion_hash,
+                "render_version": row["render_version"],
+                "note_revision": note_revision,
+                "note_hash": note_hash,
+            }
+            provenance = {
+                "kind": "legacy_bootstrap",
+                "attestation": "trusted_bootstrap_v1",
+                "provider": None,
+                "model": None,
+                "accepted_at": accepted_at,
+                "source_revision": source_revision,
+                "source_hash": source_hash,
+                "result_hash": studio_result_hash(content_state),
+            }
+            if parent_changed or source_changed or not parent_proven:
+                failure_code = "legacy_studio_lineage_unproven"
+                raise ValueError("legacy Studio historical lineage is unavailable")
+            parsed = parse_notes_studio_document_v1(
+                {**content_state, "accepted_provenance": provenance},
+                bound_attestation="trusted_bootstrap_v1",
+                bound_accepted_at=accepted_at,
+            )
+            payload_json_text = self._canonical_json_text_v61(
+                parsed.payload_json.model_dump(mode="json")
+            )
+            manifest_json_text = (
+                None
+                if parsed.diagram_manifest_json is None
+                else self._canonical_json_text_v61(
+                    parsed.diagram_manifest_json.model_dump(mode="json")
+                )
+            )
+            canonical_hash = notes_studio_document_object_hash(
+                parsed, revision=1, deleted=bool(row["parent_deleted"])
+            )
+            if self._notes_studio_envelope_size_v61(
+                parsed.model_dump(mode="json"),
+                revision=1,
+                deleted=bool(row["parent_deleted"]),
+                canonical_hash=canonical_hash,
+            ) > SYNC_ENVELOPE_MAX_BYTES:
+                raise ValueError("legacy Studio canonical envelope is oversized")
+        except (NotesMoodboardStudioContractError, TypeError, ValueError, json.JSONDecodeError):
+            diagnostic_source = self._note_task_v60_json_safe(dict(row))
+            diagnostic = moodboard_studio_legacy_source_diagnostic(
+                failure_code,
+                {"sidecar": diagnostic_source, "note_id": row["note_id"]},
+            )
+            diagnostic_code, diagnostic_hash = diagnostic["code"], diagnostic["source_hash"]
+            provenance = {
+                "kind": "legacy_bootstrap",
+                "attestation": "trusted_bootstrap_v1",
+                "provider": None,
+                "model": None,
+                "accepted_at": accepted_at,
+                "source_revision": source_revision,
+                "source_hash": source_hash,
+                "result_hash": self._note_task_v60_hash(
+                    {"domain": "notes.studio_document.result", "source": diagnostic_source}
+                ),
+            }
+            canonical_hash = self._note_task_v60_hash(
+                {"domain": "notes.studio_document", "source": diagnostic_source}
+            )
+        return {
+            "payload_json": payload_json_text,
+            "diagram_manifest_json": manifest_json_text,
+            "target_owner_user_id": owner,
+            "target_dataset_id": self._LOCAL_UNBOUND_TASK_DATASET_ID,
+            "note_revision": note_revision,
+            "note_hash": note_hash,
+            "accepted_provenance_json": self._canonical_json_text_v61(provenance),
+            "deleted": bool(row["parent_deleted"]),
+            "version": 1,
+            "canonical_revision": 1,
+            "canonical_hash": canonical_hash,
+            "source_diagnostic_code": diagnostic_code,
+            "source_diagnostic_hash": diagnostic_hash,
+        }
+
+    def _postgres_v61_expected_row(
+        self, conn: Any, *, phase: str, row: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        """Predict one canonical target row from retained legacy authority."""
+        expected = dict(row)
+        if phase == "moodboards":
+            update = self._postgres_v61_board_update(conn, row)
+            expected.update(
+                target_owner_user_id=update[0],
+                target_dataset_id=update[1],
+                sync_id=update[2],
+                smart_rule_json=update[3],
+                canvas_json=update[4],
+                canonical_revision=update[5],
+                canonical_hash=update[6],
+                source_diagnostic_code=update[7],
+                source_diagnostic_hash=update[8],
+            )
+            return expected
+        if phase == "moodboard_notes":
+            source = {
+                "moodboard_id": row["sync_id"],
+                "note_id": row["note_id"],
+                "x": 0,
+                "y": 0,
+                "width": 320,
+                "height": 220,
+                "order_index": int(row["legacy_order_index"]),
+                "display": {},
+            }
+            diagnostic_code = diagnostic_hash = None
+            try:
+                payload = parse_notes_moodboard_note_v1(source)
+                placement_id = placement_object_id(payload)
+                canonical_hash = notes_moodboard_note_object_hash(
+                    payload, revision=1, deleted=False
+                )
+            except NotesMoodboardStudioContractError:
+                diagnostic = moodboard_studio_legacy_source_diagnostic(
+                    "legacy_moodboard_placement_identity_invalid", source
+                )
+                diagnostic_code = diagnostic["code"]
+                diagnostic_hash = diagnostic["source_hash"]
+                placement_id = "notes.moodboard_note:sha256:" + hashlib.sha256(
+                    canonical_moodboard_studio_json_bytes(
+                        {
+                            "domain": "notes.moodboard_note",
+                            "members": [row["sync_id"], row["note_id"]],
+                            "schema_version": 1,
+                        }
+                    )
+                ).hexdigest()
+                canonical_hash = self._note_task_v60_hash(
+                    {"domain": "notes.moodboard_note", "source": source}
+                )
+            expected.update(
+                target_owner_user_id=row["owner_user_id"],
+                target_dataset_id=self._LOCAL_UNBOUND_TASK_DATASET_ID,
+                placement_id=placement_id,
+                x=0,
+                y=0,
+                width=320,
+                height=220,
+                order_index=int(row["legacy_order_index"]),
+                display_json="{}",
+                last_modified=row["created_at"],
+                deleted=False,
+                version=1,
+                canonical_revision=1,
+                canonical_hash=canonical_hash,
+                source_diagnostic_code=diagnostic_code,
+                source_diagnostic_hash=diagnostic_hash,
+            )
+            return expected
+        expected.update(self._postgres_v61_studio_update(row))
+        return expected
+
+    def _postgres_v61_allocate_board_identity_page(
+        self, conn: Any, *, progress: Mapping[str, Any]
+    ) -> tuple[list[dict[str, Any]], object | None, bool]:
+        """Allocate stable UUIDv4 board identities in one durable bounded page."""
+        selected, original_cursor = self._postgres_v61_source_page(
+            conn, phase="moodboards", progress=progress
+        )
+        rows: list[dict[str, Any]] = []
+        deadline = (
+            time.monotonic()
+            + self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SECONDS
+        )
+        for source_row in selected:
+            if rows and time.monotonic() >= deadline:
+                break
+            row = dict(source_row)
+            sync_id = str(row.get("sync_id") or "").strip() or str(uuid.uuid4())
+            if not row.get("sync_id"):
+                self.backend.execute(
+                    "UPDATE moodboards SET sync_id=%s WHERE id=%s AND sync_id IS NULL",
+                    (sync_id, row["id"]),
+                    connection=conn,
+                )
+            row["sync_id"] = sync_id
+            rows.append(row)
+        if not rows:
+            return rows, original_cursor, not selected
+        source_exhausted = (
+            len(selected) < self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE
+            and len(rows) == len(selected)
+        )
+        return rows, [rows[-1]["client_id"], rows[-1]["id"]], source_exhausted
+
+    def _postgres_v61_copy_page(
+        self, conn: Any, *, phase: str, progress: Mapping[str, Any]
+    ) -> tuple[list[dict[str, Any]], object | None, bool]:
+        """Copy one row- and wall-clock-bounded deterministic legacy page."""
+        selected, original_cursor = self._postgres_v61_source_page(
+            conn, phase=phase, progress=progress
+        )
+        deadline = (
+            time.monotonic()
+            + self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SECONDS
+        )
+        rows: list[dict[str, Any]] = []
+        for source_row in selected:
+            if rows and time.monotonic() >= deadline:
+                break
+            row = self._postgres_v61_expected_row(
+                conn, phase=phase, row=source_row
+            )
+            if phase == "moodboards":
+                self.backend.execute(
+                    "UPDATE moodboards SET owner_user_id=%s,dataset_id=%s,sync_id=%s,"
+                    "smart_rule_json=%s,canvas_json=%s,canonical_revision=%s,canonical_hash=%s,"
+                    "source_diagnostic_code=%s,source_diagnostic_hash=%s WHERE id=%s",
+                    (
+                        row["target_owner_user_id"], row["target_dataset_id"],
+                        row["sync_id"], row["smart_rule_json"], row["canvas_json"],
+                        row["canonical_revision"], row["canonical_hash"],
+                        row["source_diagnostic_code"], row["source_diagnostic_hash"],
+                        row["id"],
+                    ),
+                    connection=conn,
+                )
+            elif phase == "moodboard_notes":
+                self.backend.execute(
+                    "UPDATE moodboard_notes SET owner_user_id=%s,dataset_id=%s,placement_id=%s,"
+                    "x=0,y=0,width=320,height=220,order_index=%s,display_json='{}',"
+                    "last_modified=created_at,deleted=FALSE,version=1,canonical_revision=1,"
+                    "canonical_hash=%s,source_diagnostic_code=%s,source_diagnostic_hash=%s "
+                    "WHERE moodboard_id=%s AND note_id=%s",
+                    (
+                        row["target_owner_user_id"], row["target_dataset_id"],
+                        row["placement_id"], row["order_index"], row["canonical_hash"],
+                        row["source_diagnostic_code"], row["source_diagnostic_hash"],
+                        row["moodboard_id"], row["note_id"],
+                    ),
+                    connection=conn,
+                )
+            else:
+                self.backend.execute(
+                    "UPDATE note_studio_documents SET payload_json=%s,diagram_manifest_json=%s,"
+                    "owner_user_id=%s,dataset_id=%s,note_revision=%s,note_hash=%s,"
+                    "accepted_provenance_json=%s,deleted=%s,version=%s,canonical_revision=%s,"
+                    "canonical_hash=%s,source_diagnostic_code=%s,source_diagnostic_hash=%s "
+                    "WHERE note_id=%s",
+                    (
+                        row["payload_json"], row["diagram_manifest_json"],
+                        row["target_owner_user_id"], row["target_dataset_id"],
+                        row["note_revision"], row["note_hash"],
+                        row["accepted_provenance_json"], row["deleted"],
+                        row["version"], row["canonical_revision"],
+                        row["canonical_hash"], row["source_diagnostic_code"],
+                        row["source_diagnostic_hash"], row["note_id"],
+                    ),
+                    connection=conn,
+                )
+            rows.append(row)
+        if not rows:
+            return rows, original_cursor, not selected
+        source_exhausted = (
+            len(selected) < self._NOTES_MOODBOARD_STUDIO_V61_MIGRATION_PAGE_SIZE
+            and len(rows) == len(selected)
+        )
+        if phase == "moodboards":
+            return rows, [rows[-1]["client_id"], rows[-1]["id"]], source_exhausted
+        if phase == "moodboard_notes":
+            return rows, [
+                rows[-1]["owner_user_id"],
+                rows[-1]["moodboard_id"],
+                self._legacy_sync_timestamp_v61(rows[-1]["created_at"]),
+                rows[-1]["note_id"],
+            ], source_exhausted
+        return rows, [rows[-1]["owner_user_id"], rows[-1]["note_id"]], source_exhausted
+
+    def _migrate_from_v62_to_v63_postgres(self, conn: Any) -> None:
+        """Run the durable bounded PostgreSQL v63 migration, version last."""
+        def begin_phase(label: str) -> bool:
+            version = self._begin_notes_moodboard_studio_v61_postgres_transaction(
+                conn
+            )
+            if version == 63:
+                self._verify_notes_moodboard_studio_schema_postgres(conn)
+                conn.commit()
+                return False
+            if version != 62:
+                raise SchemaError(  # noqa: TRY003
+                    f"Notes moodboard/Studio v63 {label} observed schema version {version}."
+                )
+            return True
+
+        if not begin_phase("schema phase"):
+            return
+        progress_exists = self.backend.table_exists(
+            "chacha_schema_migration_progress", connection=conn
+        )
+        if progress_exists and self._postgres_v61_phase_is_complete(conn, "schema"):
+            conn.commit()
+        else:
+            self.backend.execute(
+                "LOCK TABLE note_task_scope_authority, moodboards, moodboard_notes, "
+                "note_studio_documents IN SHARE ROW EXCLUSIVE MODE",
+                connection=conn,
+            )
+            for statement in self._notes_moodboard_studio_v61_postgres_schema_sql():
+                self.backend.execute(statement, connection=conn)
+            self._complete_postgres_v61_phase(conn, "schema")
+            conn.commit()
+            self._notes_moodboard_studio_v61_postgres_checkpoint("schema")
+
+        while True:
+            if not begin_phase("moodboard identity allocation phase"):
+                return
+            progress = self._postgres_v61_progress_row(conn, "moodboard_identities")
+            if progress["status"] == "complete":
+                conn.commit()
+                break
+            rows, cursor, source_exhausted = (
+                self._postgres_v61_allocate_board_identity_page(
+                    conn, progress=progress
+                )
+            )
+            added, fingerprint = self._postgres_v61_progress_fingerprint(
+                str(progress["aggregate_fingerprint"]), rows
+            )
+            total = int(progress["copied_count"]) + added
+            status = "complete" if source_exhausted else "running"
+            self._upsert_postgres_v61_progress(
+                conn,
+                phase="moodboard_identities",
+                cursor=cursor,
+                count=total,
+                fingerprint=fingerprint,
+                status=status,
+            )
+            conn.commit()
+            self._notes_moodboard_studio_v61_postgres_checkpoint(
+                f"identity:moodboards:{total}"
+            )
+            if status == "complete":
+                break
+
+        for source_phase in (
+            "moodboards", "moodboard_notes", "note_studio_documents",
+        ):
+            prediction_phase = f"source_prediction:{source_phase}"
+            while True:
+                if not begin_phase(f"{source_phase} source prediction phase"):
+                    return
+                progress = self._postgres_v61_progress_row(conn, prediction_phase)
+                if progress["status"] == "complete":
+                    conn.commit()
+                    break
+                page = self._postgres_v61_fingerprint_phase_page(
+                    conn,
+                    source_phase=source_phase,
+                    progress=progress,
+                    predict=True,
+                )
+                self._upsert_postgres_v61_progress(
+                    conn,
+                    phase=prediction_phase,
+                    cursor=page["cursor"],
+                    count=page["count"],
+                    fingerprint=page["fingerprint"],
+                    status=page["status"],
+                )
+                conn.commit()
+                self._notes_moodboard_studio_v61_postgres_checkpoint(
+                    f"{prediction_phase}:{page['count']}"
+                )
+                if page["status"] == "complete":
+                    break
+
+        for phase in ("moodboards", "moodboard_notes", "note_studio_documents"):
+            while True:
+                if not begin_phase(f"{phase} copy phase"):
+                    return
+                progress = self._postgres_v61_progress_row(conn, phase)
+                if progress["status"] == "complete":
+                    conn.commit()
+                    break
+                rows, cursor, source_exhausted = self._postgres_v61_copy_page(
+                    conn, phase=phase, progress=progress
+                )
+                added, fingerprint = self._postgres_v61_progress_fingerprint(
+                    str(progress["aggregate_fingerprint"]), rows
+                )
+                total = int(progress["copied_count"]) + added
+                status = "complete" if source_exhausted else "running"
+                self._upsert_postgres_v61_progress(
+                    conn, phase=phase, cursor=cursor, count=total,
+                    fingerprint=fingerprint, status=status,
+                )
+                conn.commit()
+                self._notes_moodboard_studio_v61_postgres_checkpoint(
+                    f"copy:{phase}:{total}"
+                )
+                if status == "complete":
+                    break
+
+        # Prove every durable target field while the migration owner can still
+        # read all legacy tenants; forced RLS is installed only after this
+        # global aggregate succeeds.
+        for source_phase in ("moodboards", "moodboard_notes", "note_studio_documents"):
+            verification_phase = f"aggregate_verification:{source_phase}"
+            while True:
+                if not begin_phase(f"{source_phase} aggregate verification phase"):
+                    return
+                progress = self._postgres_v61_progress_row(conn, verification_phase)
+                if progress["status"] == "complete":
+                    conn.commit()
+                    break
+                page = self._postgres_v61_fingerprint_phase_page(
+                    conn,
+                    source_phase=source_phase,
+                    progress=progress,
+                    predict=False,
+                )
+                self._upsert_postgres_v61_progress(
+                    conn,
+                    phase=verification_phase,
+                    cursor=page["cursor"],
+                    count=page["count"],
+                    fingerprint=page["fingerprint"],
+                    status=page["status"],
+                )
+                conn.commit()
+                self._notes_moodboard_studio_v61_postgres_checkpoint(
+                    f"{verification_phase}:{page['count']}"
+                )
+                if page["status"] == "complete":
+                    break
+
+        if not begin_phase("aggregate verification phase"):
+            return
+        if self._postgres_v61_phase_is_complete(conn, "aggregate_verification"):
+            conn.commit()
+        else:
+            for source_phase in (
+                "moodboards",
+                "moodboard_notes",
+                "note_studio_documents",
+            ):
+                predicted = self._postgres_v61_progress_row(
+                    conn, f"source_prediction:{source_phase}"
+                )
+                copied = self._postgres_v61_progress_row(conn, source_phase)
+                verified = self._postgres_v61_progress_row(
+                    conn, f"aggregate_verification:{source_phase}"
+                )
+                if (
+                    predicted["status"] != "complete"
+                    or copied["status"] != "complete"
+                    or verified["status"] != "complete"
+                    or int(predicted["copied_count"])
+                    != int(copied["copied_count"])
+                    or int(copied["copied_count"])
+                    != int(verified["copied_count"])
+                    or predicted["aggregate_fingerprint"]
+                    != copied["aggregate_fingerprint"]
+                    or copied["aggregate_fingerprint"]
+                    != verified["aggregate_fingerprint"]
+                ):
+                    raise SchemaError(
+                        "Notes moodboard/Studio v61 aggregate verification failed."
+                    )  # noqa: TRY003
+            self._complete_postgres_v61_phase(conn, "aggregate_verification")
+            conn.commit()
+            self._notes_moodboard_studio_v61_postgres_checkpoint(
+                "aggregate_verification"
+            )
+
+        if not begin_phase("constraint phase"):
+            return
+        run_constraints = not self._postgres_v61_phase_is_complete(
+            conn, "constraints"
+        )
+        if run_constraints:
+            self.backend.execute(
+                "LOCK TABLE note_task_scope_authority, moodboards, moodboard_notes, "
+                "note_studio_documents IN SHARE ROW EXCLUSIVE MODE",
+                connection=conn,
+            )
+        constraint_statements = (
+            "ALTER TABLE moodboards ALTER COLUMN owner_user_id SET NOT NULL",
+            "ALTER TABLE moodboards ALTER COLUMN dataset_id SET NOT NULL",
+            "ALTER TABLE moodboards ALTER COLUMN sync_id SET NOT NULL",
+            "ALTER TABLE moodboards ALTER COLUMN canvas_json SET NOT NULL",
+            "ALTER TABLE moodboards ALTER COLUMN canonical_revision SET NOT NULL",
+            "ALTER TABLE moodboards ALTER COLUMN canonical_hash SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN owner_user_id SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN dataset_id SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN placement_id SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN x SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN y SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN width SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN height SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN order_index SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN display_json SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN last_modified SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN deleted SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN version SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN canonical_revision SET NOT NULL",
+            "ALTER TABLE moodboard_notes ALTER COLUMN canonical_hash SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN owner_user_id SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN dataset_id SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN note_revision SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN note_hash SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN accepted_provenance_json SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN deleted SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN version SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN canonical_revision SET NOT NULL",
+            "ALTER TABLE note_studio_documents ALTER COLUMN canonical_hash SET NOT NULL",
+            "ALTER TABLE moodboards ALTER COLUMN canonical_revision SET DEFAULT 1",
+            "ALTER TABLE moodboard_notes ALTER COLUMN x SET DEFAULT 0",
+            "ALTER TABLE moodboard_notes ALTER COLUMN y SET DEFAULT 0",
+            "ALTER TABLE moodboard_notes ALTER COLUMN width SET DEFAULT 320",
+            "ALTER TABLE moodboard_notes ALTER COLUMN height SET DEFAULT 220",
+            "ALTER TABLE moodboard_notes ALTER COLUMN order_index SET DEFAULT 0",
+            "ALTER TABLE moodboard_notes ALTER COLUMN display_json SET DEFAULT '{}'",
+            "ALTER TABLE moodboard_notes ALTER COLUMN deleted SET DEFAULT FALSE",
+            "ALTER TABLE moodboard_notes ALTER COLUMN version SET DEFAULT 1",
+            "ALTER TABLE moodboard_notes ALTER COLUMN canonical_revision SET DEFAULT 1",
+            "ALTER TABLE note_studio_documents ALTER COLUMN note_revision SET DEFAULT 1",
+            "ALTER TABLE note_studio_documents ALTER COLUMN deleted SET DEFAULT FALSE",
+            "ALTER TABLE note_studio_documents ALTER COLUMN version SET DEFAULT 1",
+            "ALTER TABLE note_studio_documents ALTER COLUMN canonical_revision SET DEFAULT 1",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_scope_sync_unique UNIQUE(owner_user_id,dataset_id,sync_id)",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_scope_id_unique UNIQUE(owner_user_id,dataset_id,id)",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_owner_check CHECK(char_length(btrim(owner_user_id))>0) NOT VALID",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_dataset_check CHECK(char_length(btrim(dataset_id))>0) NOT VALID",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_sync_id_check CHECK(sync_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') NOT VALID",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_canonical_revision_check CHECK(canonical_revision>=1) NOT VALID",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_canonical_hash_check CHECK(canonical_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_diagnostic_code_check CHECK(source_diagnostic_code IS NULL OR char_length(source_diagnostic_code) BETWEEN 1 AND 64) NOT VALID",
+            "ALTER TABLE moodboards ADD CONSTRAINT moodboards_v61_diagnostic_hash_check CHECK(source_diagnostic_hash IS NULL OR source_diagnostic_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_scope_placement_unique UNIQUE(owner_user_id,dataset_id,placement_id)",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_owner_check CHECK(char_length(btrim(owner_user_id))>0) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_dataset_check CHECK(char_length(btrim(dataset_id))>0) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_note_id_check CHECK(char_length(btrim(note_id))>0) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_placement_id_check CHECK(placement_id ~ '^notes[.]moodboard_note:sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_width_check CHECK(width BETWEEN 1 AND 1000000) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_height_check CHECK(height BETWEEN 1 AND 1000000) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_version_check CHECK(version>=1) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_canonical_revision_check CHECK(canonical_revision>=1) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_canonical_hash_check CHECK(canonical_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_diagnostic_code_check CHECK(source_diagnostic_code IS NULL OR char_length(source_diagnostic_code) BETWEEN 1 AND 64) NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_diagnostic_hash_check CHECK(source_diagnostic_hash IS NULL OR source_diagnostic_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_owner_check CHECK(char_length(btrim(owner_user_id))>0) NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_dataset_check CHECK(char_length(btrim(dataset_id))>0) NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_note_id_check CHECK(char_length(btrim(note_id))>0) NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_note_revision_check CHECK(note_revision>=1) NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_note_hash_check CHECK(note_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_version_check CHECK(version>=1) NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_canonical_revision_check CHECK(canonical_revision>=1) NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_canonical_hash_check CHECK(canonical_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_diagnostic_code_check CHECK(source_diagnostic_code IS NULL OR char_length(source_diagnostic_code) BETWEEN 1 AND 64) NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_diagnostic_hash_check CHECK(source_diagnostic_hash IS NULL OR source_diagnostic_hash ~ '^sha256:[0-9a-f]{64}$') NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_board_fk FOREIGN KEY(owner_user_id,dataset_id,moodboard_id) REFERENCES moodboards(owner_user_id,dataset_id,id) ON UPDATE CASCADE ON DELETE CASCADE NOT VALID",
+            "ALTER TABLE moodboard_notes ADD CONSTRAINT moodboard_notes_v61_note_fk FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id) ON UPDATE CASCADE ON DELETE CASCADE NOT VALID",
+            "ALTER TABLE note_studio_documents ADD CONSTRAINT note_studio_documents_v61_note_fk FOREIGN KEY(owner_user_id,note_id) REFERENCES notes(client_id,id) ON UPDATE CASCADE ON DELETE CASCADE NOT VALID",
+        )
+        if run_constraints:
+            existing_constraints = {
+                str(row["conname"])
+                for row in self.backend.execute(
+                    "SELECT conname FROM pg_constraint k JOIN pg_namespace n ON n.oid=k.connamespace "
+                    "WHERE n.nspname=current_schema()", connection=conn,
+                ).rows
+            }
+            for statement in constraint_statements:
+                match = re.search(r"ADD CONSTRAINT ([a-z0-9_]+)", statement)
+                if match and match.group(1) in existing_constraints:
+                    continue
+                self.backend.execute(statement, connection=conn)
+            self._complete_postgres_v61_phase(conn, "constraints")
+            conn.commit()
+            self._notes_moodboard_studio_v61_postgres_checkpoint("constraint")
+        else:
+            conn.commit()
+
+        validation_constraints = tuple(
+            statement.partition("ADD CONSTRAINT ")[2].partition(" ")[0]
+            for statement in constraint_statements
+            if "ADD CONSTRAINT " in statement and " NOT VALID" in statement
+        )
+        for constraint in validation_constraints:
+            if not begin_phase(f"{constraint} validation phase"):
+                return
+            progress_phase = f"constraint_validation:{constraint}"
+            if self._postgres_v61_phase_is_complete(conn, progress_phase):
+                conn.commit()
+                continue
+            table = (
+                "note_studio_documents"
+                if constraint.startswith("note_studio")
+                else "moodboards"
+                if constraint.startswith("moodboards_")
+                else "moodboard_notes"
+            )
+            self.backend.execute(
+                f"ALTER TABLE {table} VALIDATE CONSTRAINT {constraint}",  # nosec B608 - fixed names.
+                connection=conn,
+            )
+            self._complete_postgres_v61_phase(conn, progress_phase)
+            conn.commit()
+            self._notes_moodboard_studio_v61_postgres_checkpoint(progress_phase)
+
+        indexes = (
+            "CREATE INDEX IF NOT EXISTS idx_moodboards_scope_page ON moodboards(owner_user_id,dataset_id,deleted,last_modified,id)",
+            "CREATE INDEX IF NOT EXISTS idx_moodboards_scope_sync_id ON moodboards(owner_user_id,dataset_id,sync_id)",
+            "CREATE INDEX IF NOT EXISTS idx_moodboard_notes_scope_board_page ON moodboard_notes(owner_user_id,dataset_id,moodboard_id,deleted,order_index,placement_id)",
+            "CREATE INDEX IF NOT EXISTS idx_moodboard_notes_scope_note ON moodboard_notes(owner_user_id,dataset_id,note_id,deleted,moodboard_id)",
+            "CREATE INDEX IF NOT EXISTS idx_moodboard_notes_scope_placement ON moodboard_notes(owner_user_id,dataset_id,placement_id)",
+            "CREATE INDEX IF NOT EXISTS idx_note_studio_documents_scope_page ON note_studio_documents(owner_user_id,dataset_id,deleted,last_modified,note_id)",
+            "CREATE INDEX IF NOT EXISTS idx_note_studio_documents_scope_note ON note_studio_documents(owner_user_id,dataset_id,note_id)",
+            "CREATE INDEX IF NOT EXISTS idx_note_studio_documents_scope_source ON note_studio_documents(owner_user_id,dataset_id,source_note_id)",
+        )
+        for index, statement in enumerate(indexes):
+            if not begin_phase(f"index {index} phase"):
+                return
+            progress_phase = f"index:{index}"
+            if self._postgres_v61_phase_is_complete(conn, progress_phase):
+                conn.commit()
+                continue
+            self.backend.execute(statement, connection=conn)
+            self._complete_postgres_v61_phase(conn, progress_phase)
+            conn.commit()
+            self._notes_moodboard_studio_v61_postgres_checkpoint(progress_phase)
+
+        if not begin_phase("RLS phase"):
+            return
+        if self._postgres_v61_phase_is_complete(conn, "rls"):
+            conn.commit()
+        else:
+            self.backend.execute(
+                "LOCK TABLE note_task_scope_authority, moodboards, moodboard_notes, "
+                "note_studio_documents IN SHARE ROW EXCLUSIVE MODE",
+                connection=conn,
+            )
+            for statement in build_chacha_rls_sql():
+                if any(table in statement for table in self._NOTES_MOODBOARD_STUDIO_V61_RELATIONS):
+                    self.backend.execute(statement, connection=conn)
+            self._complete_postgres_v61_phase(conn, "rls")
+            conn.commit()
+            self._notes_moodboard_studio_v61_postgres_checkpoint("rls")
+
+        if not begin_phase("version phase"):
+            return
+        self.backend.execute(
+            "LOCK TABLE note_task_scope_authority, moodboards, moodboard_notes, "
+            "note_studio_documents IN SHARE MODE",
+            connection=conn,
+        )
+        self._verify_notes_moodboard_studio_schema_postgres(conn, migrating=True)
+        self._upsert_postgres_v61_progress(
+            conn, phase="migration", cursor=None, count=0,
+            fingerprint=f"sha256:{hashlib.sha256().hexdigest()}", status="complete",
+        )
+        self._set_schema_version_postgres(conn, 63)
+        conn.commit()
+        self._notes_moodboard_studio_v61_postgres_checkpoint("version")
+
+    def _verify_notes_moodboard_studio_schema_postgres(
+        self, conn: Any, *, migrating: bool = False
+    ) -> None:
+        """Reject PostgreSQL v61 catalog, relationship, or forced-RLS drift."""
+        progress_state = self.backend.execute(
+            """
+            SELECT c.relowner=current_user::regrole AS is_table_owner,
+                   n.nspowner=current_user::regrole AS is_schema_owner,
+                   c.relowner=n.nspowner AS owner_matches_schema,
+                   has_table_privilege('public',c.oid,'SELECT') AS public_select,
+                   has_table_privilege('public',c.oid,'INSERT') AS public_insert,
+                   has_table_privilege('public',c.oid,'UPDATE') AS public_update,
+                   has_table_privilege('public',c.oid,'DELETE') AS public_delete
+              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+             WHERE n.nspname=current_schema() AND c.relkind IN ('r','p')
+               AND c.relname='chacha_schema_migration_progress'
+            """,
+            connection=conn,
+        ).rows
+        if len(progress_state) != 1 or not bool(
+            progress_state[0]["owner_matches_schema"]
+        ) or any(
+            bool(progress_state[0][key])
+            for key in ("public_select", "public_insert", "public_update", "public_delete")
+        ):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL progress catalog drifted.")  # noqa: TRY003
+
+        progress_acl = self.backend.execute(
+            """
+            SELECT NOT EXISTS(
+                     (SELECT grantee,grantor,privilege_type,is_grantable
+                        FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner)))
+                      EXCEPT
+                      SELECT grantee,grantor,privilege_type,is_grantable
+                        FROM aclexplode(acldefault('r',c.relowner)))
+                   ) AND NOT EXISTS(
+                     (SELECT grantee,grantor,privilege_type,is_grantable
+                        FROM aclexplode(acldefault('r',c.relowner))
+                      EXCEPT
+                      SELECT grantee,grantor,privilege_type,is_grantable
+                        FROM aclexplode(COALESCE(c.relacl,acldefault('r',c.relowner))))
+                   ) AS acl_matches
+              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+             WHERE n.nspname=current_schema()
+               AND c.relname='chacha_schema_migration_progress'
+            """,
+            connection=conn,
+        ).rows
+        if len(progress_acl) != 1 or not bool(progress_acl[0]["acl_matches"]):
+            raise SchemaError(
+                "Notes moodboard/Studio v61 PostgreSQL progress ACL drifted."
+            )  # noqa: TRY003
+
+        progress_columns = self.backend.execute(
+            """
+            SELECT a.attname AS column_name,
+                   format_type(a.atttypid,a.atttypmod) AS data_type,
+                   a.attnotnull AS is_not_null,
+                   pg_get_expr(d.adbin,d.adrelid,false) AS default_expression
+              FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
+              JOIN pg_namespace n ON n.oid=c.relnamespace
+              LEFT JOIN pg_attrdef d ON d.adrelid=c.oid AND d.adnum=a.attnum
+             WHERE n.nspname=current_schema()
+               AND c.relname='chacha_schema_migration_progress'
+               AND a.attnum>0 AND NOT a.attisdropped
+             ORDER BY a.attnum
+            """,
+            connection=conn,
+        ).rows
+        expected_progress_columns = (
+            ("migration_id", "text", True, None),
+            ("phase", "text", True, None),
+            ("keyset_cursor", "text", False, None),
+            ("copied_count", "bigint", True, "0"),
+            ("aggregate_fingerprint", "text", True, None),
+            ("status", "text", True, None),
+            ("updated_at", "timestamp with time zone", True, "current_timestamp"),
+        )
+        actual_progress_columns = tuple(
+            (
+                str(row["column_name"]),
+                str(row["data_type"]),
+                bool(row["is_not_null"]),
+                None
+                if row["default_expression"] is None
+                else str(row["default_expression"]).lower(),
+            )
+            for row in progress_columns
+        )
+        if actual_progress_columns != expected_progress_columns:
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL progress catalog drifted.")  # noqa: TRY003
+
+        progress_constraints = self.backend.execute(
+            """
+            SELECT k.conname AS constraint_name,k.contype AS constraint_type,
+                   pg_get_expr(k.conbin,k.conrelid,false) AS check_expression,
+                   ARRAY(SELECT a.attname
+                           FROM unnest(k.conkey) WITH ORDINALITY key_row(attnum,ordinality)
+                           JOIN pg_attribute a
+                             ON a.attrelid=c.oid AND a.attnum=key_row.attnum
+                          ORDER BY key_row.ordinality) AS local_columns,
+                   k.convalidated AS constraint_validated
+              FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
+              JOIN pg_namespace n ON n.oid=c.relnamespace
+             WHERE n.nspname=current_schema()
+               AND c.relname='chacha_schema_migration_progress'
+               AND k.contype<>'n'
+            """,
+            connection=conn,
+        ).rows
+
+        def _catalog_names(value: Any) -> tuple[str, ...]:
+            if value is None:
+                return ()
+            if isinstance(value, str):
+                return tuple(part for part in value.strip("{}").split(",") if part)
+            return tuple(str(part) for part in value)
+
+        progress_constraint_map = {
+            str(row["constraint_name"]): row for row in progress_constraints
+        }
+        expected_progress_checks = {
+            "chacha_schema_migration_progress_copied_count_check": "copied_count>=0",
+            "chacha_schema_migration_progress_aggregate_fingerprint_check": (
+                "aggregate_fingerprint~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "chacha_schema_migration_progress_status_check": (
+                "status=any(array['pending','running','complete'])"
+            ),
+        }
+        expected_progress_names = set(expected_progress_checks) | {
+            "chacha_schema_migration_progress_pkey"
+        }
+        if set(progress_constraint_map) != expected_progress_names or any(
+            not bool(row["constraint_validated"])
+            for row in progress_constraint_map.values()
+        ):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL progress catalog drifted.")  # noqa: TRY003
+        for name, expression in expected_progress_checks.items():
+            row = progress_constraint_map[name]
+            if (
+                str(row["constraint_type"]) != "c"
+                or self._normalize_postgres_catalog_expression(row["check_expression"])
+                != self._normalize_postgres_catalog_expression(expression)
+            ):
+                raise SchemaError("Notes moodboard/Studio v61 PostgreSQL progress catalog drifted.")  # noqa: TRY003
+        progress_primary = progress_constraint_map[
+            "chacha_schema_migration_progress_pkey"
+        ]
+        if (
+            str(progress_primary["constraint_type"]) != "p"
+            or _catalog_names(progress_primary["local_columns"])
+            != ("migration_id", "phase")
+        ):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL progress catalog drifted.")  # noqa: TRY003
+
+        relations = self._NOTES_MOODBOARD_STUDIO_V61_RELATIONS
+        states = self.backend.execute(
+            """
+            SELECT c.relname AS table_name,c.relrowsecurity,c.relforcerowsecurity,
+                   c.relowner=n.nspowner AS owner_matches_schema
+              FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+             WHERE n.nspname=current_schema() AND c.relkind IN ('r','p')
+               AND c.relname=ANY(%s)
+             ORDER BY c.relname
+            """,
+            (list(relations),),
+            connection=conn,
+        ).rows
+        if {str(row["table_name"]) for row in states} != set(relations):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL relation catalog drifted.")  # noqa: TRY003
+        if any(
+            not bool(row["owner_matches_schema"])
+            or not bool(row["relrowsecurity"])
+            or not bool(row["relforcerowsecurity"])
+            for row in states
+        ):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL ownership or RLS drifted.")  # noqa: TRY003
+
+        expected_columns = {
+            "note_task_scope_authority": (
+                "owner_user_id", "dataset_id", "task_graph_bound",
+                "moodboard_graph_bound", "studio_graph_bound",
+            ),
+            "moodboards": (
+                "id", "name", "description", "smart_rule_json", "created_at",
+                "last_modified", "deleted", "client_id", "version",
+                "owner_user_id", "dataset_id", "sync_id", "canvas_json",
+                "canonical_revision", "canonical_hash", "source_diagnostic_code",
+                "source_diagnostic_hash",
+            ),
+            "moodboard_notes": (
+                "moodboard_id", "note_id", "created_at", "owner_user_id", "dataset_id",
+                "placement_id", "x", "y", "width", "height", "order_index",
+                "display_json", "last_modified", "deleted", "version",
+                "canonical_revision", "canonical_hash", "source_diagnostic_code",
+                "source_diagnostic_hash",
+            ),
+            "note_studio_documents": (
+                "note_id", "payload_json", "template_type", "handwriting_mode",
+                "source_note_id", "excerpt_snapshot", "excerpt_hash",
+                "diagram_manifest_json", "companion_content_hash", "render_version",
+                "created_at", "last_modified", "owner_user_id", "dataset_id",
+                "note_revision", "note_hash", "accepted_provenance_json", "deleted",
+                "version", "canonical_revision", "canonical_hash",
+                "source_diagnostic_code", "source_diagnostic_hash",
+            ),
+        }
+        column_rows = self.backend.execute(
+            """
+            SELECT c.relname AS table_name,a.attname AS column_name,
+                   format_type(a.atttypid,a.atttypmod) AS data_type,
+                   a.attnotnull AS is_not_null,
+                   pg_get_expr(d.adbin,d.adrelid,false) AS default_expression,
+                   a.attnum
+              FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
+              JOIN pg_namespace n ON n.oid=c.relnamespace
+              LEFT JOIN pg_attrdef d ON d.adrelid=c.oid AND d.adnum=a.attnum
+             WHERE n.nspname=current_schema() AND c.relname=ANY(%s)
+               AND a.attnum>0 AND NOT a.attisdropped
+             ORDER BY c.relname,a.attnum
+            """,
+            (list(relations),), connection=conn,
+        ).rows
+        actual: dict[str, list[str]] = {table: [] for table in relations}
+        metadata: dict[tuple[str, str], Mapping[str, Any]] = {}
+        for row in column_rows:
+            table = str(row["table_name"])
+            column = str(row["column_name"])
+            actual[table].append(column)
+            metadata[(table, column)] = row
+        if any(tuple(actual[table]) != expected_columns[table] for table in relations):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL column catalog drifted.")  # noqa: TRY003
+        expected_metadata = {
+            "note_task_scope_authority": (
+                ("owner_user_id", "text", True, ""),
+                ("dataset_id", "text", True, ""),
+                ("task_graph_bound", "boolean", True, "true"),
+                ("moodboard_graph_bound", "boolean", True, "false"),
+                ("studio_graph_bound", "boolean", True, "false"),
+            ),
+            "moodboards": (
+                ("id", "bigint", True, "nextval'moodboards_id_seq'::regclass"),
+                ("name", "text", True, ""),
+                ("description", "text", False, ""),
+                ("smart_rule_json", "text", False, ""),
+                ("created_at", "timestamp with time zone", True, "current_timestamp"),
+                ("last_modified", "timestamp with time zone", True, "current_timestamp"),
+                ("deleted", "boolean", True, "false"),
+                ("client_id", "text", True, "'unknown'"),
+                ("version", "integer", True, "1"),
+                ("owner_user_id", "text", True, ""),
+                ("dataset_id", "text", True, ""),
+                ("sync_id", "text", True, ""),
+                ("canvas_json", "text", True, ""),
+                ("canonical_revision", "integer", True, "1"),
+                ("canonical_hash", "text", True, ""),
+                ("source_diagnostic_code", "text", False, ""),
+                ("source_diagnostic_hash", "text", False, ""),
+            ),
+            "moodboard_notes": (
+                ("moodboard_id", "bigint", True, ""),
+                ("note_id", "text", True, ""),
+                ("created_at", "timestamp with time zone", True, "current_timestamp"),
+                ("owner_user_id", "text", True, ""),
+                ("dataset_id", "text", True, ""),
+                ("placement_id", "text", True, ""),
+                ("x", "bigint", True, "0"),
+                ("y", "bigint", True, "0"),
+                ("width", "integer", True, "320"),
+                ("height", "integer", True, "220"),
+                ("order_index", "bigint", True, "0"),
+                ("display_json", "text", True, "'{}'"),
+                ("last_modified", "timestamp with time zone", True, ""),
+                ("deleted", "boolean", True, "false"),
+                ("version", "integer", True, "1"),
+                ("canonical_revision", "integer", True, "1"),
+                ("canonical_hash", "text", True, ""),
+                ("source_diagnostic_code", "text", False, ""),
+                ("source_diagnostic_hash", "text", False, ""),
+            ),
+            "note_studio_documents": (
+                ("note_id", "text", True, ""),
+                ("payload_json", "text", True, ""),
+                ("template_type", "text", True, ""),
+                ("handwriting_mode", "text", True, ""),
+                ("source_note_id", "text", False, ""),
+                ("excerpt_snapshot", "text", False, ""),
+                ("excerpt_hash", "text", False, ""),
+                ("diagram_manifest_json", "text", False, ""),
+                ("companion_content_hash", "text", False, ""),
+                ("render_version", "integer", True, "1"),
+                ("created_at", "timestamp with time zone", True, "current_timestamp"),
+                ("last_modified", "timestamp with time zone", True, "current_timestamp"),
+                ("owner_user_id", "text", True, ""),
+                ("dataset_id", "text", True, ""),
+                ("note_revision", "integer", True, "1"),
+                ("note_hash", "text", True, ""),
+                ("accepted_provenance_json", "text", True, ""),
+                ("deleted", "boolean", True, "false"),
+                ("version", "integer", True, "1"),
+                ("canonical_revision", "integer", True, "1"),
+                ("canonical_hash", "text", True, ""),
+                ("source_diagnostic_code", "text", False, ""),
+                ("source_diagnostic_hash", "text", False, ""),
+            ),
+        }
+        for table, expected_table_metadata in expected_metadata.items():
+            actual_table_metadata = tuple(
+                (
+                    column,
+                    str(metadata[(table, column)]["data_type"]),
+                    bool(metadata[(table, column)]["is_not_null"]),
+                    self._normalize_postgres_catalog_expression(
+                        metadata[(table, column)]["default_expression"]
+                    ),
+                )
+                for column in expected_columns[table]
+            )
+            if actual_table_metadata != expected_table_metadata:
+                raise SchemaError(
+                    "Notes moodboard/Studio v61 PostgreSQL column metadata drifted."
+                )  # noqa: TRY003
+
+        constraint_rows = self.backend.execute(
+            """
+            SELECT c.relname AS table_name,k.conname AS constraint_name,
+                   k.contype AS constraint_type,
+                   pg_get_constraintdef(k.oid,true) AS constraint_definition,
+                   pg_get_expr(k.conbin,k.conrelid,false) AS check_expression,
+                   referenced.relname AS referenced_table,
+                   referenced_namespace.nspname AS referenced_schema,
+                   referenced_namespace.nspname=current_schema()
+                     AS referenced_in_current_schema,
+                   ARRAY(SELECT a.attname
+                           FROM unnest(k.conkey) WITH ORDINALITY key_row(attnum,ordinality)
+                           JOIN pg_attribute a
+                             ON a.attrelid=c.oid AND a.attnum=key_row.attnum
+                          ORDER BY key_row.ordinality) AS local_columns,
+                   CASE WHEN k.confrelid=0 THEN NULL ELSE
+                     ARRAY(SELECT a.attname
+                             FROM unnest(k.confkey) WITH ORDINALITY key_row(attnum,ordinality)
+                             JOIN pg_attribute a
+                               ON a.attrelid=referenced.oid AND a.attnum=key_row.attnum
+                            ORDER BY key_row.ordinality) END AS referenced_columns,
+                   k.convalidated AS constraint_validated,
+                   k.confdeltype AS delete_action,k.confupdtype AS update_action
+              FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
+              JOIN pg_namespace n ON n.oid=c.relnamespace
+              LEFT JOIN pg_class referenced ON referenced.oid=k.confrelid
+             LEFT JOIN pg_namespace referenced_namespace
+                ON referenced_namespace.oid=referenced.relnamespace
+             WHERE n.nspname=current_schema() AND c.relname=ANY(%s)
+               AND k.contype IN ('p','f','u','c')
+            """,
+            (list(relations),),
+            connection=conn,
+        ).rows
+        constraints = {
+            (str(row["table_name"]), str(row["constraint_name"])): row
+            for row in constraint_rows
+        }
+        expected_checks = {
+            "note_task_scope_authority_owner_check": (
+                "char_length(btrim(owner_user_id))>0"
+            ),
+            "note_task_scope_authority_dataset_check": (
+                "char_length(btrim(dataset_id))>0and"
+                "dataset_id=btrim(dataset_id)and"
+                "dataset_id<>'local-unbound'"
+            ),
+            "moodboards_v61_owner_check": "char_length(btrim(owner_user_id))>0",
+            "moodboards_v61_dataset_check": "char_length(btrim(dataset_id))>0",
+            "moodboards_v61_sync_id_check": (
+                "sync_id~'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+                "[89ab][0-9a-f]{3}-[0-9a-f]{12}$'"
+            ),
+            "moodboards_v61_canonical_revision_check": "canonical_revision>=1",
+            "moodboards_v61_canonical_hash_check": (
+                "canonical_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "moodboards_v61_diagnostic_code_check": (
+                "source_diagnostic_codeisnullor"
+                "char_length(source_diagnostic_code)>=1and"
+                "char_length(source_diagnostic_code)<=64"
+            ),
+            "moodboards_v61_diagnostic_hash_check": (
+                "source_diagnostic_hashisnullor"
+                "source_diagnostic_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "moodboard_notes_v61_owner_check": "char_length(btrim(owner_user_id))>0",
+            "moodboard_notes_v61_dataset_check": "char_length(btrim(dataset_id))>0",
+            "moodboard_notes_v61_note_id_check": "char_length(btrim(note_id))>0",
+            "moodboard_notes_v61_placement_id_check": (
+                "placement_id~'^notes[.]moodboard_note:sha256:[0-9a-f]{64}$'"
+            ),
+            "moodboard_notes_v61_width_check": "width>=1andwidth<=1000000",
+            "moodboard_notes_v61_height_check": "height>=1andheight<=1000000",
+            "moodboard_notes_v61_version_check": "version>=1",
+            "moodboard_notes_v61_canonical_revision_check": "canonical_revision>=1",
+            "moodboard_notes_v61_canonical_hash_check": (
+                "canonical_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "moodboard_notes_v61_diagnostic_code_check": (
+                "source_diagnostic_codeisnullor"
+                "char_length(source_diagnostic_code)>=1and"
+                "char_length(source_diagnostic_code)<=64"
+            ),
+            "moodboard_notes_v61_diagnostic_hash_check": (
+                "source_diagnostic_hashisnullor"
+                "source_diagnostic_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "note_studio_documents_v61_owner_check": (
+                "char_length(btrim(owner_user_id))>0"
+            ),
+            "note_studio_documents_v61_dataset_check": (
+                "char_length(btrim(dataset_id))>0"
+            ),
+            "note_studio_documents_v61_note_id_check": "char_length(btrim(note_id))>0",
+            "note_studio_documents_v61_note_revision_check": "note_revision>=1",
+            "note_studio_documents_v61_note_hash_check": (
+                "note_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "note_studio_documents_v61_version_check": "version>=1",
+            "note_studio_documents_v61_canonical_revision_check": (
+                "canonical_revision>=1"
+            ),
+            "note_studio_documents_v61_canonical_hash_check": (
+                "canonical_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "note_studio_documents_v61_diagnostic_code_check": (
+                "source_diagnostic_codeisnullor"
+                "char_length(source_diagnostic_code)>=1and"
+                "char_length(source_diagnostic_code)<=64"
+            ),
+            "note_studio_documents_v61_diagnostic_hash_check": (
+                "source_diagnostic_hashisnullor"
+                "source_diagnostic_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "note_studio_documents_template_type_check": (
+                "template_type=any(array['lined','grid','cornell'])"
+            ),
+            "note_studio_documents_handwriting_mode_check": (
+                "handwriting_mode=any(array['off','accented'])"
+            ),
+            "note_studio_documents_render_version_check": "render_version>=1",
+        }
+        expected_unique = {
+            "moodboards_v61_scope_sync_unique": (
+                "moodboards", ("owner_user_id", "dataset_id", "sync_id")
+            ),
+            "moodboards_v61_scope_id_unique": (
+                "moodboards", ("owner_user_id", "dataset_id", "id")
+            ),
+            "moodboard_notes_v61_scope_placement_unique": (
+                "moodboard_notes", ("owner_user_id", "dataset_id", "placement_id")
+            ),
+        }
+        expected_primary = {
+            "moodboards_pkey": ("moodboards", ("id",)),
+            "moodboard_notes_pkey": (
+                "moodboard_notes", ("moodboard_id", "note_id")
+            ),
+            "note_studio_documents_pkey": ("note_studio_documents", ("note_id",)),
+            "note_task_scope_authority_pkey": (
+                "note_task_scope_authority", ("owner_user_id",)
+            ),
+        }
+        expected_foreign = {
+            "moodboard_notes_moodboard_id_fkey": (
+                "moodboard_notes", ("moodboard_id",),
+                "moodboards", ("id",), "c", "c",
+            ),
+            "moodboard_notes_note_id_fkey": (
+                "moodboard_notes", ("note_id",),
+                "notes", ("id",), "c", "c",
+            ),
+            "moodboard_notes_v61_board_fk": (
+                "moodboard_notes", ("owner_user_id", "dataset_id", "moodboard_id"),
+                "moodboards", ("owner_user_id", "dataset_id", "id"), "c", "c",
+            ),
+            "moodboard_notes_v61_note_fk": (
+                "moodboard_notes", ("owner_user_id", "note_id"),
+                "notes", ("client_id", "id"), "c", "c",
+            ),
+            "note_studio_documents_v61_note_fk": (
+                "note_studio_documents", ("owner_user_id", "note_id"),
+                "notes", ("client_id", "id"), "c", "c",
+            ),
+            "note_studio_documents_note_id_fkey": (
+                "note_studio_documents", ("note_id",),
+                "notes", ("id",), "c", "c",
+            ),
+        }
+        def _expected_check_table(name: str) -> str:
+            if name.startswith("note_task_scope_authority_"):
+                return "note_task_scope_authority"
+            if name.startswith("moodboard_notes_"):
+                return "moodboard_notes"
+            if name.startswith("moodboards_"):
+                return "moodboards"
+            return "note_studio_documents"
+
+        def _constraint_definition(row: Mapping[str, Any]) -> str:
+            return self._normalize_postgres_catalog_expression(
+                row["constraint_definition"]
+            )
+
+        def _column_definition(columns: tuple[str, ...]) -> str:
+            return ",".join(columns)
+
+        expected_constraint_keys = {
+            (_expected_check_table(name), name) for name in expected_checks
+        } | {
+            (table, name)
+            for name, (table, _columns) in (expected_unique | expected_primary).items()
+        } | {
+            (expected[0], name) for name, expected in expected_foreign.items()
+        }
+        if set(constraints) != expected_constraint_keys or any(
+            not bool(row["constraint_validated"]) for row in constraints.values()
+        ):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL constraint catalog drifted.")  # noqa: TRY003
+        for name, expression in expected_checks.items():
+            row = constraints[(_expected_check_table(name), name)]
+            if (
+                str(row["constraint_type"]) != "c"
+                or self._normalize_postgres_catalog_expression(row["check_expression"])
+                != self._normalize_postgres_catalog_expression(expression)
+                or _constraint_definition(row)
+                != "check" + self._normalize_postgres_catalog_expression(expression)
+            ):
+                raise SchemaError("Notes moodboard/Studio v61 PostgreSQL constraint catalog drifted.")  # noqa: TRY003
+        for name, (table, columns) in (expected_unique | expected_primary).items():
+            row = constraints[(table, name)]
+            expected_type = "u" if name in expected_unique else "p"
+            expected_definition = (
+                ("unique" if expected_type == "u" else "primarykey")
+                + _column_definition(columns)
+            )
+            if (
+                str(row["constraint_type"]) != expected_type
+                or str(row["table_name"]) != table
+                or _catalog_names(row["local_columns"]) != columns
+                or _constraint_definition(row) != expected_definition
+            ):
+                raise SchemaError("Notes moodboard/Studio v61 PostgreSQL constraint catalog drifted.")  # noqa: TRY003
+        for name, expected in expected_foreign.items():
+            table, columns, parent, parent_columns, delete_action, update_action = expected
+            row = constraints[(table, name)]
+            expected_definition = (
+                "foreignkey"
+                + _column_definition(columns)
+                + "references"
+                + parent
+                + _column_definition(parent_columns)
+                + "onupdatecascadeondeletecascade"
+            )
+            if (
+                str(row["constraint_type"]) != "f"
+                or str(row["table_name"]) != table
+                or _catalog_names(row["local_columns"]) != columns
+                or str(row["referenced_table"]) != parent
+                or not bool(row["referenced_in_current_schema"])
+                or not str(row["referenced_schema"] or "")
+                or _catalog_names(row["referenced_columns"]) != parent_columns
+                or str(row["delete_action"]) != delete_action
+                or str(row["update_action"]) != update_action
+                or _constraint_definition(row) != expected_definition
+            ):
+                raise SchemaError("Notes moodboard/Studio v61 PostgreSQL constraint catalog drifted.")  # noqa: TRY003
+
+        index_rows = self.backend.execute(
+            "SELECT i.relname AS index_name,x.indisvalid,x.indisready,"
+            "pg_get_indexdef(x.indexrelid,0,true) AS definition "
+            "FROM pg_index x JOIN pg_class t ON t.oid=x.indrelid "
+            "JOIN pg_class i ON i.oid=x.indexrelid JOIN pg_namespace n ON n.oid=t.relnamespace "
+            "WHERE n.nspname=current_schema() AND t.relname=ANY(%s)",
+            (list(relations),), connection=conn,
+        ).rows
+        indexes = {str(row["index_name"]): row for row in index_rows}
+        expected_index_definitions = {
+            "idx_moodboards_deleted": "CREATE INDEX idx_moodboards_deleted ON moodboards USING btree (deleted)",
+            "idx_moodboards_last_modified": "CREATE INDEX idx_moodboards_last_modified ON moodboards USING btree (last_modified)",
+            "idx_moodboards_scope_page": "CREATE INDEX idx_moodboards_scope_page ON moodboards USING btree (owner_user_id, dataset_id, deleted, last_modified, id)",
+            "idx_moodboards_scope_sync_id": "CREATE INDEX idx_moodboards_scope_sync_id ON moodboards USING btree (owner_user_id, dataset_id, sync_id)",
+            "idx_moodboard_notes_board": "CREATE INDEX idx_moodboard_notes_board ON moodboard_notes USING btree (moodboard_id)",
+            "idx_moodboard_notes_note": "CREATE INDEX idx_moodboard_notes_note ON moodboard_notes USING btree (note_id)",
+            "idx_moodboard_notes_scope_board_page": "CREATE INDEX idx_moodboard_notes_scope_board_page ON moodboard_notes USING btree (owner_user_id, dataset_id, moodboard_id, deleted, order_index, placement_id)",
+            "idx_moodboard_notes_scope_note": "CREATE INDEX idx_moodboard_notes_scope_note ON moodboard_notes USING btree (owner_user_id, dataset_id, note_id, deleted, moodboard_id)",
+            "idx_moodboard_notes_scope_placement": "CREATE INDEX idx_moodboard_notes_scope_placement ON moodboard_notes USING btree (owner_user_id, dataset_id, placement_id)",
+            "idx_note_studio_documents_scope_page": "CREATE INDEX idx_note_studio_documents_scope_page ON note_studio_documents USING btree (owner_user_id, dataset_id, deleted, last_modified, note_id)",
+            "idx_note_studio_documents_scope_note": "CREATE INDEX idx_note_studio_documents_scope_note ON note_studio_documents USING btree (owner_user_id, dataset_id, note_id)",
+            "idx_note_studio_documents_scope_source": "CREATE INDEX idx_note_studio_documents_scope_source ON note_studio_documents USING btree (owner_user_id, dataset_id, source_note_id)",
+            "idx_note_studio_documents_source_note_id": "CREATE INDEX idx_note_studio_documents_source_note_id ON note_studio_documents USING btree (source_note_id)",
+            "moodboards_pkey": "CREATE UNIQUE INDEX moodboards_pkey ON moodboards USING btree (id)",
+            "moodboards_v61_scope_id_unique": "CREATE UNIQUE INDEX moodboards_v61_scope_id_unique ON moodboards USING btree (owner_user_id, dataset_id, id)",
+            "moodboards_v61_scope_sync_unique": "CREATE UNIQUE INDEX moodboards_v61_scope_sync_unique ON moodboards USING btree (owner_user_id, dataset_id, sync_id)",
+            "moodboard_notes_pkey": "CREATE UNIQUE INDEX moodboard_notes_pkey ON moodboard_notes USING btree (moodboard_id, note_id)",
+            "moodboard_notes_v61_scope_placement_unique": "CREATE UNIQUE INDEX moodboard_notes_v61_scope_placement_unique ON moodboard_notes USING btree (owner_user_id, dataset_id, placement_id)",
+            "note_studio_documents_pkey": "CREATE UNIQUE INDEX note_studio_documents_pkey ON note_studio_documents USING btree (note_id)",
+            "note_task_scope_authority_pkey": "CREATE UNIQUE INDEX note_task_scope_authority_pkey ON note_task_scope_authority USING btree (owner_user_id)",
+        }
+        if set(indexes) != set(expected_index_definitions) or any(
+            not bool(indexes[name]["indisvalid"])
+            or not bool(indexes[name]["indisready"])
+            or " ".join(str(indexes[name]["definition"]).split())
+            != expected_index_definitions[name]
+            for name in expected_index_definitions
+        ):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL index catalog drifted.")  # noqa: TRY003
+
+        policies = self.backend.execute(
+            "SELECT tablename,policyname,permissive,roles::text,cmd,qual,with_check "
+            "FROM pg_policies WHERE schemaname=current_schema() AND tablename=ANY(%s) "
+            "ORDER BY tablename,policyname",
+            (list(relations),), connection=conn,
+        ).rows
+        if len(policies) != len(relations):
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL policy catalog drifted.")  # noqa: TRY003
+        expected_policy_expressions = {
+            "note_task_scope_authority": (
+                "note_task_scope_authority.owner_user_id = "
+                "current_setting('app.current_user_id', true)"
+            ),
+            "moodboards": (
+                "moodboards.owner_user_id = current_setting('app.current_user_id', true) "
+                "AND moodboards.dataset_id = current_setting('app.current_dataset_id', true)"
+            ),
+            "moodboard_notes": (
+                "moodboard_notes.owner_user_id = current_setting('app.current_user_id', true) "
+                "AND moodboard_notes.dataset_id = current_setting('app.current_dataset_id', true) "
+                "AND EXISTS (SELECT 1 FROM moodboards board WHERE "
+                "board.owner_user_id=moodboard_notes.owner_user_id AND "
+                "board.dataset_id=moodboard_notes.dataset_id AND "
+                "board.id=moodboard_notes.moodboard_id) AND EXISTS (SELECT 1 FROM notes note "
+                "WHERE note.id=moodboard_notes.note_id AND "
+                "note.client_id=moodboard_notes.owner_user_id)"
+            ),
+            "note_studio_documents": (
+                "note_studio_documents.owner_user_id = current_setting('app.current_user_id', true) "
+                "AND note_studio_documents.dataset_id = current_setting('app.current_dataset_id', true) "
+                "AND EXISTS (SELECT 1 FROM notes note WHERE "
+                "note.id=note_studio_documents.note_id AND "
+                "note.client_id=note_studio_documents.owner_user_id) AND "
+                "(note_studio_documents.source_note_id IS NULL OR EXISTS (SELECT 1 FROM notes source_note "
+                "WHERE source_note.id=note_studio_documents.source_note_id AND "
+                "source_note.client_id=note_studio_documents.owner_user_id))"
+            ),
+        }
+        for policy in policies:
+            table = str(policy["tablename"])
+            expected_expression = self._normalize_postgres_catalog_expression(
+                expected_policy_expressions[table]
+            ).replace(f"{table}.", "")
+            actual_qual = self._normalize_postgres_catalog_expression(
+                policy["qual"]
+            ).replace(f"{table}.", "")
+            actual_with_check = self._normalize_postgres_catalog_expression(
+                policy["with_check"]
+            ).replace(f"{table}.", "")
+            if (
+                str(policy["policyname"]) != f"{table}_tenant_isolation"
+                or str(policy["permissive"]) != "PERMISSIVE"
+                or str(policy["roles"]) != "{public}"
+                or str(policy["cmd"]) != "ALL"
+                or policy["qual"] is None
+                or policy["with_check"] is None
+                or actual_qual != expected_expression
+                or actual_with_check != expected_expression
+            ):
+                raise SchemaError("Notes moodboard/Studio v61 PostgreSQL policy catalog drifted.")  # noqa: TRY003
+
+        relationship_failures = self.backend.execute(
+            "SELECT 1 FROM moodboard_notes p LEFT JOIN moodboards b "
+            "ON b.owner_user_id=p.owner_user_id AND b.dataset_id=p.dataset_id AND b.id=p.moodboard_id "
+            "LEFT JOIN notes n ON n.client_id=p.owner_user_id AND n.id=p.note_id "
+            "WHERE b.id IS NULL OR n.id IS NULL LIMIT 1",
+            connection=conn,
+        ).rows
+        studio_failures = self.backend.execute(
+            "SELECT 1 FROM note_studio_documents s LEFT JOIN notes n "
+            "ON n.client_id=s.owner_user_id AND n.id=s.note_id "
+            "WHERE n.id IS NULL LIMIT 1",
+            connection=conn,
+        ).rows
+        if relationship_failures or studio_failures:
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL relationship catalog drifted.")  # noqa: TRY003
+
+        progress = self._postgres_v61_progress_row(conn, "migration")
+        if not migrating and progress["status"] != "complete":
+            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL migration progress is incomplete.")  # noqa: TRY003
+
+    def _create_note_attachment_schema_postgres(self, conn: Any) -> None:
+        """Create the PostgreSQL v59 registry with fixed constraint and index SQL."""
+
+        statements = (
+            """
+            CREATE TABLE note_attachments(
+              client_id TEXT NOT NULL CHECK(char_length(btrim(client_id)) > 0),
+              dataset_id TEXT NOT NULL
+                CHECK(char_length(dataset_id) BETWEEN 1 AND 255 AND dataset_id = btrim(dataset_id)),
+              attachment_id TEXT NOT NULL CHECK(
+                attachment_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+              ),
+              note_id TEXT NOT NULL CHECK(
+                note_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+              ) REFERENCES notes(id) ON DELETE RESTRICT ON UPDATE RESTRICT,
+              file_name TEXT NOT NULL CHECK(
+                char_length(file_name) BETWEEN 1 AND 180
+                AND file_name = btrim(file_name)
+                AND file_name NOT IN ('.', '..')
+                AND position('/' IN file_name) = 0
+                AND position(chr(92) IN file_name) = 0
+              ),
+              normalized_file_name TEXT NOT NULL CHECK(
+                char_length(normalized_file_name) BETWEEN 1 AND 180
+                AND position('/' IN normalized_file_name) = 0
+                AND position(chr(92) IN normalized_file_name) = 0
+              ),
+              original_file_name TEXT NOT NULL CHECK(
+                char_length(original_file_name) BETWEEN 1 AND 255
+                AND octet_length(original_file_name) <= 1024
+                AND original_file_name = btrim(original_file_name)
+                AND original_file_name NOT IN ('.', '..')
+                AND position('/' IN original_file_name) = 0
+                AND position(chr(92) IN original_file_name) = 0
+              ),
+              content_type TEXT NOT NULL CHECK(
+                char_length(content_type) BETWEEN 1 AND 255
+                AND position('/' IN content_type) > 1
+              ),
+              size_bytes BIGINT NOT NULL CHECK(size_bytes >= 1),
+              blob_hash TEXT NOT NULL CHECK(blob_hash ~ '^sha256:[0-9a-f]{64}$'),
+              object_hash TEXT NOT NULL CHECK(object_hash ~ '^sha256:[0-9a-f]{64}$'),
+              version BIGINT NOT NULL CHECK(version >= 1),
+              deleted BOOLEAN NOT NULL DEFAULT FALSE,
+              deleted_at TIMESTAMPTZ,
+              delete_reason TEXT
+                CHECK(delete_reason IS NULL OR char_length(delete_reason) <= 256),
+              created_at TIMESTAMPTZ NOT NULL,
+              last_modified TIMESTAMPTZ NOT NULL,
+              created_by TEXT NOT NULL CHECK(char_length(btrim(created_by)) > 0),
+              source_kind TEXT NOT NULL
+                CHECK(source_kind IN ('upload', 'sync', 'legacy_bootstrap')),
+              PRIMARY KEY(client_id, dataset_id, attachment_id),
+              CHECK(
+                (deleted = FALSE AND deleted_at IS NULL AND delete_reason IS NULL)
+                OR (deleted = TRUE AND deleted_at IS NOT NULL)
+              )
+            )
+            """,
+            "CREATE UNIQUE INDEX uq_note_attachments_live_name "
+            "ON note_attachments(client_id, dataset_id, note_id, normalized_file_name) "
+            "WHERE deleted = FALSE",
+            "CREATE INDEX idx_note_attachments_owner_dataset_note_all_page "
+            "ON note_attachments(client_id, dataset_id, note_id, attachment_id)",
+            "CREATE INDEX idx_note_attachments_owner_dataset_note_page "
+            "ON note_attachments(client_id, dataset_id, note_id, deleted, attachment_id)",
+            "CREATE INDEX idx_note_attachments_owner_dataset_blob "
+            "ON note_attachments(client_id, dataset_id, blob_hash, attachment_id)",
+        )
+        for statement in statements:
+            self.backend.execute(statement, connection=conn)
+
+    def _verify_note_attachment_schema_postgres(self, conn: Any, *, runtime: bool = False) -> None:
+        """Fail closed unless the locked v59 registry catalog is canonical."""
+
+        backend = self.backend
+        backend.execute(
+            ("LOCK TABLE notes, note_attachments IN ACCESS SHARE MODE" if runtime
+             else "LOCK TABLE notes, note_attachments IN SHARE MODE"),
+            connection=conn,
+        )
+        relation_rows = backend.execute(
+            """
+            SELECT attachment_table.relname AS table_name,
+                   attachment_table.relrowsecurity,
+                   attachment_table.relforcerowsecurity,
+                   attachment_table.relowner = current_user::regrole AS is_schema_owner,
+                   pg_has_role(current_user, attachment_namespace.nspowner, 'USAGE')
+                     AS is_current_schema_owner
+              FROM pg_class AS attachment_table
+              JOIN pg_namespace AS attachment_namespace
+                ON attachment_namespace.oid = attachment_table.relnamespace
+             WHERE attachment_namespace.nspname = current_schema()
+               AND attachment_table.relkind IN ('r', 'p')
+               AND attachment_table.relname = 'note_attachments'
+            """,
+            connection=conn,
+        ).rows
+        if len(relation_rows) != 1 or any(
+            not bool(relation_rows[0].get(flag))
+            for flag in (
+                "relrowsecurity",
+                "relforcerowsecurity",
+                "is_schema_owner",
+                "is_current_schema_owner",
+            )
+        ):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry ownership or RLS catalog drifted."
+            )
+
+        expected_columns = (
+            ("client_id", "text", True, None),
+            ("dataset_id", "text", True, None),
+            ("attachment_id", "text", True, None),
+            ("note_id", "text", True, None),
+            ("file_name", "text", True, None),
+            ("normalized_file_name", "text", True, None),
+            ("original_file_name", "text", True, None),
+            ("content_type", "text", True, None),
+            ("size_bytes", "bigint", True, None),
+            ("blob_hash", "text", True, None),
+            ("object_hash", "text", True, None),
+            ("version", "bigint", True, None),
+            ("deleted", "boolean", True, "false"),
+            ("deleted_at", "timestamp with time zone", False, None),
+            ("delete_reason", "text", False, None),
+            ("created_at", "timestamp with time zone", True, None),
+            ("last_modified", "timestamp with time zone", True, None),
+            ("created_by", "text", True, None),
+            ("source_kind", "text", True, None),
+        )
+        column_rows = backend.execute(
+            """
+            SELECT column_row.attname AS column_name,
+                   format_type(column_row.atttypid, column_row.atttypmod) AS data_type,
+                   column_row.attnotnull AS is_not_null,
+                   pg_get_expr(default_row.adbin, default_row.adrelid, false)
+                     AS default_expression
+              FROM pg_attribute AS column_row
+              JOIN pg_class AS attachment_table
+                ON attachment_table.oid = column_row.attrelid
+              JOIN pg_namespace AS attachment_namespace
+                ON attachment_namespace.oid = attachment_table.relnamespace
+              LEFT JOIN pg_attrdef AS default_row
+                ON default_row.adrelid = attachment_table.oid
+               AND default_row.adnum = column_row.attnum
+             WHERE attachment_namespace.nspname = current_schema()
+               AND attachment_table.relname = 'note_attachments'
+               AND column_row.attnum > 0
+               AND NOT column_row.attisdropped
+             ORDER BY column_row.attnum
+            """,
+            connection=conn,
+        ).rows
+        actual_columns = tuple(
+            (
+                str(row.get("column_name")),
+                str(row.get("data_type")),
+                bool(row.get("is_not_null")),
+                (
+                    None
+                    if row.get("default_expression") is None
+                    else "".join(str(row.get("default_expression")).lower().split())
+                ),
+            )
+            for row in column_rows
+        )
+        if actual_columns != expected_columns:
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry column catalog drifted."
+            )
+
+        # Exact normalized pg_get_constraintdef shapes captured from the v59 DDL.
+        expected_checks = {
+            "note_attachments_client_id_check": "check(char_length(btrim(client_id))>0)",
+            "note_attachments_dataset_id_check": "check(char_length(dataset_id)>=1andchar_length(dataset_id)<=255anddataset_id=btrim(dataset_id))",
+            "note_attachments_attachment_id_check": "check(attachment_id~'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')",
+            "note_attachments_note_id_check": "check(note_id~'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')",
+            "note_attachments_file_name_check": (
+                "check(char_length(file_name)>=1andchar_length(file_name)<=180andfile_name=btrim(file_name)"
+                "and(file_name<>all(array['.','..']))andposition(('/')in(file_name))=0andposition((chr(92))in(file_name))=0)"
+            ),
+            "note_attachments_normalized_file_name_check": (
+                "check(char_length(normalized_file_name)>=1andchar_length(normalized_file_name)<=180"
+                "andposition(('/')in(normalized_file_name))=0andposition((chr(92))in(normalized_file_name))=0)"
+            ),
+            "note_attachments_original_file_name_check": (
+                "check(char_length(original_file_name)>=1andchar_length(original_file_name)<=255and"
+                "octet_length(original_file_name)<=1024andoriginal_file_name=btrim(original_file_name)"
+                "and(original_file_name<>all(array['.','..']))andposition(('/')in(original_file_name))=0"
+                "andposition((chr(92))in(original_file_name))=0)"
+            ),
+            "note_attachments_content_type_check": (
+                "check(char_length(content_type)>=1andchar_length(content_type)<=255andposition(('/')in(content_type))>1)"
+            ),
+            "note_attachments_size_bytes_check": "check(size_bytes>=1)",
+            "note_attachments_blob_hash_check": "check(blob_hash~'^sha256:[0-9a-f]{64}$')",
+            "note_attachments_object_hash_check": "check(object_hash~'^sha256:[0-9a-f]{64}$')",
+            "note_attachments_version_check": "check(version>=1)",
+            "note_attachments_delete_reason_check": "check(delete_reasonisnullorchar_length(delete_reason)<=256)",
+            "note_attachments_created_by_check": "check(char_length(btrim(created_by))>0)",
+            "note_attachments_source_kind_check": (
+                "check(source_kind=any(array['upload','sync','legacy_bootstrap']))"
+            ),
+            "note_attachments_check": (
+                "check(deleted=falseanddeleted_atisnullanddelete_reasonisnullordeleted=trueanddeleted_atisnotnull)"
+            ),
+        }
+        constraint_names = tuple(expected_checks) + (
+            "note_attachments_pkey",
+            "note_attachments_note_id_fkey",
+        )
+        constraint_rows = backend.execute(
+            """
+            SELECT constraint_row.conname AS constraint_name,
+                   constraint_row.contype AS constraint_type,
+                   pg_get_constraintdef(constraint_row.oid, true) AS constraint_def,
+                   referenced_table.relname AS referenced_table,
+                   referenced_namespace.nspname AS referenced_schema,
+                   referenced_namespace.nspname = current_schema()
+                     AS referenced_in_current_schema,
+                   ARRAY(
+                     SELECT local_column.attname
+                       FROM unnest(constraint_row.conkey) WITH ORDINALITY
+                         AS local_key(attnum, ordinality)
+                       JOIN pg_attribute AS local_column
+                         ON local_column.attrelid = attachment_table.oid
+                        AND local_column.attnum = local_key.attnum
+                      ORDER BY local_key.ordinality
+                   ) AS constrained_columns,
+                   CASE
+                     WHEN constraint_row.confrelid = 0 THEN NULL
+                     ELSE ARRAY(
+                       SELECT referenced_column.attname
+                         FROM unnest(constraint_row.confkey) WITH ORDINALITY
+                           AS referenced_key(attnum, ordinality)
+                         JOIN pg_attribute AS referenced_column
+                           ON referenced_column.attrelid = referenced_table.oid
+                          AND referenced_column.attnum = referenced_key.attnum
+                        ORDER BY referenced_key.ordinality
+                     )
+                   END AS referenced_columns,
+                   constraint_row.convalidated AS constraint_validated,
+                   constraint_row.confdeltype AS delete_action,
+                   constraint_row.confupdtype AS update_action
+              FROM pg_constraint AS constraint_row
+              JOIN pg_class AS attachment_table
+                ON attachment_table.oid = constraint_row.conrelid
+              JOIN pg_namespace AS attachment_namespace
+                ON attachment_namespace.oid = attachment_table.relnamespace
+              LEFT JOIN pg_class AS referenced_table
+                ON referenced_table.oid = constraint_row.confrelid
+              LEFT JOIN pg_namespace AS referenced_namespace
+                ON referenced_namespace.oid = referenced_table.relnamespace
+             WHERE attachment_namespace.nspname = current_schema()
+               AND attachment_table.relname = 'note_attachments'
+               AND constraint_row.contype <> 'n'
+            """,
+            connection=conn,
+        ).rows
+        constraints = {str(row.get("constraint_name")): row for row in constraint_rows}
+        if set(constraints) != set(constraint_names):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry constraint catalog drifted."
+            )
+        if any(not bool(row.get("constraint_validated")) for row in constraints.values()):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry constraint catalog drifted."
+            )
+
+        def _catalog_column_names(value: Any) -> tuple[str, ...]:
+            if value is None:
+                return ()
+            if isinstance(value, str):
+                return tuple(part for part in value.strip("{}").split(",") if part)
+            return tuple(str(part) for part in value)
+
+        # Compare the complete pg_get_constraintdef result after only cast/whitespace folding.
+        for name, expected_definition in expected_checks.items():
+            row = constraints[name]
+            definition = "".join(str(row.get("constraint_def") or "").lower().split())
+            definition = definition.replace("::pg_catalog.text", "").replace("::text", "")
+            if str(row.get("constraint_type")) != "c" or definition != expected_definition:
+                raise SchemaError(  # noqa: TRY003
+                    "Notes attachment v59 PostgreSQL registry check catalog drifted."
+                )
+        primary = constraints["note_attachments_pkey"]
+        primary_definition = " ".join(str(primary.get("constraint_def", "")).lower().split())
+        if (
+            str(primary.get("constraint_type")) != "p"
+            or _catalog_column_names(primary.get("constrained_columns"))
+            != ("client_id", "dataset_id", "attachment_id")
+            or "primary key (client_id, dataset_id, attachment_id)" not in primary_definition
+        ):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry primary key catalog drifted."
+            )
+        foreign_key = constraints["note_attachments_note_id_fkey"]
+        foreign_definition = " ".join(
+            str(foreign_key.get("constraint_def", "")).lower().split()
+        )
+        if (
+            str(foreign_key.get("constraint_type")) != "f"
+            or str(foreign_key.get("referenced_table")) != "notes"
+            or not str(foreign_key.get("referenced_schema") or "")
+            or not bool(foreign_key.get("referenced_in_current_schema"))
+            or _catalog_column_names(foreign_key.get("constrained_columns")) != ("note_id",)
+            or _catalog_column_names(foreign_key.get("referenced_columns")) != ("id",)
+            or str(foreign_key.get("delete_action")) != "r"
+            or str(foreign_key.get("update_action")) != "r"
+            or "foreign key (note_id)" not in foreign_definition
+        ):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry foreign key catalog drifted."
+            )
+
+        expected_indexes = {
+            "uq_note_attachments_live_name": (
+                True, "client_id,dataset_id,note_id,normalized_file_name", True,
+            ),
+            "idx_note_attachments_owner_dataset_note_all_page": (
+                False, "client_id,dataset_id,note_id,attachment_id", False,
+            ),
+            "idx_note_attachments_owner_dataset_note_page": (
+                False, "client_id,dataset_id,note_id,deleted,attachment_id", False,
+            ),
+            "idx_note_attachments_owner_dataset_blob": (
+                False, "client_id,dataset_id,blob_hash,attachment_id", False,
+            ),
+        }
+        index_rows = backend.execute(
+            """
+            SELECT index_table.relname AS index_name,
+                   index_row.indisunique AS is_unique,
+                   index_row.indisvalid AS is_valid,
+                   index_row.indisready AS is_ready,
+                   string_agg(column_row.attname, ',' ORDER BY index_key.ordinality) AS column_names,
+                   pg_get_expr(index_row.indpred, index_row.indrelid) AS predicate
+              FROM pg_index AS index_row
+              JOIN pg_class AS attachment_table ON attachment_table.oid = index_row.indrelid
+              JOIN pg_namespace AS attachment_namespace
+                ON attachment_namespace.oid = attachment_table.relnamespace
+              JOIN pg_class AS index_table ON index_table.oid = index_row.indexrelid
+              CROSS JOIN LATERAL unnest(index_row.indkey)
+                WITH ORDINALITY AS index_key(attnum, ordinality)
+              JOIN pg_attribute AS column_row
+                ON column_row.attrelid = attachment_table.oid
+               AND column_row.attnum = index_key.attnum
+             WHERE attachment_namespace.nspname = current_schema()
+               AND attachment_table.relname = 'note_attachments'
+               AND index_key.ordinality <= index_row.indnkeyatts
+               AND index_table.relname IN (
+                 'uq_note_attachments_live_name',
+                 'idx_note_attachments_owner_dataset_note_all_page',
+                 'idx_note_attachments_owner_dataset_note_page',
+                 'idx_note_attachments_owner_dataset_blob'
+               )
+             GROUP BY index_table.relname, index_row.indisunique,
+                      index_row.indisvalid, index_row.indisready,
+                      index_row.indpred, index_row.indrelid
+            """,
+            connection=conn,
+        ).rows
+        indexes = {str(row.get("index_name")): row for row in index_rows}
+        if set(indexes) != set(expected_indexes):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry index catalog drifted."
+            )
+        for name, (unique, columns, partial) in expected_indexes.items():
+            row = indexes[name]
+            predicate = "".join(str(row.get("predicate") or "").lower().split())
+            if (
+                bool(row.get("is_unique")) is not unique
+                or not bool(row.get("is_valid"))
+                or not bool(row.get("is_ready"))
+                or str(row.get("column_names")) != columns
+                or (partial and predicate != "(deleted=false)")
+                or (not partial and row.get("predicate") is not None)
+            ):
+                raise SchemaError(  # noqa: TRY003
+                    "Notes attachment v59 PostgreSQL registry index catalog drifted."
+                )
+
+        policy_rows = backend.execute(
+            """
+            SELECT policyname AS policy_name, permissive, roles::text AS roles,
+                   cmd AS command, qual AS using_expression, with_check AS check_expression
+              FROM pg_policies
+             WHERE schemaname = current_schema()
+               AND tablename = 'note_attachments'
+             ORDER BY policyname
+            """,
+            connection=conn,
+        ).rows
+        if len(policy_rows) != 1:
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry RLS policy catalog drifted."
+            )
+        policy = policy_rows[0]
+        expected_policy_expression = "".join(
+            (
+                "((client_id = current_setting('app.current_user_id'::text, true)) "
+                "AND (EXISTS (SELECT 1 FROM notes note "
+                "WHERE ((note.id = note_attachments.note_id) "
+                "AND (note.client_id = current_setting('app.current_user_id'::text, true)) "
+                "AND (note.client_id = note_attachments.client_id)))))"
+            ).lower().split()
+        )
+        using_expression = "".join(
+            str(policy.get("using_expression") or "").lower().split()
+        )
+        check_expression = "".join(
+            str(policy.get("check_expression") or "").lower().split()
+        )
+        if (
+            str(policy.get("policy_name")) != "note_attachments_tenant_isolation"
+            or str(policy.get("permissive")) != "PERMISSIVE"
+            or str(policy.get("command")) != "ALL"
+            or str(policy.get("roles")) != "{public}"
+            or using_expression != expected_policy_expression
+            or check_expression != expected_policy_expression
+        ):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 PostgreSQL registry RLS policy catalog drifted."
+            )
+
+    def _verify_note_task_schema_postgres(self, conn: Any, *, runtime: bool = False) -> None:
+        """Verify the complete PostgreSQL v60 task graph without repairing drift."""
+        backend = self.backend
+        authority_relations = ("notes", *self._NOTE_TASK_V60_RELATIONS)
+        backend.execute(
+            "LOCK TABLE note_task_scope_authority, notes, note_tasks, "
+            "task_note_projections, task_events, "
+            "task_event_read_state, note_task_reconciliation_state, task_projection_drifts "
+            + ("IN ACCESS SHARE MODE" if runtime else "IN SHARE MODE"),
+            connection=conn,
+        )
+        table_rows = backend.execute(
+            """
+            SELECT table_row.relname AS table_name,
+                   table_row.relrowsecurity AS rls_enabled,
+                   table_row.relforcerowsecurity AS rls_forced,
+                   table_row.relowner = current_user::regrole AS is_table_owner,
+                   table_row.relowner = namespace_row.nspowner
+                     AS owner_matches_schema,
+                   pg_has_role(current_user, namespace_row.nspowner, 'USAGE')
+                     AS is_schema_owner
+              FROM pg_class AS table_row
+              JOIN pg_namespace AS namespace_row ON namespace_row.oid=table_row.relnamespace
+             WHERE namespace_row.nspname=current_schema()
+               AND table_row.relkind IN ('r','p')
+               AND table_row.relname = ANY(%s)
+             ORDER BY table_row.relname
+            """,
+            (list(authority_relations),),
+            connection=conn,
+        ).rows
+        if {str(row.get("table_name")) for row in table_rows} != set(authority_relations):
+            raise SchemaError("Notes task v60 PostgreSQL relation catalog drifted.")  # noqa: TRY003
+        v61_authority_owner = (
+            self._get_schema_version_postgres(conn) >= 63
+            or self.backend.table_exists(
+                "chacha_schema_migration_progress", connection=conn
+            )
+        )
+        if any(
+            not bool(
+                row.get("owner_matches_schema")
+                if v61_authority_owner
+                and row.get("table_name") == "note_task_scope_authority"
+                else row.get("is_table_owner")
+            )
+            or not bool(row.get("is_schema_owner"))
+            or not bool(row.get("rls_enabled"))
+            or not bool(row.get("rls_forced"))
+            for row in table_rows
+        ):
+            raise SchemaError("Notes task v60 PostgreSQL ownership or RLS catalog drifted.")  # noqa: TRY003
+
+        expected_columns = self._note_task_v60_postgres_columns()
+        if v61_authority_owner:
+            expected_columns = dict(expected_columns)
+            expected_columns["note_task_scope_authority"] = (
+                *expected_columns["note_task_scope_authority"],
+                ("task_graph_bound", "boolean", True, "true"),
+                ("moodboard_graph_bound", "boolean", True, "false"),
+                ("studio_graph_bound", "boolean", True, "false"),
+            )
+        column_rows = backend.execute(
+            """
+            SELECT table_row.relname AS table_name, column_row.attnum,
+                   column_row.attname AS column_name,
+                   format_type(column_row.atttypid,column_row.atttypmod) AS data_type,
+                   column_row.attnotnull AS is_not_null,
+                   pg_get_expr(default_row.adbin,default_row.adrelid,false) AS default_expression
+              FROM pg_attribute AS column_row
+              JOIN pg_class AS table_row ON table_row.oid=column_row.attrelid
+              JOIN pg_namespace AS namespace_row ON namespace_row.oid=table_row.relnamespace
+              LEFT JOIN pg_attrdef AS default_row
+                ON default_row.adrelid=table_row.oid AND default_row.adnum=column_row.attnum
+             WHERE namespace_row.nspname=current_schema()
+               AND table_row.relname = ANY(%s)
+               AND column_row.attnum>0 AND NOT column_row.attisdropped
+             ORDER BY table_row.relname,column_row.attnum
+            """,
+            (list(self._NOTE_TASK_V60_RELATIONS),),
+            connection=conn,
+        ).rows
+        actual_columns: dict[str, list[tuple[str, str, bool, str | None]]] = {
+            table: [] for table in self._NOTE_TASK_V60_RELATIONS
+        }
+        for row in column_rows:
+            default = row.get("default_expression")
+            actual_columns[str(row.get("table_name"))].append(
+                (
+                    str(row.get("column_name")), str(row.get("data_type")),
+                    bool(row.get("is_not_null")),
+                    None if default is None else "".join(str(default).lower().split()),
+                )
+            )
+        if any(
+            tuple(actual_columns[table]) != expected_columns[table]
+            for table in self._NOTE_TASK_V60_RELATIONS
+        ):
+            raise SchemaError("Notes task v60 PostgreSQL column catalog drifted.")  # noqa: TRY003
+
+        constraint_rows = backend.execute(
+            """
+            SELECT table_row.relname AS table_name, constraint_row.conname AS constraint_name,
+                   constraint_row.contype AS constraint_type,
+                   pg_get_expr(constraint_row.conbin,constraint_row.conrelid,false) AS check_expression,
+                   referenced_table.relname AS referenced_table,
+                   referenced_namespace.nspname AS referenced_schema,
+                   referenced_namespace.nspname=current_schema() AS referenced_in_current_schema,
+                   ARRAY(SELECT local_column.attname
+                           FROM unnest(constraint_row.conkey) WITH ORDINALITY key_row(attnum,ordinality)
+                           JOIN pg_attribute local_column
+                             ON local_column.attrelid=table_row.oid AND local_column.attnum=key_row.attnum
+                          ORDER BY key_row.ordinality) AS local_columns,
+                   CASE WHEN constraint_row.confrelid=0 THEN NULL ELSE
+                     ARRAY(SELECT referenced_column.attname
+                             FROM unnest(constraint_row.confkey) WITH ORDINALITY key_row(attnum,ordinality)
+                             JOIN pg_attribute referenced_column
+                               ON referenced_column.attrelid=referenced_table.oid
+                              AND referenced_column.attnum=key_row.attnum
+                            ORDER BY key_row.ordinality) END AS referenced_columns,
+                   constraint_row.convalidated AS constraint_validated,
+                   constraint_row.confdeltype AS delete_action,
+                   constraint_row.confupdtype AS update_action
+              FROM pg_constraint AS constraint_row
+              JOIN pg_class AS table_row ON table_row.oid=constraint_row.conrelid
+              JOIN pg_namespace AS namespace_row ON namespace_row.oid=table_row.relnamespace
+              LEFT JOIN pg_class AS referenced_table ON referenced_table.oid=constraint_row.confrelid
+              LEFT JOIN pg_namespace AS referenced_namespace
+                ON referenced_namespace.oid=referenced_table.relnamespace
+             WHERE namespace_row.nspname=current_schema()
+               AND table_row.relname = ANY(%s)
+               AND constraint_row.contype <> 'n'
+            """,
+            (list(self._NOTE_TASK_V60_RELATIONS),),
+            connection=conn,
+        ).rows
+
+        def _catalog_names(value: Any) -> tuple[str, ...]:
+            if value is None:
+                return ()
+            if isinstance(value, str):
+                return tuple(part for part in value.strip("{}").split(",") if part)
+            return tuple(str(part) for part in value)
+
+        expected_checks = {
+            "note_tasks_owner_user_id_check": "char_length(btrim(owner_user_id))>0",
+            "note_tasks_dataset_id_check": "char_length(btrim(dataset_id))>0",
+            "note_tasks_id_check": "char_length(btrim(id))>0",
+            "note_tasks_note_id_check": "char_length(btrim(note_id))>0",
+            "note_tasks_text_check": "char_length(text)>0",
+            "note_tasks_status_check": "status=any(array['open','done'])",
+            "note_tasks_projection_status_check": "projection_status=any(array['live','unlinked','ambiguous','deleted'])",
+            "note_tasks_version_check": "version>=1",
+            "note_tasks_canonical_revision_check": "canonical_revision>=1",
+            "note_tasks_canonical_hash_check": "canonical_hash~'^sha256:[0-9a-f]{64}$'",
+            "note_tasks_source_diagnostic_code_check": (
+                "source_diagnostic_codeisnullorsource_diagnostic_code='legacy_task_payload_invalid'"
+            ),
+            "note_tasks_source_diagnostic_hash_check": (
+                "source_diagnostic_hashisnullorsource_diagnostic_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "task_note_projections_note_version_check": "note_version>=1",
+            "task_note_projections_line_number_check": "line_number>=1",
+            "task_note_projections_start_offset_check": "start_offset>=0",
+            "task_note_projections_end_offset_check": "end_offset>=start_offset",
+            "task_note_projections_occurrence_index_check": "occurrence_index>=0",
+            "task_note_projections_projection_status_check": (
+                "projection_status=any(array['live','unlinked','ambiguous','deleted'])"
+            ),
+            "task_events_note_id_check": "char_length(btrim(note_id))>0",
+            "task_events_sync_revision_check": "sync_revision=any(array[1,2])",
+            "task_events_sync_object_hash_check": "sync_object_hash~'^sha256:[0-9a-f]{64}$'",
+            "task_events_sync_server_cursor_check": "sync_server_cursorisnullorsync_server_cursor>=1",
+            "task_events_source_kind_check": (
+                "source_kind=any(array['client','rest','mcp','markdown_reconciliation','repair','trusted_bootstrap_v1'])"
+            ),
+            "task_events_delete_reason_check": (
+                "delete_reasonisnullordelete_reason=any(array['user_request','correction','policy'])"
+            ),
+            "task_events_source_diagnostic_hash_check": (
+                "source_diagnostic_hashisnullorsource_diagnostic_hash~'^sha256:[0-9a-f]{64}$'"
+            ),
+            "task_events_deleted_lifecycle_check": (
+                "deleted=falseanddeleted_atisnullanddelete_reasonisnullor"
+                "deleted=trueanddeleted_atisnotnullanddelete_reasonisnotnull"
+            ),
+            "task_event_read_state_user_check": "user_id=owner_user_id",
+            "note_task_reconciliation_note_version_check": "note_version>=1",
+            "note_task_reconciliation_item_count_check": "item_count>=0",
+            "note_task_reconciliation_warning_count_check": "warning_count>=0",
+            "task_projection_drifts_revision_check": "marker_base_revision>=1",
+            "task_projection_drifts_reason_check": (
+                "reason_code=any(array['missing_marker_base','malformed_marker','duplicate_marker',"
+                "'marker_scope_mismatch','base_unavailable','both_changed','ambiguous_legacy_match',"
+                "'unsupported_markdown'])"
+            ),
+            "task_projection_drifts_status_check": "status=any(array['open','resolved','dismissed'])",
+            "note_task_scope_authority_owner_check": "char_length(btrim(owner_user_id))>0",
+            "note_task_scope_authority_dataset_check": (
+                "char_length(btrim(dataset_id))>0anddataset_id=btrim(dataset_id)and"
+                "dataset_id<>'local-unbound'"
+            ),
+        }
+        expected_primary = {
+            "note_tasks_pkey": ("note_tasks", ("owner_user_id", "dataset_id", "id")),
+            "task_note_projections_pkey": (
+                "task_note_projections", ("owner_user_id", "dataset_id", "task_id"),
+            ),
+            "task_events_pkey": ("task_events", ("owner_user_id", "dataset_id", "id")),
+            "task_event_read_state_pkey": (
+                "task_event_read_state", ("owner_user_id", "dataset_id", "event_id", "user_id"),
+            ),
+            "note_task_reconciliation_state_pkey": (
+                "note_task_reconciliation_state", ("owner_user_id", "dataset_id", "note_id"),
+            ),
+            "task_projection_drifts_pkey": (
+                "task_projection_drifts", ("owner_user_id", "dataset_id", "id"),
+            ),
+            "note_task_scope_authority_pkey": (
+                "note_task_scope_authority", ("owner_user_id",),
+            ),
+        }
+        expected_foreign = {
+            "note_tasks_note_owner_fkey": (
+                "note_tasks", ("owner_user_id", "note_id"), "notes", ("client_id", "id"), "c", "c",
+            ),
+            "task_note_projections_task_fkey": (
+                "task_note_projections", ("owner_user_id", "dataset_id", "task_id"), "note_tasks",
+                ("owner_user_id", "dataset_id", "id"), "c", "c",
+            ),
+            "task_note_projections_note_owner_fkey": (
+                "task_note_projections", ("owner_user_id", "note_id"), "notes", ("client_id", "id"), "c", "c",
+            ),
+            "task_events_task_fkey": (
+                "task_events", ("owner_user_id", "dataset_id", "task_id"), "note_tasks",
+                ("owner_user_id", "dataset_id", "id"), "r", "c",
+            ),
+            "task_events_note_owner_fkey": (
+                "task_events", ("owner_user_id", "note_id"), "notes", ("client_id", "id"), "r", "c",
+            ),
+            "task_events_correction_fkey": (
+                "task_events", ("owner_user_id", "dataset_id", "corrects_activity_id"), "task_events",
+                ("owner_user_id", "dataset_id", "id"), "r", "c",
+            ),
+            "task_event_read_state_event_fkey": (
+                "task_event_read_state", ("owner_user_id", "dataset_id", "event_id"), "task_events",
+                ("owner_user_id", "dataset_id", "id"), "c", "c",
+            ),
+            "note_task_reconciliation_note_owner_fkey": (
+                "note_task_reconciliation_state", ("owner_user_id", "note_id"), "notes",
+                ("client_id", "id"), "c", "c",
+            ),
+            "task_projection_drifts_task_fkey": (
+                "task_projection_drifts", ("owner_user_id", "dataset_id", "task_id"), "note_tasks",
+                ("owner_user_id", "dataset_id", "id"), "c", "c",
+            ),
+            "task_projection_drifts_note_owner_fkey": (
+                "task_projection_drifts", ("owner_user_id", "note_id"), "notes",
+                ("client_id", "id"), "c", "c",
+            ),
+        }
+        expected_constraint_names = set(expected_checks) | set(expected_primary) | set(expected_foreign)
+        constraints = {str(row.get("constraint_name")): row for row in constraint_rows}
+        if set(constraints) != expected_constraint_names or any(
+            not bool(row.get("constraint_validated")) for row in constraints.values()
+        ):
+            raise SchemaError("Notes task v60 PostgreSQL constraint catalog drifted.")  # noqa: TRY003
+        for name, expression in expected_checks.items():
+            row = constraints[name]
+            if (
+                str(row.get("constraint_type")) != "c"
+                or self._normalize_postgres_catalog_expression(row.get("check_expression"))
+                != self._normalize_postgres_catalog_expression(expression)
+            ):
+                raise SchemaError("Notes task v60 PostgreSQL check catalog drifted.")  # noqa: TRY003
+        for name, (table, columns) in expected_primary.items():
+            row = constraints[name]
+            if (
+                str(row.get("constraint_type")) != "p"
+                or str(row.get("table_name")) != table
+                or _catalog_names(row.get("local_columns")) != columns
+            ):
+                raise SchemaError("Notes task v60 PostgreSQL primary-key catalog drifted.")  # noqa: TRY003
+        for name, expected in expected_foreign.items():
+            table, local_columns, referenced_table, referenced_columns, delete_action, update_action = expected
+            row = constraints[name]
+            if (
+                str(row.get("constraint_type")) != "f"
+                or str(row.get("table_name")) != table
+                or _catalog_names(row.get("local_columns")) != local_columns
+                or str(row.get("referenced_table")) != referenced_table
+                or not bool(row.get("referenced_in_current_schema"))
+                or not str(row.get("referenced_schema") or "")
+                or _catalog_names(row.get("referenced_columns")) != referenced_columns
+                or str(row.get("delete_action")) != delete_action
+                or str(row.get("update_action")) != update_action
+            ):
+                raise SchemaError("Notes task v60 PostgreSQL foreign-key catalog drifted.")  # noqa: TRY003
+
+        expected_indexes: dict[str, tuple[str, bool, tuple[str, ...]]] = {}
+        for statement in self._note_task_v60_postgres_indexes():
+            match = re.fullmatch(r"CREATE (UNIQUE )?INDEX (\w+) ON (\w+)\(([^)]+)\)", statement)
+            if match is None:
+                raise SchemaError("Notes task v60 PostgreSQL index definition is not fixed.")  # noqa: TRY003
+            expected_indexes[match.group(2)] = (
+                match.group(3), bool(match.group(1)),
+                tuple(column.strip() for column in match.group(4).split(",")),
+            )
+        expected_indexes["uq_notes_owner_id"] = ("notes", True, ("client_id", "id"))
+        index_rows = backend.execute(
+            """
+            SELECT table_row.relname AS table_name, index_table.relname AS index_name,
+                   index_row.indisunique AS is_unique, index_row.indisvalid AS is_valid,
+                   index_row.indisready AS is_ready, index_row.indisprimary AS is_primary,
+                   index_row.indisexclusion AS is_exclusion,
+                   index_row.indnatts AS num_attributes,
+                   index_row.indnkeyatts AS num_key_attributes,
+                   access_method.amname AS access_method,
+                   pg_get_indexdef(index_row.indexrelid,0,true) AS index_definition,
+                   pg_get_expr(index_row.indpred,index_row.indrelid,false) AS predicate,
+                   index_key.ordinality AS key_ordinality, index_key.attnum,
+                   column_row.attname AS column_name,
+                   opclass_row.opcdefault AS is_default_opclass,
+                   index_row.indcollation[index_key.ordinality - 1]
+                     = column_row.attcollation AS collation_matches_column,
+                   index_row.indoption[index_key.ordinality - 1] AS key_options,
+                   collation_row.collname AS collation_name,
+                   opclass_row.opcname AS opclass_name
+              FROM pg_index AS index_row
+              JOIN pg_class AS table_row ON table_row.oid=index_row.indrelid
+              JOIN pg_namespace AS namespace_row ON namespace_row.oid=table_row.relnamespace
+              JOIN pg_class AS index_table ON index_table.oid=index_row.indexrelid
+              JOIN pg_am AS access_method ON access_method.oid=index_table.relam
+              CROSS JOIN LATERAL unnest(index_row.indkey) WITH ORDINALITY index_key(attnum,ordinality)
+              LEFT JOIN pg_attribute AS column_row
+                ON column_row.attrelid=table_row.oid AND column_row.attnum=index_key.attnum
+              LEFT JOIN pg_opclass AS opclass_row
+                ON opclass_row.oid=index_row.indclass[index_key.ordinality - 1]
+              LEFT JOIN pg_collation AS collation_row
+                ON collation_row.oid=index_row.indcollation[index_key.ordinality - 1]
+             WHERE namespace_row.nspname=current_schema()
+               AND (
+                 (table_row.relname = ANY(%s)
+                  AND NOT EXISTS(
+                    SELECT 1 FROM pg_constraint c WHERE c.conindid=index_row.indexrelid
+                  ))
+                 OR (table_row.relname='notes' AND index_table.relname='uq_notes_owner_id')
+               )
+             ORDER BY index_table.relname,index_key.ordinality
+            """,
+            (list(self._NOTE_TASK_V60_RELATIONS),),
+            connection=conn,
+        ).rows
+        indexes: dict[str, dict[str, Any]] = {}
+        for row in index_rows:
+            name = str(row.get("index_name"))
+            index = indexes.setdefault(name, {**dict(row), "keys": []})
+            index["keys"].append(
+                (
+                    int(row.get("key_ordinality") or 0), int(row.get("attnum") or 0),
+                    str(row.get("column_name") or ""), bool(row.get("is_default_opclass")),
+                    bool(row.get("collation_matches_column")), int(row.get("key_options") or 0),
+                )
+            )
+        if set(indexes) != set(expected_indexes):
+            raise SchemaError("Notes task v60 PostgreSQL index catalog drifted.")  # noqa: TRY003
+        for name, (table, unique, columns) in expected_indexes.items():
+            row = indexes[name]
+            actual_keys = tuple(row.get("keys") or ())
+            keys_match = all(key[1] > 0 for key in actual_keys) and tuple(
+                (key[0], key[2], key[3], key[4], key[5]) for key in actual_keys
+            ) == tuple(
+                (ordinality, column, True, True, 0)
+                for ordinality, column in enumerate(columns, start=1)
+            )
+            expected_definition = (
+                f"CREATE {'UNIQUE ' if unique else ''}INDEX {name} ON {table} USING btree "
+                f"({', '.join(columns)})"
+            )
+            if (
+                str(row.get("table_name")) != table
+                or bool(row.get("is_unique")) is not unique
+                or not bool(row.get("is_valid")) or not bool(row.get("is_ready"))
+                or bool(row.get("is_primary")) or bool(row.get("is_exclusion"))
+                or int(row.get("num_attributes") or 0) != len(columns)
+                or int(row.get("num_key_attributes") or 0) != len(columns)
+                or str(row.get("access_method")) != "btree"
+                or str(row.get("index_definition")) != expected_definition
+                or row.get("predicate") is not None
+                or not keys_match
+            ):
+                raise SchemaError("Notes task v60 PostgreSQL index catalog drifted.")  # noqa: TRY003
+
+        policy_rows = backend.execute(
+            """
+            SELECT tablename AS table_name, policyname AS policy_name, permissive,
+                   roles::text AS roles, cmd AS command, qual AS using_expression,
+                   with_check AS check_expression
+              FROM pg_policies
+             WHERE schemaname=current_schema() AND tablename = ANY(%s)
+             ORDER BY tablename,policyname
+            """,
+            (list(authority_relations),),
+            connection=conn,
+        ).rows
+        expected_policies = {
+            "notes": "client_id = current_setting('app.current_user_id', true)",
+            **self._note_task_v60_policy_predicates(),
+        }
+        if len(policy_rows) != len(expected_policies):
+            raise SchemaError("Notes task v60 PostgreSQL RLS policy catalog drifted.")  # noqa: TRY003
+        policies = {str(row.get("table_name")): row for row in policy_rows}
+        if set(policies) != set(expected_policies):
+            raise SchemaError("Notes task v60 PostgreSQL RLS policy catalog drifted.")  # noqa: TRY003
+        for table, expression in expected_policies.items():
+            row = policies[table]
+            table_prefix = f"{table}."
+            normalized_expected = self._normalize_postgres_catalog_expression(expression).replace(
+                table_prefix, ""
+            )
+            normalized_using = self._normalize_postgres_catalog_expression(
+                row.get("using_expression")
+            ).replace(table_prefix, "")
+            normalized_check = self._normalize_postgres_catalog_expression(
+                row.get("check_expression")
+            ).replace(table_prefix, "")
+            if (
+                str(row.get("policy_name")) != f"{table}_tenant_isolation"
+                or str(row.get("permissive")) != "PERMISSIVE"
+                or str(row.get("roles")) != "{public}"
+                or str(row.get("command")) != "ALL"
+                or normalized_using != normalized_expected
+                or normalized_check != normalized_expected
+            ):
+                raise SchemaError("Notes task v60 PostgreSQL RLS policy catalog drifted.")  # noqa: TRY003
+
+    def _migrate_from_v58_to_v59_postgres(self, conn: Any) -> None:
+        """Install the empty registry under verified PostgreSQL schema authority."""
+
+        backend = self.backend
+        backend.execute("LOCK TABLE notes IN ACCESS EXCLUSIVE MODE", connection=conn)
+        states = backend.execute(
+            """
+            SELECT table_row.relname AS table_name,
+                   table_row.relrowsecurity,
+                   table_row.relforcerowsecurity,
+                   table_row.relowner = current_user::regrole AS is_schema_owner,
+                   pg_has_role(current_user, namespace_row.nspowner, 'USAGE')
+                     AS is_current_schema_owner
+              FROM pg_class AS table_row
+              JOIN pg_namespace AS namespace_row ON namespace_row.oid = table_row.relnamespace
+             WHERE namespace_row.nspname = current_schema()
+               AND table_row.relkind IN ('r', 'p')
+               AND table_row.relname = 'notes'
+            """,
+            connection=conn,
+        ).rows
+        if len(states) != 1 or str(states[0].get("table_name")) != "notes":
+            raise SchemaError("Notes attachment v59 cannot verify the notes relation.")  # noqa: TRY003
+        notes_state = states[0]
+        if not bool(notes_state.get("is_schema_owner")) or not bool(
+            notes_state.get("is_current_schema_owner")
+        ):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 requires the verified PostgreSQL schema-owner migration path."
+            )
+        notes_rls_enabled = bool(notes_state.get("relrowsecurity"))
+        notes_rls_forced = bool(notes_state.get("relforcerowsecurity"))
+        if notes_rls_forced and not notes_rls_enabled:
+            raise SchemaError("Notes attachment v59 cannot verify the notes RLS state.")  # noqa: TRY003
+        if backend.table_exists("note_attachments", connection=conn):
+            raise SchemaError(  # noqa: TRY003
+                "Notes attachment v59 registry collision requires explicit repair."
+            )
+        if notes_rls_forced:
+            backend.execute("ALTER TABLE notes NO FORCE ROW LEVEL SECURITY", connection=conn)
+
+        self._create_note_attachment_schema_postgres(conn)
+
+        if notes_rls_forced:
+            backend.execute("ALTER TABLE notes FORCE ROW LEVEL SECURITY", connection=conn)
+        chacha_rls = build_chacha_rls_sql()
+        notes_rls = [
+            statement
+            for statement in chacha_rls
+            if "ALTER TABLE IF EXISTS notes " in statement
+            or "DROP POLICY IF EXISTS notes_tenant_isolation ON notes" in statement
+            or "CREATE POLICY notes_tenant_isolation ON notes" in statement
+        ]
+        attachment_rls = [
+            statement
+            for statement in chacha_rls
+            if "note_attachments" in statement
+        ]
+        if len(notes_rls) != 4 or len(attachment_rls) != 4:
+            raise SchemaError("Notes attachment v59 RLS definition is not canonical.")  # noqa: TRY003
+        for statement in (*notes_rls, *attachment_rls):
+            backend.execute(statement, connection=conn)
+        self._verify_note_attachment_schema_postgres(conn)
+        self._set_schema_version_postgres(conn, 59)
+
+    @classmethod
+    def _verify_note_task_v59_authority_catalog(
+        cls,
+        relation_rows: list[Mapping[str, Any]],
+        policy_rows: list[Mapping[str, Any]],
+    ) -> tuple[str, ...]:
+        """Verify the sole reviewed v59 authority/RLS state before migration DDL."""
+        expected_relations = ("notes", *cls._NOTE_TASK_V60_TABLES[:-1])
+        states = {str(row.get("table_name")): row for row in relation_rows}
+        if (
+            len(relation_rows) != len(expected_relations)
+            or set(states) != set(expected_relations)
+            or any(
+                not bool(row.get("is_table_owner"))
+                or not bool(row.get("is_schema_owner"))
+                for row in states.values()
+            )
+            or not bool(states["notes"].get("rls_enabled"))
+            or not bool(states["notes"].get("rls_forced"))
+            or any(
+                bool(states[table].get("rls_enabled"))
+                or bool(states[table].get("rls_forced"))
+                for table in cls._NOTE_TASK_V60_TABLES[:-1]
+            )
+        ):
+            raise SchemaError("Notes task v59 PostgreSQL source authority catalog drifted.")  # noqa: TRY003
+
+        expected_expression = cls._normalize_postgres_catalog_expression(
+            "client_id = current_setting('app.current_user_id', true)"
+        )
+        if len(policy_rows) != 1:
+            raise SchemaError("Notes task v59 PostgreSQL source authority catalog drifted.")  # noqa: TRY003
+        policy = policy_rows[0]
+        if (
+            str(policy.get("table_name")) != "notes"
+            or str(policy.get("policy_name")) != "notes_tenant_isolation"
+            or str(policy.get("permissive")) != "PERMISSIVE"
+            or str(policy.get("roles")) != "{public}"
+            or str(policy.get("command")) != "ALL"
+            or cls._normalize_postgres_catalog_expression(policy.get("using_expression"))
+            != expected_expression
+            or cls._normalize_postgres_catalog_expression(policy.get("check_expression"))
+            != expected_expression
+        ):
+            raise SchemaError("Notes task v59 PostgreSQL source authority catalog drifted.")  # noqa: TRY003
+        return ("notes",)
+
+    def _validate_note_task_source_postgres(self, conn: Any) -> dict[str, Any]:
+        """Read and owner-prove the complete locked v59 source before any v60 DDL."""
+        backend = self.backend
+        notes = {
+            str(row.get("id")): str(row.get("client_id") or "").strip()
+            for row in backend.execute("SELECT id,client_id FROM notes", connection=conn).rows
+        }
+        tasks = [
+            self._note_task_v60_json_safe(dict(row))
+            for row in backend.execute("SELECT * FROM note_tasks ORDER BY id", connection=conn).rows
+        ]
+        task_scopes: dict[str, tuple[str, str]] = {}
+        for row in tasks:
+            note_id = str(row.get("note_id") or "")
+            owner = notes.get(note_id, "")
+            if not owner:
+                raise SchemaError("Notes task v60 migration could not prove a task owner.")  # noqa: TRY003
+            task_scopes[str(row.get("id"))] = (owner, note_id)
+
+        projections = [
+            self._note_task_v60_json_safe(dict(row))
+            for row in backend.execute("SELECT * FROM task_note_projections ORDER BY task_id", connection=conn).rows
+        ]
+        for row in projections:
+            scope = task_scopes.get(str(row.get("task_id")))
+            if scope is None or scope[1] != str(row.get("note_id") or ""):
+                raise SchemaError("Notes task v60 migration could not prove projection parents.")  # noqa: TRY003
+
+        source_events = [
+            self._note_task_v60_json_safe(dict(row))
+            for row in backend.execute("SELECT * FROM task_events ORDER BY id", connection=conn).rows
+        ]
+        events: list[tuple[dict[str, Any], str, str, str]] = []
+        event_owners: dict[str, str] = {}
+        for row in source_events:
+            task_scope = task_scopes.get(str(row.get("task_id"))) if row.get("task_id") is not None else None
+            note_id = str(row.get("note_id") or (task_scope[1] if task_scope else ""))
+            note_owner = notes.get(note_id, "")
+            owner = task_scope[0] if task_scope else note_owner
+            if not owner or note_owner != owner or (task_scope is not None and task_scope[1] != note_id):
+                raise SchemaError("Notes task v60 migration could not prove event parents.")  # noqa: TRY003
+            normalized_row = {**row, "note_id": note_id}
+            source_hash = self._note_task_v60_hash(
+                {"source": self._note_task_v60_json_safe(row), "version": 1}
+            )
+            events.append((normalized_row, owner, note_id, source_hash))
+            event_owners[str(row.get("id"))] = owner
+
+        read_states = [
+            self._note_task_v60_json_safe(dict(row))
+            for row in backend.execute(
+                "SELECT * FROM task_event_read_state ORDER BY event_id,user_id", connection=conn
+            ).rows
+        ]
+        for row in read_states:
+            owner = event_owners.get(str(row.get("event_id")))
+            if owner is None or owner != str(row.get("user_id") or ""):
+                raise SchemaError("Notes task v60 migration could not prove read-state ownership.")  # noqa: TRY003
+
+        reconciliation = [
+            self._note_task_v60_json_safe(dict(row))
+            for row in backend.execute(
+                "SELECT * FROM note_task_reconciliation_state ORDER BY note_id", connection=conn
+            ).rows
+        ]
+        for row in reconciliation:
+            if not notes.get(str(row.get("note_id") or ""), ""):
+                raise SchemaError("Notes task v60 migration could not prove reconciliation ownership.")  # noqa: TRY003
+        return {
+            "notes": notes, "tasks": tasks, "task_scopes": task_scopes,
+            "projections": projections, "events": events, "read_states": read_states,
+            "reconciliation": reconciliation,
+        }
+
+    def _migrate_from_v59_to_v60_postgres(self, conn: Any) -> None:
+        """Atomically rebuild the PostgreSQL task graph under owner/dataset tenancy."""
+        backend = self.backend
+        backend.execute(
+            "LOCK TABLE notes, note_tasks, task_note_projections, task_events, "
+            "task_event_read_state, note_task_reconciliation_state IN ACCESS EXCLUSIVE MODE",
+            connection=conn,
+        )
+        source_relations = ("notes", *self._NOTE_TASK_V60_TABLES[:-1])
+        relation_rows = backend.execute(
+            """
+            SELECT table_row.relname AS table_name, table_row.relrowsecurity AS rls_enabled,
+                   table_row.relforcerowsecurity AS rls_forced,
+                   table_row.relowner=current_user::regrole AS is_table_owner,
+                   pg_has_role(current_user, namespace_row.nspowner, 'USAGE')
+                     AS is_schema_owner
+              FROM pg_class AS table_row
+              JOIN pg_namespace AS namespace_row ON namespace_row.oid=table_row.relnamespace
+             WHERE namespace_row.nspname=current_schema() AND table_row.relkind IN ('r','p')
+               AND table_row.relname = ANY(%s)
+            """,
+            (list(source_relations),),
+            connection=conn,
+        ).rows
+        policy_rows = backend.execute(
+            """
+            SELECT tablename AS table_name, policyname AS policy_name, permissive,
+                   roles::text AS roles, cmd AS command, qual AS using_expression,
+                   with_check AS check_expression
+              FROM pg_policies
+             WHERE schemaname=current_schema() AND tablename = ANY(%s)
+             ORDER BY tablename,policyname
+            """,
+            (list(source_relations),),
+            connection=conn,
+        ).rows
+        forced_relations = self._verify_note_task_v59_authority_catalog(
+            relation_rows, policy_rows
+        )
+        collision_names = (
+            "task_projection_drifts",
+            self._NOTE_TASK_SCOPE_AUTHORITY_TABLE,
+            *(f"{table}_v60" for table in self._NOTE_TASK_V60_RELATIONS),
+        )
+        collisions = backend.execute(
+            """
+            SELECT table_row.relname AS relation_name
+              FROM pg_class AS table_row
+              JOIN pg_namespace AS namespace_row ON namespace_row.oid=table_row.relnamespace
+             WHERE namespace_row.nspname=current_schema() AND table_row.relname = ANY(%s)
+            """,
+            (list(collision_names),),
+            connection=conn,
+        ).rows
+        if collisions:
+            raise SchemaError("Notes task v60 target collision requires explicit repair.")  # noqa: TRY003
+        note_index_collision = backend.execute(
+            "SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+            "WHERE n.nspname=current_schema() AND c.relname='uq_notes_owner_id'",
+            connection=conn,
+        ).rows
+        if note_index_collision:
+            raise SchemaError("Notes task v60 notes-owner index collision requires explicit repair.")  # noqa: TRY003
+
+        for table in forced_relations:
+            backend.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY", connection=conn)  # nosec B608
+        source = self._validate_note_task_source_postgres(conn)
+        self._note_task_v60_migration_checkpoint("validate")
+
+        self._rename_note_task_v59_postgres_constraints(conn)
+        self._create_note_task_schema_v60_postgres(conn)
+        self._note_task_v60_migration_checkpoint("create")
+
+        dataset = self._LOCAL_UNBOUND_TASK_DATASET_ID
+        for row in source["tasks"]:
+            owner, _note_id = source["task_scopes"][str(row["id"])]
+            canonical_source = self._note_task_v60_json_safe(row)
+            canonical_hash, diagnostic_code, diagnostic_hash = self._canonicalize_legacy_task_v60(
+                canonical_source, owner_user_id=owner
+            )
+            backend.execute(
+                """
+                INSERT INTO note_tasks_v60(
+                  owner_user_id,dataset_id,id,note_id,text,status,metadata_json,projection_status,
+                  deleted,created_at,updated_at,completed_at,client_id,version,canonical_revision,
+                  canonical_hash,source_diagnostic_code,source_diagnostic_hash
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    owner, dataset, row["id"], row["note_id"], row["text"], row["status"],
+                    row["metadata_json"], row["projection_status"], row["deleted"], row["created_at"],
+                    row["updated_at"], row["completed_at"], row["client_id"], row["version"],
+                    row["version"], canonical_hash, diagnostic_code, diagnostic_hash,
+                ),
+                connection=conn,
+            )
+        for row in source["projections"]:
+            owner, _note_id = source["task_scopes"][str(row["task_id"])]
+            backend.execute(
+                """
+                INSERT INTO task_note_projections_v60(
+                  owner_user_id,dataset_id,task_id,note_id,note_version,line_number,start_offset,
+                  end_offset,normalized_text_hash,occurrence_index,block_fingerprint,raw_line,
+                  has_child_content,projection_status,updated_at
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (owner, dataset, *tuple(row.values())),
+                connection=conn,
+            )
+        for row, owner, note_id, source_hash in source["events"]:
+            backend.execute(
+                """
+                INSERT INTO task_events_v60(
+                  owner_user_id,dataset_id,id,task_id,note_id,event_type,actor_type,actor_id,tool_name,
+                  policy_mode,approval_id,old_value_json,new_value_json,created_at,client_id,sync_revision,
+                  sync_object_hash,sync_server_cursor,source_device_id,client_occurred_at,source_kind,
+                  corrects_activity_id,deleted,deleted_at,delete_reason,source_diagnostic_code,
+                  source_diagnostic_hash
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    owner, dataset, row["id"], row["task_id"], note_id, row["event_type"],
+                    row["actor_type"], row["actor_id"], row["tool_name"], row["policy_mode"],
+                    row["approval_id"], row["old_value_json"], row["new_value_json"],
+                    row["created_at"], row["client_id"], 1, source_hash, None, None,
+                    row["created_at"], "trusted_bootstrap_v1", None, False, None, None,
+                    "legacy_task_activity_unverified", source_hash,
+                ),
+                connection=conn,
+            )
+        event_owners = {str(row[0]["id"]): row[1] for row in source["events"]}
+        for row in source["read_states"]:
+            backend.execute(
+                "INSERT INTO task_event_read_state_v60 VALUES (%s,%s,%s,%s,%s,%s)",
+                (event_owners[str(row["event_id"])], dataset, *tuple(row.values())),
+                connection=conn,
+            )
+        for row in source["reconciliation"]:
+            backend.execute(
+                "INSERT INTO note_task_reconciliation_state_v60 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (source["notes"][str(row["note_id"])], dataset, *tuple(row.values())),
+                connection=conn,
+            )
+        self._note_task_v60_migration_checkpoint("copy")
+
+        verification_queries = {
+            "note_tasks": (source["tasks"], "id"),
+            "task_note_projections": (source["projections"], "task_id"),
+            "task_events": ([row[0] for row in source["events"]], "id"),
+            "task_event_read_state": (source["read_states"], "event_id,user_id"),
+            "note_task_reconciliation_state": (source["reconciliation"], "note_id"),
+        }
+        for table, (source_rows, ordering) in verification_queries.items():
+            source_columns = tuple(source_rows[0]) if source_rows else {
+                "note_tasks": ("id","note_id","text","status","metadata_json","projection_status","deleted","created_at","updated_at","completed_at","client_id","version"),
+                "task_note_projections": ("task_id","note_id","note_version","line_number","start_offset","end_offset","normalized_text_hash","occurrence_index","block_fingerprint","raw_line","has_child_content","projection_status","updated_at"),
+                "task_events": ("id","task_id","note_id","event_type","actor_type","actor_id","tool_name","policy_mode","approval_id","old_value_json","new_value_json","created_at","client_id"),
+                "task_event_read_state": ("event_id","user_id","read_at","dismissed_at"),
+                "note_task_reconciliation_state": ("note_id","note_version","status","reconciled_at","item_count","warning_count","cursor"),
+            }[table]
+            target_rows = [
+                dict(row) for row in backend.execute(
+                    f"SELECT {','.join(source_columns)} FROM {table}_v60 ORDER BY {ordering}",  # nosec B608
+                    connection=conn,
+                ).rows
+            ]
+            if len(source_rows) != len(target_rows) or self._note_task_v60_hash(
+                self._note_task_v60_json_safe(source_rows)
+            ) != self._note_task_v60_hash(self._note_task_v60_json_safe(target_rows)):
+                raise SchemaError(f"Notes task v60 source verification failed for {table}.")  # noqa: TRY003
+
+        for table in (
+            "task_event_read_state", "task_note_projections", "note_task_reconciliation_state",
+            "task_events", "note_tasks",
+        ):
+            backend.execute(f"DROP TABLE {table}", connection=conn)  # nosec B608
+        for table in self._NOTE_TASK_V60_RELATIONS:
+            backend.execute(f"ALTER TABLE {table}_v60 RENAME TO {table}", connection=conn)  # nosec B608
+        for statement in self._note_task_v60_postgres_indexes():
+            backend.execute(statement, connection=conn)
+        self._note_task_v60_migration_checkpoint("index")
+
+        for table in forced_relations:
+            backend.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY", connection=conn)  # nosec B608
+        task_rls: list[str] = []
+        for statement in build_chacha_rls_sql():
+            if any(
+                f"ALTER TABLE IF EXISTS {table} " in statement
+                or f"DROP POLICY IF EXISTS {table}_tenant_isolation ON {table}" in statement
+                or f"CREATE POLICY {table}_tenant_isolation ON {table}" in statement
+                for table in self._NOTE_TASK_V60_RELATIONS
+            ):
+                task_rls.append(statement)
+        if len(task_rls) != 4 * len(self._NOTE_TASK_V60_RELATIONS):
+            raise SchemaError("Notes task v60 RLS definition is not canonical.")  # noqa: TRY003
+        for statement in task_rls:
+            backend.execute(statement, connection=conn)
+        self._verify_note_task_schema_postgres(conn)
+        self._note_task_v60_migration_checkpoint("verify")
+        version_cursor = backend.execute(
+            "UPDATE db_schema_version SET version=60 WHERE schema_name=%s AND version=59",
+            (self._SCHEMA_NAME,),
+            connection=conn,
+        )
+        if version_cursor.rowcount != 1 or self._get_schema_version_postgres(conn) != 60:
+            raise SchemaError("Notes task v60 PostgreSQL migration failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v60_to_v61_postgres(self, conn: Any) -> None:
+        """Add recipient-owned shared chat state with verified forced RLS."""
+        if self._get_schema_version_postgres(conn) != 60:
+            raise SchemaError("Shared workspace chat v61 migration requires schema version 60.")  # noqa: TRY003
+        migration_script = "\n".join(
+            (
+                self._MIGRATION_SQL_V60_TO_V61_POSTGRES,
+                *build_shared_workspace_chat_rls_sql(),
+                self._SHARED_WORKSPACE_CHAT_V61_POSTGRES_VERIFY_SQL,
+            )
+        )
+        self._apply_postgres_migration_script(
+            migration_script,
+            conn,
+            expected_version=61,
+        )
+        if self._get_schema_version_postgres(conn) != 61:
+            raise SchemaError("Shared workspace chat v61 PostgreSQL version verification failed.")  # noqa: TRY003
+
+    def _migrate_from_v61_to_v62_postgres(self, conn: Any) -> None:
+        """Add operation-fenced staged Workspace clone lifecycle markers."""
+        if self._get_schema_version_postgres(conn) != 61:
+            raise SchemaError("Workspace clone lifecycle v62 migration requires schema version 61.")  # noqa: TRY003
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V61_TO_V62_POSTGRES,
+            conn,
+            expected_version=62,
+        )
+        if self._get_schema_version_postgres(conn) != 62:
+            raise SchemaError("Workspace clone lifecycle v62 PostgreSQL version verification failed.")  # noqa: TRY003
+
+    def _migrate_from_v63_to_v64_postgres(self, conn: Any) -> None:
+        """Add durable, forced-RLS Notes graph suggestion persistence."""
+        if self._get_schema_version_postgres(conn) != 63:
+            raise SchemaError("Notes graph suggestion v64 PostgreSQL migration requires schema version 63.")  # noqa: TRY003
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V63_TO_V64_POSTGRES,
+            conn,
+            expected_version=64,
+        )
+        self._configure_note_graph_suggestion_receipt_delete_trigger_postgres(conn)
+        if self._get_schema_version_postgres(conn) != 64:
+            raise SchemaError("Notes graph suggestion v64 PostgreSQL version verification failed.")  # noqa: TRY003
+
+    def _configure_note_graph_suggestion_receipt_delete_trigger_postgres(self, conn: Any) -> None:
+        """Clear only receipt IDs before PostgreSQL deletes an expiring receipt."""
+        for statement in self._NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_POSTGRES_TRIGGER_STATEMENTS:
+            self.backend.execute(statement, connection=conn)
+
+    def _notes_graph_schema_postgres(self, conn: Any) -> None:
+        """Create owner-scoped graph projections and direct-write invalidation."""
+
+        statements = (
+            """
+            CREATE TABLE IF NOT EXISTS note_wikilink_edges(
+              owner_user_id TEXT NOT NULL,
+              source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              target_note_id TEXT NOT NULL,
+              source_version INTEGER NOT NULL CHECK(source_version >= 1),
+              parser_version INTEGER NOT NULL CHECK(parser_version >= 1),
+              created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              last_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(owner_user_id, source_note_id, target_note_id)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_note_wikilink_edges_target "
+            "ON note_wikilink_edges(owner_user_id, target_note_id, source_note_id)",
+            """
+            CREATE TABLE IF NOT EXISTS note_graph_note_state(
+              owner_user_id TEXT NOT NULL,
+              note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              source_version INTEGER NOT NULL CHECK(source_version >= 1),
+              parser_version INTEGER NOT NULL CHECK(parser_version >= 1),
+              truncated BOOLEAN NOT NULL DEFAULT FALSE,
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(owner_user_id, note_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS note_graph_dirty(
+              owner_user_id TEXT NOT NULL,
+              note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              generation BIGINT NOT NULL DEFAULT 1 CHECK(generation >= 1),
+              last_modified TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(owner_user_id, note_id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS note_graph_projection_state(
+              owner_user_id TEXT PRIMARY KEY,
+              parser_version INTEGER NOT NULL DEFAULT 1 CHECK(parser_version >= 1),
+              rebuild_state TEXT NOT NULL DEFAULT 'ready'
+                CHECK(rebuild_state IN ('ready', 'pending', 'running', 'failed')),
+              rebuild_cursor TEXT,
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS note_graph_revisions(
+              owner_user_id TEXT PRIMARY KEY,
+              revision BIGINT NOT NULL DEFAULT 0 CHECK(revision >= 0),
+              updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
+            CREATE OR REPLACE FUNCTION notes_graph_bump_revision(owner_id TEXT) RETURNS VOID AS $$
+            BEGIN
+              INSERT INTO note_graph_revisions(owner_user_id, revision, updated_at)
+              VALUES (owner_id, 1, CURRENT_TIMESTAMP)
+              ON CONFLICT(owner_user_id) DO UPDATE SET revision = note_graph_revisions.revision + 1,
+                updated_at = CURRENT_TIMESTAMP;
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            """
+            CREATE OR REPLACE FUNCTION notes_graph_notes_changed() RETURNS TRIGGER AS $$
+            DECLARE
+              owner_id TEXT := COALESCE(NEW.client_id, OLD.client_id);
+              changed_note_id TEXT := COALESCE(NEW.id, OLD.id);
+            BEGIN
+              IF TG_OP <> 'DELETE' THEN
+                INSERT INTO note_graph_dirty(owner_user_id, note_id, generation, last_modified)
+                VALUES (owner_id, changed_note_id, 1, CURRENT_TIMESTAMP)
+                ON CONFLICT(owner_user_id, note_id) DO UPDATE
+                SET generation = note_graph_dirty.generation + 1, last_modified = CURRENT_TIMESTAMP;
+              END IF;
+              PERFORM notes_graph_bump_revision(owner_id);
+              RETURN COALESCE(NEW, OLD);
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS notes_graph_notes_changed_trigger ON notes",
+            "CREATE TRIGGER notes_graph_notes_changed_trigger AFTER INSERT OR DELETE OR UPDATE OF "
+            "title, content, conversation_id, created_at, last_modified, deleted ON notes "
+            "FOR EACH ROW EXECUTE FUNCTION notes_graph_notes_changed()",
+            """
+            CREATE OR REPLACE FUNCTION notes_graph_edges_changed() RETURNS TRIGGER AS $$
+            DECLARE owner_id TEXT := COALESCE(NEW.user_id, OLD.user_id);
+            BEGIN
+              PERFORM notes_graph_bump_revision(owner_id);
+              RETURN COALESCE(NEW, OLD);
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS notes_graph_edges_changed_trigger ON note_edges",
+            "CREATE TRIGGER notes_graph_edges_changed_trigger AFTER INSERT OR UPDATE OR DELETE ON note_edges "
+            "FOR EACH ROW EXECUTE FUNCTION notes_graph_edges_changed()",
+            """
+            CREATE OR REPLACE FUNCTION notes_graph_keywords_changed() RETURNS TRIGGER AS $$
+            BEGIN
+              PERFORM notes_graph_bump_revision(COALESCE(NEW.client_id, OLD.client_id));
+              RETURN COALESCE(NEW, OLD);
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS notes_graph_keywords_changed_trigger ON chacha_keywords",
+            "CREATE TRIGGER notes_graph_keywords_changed_trigger AFTER INSERT OR DELETE OR UPDATE OF "
+            "keyword, deleted ON chacha_keywords "
+            "FOR EACH ROW EXECUTE FUNCTION notes_graph_keywords_changed()",
+            """
+            CREATE OR REPLACE FUNCTION notes_graph_note_keywords_changed() RETURNS TRIGGER AS $$
+            DECLARE
+              changed_note_id TEXT := COALESCE(NEW.note_id, OLD.note_id);
+              owner_id TEXT;
+            BEGIN
+              SELECT client_id INTO owner_id FROM notes WHERE id = changed_note_id;
+              IF owner_id IS NOT NULL THEN
+                PERFORM notes_graph_bump_revision(owner_id);
+              END IF;
+              RETURN COALESCE(NEW, OLD);
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS notes_graph_note_keywords_changed_trigger ON note_keywords",
+            "CREATE TRIGGER notes_graph_note_keywords_changed_trigger "
+            "AFTER INSERT OR UPDATE OR DELETE ON note_keywords "
+            "FOR EACH ROW EXECUTE FUNCTION notes_graph_note_keywords_changed()",
+            """
+            CREATE OR REPLACE FUNCTION notes_graph_conversations_changed() RETURNS TRIGGER AS $$
+            BEGIN
+              PERFORM notes_graph_bump_revision(COALESCE(NEW.client_id, OLD.client_id));
+              RETURN COALESCE(NEW, OLD);
+            END;
+            $$ LANGUAGE plpgsql
+            """,
+            "DROP TRIGGER IF EXISTS notes_graph_conversations_changed_trigger ON conversations",
+            "CREATE TRIGGER notes_graph_conversations_changed_trigger "
+            "AFTER INSERT OR DELETE OR UPDATE OF source, external_ref, deleted ON conversations "
+            "FOR EACH ROW EXECUTE FUNCTION notes_graph_conversations_changed()",
+        )
+        for statement in statements:
+            self.backend.execute(statement, connection=conn)
+
+    def _ensure_chacha_rls_postgres(self, conn: Any) -> None:
+        """Install the complete ChaCha policy set after all schema migrations."""
+        for statement in build_chacha_rls_sql():
+            self.backend.execute(statement, connection=conn)
+
+    def _migration_v65_checkpoint(self, stage: str) -> None:
+        """No-op failpoint used to verify atomic v65 migrations."""
+
+    def _migrate_from_v65_to_v66(self, conn: sqlite3.Connection) -> None:
+        """Create principal-owned Buddy snapshots without changing Persona rows."""
+        from tldw_Server_API.app.core.DB_Management.Buddy_DB import BUDDY_SCHEMA_SQL
+        from tldw_Server_API.app.core.DB_Management.Buddy_Turns_DB import BUDDY_TURNS_SCHEMA_SQL
+
+        for statement in split_sql_statements(BUDDY_SCHEMA_SQL + BUDDY_TURNS_SCHEMA_SQL):
+            conn.execute(statement)
+        conn.execute(
+            "UPDATE db_schema_version SET version = 66 WHERE schema_name = ? AND version = 65",
+            (self._SCHEMA_NAME,),
+        )
+
+    def _migrate_from_v65_to_v66_postgres(self, conn: Any) -> None:
+        """Create Buddy storage and its tenant policies in the caller transaction."""
+        from tldw_Server_API.app.core.DB_Management.Buddy_DB import BUDDY_SCHEMA_SQL
+        from tldw_Server_API.app.core.DB_Management.Buddy_Turns_DB import BUDDY_TURNS_SCHEMA_SQL
+
+        for statement in split_sql_statements(BUDDY_SCHEMA_SQL + BUDDY_TURNS_SCHEMA_SQL):
+            self.backend.execute(statement, connection=conn)
+        for table in (
+            "buddy_profiles",
+            "buddy_assets",
+            "buddy_attachments",
+            "buddy_result_acknowledgements",
+            "buddy_turn_owners",
+            "buddy_turns",
+        ):
+            self.backend.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY", connection=conn)
+            self.backend.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY", connection=conn)
+            self.backend.execute(
+                f"CREATE POLICY {table}_tenant_isolation ON {table} "
+                "USING (user_id = current_setting('app.current_user_id', true)) "
+                "WITH CHECK (user_id = current_setting('app.current_user_id', true))",
+                connection=conn,
+            )
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s",
+            (66, self._SCHEMA_NAME, 65),
+            connection=conn,
+        )
+
+    _HISTORY_PROJECTIONS_SCHEMA_SQL = """
+        CREATE TABLE IF NOT EXISTS conversation_history_projections (
+            projection_id TEXT NOT NULL,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            client_id TEXT NOT NULL,
+            owner_key TEXT NOT NULL,
+            interpretation_version INTEGER NOT NULL CHECK (interpretation_version = 1),
+            source_digest TEXT NOT NULL,
+            history_fence TEXT NOT NULL,
+            source_members_json TEXT NOT NULL,
+            ordered_path_ids_json TEXT NOT NULL,
+            confirmation_json TEXT NOT NULL,
+            projection_digest TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (client_id, owner_key, conversation_id, projection_id)
+        )
+    """
+
+    def _migrate_from_v70_to_v71(self, conn: sqlite3.Connection) -> None:
+        """Preserve legacy rows; only specialized admission may set protected provenance."""
+        keyword_columns = {row[1] for row in conn.execute("PRAGMA table_info(keywords)")}
+        if "merged_into_sync_id" not in keyword_columns:
+            conn.execute(
+                "ALTER TABLE keywords ADD COLUMN merged_into_sync_id TEXT "
+                "CONSTRAINT keyword_merge_tombstone CHECK (merged_into_sync_id IS NULL "
+                "OR (deleted = 1 AND merged_into_sync_id <> sync_id))"
+            )
+        conn.execute(self._HISTORY_PROJECTIONS_SCHEMA_SQL)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+        if "history_admission_json" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN history_admission_json TEXT")
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS history_projection_immutable
+            BEFORE UPDATE ON conversation_history_projections
+            BEGIN SELECT RAISE(ABORT, 'History projections are immutable'); END
+        """)
+        conn.execute(
+            "UPDATE db_schema_version SET version = 71 WHERE schema_name = ? AND version = 70",
+            (self._SCHEMA_NAME,),
+        )
+        if self._get_db_version(conn) != 71:
+            raise SchemaError("History projection migration V70->V71 failed version verification.")  # noqa: TRY003
+
+    def _native_fork_schema_is_installed(self, conn: Any) -> bool:
+        """Recognize the published H2 catalog without replacing durable receipts.
+
+        H2 previously used the same version numbers as dev's Persona migration.
+        A complete native catalog is retained; a partial catalog needs explicit
+        repair instead of silently marking missing storage as migrated.
+        """
+        from tldw_Server_API.app.core.DB_Management.chacha.native_fork_schema import NATIVE_CHAT_TABLES
+
+        present_tables = {
+            table for table in NATIVE_CHAT_TABLES if self.backend.table_exists(table, connection=conn)
+        }
+        required_columns = {
+            "workspaces": {"native_chat_admission_closed"},
+            "conversations": {
+                "required_projection_version", "native_creation_operation_kind",
+                "native_creation_operation_id", "native_bundle_json",
+            },
+        }
+        present_columns = {
+            table: required & {column["name"] for column in self.backend.get_table_info(table, connection=conn)}
+            for table, required in required_columns.items()
+        }
+        if not present_tables and not any(present_columns.values()):
+            return False
+        if present_tables != set(NATIVE_CHAT_TABLES) or present_columns != required_columns:
+            raise SchemaError("Incomplete native fork schema; manual repair is required.")  # noqa: TRY003
+        return True
+
+    def _migrate_from_v71_to_v72(self, conn: sqlite3.Connection) -> None:
+        """Install durable native fork receipts and asset ownership in one transaction."""
+        from tldw_Server_API.app.core.DB_Management.chacha.native_fork_schema import native_fork_schema_statements
+
+        if not self._native_fork_schema_is_installed(conn):
+            for statement in native_fork_schema_statements(postgres=False):
+                conn.execute(statement)
+        conn.execute(
+            "UPDATE db_schema_version SET version = 72 WHERE schema_name = ? AND version = 71",
+            (self._SCHEMA_NAME,),
+        )
+        if self._get_db_version(conn) != 72:
+            raise SchemaError("Native fork migration V71->V72 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v75_to_v76_postgres(self, conn: Any) -> None:
+        """Install native fork storage and direct-owner RLS with the version bump."""
+        from tldw_Server_API.app.core.DB_Management.chacha.native_fork_schema import native_fork_schema_statements
+
+        if not self._native_fork_schema_is_installed(conn):
+            for statement in native_fork_schema_statements(postgres=True):
+                self.backend.execute(statement, connection=conn)
+        self._ensure_chacha_rls_postgres(conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 75",
+            (76, self._SCHEMA_NAME), connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 76:
+            raise SchemaError("Native fork PostgreSQL migration V75->V76 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v74_to_v75_postgres(self, conn: Any) -> None:
+        """Create the PostgreSQL projection store and protected nullable provenance."""
+        statements = (
+            self._HISTORY_PROJECTIONS_SCHEMA_SQL,
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS history_admission_json TEXT",
+            """CREATE OR REPLACE FUNCTION history_projection_immutable() RETURNS TRIGGER AS $$
+               BEGIN RAISE EXCEPTION 'History projections are immutable'; END;
+               $$ LANGUAGE plpgsql""",
+            "DROP TRIGGER IF EXISTS history_projection_immutable ON conversation_history_projections",
+            "CREATE TRIGGER history_projection_immutable BEFORE UPDATE ON conversation_history_projections "
+            "FOR EACH ROW EXECUTE FUNCTION history_projection_immutable()",
+        )
+        for statement in statements:
+            self.backend.execute(statement, connection=conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 74",
+            (75, self._SCHEMA_NAME), connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 75:
+            raise SchemaError("History projection PostgreSQL migration V74->V75 failed version verification.")  # noqa: TRY003
+        self._ensure_chacha_rls_postgres(conn)
+
+    def _migrate_from_v66_to_v67(self, conn: sqlite3.Connection) -> None:
+        """Add OSCE quiz activity metadata, stations, and practice attempts."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V66_TO_V67):
+            conn.execute(statement)
+        if self._get_db_version(conn) != 67:
+            raise SchemaError("OSCE schema migration V66->V67 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v66_to_v67_postgres(self, conn: Any) -> None:
+        """Add PostgreSQL OSCE quiz storage in the caller transaction."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V66_TO_V67_POSTGRES):
+            self.backend.execute(statement, connection=conn)
+        if self._get_schema_version_postgres(conn) != 67:
+            raise SchemaError("OSCE PostgreSQL migration V66->V67 failed version verification.")  # noqa: TRY003
+        self._sync_postgres_sequences(conn)
+
+    def _migrate_from_v67_to_v68(self, conn: sqlite3.Connection) -> None:
+        """Retain local merge targets without changing historical keyword records."""
+        if self._get_db_version(conn) != 67:
+            raise SchemaError("Keyword survivor migration requires SQLite schema V67.")  # noqa: TRY003
+        conn.execute(
+            "ALTER TABLE keywords ADD COLUMN merged_into_sync_id TEXT "
+            "CONSTRAINT keyword_merge_tombstone CHECK (merged_into_sync_id IS NULL "
+            "OR (deleted = 1 AND merged_into_sync_id <> sync_id))"
+        )
+        conn.execute(
+            "UPDATE db_schema_version SET version = 68 WHERE schema_name = ? AND version = 67",
+            (self._SCHEMA_NAME,),
+        )
+        if self._get_db_version(conn) != 68:
+            raise SchemaError("Keyword survivor SQLite migration failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v69_to_v70_postgres(self, conn: Any) -> None:
+        """Add local tombstone metadata in the existing PostgreSQL migration transaction."""
+        if self._get_schema_version_postgres(conn) != 69:
+            raise SchemaError("Keyword survivor migration requires PostgreSQL schema V69.")  # noqa: TRY003
+        self.backend.execute(
+            "ALTER TABLE chacha_keywords ADD COLUMN merged_into_sync_id TEXT "
+            "CONSTRAINT keyword_merge_tombstone CHECK (merged_into_sync_id IS NULL "
+            "OR (deleted = TRUE AND merged_into_sync_id <> sync_id))",
+            connection=conn,
+        )
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s",
+            (70, self._SCHEMA_NAME, 69), connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 70:
+            raise SchemaError("Keyword survivor PostgreSQL migration failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v67_to_v68_postgres(self, conn: Any) -> None:
+        """Reserve character names per owner without changing existing rows or IDs."""
+        if self._get_schema_version_postgres(conn) != 67:
+            raise SchemaError("Character name migration requires PostgreSQL schema V67.")  # noqa: TRY003
+        catalog_query = (
+            "SELECT c.conname, array_agg(a.attname ORDER BY k.ordinality) AS columns "
+            "FROM pg_constraint c "
+            "CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality) "
+            "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum "
+            "WHERE c.conrelid = 'character_cards'::regclass AND c.contype = 'u' "
+            "GROUP BY c.oid, c.conname"
+        )
+        constraints = self.backend.execute(catalog_query, connection=conn).rows
+        old_keys = [row for row in constraints if row["columns"] == ["name"]]
+        new_key = "character_cards_client_id_name_key"
+        if len(old_keys) != 1 or any(row["conname"] == new_key for row in constraints):
+            raise SchemaError("Unexpected character name constraint catalog at PostgreSQL V67.")  # noqa: TRY003
+        self.backend.execute(
+            "ALTER TABLE character_cards ADD CONSTRAINT character_cards_client_id_name_key "
+            "UNIQUE (client_id, name)",
+            connection=conn,
+        )
+        old_key = self.backend.escape_identifier(old_keys[0]["conname"])
+        self.backend.execute(
+            f"ALTER TABLE character_cards DROP CONSTRAINT {old_key}",  # nosec B608 # Catalog-validated, quoted identifier
+            connection=conn,
+        )
+        final_constraints = self.backend.execute(catalog_query, connection=conn).rows
+        remaining_global_name_key = self.backend.execute(
+            "SELECT EXISTS (SELECT 1 FROM pg_index i "
+            "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0] "
+            "WHERE i.indrelid = 'character_cards'::regclass AND i.indisunique "
+            "AND i.indnkeyatts = 1 AND a.attname = 'name')",
+            connection=conn,
+        ).scalar
+        if remaining_global_name_key or not any(
+            row["conname"] == new_key and row["columns"] == ["client_id", "name"]
+            for row in final_constraints
+        ):
+            raise SchemaError("Character owner/name constraint verification failed.")  # noqa: TRY003
+        result = self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s RETURNING version",
+            (68, self._SCHEMA_NAME, 67),
+            connection=conn,
+        )
+        if result.rowcount != 1 or self._get_schema_version_postgres(conn) != 68:
+            raise SchemaError("Character name PostgreSQL migration V67->V68 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v68_to_v69_postgres(self, conn: Any) -> None:
+        """Reserve deck names per owner without changing records or tombstones."""
+        if self._get_schema_version_postgres(conn) != 68:
+            raise SchemaError("Deck name migration requires PostgreSQL schema V68.")  # noqa: TRY003
+        catalog_query = (
+            "SELECT c.conname, array_agg(a.attname ORDER BY k.ordinality) AS columns "
+            "FROM pg_constraint c "
+            "CROSS JOIN LATERAL unnest(c.conkey) WITH ORDINALITY AS k(attnum, ordinality) "
+            "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum "
+            "WHERE c.conrelid = 'decks'::regclass AND c.contype = 'u' "
+            "GROUP BY c.oid, c.conname"
+        )
+        constraints = self.backend.execute(catalog_query, connection=conn).rows
+        old_keys = [row for row in constraints if row["columns"] == ["name"]]
+        new_key = "decks_client_id_name_key"
+        if len(old_keys) != 1 or any(row["conname"] == new_key for row in constraints):
+            raise SchemaError("Unexpected deck name constraint catalog at PostgreSQL V68.")  # noqa: TRY003
+        self.backend.execute(
+            "ALTER TABLE decks ADD CONSTRAINT decks_client_id_name_key UNIQUE (client_id, name)",
+            connection=conn,
+        )
+        old_key = self.backend.escape_identifier(old_keys[0]["conname"])
+        self.backend.execute(
+            f"ALTER TABLE decks DROP CONSTRAINT {old_key}",  # nosec B608 # Catalog-validated, quoted identifier
+            connection=conn,
+        )
+        final_constraints = self.backend.execute(catalog_query, connection=conn).rows
+        remaining_global_name_key = self.backend.execute(
+            "SELECT EXISTS (SELECT 1 FROM pg_index i "
+            "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0] "
+            "WHERE i.indrelid = 'decks'::regclass AND i.indisunique "
+            "AND i.indnkeyatts = 1 AND a.attname = 'name')",
+            connection=conn,
+        ).scalar
+        if remaining_global_name_key or not any(
+            row["conname"] == new_key and row["columns"] == ["client_id", "name"]
+            for row in final_constraints
+        ):
+            raise SchemaError("Deck owner/name constraint verification failed.")  # noqa: TRY003
+        result = self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s RETURNING version",
+            (69, self._SCHEMA_NAME, 68),
+            connection=conn,
+        )
+        if result.rowcount != 1 or self._get_schema_version_postgres(conn) != 69:
+            raise SchemaError("Deck name PostgreSQL migration V68->V69 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v68_to_v69(self, conn: sqlite3.Connection) -> None:
+        """Persist opt-out, conservatively protecting legacy null defaults in an offline upgrade."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V68_TO_V69):
+            conn.execute(statement)
+        if self._get_db_version(conn) != 69:
+            raise SchemaError("Workspace Persona migration V68->V69 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v72_to_v73_postgres(self, conn: Any) -> None:
+        """Apply PostgreSQL opt-out storage and legacy backfill in the caller transaction."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V72_TO_V73_POSTGRES):
+            self.backend.execute(statement, connection=conn)
+        if self._get_schema_version_postgres(conn) != 73:
+            raise SchemaError("Workspace Persona PostgreSQL migration V72->V73 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v69_to_v70(self, conn: sqlite3.Connection) -> None:
+        """Add bounded local startup storage without inferring historical provenance."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V69_TO_V70):
+            conn.execute(statement)
+        if self._get_db_version(conn) != 70:
+            raise SchemaError("Conversation startup migration V69->V70 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v73_to_v74_postgres(self, conn: Any) -> None:
+        """Add PostgreSQL startup storage in the caller's offline upgrade transaction."""
+        for statement in split_sql_statements(self._MIGRATION_SQL_V73_TO_V74_POSTGRES):
+            self.backend.execute(statement, connection=conn)
+        if self._get_schema_version_postgres(conn) != 74:
+            raise SchemaError("Conversation startup PostgreSQL migration V73->V74 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v64_to_v65(self, conn: sqlite3.Connection) -> None:
+        """Migrate schema from V64 to V65 (character resume snapshot state)."""
+        logger.info(f"Migrating '{self._SCHEMA_NAME}' schema from V64 to V65 for DB: {self.db_path_str}...")
+        try:
+            ddl, _, _version_update = self._MIGRATION_SQL_V64_TO_V65.partition(
+                "UPDATE db_schema_version"
+            )
+            for statement in split_sql_statements(ddl):
+                conn.execute(statement)
+            self._migration_v65_checkpoint("schema-created")
+            conn.execute(
+                "UPDATE db_schema_version SET version = 65 WHERE schema_name = ? AND version = 64",
+                (self._SCHEMA_NAME,),
+            )
+            final_version = self._get_db_version(conn)
+            if final_version != 65:
+                raise SchemaError(  # noqa: TRY003, TRY301
+                    f"[{self._SCHEMA_NAME}] Migration V64->V65 failed version check. Expected 65, got: {final_version}"
+                )
+            logger.info(f"[{self._SCHEMA_NAME}] Migration to V65 completed.")
+        except sqlite3.Error as exc:
+            logger.error(f"[{self._SCHEMA_NAME}] Migration V64->V65 failed: {exc}", exc_info=True)
+            raise SchemaError(f"Migration V64->V65 failed for '{self._SCHEMA_NAME}': {exc}") from exc  # noqa: TRY003
+        except RuntimeError as exc:
+            raise SchemaError(f"Migration V64->V65 checkpoint failed: {exc}") from exc  # noqa: TRY003
+        except SchemaError:
+            raise
+
+    def _migrate_from_v64_to_v65_postgres(self, conn: Any) -> None:
+        """Migrate PostgreSQL schema from V64 to V65 in the caller transaction."""
+        ddl, _, _version_update = self._MIGRATION_SQL_V64_TO_V65_POSTGRES.partition(
+            "UPDATE db_schema_version"
+        )
+        for statement in split_sql_statements(ddl):
+            self.backend.execute(statement, connection=conn)
+        self._migration_v65_checkpoint("schema-created")
+        result = self.backend.execute(
+            "UPDATE db_schema_version SET version = %s "
+            "WHERE schema_name = %s AND version = %s RETURNING version",
+            (65, self._SCHEMA_NAME, 64),
+            connection=conn,
+        )
+        if result is None or result.rowcount != 1:
+            raise SchemaError(  # noqa: TRY003
+                f"[{self._SCHEMA_NAME}] Migration V64->V65 did not advance exactly one V64 schema row."
+            )
+
     def _ensure_persona_persistence_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure persona persistence tables and columns exist for drifted SQLite schemas."""
         try:
@@ -8964,7 +18119,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise SchemaError(f"Failed ensuring SQLite persona persistence schema: {exc}") from exc  # noqa: TRY003
 
     def _ensure_recent_persona_schema_sqlite(self, conn: sqlite3.Connection) -> None:
-        """Backfill recent persona schema columns after version-number collisions."""
+        """Backfill Persona columns and guard local origin during historical identity repairs."""
         self._ensure_persona_persistence_schema_sqlite(conn)
         profile_cols = self._sqlite_column_names(conn, "persona_profiles")
         if "voice_defaults_json" not in profile_cols:
@@ -8991,22 +18146,26 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         self._ensure_conversations_fts_triggers_sqlite(conn)
         self._rebuild_conversations_fts_sqlite(conn)
-        conn.execute(
-            """
-            UPDATE conversations
-               SET assistant_kind = 'character'
-             WHERE character_id IS NOT NULL
-               AND COALESCE(TRIM(assistant_kind), '') = ''
-            """
-        )
-        conn.execute(
-            """
-            UPDATE conversations
-               SET assistant_id = CAST(character_id AS TEXT)
-             WHERE character_id IS NOT NULL
-               AND COALESCE(TRIM(assistant_id), '') = ''
-            """
-        )
+        if "assistant_startup_json" in conversation_cols:
+            with TransactionContextManager(self):
+                self._repair_conversation_assistant_identity(conn)
+        else:
+            conn.execute(
+                """
+                UPDATE conversations
+                   SET assistant_kind = 'character'
+                 WHERE character_id IS NOT NULL
+                   AND COALESCE(TRIM(assistant_kind), '') = ''
+                """
+            )
+            conn.execute(
+                """
+                UPDATE conversations
+                   SET assistant_id = CAST(character_id AS TEXT)
+                 WHERE character_id IS NOT NULL
+                   AND COALESCE(TRIM(assistant_id), '') = ''
+                """
+            )
 
         session_cols = {row[1] for row in conn.execute("PRAGMA table_info('persona_sessions')").fetchall()}
         if "activity_surface" not in session_cols:
@@ -9016,6 +18175,40 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if "preferences_json" not in session_cols:
             conn.execute(
                 "ALTER TABLE persona_sessions ADD COLUMN preferences_json TEXT NOT NULL DEFAULT '{}'"
+            )
+
+    def _repair_conversation_assistant_identity(self, conn: Any) -> None:
+        """Repair only historical missing Character fields, comparing locked normalized bindings."""
+        query = """
+            SELECT id, character_id, assistant_kind, assistant_id, persona_memory_mode,
+                   assistant_startup_json
+              FROM conversations
+             WHERE character_id IS NOT NULL
+               AND (COALESCE(TRIM(assistant_kind), '') = ''
+                    OR COALESCE(TRIM(assistant_id), '') = '')
+        """
+        if self.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE"
+        rows = conn.execute(query).fetchall()
+        for row in rows:
+            kind = row["assistant_kind"]
+            assistant_id = row["assistant_id"]
+            if kind is None or not kind.strip(" "):
+                kind = "character"
+            if assistant_id is None or not assistant_id.strip(" "):
+                assistant_id = str(row["character_id"])
+            try:
+                binding = self.conversation_store._normalize_conversation_assistant_identity(
+                    character_id=row["character_id"], assistant_kind=kind,
+                    assistant_id=assistant_id, persona_memory_mode=row["persona_memory_mode"],
+                )
+            except InputError:
+                preserve_origin = False
+            else:
+                preserve_origin = self.conversation_store._assistant_identity_matches(row, binding)
+            conn.execute(
+                "UPDATE conversations SET assistant_kind = ?, assistant_id = ?, assistant_startup_json = ? WHERE id = ?",
+                (kind, assistant_id, row["assistant_startup_json"] if preserve_origin else None, row["id"]),
             )
 
     def _ensure_recent_voice_command_schema_sqlite(self, conn: sqlite3.Connection) -> None:
@@ -9151,7 +18344,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
 
     def _ensure_recent_persona_schema_postgres(self, conn: Any) -> None:
-        """Backfill recent persona schema columns for PostgreSQL deployments."""
+        """Backfill Persona columns, protecting local origin when modern storage exists."""
         if not hasattr(self.backend, "execute"):
             return
         statements = [
@@ -9163,6 +18356,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assistant_kind TEXT CHECK (assistant_kind IN ('character', 'persona'))",
             "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS assistant_id TEXT",
             "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS persona_memory_mode TEXT CHECK (persona_memory_mode IN ('read_only', 'read_write'))",
+            "ALTER TABLE persona_sessions ADD COLUMN IF NOT EXISTS activity_surface TEXT NOT NULL DEFAULT 'api.persona'",
+            "ALTER TABLE persona_sessions ADD COLUMN IF NOT EXISTS preferences_json TEXT NOT NULL DEFAULT '{}'",
+        ]
+        for statement in statements:
+            self.backend.execute(statement, connection=conn)
+        if self._get_schema_version_postgres(conn) >= 74:
+            self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, self.backend))
+            return
+        for statement in (
             """
             UPDATE conversations
                SET assistant_kind = 'character'
@@ -9175,10 +18377,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              WHERE character_id IS NOT NULL
                AND COALESCE(TRIM(assistant_id), '') = ''
             """,
-            "ALTER TABLE persona_sessions ADD COLUMN IF NOT EXISTS activity_surface TEXT NOT NULL DEFAULT 'api.persona'",
-            "ALTER TABLE persona_sessions ADD COLUMN IF NOT EXISTS preferences_json TEXT NOT NULL DEFAULT '{}'",
-        ]
-        for statement in statements:
+        ):
             self.backend.execute(statement, connection=conn)
 
     def _ensure_recent_voice_command_schema_postgres(self, conn: Any) -> None:
@@ -9234,6 +18433,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """
             CREATE TABLE IF NOT EXISTS note_folders(
               id            INTEGER PRIMARY KEY AUTOINCREMENT,
+              sync_id       TEXT    NOT NULL,
               name          TEXT    NOT NULL,
               path          TEXT    UNIQUE NOT NULL COLLATE NOCASE,
               parent_id     INTEGER REFERENCES note_folders(id)
@@ -9248,6 +18448,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "CREATE INDEX IF NOT EXISTS idx_note_folders_parent ON note_folders(parent_id)",
             "CREATE INDEX IF NOT EXISTS idx_note_folders_path ON note_folders(path)",
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_path_nocase ON note_folders(LOWER(path))",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_sync_id_unique ON note_folders(sync_id)",
             """
             CREATE TABLE IF NOT EXISTS note_folder_memberships(
               note_id    TEXT    NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -9281,6 +18482,46 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         ]
         for statement in statements:
             conn.execute(statement)
+        self._ensure_note_folder_sync_suppression_schema_sqlite(conn)
+
+    @staticmethod
+    def _ensure_note_folder_sync_suppression_schema_sqlite(
+        conn: sqlite3.Connection,
+    ) -> None:
+        """Ensure derived canonical folder-link suppression state exists."""
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS note_folder_sync_suppressions(
+              note_id    TEXT    NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              folder_id  INTEGER NOT NULL REFERENCES note_folders(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(note_id, folder_id)
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_note_folder_sync_suppressions_folder "
+            "ON note_folder_sync_suppressions(folder_id)"
+        )
+
+    def _ensure_note_folder_sync_suppression_schema_postgres(self, conn: Any) -> None:
+        """Ensure PostgreSQL derived canonical folder-link suppression state exists."""
+        self.backend.execute(
+            """
+            CREATE TABLE IF NOT EXISTS note_folder_sync_suppressions(
+              note_id    TEXT    NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              folder_id  BIGINT  NOT NULL REFERENCES note_folders(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY(note_id, folder_id)
+            )
+            """,
+            connection=conn,
+        )
+        self.backend.execute(
+            "CREATE INDEX IF NOT EXISTS idx_note_folder_sync_suppressions_folder "
+            "ON note_folder_sync_suppressions(folder_id)",
+            connection=conn,
+        )
 
     def _ensure_note_folder_schema_postgres(self, conn: Any) -> None:
         """Backfill note folder tables for PostgreSQL deployments."""
@@ -9291,7 +18532,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               SELECT
                 id,
                 FIRST_VALUE(id) OVER (
-                  PARTITION BY LOWER(path)
+                  PARTITION BY client_id, LOWER(path)
                   ORDER BY id ASC
                 ) AS canonical_id
               FROM note_folders
@@ -9313,6 +18554,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """
             CREATE TABLE IF NOT EXISTS note_folders(
               id            BIGSERIAL PRIMARY KEY,
+              sync_id       TEXT    NOT NULL,
               name          TEXT    NOT NULL,
               path          TEXT    NOT NULL,
               parent_id     BIGINT REFERENCES note_folders(id)
@@ -9327,6 +18569,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "ALTER TABLE note_folders DROP CONSTRAINT IF EXISTS note_folders_path_key",
             "CREATE INDEX IF NOT EXISTS idx_note_folders_parent ON note_folders(parent_id)",
             "CREATE INDEX IF NOT EXISTS idx_note_folders_path ON note_folders(path)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_sync_id_unique ON note_folders(client_id, sync_id)",
             """
             CREATE TABLE IF NOT EXISTS note_folder_memberships(
               note_id    TEXT    NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -9435,7 +18678,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                  WHERE schemaname = current_schema()
                    AND tablename = 'note_folders'
                    AND indexname = 'idx_note_folders_path_lower'
-                   AND indexdef NOT ILIKE '%WHERE%deleted%'
+                   AND (
+                     indexdef NOT ILIKE '%client_id%'
+                     OR indexdef NOT ILIKE '%WHERE%deleted%'
+                   )
               ) THEN
                 DROP INDEX idx_note_folders_path_lower;
               END IF;
@@ -9443,44 +18689,40 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             """,
             (
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_note_folders_path_lower "
-                "ON note_folders(LOWER(path)) WHERE deleted = FALSE"
+                "ON note_folders(client_id, LOWER(path)) WHERE deleted = FALSE"
             ),
         ]
         for statement in statements:
             self.backend.execute(statement, connection=conn)
+        self._ensure_note_folder_sync_suppression_schema_postgres(conn)
 
     def _ensure_note_studio_schema_sqlite(self, conn: sqlite3.Connection) -> None:
-        """Ensure the Studio sidecar table exists for SQLite deployments."""
-        try:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS note_studio_documents(
-                  note_id                 TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
-                  payload_json            TEXT NOT NULL,
-                  template_type           TEXT NOT NULL CHECK(template_type IN ('lined', 'grid', 'cornell')),
-                  handwriting_mode        TEXT NOT NULL CHECK(handwriting_mode IN ('off', 'accented')),
-                  source_note_id          TEXT REFERENCES notes(id) ON DELETE SET NULL ON UPDATE CASCADE,
-                  excerpt_snapshot        TEXT,
-                  excerpt_hash            TEXT,
-                  diagram_manifest_json   TEXT,
-                  companion_content_hash  TEXT,
-                  render_version          INTEGER NOT NULL DEFAULT 1 CHECK(render_version >= 1),
-                  created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  last_modified           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_note_studio_documents_source_note_id ON note_studio_documents(source_note_id)"
-            )
-        except sqlite3.Error as exc:
-            raise SchemaError(f"Failed ensuring SQLite note studio schema: {exc}") from exc  # noqa: TRY003
+        """Verify the schema-version-owned Studio relation without repairing drift."""
+        if self._get_db_version(conn) < 63:
+            return
+        self._verify_notes_moodboard_studio_schema_sqlite(conn)
+
+    def _ensure_note_graph_suggestion_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Verify the schema-version-owned Notes graph suggestion relations."""
+        if self._get_db_version(conn) < 64:
+            return
+        required_tables = {
+            "note_graph_suggestion_operation_receipts",
+            "note_graph_suggestion_runs",
+            "note_graph_suggestion_rejection_sets",
+            "note_graph_suggestions",
+            "note_graph_suggestion_evidence",
+        }
+        missing = required_tables - self._sqlite_table_names(conn)
+        if missing:
+            raise SchemaError(f"Notes graph suggestion v64 SQLite schema is incomplete: {sorted(missing)}")
 
     def _ensure_note_studio_schema_postgres(self, conn: Any) -> None:
-        """Ensure the Studio sidecar table exists for PostgreSQL deployments."""
-        if not hasattr(self.backend, "execute"):
+        """Create the legacy sidecar before v63 or verify schema-owned v63 state."""
+        if self._get_schema_version_postgres(conn) >= 63:
+            self._verify_notes_moodboard_studio_schema_postgres(conn)
             return
-        statements = [
+        statements = (
             """
             CREATE TABLE IF NOT EXISTS note_studio_documents(
               note_id                 TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -9497,10 +18739,37 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               last_modified           TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """,
-            "CREATE INDEX IF NOT EXISTS idx_note_studio_documents_source_note_id ON note_studio_documents(source_note_id)",
-        ]
+            "CREATE INDEX IF NOT EXISTS idx_note_studio_documents_source_note_id "
+            "ON note_studio_documents(source_note_id)",
+        )
         for statement in statements:
             self.backend.execute(statement, connection=conn)
+
+    def _ensure_note_graph_suggestion_schema_postgres(self, conn: Any) -> None:
+        """Verify the schema-version-owned Notes graph suggestion relations."""
+        if self._get_schema_version_postgres(conn) < 64:
+            return
+        required_tables = (
+            "note_graph_suggestion_operation_receipts",
+            "note_graph_suggestion_runs",
+            "note_graph_suggestion_rejection_sets",
+            "note_graph_suggestions",
+            "note_graph_suggestion_evidence",
+        )
+        missing = [
+            table for table in required_tables if not self.backend.table_exists(table, connection=conn)
+        ]
+        if missing:
+            raise SchemaError(f"Notes graph suggestion v64 PostgreSQL schema is incomplete: {missing}")
+
+    def _supports_notes_moodboard_studio_v61(self) -> bool:
+        """Return whether this database instance has the v61 product catalog revision."""
+        if self.backend_type == BackendType.POSTGRESQL:
+            cached = getattr(self, "_runtime_schema_version", None)
+            if cached is not None:
+                return int(cached) >= 63
+            return self._get_schema_version_postgres(None) >= 63
+        return self._CURRENT_SCHEMA_VERSION >= 63
 
     def _ensure_web_clipper_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure the web clipper sidecar tables exist for SQLite deployments."""
@@ -9508,7 +18777,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS note_clipper_documents(
-                  clip_id               TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+                  clip_id               TEXT PRIMARY KEY,
                   note_id               TEXT NOT NULL UNIQUE REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
                   clip_type             TEXT NOT NULL,
                   source_url            TEXT,
@@ -9519,8 +18788,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   source_note_version   INTEGER,
                   created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                   last_modified         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                  deleted               BOOLEAN NOT NULL DEFAULT 0,
-                  CHECK(clip_id = note_id)
+                  deleted               BOOLEAN NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -9558,8 +18826,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         statements = [
             """
             CREATE TABLE IF NOT EXISTS note_clipper_documents(
-              clip_id               TEXT PRIMARY KEY REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
-              note_id               TEXT NOT NULL UNIQUE REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
+              client_id             TEXT NOT NULL,
+              clip_id               TEXT NOT NULL,
+              note_id               TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
               clip_type             TEXT NOT NULL,
               source_url            TEXT,
               source_title          TEXT,
@@ -9570,13 +18839,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               created_at            TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
               last_modified         TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
               deleted               BOOLEAN NOT NULL DEFAULT FALSE,
-              CHECK(clip_id = note_id)
+              PRIMARY KEY (client_id, clip_id),
+              UNIQUE (client_id, note_id)
             )
             """,
-            "CREATE INDEX IF NOT EXISTS idx_note_clipper_documents_note_id ON note_clipper_documents(note_id)",
+            "CREATE INDEX IF NOT EXISTS idx_note_clipper_documents_note_id ON note_clipper_documents(client_id, note_id)",
             """
             CREATE TABLE IF NOT EXISTS note_clipper_workspace_placements(
-              clip_id             TEXT NOT NULL REFERENCES note_clipper_documents(clip_id) ON DELETE CASCADE ON UPDATE CASCADE,
+              client_id           TEXT NOT NULL,
+              clip_id             TEXT NOT NULL,
               workspace_id        TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE ON UPDATE CASCADE,
               workspace_note_id   INTEGER,
               source_note_id      TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -9584,13 +18855,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               created_at          TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
               last_modified       TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
               deleted             BOOLEAN NOT NULL DEFAULT FALSE,
-              PRIMARY KEY (clip_id, workspace_id)
+              PRIMARY KEY (client_id, clip_id, workspace_id),
+              FOREIGN KEY (client_id, clip_id)
+                REFERENCES note_clipper_documents(client_id, clip_id)
+                ON DELETE CASCADE ON UPDATE CASCADE
             )
             """,
-            "CREATE INDEX IF NOT EXISTS idx_note_clipper_workspace_placements_workspace ON note_clipper_workspace_placements(workspace_id)",
-            "CREATE INDEX IF NOT EXISTS idx_note_clipper_workspace_placements_source_note ON note_clipper_workspace_placements(source_note_id)",
+            "CREATE INDEX IF NOT EXISTS idx_note_clipper_workspace_placements_workspace ON note_clipper_workspace_placements(client_id, workspace_id)",
+            "CREATE INDEX IF NOT EXISTS idx_note_clipper_workspace_placements_source_note ON note_clipper_workspace_placements(client_id, source_note_id)",
         ]
         for statement in statements:
+            self.backend.execute(statement, connection=conn)
+        for statement in build_web_clipper_rls_sql():
             self.backend.execute(statement, connection=conn)
 
     @staticmethod
@@ -9610,6 +18886,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise InputError(f"{field_name} must be JSON serializable.") from exc  # noqa: TRY003
         raise InputError(f"{field_name} must be a mapping, list, JSON string, or None.")  # noqa: TRY003
 
+    @staticmethod
+    def _is_canonical_uuid4(value: str) -> bool:
+        try:
+            parsed = uuid.UUID(value)
+        except (AttributeError, ValueError):
+            return False
+        return parsed.version == 4 and str(parsed) == value
+
     def _fetch_note_clipper_document_row(
         self,
         *,
@@ -9620,8 +18904,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     ) -> dict[str, Any] | None:
         if column not in {"clip_id", "note_id"}:
             raise InputError("Unsupported note clipper document lookup column.")  # noqa: TRY003
-        query = f"SELECT * FROM note_clipper_documents WHERE {column} = ?"  # nosec B608
-        params: list[Any] = [value]
+        owner_clause = "client_id = ? AND " if self.backend_type == BackendType.POSTGRESQL else ""
+        query = f"SELECT * FROM note_clipper_documents WHERE {owner_clause}{column} = ?"  # nosec B608
+        params: list[Any] = []
+        if owner_clause:
+            params.append(self.client_id)
+        params.append(value)
         if not include_deleted:
             query += " AND deleted = ?"
             params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
@@ -9646,12 +18934,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def list_note_clipper_workspace_placements(self, clip_id: str) -> list[dict[str, Any]]:
         """Return active workspace placements for a clip."""
-        query = (
-            "SELECT clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version "
-            "FROM note_clipper_workspace_placements WHERE clip_id = ? AND deleted = ? "
-            "ORDER BY workspace_id"
-        )
-        params = (clip_id, False if self.backend_type == BackendType.POSTGRESQL else 0)
+        if self.backend_type == BackendType.POSTGRESQL:
+            query = (
+                "SELECT clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version "
+                "FROM note_clipper_workspace_placements "
+                "WHERE client_id = ? AND clip_id = ? AND deleted = ? ORDER BY workspace_id"
+            )
+            params = (self.client_id, clip_id, False)
+        else:
+            query = (
+                "SELECT clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version "
+                "FROM note_clipper_workspace_placements "
+                "WHERE clip_id = ? AND deleted = ? ORDER BY workspace_id"
+            )
+            params = (clip_id, 0)
         cursor = self.execute_query(query, params)
         return [dict(row) for row in cursor.fetchall()]
 
@@ -9667,33 +18963,49 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         flag_value = deleted_value if deleted else active_value
         now = self._get_current_utc_timestamp_iso()
 
+        owner_clause = "client_id = ? AND " if self.backend_type == BackendType.POSTGRESQL else ""
+        owner_params: tuple[Any, ...] = (self.client_id,) if owner_clause else ()
         document = conn.execute(
-            "SELECT clip_id FROM note_clipper_documents WHERE note_id = ?",
-            (note_id,),
+            f"SELECT clip_id FROM note_clipper_documents WHERE {owner_clause}note_id = ?",  # nosec B608
+            (*owner_params, note_id),
         ).fetchone()
         if document is None:
             return
         clip_id = document["clip_id"]
         conn.execute(
-            "UPDATE note_clipper_documents SET deleted = ?, last_modified = ? WHERE clip_id = ?",
-            (flag_value, now, clip_id),
+            f"UPDATE note_clipper_documents SET deleted = ?, last_modified = ? "  # nosec B608
+            f"WHERE {owner_clause}clip_id = ?",
+            (flag_value, now, *owner_params, clip_id),
         )
         conn.execute(
-            "UPDATE note_clipper_workspace_placements SET deleted = ?, last_modified = ? WHERE clip_id = ?",
-            (flag_value, now, clip_id),
+            f"UPDATE note_clipper_workspace_placements SET deleted = ?, last_modified = ? "  # nosec B608
+            f"WHERE {owner_clause}clip_id = ?",
+            (flag_value, now, *owner_params, clip_id),
         )
 
     def _delete_note_clipper_sidecars(self, note_id: str, *, conn: sqlite3.Connection) -> None:
+        owner_clause = "client_id = ? AND " if self.backend_type == BackendType.POSTGRESQL else ""
+        owner_params: tuple[Any, ...] = (self.client_id,) if owner_clause else ()
         document = conn.execute(
-            "SELECT clip_id FROM note_clipper_documents WHERE note_id = ?",
-            (note_id,),
+            f"SELECT clip_id FROM note_clipper_documents WHERE {owner_clause}note_id = ?",  # nosec B608
+            (*owner_params, note_id),
         ).fetchone()
         if document is None:
-            conn.execute("DELETE FROM note_clipper_workspace_placements WHERE source_note_id = ?", (note_id,))
+            conn.execute(
+                f"DELETE FROM note_clipper_workspace_placements "  # nosec B608
+                f"WHERE {owner_clause}source_note_id = ?",
+                (*owner_params, note_id),
+            )
             return
         clip_id = document["clip_id"]
-        conn.execute("DELETE FROM note_clipper_workspace_placements WHERE clip_id = ?", (clip_id,))
-        conn.execute("DELETE FROM note_clipper_documents WHERE clip_id = ?", (clip_id,))
+        conn.execute(
+            f"DELETE FROM note_clipper_workspace_placements WHERE {owner_clause}clip_id = ?",  # nosec B608
+            (*owner_params, clip_id),
+        )
+        conn.execute(
+            f"DELETE FROM note_clipper_documents WHERE {owner_clause}clip_id = ?",  # nosec B608
+            (*owner_params, clip_id),
+        )
 
     def upsert_note_clipper_document(
         self,
@@ -9714,8 +19026,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         normalized_clip_type = str(clip_type).strip()
         if not normalized_clip_id or not normalized_note_id:
             raise InputError("clip_id and note_id are required.")  # noqa: TRY003
-        if normalized_clip_id != normalized_note_id:
-            raise InputError("clip_id and note_id must match for the canonical clip record.")  # noqa: TRY003
+        if not self._is_canonical_uuid4(normalized_note_id):
+            raise InputError("note_id must be a canonical UUIDv4 string.")  # noqa: TRY003
         if not normalized_clip_type:
             raise InputError("clip_type cannot be empty.")  # noqa: TRY003
         if source_note_version is not None and (not isinstance(source_note_version, int) or source_note_version < 1):
@@ -9726,24 +19038,43 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         analysis_json = self._serialize_note_clipper_json_field(enrichments, "enrichments")
         content_budget_json = self._serialize_note_clipper_json_field(content_budget, "content_budget")
         deleted_value = False if self.backend_type == BackendType.POSTGRESQL else 0
-        query = (
-            "INSERT INTO note_clipper_documents ("
-            "clip_id, note_id, clip_type, source_url, source_title, capture_metadata_json, "
-            "analysis_json, content_budget_json, source_note_version, created_at, last_modified, deleted"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(clip_id) DO UPDATE SET "
-            "note_id = excluded.note_id, "
-            "clip_type = excluded.clip_type, "
-            "source_url = excluded.source_url, "
-            "source_title = excluded.source_title, "
-            "capture_metadata_json = excluded.capture_metadata_json, "
-            "analysis_json = excluded.analysis_json, "
-            "content_budget_json = excluded.content_budget_json, "
-            "source_note_version = excluded.source_note_version, "
-            "last_modified = excluded.last_modified, "
-            "deleted = excluded.deleted"
-        )
+        postgres = self.backend_type == BackendType.POSTGRESQL
+        if postgres:
+            query = (
+                "INSERT INTO note_clipper_documents ("
+                "client_id, clip_id, note_id, clip_type, source_url, source_title, capture_metadata_json, "
+                "analysis_json, content_budget_json, source_note_version, created_at, last_modified, deleted"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(client_id, clip_id) DO UPDATE SET "
+                "clip_type = excluded.clip_type, "
+                "source_url = excluded.source_url, "
+                "source_title = excluded.source_title, "
+                "capture_metadata_json = excluded.capture_metadata_json, "
+                "analysis_json = excluded.analysis_json, "
+                "content_budget_json = excluded.content_budget_json, "
+                "source_note_version = excluded.source_note_version, "
+                "last_modified = excluded.last_modified, "
+                "deleted = excluded.deleted"
+            )
+        else:
+            query = (
+                "INSERT INTO note_clipper_documents ("
+                "clip_id, note_id, clip_type, source_url, source_title, capture_metadata_json, "
+                "analysis_json, content_budget_json, source_note_version, created_at, last_modified, deleted"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(clip_id) DO UPDATE SET "
+                "clip_type = excluded.clip_type, "
+                "source_url = excluded.source_url, "
+                "source_title = excluded.source_title, "
+                "capture_metadata_json = excluded.capture_metadata_json, "
+                "analysis_json = excluded.analysis_json, "
+                "content_budget_json = excluded.content_budget_json, "
+                "source_note_version = excluded.source_note_version, "
+                "last_modified = excluded.last_modified, "
+                "deleted = excluded.deleted"
+            )
         params = (
+            *((self.client_id,) if postgres else ()),
             normalized_clip_id,
             normalized_note_id,
             normalized_clip_type,
@@ -9759,9 +19090,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
 
         def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
+            owner_clause = "client_id = ? AND " if postgres else ""
+            owner_params: tuple[Any, ...] = (self.client_id,) if postgres else ()
+            existing_mapping = inner_conn.execute(
+                f"SELECT note_id FROM note_clipper_documents WHERE {owner_clause}clip_id = ?",  # nosec B608
+                (*owner_params, normalized_clip_id),
+            ).fetchone()
+            if (
+                existing_mapping is not None
+                and str(existing_mapping["note_id"]) != normalized_note_id
+            ):
+                raise ConflictError(
+                    "Clip ID is already mapped to a different canonical note.",
+                    entity="note_clipper_documents",
+                    entity_id=normalized_clip_id,
+                )
             note_row = inner_conn.execute(
-                "SELECT id FROM notes WHERE id = ? AND deleted = ?",
+                f"SELECT id FROM notes WHERE {owner_clause}id = ? AND deleted = ?",  # nosec B608
                 (
+                    *owner_params,
                     normalized_note_id,
                     False if self.backend_type == BackendType.POSTGRESQL else 0,
                 ),
@@ -9777,7 +19124,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             document = self._fetch_note_clipper_document_row(
                 column="clip_id",
                 value=normalized_clip_id,
-                conn=inner_conn if isinstance(inner_conn, sqlite3.Connection) else None,
+                conn=inner_conn,
             )
             if document is None:
                 raise CharactersRAGDBError(
@@ -9802,43 +19149,47 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     ) -> dict[str, Any]:
         normalized_clip_id = str(clip_id).strip()
         normalized_workspace_id = str(workspace_id).strip()
-        normalized_source_note_id = str(source_note_id).strip() if source_note_id is not None else normalized_clip_id
         if not normalized_clip_id or not normalized_workspace_id:
             raise InputError("clip_id and workspace_id are required.")  # noqa: TRY003
-        if normalized_source_note_id != normalized_clip_id:
-            raise InputError("source_note_id must match clip_id for the canonical clip placement.")  # noqa: TRY003
         if source_note_version is not None and (not isinstance(source_note_version, int) or source_note_version < 1):
             raise InputError("source_note_version must be an integer >= 1 when provided.")  # noqa: TRY003
 
         now = self._get_current_utc_timestamp_iso()
         deleted_value = False if self.backend_type == BackendType.POSTGRESQL else 0
-        query = (
-            "INSERT INTO note_clipper_workspace_placements ("
-            "clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version, "
-            "created_at, last_modified, deleted"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(clip_id, workspace_id) DO UPDATE SET "
-            "workspace_note_id = excluded.workspace_note_id, "
-            "source_note_id = excluded.source_note_id, "
-            "source_note_version = excluded.source_note_version, "
-            "last_modified = excluded.last_modified, "
-            "deleted = excluded.deleted"
-        )
-        params = (
-            normalized_clip_id,
-            normalized_workspace_id,
-            workspace_note_id,
-            normalized_source_note_id,
-            source_note_version,
-            now,
-            now,
-            deleted_value,
-        )
-
+        postgres = self.backend_type == BackendType.POSTGRESQL
+        if postgres:
+            query = (
+                "INSERT INTO note_clipper_workspace_placements ("
+                "client_id, clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version, "
+                "created_at, last_modified, deleted"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(client_id, clip_id, workspace_id) DO UPDATE SET "
+                "workspace_note_id = excluded.workspace_note_id, "
+                "source_note_id = excluded.source_note_id, "
+                "source_note_version = excluded.source_note_version, "
+                "last_modified = excluded.last_modified, "
+                "deleted = excluded.deleted"
+            )
+        else:
+            query = (
+                "INSERT INTO note_clipper_workspace_placements ("
+                "clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version, "
+                "created_at, last_modified, deleted"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(clip_id, workspace_id) DO UPDATE SET "
+                "workspace_note_id = excluded.workspace_note_id, "
+                "source_note_id = excluded.source_note_id, "
+                "source_note_version = excluded.source_note_version, "
+                "last_modified = excluded.last_modified, "
+                "deleted = excluded.deleted"
+            )
         def _execute(inner_conn: sqlite3.Connection | BackendConnectionWrapper) -> dict[str, Any]:
+            owner_clause = "client_id = ? AND " if postgres else ""
+            owner_params: tuple[Any, ...] = (self.client_id,) if postgres else ()
             workspace_row = inner_conn.execute(
-                "SELECT id FROM workspaces WHERE id = ? AND deleted = ?",
+                f"SELECT id FROM workspaces WHERE {owner_clause}id = ? AND deleted = ?",  # nosec B608
                 (
+                    *owner_params,
                     normalized_workspace_id,
                     False if self.backend_type == BackendType.POSTGRESQL else 0,
                 ),
@@ -9850,8 +19201,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     entity_id=normalized_workspace_id,
                 )
             clip_row = inner_conn.execute(
-                "SELECT clip_id FROM note_clipper_documents WHERE clip_id = ? AND deleted = ?",
+                f"SELECT clip_id, note_id FROM note_clipper_documents "  # nosec B608
+                f"WHERE {owner_clause}clip_id = ? AND deleted = ?",
                 (
+                    *owner_params,
                     normalized_clip_id,
                     False if self.backend_type == BackendType.POSTGRESQL else 0,
                 ),
@@ -9862,12 +19215,35 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     entity="note_clipper_documents",
                     entity_id=normalized_clip_id,
                 )
+            canonical_note_id = str(clip_row["note_id"])
+            normalized_source_note_id = (
+                str(source_note_id).strip()
+                if source_note_id is not None
+                else canonical_note_id
+            )
+            if normalized_source_note_id != canonical_note_id:
+                raise InputError(
+                    "source_note_id must match the clip document note_id."
+                )  # noqa: TRY003
+            params = (
+                *owner_params,
+                normalized_clip_id,
+                normalized_workspace_id,
+                workspace_note_id,
+                normalized_source_note_id,
+                source_note_version,
+                now,
+                now,
+                deleted_value,
+            )
             prepared_query, prepared_params = self._prepare_backend_statement(query, params)
             inner_conn.execute(prepared_query, prepared_params or ())
             result = inner_conn.execute(
                 "SELECT clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version "
-                "FROM note_clipper_workspace_placements WHERE clip_id = ? AND workspace_id = ? AND deleted = ?",
+                f"FROM note_clipper_workspace_placements WHERE {owner_clause}clip_id = ? "  # nosec B608
+                "AND workspace_id = ? AND deleted = ?",
                 (
+                    *owner_params,
                     normalized_clip_id,
                     normalized_workspace_id,
                     False if self.backend_type == BackendType.POSTGRESQL else 0,
@@ -10296,6 +19672,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed ensuring SQLite source review schema: {exc}") from exc  # noqa: TRY003
 
+    def _ensure_chat_macros_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Ensure chat macro storage tables and indexes exist for SQLite."""
+        try:
+            conn.executescript(self._CHAT_MACROS_SCHEMA_SQL)
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring SQLite chat macro schema: {exc}") from exc  # noqa: TRY003
+
     def _ensure_source_review_schema_postgres(self, conn: Any) -> None:
         """Ensure source review storage, indexes, and sync triggers exist for PostgreSQL."""
         statements = [
@@ -10492,6 +19875,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self.backend.execute(statement, connection=conn)
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             raise SchemaError(f"Failed ensuring PostgreSQL source review schema: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_chat_macros_schema_postgres(self, conn: Any) -> None:
+        """Ensure chat macro storage tables and indexes exist for PostgreSQL."""
+        try:
+            for statement in self._convert_sqlite_schema_to_postgres_statements(self._CHAT_MACROS_SCHEMA_SQL):
+                self.backend.execute(statement, connection=conn)
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            raise SchemaError(f"Failed ensuring PostgreSQL chat macro schema: {exc}") from exc  # noqa: TRY003
 
     def _ensure_workspace_assistant_defaults_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Ensure Workspace Assistant Defaults storage exists for SQLite."""
@@ -11056,8 +20447,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             else:
                 with self._sqlite_schema_init_lock_for_path(self.db_path_str):
                     self._initialize_schema_sqlite()
+            return
         elif self.backend_type == BackendType.POSTGRESQL:
             self._initialize_schema_postgres()
+            return
         else:
             raise NotImplementedError(
                 f"Schema initialization not implemented for backend {self.backend_type}"
@@ -11068,13 +20461,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     @classmethod
     def _sqlite_schema_init_lock_for_path(cls, db_path_str: str) -> threading.RLock:
-        """Return the process-local schema initialization lock for one SQLite DB path."""
-        with cls._SQLITE_SCHEMA_INIT_LOCKS_GUARD:
-            lock = cls._SQLITE_SCHEMA_INIT_LOCKS.get(db_path_str)
-            if lock is None:
-                lock = threading.RLock()
-                cls._SQLITE_SCHEMA_INIT_LOCKS[db_path_str] = lock
-            return lock
+        """Return a stable bounded stripe for one SQLite DB path."""
+        digest = hashlib.blake2b(str(db_path_str).encode("utf-8"), digest_size=8).digest()
+        stripe = int.from_bytes(digest, "big") % len(cls._SQLITE_SCHEMA_INIT_LOCKS)
+        return cls._SQLITE_SCHEMA_INIT_LOCKS[stripe]
 
     def ensure_character_tables_ready(self) -> None:
         """
@@ -11090,7 +20480,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._schema_lock = threading.RLock()
         with self._schema_lock:
             try:
-                self.execute_query("SELECT 1 FROM character_cards LIMIT 1")
+                self.execute_query("SELECT 1 FROM character_cards LIMIT 1", read_only=True)
                 return  # noqa: TRY300
             except CharactersRAGDBError as exc:
                 msg = str(exc).lower()
@@ -11116,7 +20506,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
             # Verify that the table now exists; if not, escalate as SchemaError.
             try:
-                self.execute_query("SELECT 1 FROM character_cards LIMIT 1")
+                self.execute_query("SELECT 1 FROM character_cards LIMIT 1", read_only=True)
             except CharactersRAGDBError as exc:
                 logger.error(
                     'Failed to verify character_cards table after schema re-initialization for {}: {}',
@@ -11197,32 +20587,78 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (self._SCHEMA_NAME,),
         )
 
-    def _initialize_schema_sqlite(self):
+    def _initialize_schema_sqlite(self) -> None:
+        """Finish legacy initialization before transactionally applying post-v67 migrations.
+
+        Legacy schema helpers include scripts that implicitly commit. Run every
+        compatibility helper and catalog check before the final transaction,
+        including the shared conversation-table helpers used by PostgreSQL.
         """
-        Initializes or migrates the database schema to `_CURRENT_SCHEMA_VERSION`.
+        conn = self.get_connection()
+        target_version = self._CURRENT_SCHEMA_VERSION
+        current_db_version = self._get_db_version(conn)
+        if target_version > 67 and current_db_version == target_version:
+            with TransactionContextManager(self):
+                missing_core_tables = self._missing_current_schema_core_tables_sqlite(conn)
+                if missing_core_tables:
+                    self._reset_empty_partial_current_schema_marker_sqlite(conn, missing_core_tables)
+                    current_db_version = 0
+        legacy_target = target_version
+        if target_version > 67 and current_db_version < target_version:
+            legacy_target = max(67, current_db_version)
+        self._initialize_schema_sqlite_legacy(target_version=legacy_target)
+        self._ensure_message_metadata_table()
+        self._ensure_persona_live_voice_session_summaries_table()
+        self._ensure_conversation_settings_table()
+        if legacy_target == target_version:
+            return
+        with TransactionContextManager(self):
+            current_db_version = self._get_db_version(conn)
+            # Earlier H1/H2 branches used Persona's version numbers for history.
+            # Repair their marker only when the actual catalog proves that lineage.
+            if (
+                current_db_version in (68, 69, 70)
+                and self.backend.table_exists("conversation_history_projections", connection=conn)
+                and "assistant_defaults_explicit_none" not in {
+                    column[1] for column in conn.execute("PRAGMA table_info(workspaces)")
+                }
+            ):
+                current_db_version = (
+                    68 if "merged_into_sync_id" in {
+                        column[1] for column in conn.execute("PRAGMA table_info(keywords)")
+                    } else 67
+                )
+                conn.execute(
+                    "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
+                    (current_db_version, self._SCHEMA_NAME),
+                )
+            while current_db_version < target_version:
+                current_db_version = self._run_sqlite_linear_migration_step(
+                    conn,
+                    from_version=current_db_version,
+                    target_version=target_version,
+                    initial_version=legacy_target,
+                )
+            if current_db_version != target_version:
+                raise SchemaError("SQLite schema changed during initialization.")  # noqa: TRY003
+        logger.info("Database schema '{}' migrated to version {}.", self._SCHEMA_NAME, target_version)
 
-        Checks the existing schema version.
-        - If 0 (new DB): Applies the full current schema (`_apply_schema_v4`).
-        - If current: Logs that schema is up to date.
-        - If older: Raises SchemaError (migration paths not yet implemented beyond initial creation).
-        - If newer: Raises SchemaError (database is newer than code supports).
+    def _initialize_schema_sqlite_legacy(self, *, target_version: int) -> None:
+        """Initialize, migrate, and validate historical SQLite storage at a pinned version.
 
-        This method is called during `CharactersRAGDB` instantiation.
-        Operations are performed within a transaction.
-
-        Raises:
-            SchemaError: If the database schema version is newer than supported by the code,
-                         if a migration path is undefined for an older schema version,
-                         or if any step in schema application/migration fails.
-            CharactersRAGDBError: For unexpected errors during schema initialization.
+        Retain legacy repair behavior and reject newer/inconsistent schemas.
+        Script-based compatibility helpers can commit, so callers must complete
+        this phase before beginning later migrations that require atomicity.
         """
         conn = self.get_connection()
         current_initial_version = 0
         try:
             with TransactionContextManager(self): # Ensures atomicity for schema changes
                 current_db_version = self._get_db_version(conn)
+                # A compatible initializer may have completed after the preliminary probe.
+                if target_version < current_db_version <= self._CURRENT_SCHEMA_VERSION:
+                    target_version = current_db_version
                 current_initial_version = current_db_version # Store initial for messages
-                target_version = self._CURRENT_SCHEMA_VERSION
                 logger.info(
                     f"Checking DB schema '{self._SCHEMA_NAME}'. Current version: {current_db_version}. Code supports: {target_version}")
 
@@ -11233,6 +20669,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         current_db_version = 0
                         current_initial_version = 0
                     else:
+                        if target_version >= 63:
+                            self._verify_notes_moodboard_studio_schema_sqlite(conn)
+                        if target_version >= 64:
+                            self._ensure_note_graph_suggestion_schema_sqlite(conn)
+                        elif target_version >= 60:
+                            self._verify_note_task_schema_sqlite(conn)
                         logger.debug(f"Database schema '{self._SCHEMA_NAME}' is up to date (Version {target_version}).")
                         # Ensure helpful indexes that may have been introduced post-creation
                         try:
@@ -11294,6 +20736,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
                         self._ensure_manuscript_annotations_schema_sqlite(conn)
                         self._ensure_source_review_schema_sqlite(conn)
+                        self._ensure_chat_macros_schema_sqlite(conn)
                         self._ensure_workspace_source_saved_view_schema_sqlite(conn)
                         # Seed/heal character_cards_fts before request traffic. Schema V4
                         # inserts "Default Assistant" before FTS triggers are created.
@@ -11460,6 +20903,60 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         current_db_version = self._get_db_version(conn)
                     if target_version >= 54 and current_db_version == 53:
                         self._migrate_from_v53_to_v54(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 55 and current_db_version == 54:
+                        self._migrate_from_v54_to_v55(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 56 and current_db_version == 55:
+                        self._migrate_from_v55_to_v56(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 57 and current_db_version == 56:
+                        self._migrate_from_v56_to_v57(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 58 and current_db_version == 57:
+                        self._migrate_from_v57_to_v58(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 59 and current_db_version == 58:
+                        self._migrate_from_v58_to_v59(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 60 and current_db_version == 59:
+                        self._migrate_from_v59_to_v60_sqlite(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 61 and current_db_version == 60:
+                        self._migrate_from_v60_to_v61_sqlite(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 62 and current_db_version == 61:
+                        self._migrate_from_v61_to_v62_sqlite(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 63 and current_db_version == 62:
+                        self._migrate_from_v62_to_v63_sqlite(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 64 and current_db_version == 63:
+                        self._migrate_from_v63_to_v64_sqlite(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 65 and current_db_version == 64:
+                        self._migrate_from_v64_to_v65(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 66 and current_db_version == 65:
+                        self._migrate_from_v65_to_v66(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 67 and current_db_version == 66:
+                        self._migrate_from_v66_to_v67(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 68 and current_db_version == 67:
+                        self._migrate_from_v67_to_v68(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 69 and current_db_version == 68:
+                        self._migrate_from_v68_to_v69(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 70 and current_db_version == 69:
+                        self._migrate_from_v69_to_v70(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 71 and current_db_version == 70:
+                        self._migrate_from_v70_to_v71(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 72 and current_db_version == 71:
+                        self._migrate_from_v71_to_v72(conn)
                         current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
@@ -11872,23 +21369,85 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 54 and current_db_version == 53:
                     self._migrate_from_v53_to_v54(conn)
                     current_db_version = self._get_db_version(conn)
+                if target_version >= 55 and current_db_version == 54:
+                    self._migrate_from_v54_to_v55(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 56 and current_db_version == 55:
+                    self._migrate_from_v55_to_v56(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 57 and current_db_version == 56:
+                    self._migrate_from_v56_to_v57(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 58 and current_db_version == 57:
+                    self._migrate_from_v57_to_v58(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 59 and current_db_version == 58:
+                    self._migrate_from_v58_to_v59(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 60 and current_db_version == 59:
+                    self._migrate_from_v59_to_v60_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 61 and current_db_version == 60:
+                    self._migrate_from_v60_to_v61_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 62 and current_db_version == 61:
+                    self._migrate_from_v61_to_v62_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 63 and current_db_version == 62:
+                    self._migrate_from_v62_to_v63_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 64 and current_db_version == 63:
+                    self._migrate_from_v63_to_v64_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 65 and current_db_version == 64:
+                    self._migrate_from_v64_to_v65(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 66 and current_db_version == 65:
+                    self._migrate_from_v65_to_v66(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 67 and current_db_version == 66:
+                    self._migrate_from_v66_to_v67(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 68 and current_db_version == 67:
+                    self._migrate_from_v67_to_v68(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 69 and current_db_version == 68:
+                    self._migrate_from_v68_to_v69(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 70 and current_db_version == 69:
+                    self._migrate_from_v69_to_v70(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 71 and current_db_version == 70:
+                    self._migrate_from_v70_to_v71(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 72 and current_db_version == 71:
+                    self._migrate_from_v71_to_v72(conn)
+                    current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
                 self._ensure_note_folder_schema_sqlite(conn)
                 self._ensure_note_studio_schema_sqlite(conn)
+                self._ensure_note_graph_suggestion_schema_sqlite(conn)
                 self._ensure_web_clipper_schema_sqlite(conn)
                 self._ensure_prompt_presets_schema_sqlite(conn)
                 self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
                 self._ensure_workspace_activity_events_schema_sqlite(conn)
                 self._ensure_manuscript_annotations_schema_sqlite(conn)
                 self._ensure_source_review_schema_sqlite(conn)
+                self._ensure_chat_macros_schema_sqlite(conn)
                 self._ensure_workspace_source_saved_view_schema_sqlite(conn)
 
                 final_version_check = self._get_db_version(conn)
                 if final_version_check != target_version:
                     raise SchemaError(  # noqa: TRY003, TRY301
                         f"Schema migration process completed, but final DB version is {final_version_check}, expected {target_version}. Manual check required.")
+                if final_version_check >= 63:
+                    self._verify_notes_moodboard_studio_schema_sqlite(conn)
+                if final_version_check >= 64:
+                    self._ensure_note_graph_suggestion_schema_sqlite(conn)
+                elif final_version_check >= 60:
+                    self._verify_note_task_schema_sqlite(conn)
                 # Verify core FTS tables after migrations complete
                 self._verify_required_fts_tables_sqlite(conn)
                 self._ensure_workspace_subresource_schema_sqlite(conn)
@@ -12141,6 +21700,51 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error("Failed rebuilding conversations_fts: {}", exc)
             raise SchemaError(f"Failed rebuilding conversations_fts: {exc}") from exc  # noqa: TRY003
 
+    @staticmethod
+    def _notes_fts_sqlite_contract() -> tuple[str, tuple[str, ...]]:
+        """Return the exact SQLite Notes FTS table and trigger definitions."""
+
+        return (
+            """
+            CREATE VIRTUAL TABLE notes_fts
+            USING fts5(
+              title,content,
+              content='notes',
+              content_rowid='rowid'
+            )
+            """,
+            (
+                """
+                CREATE TRIGGER notes_ai
+                AFTER INSERT ON notes BEGIN
+                  INSERT INTO notes_fts(rowid,title,content)
+                  SELECT new.rowid,new.title,new.content
+                  WHERE new.deleted = 0;
+                END
+                """,
+                """
+                CREATE TRIGGER notes_au
+                AFTER UPDATE ON notes BEGIN
+                  INSERT INTO notes_fts(notes_fts,rowid,title,content)
+                  SELECT 'delete',old.rowid,old.title,old.content
+                  WHERE old.deleted = 0;
+
+                  INSERT INTO notes_fts(rowid,title,content)
+                  SELECT new.rowid,new.title,new.content
+                  WHERE new.deleted = 0;
+                END
+                """,
+                """
+                CREATE TRIGGER notes_ad
+                AFTER DELETE ON notes BEGIN
+                  INSERT INTO notes_fts(notes_fts,rowid,title,content)
+                  SELECT 'delete',old.rowid,old.title,old.content
+                  WHERE old.deleted = 0;
+                END
+                """,
+            ),
+        )
+
     def _ensure_notes_fts_triggers_sqlite(self, conn: sqlite3.Connection) -> None:
         """Normalize notes FTS triggers to avoid invalid delete operations.
 
@@ -12152,37 +21756,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """
 
         try:
+            _, trigger_definitions = self._notes_fts_sqlite_contract()
             conn.executescript(
-                """
+                """\
                 DROP TRIGGER IF EXISTS notes_ai;
                 DROP TRIGGER IF EXISTS notes_au;
                 DROP TRIGGER IF EXISTS notes_ad;
-
-                CREATE TRIGGER notes_ai
-                AFTER INSERT ON notes BEGIN
-                  INSERT INTO notes_fts(rowid,title,content)
-                  SELECT new.rowid,new.title,new.content
-                  WHERE new.deleted = 0;
-                END;
-
-                CREATE TRIGGER notes_au
-                AFTER UPDATE ON notes BEGIN
-                  INSERT INTO notes_fts(notes_fts,rowid,title,content)
-                  SELECT 'delete',old.rowid,old.title,old.content
-                  WHERE old.deleted = 0;
-
-                  INSERT INTO notes_fts(rowid,title,content)
-                  SELECT new.rowid,new.title,new.content
-                  WHERE new.deleted = 0;
-                END;
-
-                CREATE TRIGGER notes_ad
-                AFTER DELETE ON notes BEGIN
-                  INSERT INTO notes_fts(notes_fts,rowid,title,content)
-                  SELECT 'delete',old.rowid,old.title,old.content
-                  WHERE old.deleted = 0;
-                END;
                 """
+                + ";\n".join(trigger_definitions)
+                + ";"
             )
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed ensuring notes FTS triggers: {exc}") from exc  # noqa: TRY003
@@ -14122,14 +23704,26 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
             raise SchemaError(f"Failed ensuring PostgreSQL study pack schema: {exc}") from exc  # noqa: TRY003
 
+        self._ensure_study_pack_sync_triggers_postgres(conn)
+
+    def _ensure_study_pack_sync_triggers_postgres(self, conn: Any) -> None:
+        """Install Study Pack and Suggestions triggers for either shared sync schema."""
         try:
+            sync_columns = {column.get("name") for column in self.backend.get_table_info("sync_log", connection=conn)}
+            if "entity_id" in sync_columns:
+                sync_entity_column = "entity_id"
+            elif "entity_uuid" in sync_columns:
+                sync_entity_column = "entity_uuid"
+            else:
+                raise SchemaError("Study pack sync log has no supported entity identifier column")  # noqa: TRY003
+
             self.backend.execute(
-                """
+                f"""
                 CREATE OR REPLACE FUNCTION study_packs_sync_log_fn()
                 RETURNS trigger AS $$
                 BEGIN
                   IF TG_OP = 'INSERT' THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'study_packs',
                       CAST(NEW.id AS TEXT),
@@ -14154,7 +23748,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                       )::text
                     );
                   ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'study_packs',
                       CAST(NEW.id AS TEXT),
@@ -14182,7 +23776,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
                     OLD.version IS DISTINCT FROM NEW.version
                   ) THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'study_packs',
                       CAST(NEW.id AS TEXT),
@@ -14210,16 +23804,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   RETURN NEW;
                 END;
                 $$ LANGUAGE plpgsql
-                """,
+                """,  # nosec B608 -- Identifier is selected from the fixed entity_id/entity_uuid names above.
                 connection=conn,
             )
             self.backend.execute(
-                """
+                f"""
                 CREATE OR REPLACE FUNCTION study_pack_cards_sync_log_fn()
                 RETURNS trigger AS $$
                 BEGIN
                   IF TG_OP = 'INSERT' THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'study_pack_cards',
                       CAST(NEW.id AS TEXT),
@@ -14239,7 +23833,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                       )::text
                     );
                   ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'study_pack_cards',
                       CAST(NEW.id AS TEXT),
@@ -14262,7 +23856,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
                     OLD.version IS DISTINCT FROM NEW.version
                   ) THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'study_pack_cards',
                       CAST(NEW.id AS TEXT),
@@ -14285,16 +23879,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   RETURN NEW;
                 END;
                 $$ LANGUAGE plpgsql
-                """,
+                """,  # nosec B608 -- Identifier is selected from the fixed entity_id/entity_uuid names above.
                 connection=conn,
             )
             self.backend.execute(
-                """
+                f"""
                 CREATE OR REPLACE FUNCTION flashcard_citations_sync_log_fn()
                 RETURNS trigger AS $$
                 BEGIN
                   IF TG_OP = 'INSERT' THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'flashcard_citations',
                       CAST(NEW.id AS TEXT),
@@ -14318,7 +23912,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                       )::text
                     );
                   ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'flashcard_citations',
                       CAST(NEW.id AS TEXT),
@@ -14345,7 +23939,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
                     OLD.version IS DISTINCT FROM NEW.version
                   ) THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'flashcard_citations',
                       CAST(NEW.id AS TEXT),
@@ -14372,16 +23966,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   RETURN NEW;
                 END;
                 $$ LANGUAGE plpgsql
-                """,
+                """,  # nosec B608 -- Identifier is selected from the fixed entity_id/entity_uuid names above.
                 connection=conn,
             )
             self.backend.execute(
-                """
+                f"""
                 CREATE OR REPLACE FUNCTION suggestion_snapshots_sync_log_fn()
                 RETURNS trigger AS $$
                 BEGIN
                   IF TG_OP = 'INSERT' THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_snapshots',
                       CAST(NEW.id AS TEXT),
@@ -14408,7 +24002,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                       )::text
                     );
                   ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_snapshots',
                       CAST(NEW.id AS TEXT),
@@ -14438,7 +24032,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
                     OLD.version IS DISTINCT FROM NEW.version
                   ) THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_snapshots',
                       CAST(NEW.id AS TEXT),
@@ -14468,16 +24062,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   RETURN NEW;
                 END;
                 $$ LANGUAGE plpgsql
-                """,
+                """,  # nosec B608 -- Identifier is selected from the fixed entity_id/entity_uuid names above.
                 connection=conn,
             )
             self.backend.execute(
-                """
+                f"""
                 CREATE OR REPLACE FUNCTION suggestion_generation_links_sync_log_fn()
                 RETURNS trigger AS $$
                 BEGIN
                   IF TG_OP = 'INSERT' THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_generation_links',
                       CAST(NEW.id AS TEXT),
@@ -14500,7 +24094,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                       )::text
                     );
                   ELSIF OLD.deleted = FALSE AND NEW.deleted = TRUE THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_generation_links',
                       CAST(NEW.id AS TEXT),
@@ -14526,7 +24120,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     OLD.last_modified IS DISTINCT FROM NEW.last_modified OR
                     OLD.version IS DISTINCT FROM NEW.version
                   ) THEN
-                    INSERT INTO sync_log(entity, entity_id, operation, timestamp, client_id, version, payload)
+                    INSERT INTO sync_log(entity, {sync_entity_column}, operation, timestamp, client_id, version, payload)
                     VALUES(
                       'suggestion_generation_links',
                       CAST(NEW.id AS TEXT),
@@ -14552,7 +24146,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   RETURN NEW;
                 END;
                 $$ LANGUAGE plpgsql
-                """,
+                """,  # nosec B608 -- Identifier is selected from the fixed entity_id/entity_uuid names above.
                 connection=conn,
             )
             self.backend.execute("DROP TRIGGER IF EXISTS study_packs_sync_log ON study_packs", connection=conn)
@@ -15599,20 +25193,119 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error("Failed rebuilding character_cards_fts: {}", exc)
             raise SchemaError(f"Failed rebuilding character_cards_fts: {exc}") from exc  # noqa: TRY003
 
+    def _postgres_schema_is_current(self, conn: Any) -> bool:
+        """Verify the current completed schema without replaying migration writes.
+
+        This is a database check on every open, including a worker's first open;
+        no process-local readiness cache can hide a changed schema. Catalog-only
+        verifiers allow ordinary DML while retaining locks against RLS changes.
+        """
+        if not self.backend.table_exists('db_schema_version', connection=conn):
+            return False
+        current_version = self._get_schema_version_postgres(conn)
+        if current_version > self._POSTGRES_SCHEMA_VERSION:
+            raise SchemaError(  # noqa: TRY003
+                f"Database schema version ({current_version}) is newer than supported by code "
+                f"({self._POSTGRES_SCHEMA_VERSION})."
+            )
+        if current_version < 71 or current_version != self._POSTGRES_SCHEMA_VERSION:
+            return False
+        self._verify_note_attachment_schema_postgres(conn, runtime=True)
+        self._verify_note_task_schema_postgres(conn, runtime=True)
+        self._verify_notes_moodboard_studio_schema_postgres(conn)
+        for fts_table, source_table, _ in self._FTS_CONFIG:
+            self.backend.register_fts_table(fts_table, self._map_table_for_backend(source_table))
+        self._runtime_schema_version = current_version
+        return True
+
     def _initialize_schema_postgres(self):
         """Bootstrap or migrate the ChaCha schema on PostgreSQL."""
+        from tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap import postgres_schema_migration
 
         backend = self.backend
-        target_version = self._CURRENT_SCHEMA_VERSION
+        target_version = self._POSTGRES_SCHEMA_VERSION
 
         with backend.transaction() as conn:
+            self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
+            if self._postgres_schema_is_current(conn):
+                if target_version >= 74:
+                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend))
+                return
+
+        with postgres_schema_migration(backend, self._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT) as conn:
+            self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
+            if self._postgres_schema_is_current(conn):
+                if target_version >= 74:
+                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend))
+                return
             schema_exists = backend.table_exists('db_schema_version', connection=conn)
 
             if not schema_exists:
                 self._apply_schema_v4_postgres(conn)
-                current_version = 4
-            else:
-                current_version = self._get_schema_version_postgres(conn)
+            current_version = self._get_schema_version_postgres(conn, lock=True)
+
+            if current_version > target_version:
+                raise SchemaError(  # noqa: TRY003
+                    f"Database schema version ({current_version}) is newer than supported by code ({target_version})."
+                )
+            # H1 previously published v68 for history projections, while dev
+            # published v68 for owner-scoped character names. Inspect the actual
+            # catalog under the migration lock before replaying the missing step.
+            if current_version == 68 and backend.table_exists("conversation_history_projections", connection=conn):
+                legacy_character_names = backend.execute(
+                    "SELECT EXISTS (SELECT 1 FROM pg_constraint c "
+                    "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1] "
+                    "WHERE c.conrelid = 'character_cards'::regclass AND c.contype = 'u' "
+                    "AND cardinality(c.conkey) = 1 AND a.attname = 'name')",
+                    connection=conn,
+                ).scalar
+                if legacy_character_names:
+                    self._set_schema_version_postgres(conn, 67)
+                    current_version = 67
+
+            if (
+                current_version in (73, 74)
+                and backend.table_exists("conversation_history_projections", connection=conn)
+                and "assistant_defaults_explicit_none" not in {
+                    column["name"] for column in backend.get_table_info("workspaces", connection=conn)
+                }
+            ):
+                self._set_schema_version_postgres(conn, 72)
+                current_version = 72
+
+            if current_version in (71, 72, 73, 74, 75) and target_version >= 72:
+                # Completed dev schemas need only the new migrations, avoiding
+                # replay of the earlier schema reconciliation and its DDL.
+                if current_version == 71:
+                    self._ensure_study_pack_sync_triggers_postgres(conn)
+                    self._set_schema_version_postgres(conn, 72)
+                    current_version = 72
+                if target_version >= 73 and current_version < 73:
+                    self._migrate_from_v72_to_v73_postgres(conn)
+                    current_version = 73
+                if target_version >= 74 and current_version < 74:
+                    self._migrate_from_v73_to_v74_postgres(conn)
+                    current_version = 74
+                if target_version >= 75 and current_version < 75:
+                    self._migrate_from_v74_to_v75_postgres(conn)
+                    current_version = 75
+                if target_version >= 76 and current_version < 76:
+                    self._migrate_from_v75_to_v76_postgres(conn)
+                    current_version = 76
+                if target_version >= 74:
+                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend))
+                self._postgres_schema_is_current(conn)
+                return
+
+            if current_version == 59:
+                self._verify_note_attachment_schema_postgres(conn)
+            elif current_version >= 60:
+                self._verify_note_attachment_schema_postgres(conn)
+                self._verify_note_task_schema_postgres(conn)
+                if current_version >= 63:
+                    self._verify_notes_moodboard_studio_schema_postgres(conn)
+                if current_version >= 64:
+                    self._ensure_note_graph_suggestion_schema_postgres(conn)
 
             if current_version < 36:
                 self._ensure_postgres_workspaces_table_base(conn)
@@ -15789,6 +25482,66 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_workspace_source_saved_view_schema_postgres(conn)
                 self._set_schema_version_postgres(conn, 54)
                 current_version = 54
+            if current_version < 55:
+                if (
+                    backend.table_exists("keywords", connection=conn)
+                    and not backend.table_exists("chacha_keywords", connection=conn)
+                ):
+                    backend.execute(
+                        "ALTER TABLE keywords RENAME TO chacha_keywords",
+                        connection=conn,
+                    )
+                if not backend.table_exists("note_folders", connection=conn):
+                    self._ensure_note_folder_schema_postgres(conn)
+                self._migrate_from_v54_to_v55_postgres(conn)
+                current_version = 55
+            if current_version < 56:
+                self._migrate_from_v55_to_v56_postgres(conn)
+                current_version = 56
+            if current_version < 57:
+                self._migrate_from_v56_to_v57_postgres(conn)
+                current_version = 57
+            if current_version < 58:
+                self._migrate_from_v57_to_v58_postgres(conn)
+                current_version = 58
+            if current_version < 59:
+                self._migrate_from_v58_to_v59_postgres(conn)
+                current_version = 59
+            if current_version < 60:
+                self._migrate_from_v59_to_v60_postgres(conn)
+                current_version = 60
+            if current_version < 61:
+                self._migrate_from_v60_to_v61_postgres(conn)
+                current_version = 61
+            if current_version < 62:
+                self._migrate_from_v61_to_v62_postgres(conn)
+                current_version = 62
+            if current_version < 63:
+                self._ensure_note_studio_schema_postgres(conn)
+                self._migrate_from_v62_to_v63_postgres(conn)
+                current_version = 63
+            if current_version < 64:
+                self._migrate_from_v63_to_v64_postgres(conn)
+                current_version = 64
+            if target_version >= 65 and current_version < 65:
+                self._migrate_from_v64_to_v65_postgres(conn)
+                current_version = 65
+            if target_version >= 66 and current_version < 66:
+                self._migrate_from_v65_to_v66_postgres(conn)
+                current_version = 66
+            if target_version >= 67 and current_version < 67:
+                self._migrate_from_v66_to_v67_postgres(conn)
+                current_version = 67
+            if target_version >= 68 and current_version < 68:
+                self._migrate_from_v67_to_v68_postgres(conn)
+                current_version = 68
+            if target_version >= 69 and current_version < 69:
+                self._migrate_from_v68_to_v69_postgres(conn)
+                current_version = 69
+            if target_version >= 70 and current_version < 70:
+                self._migrate_from_v69_to_v70_postgres(conn)
+                current_version = 70
+            self._runtime_schema_version = current_version
 
             if current_version > target_version:
                 raise SchemaError(  # noqa: TRY003
@@ -15810,20 +25563,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_recent_voice_command_schema_postgres(conn)
             self._ensure_note_folder_schema_postgres(conn)
             self._ensure_note_studio_schema_postgres(conn)
+            self._ensure_note_graph_suggestion_schema_postgres(conn)
             self._ensure_web_clipper_schema_postgres(conn)
             self._ensure_prompt_presets_schema_postgres(conn)
             self._ensure_workspace_subresource_schema_postgres(conn)
             self._ensure_workspace_file_inventory_schema_postgres(conn)
             self._ensure_workspace_migration_schema_postgres(conn)
+            self._ensure_chat_macros_schema_postgres(conn)
             self._ensure_manuscript_phase2_sync_triggers_postgres(conn)
-
-            if current_version < target_version:
-                logger.warning(
-                    'ChaChaNotes PostgreSQL schema is at version {} but code expects {}. '
-                    'Some migrations may not yet be available for PostgreSQL.',
-                    current_version,
-                    target_version,
-                )
+            self._ensure_chacha_rls_postgres(conn)
 
             try:
                 # Namespace migration: if legacy 'keywords' exists, rename to 'chacha_keywords'
@@ -15944,6 +25692,51 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             except BackendDatabaseError as exc:
                 raise SchemaError(f"Failed to ensure PostgreSQL FTS structures: {exc}") from exc  # noqa: TRY003
 
+            self._ensure_message_metadata_table(connection=conn)
+            self._ensure_persona_live_voice_session_summaries_table(connection=conn)
+            self._ensure_conversation_settings_table(connection=conn)
+            if target_version >= 71 and current_version < 71:
+                # v71 makes the previously unversioned reconciliation above a
+                # one-time migration. Publish readiness only after all of it
+                # succeeds in this transaction, including the auxiliary tables.
+                self._set_schema_version_postgres(conn, 71)
+                self._runtime_schema_version = 71
+                current_version = 71
+
+            if target_version >= 72 and current_version < 72:
+                # Fresh/older schemas installed the updated triggers above.
+                self._set_schema_version_postgres(conn, 72)
+                self._runtime_schema_version = 72
+                current_version = 72
+
+            if target_version >= 73 and current_version < 73:
+                self._migrate_from_v72_to_v73_postgres(conn)
+                self._runtime_schema_version = 73
+                current_version = 73
+
+            if target_version >= 74 and current_version < 74:
+                self._migrate_from_v73_to_v74_postgres(conn)
+                self._runtime_schema_version = 74
+                current_version = 74
+
+            if target_version >= 75 and current_version < 75:
+                self._migrate_from_v74_to_v75_postgres(conn)
+                self._runtime_schema_version = 75
+                current_version = 75
+
+            if target_version >= 76 and current_version < 76:
+                self._migrate_from_v75_to_v76_postgres(conn)
+                self._runtime_schema_version = 76
+                current_version = 76
+
+            if current_version < target_version:
+                logger.warning(
+                    'ChaChaNotes PostgreSQL schema is at version {} but code expects {}. '
+                    'Some migrations may not yet be available for PostgreSQL.',
+                    current_version,
+                    target_version,
+                )
+
     def _ensure_postgres_fts(self, conn) -> None:
         """Ensure PostgreSQL full-text search structures exist for ChaCha entities."""
 
@@ -16029,7 +25822,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     # ----------------------
     # Message metadata (tool calls)
     # ----------------------
-    def _ensure_message_metadata_table(self) -> None:
+    def _ensure_message_metadata_table(self, *, connection: Any | None = None) -> None:
         """Ensure the message_metadata table exists for the active backend."""
         if self.backend_type == BackendType.SQLITE:
             self.execute_query(
@@ -16055,7 +25848,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   extra_json TEXT,
                   last_modified TIMESTAMP NOT NULL DEFAULT NOW()
                 )
-                """
+                """,
+                connection=connection,
             )
             return
 
@@ -16350,6 +26144,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 stmt,
                 flags=re.IGNORECASE,
             )
+        stmt = re.sub(
+            r"\bON\s+keywords\s*\(",
+            "ON chacha_keywords(",
+            stmt,
+            flags=re.IGNORECASE,
+        )
         # Adjust references to keywords in foreign keys/content declarations
         stmt = re.sub(
             r"REFERENCES\s+keywords\s*\(\s*id\s*\)",
@@ -16437,9 +26237,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except _CHACHA_NONCRITICAL_EXCEPTIONS as _e:
             logger.debug(f"Skipping ensure flashcards tsvector after migration to v{expected_version}: {_e}")
 
-    def _get_schema_version_postgres(self, conn) -> int:
+    def _get_schema_version_postgres(self, conn, *, lock: bool = False) -> int:
+        query = (
+            "SELECT version FROM db_schema_version WHERE schema_name = %s LIMIT 1 FOR UPDATE"
+            if lock
+            else "SELECT version FROM db_schema_version WHERE schema_name = %s LIMIT 1"
+        )
         result = self.backend.execute(
-            "SELECT version FROM db_schema_version WHERE schema_name = %s LIMIT 1",
+            query,
             (self._SCHEMA_NAME,),
             connection=conn,
         )
@@ -16560,149 +26365,70 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         metadata: dict[str, Any] | None = None,
         created_by: str,
     ) -> dict[str, Any]:
-        """Create a manual note edge, enforcing undirected canonicalization and uniqueness.
+        """Create one owner-bound manual link using the canonical lifecycle store."""
 
-        Returns the created edge row as a dict. Raises ConflictError on duplicates.
-        """
-        if not user_id or not from_note_id or not to_note_id or created_by is None or created_by == "":
-            raise InputError("user_id, from_note_id, to_note_id, and created_by are required")  # noqa: TRY003
-
-        # Prevent self-loops for manual edges (regardless of directed flag)
-        if from_note_id == to_note_id:
-            raise InputError("from_note_id and to_note_id must differ (self-loops are not allowed)")  # noqa: TRY003
-
-        # Canonicalize for undirected edges
-        src = from_note_id
-        dst = to_note_id
-        if not directed and src > dst:
-            src, dst = dst, src
-
-        edge_id = self._generate_uuid()
-        now_iso = self._get_current_utc_timestamp_iso()
-        type_str = "manual"
-        # Validate weight
-        import math  # at top-level import preferred; see helper snippet below
-        w = 1.0 if weight is None else float(weight)
-        if not math.isfinite(w) or w < 0:
-            raise InputError("weight must be a finite, non-negative number")  # noqa: TRY003
-
-        try:
-            with self.transaction() as conn:
-                # Ensure endpoints exist (avoid dangling edges)
-                if not conn.execute("SELECT 1 FROM notes WHERE id = ? AND deleted = 0", (src,)).fetchone():
-                    raise InputError("from_note_id not found or deleted")  # noqa: TRY003
-                if not conn.execute("SELECT 1 FROM notes WHERE id = ? AND deleted = 0", (dst,)).fetchone():
-                    raise InputError("to_note_id not found or deleted")  # noqa: TRY003
-                query = (
-                    "INSERT INTO note_edges(edge_id, user_id, from_note_id, to_note_id, type, directed, weight, created_at, created_by, metadata) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-                )
-                params = (
-                    edge_id,
-                    str(user_id),
-                    src,
-                    dst,
-                    type_str,
-                    1 if directed else 0,
-                    w,
-                    now_iso,
-                    created_by,
-                    json.dumps(metadata) if metadata is not None else None,
-                )
-                conn.execute(query, params)
-
-                # Log sync event
-                payload = {
-                    "edge_id": edge_id,
-                    "user_id": str(user_id),
-                    "from_note_id": src,
-                    "to_note_id": dst,
-                    "type": type_str,
-                    "directed": bool(directed),
-                    "weight": float(weight) if weight is not None else 1.0,
-                    "created_at": now_iso,
-                    "created_by": created_by,
-                }
-                entity_col = 'entity_id'
-                if self.backend_type == BackendType.POSTGRESQL:
-                    try:
-                        cols = {c.get('name') for c in self.backend.get_table_info('sync_log', connection=conn)}
-                        if 'entity_uuid' in cols and 'entity_id' not in cols:
-                            entity_col = 'entity_uuid'
-                    except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-                        logger.debug("sync_log column introspection failed on {}: {}", self.backend_type.value, e)
-                if entity_col not in ("entity_id", "entity_uuid"):
-                    raise CharactersRAGDBError(  # noqa: TRY003
-                        f"Unexpected sync_log id column: {entity_col}"
-                    )
-                conn.execute(
-                    f"INSERT INTO sync_log (entity, {entity_col}, operation, timestamp, client_id, version, payload) VALUES (?, ?, ?, ?, ?, ?, ?)",  # nosec B608
-                    ("note_edges", edge_id, "create", now_iso, self.client_id, 1, json.dumps(payload)),
-                )
-
-                # Fetch inserted row
-                cur = conn.execute(
-                    "SELECT edge_id, user_id, from_note_id, to_note_id, type, directed, weight, created_at, created_by, metadata FROM note_edges WHERE edge_id = ?",
-                    (edge_id,),
-                )
-                row = cur.fetchone()
-                if not row:
-                    raise CharactersRAGDBError("Inserted edge not found")  # noqa: TRY003
-                # Normalize metadata JSON
-                out = dict(row)
-                try:
-                    if out.get("metadata") is not None and isinstance(out.get("metadata"), str):
-                        out["metadata"] = json.loads(out["metadata"])  # type: ignore[arg-type]
-                except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                    pass
-                out["directed"] = bool(out.get("directed", 0))
-                return out
-        except sqlite3.IntegrityError as e:
-            msg = str(e).lower()
-            if "unique" in msg or "constraint" in msg:
-                raise ConflictError("Duplicate manual link for this user and endpoints") from e  # noqa: TRY003
-            raise CharactersRAGDBError(f"Failed to create manual note edge: {e}") from e  # noqa: TRY003
-        except BackendDatabaseError as e:
-            # Try to detect unique/duplicate
-            msg = str(e).lower()
-            if "duplicate key" in msg or "unique constraint" in msg:
-                raise ConflictError("Duplicate manual link for this user and endpoints") from e  # noqa: TRY003
-            raise CharactersRAGDBError(f"Backend error creating manual note edge: {e}") from e  # noqa: TRY003
+        if str(user_id) != str(self.client_id):
+            raise InputError("Manual links must use the authenticated owner")
+        source_note_id, target_note_id = from_note_id, to_note_id
+        if not directed and source_note_id > target_note_id:
+            source_note_id, target_note_id = target_note_id, source_note_id
+        properties = dict(metadata or {})
+        label = properties.pop("label", None)
+        if label is not None and not isinstance(label, str):
+            raise InputError("Manual link metadata.label must be a string or null")
+        timestamp = datetime.fromisoformat(
+            self._get_current_utc_timestamp_iso().replace("Z", "+00:00")
+        ).astimezone(timezone.utc).isoformat()
+        result = self.notes_link_store.upsert(
+            edge_id=self._generate_uuid(),
+            payload={
+                "source_note_id": source_note_id,
+                "target_note_id": target_note_id,
+                "type": "manual",
+                "directed": bool(directed),
+                "weight": 1.0 if weight is None else weight,
+                "label": label,
+                "properties": properties,
+                "created_at": timestamp,
+                "last_modified": timestamp,
+                "created_by": created_by,
+            },
+            expected_version=None,
+        )
+        return self.notes_link_store.legacy_dict(result.link)
 
     def delete_manual_note_edge(self, *, user_id: str, edge_id: str) -> bool:
-        """Delete a manual note edge by id for the given user. Returns True if deleted."""
-        if not user_id or not edge_id:
-            raise InputError("user_id and edge_id are required")  # noqa: TRY003
-        now_iso = self._get_current_utc_timestamp_iso()
-        try:
-            with self.transaction() as conn:
-                cur = conn.execute(
-                    "DELETE FROM note_edges WHERE edge_id = ? AND user_id = ?",
-                    (edge_id, str(user_id)),
-                )
-                deleted = cur.rowcount > 0
-                if deleted:
-                    entity_col = 'entity_id'
-                    if self.backend_type == BackendType.POSTGRESQL:
-                        try:
-                            cols = {c.get('name') for c in self.backend.get_table_info('sync_log', connection=conn)}
-                            if 'entity_uuid' in cols and 'entity_id' not in cols:
-                                entity_col = 'entity_uuid'
-                        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-                            logger.debug("sync_log column introspection failed on {}: {}", self.backend_type.value, e)
-                    if entity_col not in ("entity_id", "entity_uuid"):
-                        raise CharactersRAGDBError(  # noqa: TRY003
-                            f"Unexpected sync_log id column: {entity_col}"
-                        )
-                    conn.execute(
-                        f"INSERT INTO sync_log (entity, {entity_col}, operation, timestamp, client_id, version, payload) VALUES (?, ?, ?, ?, ?, ?, ?)",  # nosec B608
-                        ("note_edges", edge_id, "delete", now_iso, self.client_id, 1, json.dumps({"edge_id": edge_id})),
-                    )
-                return deleted
-        except sqlite3.Error as e:
-            raise CharactersRAGDBError(f"Failed to delete manual note edge: {e}") from e  # noqa: TRY003
-        except BackendDatabaseError as e:
-            raise CharactersRAGDBError(f"Backend error deleting manual note edge: {e}") from e  # noqa: TRY003
+        """Soft-delete one owner-bound manual link; repeated deletion is idempotent."""
+
+        if str(user_id) != str(self.client_id):
+            raise InputError("Manual links must use the authenticated owner")
+        existing = self.notes_link_store.get(edge_id)
+        if existing is None:
+            return False
+        if existing.deleted:
+            return True
+        timestamp = datetime.fromisoformat(
+            self._get_current_utc_timestamp_iso().replace("Z", "+00:00")
+        ).astimezone(timezone.utc).isoformat()
+        self.notes_link_store.tombstone(
+            edge_id=edge_id,
+            payload={
+                "source_note_id": existing.source_note_id,
+                "target_note_id": existing.target_note_id,
+                "type": existing.type,
+                "directed": existing.directed,
+                "weight": existing.weight,
+                "label": existing.label,
+                "properties": dict(existing.properties),
+                "created_at": existing.created_at,
+                "last_modified": timestamp,
+                "created_by": existing.created_by,
+                "deleted_at": timestamp,
+                "reason": "legacy-api-delete",
+            },
+            expected_version=existing.version,
+        )
+        return True
 
     # ----------------------
     # Notes Graph: batch query helpers
@@ -16712,33 +26438,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_manual_edges_for_notes(self, user_id: str, note_ids: list[str]) -> list[dict[str, Any]]:
         """Return all manual edges touching any of *note_ids* for *user_id*."""
-        if not note_ids:
+        if str(user_id) != str(self.client_id):
             return []
-        results: list[dict[str, Any]] = []
-        for batch in self._chunk_list(note_ids, self._SQLITE_PARAM_LIMIT):
-            ph = ",".join(["?"] * len(batch))
-            query = (
-                f"SELECT edge_id, user_id, from_note_id, to_note_id, type, directed, weight, "  # nosec B608
-                f"created_at, created_by, metadata "
-                f"FROM note_edges "
-                f"WHERE user_id = ? AND (from_note_id IN ({ph}) OR to_note_id IN ({ph}))"
-            )
-            params = (str(user_id), *batch, *batch)
-            cur = self.execute_query(query, params)
-            for row in cur.fetchall():
-                r = dict(row) if hasattr(row, "keys") else {
-                    "edge_id": row[0], "user_id": row[1], "from_note_id": row[2],
-                    "to_note_id": row[3], "type": row[4], "directed": row[5],
-                    "weight": row[6], "created_at": row[7], "created_by": row[8],
-                    "metadata": row[9],
-                }
-                if isinstance(r.get("metadata"), str):
-                    try:
-                        r["metadata"] = json.loads(r["metadata"])
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                results.append(r)
-        return results
+        return [
+            self.notes_link_store.legacy_dict(link)
+            for link in self.notes_link_store.list_for_notes(note_ids)
+        ]
 
     # Note graph helper methods are delegated to NoteStore at module bottom.
 
@@ -16748,7 +26453,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return [lst[i:i + size] for i in range(0, len(lst), size)]
 
     def _get_current_db_version(self, conn: sqlite3.Connection, table_name: str, pk_col_name: str,
-                                pk_value: Any) -> int:
+                                pk_value: Any, *, owner_client_id: str | None = None) -> int:
         """
         Fetches the current version of an active (not soft-deleted) record.
 
@@ -16771,7 +26476,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise CharactersRAGDBError(  # noqa: TRY003
                 f"Unsafe identifier in version lookup: table={table_name!r}, column={pk_col_name!r}"
             )
-        cursor = conn.execute(f"SELECT version, deleted FROM {table_name} WHERE {pk_col_name} = ?", (pk_value,))  # nosec B608
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        cursor = conn.execute(f"SELECT version, deleted FROM {table_name} WHERE {pk_col_name} = ?{owner_clause}", (pk_value,) + owner_params)  # nosec B608
         row = cursor.fetchone()
 
         if not row:
@@ -16804,12 +26510,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _is_unique_violation(self, error: Exception) -> bool:
         """Return True if the provided backend error represents a unique constraint violation."""
+        if isinstance(error, UniqueConstraintError):
+            return True
         message = str(error).lower()
         return "unique constraint" in message or "duplicate key" in message
 
     # ----------------------
     # Skill registry
     # ----------------------
+    def history_skills_may_be_visible(self) -> bool:
+        """Read potential model-visible registry state without creating/syncing tables."""
+        with self.transaction() as conn:
+            if not self.backend.table_exists("skill_registry", connection=conn):
+                return False
+            row = conn.execute(
+                "SELECT 1 FROM skill_registry WHERE deleted = FALSE "
+                "AND user_invocable = TRUE AND disable_model_invocation = FALSE LIMIT 1"
+            ).fetchone()
+            return row is not None
+
     def _ensure_skill_registry_table(self) -> None:
         """Ensure the skill_registry table exists for the active backend."""
         if self.backend_type == BackendType.SQLITE:
@@ -17743,6 +27462,29 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return normalized
 
     @staticmethod
+    def _validate_workspace_clone_identifier(value: Any, field_name: str) -> str:
+        """Validate one clone lifecycle identifier using the clone request contract."""
+        if not isinstance(value, str) or not value:
+            raise InputError(f"{field_name} must be a non-empty ASCII string")  # noqa: TRY003
+        if len(value) > 255:
+            raise InputError(f"{field_name} must be at most 255 characters")  # noqa: TRY003
+        if not value.isascii() or any(ord(character) < 0x21 or ord(character) > 0x7E for character in value):
+            raise InputError(f"{field_name} must contain only printable ASCII characters")  # noqa: TRY003
+        return value
+
+    @staticmethod
+    def _normalize_workspace_clone_name(value: Any) -> str:
+        """Normalize a clone target name using the immutable clone request contract."""
+        if not isinstance(value, str):
+            raise InputError("name must be a non-empty string")  # noqa: TRY003
+        normalized = " ".join(value.split())
+        if not normalized:
+            raise InputError("name must be non-empty after normalization")  # noqa: TRY003
+        if len(normalized) > 255:
+            raise InputError("name must be at most 255 characters")  # noqa: TRY003
+        return normalized
+
+    @staticmethod
     def _validate_workspace_project_root_backend(backend: Any) -> str:
         """Validate a Workspace-owned project-root backend."""
         normalized = str(backend or "").strip().lower()
@@ -17844,13 +27586,307 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     @classmethod
     def _workspace_row_to_dict(cls, row: Any) -> dict[str, Any]:
-        """Convert a workspace DB row to the public DB-layer dict shape."""
+        """Normalize stored defaults, retaining only a computed private corruption flag.
+
+        SQL NULL is unset or opted out according to the stored choice bit. A
+        non-object default or a non-null default paired with opt-out is invalid.
+        The corruption flag is computed, read-only, and never a storage field.
+        """
         workspace = dict(row)
+        stored_defaults = workspace.get("assistant_defaults_json")
         if "assistant_defaults_json" in workspace:
-            workspace["assistant_defaults_json"] = cls._load_workspace_assistant_defaults_json(
-                workspace["assistant_defaults_json"]
-            )
+            workspace["assistant_defaults_json"] = cls._load_workspace_assistant_defaults_json(stored_defaults)
+        workspace["assistant_defaults_explicit_none"] = bool(workspace.get("assistant_defaults_explicit_none", False))
+        workspace["_assistant_defaults_invalid"] = (
+            stored_defaults is not None
+            and (workspace.get("assistant_defaults_json") is None or workspace["assistant_defaults_explicit_none"])
+        )
         return workspace
+
+    def _get_workspace_internal(
+        self,
+        workspace_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Read a Workspace without public lifecycle-marker filtering."""
+        query = "SELECT * FROM workspaces WHERE id = ?"
+        if not include_deleted:
+            query += " AND deleted = 0"
+        row = self.execute_query(query, (workspace_id,)).fetchone()
+        return self._workspace_row_to_dict(row) if row else None
+
+    def _get_workspace_internal_with_conn(
+        self,
+        conn: Any,
+        workspace_id: str,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Read a Workspace through an existing lifecycle transaction."""
+        query = "SELECT * FROM workspaces WHERE id = ?"
+        if not include_deleted:
+            query += " AND deleted = 0"
+        row = conn.execute(query, (workspace_id,)).fetchone()
+        return self._workspace_row_to_dict(row) if row else None
+
+    @classmethod
+    def _clone_reservation_matches(
+        cls,
+        row: Mapping[str, Any],
+        *,
+        operation_id: str,
+        request_fingerprint: str,
+        name: str,
+        description: str | None,
+        workspace_profile: str,
+    ) -> bool:
+        """Return whether an existing row is the exact reusable reservation."""
+        return (
+            not bool(row.get("deleted"))
+            and row.get("system_operation_kind") == cls._WORKSPACE_CLONE_OPERATION_KIND
+            and row.get("system_operation_state") in {"staged", "publication_pending"}
+            and row.get("system_operation_id") == operation_id
+            and row.get("system_request_fingerprint") == request_fingerprint
+            and row.get("name") == name
+            and row.get("description") == description
+            and row.get("workspace_profile") == workspace_profile
+        )
+
+    @staticmethod
+    def _clone_target_conflict(workspace_id: str) -> ConflictError:
+        """Build the controlled collision error for a deterministic target id."""
+        return ConflictError(
+            f"Workspace clone target '{workspace_id}' is already reserved.",
+            entity="workspaces",
+            entity_id=workspace_id,
+        )
+
+    def reserve_clone_target(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+        request_fingerprint: str,
+        name: str,
+        description: str | None,
+        workspace_profile: str,
+    ) -> dict[str, Any]:
+        """Reserve a hidden clone target, opting out of unrepresented source Persona choices."""
+        validated_workspace_id = self._validate_workspace_clone_identifier(workspace_id, "workspace_id")
+        validated_operation_id = self._validate_workspace_clone_identifier(operation_id, "operation_id")
+        validated_fingerprint = self._validate_workspace_clone_identifier(
+            request_fingerprint,
+            "request_fingerprint",
+        )
+        normalized_name = self._normalize_workspace_clone_name(name)
+        normalized_profile = self._validate_workspace_profile(workspace_profile)
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO workspaces (
+                        id, name, description, metadata_json, study_materials_policy,
+                        workspace_profile, archived, created_at, last_modified, deleted,
+                        client_id, version, system_operation_id, system_operation_kind,
+                        system_operation_state, system_request_fingerprint, assistant_defaults_explicit_none
+                    ) VALUES (?, ?, ?, '{}', 'general', ?, ?, ?, ?, ?, ?, 1, ?, ?, 'staged', ?, ?)
+                    ON CONFLICT(id) DO NOTHING
+                    """,
+                    (
+                        validated_workspace_id,
+                        normalized_name,
+                        description,
+                        normalized_profile,
+                        True,
+                        now,
+                        now,
+                        False,
+                        self.client_id or "unknown",
+                        validated_operation_id,
+                        self._WORKSPACE_CLONE_OPERATION_KIND,
+                        validated_fingerprint,
+                        True,
+                    ),
+                )
+                workspace = self._get_workspace_internal_with_conn(
+                    conn,
+                    validated_workspace_id,
+                    include_deleted=True,
+                )
+                if workspace is None:  # pragma: no cover - defensive database invariant
+                    raise CharactersRAGDBError("Failed to load reserved Workspace clone target.")  # noqa: TRY003
+                if not self._clone_reservation_matches(
+                    workspace,
+                    operation_id=validated_operation_id,
+                    request_fingerprint=validated_fingerprint,
+                    name=normalized_name,
+                    description=description,
+                    workspace_profile=normalized_profile,
+                ):
+                    raise self._clone_target_conflict(validated_workspace_id)
+                return workspace
+        except ConflictError:
+            raise
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError("Workspace clone target reservation failed.") from exc  # noqa: TRY003
+
+    def _transition_clone_target(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+        expected_state: str,
+        set_clause: str,
+        set_params: tuple[Any, ...],
+    ) -> dict[str, Any]:
+        """Apply one exact operation-owned clone lifecycle transition."""
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                cursor = conn.execute(
+                    f"""
+                    UPDATE workspaces
+                       SET {set_clause}, last_modified = ?, version = version + 1
+                     WHERE id = ?
+                       AND deleted = ?
+                       AND system_operation_id = ?
+                       AND system_operation_kind = ?
+                       AND system_operation_state = ?
+                    """,  # nosec B608 - set_clause is fixed at internal call sites.
+                    (
+                        *set_params,
+                        now,
+                        workspace_id,
+                        False,
+                        operation_id,
+                        self._WORKSPACE_CLONE_OPERATION_KIND,
+                        expected_state,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise self._clone_target_conflict(workspace_id)
+                workspace = self._get_workspace_internal_with_conn(conn, workspace_id)
+                if workspace is None:  # pragma: no cover - defensive database invariant
+                    raise CharactersRAGDBError("Failed to load transitioned Workspace clone target.")  # noqa: TRY003
+                return workspace
+        except ConflictError:
+            raise
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError("Workspace clone target transition failed.") from exc  # noqa: TRY003
+
+    def publish_clone_target(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+    ) -> dict[str, Any]:
+        """Move an exact owned staged target into hidden publication-pending state."""
+        validated_workspace_id = self._validate_workspace_clone_identifier(workspace_id, "workspace_id")
+        validated_operation_id = self._validate_workspace_clone_identifier(operation_id, "operation_id")
+        return self._transition_clone_target(
+            workspace_id=validated_workspace_id,
+            operation_id=validated_operation_id,
+            expected_state="staged",
+            set_clause="archived = ?, system_operation_state = ?",
+            set_params=(False, "publication_pending"),
+        )
+
+    def confirm_clone_target_publication(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+    ) -> dict[str, Any]:
+        """Expose an exact owned publication-pending target by clearing all markers."""
+        validated_workspace_id = self._validate_workspace_clone_identifier(workspace_id, "workspace_id")
+        validated_operation_id = self._validate_workspace_clone_identifier(operation_id, "operation_id")
+        return self._transition_clone_target(
+            workspace_id=validated_workspace_id,
+            operation_id=validated_operation_id,
+            expected_state="publication_pending",
+            set_clause=(
+                "system_operation_id = NULL, system_operation_kind = NULL, "
+                "system_operation_state = NULL, system_request_fingerprint = NULL"
+            ),
+            set_params=(),
+        )
+
+    def discard_clone_target(
+        self,
+        *,
+        workspace_id: str,
+        operation_id: str,
+    ) -> bool:
+        """Soft-delete only an exact operation-owned staged or pending clone target."""
+        validated_workspace_id = self._validate_workspace_clone_identifier(workspace_id, "workspace_id")
+        validated_operation_id = self._validate_workspace_clone_identifier(operation_id, "operation_id")
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE workspaces
+                       SET deleted = ?, last_modified = ?, version = version + 1
+                     WHERE id = ?
+                       AND deleted = ?
+                       AND system_operation_id = ?
+                       AND system_operation_kind = ?
+                       AND system_operation_state IN ('staged', 'publication_pending')
+                    """,
+                    (
+                        True,
+                        now,
+                        validated_workspace_id,
+                        False,
+                        validated_operation_id,
+                        self._WORKSPACE_CLONE_OPERATION_KIND,
+                    ),
+                )
+                return cursor.rowcount == 1
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError("Workspace clone target discard failed.") from exc  # noqa: TRY003
+
+    def list_clone_targets_for_reconciliation(
+        self,
+        *,
+        operation_ids: Sequence[str],
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return a bounded set of caller-correlated staged clone targets."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise InputError("limit must be an integer between 1 and 100")  # noqa: TRY003
+        if isinstance(operation_ids, (str, bytes)) or not isinstance(operation_ids, Sequence):
+            raise InputError("operation_ids must be a sequence of identifiers")  # noqa: TRY003
+        if len(operation_ids) > self._WORKSPACE_CLONE_RECONCILIATION_MAX:
+            raise InputError("operation_ids may contain at most 100 identifiers")  # noqa: TRY003
+        if not operation_ids:
+            return []
+        validated_ids = [
+            self._validate_workspace_clone_identifier(operation_id, "operation_id")
+            for operation_id in operation_ids
+        ]
+        placeholders = ", ".join("?" for _ in validated_ids)
+        cursor = self.execute_query(
+            f"""
+            SELECT *
+              FROM workspaces
+             WHERE deleted = ?
+               AND system_operation_kind = ?
+               AND system_operation_state IN ('staged', 'publication_pending')
+               AND system_operation_id IN ({placeholders})
+             ORDER BY system_operation_id ASC, id ASC
+             LIMIT ?
+            """,  # nosec B608 - placeholders are generated from bounded validated inputs.
+            (
+                False,
+                self._WORKSPACE_CLONE_OPERATION_KIND,
+                *validated_ids,
+                limit,
+            ),
+        )
+        return [self._workspace_row_to_dict(row) for row in cursor.fetchall()]
 
     def upsert_workspace(
         self,
@@ -17861,11 +27897,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         metadata_json: str | None = None,
         study_materials_policy: str = "general",
         workspace_profile: str | None = None,
+        initial_assistant_opt_out: bool = False,
     ) -> dict[str, Any]:
         """Create a workspace or update the existing row in place.
 
         If the workspace already exists (and is not deleted), the provided
         mutable fields are applied to the existing row using optimistic locking.
+        Internal import callers may opt out on creation when the source cannot
+        represent a Persona choice; this never changes an existing row's choice.
 
         Returns:
             A dict representing the workspace row.
@@ -17908,8 +27947,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = (
             "INSERT INTO workspaces "
             "(id, name, description, metadata_json, study_materials_policy, workspace_profile, "
-            "created_at, last_modified, deleted, client_id, version) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1)"
+            "created_at, last_modified, deleted, client_id, version, assistant_defaults_explicit_none) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, ?)"
         )
         params = (
             workspace_id,
@@ -17921,16 +27960,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             now,
             now,
             client_id,
+            initial_assistant_opt_out,
         )
         try:
             with self.transaction() as conn:
                 conn.execute(query, params)
-        except sqlite3.IntegrityError:
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
             # Race condition: another thread inserted between our check and insert.
             existing = self.get_workspace(workspace_id)
             if existing is not None:
                 return existing
-            raise  # pragma: no cover
+            if self._get_workspace_internal(workspace_id, include_deleted=True) is not None:
+                raise ConflictError(  # noqa: TRY003
+                    f"Workspace '{workspace_id}' already exists.",
+                    entity="workspaces",
+                    entity_id=workspace_id,
+                ) from exc
+            raise CharactersRAGDBError("Workspace creation failed.") from exc  # noqa: TRY003
         return self.get_workspace(workspace_id)  # type: ignore[return-value]
 
     def get_workspace(
@@ -17938,23 +27984,188 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         workspace_id: str,
         *,
         include_deleted: bool = False,
+        conn: Any = None,
+        for_update: bool = False,
     ) -> dict[str, Any] | None:
-        """Retrieve a workspace by id, optionally including soft-deleted rows."""
-        if include_deleted:
-            cursor = self.execute_query("SELECT * FROM workspaces WHERE id = ?", (workspace_id,))
-        else:
-            cursor = self.execute_query(
-                "SELECT * FROM workspaces WHERE id = ? AND deleted = 0",
-                (workspace_id,),
-            )
+        """Read a visible Workspace, optionally locking it in an existing transaction."""
+        if for_update and (
+            conn is None or not getattr(conn, "in_transaction", False)
+            or (self.backend_type == BackendType.POSTGRESQL and not getattr(self._local, "tx_depth", 0))
+        ):
+            raise InputError("Workspace locking reads require a transaction connection.")
+        query = "SELECT * FROM workspaces WHERE id = ? AND system_operation_state IS NULL"
+        if not include_deleted:
+            query += " AND deleted = 0"
+        if for_update and self.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE"
+        cursor = (
+            conn.execute(query, (workspace_id,))
+            if conn is not None else self.execute_query(query, (workspace_id,), read_only=True)
+        )
         row = cursor.fetchone()
         return self._workspace_row_to_dict(row) if row else None
 
     def list_workspaces(self) -> list[dict[str, Any]]:
         """Return all non-deleted workspaces ordered by name."""
-        query = "SELECT * FROM workspaces WHERE deleted = 0 ORDER BY name"
+        query = (
+            "SELECT * FROM workspaces "
+            "WHERE deleted = 0 AND system_operation_state IS NULL ORDER BY name"
+        )
         cursor = self.execute_query(query, ())
         return [self._workspace_row_to_dict(row) for row in cursor.fetchall()]
+
+    def read_workspace_clone_snapshot(self, workspace_id: str) -> WorkspaceCloneSnapshot:
+        """Read one active Workspace and its cloneable rows from one source snapshot."""
+        from tldw_Server_API.app.core.Sharing.clone_models import (
+            CloneSnapshotUnavailable,
+            WorkspaceCloneSnapshot,
+        )
+
+        if not isinstance(workspace_id, str) or not workspace_id.strip():
+            raise CloneSnapshotUnavailable(cleanup_state="complete")
+
+        backend = self.backend
+        connection: Any | None = None
+        pool: Any | None = None
+        committed = False
+        primary_error: BaseException | None = None
+        cleanup_error: BaseException | None = None
+        snapshot: WorkspaceCloneSnapshot | None = None
+
+        try:
+            if backend.backend_type == BackendType.SQLITE:
+                sqlite_path = str(getattr(backend.config, "sqlite_path", "") or "").strip()
+                lowered_path = sqlite_path.lower()
+                private_memory = sqlite_path == ":memory:" or (
+                    "mode=memory" in lowered_path and "cache=shared" not in lowered_path
+                )
+                if not sqlite_path or private_memory:
+                    raise CloneSnapshotUnavailable(cleanup_state="complete")
+                connection = backend.connect()
+                connection.execute("PRAGMA query_only = ON")
+                query_only_row = connection.execute("PRAGMA query_only").fetchone()
+                if query_only_row is None or int(query_only_row[0]) != 1:
+                    raise RuntimeError("SQLite query-only mode unavailable")
+                connection.execute("BEGIN")
+                if not bool(getattr(connection, "in_transaction", False)):
+                    raise RuntimeError("SQLite snapshot transaction unavailable")
+            else:
+                pool = backend.get_pool()
+                connection = pool.get_connection()
+                connection.rollback()
+                backend.apply_and_verify_scope(
+                    connection,
+                    fallback_user_id=self.client_id,
+                )
+                with connection.cursor() as cursor:
+                    cursor.execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY")
+                isolation_rows = backend.execute(
+                    "SHOW transaction_isolation",
+                    connection=connection,
+                    log_errors=False,
+                ).rows
+                read_only_rows = backend.execute(
+                    "SHOW transaction_read_only",
+                    connection=connection,
+                    log_errors=False,
+                ).rows
+                isolation = next(iter(isolation_rows[0].values()), None) if isolation_rows else None
+                read_only = next(iter(read_only_rows[0].values()), None) if read_only_rows else None
+                if str(isolation).lower() != "repeatable read" or str(read_only).lower() not in {
+                    "on",
+                    "true",
+                }:
+                    raise RuntimeError("PostgreSQL repeatable read unavailable")
+
+            active_value = False if backend.backend_type == BackendType.POSTGRESQL else 0
+
+            def read_rows(query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+                result = backend.execute(
+                    query,
+                    params,
+                    connection=connection,
+                    log_errors=False,
+                )
+                return [dict(row) for row in result.rows]
+
+            workspace_rows = read_rows(
+                "SELECT * FROM workspaces "
+                "WHERE id = ? AND deleted = ? AND system_operation_state IS NULL",
+                (workspace_id, active_value),
+            )
+            if len(workspace_rows) != 1:
+                raise CloneSnapshotUnavailable(cleanup_state="complete")
+
+            membership_rows = read_rows(
+                "SELECT * FROM workspace_resource_memberships "
+                "WHERE workspace_id = ? AND deleted = ? "
+                "ORDER BY updated_at DESC, resource_type ASC, resource_id ASC",
+                (workspace_id, active_value),
+            )
+            source_rows = read_rows(
+                "SELECT * FROM workspace_sources WHERE workspace_id = ? "
+                "ORDER BY position, added_at",
+                (workspace_id,),
+            )
+            note_rows = read_rows(
+                "SELECT * FROM workspace_notes WHERE workspace_id = ? AND deleted = ? "
+                "ORDER BY last_modified DESC",
+                (workspace_id, active_value),
+            )
+            artifact_rows = read_rows(
+                "SELECT * FROM workspace_artifacts WHERE workspace_id = ? ORDER BY created_at DESC",
+                (workspace_id,),
+            )
+
+            normalized_memberships = []
+            for row in membership_rows:
+                normalized = self._normalize_workspace_membership_row(row)
+                if normalized is None:
+                    raise RuntimeError("Workspace membership row unavailable")
+                normalized_memberships.append(normalized)
+            normalized_artifacts = []
+            for row in artifact_rows:
+                normalized = self._normalize_workspace_artifact_row(row)
+                if normalized is None:
+                    raise RuntimeError("Workspace artifact row unavailable")
+                normalized_artifacts.append(normalized)
+
+            snapshot = WorkspaceCloneSnapshot.from_rows(
+                workspace=self._workspace_row_to_dict(workspace_rows[0]),
+                memberships=normalized_memberships,
+                sources=source_rows,
+                notes=note_rows,
+                artifacts=normalized_artifacts,
+            )
+            connection.commit()
+            committed = True
+        except BaseException as exc:  # noqa: BLE001 - cleanup must run for every path
+            primary_error = exc
+
+        if connection is not None:
+            if not committed:
+                try:
+                    connection.rollback()
+                except BaseException as exc:  # noqa: BLE001 - preserve primary failure
+                    cleanup_error = exc
+            try:
+                if backend.backend_type == BackendType.SQLITE:
+                    backend.disconnect(connection)
+                else:
+                    (pool or backend.get_pool()).return_connection(connection)
+            except BaseException as exc:  # noqa: BLE001 - convert cleanup failures below
+                cleanup_error = cleanup_error or exc
+
+        if primary_error is not None and not isinstance(primary_error, Exception):
+            raise primary_error
+        if primary_error is not None or cleanup_error is not None or snapshot is None:
+            failure = primary_error or cleanup_error
+            logger.bind(
+                backend=backend.backend_type.value,
+                exception_type=type(failure).__name__ if failure is not None else "Unknown",
+            ).warning("Workspace clone snapshot read failed")
+            raise CloneSnapshotUnavailable(cleanup_state="complete") from None
+        return snapshot
 
     def update_workspace(
         self,
@@ -18003,7 +28214,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if col == "workspace_profile":
                     params.append(self._validate_workspace_profile(update_data[col]))
                 elif col == "assistant_defaults_json":
-                    params.append(self._serialize_workspace_assistant_defaults_json(update_data[col]))
+                    stored_defaults = self._serialize_workspace_assistant_defaults_json(update_data[col])
+                    params.append(stored_defaults)
+                    set_clauses.append("assistant_defaults_explicit_none = ?")
+                    params.append(stored_defaults is None)
                 else:
                     params.append(update_data[col])
 
@@ -18020,6 +28234,99 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
         return self.get_workspace(workspace_id)  # type: ignore[return-value]
 
+    def _require_outermost_workspace_delete(self, workspace_id: str) -> None:
+        """A staged delete must be able to commit admission closure on its own."""
+        if self.backend_type == BackendType.SQLITE:
+            nested = bool(self.get_connection().in_transaction)
+        else:
+            connection = self.get_connection()
+            raw = connection._connection
+            transaction_status = getattr(getattr(raw, "info", None), "transaction_status", None)
+            nested = bool(
+                getattr(self._connection_state(), "tx_depth", 0)
+                or connection._backend._tx_depth(raw)
+                or getattr(transaction_status, "name", None) != "IDLE"
+            )
+        if nested:
+            raise ConflictError(  # noqa: TRY003
+                "Workspace deletion requires an outermost transaction boundary.",
+                entity="workspaces",
+                entity_id=workspace_id,
+            )
+
+    def _lock_native_workspace_delete(self, conn: Any, workspace_id: str) -> Any:
+        """Lock only the owned, ordinary workspace during a lifecycle transition."""
+        lock = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        return conn.execute(
+            "SELECT version, deleted, native_chat_admission_closed FROM workspaces "
+            "WHERE id = ? AND client_id = ? AND system_operation_state IS NULL" + lock,  # nosec B608 - lock is a fixed backend-only suffix.
+            (workspace_id, self.client_id),
+        ).fetchone()
+
+    def _begin_native_workspace_delete(
+        self, workspace_id: str, *, expected_version: int | None, hard: bool
+    ) -> bool:
+        """Durably fence new native admissions before enumerating conversations."""
+        self._require_outermost_workspace_delete(workspace_id)
+        with self.transaction() as conn:
+            workspace = self._lock_native_workspace_delete(conn, workspace_id)
+            if workspace is None and hard:
+                return False
+            if workspace is None or (not hard and workspace["deleted"]):
+                raise ConflictError(  # noqa: TRY003
+                    f"Workspace '{workspace_id}' not found.", entity="workspaces", entity_id=workspace_id
+                )
+            if expected_version is not None and workspace["version"] != expected_version:
+                raise ConflictError(  # noqa: TRY003
+                    f"Workspace '{workspace_id}' version mismatch.", entity="workspaces", entity_id=workspace_id
+                )
+            if not workspace["native_chat_admission_closed"]:
+                conn.execute(
+                    "UPDATE workspaces SET native_chat_admission_closed = ? "
+                    "WHERE id = ? AND client_id = ?",
+                    (True, workspace_id, self.client_id),
+                )
+        return True
+
+    def _finish_native_workspace_delete(
+        self, conn: Any, workspace_id: str, *, expected_version: int | None, hard: bool, now: str | None = None
+    ) -> None:
+        """Stop a final transition if a protected scoped chat escaped the cascade."""
+        workspace = self._lock_native_workspace_delete(conn, workspace_id)
+        if workspace is None or not workspace["native_chat_admission_closed"]:
+            raise self._workspace_delete_incomplete(workspace_id)
+        if expected_version is not None and workspace["version"] != expected_version:
+            raise self._workspace_delete_incomplete(workspace_id)
+        if not hard and workspace["deleted"]:
+            raise self._workspace_delete_incomplete(workspace_id)
+        deleted_clause = "" if hard else " AND deleted = ?"
+        params: tuple[Any, ...] = (workspace_id, self.client_id)
+        if not hard:
+            params += (False,)
+        residual = conn.execute(
+            "SELECT id FROM conversations WHERE workspace_id = ? AND client_id = ? "  # nosec B608 - only a fixed deleted predicate is appended.
+            "AND scope_type = 'workspace'" + deleted_clause + " "
+            "AND (required_projection_version IS NOT NULL OR native_bundle_json IS NOT NULL "
+            "OR native_creation_operation_kind IS NOT NULL OR native_creation_operation_id IS NOT NULL) "
+            "LIMIT 1",
+            params,
+        ).fetchone()
+        if residual is not None:
+            raise self._workspace_delete_incomplete(workspace_id)
+        if not hard:
+            cursor = conn.execute(
+                "UPDATE workspaces SET deleted = 1, last_modified = ?, version = ? "
+                "WHERE id = ? AND client_id = ? AND version = ? AND native_chat_admission_closed = ?",
+                (now, expected_version + 1, workspace_id, self.client_id, expected_version, True),
+            )
+            if cursor.rowcount == 0:
+                raise self._workspace_delete_incomplete(workspace_id)
+
+    @staticmethod
+    def _workspace_delete_incomplete(workspace_id: str) -> ConflictError:
+        """Return the retryable conflict for a fenced but unfinished cascade."""
+        return ConflictError("workspace_delete_incomplete", entity="workspaces", entity_id=workspace_id)
+
     def delete_workspace(
         self,
         workspace_id: str,
@@ -18033,20 +28340,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         Raises:
             ConflictError: If not found or version mismatch.
         """
-        existing = self.get_workspace(workspace_id)
-        if existing is None:
-            raise ConflictError(  # noqa: TRY003
-                f"Workspace '{workspace_id}' not found.",
-                entity="workspaces",
-                entity_id=workspace_id,
-            )
-        if existing["version"] != expected_version:
-            raise ConflictError(  # noqa: TRY003
-                f"Workspace '{workspace_id}' version mismatch.",
-                entity="workspaces",
-                entity_id=workspace_id,
-            )
+        self._begin_native_workspace_delete(workspace_id, expected_version=expected_version, hard=False)
 
+        try:
+            return self._cascade_and_finish_soft_workspace_delete(workspace_id, expected_version)
+        except Exception as exc:
+            raise self._workspace_delete_incomplete(workspace_id) from exc
+
+    def _cascade_and_finish_soft_workspace_delete(self, workspace_id: str, expected_version: int) -> bool:
+        """Run the existing per-chat cascade after durable admission closure."""
         conversations = self.execute_query(
             "SELECT id, version FROM conversations WHERE workspace_id = ? AND scope_type = ? AND deleted = 0",
             (workspace_id, "workspace"),
@@ -18093,20 +28395,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "WHERE workspace_id = ? AND deleted = 0",
                 (now, self.client_id, workspace_id),
             )
-            cursor = conn.execute(
-                "UPDATE workspaces SET deleted = 1, last_modified = ?, version = ? WHERE id = ? AND version = ?",
-                (now, expected_version + 1, workspace_id, expected_version),
+            self._finish_native_workspace_delete(
+                conn, workspace_id, expected_version=expected_version, hard=False, now=now
             )
-            if cursor.rowcount == 0:
-                raise ConflictError(  # noqa: TRY003
-                    f"Workspace '{workspace_id}' concurrent delete detected.",
-                    entity="workspaces",
-                    entity_id=workspace_id,
-                )
         return True
 
     def hard_delete_workspace(self, workspace_id: str) -> None:
         """Permanently delete a workspace row. FK CASCADE handles sub-resources."""
+        if not self._begin_native_workspace_delete(workspace_id, expected_version=None, hard=True):
+            return
+        try:
+            self._cascade_and_finish_hard_workspace_delete(workspace_id)
+        except Exception as exc:
+            raise self._workspace_delete_incomplete(workspace_id) from exc
+
+    def _cascade_and_finish_hard_workspace_delete(self, workspace_id: str) -> None:
+        """Purge scoped chats before deleting their workspace row."""
         conversations = self.execute_query(
             "SELECT id FROM conversations WHERE workspace_id = ? AND scope_type = ?",
             (workspace_id, "workspace"),
@@ -18115,9 +28419,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conversation_id = conversation["id"] if isinstance(conversation, dict) else conversation[0]
             self.hard_delete_conversation(str(conversation_id))
         with self.transaction() as conn:
+            self._finish_native_workspace_delete(conn, workspace_id, expected_version=None, hard=True)
             conn.execute("DELETE FROM workspace_resource_memberships WHERE workspace_id = ?", (workspace_id,))
             conn.execute("DELETE FROM workspace_project_roots WHERE workspace_id = ?", (workspace_id,))
-            conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
+            conn.execute("DELETE FROM workspaces WHERE id = ? AND client_id = ?", (workspace_id, self.client_id))
 
     @staticmethod
     def _normalize_workspace_source_saved_view_name(name: str) -> tuple[str, str]:
@@ -20156,6 +30461,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             target_workspace_id,
             target_workspace_name,
             study_materials_policy="workspace",
+            initial_assistant_opt_out=True,
         )
 
         now = self._get_current_utc_timestamp_iso()
@@ -22371,7 +32677,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 redaction_json=redaction_json,
                 created_at=now,
             )
-        return self._get_workspace_artifact(workspace_id, artifact_id)  # type: ignore[return-value]
+            row = conn.execute(
+                "SELECT * FROM workspace_artifacts WHERE workspace_id = ? AND id = ?",
+                (workspace_id, artifact_id),
+            ).fetchone()
+            artifact = self._normalize_workspace_artifact_row(row)
+            if artifact is None:
+                raise CharactersRAGDBError("Workspace artifact insert could not be verified.")  # noqa: TRY003
+        return artifact
 
     def _get_workspace_artifact(
         self,
@@ -22685,9 +32998,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             now,
         )
         with self.transaction() as conn:
-            cursor = conn.execute(query, params)
-            note_id = cursor.lastrowid
-        return self._get_workspace_note(workspace_id, note_id)  # type: ignore[return-value]
+            if self.backend_type == BackendType.POSTGRESQL:
+                cursor = conn.execute(query + " RETURNING id", params)
+                inserted = cursor.fetchone()
+                note_id = int(inserted["id"]) if inserted else None
+            else:
+                cursor = conn.execute(query, params)
+                note_id = cursor.lastrowid
+            if note_id is None:
+                raise CharactersRAGDBError("Workspace note insert ID was unavailable.")  # noqa: TRY003
+            row = conn.execute(
+                "SELECT * FROM workspace_notes WHERE workspace_id = ? AND id = ?",
+                (workspace_id, note_id),
+            ).fetchone()
+            if row is None:
+                raise CharactersRAGDBError("Workspace note insert could not be verified.")  # noqa: TRY003
+            note = dict(row)
+        return note
 
     def _get_workspace_note(
         self,
@@ -22784,8 +33111,75 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     # - soft_delete: UPDATE SET deleted = 1, last_modified, version, client_id WHERE id/name = ? AND version = ? AND deleted = 0.
     # - search: Use respective FTS table.
 
+    def _selected_owner_filter(self, owner_client_id: str | None, alias: str = "") -> tuple[str, tuple[str, ...]]:
+        """Apply an explicitly requested PostgreSQL owner; SQLite IDs label devices."""
+        if owner_client_id is None or self.backend_type != BackendType.POSTGRESQL:
+            return "", ()
+        if alias and not _SAFE_IDENTIFIER_RE.fullmatch(alias):
+            raise InputError("Invalid owner filter alias")  # noqa: TRY003
+        column = f"{alias}.client_id" if alias else "client_id"
+        return f" AND {column} = ?", (owner_client_id,)
+
+    def _selected_keyword_link_filter(
+        self, link_table: str, alias: str, *, owner_client_id: str | None,
+    ) -> tuple[str, tuple[str, ...]]:
+        """Scope both ends of the explicitly requested keyword relationship."""
+        if owner_client_id is None or self.backend_type != BackendType.POSTGRESQL:
+            return "", ()
+        parents = {
+            "note_keywords": ("notes", "note_id"),
+            "conversation_keywords": ("conversations", "conversation_id"),
+            "collection_keywords": ("keyword_collections", "collection_id"),
+            "flashcard_keywords": ("flashcards", "card_id"),
+        }
+        parent_table, parent_column = parents[link_table]
+        if not _SAFE_IDENTIFIER_RE.fullmatch(alias):
+            raise InputError("Invalid keyword link alias")  # noqa: TRY003
+        keyword_table = self._map_table_for_backend("keywords")
+        return (
+            f" AND EXISTS (SELECT 1 FROM {parent_table} owner_parent "  # nosec B608
+            f"WHERE owner_parent.id = {alias}.{parent_column} AND owner_parent.client_id = ?)"
+            f" AND EXISTS (SELECT 1 FROM {keyword_table} owner_keyword "
+            f"WHERE owner_keyword.id = {alias}.keyword_id AND owner_keyword.client_id = ?)",
+            (owner_client_id, owner_client_id),
+        )
+
+    def _require_selected_owner_row(
+        self, conn: Any, table_name: str, item_id: Any, owner_client_id: str | None,
+        *, include_deleted: bool = False,
+    ) -> None:
+        """Lock an explicitly scoped parent until its existing transaction completes."""
+        if owner_client_id is None or self.backend_type != BackendType.POSTGRESQL or item_id is None:
+            return
+        if table_name == "messages":
+            # Message client IDs may name sync devices. Its conversation owns it.
+            # Match the existing message-edit lock order: message, then conversation.
+            row = conn.execute(
+                "SELECT conversation_id FROM messages WHERE id = ? AND deleted = FALSE FOR UPDATE",
+                (item_id,),
+            ).fetchone()
+            if row is not None:
+                try:
+                    self._require_selected_owner_row(conn, "conversations", row["conversation_id"], owner_client_id)
+                except ConflictError:
+                    row = None
+            if row is None:
+                raise ConflictError("Referenced message not found", entity="messages", entity_id=item_id)  # noqa: TRY003
+            return
+        if table_name not in {"notes", "conversations", "keywords", "keyword_collections", "note_folders", "study_packs", "flashcards"}:
+            raise InputError("Unsupported Notes parent table")  # noqa: TRY003
+        lookup_column = "uuid" if table_name == "flashcards" else "id"
+        table_name = self._map_table_for_backend(table_name)
+        deleted_clause = "" if include_deleted else " AND deleted = FALSE"
+        row = conn.execute(
+            f"SELECT id FROM {table_name} WHERE {lookup_column} = ? AND client_id = ?{deleted_clause} FOR UPDATE",  # nosec B608
+            (item_id, owner_client_id),
+        ).fetchone()
+        if row is None:
+            raise ConflictError("Referenced record not found", entity=table_name, entity_id=item_id)  # noqa: TRY003
+
     def _add_generic_item(self, table_name: str, unique_col_name: str, item_data: dict[str, Any], main_col_value: str,
-                          other_fields_map: dict[str, str]) -> int | None:
+                          other_fields_map: dict[str, str], *, owner_client_id: str | None = None) -> int | None:
         """
         Internal helper to add items to tables with an auto-increment ID and a unique text column.
 
@@ -22816,7 +33210,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For other database errors.
         """
         now = self._get_current_utc_timestamp_iso()
-        client_id_to_use = item_data.get('client_id', self.client_id)
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        client_id_to_use = owner_client_id if owner_params else item_data.get('client_id', self.client_id)
 
         other_cols = list(other_fields_map.keys())
         other_placeholders_list = ['?'] * len(other_cols)
@@ -22858,8 +33253,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             with self.transaction() as conn:
                 # Check if a soft-deleted item exists and undelete it
                 undelete_cursor = conn.execute(
-                    f"SELECT id, version FROM {table_name} WHERE {unique_col_name} = ? AND deleted = 1",  # nosec B608
-                    (main_col_value,))
+                    f"SELECT id, version FROM {table_name} WHERE {unique_col_name} = ? AND deleted = 1{owner_clause}",  # nosec B608
+                    (main_col_value,) + owner_params)
                 existing_deleted = undelete_cursor.fetchone()
                 if existing_deleted:
                     item_id, current_version = existing_deleted['id'], existing_deleted['version']
@@ -22868,14 +33263,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     update_set_parts = [f"{unique_col_name} = ?"]
                     update_params_list = [main_col_value]
                     for i, col_db in enumerate(other_cols):
+                        if col_db == "sync_id":
+                            continue
                         update_set_parts.append(f"{col_db} = ?")
                         update_params_list.append(other_values[i])
                     update_set_parts.extend(["deleted = 0", "last_modified = ?", "version = ?", "client_id = ?"])
                     # WHERE clause params for undelete
-                    undelete_where_params = [item_id, current_version]
+                    undelete_where_params = [item_id, current_version] + list(owner_params)
                     full_undelete_params = tuple(update_params_list + [now, next_version, client_id_to_use] + undelete_where_params)
 
-                    undelete_query = f"UPDATE {table_name} SET {', '.join(update_set_parts)} WHERE id = ? AND version = ?"  # nosec B608
+                    undelete_query = f"UPDATE {table_name} SET {', '.join(update_set_parts)} WHERE id = ? AND version = ?{owner_clause}"  # nosec B608
 
                     row_count_undelete = conn.execute(undelete_query, full_undelete_params).rowcount
                     if row_count_undelete == 0:
@@ -22891,8 +33288,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 item_id_insert = cursor_insert.lastrowid if hasattr(cursor_insert, 'lastrowid') else None
                 if item_id_insert is None and self.backend_type == BackendType.POSTGRESQL:
                     sel = conn.execute(
-                        f"SELECT id FROM {table_name} WHERE {unique_col_name} = ?",  # nosec B608
-                        (main_col_value,)
+                        f"SELECT id FROM {table_name} WHERE {unique_col_name} = ?{owner_clause}",  # nosec B608
+                        (main_col_value,) + owner_params
                     )
                     row = sel.fetchone()
                     if row is not None:
@@ -22912,7 +33309,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise
         return None  # Should not be reached if exceptions are raised properly
 
-    def _get_generic_item_by_id(self, table_name: str, item_id: int) -> dict[str, Any] | None:
+    def _get_generic_item_by_id(self, table_name: str, item_id: int, *, owner_client_id: str | None = None) -> dict[str, Any] | None:
         """
         Internal helper: Retrieves a non-deleted item by its auto-increment integer ID.
 
@@ -22927,16 +33324,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For database errors.
         """
         table_name = self._map_table_for_backend(table_name)
-        query = f"SELECT * FROM {table_name} WHERE id = ? AND deleted = 0"  # nosec B608
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        query = f"SELECT * FROM {table_name} WHERE id = ? AND deleted = 0{owner_clause}"  # nosec B608
         try:
-            cursor = self.execute_query(query, (item_id,))
+            cursor = self.execute_query(query, (item_id,) + owner_params)
             row = cursor.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError as e:
             logger.error(f"Database error fetching {table_name} ID {item_id}: {e}")
             raise
 
-    def _get_generic_item_by_unique_text(self, table_name: str, unique_col_name: str, value: str) -> dict[str, Any] | None:
+    def _get_generic_item_by_unique_text(self, table_name: str, unique_col_name: str, value: str, *, owner_client_id: str | None = None) -> dict[str, Any] | None:
         """
         Internal helper: Retrieves a non-deleted item by a unique text column value.
         Assumes the column has `COLLATE NOCASE` if case-insensitive search is desired.
@@ -22953,9 +33351,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             CharactersRAGDBError: For database errors.
         """
         table_name = self._map_table_for_backend(table_name)
-        query = f"SELECT * FROM {table_name} WHERE {unique_col_name} = ? AND deleted = 0"  # nosec B608
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        query = f"SELECT * FROM {table_name} WHERE {unique_col_name} = ? AND deleted = 0{owner_clause}"  # nosec B608
         try:
-            cursor = self.execute_query(query, (value,))
+            cursor = self.execute_query(query, (value,) + owner_params)
             row = cursor.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError as e:
@@ -22975,7 +33374,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _case_insensitive_order_clause(self, column: str, direction: str | None = None) -> str:
         return f"ORDER BY {self._case_insensitive_order_expression(column, direction)}"
 
-    def _list_generic_items(self, table_name: str, order_by_col: str, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+    def _list_generic_items(self, table_name: str, order_by_col: str, limit: int = 100, offset: int = 0, *, owner_client_id: str | None = None) -> list[dict[str, Any]]:
         """
         Internal helper: Lists non-deleted items from a table, with specified ordering.
 
@@ -23002,9 +33401,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             order_expression = self._case_insensitive_order_expression(base.strip(), direction.strip() or None)
 
         table_name = self._map_table_for_backend(table_name)
-        query = f"SELECT * FROM {table_name} WHERE deleted = 0 ORDER BY {order_expression} LIMIT ? OFFSET ?"  # nosec B608
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
+        query = f"SELECT * FROM {table_name} WHERE deleted = 0{owner_clause} ORDER BY {order_expression} LIMIT ? OFFSET ?"  # nosec B608
         try:
-            cursor = self.execute_query(query, (limit, offset))
+            cursor = self.execute_query(query, owner_params + (limit, offset), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError as e:
             logger.error(f"Database error listing {table_name}: {e}")
@@ -23013,7 +33413,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _update_generic_item(self, table_name: str, item_id: int | str,
                              update_data: dict[str, Any], expected_version: int,
                              allowed_fields: list[str], pk_col_name: str = "id",
-                             unique_col_name_in_data: str | None = None) -> bool | None:
+                             unique_col_name_in_data: str | None = None, *, owner_client_id: str | None = None) -> bool | None:
         """
         Internal helper: Updates an item in a table using optimistic locking.
 
@@ -23040,6 +33440,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not update_data:
             raise InputError(f"No data provided for update of {table_name} ID {item_id}.")  # noqa: TRY003
 
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
         now = self._get_current_utc_timestamp_iso()
         fields_to_update_sql = []
         params_for_set_clause = []
@@ -23077,14 +33478,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         # Values for the WHERE clause
         where_clause_values = [item_id, expected_version]
-        final_query_params = tuple(current_params_for_set_clause + where_clause_values)
+        final_query_params = tuple(current_params_for_set_clause + where_clause_values) + owner_params
 
-        query = f"UPDATE {table_name} SET {', '.join(current_fields_to_update_sql)} WHERE {pk_col_name} = ? AND version = ? AND deleted = 0"  # nosec B608
+        query = f"UPDATE {table_name} SET {', '.join(current_fields_to_update_sql)} WHERE {pk_col_name} = ? AND version = ? AND deleted = 0{owner_clause}"  # nosec B608
 
         try:
             with self.transaction() as conn:
                 # Explicit pre-check. _get_current_db_version raises ConflictError if not found or soft-deleted.
-                current_db_version = self._get_current_db_version(conn, table_name, pk_col_name, item_id)
+                current_db_version = self._get_current_db_version(conn, table_name, pk_col_name, item_id, owner_client_id=owner_client_id)
 
                 if current_db_version != expected_version:
                     raise ConflictError(  # noqa: TRY003, TRY301
@@ -23099,7 +33500,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     # This state implies the record was active with expected_version during the _get_current_db_version check,
                     # but was either deleted or its version changed *just before* the UPDATE SQL executed.
                     check_again_cursor = conn.execute(
-                        f"SELECT version, deleted FROM {table_name} WHERE {pk_col_name} = ?", (item_id,))  # nosec B608
+                        f"SELECT version, deleted FROM {table_name} WHERE {pk_col_name} = ?{owner_clause}", (item_id,) + owner_params)  # nosec B608
                     final_state = check_again_cursor.fetchone()
                     msg = f"Update for {table_name} ID {item_id} (expected version {expected_version}) affected 0 rows."
                     if not final_state:
@@ -23140,7 +33541,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         # No implicit return None, function should return True or raise.
 
     def _soft_delete_generic_item(self, table_name: str, item_id: int | str,
-                                  expected_version: int, pk_col_name: str = "id") -> bool | None:
+                                  expected_version: int, pk_col_name: str = "id", *, owner_client_id: str | None = None) -> bool | None:
         """
         Internal helper: Soft-deletes an item in a table using optimistic locking.
 
@@ -23162,22 +33563,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """
         logical_table_name = table_name
         table_name = self._map_table_for_backend(table_name)
+        owner_clause, owner_params = self._selected_owner_filter(owner_client_id)
         now = self._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
 
-        query = f"UPDATE {table_name} SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE {pk_col_name} = ? AND version = ? AND deleted = 0"  # nosec B608
-        params = (now, next_version_val, self.client_id, item_id, expected_version)
+        query = f"UPDATE {table_name} SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE {pk_col_name} = ? AND version = ? AND deleted = 0{owner_clause}"  # nosec B608
+        params = (now, next_version_val, self.client_id, item_id, expected_version) + owner_params
 
         try:
             with self.transaction() as conn:
                 try:
-                    current_db_version = self._get_current_db_version(conn, table_name, pk_col_name, item_id)
+                    current_db_version = self._get_current_db_version(conn, table_name, pk_col_name, item_id, owner_client_id=owner_client_id)
                     # If we are here, record is active and current_db_version is its version.
                 except ConflictError:
                     # Check if the ConflictError is because it's already soft-deleted.
                     # Query again to be absolutely sure of the 'deleted' status.
                     check_deleted_cursor = conn.execute(
-                        f"SELECT deleted, version FROM {table_name} WHERE {pk_col_name} = ?", (item_id,))  # nosec B608
+                        f"SELECT deleted, version FROM {table_name} WHERE {pk_col_name} = ?{owner_clause}", (item_id,) + owner_params)  # nosec B608
                     record_status = check_deleted_cursor.fetchone()
 
                     if record_status and record_status['deleted']:
@@ -23198,7 +33600,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     # This means the record (which was active with expected_version) changed state
                     # between the _get_current_db_version check and the UPDATE execution.
                     check_again_cursor = conn.execute(
-                        f"SELECT deleted, version FROM {table_name} WHERE {pk_col_name} = ?", (item_id,))  # nosec B608
+                        f"SELECT deleted, version FROM {table_name} WHERE {pk_col_name} = ?{owner_clause}", (item_id,) + owner_params)  # nosec B608
                     changed_record = check_again_cursor.fetchone()
                     if not changed_record:
                         raise ConflictError(  # noqa: TRY003, TRY301
@@ -23238,7 +33640,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         # No implicit return None.
 
     def _search_generic_items_fts(self, fts_table_name: str, main_table_name: str, fts_match_cols_or_table: str,
-                                  search_term: str, limit: int = 10) -> list[dict[str, Any]]:
+                                  search_term: str, limit: int = 10, *, owner_client_id: str | None = None) -> list[dict[str, Any]]:
         """
         Internal helper: Performs FTS search on tables like keywords, notes, collections.
 
@@ -23279,17 +33681,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
                 return []
 
+            owner_clause, owner_params = self._selected_owner_filter(owner_client_id, "main")
             fts_column = f"{fts_table_name}_tsv"
             query = """
                 SELECT main.*, ts_rank(main.{fts_column}, to_tsquery('english', ?)) AS rank
                 FROM {main_table_name} main
-                WHERE main.deleted = FALSE
+                WHERE main.deleted = FALSE{owner_clause}
                   AND main.{fts_column} @@ to_tsquery('english', ?)
                 ORDER BY rank DESC, main.last_modified DESC
                 LIMIT ?
             """.format_map(locals())  # nosec B608
             try:
-                cursor = self.execute_query(query, (tsquery, tsquery, limit))
+                cursor = self.execute_query(query, (tsquery,) + owner_params + (tsquery, limit))
                 return [dict(row) for row in cursor.fetchall()]
             except CharactersRAGDBError as exc:
                 logger.error("PostgreSQL FTS search failed for table '{}': {}", main_table_name, exc)
@@ -23327,11 +33730,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             query = """
                 SELECT COUNT(*) AS cnt
                 FROM notes n
-                WHERE n.deleted = FALSE
+                WHERE n.deleted = FALSE AND n.client_id = ?
                   AND n.notes_fts_tsv @@ to_tsquery('english', ?)
             """
             try:
-                cursor = self.execute_query(query, (tsquery,))
+                cursor = self.execute_query(query, (self.client_id, tsquery))
                 row = cursor.fetchone()
                 return int(row["cnt"]) if row else 0
             except CharactersRAGDBError as exc:
@@ -23369,9 +33772,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = queries.get(category)
         if query is None:
             return 0
+        params = ()
+        if category == "world_books" and self.backend_type == BackendType.POSTGRESQL:
+            query = "SELECT COUNT(*) AS count FROM world_books WHERE deleted = FALSE AND client_id = ?"
+            params = (self.client_id,)
         try:
             # Category selects a fixed allowlisted query; no user input enters SQL.
-            cursor = self.execute_query(query)  # nosec B608
+            cursor = self.execute_query(query, params)  # nosec B608
             row = cursor.fetchone()
             if not row:
                 return 0
@@ -23399,9 +33806,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = queries.get(category)
         if query is None:
             return []
+        params = ()
+        if category == "world_books" and self.backend_type == BackendType.POSTGRESQL:
+            query = "SELECT id FROM world_books WHERE deleted = FALSE AND client_id = ? ORDER BY id ASC"
+            params = (self.client_id,)
         try:
             # Category selects a fixed allowlisted query; no user input enters SQL.
-            cursor = self.execute_query(query)  # nosec B608
+            cursor = self.execute_query(query, params)  # nosec B608
             ids: list[str] = []
             for row in cursor.fetchall() or []:
                 try:
@@ -23449,11 +33860,131 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return json.dumps(smart_rule, ensure_ascii=False, default=_json_default)
 
     def _deserialize_moodboard_row(self, row: Any) -> dict[str, Any] | None:
-        item = self._deserialize_row_fields(row, ["smart_rule_json"])
+        item = self._deserialize_row_fields(row, ["smart_rule_json", "canvas_json"])
         if not item:
             return None
         item["smart_rule"] = item.pop("smart_rule_json", None)
         return item
+
+    def _canonical_moodboard_state_v61(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        *,
+        sync_id: str,
+        name: str,
+        description: str | None,
+        raw_smart_rule: object,
+        raw_canvas: object,
+        owner_user_id: str,
+        revision: int,
+        deleted: bool,
+    ) -> tuple[str | None, str, str, str | None, str | None]:
+        """Normalize one complete compatibility row and rebuild its whole-object lineage."""
+        rule, diagnostic_code, diagnostic_hash = self._legacy_moodboard_rule_v61(
+            conn,
+            raw_smart_rule,
+            owner_user_id=owner_user_id,
+        )
+        raw_rule_text = (
+            None
+            if raw_smart_rule is None
+            else (
+                str(raw_smart_rule)
+                if isinstance(raw_smart_rule, str)
+                else self._canonical_json_text_v61(raw_smart_rule)
+            )
+        )
+        try:
+            canvas_value = (
+                json.loads(raw_canvas)
+                if isinstance(raw_canvas, str)
+                else raw_canvas
+            )
+            if not isinstance(canvas_value, Mapping):
+                raise ValueError("moodboard canvas must be an object")
+            parsed = parse_notes_moodboard_v1(
+                {
+                    "moodboard_id": sync_id,
+                    "name": name,
+                    "description": description,
+                    "smart_rule": rule,
+                    "canvas": dict(canvas_value),
+                }
+            )
+            if diagnostic_code is not None:
+                raise NotesMoodboardStudioContractError(
+                    "moodboard smart rule is not canonical"
+                )
+            smart_rule_text = (
+                None
+                if parsed.smart_rule is None
+                else self._canonical_json_text_v61(
+                    parsed.smart_rule.model_dump(mode="json")
+                )
+            )
+            canvas_text = self._canonical_json_text_v61(
+                parsed.canvas.model_dump(mode="json")
+            )
+            canonical_hash = notes_moodboard_object_hash(
+                parsed,
+                revision=revision,
+                deleted=deleted,
+            )
+            return smart_rule_text, canvas_text, canonical_hash, None, None
+        except (
+            NotesMoodboardStudioContractError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ):
+            if diagnostic_code is None:
+                diagnostic = moodboard_studio_legacy_source_diagnostic(
+                    "legacy_moodboard_payload_invalid",
+                    {
+                        "moodboard_id": sync_id,
+                        "name": name,
+                        "description": description,
+                        "smart_rule": raw_smart_rule,
+                        "canvas": raw_canvas,
+                    },
+                )
+                diagnostic_code = diagnostic["code"]
+                diagnostic_hash = diagnostic["source_hash"]
+            canvas_text = (
+                str(raw_canvas)
+                if isinstance(raw_canvas, str)
+                else self._canonical_json_text_v61(raw_canvas)
+            )
+            canonical_hash = self._note_task_v60_hash(
+                {
+                    "domain": "notes.moodboard.blocked",
+                    "moodboard_id": sync_id,
+                    "revision": revision,
+                    "deleted": deleted,
+                    "diagnostic": diagnostic_hash,
+                }
+            )
+            return (
+                raw_rule_text,
+                canvas_text,
+                canonical_hash,
+                diagnostic_code,
+                diagnostic_hash,
+            )
+
+    def _set_notes_moodboard_studio_v61_dataset_scope(
+        self,
+        conn: sqlite3.Connection | BackendConnectionWrapper,
+        dataset_id: str,
+    ) -> None:
+        if (
+            self.backend_type == BackendType.POSTGRESQL
+            and self._supports_notes_moodboard_studio_v61()
+        ):
+            conn.execute(
+                "SELECT set_config('app.current_dataset_id', ?, true)",
+                (str(dataset_id),),
+            )
 
     def add_moodboard(
         self,
@@ -23467,22 +33998,70 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         description_value = self._normalize_nullable_text(description)
         deleted_value = False if self.backend_type == BackendType.POSTGRESQL else 0
 
-        query = (
-            "INSERT INTO moodboards(name, description, smart_rule_json, created_at, last_modified, deleted, client_id, version) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?)"
+        legacy_query = (
+            "INSERT INTO moodboards(name,description,smart_rule_json,created_at,last_modified,deleted,client_id,version) "
+            "VALUES(?,?,?,?,?,?,?,?)"
         )
-        params = (
-            moodboard_name,
-            description_value,
-            smart_rule_json,
-            now,
-            now,
-            deleted_value,
-            self.client_id,
-            1,
-        )
+        legacy_params = (moodboard_name, description_value, smart_rule_json, now, now, deleted_value, self.client_id, 1)
         try:
             with self.transaction() as conn:
+                if not self._supports_notes_moodboard_studio_v61():
+                    cursor = conn.execute(legacy_query, legacy_params)
+                    return int(cursor.lastrowid)
+                owner = str(self.client_id)
+                dataset = self.resolve_moodboard_compatibility_dataset_id(
+                    owner_user_id=owner, conn=conn
+                )
+                sync_id = str(uuid.uuid4())
+                smart_rule_value, diagnostic_code, diagnostic_hash = self._legacy_moodboard_rule_v61(
+                    conn,
+                    smart_rule_json,
+                    owner_user_id=owner,
+                )
+                canvas = {"layout_mode": "masonry", "metadata": {}}
+                try:
+                    parsed = parse_notes_moodboard_v1(
+                        {
+                            "moodboard_id": sync_id,
+                            "name": moodboard_name,
+                            "description": description_value,
+                            "smart_rule": smart_rule_value,
+                            "canvas": canvas,
+                        }
+                    )
+                    canonical_hash = notes_moodboard_object_hash(parsed, revision=1, deleted=False)
+                except NotesMoodboardStudioContractError:
+                    diagnostic = moodboard_studio_legacy_source_diagnostic(
+                        "legacy_moodboard_payload_invalid",
+                        {"name": moodboard_name, "smart_rule": smart_rule_value},
+                    )
+                    diagnostic_code, diagnostic_hash = diagnostic["code"], diagnostic["source_hash"]
+                    canonical_hash = self._note_task_v60_hash(
+                        {"domain": "notes.moodboard", "moodboard_id": sync_id, "version": 1}
+                    )
+                query = (
+                    "INSERT INTO moodboards("
+                    "owner_user_id,dataset_id,sync_id,name,description,smart_rule_json,canvas_json,"
+                    "created_at,last_modified,deleted,client_id,version,canonical_revision,canonical_hash,"
+                    "source_diagnostic_code,source_diagnostic_hash"
+                    ") VALUES(?,?,?,?,?,?,?,?,?,?,?,1,1,?,?,?)"
+                )
+                params = (
+                    owner,
+                    dataset,
+                    sync_id,
+                    moodboard_name,
+                    description_value,
+                    None if smart_rule_value is None else self._canonical_json_text_v61(smart_rule_value),
+                    self._canonical_json_text_v61(canvas),
+                    now,
+                    now,
+                    deleted_value,
+                    owner,
+                    canonical_hash,
+                    diagnostic_code,
+                    diagnostic_hash,
+                )
                 if self.backend_type == BackendType.POSTGRESQL:
                     cursor = conn.execute(query + " RETURNING id", params)
                     row = cursor.fetchone()
@@ -23500,11 +34079,30 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_moodboard_by_id(self, moodboard_id: int, include_deleted: bool = False) -> dict[str, Any] | None:
         params: list[Any] = [moodboard_id]
+        scope = ""
+        if self._supports_notes_moodboard_studio_v61():
+            owner = str(self.client_id)
+            with self.transaction() as conn:
+                dataset = self.resolve_moodboard_compatibility_dataset_id(
+                    owner_user_id=owner,
+                    conn=conn,
+                )
+                scope = " AND owner_user_id=? AND dataset_id=?"
+                scoped_params = [*params, owner, dataset]
+                where_deleted = ""
+                if not include_deleted:
+                    where_deleted = " AND deleted = ?"
+                    scoped_params.append(
+                        False if self.backend_type == BackendType.POSTGRESQL else 0
+                    )
+                query = f"SELECT * FROM moodboards WHERE id = ?{scope}{where_deleted}"  # nosec B608
+                cursor = conn.execute(query, tuple(scoped_params))
+                return self._deserialize_moodboard_row(cursor.fetchone())
         where_deleted = ""
         if not include_deleted:
             where_deleted = " AND deleted = ?"
             params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
-        query = f"SELECT * FROM moodboards WHERE id = ?{where_deleted}"  # nosec B608
+        query = f"SELECT * FROM moodboards WHERE id = ?{scope}{where_deleted}"  # nosec B608
         cursor = self.execute_query(query, tuple(params))
         return self._deserialize_moodboard_row(cursor.fetchone())
 
@@ -23518,14 +34116,44 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if limit <= 0:
             return []
 
-        where_clause = ""
+        predicates: list[str] = []
         params: list[Any] = []
+        if self._supports_notes_moodboard_studio_v61():
+            owner = str(self.client_id)
+            with self.transaction() as conn:
+                dataset = self.resolve_moodboard_compatibility_dataset_id(
+                    owner_user_id=owner,
+                    conn=conn,
+                )
+                predicates.extend(("owner_user_id=?", "dataset_id=?"))
+                params.extend((owner, dataset))
+                if only_deleted:
+                    predicates.append("deleted = ?")
+                    params.append(
+                        True if self.backend_type == BackendType.POSTGRESQL else 1
+                    )
+                elif not include_deleted:
+                    predicates.append("deleted = ?")
+                    params.append(
+                        False if self.backend_type == BackendType.POSTGRESQL else 0
+                    )
+                where_clause = " WHERE " + " AND ".join(predicates)
+                query = (
+                    f"SELECT * FROM moodboards{where_clause} "  # nosec B608
+                    "ORDER BY last_modified DESC, id DESC "
+                    "LIMIT ? OFFSET ?"
+                )
+                params.extend([limit, offset])
+                cursor = conn.execute(query, tuple(params))
+                rows = cursor.fetchall()
+                return [self._deserialize_moodboard_row(row) for row in rows if row]
         if only_deleted:
-            where_clause = " WHERE deleted = ?"
+            predicates.append("deleted = ?")
             params.append(True if self.backend_type == BackendType.POSTGRESQL else 1)
         elif not include_deleted:
-            where_clause = " WHERE deleted = ?"
+            predicates.append("deleted = ?")
             params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+        where_clause = " WHERE " + " AND ".join(predicates) if predicates else ""
 
         query = (
             f"SELECT * FROM moodboards{where_clause} "  # nosec B608
@@ -23542,14 +34170,39 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         include_deleted: bool = False,
         only_deleted: bool = False,
     ) -> int:
-        where_clause = ""
+        predicates: list[str] = []
         params: list[Any] = []
+        if self._supports_notes_moodboard_studio_v61():
+            owner = str(self.client_id)
+            with self.transaction() as conn:
+                dataset = self.resolve_moodboard_compatibility_dataset_id(
+                    owner_user_id=owner,
+                    conn=conn,
+                )
+                predicates.extend(("owner_user_id=?", "dataset_id=?"))
+                params.extend((owner, dataset))
+                if only_deleted:
+                    predicates.append("deleted = ?")
+                    params.append(
+                        True if self.backend_type == BackendType.POSTGRESQL else 1
+                    )
+                elif not include_deleted:
+                    predicates.append("deleted = ?")
+                    params.append(
+                        False if self.backend_type == BackendType.POSTGRESQL else 0
+                    )
+                where_clause = " WHERE " + " AND ".join(predicates)
+                query = f"SELECT COUNT(*) AS total FROM moodboards{where_clause}"  # nosec B608
+                cursor = conn.execute(query, tuple(params))
+                row = cursor.fetchone()
+                return int(row["total"]) if row and row["total"] is not None else 0
         if only_deleted:
-            where_clause = " WHERE deleted = ?"
+            predicates.append("deleted = ?")
             params.append(True if self.backend_type == BackendType.POSTGRESQL else 1)
         elif not include_deleted:
-            where_clause = " WHERE deleted = ?"
+            predicates.append("deleted = ?")
             params.append(False if self.backend_type == BackendType.POSTGRESQL else 0)
+        where_clause = " WHERE " + " AND ".join(predicates) if predicates else ""
 
         query = f"SELECT COUNT(*) AS total FROM moodboards{where_clause}"  # nosec B608
         cursor = self.execute_query(query, tuple(params))
@@ -23559,6 +34212,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def update_moodboard(self, moodboard_id: int, update_data: dict[str, Any], expected_version: int) -> bool | None:
         if not update_data:
             raise InputError("No data provided for moodboard update.")  # noqa: TRY003
+
+        if self._supports_notes_moodboard_studio_v61():
+            return self._update_moodboard_v61(
+                moodboard_id=moodboard_id,
+                update_data=update_data,
+                expected_version=expected_version,
+            )
 
         now = self._get_current_utc_timestamp_iso()
         fields_to_update_sql: list[str] = []
@@ -23590,13 +34250,28 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         all_set_values = params_for_set_clause[:]
         all_set_values.extend([now, next_version_val, self.client_id])
-        where_values = [moodboard_id, expected_version]
+        scope_clause = ""
+        where_values: list[Any] = [moodboard_id, expected_version]
+        if self._supports_notes_moodboard_studio_v61():
+            owner = str(self.client_id)
+            dataset = self.resolve_moodboard_compatibility_dataset_id(owner_user_id=owner)
+            fields_to_update_sql.extend(["canonical_revision = ?", "canonical_hash = ?"])
+            all_set_values.extend(
+                [
+                    next_version_val,
+                    self._note_task_v60_hash(
+                        {"domain": "notes.moodboard", "id": moodboard_id, "revision": next_version_val, "update": update_data}
+                    ),
+                ]
+            )
+            scope_clause = " AND owner_user_id=? AND dataset_id=?"
+            where_values.extend((owner, dataset))
         final_params_for_execute = tuple(all_set_values + where_values)
         deleted_false = "FALSE" if self.backend_type == BackendType.POSTGRESQL else "0"
 
         query = (
             f"UPDATE moodboards SET {', '.join(fields_to_update_sql)} "  # nosec B608
-            f"WHERE id = ? AND version = ? AND deleted = {deleted_false}"
+            f"WHERE id = ? AND version = ?{scope_clause} AND deleted = {deleted_false}"
         )
 
         try:
@@ -23637,17 +34312,162 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except BackendDatabaseError as exc:
             raise CharactersRAGDBError(f"Backend error updating moodboard: {exc}") from exc  # noqa: TRY003
 
+    def _update_moodboard_v61(
+        self,
+        *,
+        moodboard_id: int,
+        update_data: dict[str, Any],
+        expected_version: int,
+    ) -> bool:
+        allowed = {"name", "description", "smart_rule", "smart_rule_json", "canvas", "canvas_json"}
+        if not set(update_data).intersection(allowed):
+            return True
+        now = self._get_current_utc_timestamp_iso()
+        owner = str(self.client_id)
+        try:
+            with self.transaction() as conn:
+                dataset = self.resolve_moodboard_compatibility_dataset_id(
+                    owner_user_id=owner,
+                    conn=conn,
+                )
+                row = conn.execute(
+                    "SELECT * FROM moodboards WHERE id=? AND owner_user_id=? "
+                    "AND dataset_id=? AND deleted=?",
+                    (
+                        moodboard_id,
+                        owner,
+                        dataset,
+                        False if self.backend_type == BackendType.POSTGRESQL else 0,
+                    ),
+                ).fetchone()
+                if row is None:
+                    raise ConflictError(
+                        f"Moodboard ID {moodboard_id} not found or deleted.",
+                        entity="moodboards",
+                        entity_id=moodboard_id,
+                    )  # noqa: TRY003
+                if int(row["version"]) != expected_version:
+                    raise ConflictError(
+                        f"Moodboard ID {moodboard_id} update failed: version mismatch "
+                        f"(db has {row['version']}, client expected {expected_version}).",
+                        entity="moodboards",
+                        entity_id=moodboard_id,
+                    )  # noqa: TRY003
+
+                name = (
+                    self._normalize_moodboard_name(str(update_data["name"] or ""))
+                    if "name" in update_data
+                    else str(row["name"])
+                )
+                description = (
+                    self._normalize_nullable_text(update_data["description"])
+                    if "description" in update_data
+                    else row["description"]
+                )
+                smart_key = (
+                    "smart_rule"
+                    if "smart_rule" in update_data
+                    else "smart_rule_json"
+                    if "smart_rule_json" in update_data
+                    else None
+                )
+                raw_rule = (
+                    self._serialize_moodboard_smart_rule(update_data[smart_key])
+                    if smart_key is not None
+                    else row["smart_rule_json"]
+                )
+                canvas_key = (
+                    "canvas"
+                    if "canvas" in update_data
+                    else "canvas_json"
+                    if "canvas_json" in update_data
+                    else None
+                )
+                raw_canvas = (
+                    update_data[canvas_key]
+                    if canvas_key is not None
+                    else row["canvas_json"]
+                )
+                revision = int(row["canonical_revision"]) + 1
+                (
+                    smart_rule_text,
+                    canvas_text,
+                    canonical_hash,
+                    diagnostic_code,
+                    diagnostic_hash,
+                ) = self._canonical_moodboard_state_v61(
+                    conn,
+                    sync_id=str(row["sync_id"]),
+                    name=name,
+                    description=description,
+                    raw_smart_rule=raw_rule,
+                    raw_canvas=raw_canvas,
+                    owner_user_id=owner,
+                    revision=revision,
+                    deleted=False,
+                )
+                cursor = conn.execute(
+                    "UPDATE moodboards SET name=?,description=?,smart_rule_json=?,canvas_json=?,"
+                    "last_modified=?,version=?,client_id=?,canonical_revision=?,canonical_hash=?,"
+                    "source_diagnostic_code=?,source_diagnostic_hash=? "
+                    "WHERE id=? AND owner_user_id=? AND dataset_id=? AND version=? AND deleted=?",
+                    (
+                        name,
+                        description,
+                        smart_rule_text,
+                        canvas_text,
+                        now,
+                        expected_version + 1,
+                        owner,
+                        revision,
+                        canonical_hash,
+                        diagnostic_code,
+                        diagnostic_hash,
+                        moodboard_id,
+                        owner,
+                        dataset,
+                        expected_version,
+                        False if self.backend_type == BackendType.POSTGRESQL else 0,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ConflictError(
+                        f"Moodboard ID {moodboard_id} changed concurrently.",
+                        entity="moodboards",
+                        entity_id=moodboard_id,
+                    )  # noqa: TRY003
+                return True
+        except (sqlite3.IntegrityError, BackendDatabaseError) as exc:
+            raise CharactersRAGDBError(
+                f"Database error updating moodboard: {exc}"
+            ) from exc  # noqa: TRY003
+
     def delete_moodboard(self, moodboard_id: int, expected_version: int | None = None, hard_delete: bool = False) -> bool:
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
-                row = conn.execute("SELECT id, version, deleted FROM moodboards WHERE id = ?", (moodboard_id,)).fetchone()
+                scope_clause = ""
+                scope_params: tuple[Any, ...] = ()
+                if self._supports_notes_moodboard_studio_v61():
+                    owner = str(self.client_id)
+                    dataset = self.resolve_moodboard_compatibility_dataset_id(
+                        owner_user_id=owner, conn=conn
+                    )
+                    scope_clause = " AND owner_user_id=? AND dataset_id=?"
+                    scope_params = (owner, dataset)
+                row = conn.execute(
+                    f"SELECT * FROM moodboards WHERE id=?{scope_clause}",  # nosec B608
+                    (moodboard_id, *scope_params),
+                ).fetchone()
                 if not row:
                     return False
                 current_version = int(row["version"])
                 deleted = bool(row["deleted"])
                 if hard_delete:
-                    conn.execute("DELETE FROM moodboards WHERE id = ?", (moodboard_id,))
+                    conn.execute(
+                        f"DELETE FROM moodboards WHERE id=?{scope_clause}",  # nosec B608
+                        (moodboard_id, *scope_params),
+                    )
                     return True
                 if deleted:
                     return True
@@ -23658,10 +34478,55 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         identifier=moodboard_id,
                     )
                 deleted_val = True if self.backend_type == BackendType.POSTGRESQL else 1
+                lineage_sql = ""
+                lineage_params: tuple[Any, ...] = ()
+                if self._supports_notes_moodboard_studio_v61():
+                    revision = int(row["canonical_revision"]) + 1
+                    try:
+                        smart_rule = (
+                            None
+                            if row["smart_rule_json"] is None
+                            else json.loads(str(row["smart_rule_json"]))
+                        )
+                        canvas = json.loads(str(row["canvas_json"]))
+                        canonical_hash = notes_moodboard_object_hash(
+                            parse_notes_moodboard_v1(
+                                {
+                                    "moodboard_id": row["sync_id"],
+                                    "name": row["name"],
+                                    "description": row["description"],
+                                    "smart_rule": smart_rule,
+                                    "canvas": canvas,
+                                }
+                            ),
+                            revision=revision,
+                            deleted=True,
+                        )
+                    except (NotesMoodboardStudioContractError, TypeError, ValueError, json.JSONDecodeError):
+                        canonical_hash = self._note_task_v60_hash(
+                            {
+                                "domain": "notes.moodboard",
+                                "sync_id": row["sync_id"],
+                                "revision": revision,
+                                "deleted": True,
+                            }
+                        )
+                    lineage_sql = ", canonical_revision = ?, canonical_hash = ?"
+                    lineage_params = (revision, canonical_hash)
                 rowcount = conn.execute(
                     "UPDATE moodboards SET deleted = ?, last_modified = ?, version = ?, client_id = ? "
-                    "WHERE id = ? AND deleted = 0",
-                    (deleted_val, now, current_version + 1, self.client_id, moodboard_id),
+                    f"{lineage_sql} "
+                    f"WHERE id = ?{scope_clause} AND deleted = ?",  # nosec B608
+                    (
+                        deleted_val,
+                        now,
+                        current_version + 1,
+                        self.client_id,
+                        *lineage_params,
+                        moodboard_id,
+                        *scope_params,
+                        False if self.backend_type == BackendType.POSTGRESQL else 0,
+                    ),
                 ).rowcount
                 return rowcount > 0
         except BackendDatabaseError as exc:
@@ -23676,13 +34541,178 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         note = self.get_note_by_id(note_id=note_id)
         if not note:
             raise ConflictError("Note not found.", entity="notes", entity_id=note_id)  # noqa: TRY003
-        return self._manage_link("moodboard_notes", "moodboard_id", moodboard_id, "note_id", note_id, "link")
+        if not self._supports_notes_moodboard_studio_v61():
+            return self._manage_link("moodboard_notes", "moodboard_id", moodboard_id, "note_id", note_id, "link")
+        owner = str(self.client_id)
+        dataset = str(moodboard["dataset_id"])
+        now = self._get_current_utc_timestamp_iso()
+        placement_source = {
+            "moodboard_id": moodboard["sync_id"],
+            "note_id": note_id,
+            "x": 0,
+            "y": 0,
+            "width": 320,
+            "height": 220,
+            "order_index": 0,
+            "display": {},
+        }
+        diagnostic_code = diagnostic_hash = None
+        try:
+            parsed = parse_notes_moodboard_note_v1(placement_source)
+            placement_id = placement_object_id(parsed)
+            canonical_hash = notes_moodboard_note_object_hash(parsed, revision=1, deleted=False)
+        except NotesMoodboardStudioContractError:
+            digest = hashlib.sha256(canonical_moodboard_studio_json_bytes(placement_source)).hexdigest()
+            placement_id = f"notes.moodboard_note:sha256:{digest}"
+            canonical_hash = self._note_task_v60_hash(
+                {"domain": "notes.moodboard_note", "source": placement_source}
+            )
+            diagnostic = moodboard_studio_legacy_source_diagnostic(
+                "legacy_moodboard_placement_identity_invalid", placement_source
+            )
+            diagnostic_code, diagnostic_hash = diagnostic["code"], diagnostic["source_hash"]
+        with self.transaction() as conn:
+            self._set_notes_moodboard_studio_v61_dataset_scope(conn, dataset)
+            existing = conn.execute(
+                "SELECT * FROM moodboard_notes "
+                "WHERE owner_user_id=? AND dataset_id=? AND moodboard_id=? AND note_id=?",
+                (owner, dataset, moodboard_id, note_id),
+            ).fetchone()
+            if existing is not None and not bool(existing["deleted"]):
+                return False
+            if existing is not None:
+                revision = int(existing["canonical_revision"]) + 1
+                version = int(existing["version"]) + 1
+                placement_source.update(
+                    {
+                        "x": int(existing["x"]),
+                        "y": int(existing["y"]),
+                        "width": int(existing["width"]),
+                        "height": int(existing["height"]),
+                        "order_index": int(existing["order_index"]),
+                        "display": json.loads(str(existing["display_json"])),
+                    }
+                )
+                try:
+                    parsed = parse_notes_moodboard_note_v1(placement_source)
+                    canonical_hash = notes_moodboard_note_object_hash(
+                        parsed,
+                        revision=revision,
+                        deleted=False,
+                    )
+                except NotesMoodboardStudioContractError:
+                    canonical_hash = self._note_task_v60_hash(
+                        {"domain": "notes.moodboard_note", "source": placement_source, "revision": revision}
+                    )
+                conn.execute(
+                    "UPDATE moodboard_notes SET deleted=?,last_modified=?,version=?,canonical_revision=?,canonical_hash=? "
+                    "WHERE owner_user_id=? AND dataset_id=? AND moodboard_id=? AND note_id=? AND deleted=?",
+                    (
+                        False,
+                        now,
+                        version,
+                        revision,
+                        canonical_hash,
+                        owner,
+                        dataset,
+                        moodboard_id,
+                        note_id,
+                        True,
+                    ),
+                )
+                return True
+            order_row = conn.execute(
+                "SELECT COALESCE(MAX(order_index),-1)+1 AS next_order_index "
+                "FROM moodboard_notes "
+                "WHERE owner_user_id=? AND dataset_id=? AND moodboard_id=?",
+                (owner, dataset, moodboard_id),
+            ).fetchone()
+            order_index = int(
+                order_row["next_order_index"]
+                if isinstance(order_row, Mapping)
+                else order_row[0]
+            )
+            placement_source["order_index"] = order_index
+            try:
+                parsed = parse_notes_moodboard_note_v1(placement_source)
+                placement_id = placement_object_id(parsed)
+                canonical_hash = notes_moodboard_note_object_hash(parsed, revision=1, deleted=False)
+            except NotesMoodboardStudioContractError:
+                digest = hashlib.sha256(canonical_moodboard_studio_json_bytes(placement_source)).hexdigest()
+                placement_id = f"notes.moodboard_note:sha256:{digest}"
+            conn.execute(
+                "INSERT INTO moodboard_notes("
+                "owner_user_id,dataset_id,moodboard_id,note_id,placement_id,x,y,width,height,order_index,"
+                "display_json,created_at,last_modified,deleted,version,canonical_revision,canonical_hash,"
+                "source_diagnostic_code,source_diagnostic_hash"
+                ") VALUES(?,?,?,?,?,0,0,320,220,?,'{}',?,?,?,1,1,?,?,?)",
+                (
+                    owner,
+                    dataset,
+                    moodboard_id,
+                    note_id,
+                    placement_id,
+                    order_index,
+                    now,
+                    now,
+                    False,
+                    canonical_hash,
+                    diagnostic_code,
+                    diagnostic_hash,
+                ),
+            )
+            return True
 
     def unlink_note_from_moodboard(self, moodboard_id: int, note_id: str) -> bool:
         moodboard = self.get_moodboard_by_id(moodboard_id)
         if not moodboard:
             raise ConflictError("Moodboard not found.", entity="moodboards", entity_id=moodboard_id)  # noqa: TRY003
-        return self._manage_link("moodboard_notes", "moodboard_id", moodboard_id, "note_id", note_id, "unlink")
+        if not self._supports_notes_moodboard_studio_v61():
+            return self._manage_link("moodboard_notes", "moodboard_id", moodboard_id, "note_id", note_id, "unlink")
+        owner = str(self.client_id)
+        dataset = str(moodboard["dataset_id"])
+        now = self._get_current_utc_timestamp_iso()
+        with self.transaction() as conn:
+            self._set_notes_moodboard_studio_v61_dataset_scope(conn, dataset)
+            row = conn.execute(
+                "SELECT * FROM moodboard_notes WHERE owner_user_id=? AND dataset_id=? "
+                "AND moodboard_id=? AND note_id=?",
+                (owner, dataset, moodboard_id, note_id),
+            ).fetchone()
+            if row is None or bool(row["deleted"]):
+                return False
+            revision = int(row["canonical_revision"]) + 1
+            source = {
+                "moodboard_id": moodboard["sync_id"], "note_id": note_id,
+                "x": int(row["x"]), "y": int(row["y"]), "width": int(row["width"]),
+                "height": int(row["height"]), "order_index": int(row["order_index"]),
+                "display": json.loads(str(row["display_json"])),
+            }
+            try:
+                canonical_hash = notes_moodboard_note_object_hash(
+                    parse_notes_moodboard_note_v1(source), revision=revision, deleted=True
+                )
+            except NotesMoodboardStudioContractError:
+                canonical_hash = self._note_task_v60_hash(
+                    {"domain": "notes.moodboard_note", "source": source, "revision": revision, "deleted": True}
+                )
+            cursor = conn.execute(
+                "UPDATE moodboard_notes SET deleted=?,last_modified=?,version=version+1,"
+                "canonical_revision=?,canonical_hash=? WHERE owner_user_id=? AND dataset_id=? "
+                "AND moodboard_id=? AND note_id=? AND deleted=?",
+                (
+                    True if self.backend_type == BackendType.POSTGRESQL else 1,
+                    now,
+                    revision,
+                    canonical_hash,
+                    owner,
+                    dataset,
+                    moodboard_id,
+                    note_id,
+                    False if self.backend_type == BackendType.POSTGRESQL else 0,
+                ),
+            )
+            return cursor.rowcount == 1
 
     @staticmethod
     def _moodboard_content_preview_expr(note_alias: str = "n") -> str:
@@ -23697,6 +34727,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _build_moodboard_smart_rule_sql_parts(
         self,
         smart_rule: dict[str, Any],
+        *,
+        owner_user_id: str,
         note_alias: str = "n",
     ) -> tuple[list[str], list[str], list[Any]]:
         if not isinstance(smart_rule, dict):
@@ -23730,6 +34762,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         params: list[Any] = []
         deleted_false = "FALSE" if self.backend_type == BackendType.POSTGRESQL else "0"
         where_clauses.append(f"{note_alias}.deleted = {deleted_false}")
+        where_clauses.append(f"{note_alias}.client_id = ?")
+        params.append(owner_user_id)
 
         if query_text:
             like_value = f"%{query_text.lower()}%"
@@ -23764,6 +34798,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self,
         moodboard_id: int,
         smart_rule: dict[str, Any] | None,
+        *,
+        owner_user_id: str,
+        dataset_id: str | None,
     ) -> tuple[str, tuple[Any, ...]]:
         preview_expr = self._moodboard_content_preview_expr("n")
         deleted_false_value = False if self.backend_type == BackendType.POSTGRESQL else 0
@@ -23775,13 +34812,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "1 AS manual_hit, 0 AS smart_hit "
             "FROM moodboard_notes mn "
             "JOIN notes n ON n.id = mn.note_id "
-            "WHERE mn.moodboard_id = ? AND n.deleted = ?"
+            "WHERE mn.moodboard_id = ? AND mn.deleted = ? AND n.deleted = ? "
+            "AND n.client_id = ?"
         )
         select_queries: list[str] = [manual_select]
-        params: list[Any] = [moodboard_id, deleted_false_value]
+        params: list[Any] = [
+            moodboard_id,
+            deleted_false_value,
+            deleted_false_value,
+            owner_user_id,
+        ]
+        if self._supports_notes_moodboard_studio_v61():
+            manual_select += " AND mn.owner_user_id = ? AND mn.dataset_id = ?"
+            select_queries[0] = manual_select
+            params.extend((owner_user_id, dataset_id))
 
         if isinstance(smart_rule, dict) and smart_rule:
-            joins, where_clauses, smart_params = self._build_moodboard_smart_rule_sql_parts(smart_rule, note_alias="n")
+            joins, where_clauses, smart_params = self._build_moodboard_smart_rule_sql_parts(
+                smart_rule,
+                owner_user_id=owner_user_id,
+                note_alias="n",
+            )
             if where_clauses:
                 smart_select = (
                     "SELECT DISTINCT n.id AS id, n.title AS title, n.last_modified AS last_modified, "
@@ -23797,7 +34848,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return union_query, tuple(params)
 
     def _list_notes_matching_moodboard_rule(self, smart_rule: dict[str, Any]) -> list[dict[str, Any]]:
-        joins, where_clauses, params = self._build_moodboard_smart_rule_sql_parts(smart_rule, note_alias="n")
+        joins, where_clauses, params = self._build_moodboard_smart_rule_sql_parts(
+            smart_rule,
+            owner_user_id=str(self.client_id),
+            note_alias="n",
+        )
         if not where_clauses:
             return []
 
@@ -23817,11 +34872,28 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         union_query, union_params = self._build_moodboard_note_union_query(
             moodboard_id=moodboard_id,
             smart_rule=moodboard.get("smart_rule"),
+            owner_user_id=str(moodboard.get("owner_user_id") or self.client_id),
+            dataset_id=(
+                None
+                if moodboard.get("dataset_id") is None
+                else str(moodboard["dataset_id"])
+            ),
         )
         count_query = (
             f"WITH combined AS ({union_query}) "  # nosec B608
             "SELECT COUNT(DISTINCT id) AS total FROM combined"
         )
+        if self._supports_notes_moodboard_studio_v61():
+            with self.transaction() as conn:
+                dataset = moodboard.get("dataset_id")
+                if dataset is not None:
+                    self._set_notes_moodboard_studio_v61_dataset_scope(
+                        conn,
+                        str(dataset),
+                    )
+                cursor = conn.execute(count_query, union_params)
+                row = cursor.fetchone()
+                return int(row["total"]) if row and row["total"] is not None else 0
         cursor = self.execute_query(count_query, union_params)
         row = cursor.fetchone()
         return int(row["total"]) if row and row["total"] is not None else 0
@@ -23837,6 +34909,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         union_query, union_params = self._build_moodboard_note_union_query(
             moodboard_id=moodboard_id,
             smart_rule=moodboard.get("smart_rule"),
+            owner_user_id=str(moodboard.get("owner_user_id") or self.client_id),
+            dataset_id=(
+                None
+                if moodboard.get("dataset_id") is None
+                else str(moodboard["dataset_id"])
+            ),
         )
         page_query = (
             f"WITH combined AS ({union_query}), "  # nosec B608
@@ -23866,8 +34944,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "LIMIT ? OFFSET ?"
         )
         page_params = (*union_params, limit, offset)
-        cursor = self.execute_query(page_query, page_params)
-        paged = [dict(row) for row in cursor.fetchall()]
+        if self._supports_notes_moodboard_studio_v61():
+            with self.transaction() as conn:
+                dataset = moodboard.get("dataset_id")
+                if dataset is not None:
+                    self._set_notes_moodboard_studio_v61_dataset_scope(
+                        conn,
+                        str(dataset),
+                    )
+                cursor = conn.execute(page_query, page_params)
+                paged = [dict(row) for row in cursor.fetchall()]
+        else:
+            cursor = self.execute_query(page_query, page_params)
+            paged = [dict(row) for row in cursor.fetchall()]
 
         note_ids = [str(item.get("id")) for item in paged if item.get("id") is not None]
         keywords_by_note = self.get_keywords_for_notes(note_ids) if note_ids else {}
@@ -23884,7 +34973,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     # --- Linking Table Methods (with manual sync_log entries) ---
     def _manage_link(self, link_table: str, col1_name: str, col1_val: Any, col2_name: str, col2_val: Any,
-                     operation: str) -> bool:
+                     operation: str, *, owner_client_id: str | None = None) -> bool:
         """Helper to add ('link') or remove ('unlink') entries from a linking table."""
         now_iso = self._get_current_utc_timestamp_iso()
         sync_payload_dict: dict[str, Any] = {}
@@ -23893,6 +34982,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         try:
             with self.transaction() as conn:
+                if owner_client_id is not None and self.backend_type == BackendType.POSTGRESQL:
+                    parents = {
+                        "note_keywords": "notes",
+                        "conversation_keywords": "conversations",
+                        "collection_keywords": "keyword_collections",
+                    }
+                    parent = parents.get(link_table)
+                    if parent is None or col2_name != "keyword_id":
+                        raise InputError("Unsupported scoped keyword link")  # noqa: TRY003
+                    self._require_selected_owner_row(conn, parent, col1_val, owner_client_id)
+                    self._require_selected_owner_row(conn, "keywords", col2_val, owner_client_id)
                 if operation == "link":
                     if self.backend_type == BackendType.POSTGRESQL:
                         query = (
@@ -23991,7 +35091,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return dict(row)
         except (TypeError, ValueError):
             if hasattr(row, "keys"):
-                return {key: row[key] for key in row.keys()}
+                keys = row.keys()
+                return {key: row[key] for key in keys}
         return None
 
     def _normalize_note_folder_path(self, value: Any) -> str | None:
@@ -24037,6 +35138,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return expanded
 
     def _ensure_note_exists_for_folder_sync(self, conn: Any, note_id: str) -> None:
+        self._require_selected_owner_row(conn, "notes", note_id, self.client_id, include_deleted=True)
         row = conn.execute("SELECT id FROM notes WHERE id = ?", (note_id,)).fetchone()
         if row is None:
             raise ConflictError("Note not found.", entity="notes", entity_id=note_id)  # noqa: TRY003
@@ -24045,16 +35147,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         normalized_path = self._normalize_note_folder_path(folder_path)
         if not normalized_path:
             return None
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
+        lock_clause = " FOR UPDATE" if owner_params else ""
         return self._coerce_mapping_row(
             conn.execute(
-                """
+                f"""
                 SELECT id, path, deleted, version
                   FROM note_folders
-                 WHERE LOWER(path) = LOWER(?)
+                 WHERE LOWER(path) = LOWER(?){owner_clause}
                  ORDER BY deleted ASC, id ASC
-                 LIMIT 1
-                """,
-                (normalized_path,),
+                 LIMIT 1{lock_clause}
+                """,  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                (normalized_path,) + owner_params,
             ).fetchone()
         )
 
@@ -24063,6 +35167,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not normalized_path:
             raise InputError("Folder path cannot be empty.")  # noqa: TRY003
 
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         existing_row = self._lookup_note_folder_row_locked(conn, normalized_path)
         if existing_row:
             folder_id = int(existing_row["id"])
@@ -24070,14 +35175,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 now = self._get_current_utc_timestamp_iso()
                 deleted_value = False if self.backend_type == BackendType.POSTGRESQL else 0
                 conn.execute(
-                    "UPDATE note_folders SET deleted = ?, last_modified = ?, version = ?, client_id = ? WHERE id = ?",
+                    f"UPDATE note_folders SET deleted = ?, last_modified = ?, version = ?, client_id = ? WHERE id = ?{owner_clause}",  # nosec B608
                     (
                         deleted_value,
                         now,
                         int(existing_row.get("version") or 1) + 1,
                         self.client_id,
                         folder_id,
-                    ),
+                    ) + owner_params,
                 )
             return folder_id
 
@@ -24087,8 +35192,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if parent_id is not None:
             parent_row = self._coerce_mapping_row(
                 conn.execute(
-                    "SELECT path FROM note_folders WHERE id = ?",
-                    (parent_id,),
+                    f"SELECT path FROM note_folders WHERE id = ?{owner_clause}",  # nosec B608
+                    (parent_id,) + owner_params,
                 ).fetchone()
             ) or {}
             parent_display_path = self._normalize_note_folder_path(parent_row.get("path")) or parent_path
@@ -24098,11 +35203,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         conn.execute(
             """
             INSERT INTO note_folders(
-              name, path, parent_id, created_at, last_modified, deleted, client_id, version
+              sync_id, name, path, parent_id, created_at, last_modified, deleted, client_id, version
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                self._generate_uuid(),
                 stored_path.rsplit("/", 1)[-1],
                 stored_path,
                 parent_id,
@@ -24123,17 +35229,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def create_note_folder_path(self, folder_path: str) -> dict[str, Any]:
         """Create or reuse a note folder path and return the active folder row."""
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         try:
             with self.transaction() as conn:
                 folder_id = self._ensure_note_folder_path_locked(conn, folder_path)
                 folder_row = self._coerce_mapping_row(
                     conn.execute(
-                        """
-                        SELECT id, name, path, parent_id
+                        f"""
+                        SELECT id, sync_id, name, path, parent_id
                           FROM note_folders
-                         WHERE id = ? AND deleted = ?
-                        """,
-                        (folder_id, self._active_note_folder_deleted_value()),
+                         WHERE id = ? AND deleted = ?{owner_clause}
+                        """,  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                        (folder_id, self._active_note_folder_deleted_value()) + owner_params,
                     ).fetchone()
                 )
                 if folder_row is None:
@@ -24149,13 +35256,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         normalized_path = self._normalize_note_folder_path(folder_path)
         if not normalized_path:
             return None
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         cursor = self.execute_query(
-            """
-            SELECT id, name, path, parent_id
+            f"""
+            SELECT id, sync_id, name, path, parent_id
               FROM note_folders
-             WHERE LOWER(path) = LOWER(?) AND deleted = ?
-            """,
-            (normalized_path, self._active_note_folder_deleted_value()),
+             WHERE LOWER(path) = LOWER(?) AND deleted = ?{owner_clause}
+            """,  # nosec B608 - fixed owner SQL fragments; values stay bound.
+            (normalized_path, self._active_note_folder_deleted_value()) + owner_params,
+            read_only=True,
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -24165,21 +35274,28 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if limit <= 0:
             return []
         path_order_expr = self._case_insensitive_order_expression("path")
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         query = (
-            "SELECT id, name, path, parent_id "
+            "SELECT id, sync_id, name, path, parent_id "
             "FROM note_folders "
-            "WHERE deleted = ? "
+            f"WHERE deleted = ?{owner_clause} "
             f"ORDER BY {path_order_expr} "  # nosec B608
             "LIMIT ? OFFSET ?"
         )
         cursor = self.execute_query(
             query,
-            (self._active_note_folder_deleted_value(), limit, max(0, offset)),
+            (self._active_note_folder_deleted_value(),) + owner_params + (limit, max(0, offset)),
+            read_only=True,
         )
         return [dict(row) for row in cursor.fetchall()]
 
     def sync_note_folders(self, note_id: str, folder_paths: list[str] | tuple[str, ...]) -> list[dict[str, Any]]:
         desired_paths = self._expand_note_folder_paths(list(folder_paths or []))
+        folder_scope = ""
+        folder_params: tuple[str, ...] = ()
+        if self.backend_type == BackendType.POSTGRESQL:
+            folder_scope = " AND EXISTS (SELECT 1 FROM note_folders owner_folder WHERE owner_folder.id = note_folder_memberships.folder_id AND owner_folder.client_id = ?)"
+            folder_params = (self.client_id,)
         try:
             with self.transaction() as conn:
                 self._ensure_note_exists_for_folder_sync(conn, note_id)
@@ -24188,8 +35304,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     for folder_path in desired_paths
                 }
                 existing_rows = conn.execute(
-                    "SELECT folder_id FROM note_folder_memberships WHERE note_id = ?",
-                    (note_id,),
+                    f"SELECT folder_id FROM note_folder_memberships WHERE note_id = ?{folder_scope}",  # nosec B608
+                    (note_id,) + folder_params,
                 ).fetchall()
                 existing_ids: set[int] = set()
                 for row in existing_rows:
@@ -24230,6 +35346,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise InputError("source_id must be a positive integer.")  # noqa: TRY003
 
         desired_paths = self._expand_note_folder_paths(list(folder_paths or []))
+        folder_scope = ""
+        folder_params: tuple[str, ...] = ()
+        if self.backend_type == BackendType.POSTGRESQL:
+            folder_scope = " AND EXISTS (SELECT 1 FROM note_folders owner_folder WHERE owner_folder.id = note_folder_source_memberships.folder_id AND owner_folder.client_id = ?)"
+            folder_params = (self.client_id,)
+        key_scope = ""
+        if folder_params:
+            key_scope = " AND EXISTS (SELECT 1 FROM note_folders owner_folder WHERE owner_folder.id = note_folder_source_keys.folder_id AND owner_folder.client_id = ?)"
         try:
             with self.transaction() as conn:
                 self._ensure_note_exists_for_folder_sync(conn, note_id)
@@ -24239,12 +35363,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     desired_pairs.append((folder_path, folder_id))
 
                 existing_rows = conn.execute(
-                    """
+                    f"""
                     SELECT folder_id
                       FROM note_folder_source_memberships
-                     WHERE note_id = ? AND source_id = ?
-                    """,
-                    (note_id, int(source_id)),
+                     WHERE note_id = ? AND source_id = ?{folder_scope}
+                    """,  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                    (note_id, int(source_id)) + folder_params,
                 ).fetchall()
                 existing_ids: set[int] = set()
                 for row in existing_rows:
@@ -24271,12 +35395,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     )
 
                 existing_key_rows = conn.execute(
-                    """
+                    f"""
                     SELECT folder_key
                       FROM note_folder_source_keys
-                     WHERE source_id = ?
-                    """,
-                    (int(source_id),),
+                     WHERE source_id = ?{key_scope}
+                    """,  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                    (int(source_id),) + folder_params,
                 ).fetchall()
                 existing_keys: set[str] = set()
                 for row in existing_key_rows:
@@ -24287,11 +35411,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     existing_keys.add(str(folder_key))
                 for folder_key in existing_keys - desired_keys:
                     conn.execute(
-                        """
+                        f"""
                         DELETE FROM note_folder_source_keys
-                         WHERE source_id = ? AND folder_key = ?
-                        """,
-                        (int(source_id), folder_key),
+                         WHERE source_id = ? AND folder_key = ?{key_scope}
+                        """,  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                        (int(source_id), folder_key) + folder_params,
                     )
 
                 now = self._get_current_utc_timestamp_iso()
@@ -24300,11 +35424,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if not folder_key:
                         continue
                     conn.execute(
-                        """
+                        f"""
                         DELETE FROM note_folder_source_keys
-                         WHERE source_id = ? AND folder_key = ?
-                        """,
-                        (int(source_id), folder_key),
+                         WHERE source_id = ? AND folder_key = ?{key_scope}
+                        """,  # nosec B608 - fixed owner SQL fragments; values stay bound.
+                        (int(source_id), folder_key) + folder_params,
                     )
                     conn.execute(
                         """
@@ -24330,8 +35454,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_note_folders_for_note(self, note_id: str) -> list[dict[str, Any]]:
         order_clause = self._case_insensitive_order_clause("f.path")
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id, "f")
+        if owner_params:
+            owner_clause += " AND EXISTS (SELECT 1 FROM notes owner_note WHERE owner_note.id = ? AND owner_note.client_id = ?)"
+            owner_params += (note_id, self.client_id)
         query = """
-                SELECT f.id, f.name, f.path, f.parent_id
+                SELECT f.id, f.sync_id, f.name, f.path, f.parent_id
                   FROM note_folders f
                   JOIN (
                         SELECT folder_id
@@ -24344,9 +35472,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                   ) memberships
                     ON memberships.folder_id = f.id
                  WHERE f.deleted = 0
+                   AND NOT EXISTS (
+                         SELECT 1
+                           FROM note_folder_sync_suppressions suppression
+                          WHERE suppression.note_id = ?
+                            AND suppression.folder_id = memberships.folder_id
+                   )
+                {owner_clause}
                 {order_clause}
                 """.format_map(locals())  # nosec B608
-        cursor = self.execute_query(query, (note_id, note_id))
+        cursor = self.execute_query(query, (note_id, note_id, note_id) + owner_params, read_only=True)
         return [dict(row) for row in cursor.fetchall()]
 
     def get_note_folders_for_notes(self, note_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
@@ -24355,11 +35490,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         out: dict[str, list[dict[str, Any]]] = {note_id: [] for note_id in note_ids}
         max_vars = 450
         path_order_expr = self._case_insensitive_order_expression("f.path")
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id, "f")
+        if owner_params:
+            owner_clause += " AND EXISTS (SELECT 1 FROM notes owner_note WHERE owner_note.id = memberships.note_id AND owner_note.client_id = ?)"
+            owner_params += (self.client_id,)
         for start in range(0, len(note_ids), max_vars):
             batch = note_ids[start:start + max_vars]
             placeholders = ",".join(["?"] * len(batch))
             query = """
-                    SELECT memberships.note_id AS note_id, f.id, f.name, f.path, f.parent_id
+                    SELECT memberships.note_id AS note_id, f.id, f.sync_id, f.name, f.path, f.parent_id
                       FROM note_folders f
                       JOIN (
                             SELECT note_id, folder_id
@@ -24372,9 +35511,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                       ) memberships
                         ON memberships.folder_id = f.id
                      WHERE f.deleted = 0
+                       AND NOT EXISTS (
+                             SELECT 1
+                               FROM note_folder_sync_suppressions suppression
+                              WHERE suppression.note_id = memberships.note_id
+                                AND suppression.folder_id = memberships.folder_id
+                       )
+                     {owner_clause}
                      ORDER BY memberships.note_id, {path_order_expr}
                     """.format_map(locals())  # nosec B608
-            cursor = self.execute_query(query, tuple(batch + batch))
+            cursor = self.execute_query(query, tuple(batch + batch) + owner_params, read_only=True)
             for row in cursor.fetchall():
                 record = dict(row)
                 current_note_id = str(record.pop("note_id"))
@@ -24386,6 +35532,35 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     # ==========================
     # Flashcards & Decks (V5)
     # ==========================
+    def _flashcard_owner_filter(self, alias: str = "") -> tuple[str, tuple[str, ...]]:
+        """Scope shared PostgreSQL resources; SQLite client IDs identify devices."""
+        if self.backend_type != BackendType.POSTGRESQL:
+            return "", ()
+        columns = {"": "client_id", "f": "f.client_id", "d": "d.client_id", "fa": "fa.client_id", "fr": "fr.client_id", "kw": "kw.client_id"}
+        return f" AND {columns[alias]} = ?", (self.client_id,)
+
+    def _validate_flashcard_deck_locked(self, conn: Any, deck_id: Any) -> None:
+        """Require a live owned deck when a PostgreSQL card references one."""
+        if self.backend_type != BackendType.POSTGRESQL or deck_id is None:
+            return
+        row = conn.execute(
+            "SELECT id FROM decks WHERE id = ? AND client_id = ? AND deleted = FALSE FOR SHARE",
+            (deck_id, self.client_id),
+        ).fetchone()
+        if not row:
+            raise InputError("Deck not found")  # noqa: TRY003
+
+    def _validate_flashcard_workspace_locked(self, conn: Any, workspace_id: str | None) -> None:
+        """Validate the owner at the deck boundary without broadening workspace APIs."""
+        if self.backend_type != BackendType.POSTGRESQL or workspace_id is None:
+            return
+        row = conn.execute(
+            "SELECT id FROM workspaces WHERE id = ? AND client_id = ? AND deleted = FALSE FOR SHARE",
+            (workspace_id, self.client_id),
+        ).fetchone()
+        if not row:
+            raise InputError("Workspace not found")  # noqa: TRY003
+
     @staticmethod
     def _normalize_deck_parent_id(parent_deck_id: Any) -> int | None:
         if parent_deck_id is None:
@@ -24417,22 +35592,24 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         if self.backend_type == BackendType.POSTGRESQL:
             parent_lookup_query = (
-                "SELECT id, parent_deck_id FROM decks WHERE id = ? AND deleted = 0 FOR UPDATE"
+                "SELECT id, parent_deck_id FROM decks WHERE id = ? AND deleted = 0 AND client_id = ? FOR UPDATE"
             )
-            ancestor_lookup_query = "SELECT parent_deck_id FROM decks WHERE id = ? FOR UPDATE"
+            ancestor_lookup_query = "SELECT parent_deck_id FROM decks WHERE id = ? AND client_id = ? FOR UPDATE"
+            owner_params = (self.client_id,)
         else:
             parent_lookup_query = "SELECT id, parent_deck_id FROM decks WHERE id = ? AND deleted = 0"
             ancestor_lookup_query = "SELECT parent_deck_id FROM decks WHERE id = ?"
+            owner_params = ()
         parent_row = self._coerce_mapping_row(
             conn.execute(
                 parent_lookup_query,
-                (parent_id,),
+                (parent_id, *owner_params),
             ).fetchone()
         )
         if not parent_row:
             raise InputError("Parent deck not found")  # noqa: TRY003
 
-        if target_deck_id is None:
+        if target_deck_id is None and self.backend_type != BackendType.POSTGRESQL:
             return parent_id
 
         seen: set[int] = set()
@@ -24444,10 +35621,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             row = self._coerce_mapping_row(
                 conn.execute(
                     ancestor_lookup_query,
-                    (current_parent_id,),
+                    (current_parent_id, *owner_params),
                 ).fetchone()
             )
             if not row:
+                if self.backend_type == BackendType.POSTGRESQL:
+                    raise InputError("Parent deck ancestry is not available to this owner")  # noqa: TRY003
                 return parent_id
             raw_parent_id = row.get("parent_deck_id")
             current_parent_id = None if raw_parent_id is None else self._normalize_deck_parent_id(raw_parent_id)
@@ -24478,8 +35657,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         prompt_side_for_insert = normalized_prompt_side or "front"
         scheduler_settings_json = scheduler_settings_to_json(scheduler_settings)
+        owner_filter, owner_params = self._flashcard_owner_filter()
         try:
             with self.transaction() as conn:
+                self._validate_flashcard_workspace_locked(conn, workspace_id)
                 parent_for_insert = (
                     None
                     if parent_deck_id is ...
@@ -24491,11 +35672,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
                 # Undelete if a deck with the same name exists but is deleted
                 deleted_row = conn.execute(
-                    "SELECT id, version FROM decks WHERE name = ? AND deleted = 1",
-                    (name,),
+                    "SELECT id, version FROM decks WHERE name = ? AND deleted = 1" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (name, *owner_params),
                 ).fetchone()
                 if deleted_row:
-                    deck_id, current_version = int(deleted_row[0]), int(deleted_row[1])
+                    deck_id, current_version = int(deleted_row["id"]), int(deleted_row["version"])
                     if parent_deck_id is not ...:
                         self._validate_deck_parent_locked(
                             conn,
@@ -24531,9 +35712,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if parent_deck_id is not ...:
                         set_parts.append("parent_deck_id = ?")
                         params.append(parent_for_insert)
-                    params.extend([deck_id, current_version])
+                    params.extend([deck_id, current_version, *owner_params])
                     rc = conn.execute(
-                        f"UPDATE decks SET {', '.join(set_parts)} WHERE id = ? AND version = ?",  # nosec B608
+                        f"UPDATE decks SET {', '.join(set_parts)} WHERE id = ? AND version = ?{owner_filter}",  # nosec B608
                         tuple(params),
                     ).rowcount
                     if rc == 0:
@@ -24604,6 +35785,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
             conditions = ["ds.user_id = ?"]
             params_list: list[Any] = [int(shared_with_user_id)]
+            if self.backend_type == BackendType.POSTGRESQL:
+                conditions.append("d.client_id = ?")
+                params_list.append(self.client_id)
             if not include_deleted:
                 conditions.append("d.deleted = 0")
             if workspace_id is not None:
@@ -24615,7 +35799,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             query += "WHERE " + " AND ".join(conditions) + " ORDER BY d.name LIMIT ? OFFSET ?"
             params_list.extend([limit, offset])
             try:
-                cursor = self.execute_query(query, tuple(params_list))
+                cursor = self.execute_query(query, tuple(params_list), read_only=True)
                 return [dict(row) for row in cursor.fetchall()]
             except CharactersRAGDBError:  # noqa: TRY203
                 raise
@@ -24624,61 +35808,55 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "SELECT id, name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, "
             "deleted, client_id, version FROM decks "
         )
-        if include_deleted:
-            if workspace_id is not None:
-                query = select_sql + "WHERE workspace_id = ? ORDER BY name LIMIT ? OFFSET ?"
-                params: tuple[Any, ...] = (workspace_id, limit, offset)
-            elif include_workspace_items:
-                query = select_sql + "ORDER BY name LIMIT ? OFFSET ?"
-                params = (limit, offset)
-            else:
-                query = select_sql + "WHERE workspace_id IS NULL ORDER BY name LIMIT ? OFFSET ?"
-                params = (limit, offset)
-        else:
-            if workspace_id is not None:
-                query = select_sql + "WHERE deleted = 0 AND workspace_id = ? ORDER BY name LIMIT ? OFFSET ?"
-                params = (workspace_id, limit, offset)
-            elif include_workspace_items:
-                query = select_sql + "WHERE deleted = 0 ORDER BY name LIMIT ? OFFSET ?"
-                params = (limit, offset)
-            else:
-                query = select_sql + "WHERE deleted = 0 AND workspace_id IS NULL ORDER BY name LIMIT ? OFFSET ?"
-                params = (limit, offset)
+        owner_filter, owner_params = self._flashcard_owner_filter()
+        query = select_sql + "WHERE 1 = 1" + owner_filter
+        params = list(owner_params)
+        if not include_deleted:
+            query += " AND deleted = 0"
+        if workspace_id is not None:
+            query += " AND workspace_id = ?"
+            params.append(workspace_id)
+        elif not include_workspace_items:
+            query += " AND workspace_id IS NULL"
+        query += " ORDER BY name LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
         try:
-            cursor = self.execute_query(query, params)
+            cursor = self.execute_query(query, tuple(params), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
 
     def get_deck(self, deck_id: int) -> dict[str, Any] | None:
         """Fetch a single deck row by id."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         query = (
             "SELECT id, name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, deleted, client_id, version "
-            "FROM decks WHERE id = ?"
+            "FROM decks WHERE id = ?" + owner_filter  # nosec B608 -- Fixed owner clauses; all data values are bound.
         )
         try:
-            cursor = self.execute_query(query, (deck_id,))
+            cursor = self.execute_query(query, (deck_id, *owner_params), read_only=True)
             row = cursor.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError:  # noqa: TRY203
             raise
 
     def get_deck_by_name(self, name: str, *, include_deleted: bool = False) -> dict[str, Any] | None:
-        """Fetch one deck row by name using the repository-wide unique-name invariant."""
+        """Fetch one deck row by name in the selected owner's repository."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         if include_deleted:
             query = (
                 "SELECT id, name, description, parent_deck_id, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, "
                 "last_modified, deleted, client_id, version, visibility FROM decks WHERE name = ? "
-                "ORDER BY id LIMIT 1"
+                + owner_filter + " ORDER BY id LIMIT 1"  # nosec B608 -- Fixed owner clauses; all data values are bound.
             )
         else:
             query = (
                 "SELECT id, name, description, parent_deck_id, workspace_id, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, "
                 "last_modified, deleted, client_id, version, visibility FROM decks WHERE name = ? AND deleted = 0 "
-                "ORDER BY id LIMIT 1"
+                + owner_filter + " ORDER BY id LIMIT 1"  # nosec B608 -- Fixed owner clauses; all data values are bound.
             )
         try:
-            cursor = self.execute_query(query, (name,))
+            cursor = self.execute_query(query, (name, *owner_params), read_only=True)
             row = cursor.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError:  # noqa: TRY203
@@ -24704,11 +35882,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         normalized_role = _normalize_deck_share_role(role)
         now = self._get_current_utc_timestamp_iso()
+        owner_filter, owner_params = self._flashcard_owner_filter()
+        lock_clause = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
         try:
             with self.transaction() as conn:
                 deck = conn.execute(
-                    "SELECT id FROM decks WHERE id = ? AND deleted = 0",
-                    (int(deck_id),),
+                    "SELECT id FROM decks WHERE id = ? AND deleted = 0" + owner_filter + lock_clause,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (int(deck_id), *owner_params),
                 ).fetchone()
                 if deck is None:
                     raise ConflictError("Deck not found", entity="decks", identifier=deck_id)  # noqa: TRY003
@@ -24760,15 +35940,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def list_deck_shares(self, deck_id: int) -> list[dict[str, Any]]:
         """List all per-user share records for a deck owned by this DB."""
+        owner_filter = ""
+        owner_params = ()
+        if self.backend_type == BackendType.POSTGRESQL:
+            owner_filter = " AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_shares.deck_id AND d.client_id = ?)"
+            owner_params = (self.client_id,)
         try:
             cursor = self.execute_query(
-                """
+                f"""
                 SELECT deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version
                   FROM deck_shares
-                 WHERE deck_id = ?
+                 WHERE deck_id = ?{owner_filter}
                  ORDER BY user_id
-                """,
-                (int(deck_id),),
+                """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                (int(deck_id), *owner_params),
+                read_only=True,
             )
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
@@ -24776,14 +35962,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_deck_share(self, deck_id: int, *, user_id: int) -> dict[str, Any] | None:
         """Fetch one per-user share record for a deck owned by this DB."""
+        owner_filter = ""
+        owner_params = ()
+        if self.backend_type == BackendType.POSTGRESQL:
+            owner_filter = " AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_shares.deck_id AND d.client_id = ?)"
+            owner_params = (self.client_id,)
         try:
             cursor = self.execute_query(
-                """
+                f"""
                 SELECT deck_id, user_id, role, shared_by, shared_at, last_modified, client_id, version
                   FROM deck_shares
-                 WHERE deck_id = ? AND user_id = ?
-                """,
-                (int(deck_id), int(user_id)),
+                 WHERE deck_id = ? AND user_id = ?{owner_filter}
+                """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                (int(deck_id), int(user_id), *owner_params),
+                read_only=True,
             )
             row = cursor.fetchone()
             return dict(row) if row else None
@@ -24792,11 +35984,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def delete_deck_share(self, deck_id: int, *, user_id: int) -> bool:
         """Remove one per-user share record from a deck owned by this DB."""
+        owner_filter = ""
+        owner_params = ()
+        if self.backend_type == BackendType.POSTGRESQL:
+            owner_filter = " AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_shares.deck_id AND d.client_id = ?)"
+            owner_params = (self.client_id,)
         try:
             with self.transaction() as conn:
                 rowcount = conn.execute(
-                    "DELETE FROM deck_shares WHERE deck_id = ? AND user_id = ?",
-                    (int(deck_id), int(user_id)),
+                    "DELETE FROM deck_shares WHERE deck_id = ? AND user_id = ?" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (int(deck_id), int(user_id), *owner_params),
                 ).rowcount
                 return rowcount > 0
         except sqlite3.Error as exc:
@@ -24819,6 +36016,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         expected_version: int | None = None,
     ) -> bool:
         """Update mutable deck fields with optimistic locking."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         set_parts: list[str] = []
         params: list[Any] = []
         if name is not None:
@@ -24846,12 +36044,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             set_parts.append("parent_deck_id = ?")
             params.append(self._normalize_deck_parent_id(parent_deck_id))
         if not set_parts:
-            if expected_version is None:
+            if expected_version is None and self.backend_type != BackendType.POSTGRESQL:
                 return True
             deck = self.get_deck(deck_id)
             if not deck:
                 raise ConflictError("Deck not found", entity="decks", identifier=deck_id)  # noqa: TRY003
-            if int(deck["version"]) != expected_version:
+            if expected_version is not None and int(deck["version"]) != expected_version:
                 raise ConflictError("Version mismatch updating deck", entity="decks", identifier=deck_id)  # noqa: TRY003
             return True
 
@@ -24862,14 +36060,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         try:
             with self.transaction() as conn:
                 row = conn.execute(
-                    "SELECT version FROM decks WHERE id = ? AND deleted = 0",
-                    (deck_id,),
+                    "SELECT version FROM decks WHERE id = ? AND deleted = 0" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (deck_id, *owner_params),
                 ).fetchone()
                 if not row:
                     raise ConflictError("Deck not found", entity="decks", identifier=deck_id)  # noqa: TRY003
-                current_version = int(row[0])
+                current_version = int(row["version"])
                 if expected_version is not None and current_version != expected_version:
                     raise ConflictError("Version mismatch updating deck", entity="decks", identifier=deck_id)  # noqa: TRY003
+                if workspace_id is not ...:
+                    self._validate_flashcard_workspace_locked(conn, workspace_id)
                 if parent_deck_id is not ...:
                     params[set_parts.index("parent_deck_id = ?")] = self._validate_deck_parent_locked(
                         conn,
@@ -24877,8 +36077,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         parent_deck_id=parent_deck_id,
                     )
 
-                params_final = params + [deck_id]
-                query = f"UPDATE decks SET {', '.join(set_parts)} WHERE id = ? AND deleted = 0"  # nosec B608
+                params_final = params + [deck_id, *owner_params]
+                query = f"UPDATE decks SET {', '.join(set_parts)} WHERE id = ? AND deleted = 0{owner_filter}"  # nosec B608
                 rc = conn.execute(query, tuple(params_final)).rowcount
                 return rc > 0
         except sqlite3.IntegrityError as exc:
@@ -25170,15 +36370,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise CharactersRAGDBError(f"Failed to create flashcard template: {exc}") from exc  # noqa: TRY003
 
     def count_flashcard_templates(self) -> int:
-        try:
-            cursor = self.execute_query(
-                "SELECT COUNT(*) AS cnt FROM flashcard_templates WHERE deleted = ?",
-                (self._flashcard_template_deleted_value(False),),
-            )
-            row = cursor.fetchone()
-            return int(row["cnt"]) if row else 0
-        except CharactersRAGDBError:
-            raise
+        cursor = self.execute_query(
+            "SELECT COUNT(*) AS cnt FROM flashcard_templates WHERE deleted = ?",
+            (self._flashcard_template_deleted_value(False),),
+            read_only=True,
+        )
+        row = cursor.fetchone()
+        return int(row["cnt"]) if row else 0
 
     def list_flashcard_templates(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
         query = (
@@ -25186,14 +36384,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "placeholder_definitions_json, created_at, last_modified, deleted, client_id, version "
             "FROM flashcard_templates WHERE deleted = ? ORDER BY name ASC LIMIT ? OFFSET ?"
         )
-        try:
-            cursor = self.execute_query(
-                query,
-                (self._flashcard_template_deleted_value(False), limit, offset),
-            )
-            return [self._serialize_flashcard_template_row(dict(row)) for row in cursor.fetchall()]
-        except CharactersRAGDBError:
-            raise
+        cursor = self.execute_query(
+            query,
+            (self._flashcard_template_deleted_value(False), limit, offset),
+            read_only=True,
+        )
+        return [self._serialize_flashcard_template_row(dict(row)) for row in cursor.fetchall()]
 
     def get_flashcard_template(self, template_id: int, *, include_deleted: bool = False) -> dict[str, Any] | None:
         query = (
@@ -25205,12 +36401,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not include_deleted:
             query += " AND deleted = ?"
             params.append(self._flashcard_template_deleted_value(False))
-        try:
-            cursor = self.execute_query(query, tuple(params))
-            row = cursor.fetchone()
-            return self._serialize_flashcard_template_row(dict(row)) if row else None
-        except CharactersRAGDBError:
-            raise
+        cursor = self.execute_query(query, tuple(params), read_only=True)
+        row = cursor.fetchone()
+        return self._serialize_flashcard_template_row(dict(row)) if row else None
 
     def update_flashcard_template(
         self,
@@ -25444,6 +36637,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             reverse_flag = 1 if model_type == 'basic_reverse' else 0
         try:
             with self.transaction() as conn:
+                self._validate_flashcard_deck_locked(conn, deck_id)
                 insert_sql = (
                     """
                     INSERT INTO flashcards(
@@ -25506,7 +36700,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """
         uuids: list[str] = []
         try:
-            with self.transaction() as _:
+            with self.transaction() as conn:
                 insert_sql = (
                     """
                     INSERT INTO flashcards(
@@ -25526,6 +36720,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     now = self._get_current_utc_timestamp_iso()
 
                     deck_id = card_data.get('deck_id')
+                    self._validate_flashcard_deck_locked(conn, deck_id)
                     front = card_data['front']
                     back = card_data['back']
                     notes = card_data.get('notes')
@@ -25636,8 +36831,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if deck_id is not None:
             return f"{deck_id_column} = ?", (deck_id,), False
         if not include_workspace_items:
-            return f"{deck_alias}.workspace_id IS NULL", tuple(), True
-        return "", tuple(), False
+            return f"{deck_alias}.workspace_id IS NULL", (), True
+        return "", (), False
 
     @staticmethod
     def _normalize_flashcard_sqlite_query(q: str) -> str:
@@ -25661,6 +36856,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """List flashcards with filters. due_status in {'new','learning','due','all'}."""
         where_clauses = ["1=1"]
         params: list[Any] = []
+        if self.backend_type == BackendType.POSTGRESQL:
+            where_clauses.append("f.client_id = ?")
+            params.append(self.client_id)
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
         keyword_table = self._map_table_for_backend("keywords")
         if not include_deleted:
             if self.backend_type == BackendType.POSTGRESQL:
@@ -25691,6 +36890,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         join_tag = ""
         if tag:
             join_tag = f"JOIN flashcard_keywords fk ON fk.card_id = f.id JOIN {keyword_table} kw ON kw.id = fk.keyword_id"
+            if self.backend_type == BackendType.POSTGRESQL:
+                join_tag += " AND kw.client_id = f.client_id"
             where_clauses.append("kw.keyword = ?")
             params.append(tag)
 
@@ -25724,7 +36925,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                    f.queue_state, f.step_index, f.suspended_reason,
                    f.created_at, f.last_modified, f.deleted, f.client_id, f.version, f.model_type, f.reverse
             FROM flashcards f
-            LEFT JOIN decks d ON d.id = f.deck_id
+            LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}
             {join_tag}
             WHERE {where_sql} {fts_filter}
             {order_sql}
@@ -25732,7 +36933,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """.format_map(locals())  # nosec B608
         params.extend([limit, offset])
         try:
-            cursor = self.execute_query(query, tuple(params))
+            cursor = self.execute_query(query, tuple(params), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
@@ -25748,6 +36949,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Count flashcards matching filters. Mirrors list_flashcards filters."""
         where_clauses = ["1=1"]
         params: list[Any] = []
+        if self.backend_type == BackendType.POSTGRESQL:
+            where_clauses.append("f.client_id = ?")
+            params.append(self.client_id)
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
         keyword_table = self._map_table_for_backend("keywords")
         if not include_deleted:
             if self.backend_type == BackendType.POSTGRESQL:
@@ -25759,7 +36964,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
         )
-        visibility_join = " LEFT JOIN decks d ON d.id = f.deck_id" if needs_deck_join else ""
+        visibility_join = f" LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}" if needs_deck_join else ""
         if visibility_clause:
             where_clauses.append(visibility_clause)
             params.extend(visibility_params)
@@ -25778,6 +36983,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         join_tag = ""
         if tag:
             join_tag = f"JOIN flashcard_keywords fk ON fk.card_id = f.id JOIN {keyword_table} kw ON kw.id = fk.keyword_id"
+            if self.backend_type == BackendType.POSTGRESQL:
+                join_tag += " AND kw.client_id = f.client_id"
             where_clauses.append("kw.keyword = ?")
             params.append(tag)
 
@@ -25805,9 +37012,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              WHERE {where_sql} {fts_filter}
         """.format_map(locals())  # nosec B608
         try:
-            cursor = self.execute_query(query, tuple(params))
+            cursor = self.execute_query(query, tuple(params), read_only=True)
             row = cursor.fetchone()
-            return int(row[0]) if row else 0
+            return int(row["cnt"]) if row else 0
         except CharactersRAGDBError:  # noqa: TRY203
             raise
 
@@ -25842,6 +37049,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 ]
             )
 
+        if self.backend_type == BackendType.POSTGRESQL:
+            where_clauses.extend(["f.client_id = ?", "kw.client_id = f.client_id", "(d.id IS NULL OR d.client_id = f.client_id)"])
+            params.append(self.client_id)
+
         if normalized_q:
             where_clauses.append("LOWER(kw.keyword) LIKE ?")
             params.append(f"%{normalized_q.lower()}%")
@@ -25864,7 +37075,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         params.append(limit)
 
         try:
-            cursor = self.execute_query(query, tuple(params))
+            cursor = self.execute_query(query, tuple(params), read_only=True)
             return [
                 {"tag": str(row["tag"]), "count": int(row["usage_count"] or 0)}
                 for row in cursor.fetchall()
@@ -25878,18 +37089,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return []
         placeholders = ",".join(["?"] * len(uuids))
         deleted_clause = "f.deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "f.deleted = 0"
-        query = """
+        owner_filter, owner_params = self._flashcard_owner_filter("f")
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
+        query = f"""
             SELECT f.uuid, f.deck_id, d.name AS deck_name, d.workspace_id AS workspace_id, f.front, f.back, f.notes, f.extra, f.is_cloze, f.tags_json,
                    f.source_ref_type, f.source_ref_id, f.conversation_id, f.message_id,
                    f.ef, f.interval_days, f.repetitions, f.lapses, f.due_at, f.last_reviewed_at,
                    f.queue_state, f.step_index, f.suspended_reason,
                    f.created_at, f.last_modified, f.deleted, f.client_id, f.version, f.model_type, f.reverse
               FROM flashcards f
-              LEFT JOIN decks d ON d.id = f.deck_id
-             WHERE f.uuid IN ({placeholders}) AND {deleted_clause}
-        """.format_map(locals())  # nosec B608
+              LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}
+             WHERE f.uuid IN ({placeholders}) AND {deleted_clause}{owner_filter}
+        """  # nosec B608
         try:
-            cursor = self.execute_query(query, tuple(uuids))
+            cursor = self.execute_query(query, (*uuids, *owner_params), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
@@ -25963,8 +37176,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
         )
-        visibility_join = " LEFT JOIN decks d ON d.id = f.deck_id" if needs_deck_join else ""
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
+        visibility_join = f" LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}" if needs_deck_join else ""
         visibility_suffix = f" AND {visibility_clause}" if visibility_clause else ""
+        owner_filter, owner_params = self._flashcard_owner_filter("f")
+        visibility_suffix += owner_filter
+        visibility_params = (*visibility_params, *owner_params)
         if deck_id is None:
             selections: tuple[tuple[str, str, tuple[Any, ...]], ...] = (
                 (
@@ -26004,34 +37221,34 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     (
                         "SELECT uuid FROM flashcards f "
                         "WHERE f.deleted = ? AND f.queue_state IN ('learning', 'relearning') "
-                        "AND f.due_at IS NOT NULL AND f.due_at <= ? AND f.deck_id = ? "
-                        "ORDER BY f.due_at ASC, f.created_at ASC LIMIT 1"
+                        f"AND f.due_at IS NOT NULL AND f.due_at <= ? AND f.deck_id = ?{owner_filter} "
+                        "ORDER BY f.due_at ASC, f.created_at ASC LIMIT 1"  # nosec B608 -- Fixed owner clause; all data values are bound.
                     ),
-                    (deleted_value, now_iso, deck_id),
+                    (deleted_value, now_iso, deck_id, *owner_params),
                 ),
                 (
                     "review_due",
                     (
                         "SELECT uuid FROM flashcards f "
                         "WHERE f.deleted = ? AND f.queue_state = 'review' "
-                        "AND f.due_at IS NOT NULL AND f.due_at <= ? AND f.deck_id = ? "
-                        "ORDER BY f.due_at ASC, f.created_at ASC LIMIT 1"
+                        f"AND f.due_at IS NOT NULL AND f.due_at <= ? AND f.deck_id = ?{owner_filter} "
+                        "ORDER BY f.due_at ASC, f.created_at ASC LIMIT 1"  # nosec B608 -- Fixed owner clause; all data values are bound.
                     ),
-                    (deleted_value, now_iso, deck_id),
+                    (deleted_value, now_iso, deck_id, *owner_params),
                 ),
                 (
                     "new",
                     (
                         "SELECT uuid FROM flashcards f "
-                        "WHERE f.deleted = ? AND f.queue_state = 'new' AND f.deck_id = ? "
-                        "ORDER BY f.created_at ASC, f.id ASC LIMIT 1"
+                        f"WHERE f.deleted = ? AND f.queue_state = 'new' AND f.deck_id = ?{owner_filter} "
+                        "ORDER BY f.created_at ASC, f.id ASC LIMIT 1"  # nosec B608 -- Fixed owner clause; all data values are bound.
                     ),
-                    (deleted_value, deck_id),
+                    (deleted_value, deck_id, *owner_params),
                 ),
             )
         try:
             for reason, query, params in selections:
-                cursor = self.execute_query(query, tuple(params))
+                cursor = self.execute_query(query, tuple(params), read_only=True)
                 row = cursor.fetchone()
                 if not row:
                     continue
@@ -26122,7 +37339,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Return the current deck name to snapshot when a review session starts."""
         if deck_id is None:
             return None
-        row = conn.execute("SELECT name FROM decks WHERE id = ?", (int(deck_id),)).fetchone()
+        owner_filter, owner_params = self._flashcard_owner_filter()
+        row = conn.execute("SELECT name FROM decks WHERE id = ?" + owner_filter, (int(deck_id), *owner_params)).fetchone()  # nosec B608 -- Fixed owner clauses; all data values are bound.
         if not row:
             return None
         try:
@@ -26132,27 +37350,29 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return self._normalize_nullable_text(raw_name)
 
     def _get_flashcard_review_session_row_for_conn(self, conn: Any, session_id: int) -> dict[str, Any] | None:
+        owner_filter, owner_params = self._flashcard_owner_filter()
         row = conn.execute(
-            """
+            f"""
             SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                    started_at, last_activity_at, completed_at, client_id,
                    cards_reviewed, correct_count, source_bundle_json, study_pack_id
               FROM flashcard_review_sessions
-             WHERE id = ?
-            """,
-            (int(session_id),),
+             WHERE id = ?{owner_filter}
+            """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+            (int(session_id), *owner_params),
         ).fetchone()
         return self._deserialize_flashcard_review_session_row(row) if row else None
 
     def _get_flashcard_review_session_reconstructed_aggregates(self, conn: Any, session_id: int) -> tuple[int, int]:
+        owner_filter, owner_params = self._flashcard_owner_filter()
         row = conn.execute(
-            """
+            f"""
             SELECT COUNT(*) AS cards_reviewed,
-                   COALESCE(SUM(CASE WHEN rating >= 3 THEN 1 ELSE 0 END), 0) AS correct_count
+                   COALESCE(SUM(CASE WHEN NOT was_lapse AND rating <> 0 THEN 1 ELSE 0 END), 0) AS correct_count
               FROM flashcard_reviews
-             WHERE review_session_id = ?
-            """,
-            (int(session_id),),
+             WHERE review_session_id = ?{owner_filter}
+            """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+            (int(session_id), *owner_params),
         ).fetchone()
         if not row:
             return 0, 0
@@ -26168,19 +37388,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         repaired_cards_reviewed: int,
         repaired_correct_count: int,
     ) -> bool:
+        owner_filter, owner_params = self._flashcard_owner_filter()
         cursor = conn.execute(
-            """
+            f"""
             UPDATE flashcard_review_sessions
                SET cards_reviewed = ?,
                    correct_count = ?
-             WHERE id = ?
+             WHERE id = ?{owner_filter}
                AND ((cards_reviewed IS NULL AND ? IS NULL) OR cards_reviewed = ?)
                AND ((correct_count IS NULL AND ? IS NULL) OR correct_count = ?)
-            """,
+            """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
             (
                 repaired_cards_reviewed,
                 repaired_correct_count,
                 int(session_id),
+                *owner_params,
                 expected_cards_reviewed,
                 expected_cards_reviewed,
                 expected_correct_count,
@@ -26200,12 +37422,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                AND last_activity_at < ?
             """
         )
-        params: list[Any] = [cutoff]
+        owner_filter, owner_params = self._flashcard_owner_filter()
+        query += owner_filter
+        params: list[Any] = [cutoff, *owner_params]
         if scope_key:
             query += " AND scope_key = ?"
             params.append(scope_key)
-        cursor = self.execute_query(query, tuple(params), commit=True)
-        return max(0, int(getattr(cursor, "rowcount", 0) or 0))
+        with self.transaction() as conn:
+            cursor = conn.execute(query, tuple(params))
+            return max(0, int(getattr(cursor, "rowcount", 0) or 0))
 
     def list_flashcard_review_sessions(
         self,
@@ -26226,7 +37451,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              WHERE 1 = 1
             """
         ]
-        params: list[Any] = []
+        owner_filter, owner_params = self._flashcard_owner_filter()
+        query_parts.append(owner_filter)
+        params: list[Any] = list(owner_params)
         if deck_id is not None:
             query_parts.append("AND deck_id = ?")
             params.append(int(deck_id))
@@ -26238,7 +37465,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             params.append(self._normalize_flashcard_review_session_status(status))
         query_parts.append("ORDER BY last_activity_at DESC, started_at DESC, id DESC LIMIT ?")
         params.append(max(1, int(limit)))
-        cursor = self.execute_query(" ".join(query_parts), tuple(params))
+        cursor = self.execute_query(" ".join(query_parts), tuple(params), read_only=True)
         return [
             session
             for row in cursor.fetchall()
@@ -26260,20 +37487,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         normalized_mode = self._normalize_flashcard_review_mode(review_mode)
         normalized_tag_filter = self._normalize_nullable_text(tag_filter)
         self.abandon_stale_flashcard_review_sessions(scope_key=normalized_scope_key)
+        owner_filter, owner_params = self._flashcard_owner_filter()
         now = self._get_current_utc_timestamp_iso()
 
         try:
             with self.transaction() as conn:
+                self._validate_flashcard_deck_locked(conn, deck_id)
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                            started_at, last_activity_at, completed_at, client_id,
                            cards_reviewed, correct_count, source_bundle_json, study_pack_id
                       FROM flashcard_review_sessions
-                     WHERE scope_key = ? AND status = 'active'
+                     WHERE scope_key = ? AND status = 'active'{owner_filter}
                      ORDER BY last_activity_at DESC, started_at DESC, id DESC
-                    """,
-                    (normalized_scope_key,),
+                    """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (normalized_scope_key, *owner_params),
                 ).fetchall()
                 if rows:
                     authoritative = self._deserialize_flashcard_review_session_row(rows[0]) or {}
@@ -26281,16 +37510,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         duplicate_ids = [int(row["id"]) for row in rows[1:]]
                         placeholders = ", ".join("?" for _ in duplicate_ids)
                         conn.execute(
-                            f"UPDATE flashcard_review_sessions SET status = 'abandoned' WHERE id IN ({placeholders})",  # nosec B608
-                            tuple(duplicate_ids),
+                            f"UPDATE flashcard_review_sessions SET status = 'abandoned' WHERE id IN ({placeholders}){owner_filter}",  # nosec B608
+                            (*duplicate_ids, *owner_params),
                         )
                     conn.execute(
-                        """
+                        f"""
                         UPDATE flashcard_review_sessions
                            SET last_activity_at = ?
-                        WHERE id = ?
-                        """,
-                        (now, int(authoritative["id"])),
+                        WHERE id = ?{owner_filter}
+                        """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                        (now, int(authoritative["id"]), *owner_params),
                     )
                     authoritative["last_activity_at"] = now
                     return authoritative
@@ -26348,14 +37577,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if session_id is None:
                     raise CharactersRAGDBError("Failed to determine flashcard review session ID after insert")  # noqa: TRY003
                 row = conn.execute(
-                    """
+                    f"""
                     SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                            started_at, last_activity_at, completed_at, client_id,
                            cards_reviewed, correct_count, source_bundle_json, study_pack_id
                       FROM flashcard_review_sessions
-                     WHERE id = ?
-                    """,
-                    (session_id,),
+                     WHERE id = ?{owner_filter}
+                    """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (session_id, *owner_params),
                 ).fetchone()
                 return self._deserialize_flashcard_review_session_row(row) or {}
         except sqlite3.Error as exc:
@@ -26365,45 +37594,49 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_flashcard_review_session(self, session_id: int) -> dict[str, Any] | None:
         """Fetch a single flashcard review session by id, or None if not found."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         cursor = self.execute_query(
-            """
+            f"""
             SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                    started_at, last_activity_at, completed_at, client_id,
                    cards_reviewed, correct_count, source_bundle_json, study_pack_id
               FROM flashcard_review_sessions
-             WHERE id = ?
-            """,
-            (int(session_id),),
+             WHERE id = ?{owner_filter}
+            """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+            (int(session_id), *owner_params),
+            read_only=True,
         )
         row = cursor.fetchone()
         return self._deserialize_flashcard_review_session_row(row) if row else None
 
     def mark_flashcard_review_session_completed(self, session_id: int) -> dict[str, Any]:
         """Mark a persisted review session as completed."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         try:
             cursor = self.execute_query(
-                """
+                f"""
                 UPDATE flashcard_review_sessions
                    SET status = 'completed',
                        last_activity_at = ?,
                        completed_at = ?
-                 WHERE id = ?
-                """,
-                (now, now, int(session_id)),
+                 WHERE id = ?{owner_filter}
+                """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                (now, now, int(session_id), *owner_params),
                 commit=True,
             )
             if getattr(cursor, "rowcount", 0) == 0:
                 raise ConflictError("Flashcard review session not found", entity="flashcard_review_sessions", entity_id=session_id)  # noqa: TRY003
             row = self.execute_query(
-                """
+                f"""
                 SELECT id, deck_id, deck_name_snapshot, review_mode, tag_filter, scope_key, status,
                        started_at, last_activity_at, completed_at, client_id,
                        cards_reviewed, correct_count, source_bundle_json, study_pack_id
                   FROM flashcard_review_sessions
-                 WHERE id = ?
-                """,
-                (int(session_id),),
+                 WHERE id = ?{owner_filter}
+                """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                (int(session_id), *owner_params),
+                read_only=True,
             ).fetchone()
             return self._deserialize_flashcard_review_session_row(row) or {}
         except CharactersRAGDBError:
@@ -26490,8 +37723,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_flashcard_reviewed_cards(self, session_id: int) -> list[dict[str, Any]]:
         """Return reviewed flashcard metadata for a session in review order."""
+        owner_filter, owner_params = self._flashcard_owner_filter("f")
+        if self.backend_type == BackendType.POSTGRESQL:
+            owner_filter += " AND fr.client_id = f.client_id AND EXISTS (SELECT 1 FROM flashcard_review_sessions s WHERE s.id = fr.review_session_id AND s.client_id = f.client_id)"
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
         cursor = self.execute_query(
-            """
+            f"""
             SELECT f.uuid,
                    MAX(f.tags_json) AS tags_json,
                    MAX(f.source_ref_type) AS source_ref_type,
@@ -26499,30 +37736,35 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                    MAX(d.name) AS deck_name
               FROM flashcard_reviews fr
               JOIN flashcards f ON f.id = fr.card_id
-              LEFT JOIN decks d ON d.id = f.deck_id
-             WHERE fr.review_session_id = ?
+              LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}
+             WHERE fr.review_session_id = ?{owner_filter}
              GROUP BY f.uuid
              ORDER BY MIN(fr.id)
-            """,
-            (int(session_id),),
+            """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+            (int(session_id), *owner_params),
+            read_only=True,
         )
         return [dict(row) for row in cursor.fetchall()]
 
     def get_latest_flashcard_review(self, card_uuid: str) -> dict[str, Any] | None:
         """Return the most recent review row for a flashcard, including nullable session linkage."""
+        owner_filter, owner_params = self._flashcard_owner_filter("f")
+        if self.backend_type == BackendType.POSTGRESQL:
+            owner_filter += " AND fr.client_id = f.client_id"
         cursor = self.execute_query(
-            """
+            f"""
             SELECT fr.id, fr.card_id, fr.reviewed_at, fr.rating, fr.answer_time_ms,
                    fr.scheduled_interval_days, fr.new_ef, fr.new_repetitions, fr.was_lapse,
                    fr.client_id, fr.scheduler_type, fr.previous_queue_state, fr.next_queue_state,
                    fr.previous_due_at, fr.next_due_at, fr.review_session_id
               FROM flashcard_reviews fr
               JOIN flashcards f ON f.id = fr.card_id
-             WHERE f.uuid = ?
+             WHERE f.uuid = ?{owner_filter}
              ORDER BY fr.id DESC
              LIMIT 1
-            """,
-            (card_uuid,),
+            """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+            (card_uuid, *owner_params),
+            read_only=True,
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -26533,46 +37775,86 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         rating: int,
         answer_time_ms: int | None = None,
         review_session_id: int | None = None,
+        *,
+        review_mode: str | None = None,
+        review_deck_id: int | None = None,
+        review_tag_filter: str | None = None,
     ) -> dict[str, Any]:
-        """Submit a review for a flashcard and update scheduling. Returns updated card fields."""
+        """Review a card within a validated session and update its schedule atomically.
+
+        An explicit review_mode selects the caller's queue scope. A null
+        review_deck_id then means all decks; omitted context keeps the legacy
+        per-card deck scope. Acknowledged session IDs must still be active and
+        match that explicit context before any review or scheduling write.
+        """
+        owner_filter, owner_params = self._flashcard_owner_filter()
+        card_owner_filter, _ = self._flashcard_owner_filter("f")
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
         now_dt = datetime.now(timezone.utc)
         now = to_iso_z(now_dt) or self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
                 card = conn.execute(
-                    """
+                    f"""
                     SELECT f.id, f.uuid, f.deck_id, f.ef, f.interval_days, f.repetitions, f.lapses,
                            f.due_at, f.last_reviewed_at, f.queue_state, f.step_index, f.suspended_reason,
                            f.scheduler_state_json,
                            COALESCE(d.scheduler_type, 'sm2_plus') AS scheduler_type,
                            COALESCE(d.scheduler_settings_json, ?) AS scheduler_settings_json
                       FROM flashcards f
-                      LEFT JOIN decks d ON d.id = f.deck_id
-                     WHERE f.uuid = ? AND f.deleted = 0
-                    """,
-                    (scheduler_settings_to_json(None), card_uuid),
+                      LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}
+                     WHERE f.uuid = ? AND f.deleted = 0{card_owner_filter}
+                    """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (scheduler_settings_to_json(None), card_uuid, *owner_params),
                 ).fetchone()
                 if not card:
-                    raise ConflictError("Flashcard not found", entity="flashcards", identifier=card_uuid)  # noqa: TRY003
-                card_id = int(card['id'])
+                    raise ConflictError(
+                        "Flashcard not found", entity="flashcards", identifier=card_uuid
+                    )  # noqa: TRY003
+                card_id = int(card["id"])
                 card_deck_id = int(card["deck_id"]) if card["deck_id"] is not None else None
+                explicit_scope = review_mode is not None
+                scope_mode = self._normalize_flashcard_review_mode(review_mode if explicit_scope else "due")
+                scope_deck_id = review_deck_id if explicit_scope else card_deck_id
+                scope_tag = self._normalize_nullable_text(review_tag_filter) if explicit_scope else None
+                scope_key = (
+                    f"{scope_mode}:deck:{scope_deck_id}" if scope_deck_id is not None else f"{scope_mode}:global"
+                )
+                if scope_tag:
+                    scope_key += f":tag:{scope_tag}"
+                if explicit_scope and scope_deck_id is not None and scope_deck_id != card_deck_id:
+                    raise InputError("Review context must include the flashcard deck")  # noqa: TRY003
+                if scope_tag:
+                    tag_owner_filter, tag_owner_params = self._flashcard_owner_filter("kw")
+                    keyword_table = self._map_table_for_backend("keywords")
+                    matching_tag = conn.execute(
+                        f"""
+                        SELECT 1 FROM flashcard_keywords fk
+                        JOIN {keyword_table} kw ON kw.id = fk.keyword_id
+                        WHERE fk.card_id = ? AND kw.keyword = ?{tag_owner_filter}
+                        """,  # nosec B608 -- keyword table comes from the backend mapping
+                        (card_id, scope_tag, *tag_owner_params),
+                    ).fetchone()
+                    if not matching_tag:
+                        raise InputError("Flashcard does not match the review tag filter")  # noqa: TRY003
                 resolved_review_session_id = int(review_session_id) if review_session_id is not None else None
                 if resolved_review_session_id is None:
                     auto_session = self.get_or_create_flashcard_review_session(
-                        deck_id=card_deck_id,
-                        review_mode="due",
-                        tag_filter=None,
-                        scope_key=f"due:deck:{card_deck_id}" if card_deck_id is not None else "due:global",
+                        deck_id=scope_deck_id,
+                        review_mode=scope_mode,
+                        tag_filter=scope_tag,
+                        scope_key=scope_key,
                     )
                     resolved_review_session_id = int(auto_session["id"])
                 if resolved_review_session_id is not None:
                     session_row = conn.execute(
-                        """
-                        SELECT id, deck_id, status
+                        f"""
+                        SELECT id, deck_id, status, review_mode, tag_filter, scope_key,
+                               CASE WHEN last_activity_at < ? THEN 1 ELSE 0 END AS is_stale
                           FROM flashcard_review_sessions
-                         WHERE id = ?
-                        """,
-                        (resolved_review_session_id,),
+                         WHERE id = ?{owner_filter}
+                        """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                        (to_iso_z(now_dt - _FLASHCARD_REVIEW_SESSION_TIMEOUT), resolved_review_session_id, *owner_params),
                     ).fetchone()
                     if not session_row:
                         raise ConflictError(
@@ -26581,9 +37863,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             identifier=resolved_review_session_id,
                         )
                     session_deck_id = int(session_row["deck_id"]) if session_row["deck_id"] is not None else None
-                    if session_deck_id != card_deck_id:
+                    if explicit_scope and (
+                        session_deck_id != scope_deck_id
+                        or session_row["review_mode"] != scope_mode
+                        or self._normalize_nullable_text(session_row["tag_filter"]) != scope_tag
+                        or session_row["scope_key"] != scope_key
+                    ):
+                        raise InputError("review_session_id must match the requested review context")  # noqa: TRY003
+                    if not explicit_scope and session_deck_id != card_deck_id:
                         raise InputError("review_session_id must match the flashcard deck scope")  # noqa: TRY003
-                    if str(session_row["status"] or "").strip().lower() != "active":
+                    if str(session_row["status"] or "").strip().lower() != "active" or session_row["is_stale"]:
                         raise ConflictError(
                             "Flashcard review session is not active",
                             entity="flashcard_review_sessions",
@@ -26602,13 +37891,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
 
                 conn.execute(
-                    """
+                    f"""
                     UPDATE flashcards
                        SET ef = ?, interval_days = ?, repetitions = ?, lapses = ?,
                            due_at = ?, last_reviewed_at = ?, queue_state = ?, step_index = ?,
                            suspended_reason = ?, scheduler_state_json = ?, last_modified = ?, version = version + 1, client_id = ?
-                     WHERE id = ? AND deleted = 0
-                    """,
+                     WHERE id = ? AND deleted = 0{owner_filter}
+                    """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
                     (
                         upd["ef"],
                         upd["interval_days"],
@@ -26623,6 +37912,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         now,
                         self.client_id,
                         card_id,
+                        *owner_params,
                     )
                 )
                 conn.execute(
@@ -26653,25 +37943,26 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     )
                 )
                 if resolved_review_session_id is not None:
-                    correct_increment = 1 if int(rating) >= 3 else 0
+                    # Again during learning is incorrect even before a mature lapse.
+                    correct_increment = int(not upd["was_lapse"] and int(rating) != 0)
                     conn.execute(
-                        """
+                        f"""
                         UPDATE flashcard_review_sessions
                            SET last_activity_at = ?,
                                cards_reviewed = COALESCE(cards_reviewed, 0) + 1,
                                correct_count = COALESCE(correct_count, 0) + ?
-                         WHERE id = ?
-                        """,
-                        (now, correct_increment, resolved_review_session_id),
+                         WHERE id = ?{owner_filter}
+                        """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                        (now, correct_increment, resolved_review_session_id, *owner_params),
                     )
                 updated = conn.execute(
-                    """
+                    f"""
                     SELECT uuid, ef, interval_days, repetitions, lapses, due_at, last_reviewed_at,
                            last_modified, version, queue_state, step_index, suspended_reason, scheduler_state_json
                       FROM flashcards
-                     WHERE id = ?
-                    """,
-                    (card_id,)
+                     WHERE id = ?{owner_filter}
+                    """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (card_id, *owner_params)
                 ).fetchone()
                 updated_payload = dict(updated)
                 updated_payload["scheduler_type"] = scheduler_type
@@ -26705,10 +37996,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             workspace_id=workspace_id,
             include_workspace_items=include_workspace_items,
         )
-        visibility_join = " LEFT JOIN decks d ON d.id = f.deck_id" if needs_deck_join else ""
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
+        visibility_join = f" LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}" if needs_deck_join else ""
         visibility_suffix = f" AND {visibility_clause}" if visibility_clause else ""
-        metrics_join = visibility_join or " LEFT JOIN decks d ON d.id = f.deck_id"
+        owner_filter, owner_params = self._flashcard_owner_filter("f")
+        visibility_suffix += owner_filter
+        visibility_params = (*visibility_params, *owner_params)
+        metrics_join = visibility_join or f" LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}"
         metrics_suffix = f"{visibility_suffix} AND (d.id IS NULL OR d.deleted = 0)"
+        if self.backend_type == BackendType.POSTGRESQL:
+            metrics_suffix += " AND fr.client_id = f.client_id"
         deck_rows_clause, deck_rows_params, _ = self._flashcard_visibility_filter(
             deck_id=normalized_deck_id,
             workspace_id=workspace_id,
@@ -26717,14 +38014,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             deck_id_column="d.id",
         )
         deck_rows_suffix = f" AND {deck_rows_clause}" if deck_rows_clause else ""
+        deck_owner_filter, deck_owner_params = self._flashcard_owner_filter("d")
+        deck_rows_suffix += deck_owner_filter
+        deck_rows_params = (*deck_rows_params, *deck_owner_params)
 
         try:
-            # Daily review metrics
+            # Trust stored scheduler outcomes, including historical rows. Hard is
+            # successful recall; ratings alone cannot identify mature lapses.
             daily_row = self.execute_query(
                 """
                 SELECT
                     COUNT(*) AS reviewed_today,
-                    SUM(CASE WHEN rating < 3 THEN 1 ELSE 0 END) AS lapses_today,
+                    SUM(CASE WHEN fr.was_lapse THEN 1 ELSE 0 END) AS lapses_today,
                     AVG(answer_time_ms) AS avg_answer_time_ms_today
                 FROM flashcard_reviews fr
                 JOIN flashcards f ON f.id = fr.card_id AND f.deleted = 0
@@ -26732,6 +38033,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 WHERE fr.reviewed_at >= ? AND fr.reviewed_at < ?{metrics_suffix}
                 """.format_map(locals()),  # nosec B608
                 (today_start_iso, tomorrow_start_iso, *visibility_params),
+                read_only=True,
             ).fetchone()
 
             reviewed_today = int((daily_row["reviewed_today"] if daily_row else 0) or 0)
@@ -26748,9 +38050,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 retention_rate_today = 100.0 - lapse_rate_today
 
             # UTC day streak: count consecutive days ending at today with >=1 review
+            review_day_sql = (
+                "(fr.reviewed_at AT TIME ZONE 'UTC')::date"
+                if self.backend_type == BackendType.POSTGRESQL
+                else "substr(fr.reviewed_at, 1, 10)"
+            )
             day_rows = self.execute_query(
                 """
-                SELECT DISTINCT substr(fr.reviewed_at, 1, 10) AS review_day
+                SELECT DISTINCT {review_day_sql} AS review_day
                 FROM flashcard_reviews fr
                 JOIN flashcards f ON f.id = fr.card_id AND f.deleted = 0
                 {metrics_join}
@@ -26759,6 +38066,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 LIMIT 400
                 """.format_map(locals()),  # nosec B608
                 visibility_params,
+                read_only=True,
             ).fetchall()
             reviewed_days = {
                 str(row["review_day"])
@@ -26785,12 +38093,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 FROM decks d
                 LEFT JOIN flashcards f
                     ON f.deck_id = d.id
-                   AND f.deleted = 0
+                   AND f.deleted = 0{deck_owner_join}
                 WHERE d.deleted = 0{deck_rows_suffix}
                 GROUP BY d.id, d.name
                 ORDER BY d.name ASC
                 """.format_map(locals()),  # nosec B608
                 (now_iso, MATURE_INTERVAL_DAYS, *deck_rows_params),
+                read_only=True,
             ).fetchall()
 
             decks = []
@@ -26799,11 +38108,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     {
                         "deck_id": int(row["deck_id"]),
                         "deck_name": str(row["deck_name"] or f"Deck {row['deck_id']}"),
-                        "total": int((row["total_count"] or 0)),
-                        "new": int((row["new_count"] or 0)),
-                        "learning": int((row["learning_count"] or 0)),
-                        "due": int((row["due_count"] or 0)),
-                        "mature": int((row["mature_count"] or 0)),
+                        "total": int(row["total_count"] or 0),
+                        "new": int(row["new_count"] or 0),
+                        "learning": int(row["learning_count"] or 0),
+                        "due": int(row["due_count"] or 0),
+                        "mature": int(row["mature_count"] or 0),
                     }
                 )
 
@@ -26880,18 +38189,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_flashcard(self, card_uuid: str) -> dict[str, Any] | None:
         """Fetch a single flashcard by uuid (active only)."""
-        query = """
+        owner_filter, owner_params = self._flashcard_owner_filter("f")
+        deck_owner_join = " AND d.client_id = f.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
+        query = f"""
             SELECT f.uuid, f.deck_id, d.name AS deck_name, d.workspace_id AS workspace_id, f.front, f.back, f.notes, f.extra, f.is_cloze, f.tags_json,
                    f.source_ref_type, f.source_ref_id, f.conversation_id, f.message_id,
                    f.ef, f.interval_days, f.repetitions, f.lapses, f.due_at, f.last_reviewed_at,
                    f.queue_state, f.step_index, f.suspended_reason, f.scheduler_state_json, d.scheduler_type,
                    f.created_at, f.last_modified, f.deleted, f.client_id, f.version, f.model_type, f.reverse
               FROM flashcards f
-              LEFT JOIN decks d ON d.id = f.deck_id
-             WHERE f.uuid = ? AND f.deleted = 0
-        """
+              LEFT JOIN decks d ON d.id = f.deck_id{deck_owner_join}
+             WHERE f.uuid = ? AND f.deleted = 0{owner_filter}
+        """  # nosec B608 -- Fixed owner clauses; all data values are bound.
         try:
-            cur = self.execute_query(query, (card_uuid,))
+            cur = self.execute_query(query, (card_uuid, *owner_params), read_only=True)
             row = cur.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError:  # noqa: TRY203
@@ -26948,16 +38259,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_flashcard_asset(self, asset_uuid: str) -> dict[str, Any] | None:
         """Fetch flashcard asset metadata by UUID."""
-        query = """
+        owner_filter, owner_params = self._flashcard_owner_filter("fa")
+        card_owner_join = " AND f.client_id = fa.client_id" if self.backend_type == BackendType.POSTGRESQL else ""
+        query = f"""
             SELECT fa.uuid, fa.mime_type, fa.original_filename, fa.byte_size, fa.sha256,
                    fa.width, fa.height, fa.created_at, fa.last_modified, fa.deleted,
                    fa.client_id, fa.version, f.uuid AS card_uuid
               FROM flashcard_assets fa
-              LEFT JOIN flashcards f ON f.id = fa.card_id
-             WHERE fa.uuid = ? AND fa.deleted = 0
-        """
+              LEFT JOIN flashcards f ON f.id = fa.card_id{card_owner_join}
+             WHERE fa.uuid = ? AND fa.deleted = 0{owner_filter}
+        """  # nosec B608 -- Fixed owner clauses; all data values are bound.
         try:
-            cur = self.execute_query(query, (asset_uuid,))
+            cur = self.execute_query(query, (asset_uuid, *owner_params), read_only=True)
             row = cur.fetchone()
             return dict(row) if row else None
         except CharactersRAGDBError:  # noqa: TRY203
@@ -26965,15 +38278,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_flashcard_asset_content(self, asset_uuid: str) -> bytes | None:
         """Fetch raw bytes for a flashcard asset by UUID."""
-        query = "SELECT image_data FROM flashcard_assets WHERE uuid = ? AND deleted = 0"
+        owner_filter, owner_params = self._flashcard_owner_filter()
+        query = "SELECT image_data FROM flashcard_assets WHERE uuid = ? AND deleted = 0" + owner_filter  # nosec B608 -- Fixed owner clauses; all data values are bound.
         try:
-            cur = self.execute_query(query, (asset_uuid,))
+            cur = self.execute_query(query, (asset_uuid, *owner_params), read_only=True)
             row = cur.fetchone()
         except CharactersRAGDBError:  # noqa: TRY203
             raise
         if not row:
             return None
-        blob = row[0]
+        blob = row["image_data"]
         if isinstance(blob, memoryview):
             return blob.tobytes()
         return bytes(blob) if blob is not None else None
@@ -26988,6 +38302,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         notes: str | None,
     ) -> list[str]:
         """Attach referenced assets to a card and detach removed assets."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         referenced_asset_uuids: list[str] = []
         for text in (front, back, extra, notes):
             for asset_uuid in extract_flashcard_asset_uuids(text):
@@ -26997,22 +38312,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         try:
             with self.transaction() as conn:
                 card_row = conn.execute(
-                    "SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0",
-                    (card_uuid,),
+                    "SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (card_uuid, *owner_params),
                 ).fetchone()
                 if not card_row:
                     raise CharactersRAGDBError("Flashcard not found or deleted")  # noqa: TRY003
-                card_id = int(card_row[0])
+                card_id = int(card_row["id"])
 
                 existing_asset_rows = conn.execute(
-                    "SELECT id, uuid, card_id FROM flashcard_assets WHERE deleted = 0"
+                    "SELECT id, uuid, card_id FROM flashcard_assets WHERE deleted = 0" + owner_filter, owner_params  # nosec B608 -- Fixed owner clauses; all data values are bound.
                 ).fetchall()
-                assets_by_uuid = {str(row[1]): row for row in existing_asset_rows}
+                assets_by_uuid = {str(row["uuid"]): row for row in existing_asset_rows}
                 for asset_uuid in referenced_asset_uuids:
                     asset_row = assets_by_uuid.get(asset_uuid)
                     if not asset_row:
                         raise InputError(f"Flashcard asset not found: {asset_uuid}")  # noqa: TRY003
-                    attached_card_id = asset_row[2]
+                    attached_card_id = asset_row["card_id"]
                     if attached_card_id is not None and int(attached_card_id) != card_id:
                         raise ConflictError(
                             "Flashcard asset is attached to a different card",
@@ -27023,30 +38338,30 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 now = self._get_current_utc_timestamp_iso()
                 for asset_uuid in referenced_asset_uuids:
                     conn.execute(
-                        """
+                        f"""
                         UPDATE flashcard_assets
                            SET card_id = ?, last_modified = ?, version = version + 1, client_id = ?
-                         WHERE uuid = ? AND deleted = 0
-                        """,
-                        (card_id, now, self.client_id, asset_uuid),
+                         WHERE uuid = ? AND deleted = 0{owner_filter}
+                        """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                        (card_id, now, self.client_id, asset_uuid, *owner_params),
                     )
 
                 existing_attached_rows = conn.execute(
-                    "SELECT uuid FROM flashcard_assets WHERE card_id = ? AND deleted = 0",
-                    (card_id,),
+                    "SELECT uuid FROM flashcard_assets WHERE card_id = ? AND deleted = 0" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (card_id, *owner_params),
                 ).fetchall()
                 referenced_set = set(referenced_asset_uuids)
                 for row in existing_attached_rows:
-                    existing_uuid = str(row[0])
+                    existing_uuid = str(row["uuid"])
                     if existing_uuid in referenced_set:
                         continue
                     conn.execute(
-                        """
+                        f"""
                         UPDATE flashcard_assets
                            SET card_id = NULL, last_modified = ?, version = version + 1, client_id = ?
-                         WHERE uuid = ? AND deleted = 0
-                        """,
-                        (now, self.client_id, existing_uuid),
+                         WHERE uuid = ? AND deleted = 0{owner_filter}
+                        """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                        (now, self.client_id, existing_uuid, *owner_params),
                     )
             return referenced_asset_uuids
         except (BackendDatabaseError, sqlite3.Error) as exc:
@@ -27054,13 +38369,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def cleanup_stale_flashcard_assets(self, *, older_than: timedelta | None = None) -> int:
         """Soft-delete unattached flashcard assets older than the provided age."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         age = older_than or timedelta(hours=24)
         cutoff = (datetime.now(timezone.utc) - age).strftime("%Y-%m-%dT%H:%M:%SZ")
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
                 cursor = conn.execute(
-                    """
+                    f"""
                     UPDATE flashcard_assets
                        SET deleted = 1,
                            last_modified = ?,
@@ -27068,9 +38384,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                            client_id = ?
                      WHERE card_id IS NULL
                        AND deleted = 0
-                       AND created_at <= ?
-                    """,
-                    (now, self.client_id, cutoff),
+                       AND created_at <= ?{owner_filter}
+                    """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (now, self.client_id, cutoff, *owner_params),
                 )
                 return int(cursor.rowcount or 0)
         except (BackendDatabaseError, sqlite3.Error) as exc:
@@ -27087,6 +38403,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         Update mutable fields: deck_id, front, back, notes, is_cloze, tags_json.
         If expected_version is provided, enforce optimistic locking.
         """
+        owner_filter, owner_params = self._flashcard_owner_filter()
         allowed = {"deck_id", "front", "back", "notes", "extra", "is_cloze", "tags_json", "model_type", "reverse"}
         set_parts = []
         params: list[Any] = []
@@ -27109,18 +38426,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             set_parts.append("tags_json = ?")
             params.append(json.dumps(norm_tags))
         if not set_parts:
-            if expected_version is None:
+            if expected_version is None and self.backend_type != BackendType.POSTGRESQL:
                 return True
             try:
                 with self.transaction() as conn:
                     row = conn.execute(
-                        "SELECT version FROM flashcards WHERE uuid = ? AND deleted = 0",
-                        (card_uuid,),
+                        "SELECT version FROM flashcards WHERE uuid = ? AND deleted = 0" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                        (card_uuid, *owner_params),
                     ).fetchone()
                     if not row:
                         raise CharactersRAGDBError("Flashcard not found or deleted")  # noqa: TRY003
-                    current_version = int(row[0])
-                    if current_version != expected_version:
+                    current_version = int(row["version"])
+                    if expected_version is not None and current_version != expected_version:
                         raise ConflictError(  # noqa: TRY003
                             "Version mismatch updating flashcard",
                             entity="flashcards",
@@ -27136,16 +38453,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         try:
             with self.transaction() as conn:
                 # get id and (optionally) version
-                row = conn.execute("SELECT id, version FROM flashcards WHERE uuid = ? AND deleted = 0", (card_uuid,)).fetchone()
+                row = conn.execute("SELECT id, version FROM flashcards WHERE uuid = ? AND deleted = 0" + owner_filter, (card_uuid, *owner_params)).fetchone()  # nosec B608 -- Fixed owner clauses; all data values are bound.
                 if not row:
                     raise CharactersRAGDBError("Flashcard not found or deleted")  # noqa: TRY003
-                card_id, current_version = int(row[0]), int(row[1])
+                card_id, current_version = int(row["id"]), int(row["version"])
                 if expected_version is not None and current_version != expected_version:
                     raise ConflictError("Version mismatch updating flashcard", entity="flashcards", identifier=card_uuid)  # noqa: TRY003
+                if "deck_id" in updates:
+                    self._validate_flashcard_deck_locked(conn, updates["deck_id"])
                 if norm_tags is not None:
                     self._sync_flashcard_keyword_links(conn, card_id, norm_tags)
-                params_final = params + [card_id]
-                query = f"UPDATE flashcards SET {', '.join(set_parts)} WHERE id = ? AND deleted = 0"  # nosec B608
+                params_final = params + [card_id, *owner_params]
+                query = f"UPDATE flashcards SET {', '.join(set_parts)} WHERE id = ? AND deleted = 0{owner_filter}"  # nosec B608
                 rc = conn.execute(query, tuple(params_final)).rowcount
                 return rc > 0
         except sqlite3.Error as e:
@@ -27153,20 +38472,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def soft_delete_flashcard(self, card_uuid: str, expected_version: int) -> bool:
         """Soft delete a flashcard with optimistic locking."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
-                row = conn.execute("SELECT id, version, deleted FROM flashcards WHERE uuid = ?", (card_uuid,)).fetchone()
+                row = conn.execute("SELECT id, version, deleted FROM flashcards WHERE uuid = ?" + owner_filter, (card_uuid, *owner_params)).fetchone()  # nosec B608 -- Fixed owner clauses; all data values are bound.
                 if not row:
                     raise ConflictError("Flashcard not found", entity="flashcards", identifier=card_uuid)  # noqa: TRY003
-                card_id, cur_ver, deleted = int(row[0]), int(row[1]), int(row[2])
+                card_id, cur_ver, deleted = int(row["id"]), int(row["version"]), int(row["deleted"])
                 if deleted:
                     return True
                 if cur_ver != expected_version:
                     raise ConflictError("Version mismatch deleting flashcard", entity="flashcards", identifier=card_uuid)  # noqa: TRY003
                 rc = conn.execute(
-                    "UPDATE flashcards SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND deleted = 0",
-                    (now, expected_version + 1, self.client_id, card_id)
+                    "UPDATE flashcards SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND deleted = 0" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (now, expected_version + 1, self.client_id, card_id, *owner_params)
                 ).rowcount
                 return rc > 0
         except sqlite3.Error as e:
@@ -27174,16 +38494,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def reset_flashcard_scheduling(self, card_uuid: str, expected_version: int | None = None) -> bool:
         """Reset scheduling fields to new-card defaults with optimistic locking."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
                 row = conn.execute(
-                    "SELECT id, version FROM flashcards WHERE uuid = ? AND deleted = 0",
-                    (card_uuid,),
+                    "SELECT id, version FROM flashcards WHERE uuid = ? AND deleted = 0" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (card_uuid, *owner_params),
                 ).fetchone()
                 if not row:
                     raise ConflictError("Flashcard not found", entity="flashcards", identifier=card_uuid)  # noqa: TRY003
-                card_id, current_version = int(row[0]), int(row[1])
+                card_id, current_version = int(row["id"]), int(row["version"])
                 if expected_version is not None and current_version != expected_version:
                     raise ConflictError(
                         "Version mismatch resetting flashcard scheduling",
@@ -27191,7 +38512,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         identifier=card_uuid,
                     )  # noqa: TRY003
                 rc = conn.execute(
-                    """
+                    f"""
                     UPDATE flashcards
                        SET ef = 2.5,
                            interval_days = 0,
@@ -27200,15 +38521,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                            queue_state = 'new',
                            step_index = NULL,
                            suspended_reason = NULL,
-                           scheduler_state_json = '{}',
+                           scheduler_state_json = '{{}}',
                            due_at = ?,
                            last_reviewed_at = NULL,
                            last_modified = ?,
                            version = version + 1,
                            client_id = ?
-                     WHERE id = ? AND deleted = 0
-                    """,
-                    (now, now, self.client_id, card_id),
+                     WHERE id = ? AND deleted = 0{owner_filter}
+                    """,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (now, now, self.client_id, card_id, *owner_params),
                 ).rowcount
                 return rc > 0
         except sqlite3.Error as e:
@@ -27216,6 +38537,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_keywords_for_flashcard(self, card_uuid: str) -> list[dict[str, Any]]:
         """Return keywords linked to a flashcard."""
+        owner_filter, owner_params = self._flashcard_owner_filter("f")
+        if self.backend_type == BackendType.POSTGRESQL:
+            owner_filter += " AND kw.client_id = f.client_id"
         keyword_table = self._map_table_for_backend("keywords")
         order_clause = self._case_insensitive_order_clause("kw.keyword")
         query = """
@@ -27223,11 +38547,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               FROM flashcards f
               JOIN flashcard_keywords fk ON fk.card_id = f.id
               JOIN {keyword_table} kw ON kw.id = fk.keyword_id
-             WHERE f.uuid = ? AND f.deleted = 0 AND kw.deleted = 0
+             WHERE f.uuid = ? AND f.deleted = 0 AND kw.deleted = 0{owner_filter}
              {order_clause}
         """.format_map(locals())  # nosec B608
         try:
-            cur = self.execute_query(query, (card_uuid,))
+            cur = self.execute_query(query, (card_uuid, *owner_params), read_only=True)
             return [dict(r) for r in cur.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
@@ -27238,18 +38562,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         Ensures keywords exist, links missing, removes extra.
         Also updates flashcards.tags_json accordingly.
         """
+        owner_filter, owner_params = self._flashcard_owner_filter()
         norm_tags = [t.strip() for t in tags if t and t.strip()]
         try:
             with self.transaction() as conn:
-                row = conn.execute("SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0", (card_uuid,)).fetchone()
+                row = conn.execute("SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0" + owner_filter, (card_uuid, *owner_params)).fetchone()  # nosec B608 -- Fixed owner clauses; all data values are bound.
                 if not row:
                     raise CharactersRAGDBError("Flashcard not found or deleted")  # noqa: TRY003
-                card_id = int(row[0])
+                card_id = int(row["id"])
                 self._sync_flashcard_keyword_links(conn, card_id, norm_tags)
                 # update tags_json mirror
                 conn.execute(
-                    "UPDATE flashcards SET tags_json = ?, last_modified = ?, version = version + 1, client_id = ? WHERE id = ?",
-                    (json.dumps(norm_tags), self._get_current_utc_timestamp_iso(), self.client_id, card_id),
+                    "UPDATE flashcards SET tags_json = ?, last_modified = ?, version = version + 1, client_id = ? WHERE id = ?" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                    (json.dumps(norm_tags), self._get_current_utc_timestamp_iso(), self.client_id, card_id, *owner_params),
                 )
                 return True
         except sqlite3.Error as e:
@@ -27260,15 +38585,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _sync_flashcard_keyword_links(self, conn: sqlite3.Connection, card_id: int, tags: list[str]) -> None:
         # current keyword ids
         cur_kw_ids = {
-            r[0] for r in conn.execute(
+            r["keyword_id"] for r in conn.execute(
                 "SELECT keyword_id FROM flashcard_keywords WHERE card_id = ?", (card_id,)
             ).fetchall()
         }
         # ensure keywords exist and collect ids
         desired_kw_ids = set()
         for t in tags:
-            kw = self.get_keyword_by_text(t)
-            kid = self.add_keyword(t) if not kw else kw['id']
+            if self.backend_type == BackendType.POSTGRESQL:
+                kid = self._flashcard_owned_keyword_id(conn, t)
+            else:
+                kw = self.get_keyword_by_text(t)
+                kid = self.add_keyword(t) if not kw else kw['id']
             if kid is not None:
                 desired_kw_ids.add(int(kid))
         # link missing
@@ -27287,6 +38615,31 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         # unlink extras
         for kid in cur_kw_ids - desired_kw_ids:
             conn.execute("DELETE FROM flashcard_keywords WHERE card_id = ? AND keyword_id = ?", (card_id, int(kid)))
+
+    def _flashcard_owned_keyword_id(self, conn: Any, text: str) -> int:
+        """Resolve an owner-local PostgreSQL tag without changing generic keyword APIs."""
+        from tldw_Server_API.app.core.Sync.v2.notes_organization import new_organization_sync_id
+
+        now = self._get_current_utc_timestamp_iso()
+        conn.execute(
+            "INSERT INTO chacha_keywords(sync_id, keyword, created_at, last_modified, deleted, client_id, version) "
+            "VALUES (?, ?, ?, ?, FALSE, ?, 1) "
+            "ON CONFLICT (client_id, LOWER(keyword)) DO NOTHING",
+            (new_organization_sync_id(), text, now, now, self.client_id),
+        )
+        row = conn.execute(
+            "SELECT id, deleted FROM chacha_keywords WHERE client_id = ? AND LOWER(keyword) = LOWER(?) FOR UPDATE",
+            (self.client_id, text),
+        ).fetchone()
+        if not row:
+            raise CharactersRAGDBError("Flashcard keyword could not be resolved")  # noqa: TRY003
+        if row["deleted"]:
+            conn.execute(
+                "UPDATE chacha_keywords SET deleted = FALSE, merged_into_sync_id = NULL, last_modified = ?, version = version + 1 "
+                "WHERE id = ? AND client_id = ? AND deleted = TRUE",
+                (now, row["id"], self.client_id),
+            )
+        return int(row["id"])
 
     # ==========================
     # Source Review Plans
@@ -27766,6 +39119,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         try:
             with self.transaction() as conn:
+                self._validate_flashcard_deck_locked(conn, deck_id)
+                self._require_selected_owner_row(conn, "study_packs", superseded_by_pack_id, self.client_id)
                 insert_sql = (
                     "INSERT INTO study_packs("
                     "workspace_id, title, deck_id, source_bundle_json, generation_options_json, "
@@ -27968,13 +39323,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     user_selection_value = self._ensure_json_string_from_mixed(user_selection_json)
 
                 if refreshed_from_snapshot_id is not None:
+                    owner_clause, owner_params = self._selected_owner_filter(self.client_id)
                     parent_row = conn.execute(
                         """
                         SELECT service, activity_type, anchor_type, anchor_id, suggestion_type, user_selection_json
                           FROM suggestion_snapshots
                          WHERE id = ? AND deleted = 0
-                        """,
-                        (refreshed_from_snapshot_id,),
+                        """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
+                        (refreshed_from_snapshot_id, *owner_params),
                     ).fetchone()
                     if not parent_row:
                         raise ConflictError(
@@ -28032,6 +39388,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_suggestion_snapshot(self, snapshot_id: int) -> dict[str, Any] | None:
         """Fetch a single active suggestion snapshot by id."""
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         query = """
             SELECT id, service, activity_type, anchor_type, anchor_id, suggestion_type, status,
                    payload_json, user_selection_json, refreshed_from_snapshot_id,
@@ -28039,7 +39396,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
               FROM suggestion_snapshots
              WHERE id = ? AND deleted = 0
         """
-        cursor = self.execute_query(query, (snapshot_id,))
+        cursor = self.execute_query(query + owner_clause, (snapshot_id, *owner_params))
         row = cursor.fetchone()
         return self._deserialize_row_fields(row, self._SUGGESTION_SNAPSHOT_JSON_FIELDS)
 
@@ -28051,21 +39408,45 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         include_deleted: bool = False,
     ) -> list[dict[str, Any]]:
         """List snapshots for a concrete anchor in newest-first order."""
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         deleted_clause = "1=1" if include_deleted else "deleted = 0"
         query = f"""
             SELECT id, service, activity_type, anchor_type, anchor_id, suggestion_type, status,
                    payload_json, user_selection_json, refreshed_from_snapshot_id,
                    created_at, last_modified, deleted, client_id, version
               FROM suggestion_snapshots
-             WHERE anchor_type = ? AND anchor_id = ? AND {deleted_clause}
+             WHERE anchor_type = ? AND anchor_id = ? AND {deleted_clause}{owner_clause}
              ORDER BY id DESC
         """  # nosec B608
-        cursor = self.execute_query(query, (anchor_type, anchor_id))
+        cursor = self.execute_query(query, (anchor_type, anchor_id, *owner_params))
         return [
             self._deserialize_row_fields(row, self._SUGGESTION_SNAPSHOT_JSON_FIELDS)
             for row in cursor.fetchall()
             if row
         ]
+
+    def _suggestion_link_owner_filter(self) -> tuple[str, tuple[str, ...]]:
+        """Require both the PostgreSQL link and its live snapshot to belong to the caller."""
+        if self.backend_type != BackendType.POSTGRESQL:
+            return "", ()
+        return (
+            " AND client_id = ? AND EXISTS ("
+            "SELECT 1 FROM suggestion_snapshots snapshot "
+            "WHERE snapshot.id = suggestion_generation_links.snapshot_id "
+            "AND snapshot.deleted = FALSE AND snapshot.client_id = ?)",
+            (self.client_id, self.client_id),
+        )
+
+    def _validate_suggestion_snapshot_locked(self, conn: Any, snapshot_id: int) -> None:
+        """Require an owned live PostgreSQL snapshot before creating action links."""
+        if self.backend_type != BackendType.POSTGRESQL:
+            return
+        row = conn.execute(
+            "SELECT id FROM suggestion_snapshots WHERE id = ? AND client_id = ? AND deleted = FALSE FOR SHARE",
+            (snapshot_id, self.client_id),
+        ).fetchone()
+        if row is None:
+            raise InputError("Suggestion snapshot not found")  # noqa: TRY003
 
     def create_suggestion_generation_link(
         self,
@@ -28080,6 +39461,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
+                self._validate_suggestion_snapshot_locked(conn, snapshot_id)
                 insert_sql = (
                     "INSERT INTO suggestion_generation_links("
                     "snapshot_id, target_service, target_type, target_id, selection_fingerprint, "
@@ -28137,7 +39519,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         selection_fingerprint: str,
     ) -> dict[str, Any] | None:
         """Find the durable link row for a concrete snapshot/action result."""
-        query = """
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
+        query = f"""
             SELECT id, snapshot_id, target_service, target_type, target_id, selection_fingerprint,
                    created_at, last_modified, deleted, client_id, version
               FROM suggestion_generation_links
@@ -28146,13 +39529,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                AND target_type = ?
                AND target_id = ?
                AND selection_fingerprint = ?
-               AND deleted = 0
+               AND deleted = 0{owner_clause}
              ORDER BY id DESC
              LIMIT 1
-        """
+        """  # nosec B608 -- Fixed owner clause; values are bound.
         cursor = self.execute_query(
             query,
-            (snapshot_id, target_service, target_type, target_id, selection_fingerprint),
+            (snapshot_id, target_service, target_type, target_id, selection_fingerprint, *owner_params),
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -28167,25 +39550,28 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         selection_fingerprint: str,
     ) -> int:
         """Upsert a direct generation link without accumulating multiple active rows."""
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
+                self._validate_suggestion_snapshot_locked(conn, snapshot_id)
                 rows = conn.execute(
-                    """
+                    f"""
                     SELECT id
                       FROM suggestion_generation_links
                      WHERE snapshot_id = ?
                        AND target_service = ?
                        AND target_type = ?
                        AND selection_fingerprint = ?
-                       AND deleted = 0
+                       AND deleted = 0{owner_clause}
                      ORDER BY id DESC
-                    """,
+                    """,  # nosec B608 -- Fixed owner clause; values are bound.
                     (
                         int(snapshot_id),
                         target_service,
                         target_type,
                         selection_fingerprint,
+                        *owner_params,
                     ),
                 ).fetchall()
                 if rows:
@@ -28195,12 +39581,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         UPDATE suggestion_generation_links
                            SET target_id = ?, last_modified = ?, version = version + 1, client_id = ?
                          WHERE id = ? AND deleted = 0
-                        """,
+                        """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
                         (
                             str(target_id),
                             now,
                             self.client_id,
                             keeper_id,
+                            *owner_params,
                         ),
                     ).rowcount
                     stale_ids = [int(row["id"]) for row in rows[1:]]
@@ -28210,8 +39597,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             UPDATE suggestion_generation_links
                                SET deleted = ?, last_modified = ?, version = version + 1, client_id = ?
                              WHERE id = ? AND deleted = 0
-                            """,
-                            (True, now, self.client_id, stale_id),
+                            """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
+                            (True, now, self.client_id, stale_id, *owner_params),
                         )
                     if updated <= 0:
                         raise CharactersRAGDBError("Failed to update existing suggestion generation link")  # noqa: TRY003
@@ -28273,7 +39660,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         selection_fingerprint: str,
     ) -> dict[str, Any] | None:
         """Find an existing generation link by fingerprint without requiring the target id."""
-        query = """
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
+        query = f"""
             SELECT id, snapshot_id, target_service, target_type, target_id, selection_fingerprint,
                    created_at, last_modified, deleted, client_id, version
               FROM suggestion_generation_links
@@ -28281,13 +39669,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                AND target_service = ?
                AND target_type = ?
                AND selection_fingerprint = ?
-               AND deleted = 0
+               AND deleted = 0{owner_clause}
              ORDER BY id DESC
              LIMIT 1
-        """
+        """  # nosec B608 -- Fixed owner clause; values are bound.
         cursor = self.execute_query(
             query,
-            (int(snapshot_id), target_service, target_type, selection_fingerprint),
+            (int(snapshot_id), target_service, target_type, selection_fingerprint, *owner_params),
         )
         row = cursor.fetchone()
         return dict(row) if row else None
@@ -28305,6 +39693,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         Returns the number of rows updated (0 means the reservation was not found).
         """
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         pending_target_id = f"pending:{selection_fingerprint}"
         try:
@@ -28319,7 +39708,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                        AND target_id = ?
                        AND selection_fingerprint = ?
                        AND deleted = 0
-                    """,
+                    """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
                     (
                         str(final_target_id),
                         now,
@@ -28329,6 +39718,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         target_type,
                         pending_target_id,
                         selection_fingerprint,
+                        *owner_params,
                     ),
                 ).rowcount
             return int(updated)
@@ -28346,6 +39736,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         selection_fingerprint: str,
     ) -> int:
         """Soft-delete active generation links matching a snapshot fingerprint."""
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
@@ -28358,7 +39749,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                        AND target_type = ?
                        AND selection_fingerprint = ?
                        AND deleted = 0
-                    """,
+                    """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
                     (
                         True,
                         now,
@@ -28367,6 +39758,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         target_service,
                         target_type,
                         selection_fingerprint,
+                        *owner_params,
                     ),
                 ).rowcount
             return int(updated)
@@ -28384,6 +39776,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         selection_fingerprint: str,
     ) -> None:
         """Soft-delete an in-progress reservation after generation failure."""
+        owner_clause, owner_params = self._suggestion_link_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         pending_target_id = f"pending:{selection_fingerprint}"
         try:
@@ -28398,7 +39791,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                        AND target_id = ?
                        AND selection_fingerprint = ?
                        AND deleted = 0
-                    """,
+                    """ + owner_clause,  # nosec B608 -- Fixed owner clause; values are bound.
                     (
                         True,
                         now,
@@ -28408,6 +39801,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         target_type,
                         pending_target_id,
                         selection_fingerprint,
+                        *owner_params,
                     ),
                 )
         except sqlite3.Error as exc:
@@ -28417,6 +39811,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def soft_delete_deck_by_id(self, deck_id: int, expected_version: int | None = None) -> None:
         """Best-effort soft-delete of a deck by id, optionally with optimistic locking."""
+        owner_filter, owner_params = self._flashcard_owner_filter()
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
@@ -28430,18 +39825,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if expected_version is not None:
                     version_clause = " AND version = ?"
                     params.append(int(expected_version))
+                params.extend(owner_params)
                 rowcount = conn.execute(
                     f"""
                     UPDATE decks
                        SET deleted = ?, last_modified = ?, version = version + 1, client_id = ?
-                     WHERE id = ? AND deleted = 0{version_clause}
+                     WHERE id = ? AND deleted = 0{version_clause}{owner_filter}
                     """,  # nosec B608
                     tuple(params),
                 ).rowcount
                 if rowcount == 0 and expected_version is not None:
                     existing = conn.execute(
-                        "SELECT id FROM decks WHERE id = ? AND deleted = 0",
-                        (int(deck_id),),
+                        "SELECT id FROM decks WHERE id = ? AND deleted = 0" + owner_filter,  # nosec B608 -- Fixed owner clauses; all data values are bound.
+                        (int(deck_id), *owner_params),
                     ).fetchone()
                     if existing is None:
                         raise ConflictError("Deck not found", entity="decks", identifier=deck_id)  # noqa: TRY003
@@ -28455,6 +39851,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_study_pack(self, pack_id: int) -> dict[str, Any] | None:
         """Fetch a single active study pack by id."""
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         query = """
             SELECT id, workspace_id, title, deck_id, source_bundle_json, generation_options_json,
                    status, superseded_by_pack_id, created_at, last_modified, deleted, client_id, version
@@ -28462,7 +39859,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
              WHERE id = ? AND deleted = 0
         """
         try:
-            cursor = self.execute_query(query, (pack_id,))
+            cursor = self.execute_query(query + owner_clause, (pack_id, *owner_params))
             row = cursor.fetchone()
             return self._deserialize_row_fields(row, self._STUDY_PACK_JSON_FIELDS)
         except CharactersRAGDBError:  # noqa: TRY203
@@ -28494,17 +39891,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         ]
         try:
             with self.transaction() as conn:
+                self._require_selected_owner_row(conn, "study_packs", study_pack_id, self.client_id)
+                if self.backend_type == BackendType.POSTGRESQL:
+                    for card_uuid in sorted(set(flashcard_uuids)):
+                        self._require_selected_owner_row(conn, "flashcards", card_uuid, self.client_id)
                 before_row = conn.execute(
                     "SELECT COUNT(*) FROM study_pack_cards WHERE study_pack_id = ? AND deleted = 0",
                     (study_pack_id,),
                 ).fetchone()
-                before_count = int(before_row[0]) if before_row else 0
+                before_count = int(before_row["count"] if self.backend_type == BackendType.POSTGRESQL else before_row[0]) if before_row else 0
                 self.execute_many(insert_sql, params, commit=False)
                 after_row = conn.execute(
                     "SELECT COUNT(*) FROM study_pack_cards WHERE study_pack_id = ? AND deleted = 0",
                     (study_pack_id,),
                 ).fetchone()
-                after_count = int(after_row[0]) if after_row else before_count
+                after_count = int(after_row["count"] if self.backend_type == BackendType.POSTGRESQL else after_row[0]) if after_row else before_count
             return max(0, after_count - before_count)
         except sqlite3.Error as exc:
             raise CharactersRAGDBError(f"Failed to add study pack cards: {exc}") from exc  # noqa: TRY003
@@ -28514,16 +39915,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def list_study_pack_cards(self, study_pack_id: int, *, include_deleted: bool = False) -> list[dict[str, Any]]:
         """List study pack membership rows in insertion order."""
         deleted_clause = "1=1" if include_deleted else "spc.deleted = 0"
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id, "spc")
+        if owner_params:
+            owner_clause += (
+                " AND f.client_id = ? AND EXISTS (SELECT 1 FROM study_packs sp "
+                "WHERE sp.id = spc.study_pack_id AND sp.client_id = ?)"
+            )
+            owner_params += (self.client_id, self.client_id)
         query = f"""
             SELECT spc.id, spc.study_pack_id, spc.flashcard_uuid, spc.created_at, spc.last_modified,
                    spc.deleted, spc.client_id, spc.version, f.deck_id
               FROM study_pack_cards spc
               LEFT JOIN flashcards f ON f.uuid = spc.flashcard_uuid
-             WHERE spc.study_pack_id = ? AND {deleted_clause}
+             WHERE spc.study_pack_id = ? AND {deleted_clause}{owner_clause}
              ORDER BY spc.id
         """  # nosec B608
         try:
-            cursor = self.execute_query(query, (study_pack_id,))
+            cursor = self.execute_query(query, (study_pack_id, *owner_params))
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
@@ -28568,7 +39976,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
 
         try:
-            with self.transaction() as _:
+            with self.transaction() as conn:
+                self._require_selected_owner_row(conn, "flashcards", flashcard_uuid, self.client_id)
                 self.execute_many(
                     """
                     INSERT INTO flashcard_citations(
@@ -28622,15 +40031,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
             )
 
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         try:
             with self.transaction() as conn:
+                self._require_selected_owner_row(conn, "flashcards", flashcard_uuid, self.client_id)
                 conn.execute(
-                    """
+                    f"""
                     UPDATE flashcard_citations
                        SET deleted = 1, last_modified = ?, version = version + 1, client_id = ?
-                     WHERE flashcard_uuid = ? AND deleted = 0
-                    """,
-                    (now, self.client_id, flashcard_uuid),
+                     WHERE flashcard_uuid = ? AND deleted = 0{owner_clause}
+                    """,  # nosec B608 - fixed owner predicate; values remain bound.
+                    (now, self.client_id, flashcard_uuid, *owner_params),
                 )
                 if params:
                     self.execute_many(
@@ -28700,8 +40111,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
             )
 
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
         try:
             with self.transaction() as conn:
+                self._require_selected_owner_row(conn, "flashcards", flashcard_uuid, self.client_id)
                 row = conn.execute(
                     "SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0",
                     (flashcard_uuid,),
@@ -28724,12 +40137,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     ),
                 )
                 conn.execute(
-                    """
+                    f"""
                     UPDATE flashcard_citations
                        SET deleted = 1, last_modified = ?, version = version + 1, client_id = ?
-                     WHERE flashcard_uuid = ? AND deleted = 0
-                    """,
-                    (now, self.client_id, flashcard_uuid),
+                     WHERE flashcard_uuid = ? AND deleted = 0{owner_clause}
+                    """,  # nosec B608 - fixed owner predicate; values remain bound.
+                    (now, self.client_id, flashcard_uuid, *owner_params),
                 )
                 if params:
                     self.execute_many(
@@ -28756,15 +40169,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def list_flashcard_citations(self, flashcard_uuid: str, *, include_deleted: bool = False) -> list[dict[str, Any]]:
         """List citations for a flashcard ordered by ordinal."""
         deleted_clause = "1=1" if include_deleted else "deleted = 0"
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id)
+        if owner_params:
+            owner_clause += (
+                " AND EXISTS (SELECT 1 FROM flashcards f "
+                "WHERE f.uuid = flashcard_citations.flashcard_uuid AND f.client_id = ?)"
+            )
+            owner_params += (self.client_id,)
         query = f"""
             SELECT id, flashcard_uuid, source_type, source_id, citation_text, locator, ordinal,
                    created_at, last_modified, deleted, client_id, version
               FROM flashcard_citations
-             WHERE flashcard_uuid = ? AND {deleted_clause}
+             WHERE flashcard_uuid = ? AND {deleted_clause}{owner_clause}
              ORDER BY ordinal, id
         """  # nosec B608
         try:
-            cursor = self.execute_query(query, (flashcard_uuid,))
+            cursor = self.execute_query(query, (flashcard_uuid, *owner_params), read_only=True)
             return [dict(row) for row in cursor.fetchall()]
         except CharactersRAGDBError:  # noqa: TRY203
             raise
@@ -28787,6 +40207,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
+                self._require_selected_owner_row(conn, "flashcards", flashcard_uuid, self.client_id)
                 row = conn.execute(
                     "SELECT id FROM flashcards WHERE uuid = ? AND deleted = 0",
                     (flashcard_uuid,),
@@ -28816,17 +40237,24 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_study_pack_for_flashcard(self, flashcard_uuid: str) -> dict[str, Any] | None:
         """Return the first active study pack containing the flashcard."""
-        query = """
+        owner_clause, owner_params = self._selected_owner_filter(self.client_id, "sp")
+        if owner_params:
+            owner_clause += (
+                " AND spc.client_id = ? AND EXISTS (SELECT 1 FROM flashcards f "
+                "WHERE f.uuid = spc.flashcard_uuid AND f.client_id = ?)"
+            )
+            owner_params += (self.client_id, self.client_id)
+        query = f"""
             SELECT sp.id, sp.workspace_id, sp.title, sp.deck_id, sp.source_bundle_json, sp.generation_options_json,
                    sp.status, sp.superseded_by_pack_id, sp.created_at, sp.last_modified, sp.deleted, sp.client_id, sp.version
               FROM study_pack_cards spc
               JOIN study_packs sp ON sp.id = spc.study_pack_id
-             WHERE spc.flashcard_uuid = ? AND spc.deleted = 0 AND sp.deleted = 0
+             WHERE spc.flashcard_uuid = ? AND spc.deleted = 0 AND sp.deleted = 0{owner_clause}
              ORDER BY spc.id ASC, sp.id ASC
              LIMIT 1
-        """
+        """  # nosec B608 - fixed owner predicate; values remain bound.
         try:
-            cursor = self.execute_query(query, (flashcard_uuid,))
+            cursor = self.execute_query(query, (flashcard_uuid, *owner_params), read_only=True)
             row = cursor.fetchone()
             return self._deserialize_row_fields(row, self._STUDY_PACK_JSON_FIELDS)
         except CharactersRAGDBError:  # noqa: TRY203
@@ -28837,6 +40265,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
+                self._require_selected_owner_row(conn, "study_packs", pack_id, self.client_id, include_deleted=True)
                 row = conn.execute("SELECT version, deleted FROM study_packs WHERE id = ?", (pack_id,)).fetchone()
                 if not row:
                     raise ConflictError("Study pack not found", entity="study_packs", identifier=pack_id)  # noqa: TRY003
@@ -28893,8 +40322,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     locked_rows: dict[int, Any] = {}
                     for locked_pack_id in sorted((pack_id, superseded_by_pack_id)):
                         locked_row = conn.execute(
-                            "SELECT id, version, deleted FROM study_packs WHERE id = ? FOR UPDATE",
-                            (locked_pack_id,),
+                            "SELECT id, version, deleted FROM study_packs WHERE id = ? AND client_id = ? FOR UPDATE",
+                            (locked_pack_id, self.client_id),
                         ).fetchone()
                         if locked_row:
                             locked_rows[int(locked_row["id"])] = locked_row
@@ -29103,6 +40532,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             item["correct_answer"] = self._normalize_multi_select_indices(item["correct_answer"])
         if item.get("question_type") == "matching" and item.get("correct_answer") is not None:
             item["correct_answer"] = self._normalize_matching_map(item["correct_answer"])
+        for field in ("created_at", "last_modified"):
+            item[field] = self._osce_timestamp(item.get(field))
         return item
 
     def _deserialize_quiz_row(self, row: Any) -> dict[str, Any] | None:
@@ -29116,7 +40547,104 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             item["source_bundle_json"] = [source_bundle]
         else:
             item["source_bundle_json"] = None
+        activity_type = self._normalize_quiz_activity(item.get("activity_type"))
+        item["activity_type"] = activity_type
+        item["generation_profile"] = item.get("generation_profile") or None
+        item["total_questions"] = max(0, int(item.get("total_questions") or 0))
+        item["total_stations"] = max(0, int(item.get("total_stations") or 0))
+        if activity_type == "osce":
+            item["total_questions"] = 0
+        else:
+            item["total_stations"] = 0
+        for field in ("created_at", "last_modified"):
+            item[field] = self._osce_timestamp(item.get(field))
         return item
+
+    @staticmethod
+    def _normalize_quiz_activity(activity_type: Any) -> str:
+        value = getattr(activity_type, "value", activity_type)
+        normalized = str(value or "questions").strip().lower()
+        if normalized not in {"questions", "osce"}:
+            raise InputError("activity_type must be 'questions' or 'osce'")
+        return normalized
+
+    @staticmethod
+    def _normalize_quiz_generation_profile(generation_profile: Any) -> str | None:
+        if generation_profile is None:
+            return None
+        value = getattr(generation_profile, "value", generation_profile)
+        normalized = str(value).strip()
+        return normalized or None
+
+    @staticmethod
+    def _quiz_not_found(quiz_id: int) -> ConflictError:
+        return ConflictError("Quiz not found", entity="quizzes", identifier=quiz_id)
+
+    def _get_quiz_row_for_mutation(self, conn: Any, quiz_id: int) -> Any:
+        """Read an active quiz, locking it on PostgreSQL for content mutations."""
+        deleted_clause = "deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "deleted = 0"
+        lock_clause = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        owner_clause = " AND client_id = ?" if self.backend_type == BackendType.POSTGRESQL else ""
+        params = (quiz_id, self.client_id) if owner_clause else (quiz_id,)
+        return conn.execute(
+            "SELECT id, version, activity_type, total_questions, total_stations, "
+            "time_limit_seconds, passing_score FROM quizzes "
+            f"WHERE id = ? AND {deleted_clause}{owner_clause}{lock_clause}",  # nosec B608
+            params,
+        ).fetchone()
+
+    def _require_quiz_activity(self, quiz_id: int, activity_type: str) -> dict[str, Any]:
+        quiz = self.get_quiz(quiz_id)
+        if quiz is None or quiz["activity_type"] != activity_type:
+            raise self._quiz_not_found(quiz_id)
+        return quiz
+
+    def _reject_question_for_osce_quiz(
+        self,
+        question_id: int,
+        quiz_id: int | None = None,
+    ) -> None:
+        owner_clause = " AND q.client_id = ?" if self.backend_type == BackendType.POSTGRESQL else ""
+        parent_clause = " AND qq.quiz_id = ?" if quiz_id is not None else ""
+        params: list[Any] = [question_id]
+        if quiz_id is not None:
+            params.append(quiz_id)
+        if owner_clause:
+            params.append(self.client_id)
+        row = self.execute_query(
+            "SELECT q.id AS quiz_id, q.activity_type "
+            "FROM quiz_questions AS qq JOIN quizzes AS q ON q.id = qq.quiz_id "
+            f"WHERE qq.id = ?{parent_clause}{owner_clause}",  # nosec B608
+            tuple(params),
+        ).fetchone()
+        if row and str(row["activity_type"]) != "questions":
+            raise self._quiz_not_found(int(row["quiz_id"]))
+
+    def _get_question_row_for_mutation(
+        self,
+        conn: Any,
+        question_id: int,
+        quiz_id: int | None = None,
+        *,
+        include_deleted: bool = False,
+    ) -> Any:
+        owner_clause = " AND q.client_id = ?" if self.backend_type == BackendType.POSTGRESQL else ""
+        parent_clause = " AND qq.quiz_id = ?" if quiz_id is not None else ""
+        deleted_clause = "1=1" if include_deleted else (
+            "qq.deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "qq.deleted = 0"
+        )
+        lock_clause = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        params: list[Any] = [question_id]
+        if quiz_id is not None:
+            params.append(quiz_id)
+        if owner_clause:
+            params.append(self.client_id)
+        return conn.execute(
+            "SELECT qq.id, qq.quiz_id, qq.version, qq.deleted, qq.question_type, q.activity_type "
+            "FROM quiz_questions AS qq JOIN quizzes AS q ON q.id = qq.quiz_id "
+            f"WHERE qq.id = ? AND {deleted_clause}{parent_clause}{owner_clause}{lock_clause}",  # nosec B608
+            tuple(params),
+        ).fetchone()
 
     def _deserialize_quiz_remediation_conversion_row(self, row: Any) -> dict[str, Any] | None:
         item = self._deserialize_row_fields(row, ["flashcard_uuids_json"])
@@ -29138,6 +40666,20 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _recount_quiz_questions(self, conn: Any, quiz_id: int) -> int:
         deleted_clause = "deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "deleted = 0"
+        if self.backend_type == BackendType.POSTGRESQL:
+            row = conn.execute(
+                "SELECT COUNT(*) AS count FROM quiz_questions AS qq "
+                "JOIN quizzes AS q ON q.id = qq.quiz_id "
+                "WHERE qq.quiz_id = ? AND qq.deleted = FALSE AND q.client_id = ?",
+                (quiz_id, self.client_id),
+            ).fetchone()
+            total = int(row["count"]) if row else 0
+            conn.execute(
+                "UPDATE quizzes SET total_questions = ?, total_stations = 0, last_modified = ?, "
+                "version = version + 1 WHERE id = ? AND client_id = ?",
+                (total, self._get_current_utc_timestamp_iso(), quiz_id, self.client_id),
+            )
+            return total
         row = conn.execute(
             f"SELECT COUNT(*) AS count FROM quiz_questions WHERE quiz_id = ? AND {deleted_clause}",  # nosec B608
             (quiz_id,),
@@ -29145,10 +40687,1074 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         total = int(row["count"]) if row else 0
         now = self._get_current_utc_timestamp_iso()
         conn.execute(
-            "UPDATE quizzes SET total_questions = ?, last_modified = ?, version = version + 1, client_id = ? WHERE id = ?",
+            "UPDATE quizzes SET total_questions = ?, total_stations = 0, last_modified = ?, "
+            "version = version + 1, client_id = ? WHERE id = ?",
             (total, now, self.client_id, quiz_id),
         )
         return total
+
+    @staticmethod
+    def _normalize_osce_station_content(content: Any) -> dict[str, Any]:
+        if hasattr(content, "model_dump"):
+            payload = content.model_dump(mode="json")
+        elif isinstance(content, Mapping):
+            payload = dict(content)
+        else:
+            raise InputError("OSCE station content must be a validated mapping")
+        if payload.get("schema_version") != "osce.station.v1":
+            raise InputError("Unsupported OSCE station schema_version")
+        return payload
+
+    @staticmethod
+    def _normalize_osce_station_origin(origin: Any) -> str:
+        value = getattr(origin, "value", origin)
+        normalized = str(value or "").strip().lower()
+        if normalized not in {"generated", "manual"}:
+            raise InputError("OSCE station origin must be 'generated' or 'manual'")
+        return normalized
+
+    @staticmethod
+    def _normalize_osce_verification_state(state: Any, *, origin: str) -> str:
+        value = getattr(state, "value", state)
+        normalized = str(
+            value or ("manually_authored" if origin == "manual" else "source_verified")
+        ).strip().lower()
+        allowed = {"source_verified", "modified_after_verification", "manually_authored"}
+        if normalized not in allowed:
+            raise InputError("Invalid OSCE station verification_state")
+        return normalized
+
+    @staticmethod
+    def _osce_json_string(value: Any) -> str | None:
+        if value is None:
+            return None
+        if hasattr(value, "model_dump"):
+            value = value.model_dump(mode="json")
+        if isinstance(value, str):
+            try:
+                json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise InputError("OSCE structured metadata must contain valid JSON") from exc
+            return value
+        return json.dumps(value, ensure_ascii=True, default=str)
+
+    @staticmethod
+    def _osce_timestamp(value: Any) -> Any:
+        if isinstance(value, datetime):
+            return value.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        return value
+
+    def _deserialize_osce_station_row(self, row: Any) -> dict[str, Any] | None:
+        item = self._deserialize_row_fields(
+            row,
+            ["content_json", "provenance_json", "source_bundle_json"],
+        )
+        if not item:
+            return None
+        item["content"] = item.pop("content_json")
+        item["provenance"] = item.pop("provenance_json", None)
+        source_bundle = item.pop("source_bundle_json", None)
+        item["source_bundle"] = source_bundle if isinstance(source_bundle, list) else []
+        item["deleted"] = bool(item.get("deleted"))
+        for field in ("verification_timestamp", "created_at", "updated_at"):
+            item[field] = self._osce_timestamp(item.get(field))
+        return item
+
+    @staticmethod
+    def _osce_station_columns(table_alias: str | None = None) -> str:
+        prefix = f"{table_alias}." if table_alias else ""
+        columns = (
+            "id",
+            "quiz_id",
+            "schema_version",
+            "content_json",
+            "order_index",
+            "version",
+            "origin",
+            "provenance_json",
+            "source_bundle_json",
+            "verification_state",
+            "verification_timestamp",
+            "verification_summary",
+            "deleted",
+            "created_at",
+            "updated_at",
+        )
+        return ", ".join(f"{prefix}{column}" for column in columns)
+
+    def _get_osce_station_row(
+        self,
+        conn: Any,
+        quiz_id: int,
+        station_id: int,
+        *,
+        include_deleted: bool = False,
+        lock: bool = False,
+    ) -> Any:
+        deleted_clause = "" if include_deleted else (
+            "AND deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "AND deleted = 0"
+        )
+        lock_clause = " FOR UPDATE" if lock and self.backend_type == BackendType.POSTGRESQL else ""
+        if self.backend_type == BackendType.POSTGRESQL:
+            station_deleted_clause = "" if include_deleted else "AND s.deleted = FALSE"
+            return conn.execute(
+                f"SELECT {self._osce_station_columns('s')} "  # nosec B608
+                "FROM osce_stations AS s JOIN quizzes AS q ON q.id = s.quiz_id "
+                f"WHERE s.id = ? AND s.quiz_id = ? {station_deleted_clause} "  # nosec B608
+                f"AND q.client_id = ?{lock_clause}",  # nosec B608
+                (station_id, quiz_id, self.client_id),
+            ).fetchone()
+        return conn.execute(
+            f"SELECT {self._osce_station_columns()} FROM osce_stations "  # nosec B608
+            f"WHERE id = ? AND quiz_id = ? {deleted_clause}{lock_clause}",  # nosec B608
+            (station_id, quiz_id),
+        ).fetchone()
+
+    def _insert_osce_station_row(
+        self,
+        conn: Any,
+        quiz_id: int,
+        station_data: Mapping[str, Any],
+        *,
+        now: str,
+    ) -> int:
+        content = self._normalize_osce_station_content(station_data["content"])
+        origin = self._normalize_osce_station_origin(station_data.get("origin"))
+        verification_state = self._normalize_osce_verification_state(
+            station_data.get("verification_state"),
+            origin=origin,
+        )
+        order_index = int(station_data.get("order_index", 0))
+        if order_index < 0:
+            raise InputError("OSCE station order_index must be non-negative")
+        verification_summary = station_data.get("verification_summary")
+        if verification_summary is not None and len(str(verification_summary)) > 2000:
+            raise InputError("OSCE verification_summary exceeds 2000 characters")
+        insert_sql = (
+            "INSERT INTO osce_stations(quiz_id, schema_version, content_json, order_index, version, "
+            "origin, provenance_json, source_bundle_json, verification_state, verification_timestamp, "
+            "verification_summary, deleted, created_at, updated_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        params = (
+            quiz_id,
+            content["schema_version"],
+            self._osce_json_string(content),
+            order_index,
+            1,
+            origin,
+            self._osce_json_string(station_data.get("provenance")),
+            self._osce_json_string(
+                station_data.get("source_bundle", station_data.get("source_bundle_json"))
+            ),
+            verification_state,
+            station_data.get("verification_timestamp"),
+            verification_summary,
+            False,
+            now,
+            now,
+        )
+        if self.backend_type == BackendType.POSTGRESQL:
+            row = conn.execute(insert_sql + " RETURNING id", params).fetchone()
+            station_id = int(row["id"]) if row else None
+        else:
+            station_id = int(conn.execute(insert_sql, params).lastrowid)
+        if station_id is None:
+            raise CharactersRAGDBError("Failed to determine OSCE station ID after insert")  # noqa: TRY003
+        return station_id
+
+    def _recount_quiz_stations(self, conn: Any, quiz_id: int) -> int:
+        deleted_clause = "deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "deleted = 0"
+        if self.backend_type == BackendType.POSTGRESQL:
+            row = conn.execute(
+                "SELECT COUNT(*) AS count FROM osce_stations AS s "
+                "JOIN quizzes AS q ON q.id = s.quiz_id "
+                "WHERE s.quiz_id = ? AND s.deleted = FALSE AND q.client_id = ?",
+                (quiz_id, self.client_id),
+            ).fetchone()
+            total = int(row["count"]) if row else 0
+            conn.execute(
+                "UPDATE quizzes SET total_questions = 0, total_stations = ?, last_modified = ?, "
+                "version = version + 1 WHERE id = ? AND client_id = ?",
+                (total, self._get_current_utc_timestamp_iso(), quiz_id, self.client_id),
+            )
+            return total
+        row = conn.execute(
+            f"SELECT COUNT(*) AS count FROM osce_stations WHERE quiz_id = ? AND {deleted_clause}",  # nosec B608
+            (quiz_id,),
+        ).fetchone()
+        total = int(row["count"]) if row else 0
+        conn.execute(
+            "UPDATE quizzes SET total_questions = 0, total_stations = ?, last_modified = ?, "
+            "version = version + 1, client_id = ? WHERE id = ?",
+            (total, self._get_current_utc_timestamp_iso(), self.client_id, quiz_id),
+        )
+        return total
+
+    def _osce_station_owner_update_clause(self) -> tuple[str, tuple[Any, ...]]:
+        if self.backend_type != BackendType.POSTGRESQL:
+            return "", ()
+        return (
+            " AND EXISTS (SELECT 1 FROM quizzes AS q "
+            "WHERE q.id = osce_stations.quiz_id AND q.client_id = ?)",
+            (self.client_id,),
+        )
+
+    def create_osce_station(
+        self,
+        quiz_id: int,
+        content: Any,
+        *,
+        order_index: int = 0,
+        origin: Any,
+        provenance: Any = None,
+        source_bundle: Any = None,
+        verification_state: Any = None,
+        verification_timestamp: str | None = None,
+        verification_summary: str | None = None,
+    ) -> dict[str, Any]:
+        """Create one station and update the owning quiz count atomically."""
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                quiz_row = self._get_quiz_row_for_mutation(conn, quiz_id)
+                if not quiz_row or str(quiz_row["activity_type"]) != "osce":
+                    raise self._quiz_not_found(quiz_id)
+                station_id = self._insert_osce_station_row(
+                    conn,
+                    quiz_id,
+                    {
+                        "content": content,
+                        "order_index": order_index,
+                        "origin": origin,
+                        "provenance": provenance,
+                        "source_bundle": source_bundle,
+                        "verification_state": verification_state,
+                        "verification_timestamp": verification_timestamp,
+                        "verification_summary": verification_summary,
+                    },
+                    now=now,
+                )
+                self._recount_quiz_stations(conn, quiz_id)
+                row = self._get_osce_station_row(conn, quiz_id, station_id)
+                station = self._deserialize_osce_station_row(row)
+                if station is None:
+                    raise CharactersRAGDBError("Failed to read created OSCE station")  # noqa: TRY003
+                return station
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to create OSCE station: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to create OSCE station: {exc}") from exc  # noqa: TRY003
+
+    def get_osce_station(
+        self,
+        quiz_id: int,
+        station_id: int,
+        *,
+        include_deleted: bool = False,
+    ) -> dict[str, Any] | None:
+        """Return one station only when it belongs to the supplied OSCE quiz."""
+        self._require_quiz_activity(quiz_id, "osce")
+        row = self._get_osce_station_row(
+            self.get_connection(),
+            quiz_id,
+            station_id,
+            include_deleted=include_deleted,
+        )
+        return self._deserialize_osce_station_row(row)
+
+    def list_osce_stations(
+        self,
+        quiz_id: int,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        include_deleted: bool = False,
+    ) -> dict[str, Any]:
+        """List stations in deterministic authoring order."""
+        self._require_quiz_activity(quiz_id, "osce")
+        if limit < 1 or offset < 0:
+            raise InputError("OSCE station pagination values are invalid")
+        deleted_clause = "" if include_deleted else (
+            "AND deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "AND deleted = 0"
+        )
+        if self.backend_type == BackendType.POSTGRESQL:
+            station_deleted_clause = "" if include_deleted else "AND s.deleted = FALSE"
+            query = (
+                f"SELECT {self._osce_station_columns('s')} "  # nosec B608
+                "FROM osce_stations AS s JOIN quizzes AS q ON q.id = s.quiz_id "
+                f"WHERE s.quiz_id = ? {station_deleted_clause} AND q.client_id = ? "  # nosec B608
+                "ORDER BY s.order_index ASC, s.id ASC LIMIT ? OFFSET ?"
+            )
+            count_query = (
+                "SELECT COUNT(*) AS count FROM osce_stations AS s "
+                "JOIN quizzes AS q ON q.id = s.quiz_id "
+                f"WHERE s.quiz_id = ? {station_deleted_clause} AND q.client_id = ?"  # nosec B608
+            )
+            params = (quiz_id, self.client_id)
+            rows = self.execute_query(query, (*params, limit, offset)).fetchall()
+            items = [self._deserialize_osce_station_row(row) for row in rows]
+            count_row = self.execute_query(count_query, params).fetchone()
+            return {
+                "items": [item for item in items if item is not None],
+                "count": int(count_row["count"]) if count_row else 0,
+            }
+        query = (
+            f"SELECT {self._osce_station_columns()} FROM osce_stations "  # nosec B608
+            f"WHERE quiz_id = ? {deleted_clause} ORDER BY order_index ASC, id ASC LIMIT ? OFFSET ?"  # nosec B608
+        )
+        count_query = f"SELECT COUNT(*) AS count FROM osce_stations WHERE quiz_id = ? {deleted_clause}"  # nosec B608
+        rows = self.execute_query(query, (quiz_id, limit, offset)).fetchall()
+        items = [self._deserialize_osce_station_row(row) for row in rows]
+        count_row = self.execute_query(count_query, (quiz_id,)).fetchone()
+        return {
+            "items": [item for item in items if item is not None],
+            "count": int(count_row["count"]) if count_row else 0,
+        }
+
+    def update_osce_station(
+        self,
+        quiz_id: int,
+        station_id: int,
+        content: Any,
+        *,
+        expected_version: int,
+        order_index: int | None = None,
+        verification_state: Any = None,
+        verification_timestamp: str | None = None,
+        verification_summary: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Replace validated station content using optimistic locking."""
+        content_payload = self._normalize_osce_station_content(content)
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                quiz_row = self._get_quiz_row_for_mutation(conn, quiz_id)
+                if not quiz_row or str(quiz_row["activity_type"]) != "osce":
+                    raise self._quiz_not_found(quiz_id)
+                row = self._get_osce_station_row(conn, quiz_id, station_id, lock=True)
+                if not row:
+                    return None
+                current = self._deserialize_osce_station_row(row)
+                if current is None:
+                    return None
+                if int(current["version"]) != expected_version:
+                    raise ConflictError(
+                        "Version mismatch updating OSCE station",
+                        entity="osce_stations",
+                        identifier=station_id,
+                    )
+                next_order = int(current["order_index"] if order_index is None else order_index)
+                if next_order < 0:
+                    raise InputError("OSCE station order_index must be non-negative")
+                next_state = self._normalize_osce_verification_state(
+                    verification_state or current["verification_state"],
+                    origin=current["origin"],
+                )
+                next_timestamp = (
+                    current["verification_timestamp"]
+                    if verification_timestamp is None
+                    else verification_timestamp
+                )
+                next_summary = (
+                    current["verification_summary"]
+                    if verification_summary is None
+                    else verification_summary
+                )
+                if next_summary is not None and len(str(next_summary)) > 2000:
+                    raise InputError("OSCE verification_summary exceeds 2000 characters")
+                deleted_clause = (
+                    "deleted = FALSE"
+                    if self.backend_type == BackendType.POSTGRESQL
+                    else "deleted = 0"
+                )
+                owner_clause, owner_params = self._osce_station_owner_update_clause()
+                conn.execute(
+                    "UPDATE osce_stations SET schema_version = ?, content_json = ?, order_index = ?, "
+                    "verification_state = ?, verification_timestamp = ?, verification_summary = ?, "
+                    "version = version + 1, updated_at = ? WHERE id = ? AND quiz_id = ? "
+                    f"AND {deleted_clause}{owner_clause}",  # nosec B608
+                    (
+                        content_payload["schema_version"],
+                        self._osce_json_string(content_payload),
+                        next_order,
+                        next_state,
+                        next_timestamp,
+                        next_summary,
+                        now,
+                        station_id,
+                        quiz_id,
+                        *owner_params,
+                    ),
+                )
+                updated_row = self._get_osce_station_row(conn, quiz_id, station_id)
+                return self._deserialize_osce_station_row(updated_row)
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to update OSCE station: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to update OSCE station: {exc}") from exc  # noqa: TRY003
+
+    def delete_osce_station(
+        self,
+        quiz_id: int,
+        station_id: int,
+        *,
+        expected_version: int | None = None,
+    ) -> bool:
+        """Soft-delete one station and update the owning quiz count atomically."""
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                quiz_row = self._get_quiz_row_for_mutation(conn, quiz_id)
+                if not quiz_row or str(quiz_row["activity_type"]) != "osce":
+                    raise self._quiz_not_found(quiz_id)
+                row = self._get_osce_station_row(
+                    conn,
+                    quiz_id,
+                    station_id,
+                    include_deleted=True,
+                    lock=True,
+                )
+                if not row:
+                    return False
+                if bool(row["deleted"]):
+                    return True
+                current_version = int(row["version"])
+                if expected_version is not None and current_version != expected_version:
+                    raise ConflictError(
+                        "Version mismatch deleting OSCE station",
+                        entity="osce_stations",
+                        identifier=station_id,
+                    )
+                deleted_clause = "deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "deleted = 0"
+                owner_clause, owner_params = self._osce_station_owner_update_clause()
+                result = conn.execute(
+                    "UPDATE osce_stations SET deleted = ?, version = version + 1, updated_at = ? "
+                    f"WHERE id = ? AND quiz_id = ? AND {deleted_clause}{owner_clause}",  # nosec B608
+                    (
+                        True,
+                        now,
+                        station_id,
+                        quiz_id,
+                        *owner_params,
+                    ),
+                )
+                if result.rowcount:
+                    self._recount_quiz_stations(conn, quiz_id)
+                return result.rowcount > 0
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to delete OSCE station: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to delete OSCE station: {exc}") from exc  # noqa: TRY003
+
+    @staticmethod
+    def _normalize_osce_attempt_state(state: Any) -> str:
+        value = getattr(state, "value", state)
+        normalized = str(value or "").strip().lower()
+        if normalized not in {"in_progress", "self_assessment", "completed"}:
+            raise InputError("Invalid OSCE attempt state")
+        return normalized
+
+    @staticmethod
+    def _normalize_osce_client_attempt_id(client_attempt_id: Any) -> str:
+        try:
+            return str(uuid.UUID(str(client_attempt_id)))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise InputError("client_attempt_id must be a UUID") from exc
+
+    @staticmethod
+    def _osce_attempt_snapshot(station: Mapping[str, Any]) -> dict[str, Any]:
+        content = dict(station["content"])
+        return {
+            "title": content["title"],
+            "content": content,
+            "origin": station["origin"],
+            "provenance": station.get("provenance"),
+            "source_bundle": list(station.get("source_bundle") or []),
+            "verification_state": station["verification_state"],
+            "verification_timestamp": station.get("verification_timestamp"),
+            "verification_summary": station.get("verification_summary"),
+        }
+
+    @staticmethod
+    def _osce_attempt_columns(table_alias: str | None = None) -> str:
+        prefix = f"{table_alias}." if table_alias else ""
+        columns = (
+            "id",
+            "station_id",
+            "quiz_id",
+            "client_attempt_id",
+            "station_snapshot_json",
+            "state",
+            "candidate_notes",
+            "checklist_selections_json",
+            "rubric_selections_json",
+            "started_at",
+            "self_assessment_started_at",
+            "completed_at",
+            "frozen_elapsed_seconds",
+            "version",
+            "last_modified_at",
+        )
+        return ", ".join(f"{prefix}{column}" for column in columns)
+
+    def _deserialize_osce_attempt_row(self, row: Any) -> dict[str, Any] | None:
+        item = self._deserialize_row_fields(
+            row,
+            [
+                "station_snapshot_json",
+                "checklist_selections_json",
+                "rubric_selections_json",
+            ],
+        )
+        if not item:
+            return None
+        item["station_snapshot"] = item.pop("station_snapshot_json")
+        checklist = item.pop("checklist_selections_json", None)
+        rubric = item.pop("rubric_selections_json", None)
+        item["checklist_selections"] = checklist if isinstance(checklist, dict) else {}
+        item["rubric_selections"] = rubric if isinstance(rubric, dict) else {}
+        for field in (
+            "started_at",
+            "self_assessment_started_at",
+            "completed_at",
+            "last_modified_at",
+        ):
+            item[field] = self._osce_timestamp(item.get(field))
+        item["elapsed_seconds"] = item.get("frozen_elapsed_seconds")
+        return item
+
+    def _get_osce_attempt_row(
+        self,
+        conn: Any,
+        attempt_id: int,
+        *,
+        lock: bool = False,
+    ) -> Any:
+        lock_clause = " FOR UPDATE" if lock and self.backend_type == BackendType.POSTGRESQL else ""
+        if self.backend_type == BackendType.POSTGRESQL:
+            return conn.execute(
+                f"SELECT {self._osce_attempt_columns('a')} "  # nosec B608
+                "FROM osce_practice_attempts AS a "
+                "JOIN quizzes AS q ON q.id = a.quiz_id "
+                f"WHERE a.id = ? AND q.client_id = ?{lock_clause}",  # nosec B608
+                (attempt_id, self.client_id),
+            ).fetchone()
+        return conn.execute(
+            f"SELECT {self._osce_attempt_columns()} FROM osce_practice_attempts "  # nosec B608
+            f"WHERE id = ?{lock_clause}",  # nosec B608
+            (attempt_id,),
+        ).fetchone()
+
+    def _get_osce_attempt_by_retry_key(
+        self,
+        conn: Any,
+        station_id: int,
+        client_attempt_id: str,
+    ) -> Any:
+        if self.backend_type == BackendType.POSTGRESQL:
+            return conn.execute(
+                f"SELECT {self._osce_attempt_columns('a')} "  # nosec B608
+                "FROM osce_practice_attempts AS a "
+                "JOIN quizzes AS q ON q.id = a.quiz_id "
+                "WHERE a.station_id = ? AND a.client_attempt_id = ? AND q.client_id = ?",
+                (station_id, client_attempt_id, self.client_id),
+            ).fetchone()
+        return conn.execute(
+            f"SELECT {self._osce_attempt_columns()} FROM osce_practice_attempts "  # nosec B608
+            "WHERE station_id = ? AND client_attempt_id = ?",
+            (station_id, client_attempt_id),
+        ).fetchone()
+
+    def _get_active_osce_station_for_attempt(self, conn: Any, station_id: int) -> Any:
+        station_deleted = "s.deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "s.deleted = 0"
+        quiz_deleted = "q.deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "q.deleted = 0"
+        lock_clause = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        owner_clause = " AND q.client_id = ?" if self.backend_type == BackendType.POSTGRESQL else ""
+        params = (station_id, self.client_id) if owner_clause else (station_id,)
+        return conn.execute(
+            "SELECT s.id, s.quiz_id, s.schema_version, s.content_json, s.order_index, s.version, "
+            "s.origin, s.provenance_json, s.source_bundle_json, s.verification_state, "
+            "s.verification_timestamp, s.verification_summary, s.deleted, s.created_at, s.updated_at "
+            "FROM osce_stations AS s JOIN quizzes AS q ON q.id = s.quiz_id "
+            f"WHERE s.id = ? AND {station_deleted} AND {quiz_deleted} "  # nosec B608
+            f"AND q.activity_type = 'osce'{owner_clause}{lock_clause}",  # nosec B608
+            params,
+        ).fetchone()
+
+    def _osce_attempt_owner_update_clause(self) -> tuple[str, tuple[Any, ...]]:
+        if self.backend_type != BackendType.POSTGRESQL:
+            return "", ()
+        return (
+            " AND EXISTS (SELECT 1 FROM quizzes AS q "
+            "WHERE q.id = osce_practice_attempts.quiz_id AND q.client_id = ?)",
+            (self.client_id,),
+        )
+
+    @staticmethod
+    def _parse_osce_attempt_timestamp(value: Any) -> datetime:
+        if isinstance(value, datetime):
+            parsed = value
+        else:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    @staticmethod
+    def _validate_osce_attempt_selections(
+        attempt: Mapping[str, Any],
+        checklist_selections: Mapping[Any, Any],
+        rubric_selections: Mapping[Any, Any],
+        *,
+        require_complete: bool,
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        from tldw_Server_API.app.services.osce_practice import validate_assessment_selections
+
+        snapshot = attempt["station_snapshot"]
+        content = snapshot.get("content", snapshot)
+        try:
+            return validate_assessment_selections(
+                content,
+                checklist_selections,
+                rubric_selections,
+                require_complete=require_complete,
+            )
+        except ValueError as exc:
+            raise InputError(str(exc)) from exc
+
+    def start_osce_attempt(
+        self,
+        station_id: int,
+        client_attempt_id: Any,
+    ) -> dict[str, Any] | None:
+        """Create one immutable attempt snapshot or return the matching retry."""
+        normalized_client_id = self._normalize_osce_client_attempt_id(client_attempt_id)
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                existing_row = self._get_osce_attempt_by_retry_key(
+                    conn, station_id, normalized_client_id
+                )
+                if existing_row:
+                    return self._deserialize_osce_attempt_row(existing_row)
+
+                station_row = self._get_active_osce_station_for_attempt(conn, station_id)
+                station = self._deserialize_osce_station_row(station_row)
+                if station is None:
+                    return None
+                snapshot_json = self._osce_json_string(self._osce_attempt_snapshot(station))
+                conn.execute(
+                    "INSERT INTO osce_practice_attempts("
+                    "station_id, quiz_id, client_attempt_id, station_snapshot_json, state, "
+                    "candidate_notes, checklist_selections_json, rubric_selections_json, "
+                    "started_at, self_assessment_started_at, completed_at, "
+                    "frozen_elapsed_seconds, version, last_modified_at) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(station_id, client_attempt_id) DO NOTHING",
+                    (
+                        station_id,
+                        station["quiz_id"],
+                        normalized_client_id,
+                        snapshot_json,
+                        "in_progress",
+                        "",
+                        "{}",
+                        "{}",
+                        now,
+                        None,
+                        None,
+                        None,
+                        1,
+                        now,
+                    ),
+                )
+                row = self._get_osce_attempt_by_retry_key(
+                    conn, station_id, normalized_client_id
+                )
+                attempt = self._deserialize_osce_attempt_row(row)
+                if attempt is None:
+                    raise CharactersRAGDBError("Failed to read created OSCE attempt")  # noqa: TRY003
+                return attempt
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to start OSCE attempt: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to start OSCE attempt: {exc}") from exc  # noqa: TRY003
+
+    def get_osce_attempt(self, attempt_id: int) -> dict[str, Any] | None:
+        """Load an attempt solely from its immutable snapshot."""
+        row = self._get_osce_attempt_row(self.get_connection(), attempt_id)
+        return self._deserialize_osce_attempt_row(row)
+
+    def list_osce_attempts(
+        self,
+        *,
+        quiz_id: int | None = None,
+        station_id: int | None = None,
+        states: Sequence[Any] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """List compact snapshot-based attempt summaries by recent activity."""
+        if limit < 1 or offset < 0:
+            raise InputError("OSCE attempt pagination values are invalid")
+        normalized_states = [self._normalize_osce_attempt_state(state) for state in states or ()]
+        if len(normalized_states) != len(set(normalized_states)):
+            normalized_states = list(dict.fromkeys(normalized_states))
+
+        clauses: list[str] = []
+        params: list[Any] = []
+        join_clause = ""
+        if self.backend_type == BackendType.POSTGRESQL:
+            join_clause = " JOIN quizzes AS q ON q.id = a.quiz_id"
+            clauses.append("q.client_id = ?")
+            params.append(self.client_id)
+        if quiz_id is not None:
+            clauses.append("a.quiz_id = ?")
+            params.append(quiz_id)
+        if station_id is not None:
+            clauses.append("a.station_id = ?")
+            params.append(station_id)
+        if normalized_states:
+            clauses.append(f"a.state IN ({', '.join('?' for _ in normalized_states)})")
+            params.extend(normalized_states)
+        where_clause = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self.execute_query(
+            f"SELECT {self._osce_attempt_columns('a')} FROM osce_practice_attempts AS a"  # nosec B608
+            f"{join_clause}{where_clause} "  # nosec B608
+            "ORDER BY a.last_modified_at DESC, a.id DESC LIMIT ? OFFSET ?",
+            (*params, limit, offset),
+        ).fetchall()
+        count_row = self.execute_query(
+            f"SELECT COUNT(*) AS count FROM osce_practice_attempts AS a"  # nosec B608
+            f"{join_clause}{where_clause}",  # nosec B608
+            tuple(params),
+        ).fetchone()
+
+        from tldw_Server_API.app.services.osce_practice import summarize_osce_attempt
+
+        summaries = []
+        for row in rows:
+            attempt = self._deserialize_osce_attempt_row(row)
+            if attempt is not None:
+                summaries.append(summarize_osce_attempt(attempt).model_dump(mode="json"))
+        return {
+            "items": summaries,
+            "count": int(count_row["count"]) if count_row else 0,
+        }
+
+    def patch_osce_attempt(
+        self,
+        attempt_id: int,
+        *,
+        expected_version: int,
+        notes: str | None = None,
+        checklist_selections: Mapping[Any, Any] | None = None,
+        rubric_selections: Mapping[Any, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Update phase-appropriate fields under strict optimistic locking."""
+        if notes is None and checklist_selections is None and rubric_selections is None:
+            raise InputError("OSCE attempt patch contains no updates")
+        if notes is not None and (not isinstance(notes, str) or len(notes) > 10000):
+            raise InputError("OSCE candidate notes must be a string of at most 10000 characters")
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                row = self._get_osce_attempt_row(conn, attempt_id, lock=True)
+                attempt = self._deserialize_osce_attempt_row(row)
+                if attempt is None:
+                    return None
+                if attempt["state"] == "completed":
+                    raise ConflictError(
+                        "Completed OSCE attempts are immutable",
+                        entity="osce_practice_attempts",
+                        identifier=attempt_id,
+                    )
+                if int(attempt["version"]) != expected_version:
+                    raise ConflictError(
+                        "Version mismatch updating OSCE attempt",
+                        entity="osce_practice_attempts",
+                        identifier=attempt_id,
+                    )
+                if attempt["state"] == "in_progress" and (
+                    checklist_selections is not None or rubric_selections is not None
+                ):
+                    raise InputError("Assessment selections require self-assessment state")
+
+                next_checklist = (
+                    attempt["checklist_selections"]
+                    if checklist_selections is None
+                    else checklist_selections
+                )
+                next_rubric = (
+                    attempt["rubric_selections"]
+                    if rubric_selections is None
+                    else rubric_selections
+                )
+                normalized_checklist, normalized_rubric = self._validate_osce_attempt_selections(
+                    attempt,
+                    next_checklist,
+                    next_rubric,
+                    require_complete=False,
+                )
+                allowed_state = attempt["state"]
+                owner_clause, owner_params = self._osce_attempt_owner_update_clause()
+                result = conn.execute(
+                    "UPDATE osce_practice_attempts SET candidate_notes = ?, "
+                    "checklist_selections_json = ?, rubric_selections_json = ?, "
+                    "version = version + 1, last_modified_at = ? "
+                    f"WHERE id = ? AND version = ? AND state = ?{owner_clause}",  # nosec B608
+                    (
+                        attempt["candidate_notes"] if notes is None else notes,
+                        json.dumps(normalized_checklist, ensure_ascii=True, sort_keys=True),
+                        json.dumps(normalized_rubric, ensure_ascii=True, sort_keys=True),
+                        now,
+                        attempt_id,
+                        expected_version,
+                        allowed_state,
+                        *owner_params,
+                    ),
+                )
+                if result.rowcount != 1:
+                    raise ConflictError(
+                        "Version mismatch updating OSCE attempt",
+                        entity="osce_practice_attempts",
+                        identifier=attempt_id,
+                    )
+                return self._deserialize_osce_attempt_row(
+                    self._get_osce_attempt_row(conn, attempt_id)
+                )
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to update OSCE attempt: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to update OSCE attempt: {exc}") from exc  # noqa: TRY003
+
+    def transition_osce_attempt(
+        self,
+        attempt_id: int,
+        target_state: Any,
+        *,
+        expected_version: int,
+    ) -> dict[str, Any] | None:
+        """Advance an attempt monotonically or return its already-achieved state."""
+        normalized_target = self._normalize_osce_attempt_state(target_state)
+        if normalized_target == "in_progress":
+            raise InputError("OSCE attempts cannot transition to in_progress")
+        ranks = {"in_progress": 0, "self_assessment": 1, "completed": 2}
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                row = self._get_osce_attempt_row(conn, attempt_id, lock=True)
+                attempt = self._deserialize_osce_attempt_row(row)
+                if attempt is None:
+                    return None
+                current_state = attempt["state"]
+                if ranks[current_state] >= ranks[normalized_target]:
+                    return attempt
+                if int(attempt["version"]) != expected_version:
+                    raise ConflictError(
+                        "Version mismatch transitioning OSCE attempt",
+                        entity="osce_practice_attempts",
+                        identifier=attempt_id,
+                    )
+                if ranks[normalized_target] != ranks[current_state] + 1:
+                    raise ConflictError(
+                        "Invalid OSCE attempt transition",
+                        entity="osce_practice_attempts",
+                        identifier=attempt_id,
+                    )
+
+                owner_clause, owner_params = self._osce_attempt_owner_update_clause()
+                if normalized_target == "self_assessment":
+                    started_at = self._parse_osce_attempt_timestamp(attempt["started_at"])
+                    transition_time = self._parse_osce_attempt_timestamp(now)
+                    elapsed_seconds = max(0, int((transition_time - started_at).total_seconds()))
+                    result = conn.execute(
+                        "UPDATE osce_practice_attempts SET state = ?, "
+                        "self_assessment_started_at = ?, frozen_elapsed_seconds = ?, "
+                        "version = version + 1, last_modified_at = ? "
+                        f"WHERE id = ? AND version = ? AND state = ?{owner_clause}",  # nosec B608
+                        (
+                            normalized_target,
+                            now,
+                            elapsed_seconds,
+                            now,
+                            attempt_id,
+                            expected_version,
+                            current_state,
+                            *owner_params,
+                        ),
+                    )
+                else:
+                    self._validate_osce_attempt_selections(
+                        attempt,
+                        attempt["checklist_selections"],
+                        attempt["rubric_selections"],
+                        require_complete=True,
+                    )
+                    result = conn.execute(
+                        "UPDATE osce_practice_attempts SET state = ?, completed_at = ?, "
+                        "version = version + 1, last_modified_at = ? "
+                        f"WHERE id = ? AND version = ? AND state = ?{owner_clause}",  # nosec B608
+                        (
+                            normalized_target,
+                            now,
+                            now,
+                            attempt_id,
+                            expected_version,
+                            current_state,
+                            *owner_params,
+                        ),
+                    )
+                if result.rowcount != 1:
+                    latest = self._deserialize_osce_attempt_row(
+                        self._get_osce_attempt_row(conn, attempt_id)
+                    )
+                    if latest is not None and ranks[latest["state"]] >= ranks[normalized_target]:
+                        return latest
+                    raise ConflictError(
+                        "Version mismatch transitioning OSCE attempt",
+                        entity="osce_practice_attempts",
+                        identifier=attempt_id,
+                    )
+                return self._deserialize_osce_attempt_row(
+                    self._get_osce_attempt_row(conn, attempt_id)
+                )
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to transition OSCE attempt: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to transition OSCE attempt: {exc}") from exc  # noqa: TRY003
+
+    def create_quiz_with_osce_stations_atomic(
+        self,
+        quiz_data: dict[str, Any],
+        stations: Sequence[dict[str, Any]],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """Persist one OSCE quiz and all validated stations atomically."""
+        data = dict(quiz_data)
+        activity_type = self._normalize_quiz_activity(data.get("activity_type", "osce"))
+        if activity_type != "osce":
+            raise InputError("Atomic OSCE persistence requires activity_type 'osce'")
+        if data.get("passing_score") is not None or data.get("time_limit_seconds") is not None:
+            raise InputError("Question-only settings are not supported for OSCE quizzes")
+        now = self._get_current_utc_timestamp_iso()
+        try:
+            with self.transaction() as conn:
+                insert_quiz_sql = (
+                    "INSERT INTO quizzes(name, description, workspace_tag, workspace_id, media_id, source_bundle_json, "
+                    "activity_type, generation_profile, total_questions, total_stations, time_limit_seconds, passing_score, "
+                    "deleted, client_id, version, created_at, last_modified) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                )
+                quiz_params = (
+                    data["name"],
+                    data.get("description"),
+                    data.get("workspace_tag"),
+                    data.get("workspace_id"),
+                    data.get("media_id"),
+                    self._osce_json_string(data.get("source_bundle_json")),
+                    "osce",
+                    self._normalize_quiz_generation_profile(data.get("generation_profile")),
+                    0,
+                    0,
+                    None,
+                    None,
+                    False,
+                    self.client_id
+                    if self.backend_type == BackendType.POSTGRESQL
+                    else data.get("client_id") or self.client_id,
+                    1,
+                    now,
+                    now,
+                )
+                if self.backend_type == BackendType.POSTGRESQL:
+                    quiz_row = conn.execute(insert_quiz_sql + " RETURNING id", quiz_params).fetchone()
+                    quiz_id = int(quiz_row["id"]) if quiz_row else None
+                else:
+                    quiz_id = int(conn.execute(insert_quiz_sql, quiz_params).lastrowid)
+                if quiz_id is None:
+                    raise CharactersRAGDBError("Failed to determine quiz ID after insert")  # noqa: TRY003
+
+                station_ids = [
+                    self._insert_osce_station_row(conn, quiz_id, station, now=now)
+                    for station in stations
+                ]
+                self._recount_quiz_stations(conn, quiz_id)
+                persisted_quiz_row = conn.execute(
+                    "SELECT id, name, description, workspace_tag, workspace_id, media_id, source_bundle_json, "  # nosec B608
+                    "activity_type, generation_profile, total_questions, total_stations, time_limit_seconds, "
+                    "passing_score, deleted, client_id, version, created_at, last_modified "
+                    "FROM quizzes WHERE id = ?"
+                    + (
+                        " AND client_id = ?"
+                        if self.backend_type == BackendType.POSTGRESQL
+                        else ""
+                    ),
+                    (
+                        quiz_id,
+                        *(
+                            (self.client_id,)
+                            if self.backend_type == BackendType.POSTGRESQL
+                            else ()
+                        ),
+                    ),
+                ).fetchone()
+                quiz = self._deserialize_quiz_row(persisted_quiz_row)
+                if quiz is None:
+                    raise CharactersRAGDBError("Failed to read created OSCE quiz")  # noqa: TRY003
+                persisted_stations: list[dict[str, Any]] = []
+                for station_id in station_ids:
+                    row = self._get_osce_station_row(conn, quiz_id, station_id)
+                    station = self._deserialize_osce_station_row(row)
+                    if station is None:
+                        raise CharactersRAGDBError("Failed to read created OSCE station")  # noqa: TRY003
+                    persisted_stations.append(station)
+                return quiz, persisted_stations
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Failed to create OSCE quiz bundle: {exc}") from exc  # noqa: TRY003
+        except BackendDatabaseError as exc:
+            raise CharactersRAGDBError(f"Failed to create OSCE quiz bundle: {exc}") from exc  # noqa: TRY003
+
+    def import_osce_quiz_entry_atomic(
+        self,
+        entry: OsceQuizExportV2 | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Validate, rekey, downgrade, and atomically persist one portable OSCE entry."""
+        from tldw_Server_API.app.api.v1.schemas.quizzes import OsceQuizExportV2
+        from tldw_Server_API.app.services.osce_practice import materialize_station_content
+
+        validated = OsceQuizExportV2.model_validate(entry)
+        stations = [
+            {
+                "content": materialize_station_content(station.content),
+                "order_index": station.order_index,
+                "origin": "manual",
+                "provenance": None,
+                "source_bundle": [],
+                "verification_state": "manually_authored",
+                "verification_timestamp": None,
+                "verification_summary": None,
+            }
+            for station in sorted(validated.stations, key=lambda item: item.order_index)
+        ]
+        quiz, persisted_stations = self.create_quiz_with_osce_stations_atomic(
+            {
+                "name": validated.quiz.name,
+                "description": validated.quiz.description,
+                "workspace_tag": validated.quiz.workspace_tag,
+                "workspace_id": validated.quiz.workspace_id,
+                "media_id": validated.quiz.media_id,
+                "source_bundle_json": None,
+                "activity_type": "osce",
+                "generation_profile": None,
+            },
+            stations,
+        )
+        return {
+            "quiz": quiz,
+            "stations": persisted_stations,
+            "station_ids": [int(station["id"]) for station in persisted_stations],
+        }
 
     def create_quiz(
         self,
@@ -29160,17 +41766,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         source_bundle_json: list[dict[str, Any]] | None = None,
         time_limit_seconds: int | None = None,
         passing_score: int | None = None,
-        client_id: str = "unknown",
+        activity_type: Any = "questions",
+        generation_profile: Any = None,
+        client_id: str | None = None,
     ) -> int:
         """Create a new quiz and return its ID."""
         now = self._get_current_utc_timestamp_iso()
         source_bundle_payload = self._ensure_json_string(source_bundle_json)
+        normalized_activity = self._normalize_quiz_activity(activity_type)
+        normalized_profile = self._normalize_quiz_generation_profile(generation_profile)
+        if normalized_activity == "osce":
+            if passing_score is not None:
+                raise InputError("passing_score is not supported for OSCE quizzes")
+            if time_limit_seconds is not None:
+                raise InputError("time_limit_seconds is not supported for OSCE quizzes")
         try:
             with self.transaction() as conn:
                 insert_sql = (
-                    "INSERT INTO quizzes(name, description, workspace_tag, workspace_id, media_id, source_bundle_json, total_questions, "
-                    "time_limit_seconds, passing_score, deleted, client_id, version, created_at, last_modified) "
-                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    "INSERT INTO quizzes(name, description, workspace_tag, workspace_id, media_id, source_bundle_json, "
+                    "activity_type, generation_profile, total_questions, total_stations, time_limit_seconds, passing_score, "
+                    "deleted, client_id, version, created_at, last_modified) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 )
                 params = (
                     name,
@@ -29179,11 +41795,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     workspace_id,
                     media_id,
                     source_bundle_payload,
+                    normalized_activity,
+                    normalized_profile,
+                    0,
                     0,
                     time_limit_seconds,
                     passing_score,
                     False,
-                    client_id or self.client_id,
+                    self.client_id
+                    if self.backend_type == BackendType.POSTGRESQL
+                    else client_id or self.client_id,
                     1,
                     now,
                     now,
@@ -29205,15 +41826,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def get_quiz(self, quiz_id: int, include_deleted: bool = False) -> dict[str, Any] | None:
         """Get quiz by ID, returns None if not found or deleted (unless include_deleted)."""
-        deleted_clause = "" if include_deleted else "AND deleted = 0"
+        deleted_clause = "" if include_deleted else (
+            "AND deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "AND deleted = 0"
+        )
+        owner_clause = " AND client_id = ?" if self.backend_type == BackendType.POSTGRESQL else ""
         query = (
-            "SELECT id, name, description, workspace_tag, workspace_id, media_id, source_bundle_json, total_questions, "  # nosec B608
-            "time_limit_seconds, passing_score, "
+            "SELECT id, name, description, workspace_tag, workspace_id, media_id, source_bundle_json, activity_type, "  # nosec B608
+            "generation_profile, total_questions, total_stations, time_limit_seconds, passing_score, "
             "deleted, client_id, version, created_at, last_modified "
-            "FROM quizzes WHERE id = ? " + deleted_clause
+            f"FROM quizzes WHERE id = ? {deleted_clause}{owner_clause}"  # nosec B608
         )
         try:
-            cursor = self.execute_query(query, (quiz_id,))
+            params = (
+                (quiz_id, self.client_id)
+                if self.backend_type == BackendType.POSTGRESQL
+                else (quiz_id,)
+            )
+            cursor = self.execute_query(query, params)
             row = cursor.fetchone()
             return self._deserialize_quiz_row(row) if row else None
         except CharactersRAGDBError:  # noqa: TRY203
@@ -29224,14 +41853,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         q: str | None = None,
         media_id: int | None = None,
         workspace_id: str | None = None,
+        activity_type: Any = "questions",
         include_workspace_items: bool = False,
         include_deleted: bool = False,
+        sort_by: str = "last_modified",
+        sort_order: str = "desc",
         limit: int = 50,
         offset: int = 0,
+        workspace_tag: str | None = None,
     ) -> dict[str, Any]:
         """List quizzes with pagination and optional filters."""
         where_clauses = ["1=1"]
         params: list[Any] = []
+        if self.backend_type == BackendType.POSTGRESQL:
+            where_clauses.append("client_id = ?")
+            params.append(self.client_id)
         if not include_deleted:
             where_clauses.append("deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "deleted = 0")
         if media_id is not None:
@@ -29242,17 +41878,35 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             params.append(workspace_id)
         elif not include_workspace_items:
             where_clauses.append("workspace_id IS NULL")
+        if workspace_tag is not None:
+            where_clauses.append("workspace_tag = ?")
+            params.append(workspace_tag)
+        if activity_type not in {None, "all"}:
+            where_clauses.append("activity_type = ?")
+            params.append(self._normalize_quiz_activity(activity_type))
         if q:
             where_clauses.append("(LOWER(name) LIKE ? OR LOWER(description) LIKE ?)")
             q_like = f"%{q.lower()}%"
             params.extend([q_like, q_like])
 
         where_sql = " AND ".join(where_clauses)
+        normalized_sort = str(sort_by or "last_modified").strip().lower()
+        normalized_order = str(sort_order or "desc").strip().lower()
+        if normalized_sort not in {"last_modified", "name", "size"}:
+            raise InputError("sort_by must be 'last_modified', 'name', or 'size'")
+        if normalized_order not in {"asc", "desc"}:
+            raise InputError("sort_order must be 'asc' or 'desc'")
+        sort_expression = {
+            "last_modified": "last_modified",
+            "name": "LOWER(name)",
+            "size": "CASE WHEN activity_type = 'osce' THEN total_stations ELSE total_questions END",
+        }[normalized_sort]
+        order_sql = f"{sort_expression} {normalized_order.upper()}, id {normalized_order.upper()}"
         query = (
-            "SELECT id, name, description, workspace_tag, workspace_id, media_id, source_bundle_json, total_questions, "  # nosec B608
-            "time_limit_seconds, passing_score, "
+            "SELECT id, name, description, workspace_tag, workspace_id, media_id, source_bundle_json, activity_type, "  # nosec B608
+            "generation_profile, total_questions, total_stations, time_limit_seconds, passing_score, "
             "deleted, client_id, version, created_at, last_modified "
-            f"FROM quizzes WHERE {where_sql} ORDER BY last_modified DESC LIMIT ? OFFSET ?"
+            f"FROM quizzes WHERE {where_sql} ORDER BY {order_sql} LIMIT ? OFFSET ?"
         )
         count_query = f"SELECT COUNT(*) AS count FROM quizzes WHERE {where_sql}"  # nosec B608
         try:
@@ -29266,8 +41920,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError:  # noqa: TRY203
             raise
 
-    def update_quiz(self, quiz_id: int, updates: dict[str, Any], client_id: str = "unknown") -> bool:
+    def update_quiz(
+        self,
+        quiz_id: int,
+        updates: dict[str, Any],
+        client_id: str | None = None,
+    ) -> bool:
         """Update quiz fields, returns True if successful."""
+        updates = dict(updates)
         expected_version = updates.pop("expected_version", None)
         allowed = {
             "name",
@@ -29278,21 +41938,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "source_bundle_json",
             "time_limit_seconds",
             "passing_score",
+            "activity_type",
+            "generation_profile",
         }
-        set_parts = []
-        params: list[Any] = []
-        for k, v in updates.items():
-            if k in allowed:
-                if k == "source_bundle_json":
-                    v = self._ensure_json_string_from_mixed(v)
-                set_parts.append(f"{k} = ?")
-                params.append(v)
-        if not set_parts:
+        requested_updates = {key: value for key, value in updates.items() if key in allowed}
+        if not requested_updates:
             if expected_version is None:
-                return True
+                if self.backend_type != BackendType.POSTGRESQL:
+                    return True
+                try:
+                    with self.transaction() as conn:
+                        return self._get_quiz_row_for_mutation(conn, quiz_id) is not None
+                except sqlite3.Error as e:
+                    raise CharactersRAGDBError(f"Failed to update quiz: {e}") from e  # noqa: TRY003
             try:
                 with self.transaction() as conn:
-                    row = conn.execute("SELECT version FROM quizzes WHERE id = ? AND deleted = 0", (quiz_id,)).fetchone()
+                    row = self._get_quiz_row_for_mutation(conn, quiz_id)
                     if not row:
                         return False
                     if int(row["version"]) != expected_version:
@@ -29301,18 +41962,68 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             except sqlite3.Error as e:
                 raise CharactersRAGDBError(f"Failed to update quiz: {e}") from e  # noqa: TRY003
         now = self._get_current_utc_timestamp_iso()
-        set_parts.extend(["last_modified = ?", "version = version + 1", "client_id = ?"])
-        params.extend([now, client_id or self.client_id])
         try:
             with self.transaction() as conn:
-                row = conn.execute("SELECT version FROM quizzes WHERE id = ? AND deleted = 0", (quiz_id,)).fetchone()
+                row = self._get_quiz_row_for_mutation(conn, quiz_id)
                 if not row:
                     return False
                 current_version = int(row["version"])
                 if expected_version is not None and current_version != expected_version:
                     raise ConflictError("Version mismatch updating quiz", entity="quizzes", identifier=quiz_id)  # noqa: TRY003
-                params_final = params + [quiz_id]
-                query = f"UPDATE quizzes SET {', '.join(set_parts)} WHERE id = ? AND deleted = 0"  # nosec B608
+
+                current_activity = self._normalize_quiz_activity(row["activity_type"])
+                desired_activity = self._normalize_quiz_activity(
+                    requested_updates.get("activity_type", current_activity)
+                )
+                if desired_activity != current_activity and (
+                    int(row["total_questions"] or 0) > 0 or int(row["total_stations"] or 0) > 0
+                ):
+                    raise ConflictError(  # noqa: TRY003
+                        "Quiz activity type cannot change after content is added",
+                        entity="quizzes",
+                        identifier=quiz_id,
+                    )
+
+                future_passing_score = requested_updates.get("passing_score", row["passing_score"])
+                future_time_limit = requested_updates.get("time_limit_seconds", row["time_limit_seconds"])
+                if desired_activity == "osce":
+                    if future_passing_score is not None:
+                        raise InputError("passing_score is not supported for OSCE quizzes")
+                    if future_time_limit is not None:
+                        raise InputError("time_limit_seconds is not supported for OSCE quizzes")
+
+                normalized_updates = dict(requested_updates)
+                if "activity_type" in normalized_updates:
+                    normalized_updates["activity_type"] = desired_activity
+                if "generation_profile" in normalized_updates:
+                    normalized_updates["generation_profile"] = self._normalize_quiz_generation_profile(
+                        normalized_updates["generation_profile"]
+                    )
+                normalized_updates["total_questions" if desired_activity == "osce" else "total_stations"] = 0
+
+                set_parts: list[str] = []
+                params: list[Any] = []
+                for key, value in normalized_updates.items():
+                    if key == "source_bundle_json":
+                        value = self._ensure_json_string_from_mixed(value)
+                    set_parts.append(f"{key} = ?")
+                    params.append(value)
+                set_parts.extend(["last_modified = ?", "version = version + 1"])
+                params.append(now)
+                if self.backend_type == BackendType.POSTGRESQL:
+                    params_final = params + [quiz_id, self.client_id]
+                    query = (
+                        f"UPDATE quizzes SET {', '.join(set_parts)} "  # nosec B608
+                        "WHERE id = ? AND deleted = FALSE AND client_id = ?"
+                    )
+                else:
+                    set_parts.append("client_id = ?")
+                    params.append(client_id or self.client_id)
+                    params_final = params + [quiz_id]
+                    query = (
+                        f"UPDATE quizzes SET {', '.join(set_parts)} "  # nosec B608
+                        "WHERE id = ? AND deleted = 0"
+                    )
                 rc = conn.execute(query, tuple(params_final)).rowcount
                 return rc > 0
         except sqlite3.Error as e:
@@ -29323,28 +42034,75 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
-                row = conn.execute("SELECT id, version, deleted FROM quizzes WHERE id = ?", (quiz_id,)).fetchone()
+                if self.backend_type == BackendType.POSTGRESQL:
+                    row = conn.execute(
+                        "SELECT id, version, deleted FROM quizzes "
+                        "WHERE id = ? AND client_id = ? FOR UPDATE",
+                        (quiz_id, self.client_id),
+                    ).fetchone()
+                else:
+                    row = conn.execute(
+                        "SELECT id, version, deleted FROM quizzes WHERE id = ?",
+                        (quiz_id,),
+                    ).fetchone()
                 if not row:
                     return False
                 cur_ver = int(row["version"])
                 deleted = int(row["deleted"])
                 if hard_delete:
-                    conn.execute("DELETE FROM quizzes WHERE id = ?", (quiz_id,))
-                    return True
+                    if self.backend_type == BackendType.POSTGRESQL:
+                        rc = conn.execute(
+                            "DELETE FROM quizzes WHERE id = ? AND client_id = ?",
+                            (quiz_id, self.client_id),
+                        ).rowcount
+                    else:
+                        rc = conn.execute("DELETE FROM quizzes WHERE id = ?", (quiz_id,)).rowcount
+                    return rc > 0
                 if deleted:
                     return True
                 if expected_version is not None and cur_ver != expected_version:
                     raise ConflictError("Version mismatch deleting quiz", entity="quizzes", identifier=quiz_id)  # noqa: TRY003
-                rc = conn.execute(
-                    "UPDATE quizzes SET deleted = 1, last_modified = ?, version = ?, client_id = ? WHERE id = ? AND deleted = 0",
-                    (now, cur_ver + 1, self.client_id, quiz_id),
-                ).rowcount
+                if self.backend_type == BackendType.POSTGRESQL:
+                    rc = conn.execute(
+                        "UPDATE quizzes SET deleted = TRUE, last_modified = ?, version = ? "
+                        "WHERE id = ? AND deleted = FALSE AND client_id = ?",
+                        (now, cur_ver + 1, quiz_id, self.client_id),
+                    ).rowcount
+                else:
+                    rc = conn.execute(
+                        "UPDATE quizzes SET deleted = 1, last_modified = ?, version = ?, "
+                        "client_id = ? WHERE id = ? AND deleted = 0",
+                        (now, cur_ver + 1, self.client_id, quiz_id),
+                    ).rowcount
                 if rc:
-                    conn.execute(
-                        "UPDATE quiz_questions SET deleted = 1, last_modified = ?, version = version + 1, client_id = ? "
-                        "WHERE quiz_id = ? AND deleted = 0",
-                        (now, self.client_id, quiz_id),
-                    )
+                    if self.backend_type == BackendType.POSTGRESQL:
+                        conn.execute(
+                            "UPDATE quiz_questions SET deleted = TRUE, last_modified = ?, "
+                            "version = version + 1, client_id = ? "
+                            "WHERE quiz_id = ? AND deleted = FALSE "
+                            "AND EXISTS (SELECT 1 FROM quizzes AS q "
+                            "WHERE q.id = quiz_questions.quiz_id AND q.client_id = ?)",
+                            (now, self.client_id, quiz_id, self.client_id),
+                        )
+                        conn.execute(
+                            "UPDATE osce_stations SET deleted = TRUE, updated_at = ?, "
+                            "version = version + 1 WHERE quiz_id = ? AND deleted = FALSE "
+                            "AND EXISTS (SELECT 1 FROM quizzes AS q "
+                            "WHERE q.id = osce_stations.quiz_id AND q.client_id = ?)",
+                            (now, quiz_id, self.client_id),
+                        )
+                    else:
+                        conn.execute(
+                            "UPDATE quiz_questions SET deleted = 1, last_modified = ?, "
+                            "version = version + 1, client_id = ? "
+                            "WHERE quiz_id = ? AND deleted = 0",
+                            (now, self.client_id, quiz_id),
+                        )
+                        conn.execute(
+                            "UPDATE osce_stations SET deleted = 1, updated_at = ?, "
+                            "version = version + 1 WHERE quiz_id = ? AND deleted = 0",
+                            (now, quiz_id),
+                        )
                 return rc > 0
         except sqlite3.Error as e:
             raise CharactersRAGDBError(f"Failed to delete quiz: {e}") from e  # noqa: TRY003
@@ -29377,9 +42135,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         normalized_hint_penalty = max(0, int(hint_penalty_points or 0))
         try:
             with self.transaction() as conn:
-                quiz_row = conn.execute("SELECT id FROM quizzes WHERE id = ? AND deleted = 0", (quiz_id,)).fetchone()
-                if not quiz_row:
-                    raise ConflictError("Quiz not found", entity="quizzes", identifier=quiz_id)  # noqa: TRY003
+                quiz_row = self._get_quiz_row_for_mutation(conn, quiz_id)
+                if not quiz_row or str(quiz_row["activity_type"]) != "questions":
+                    raise self._quiz_not_found(quiz_id)
                 insert_sql = (
                     "INSERT INTO quiz_questions(quiz_id, question_type, question_text, group_id, group_prompt, options, correct_answer, "
                     "explanation, hint, hint_penalty_points, source_citations_json, points, order_index, tags_json, deleted, client_id, "
@@ -29402,7 +42160,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     order_index,
                     tags_json,
                     False,
-                    client_id or self.client_id,
+                    self.client_id
+                    if self.backend_type == BackendType.POSTGRESQL
+                    else client_id or self.client_id,
                     1,
                     now,
                     now,
@@ -29423,17 +42183,43 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except BackendDatabaseError as exc:
             raise CharactersRAGDBError(f"Failed to create question: {exc}") from exc  # noqa: TRY003
 
-    def get_question(self, question_id: int, include_deleted: bool = False) -> dict[str, Any] | None:
+    def get_question(
+        self,
+        question_id: int,
+        include_deleted: bool = False,
+        quiz_id: int | None = None,
+    ) -> dict[str, Any] | None:
         """Get question by ID."""
-        deleted_clause = "" if include_deleted else "AND deleted = 0"
-        query = (
-            "SELECT id, quiz_id, question_type, question_text, group_id, group_prompt, options, correct_answer, explanation, hint, "  # nosec B608
-            "hint_penalty_points, source_citations_json, points, "
-            "order_index, tags_json, deleted, client_id, version, created_at, last_modified "
-            "FROM quiz_questions WHERE id = ? " + deleted_clause
-        )
+        self._reject_question_for_osce_quiz(question_id, quiz_id)
+        if self.backend_type == BackendType.POSTGRESQL:
+            deleted_clause = "" if include_deleted else "AND qq.deleted = FALSE"
+            parent_clause = " AND qq.quiz_id = ?" if quiz_id is not None else ""
+            query = (
+                "SELECT qq.id, qq.quiz_id, qq.question_type, qq.question_text, qq.group_id, "
+                "qq.group_prompt, qq.options, qq.correct_answer, qq.explanation, qq.hint, "
+                "qq.hint_penalty_points, qq.source_citations_json, qq.points, qq.order_index, "
+                "qq.tags_json, qq.deleted, qq.client_id, qq.version, qq.created_at, qq.last_modified "
+                "FROM quiz_questions AS qq JOIN quizzes AS q ON q.id = qq.quiz_id "
+                f"WHERE qq.id = ?{parent_clause} {deleted_clause} AND q.client_id = ?"  # nosec B608
+            )
+            params = (
+                (question_id, quiz_id, self.client_id)
+                if quiz_id is not None
+                else (question_id, self.client_id)
+            )
+        else:
+            deleted_clause = "" if include_deleted else "AND deleted = 0"
+            parent_clause = " AND quiz_id = ?" if quiz_id is not None else ""
+            query = (
+                "SELECT id, quiz_id, question_type, question_text, group_id, group_prompt, "
+                "options, correct_answer, explanation, hint, hint_penalty_points, "
+                "source_citations_json, points, order_index, tags_json, deleted, client_id, "
+                "version, created_at, last_modified FROM quiz_questions "
+                f"WHERE id = ?{parent_clause} {deleted_clause}"  # nosec B608
+            )
+            params = (question_id, quiz_id) if quiz_id is not None else (question_id,)
         try:
-            cursor = self.execute_query(query, (question_id,))
+            cursor = self.execute_query(query, params)
             row = cursor.fetchone()
             return self._deserialize_quiz_question(row) if row else None
         except CharactersRAGDBError:  # noqa: TRY203
@@ -29448,9 +42234,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         offset: int = 0,
     ) -> dict[str, Any]:
         """List questions for a quiz with pagination."""
+        self._require_quiz_activity(quiz_id, "questions")
         where_clauses = ["quiz_id = ?"]
         params: list[Any] = [quiz_id]
         where_clauses.append("deleted = FALSE" if self.backend_type == BackendType.POSTGRESQL else "deleted = 0")
+        if self.backend_type == BackendType.POSTGRESQL:
+            where_clauses.append(
+                "EXISTS (SELECT 1 FROM quizzes AS q "
+                "WHERE q.id = quiz_questions.quiz_id AND q.client_id = ?)"
+            )
+            params.append(self.client_id)
 
         fts_filter = ""
         if q:
@@ -29498,8 +42291,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except CharactersRAGDBError:  # noqa: TRY203
             raise
 
-    def update_question(self, question_id: int, updates: dict[str, Any], client_id: str = "unknown") -> bool:
+    def update_question(
+        self,
+        question_id: int,
+        updates: dict[str, Any],
+        client_id: str = "unknown",
+        quiz_id: int | None = None,
+    ) -> bool:
         """Update question fields."""
+        self._reject_question_for_osce_quiz(question_id, quiz_id)
+        updates = dict(updates)
         expected_version = updates.pop("expected_version", None)
         allowed = {
             "question_type",
@@ -29530,10 +42331,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             elif k == "correct_answer":
                 question_type = updates.get("question_type")
                 if not question_type:
-                    row = self.execute_query(
-                        "SELECT question_type FROM quiz_questions WHERE id = ? AND deleted = 0",
-                        (question_id,),
-                    ).fetchone()
+                    row = self.get_question(question_id, quiz_id=quiz_id)
                     question_type = row["question_type"] if row else None
                 set_parts.append("correct_answer = ?")
                 params.append(self._normalize_quiz_correct_answer(str(question_type or "fill_blank"), v))
@@ -29556,70 +42354,125 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 params.append(v)
 
         if not set_parts:
-            if expected_version is None:
+            if (
+                expected_version is None
+                and self.backend_type != BackendType.POSTGRESQL
+                and quiz_id is None
+            ):
                 return True
             try:
                 with self.transaction() as conn:
-                    row = conn.execute("SELECT version FROM quiz_questions WHERE id = ? AND deleted = 0", (question_id,)).fetchone()
+                    row = self._get_question_row_for_mutation(conn, question_id, quiz_id)
                     if not row:
                         return False
-                    if int(row["version"]) != expected_version:
+                    if expected_version is not None and int(row["version"]) != expected_version:
                         raise ConflictError("Version mismatch updating question", entity="quiz_questions", identifier=question_id)  # noqa: TRY003
                 return True  # noqa: TRY300
             except sqlite3.Error as e:
                 raise CharactersRAGDBError(f"Failed to update question: {e}") from e  # noqa: TRY003
 
         now = self._get_current_utc_timestamp_iso()
-        set_parts.extend(["last_modified = ?", "version = version + 1", "client_id = ?"])
-        params.extend([now, client_id or self.client_id])
+        set_parts.extend(["last_modified = ?", "version = version + 1"])
+        params.append(now)
+        if self.backend_type != BackendType.POSTGRESQL:
+            set_parts.append("client_id = ?")
+            params.append(client_id or self.client_id)
 
         try:
             with self.transaction() as conn:
-                row = conn.execute(
-                    "SELECT version FROM quiz_questions WHERE id = ? AND deleted = 0",
-                    (question_id,),
-                ).fetchone()
+                row = self._get_question_row_for_mutation(conn, question_id, quiz_id)
                 if not row:
                     return False
                 current_version = int(row["version"])
                 if expected_version is not None and current_version != expected_version:
                     raise ConflictError("Version mismatch updating question", entity="quiz_questions", identifier=question_id)  # noqa: TRY003
-                params_final = params + [question_id]
-                query = f"UPDATE quiz_questions SET {', '.join(set_parts)} WHERE id = ? AND deleted = 0"  # nosec B608
+                if self.backend_type == BackendType.POSTGRESQL:
+                    parent_clause = " AND quiz_id = ?" if quiz_id is not None else ""
+                    params_final = params + [question_id]
+                    if quiz_id is not None:
+                        params_final.append(quiz_id)
+                    params_final.append(self.client_id)
+                    query = (
+                        f"UPDATE quiz_questions SET {', '.join(set_parts)} "  # nosec B608
+                        f"WHERE id = ? AND deleted = FALSE{parent_clause} "  # nosec B608
+                        "AND EXISTS (SELECT 1 FROM quizzes AS q "
+                        "WHERE q.id = quiz_questions.quiz_id AND q.client_id = ?)"
+                    )
+                else:
+                    parent_clause = " AND quiz_id = ?" if quiz_id is not None else ""
+                    params_final = params + [question_id]
+                    if quiz_id is not None:
+                        params_final.append(quiz_id)
+                    query = (
+                        f"UPDATE quiz_questions SET {', '.join(set_parts)} "  # nosec B608
+                        f"WHERE id = ? AND deleted = 0{parent_clause}"
+                    )
                 rc = conn.execute(query, tuple(params_final)).rowcount
                 return rc > 0
         except sqlite3.Error as e:
             raise CharactersRAGDBError(f"Failed to update question: {e}") from e  # noqa: TRY003
 
-    def delete_question(self, question_id: int, expected_version: int | None = None, hard_delete: bool = False) -> bool:
+    def delete_question(
+        self,
+        question_id: int,
+        expected_version: int | None = None,
+        hard_delete: bool = False,
+        quiz_id: int | None = None,
+    ) -> bool:
         """Delete a question and decrement total_questions (or recompute)."""
+        self._reject_question_for_osce_quiz(question_id, quiz_id)
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
-                row = conn.execute(
-                    "SELECT id, quiz_id, version, deleted FROM quiz_questions WHERE id = ?",
-                    (question_id,),
-                ).fetchone()
+                row = self._get_question_row_for_mutation(
+                    conn,
+                    question_id,
+                    quiz_id,
+                    include_deleted=True,
+                )
                 if not row:
                     return False
-                quiz_id = int(row["quiz_id"])
+                parent_quiz_id = int(row["quiz_id"])
+                if str(row["activity_type"]) != "questions":
+                    raise self._quiz_not_found(parent_quiz_id)
                 cur_ver = int(row["version"])
                 deleted = int(row["deleted"])
                 if hard_delete:
-                    conn.execute("DELETE FROM quiz_questions WHERE id = ?", (question_id,))
-                    self._recount_quiz_questions(conn, quiz_id)
-                    return True
+                    if self.backend_type == BackendType.POSTGRESQL:
+                        rc = conn.execute(
+                            "DELETE FROM quiz_questions WHERE id = ? "
+                            "AND EXISTS (SELECT 1 FROM quizzes AS q "
+                            "WHERE q.id = quiz_questions.quiz_id AND q.client_id = ?)",
+                            (question_id, self.client_id),
+                        ).rowcount
+                    else:
+                        rc = conn.execute(
+                            "DELETE FROM quiz_questions WHERE id = ?",
+                            (question_id,),
+                        ).rowcount
+                    if rc:
+                        self._recount_quiz_questions(conn, parent_quiz_id)
+                    return rc > 0
                 if deleted:
                     return True
                 if expected_version is not None and cur_ver != expected_version:
                     raise ConflictError("Version mismatch deleting question", entity="quiz_questions", identifier=question_id)  # noqa: TRY003
-                rc = conn.execute(
-                    "UPDATE quiz_questions SET deleted = 1, last_modified = ?, version = ?, client_id = ? "
-                    "WHERE id = ? AND deleted = 0",
-                    (now, cur_ver + 1, self.client_id, question_id),
-                ).rowcount
+                if self.backend_type == BackendType.POSTGRESQL:
+                    rc = conn.execute(
+                        "UPDATE quiz_questions SET deleted = TRUE, last_modified = ?, version = ? "
+                        "WHERE id = ? AND deleted = FALSE "
+                        "AND EXISTS (SELECT 1 FROM quizzes AS q "
+                        "WHERE q.id = quiz_questions.quiz_id AND q.client_id = ?)",
+                        (now, cur_ver + 1, question_id, self.client_id),
+                    ).rowcount
+                else:
+                    rc = conn.execute(
+                        "UPDATE quiz_questions SET deleted = 1, last_modified = ?, version = ?, "
+                        "client_id = ? WHERE id = ? AND deleted = 0",
+                        (now, cur_ver + 1, self.client_id, question_id),
+                    ).rowcount
                 if rc:
-                    self._recount_quiz_questions(conn, quiz_id)
+                    self._recount_quiz_questions(conn, parent_quiz_id)
                 return rc > 0
         except sqlite3.Error as e:
             raise CharactersRAGDBError(f"Failed to delete question: {e}") from e  # noqa: TRY003
@@ -29629,9 +42482,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
-                quiz_row = conn.execute("SELECT id FROM quizzes WHERE id = ? AND deleted = 0", (quiz_id,)).fetchone()
-                if not quiz_row:
-                    raise ConflictError("Quiz not found", entity="quizzes", identifier=quiz_id)  # noqa: TRY003
+                quiz_row = self._get_quiz_row_for_mutation(conn, quiz_id)
+                if not quiz_row or str(quiz_row["activity_type"]) != "questions":
+                    raise self._quiz_not_found(quiz_id)
                 questions_payload = self.list_questions(quiz_id, include_answers=True, limit=None, offset=0)
                 questions = questions_payload.get("items", [])
                 total_possible = sum(int(q.get("points") or 0) for q in questions)
@@ -29646,7 +42499,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     total_possible,
                     questions_snapshot,
                     json.dumps([]),
-                    client_id or self.client_id,
+                    self.client_id
+                    if self.backend_type == BackendType.POSTGRESQL
+                    else client_id or self.client_id,
                 )
                 if self.backend_type == BackendType.POSTGRESQL:
                     cursor = conn.execute(insert_sql + " RETURNING id", params)
@@ -29678,14 +42533,28 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         now = self._get_current_utc_timestamp_iso()
         try:
             with self.transaction() as conn:
+                owner_clause = (
+                    " AND q.client_id = ?" if self.backend_type == BackendType.POSTGRESQL else ""
+                )
+                lock_clause = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+                params = (
+                    (attempt_id, self.client_id)
+                    if self.backend_type == BackendType.POSTGRESQL
+                    else (attempt_id,)
+                )
                 row = conn.execute(
-                    "SELECT quiz_id, started_at, total_possible, questions_snapshot, answers FROM quiz_attempts WHERE id = ?",
-                    (attempt_id,),
+                    "SELECT qa.quiz_id, qa.started_at, qa.total_possible, qa.questions_snapshot, "
+                    "qa.answers, q.activity_type FROM quiz_attempts AS qa "
+                    "JOIN quizzes AS q ON q.id = qa.quiz_id "
+                    f"WHERE qa.id = ?{owner_clause}{lock_clause}",  # nosec B608
+                    params,
                 ).fetchone()
                 if not row:
                     raise ConflictError("Attempt not found", entity="quiz_attempts", identifier=attempt_id)  # noqa: TRY003
                 row_data = dict(row)
                 quiz_id = int(row_data["quiz_id"])
+                if str(row_data["activity_type"]) != "questions":
+                    raise self._quiz_not_found(quiz_id)
                 questions_snapshot = row_data.get("questions_snapshot") or "[]"
                 try:
                     questions = json.loads(questions_snapshot)
@@ -29738,16 +42607,46 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     })
 
                 time_spent_seconds = int(total_time_ms / 1000) if total_time_ms else None
-                conn.execute(
-                    "UPDATE quiz_attempts SET completed_at = ?, score = ?, total_possible = ?, time_spent_seconds = ?, answers = ? "
-                    "WHERE id = ?",
-                    (now, score, total_possible, time_spent_seconds, json.dumps(graded_answers), attempt_id),
-                )
+                if self.backend_type == BackendType.POSTGRESQL:
+                    rc = conn.execute(
+                        "UPDATE quiz_attempts SET completed_at = ?, score = ?, total_possible = ?, "
+                        "time_spent_seconds = ?, answers = ? WHERE id = ? "
+                        "AND EXISTS (SELECT 1 FROM quizzes AS q "
+                        "WHERE q.id = quiz_attempts.quiz_id AND q.client_id = ?)",
+                        (
+                            now,
+                            score,
+                            total_possible,
+                            time_spent_seconds,
+                            json.dumps(graded_answers),
+                            attempt_id,
+                            self.client_id,
+                        ),
+                    ).rowcount
+                    if not rc:
+                        raise ConflictError(  # noqa: TRY003
+                            "Attempt not found",
+                            entity="quiz_attempts",
+                            identifier=attempt_id,
+                        )
+                else:
+                    conn.execute(
+                        "UPDATE quiz_attempts SET completed_at = ?, score = ?, total_possible = ?, "
+                        "time_spent_seconds = ?, answers = ? WHERE id = ?",
+                        (
+                            now,
+                            score,
+                            total_possible,
+                            time_spent_seconds,
+                            json.dumps(graded_answers),
+                            attempt_id,
+                        ),
+                    )
 
                 return {
                     "id": attempt_id,
                     "quiz_id": quiz_id,
-                    "started_at": row_data.get("started_at"),
+                    "started_at": self._osce_timestamp(row_data.get("started_at")),
                     "completed_at": now,
                     "score": score,
                     "total_possible": total_possible,
@@ -29766,18 +42665,31 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         include_answers: bool = False,
     ) -> dict[str, Any] | None:
         """Get attempt with full answer breakdown."""
-        query = (
-            "SELECT id, quiz_id, started_at, completed_at, score, total_possible, time_spent_seconds, "
-            "questions_snapshot, answers FROM quiz_attempts WHERE id = ?"
-        )
+        if self.backend_type == BackendType.POSTGRESQL:
+            query = (
+                "SELECT qa.id, qa.quiz_id, qa.started_at, qa.completed_at, qa.score, "
+                "qa.total_possible, qa.time_spent_seconds, qa.questions_snapshot, qa.answers "
+                "FROM quiz_attempts AS qa JOIN quizzes AS q ON q.id = qa.quiz_id "
+                "WHERE qa.id = ? AND q.client_id = ?"
+            )
+            params = (attempt_id, self.client_id)
+        else:
+            query = (
+                "SELECT id, quiz_id, started_at, completed_at, score, total_possible, "
+                "time_spent_seconds, questions_snapshot, answers "
+                "FROM quiz_attempts WHERE id = ?"
+            )
+            params = (attempt_id,)
         try:
-            cursor = self.execute_query(query, (attempt_id,))
+            cursor = self.execute_query(query, params)
             row = cursor.fetchone()
             if not row:
                 return None
             item = self._deserialize_row_fields(row, ["questions_snapshot", "answers"])
             if not item:
                 return None
+            item["started_at"] = self._osce_timestamp(item.get("started_at"))
+            item["completed_at"] = self._osce_timestamp(item.get("completed_at"))
             questions = item.pop("questions_snapshot", None)
             if include_questions and isinstance(questions, list):
                 if include_answers:
@@ -29795,20 +42707,33 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         offset: int = 0,
     ) -> dict[str, Any]:
         """List attempts with optional quiz filter."""
-        where_clauses = ["1=1"]
-        params: list[Any] = []
+        if self.backend_type == BackendType.POSTGRESQL:
+            from_clause = "quiz_attempts AS qa JOIN quizzes AS q ON q.id = qa.quiz_id"
+            field_prefix = "qa."
+            where_clauses = ["q.client_id = ?"]
+            params: list[Any] = [self.client_id]
+        else:
+            from_clause = "quiz_attempts"
+            field_prefix = ""
+            where_clauses = ["1=1"]
+            params = []
         if quiz_id is not None:
-            where_clauses.append("quiz_id = ?")
+            where_clauses.append(f"{field_prefix}quiz_id = ?")
             params.append(quiz_id)
         where_sql = " AND ".join(where_clauses)
         query = (
-            "SELECT id, quiz_id, started_at, completed_at, score, total_possible, time_spent_seconds "  # nosec B608
-            f"FROM quiz_attempts WHERE {where_sql} ORDER BY started_at DESC LIMIT ? OFFSET ?"
+            f"SELECT {field_prefix}id, {field_prefix}quiz_id, {field_prefix}started_at, "  # nosec B608
+            f"{field_prefix}completed_at, {field_prefix}score, {field_prefix}total_possible, "
+            f"{field_prefix}time_spent_seconds FROM {from_clause} WHERE {where_sql} "
+            f"ORDER BY {field_prefix}started_at DESC LIMIT ? OFFSET ?"
         )
-        count_query = f"SELECT COUNT(*) AS count FROM quiz_attempts WHERE {where_sql}"  # nosec B608
+        count_query = f"SELECT COUNT(*) AS count FROM {from_clause} WHERE {where_sql}"  # nosec B608
         try:
             cursor = self.execute_query(query, tuple(params + [limit, offset]))
             items = [dict(row) for row in cursor.fetchall()]
+            for item in items:
+                item["started_at"] = self._osce_timestamp(item.get("started_at"))
+                item["completed_at"] = self._osce_timestamp(item.get("completed_at"))
             count_cursor = self.execute_query(count_query, tuple(params))
             count_row = count_cursor.fetchone()
             total = int(count_row["count"]) if count_row else 0
@@ -30370,7 +43295,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         else:
             raise InputError("context_type must be 'flashcard' or 'quiz_attempt_question'.")  # noqa: TRY003
 
-        existing = self.execute_query(select_sql, where_params).fetchone()
+        existing = self.execute_query(select_sql, where_params, read_only=True).fetchone()
         if existing:
             item = dict(existing)
             item["deleted"] = bool(item.get("deleted"))
@@ -30413,7 +43338,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         except sqlite3.Error as exc:
             raise CharactersRAGDBError(f"Failed to create study assistant thread: {exc}") from exc  # noqa: TRY003
 
-        created = self.execute_query(select_sql, where_params).fetchone()
+        created = self.execute_query(select_sql, where_params, read_only=True).fetchone()
         if not created:
             raise CharactersRAGDBError("Study assistant thread was not readable after create")  # noqa: TRY003
         item = dict(created)
@@ -30427,7 +43352,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "created_at, last_modified, deleted, client_id, version "
             "FROM study_assistant_threads WHERE id = ? AND deleted = 0"
         )
-        row = self.execute_query(query, (thread_id,)).fetchone()
+        row = self.execute_query(query, (thread_id,), read_only=True).fetchone()
         if not row:
             return None
         item = dict(row)
@@ -30447,7 +43372,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "context_snapshot_json, provider, model, created_at, client_id "
             "FROM study_assistant_messages WHERE thread_id = ? ORDER BY id ASC LIMIT ? OFFSET ?"
         )
-        cursor = self.execute_query(query, (thread_id, int(limit), int(offset)))
+        cursor = self.execute_query(query, (thread_id, int(limit), int(offset)), read_only=True)
         items: list[dict[str, Any]] = []
         for row in cursor.fetchall():
             item = self._deserialize_row_fields(row, ["structured_payload_json", "context_snapshot_json"])
@@ -31879,7 +44804,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             for row in cursor.fetchall():
                 entry = dict(row)
                 try:
-                    entry['payload'] = json.loads(entry['payload'])
+                    entry['payload'] = json.loads(entry['payload']) if entry['payload'] is not None else None
                 except json.JSONDecodeError:
                     logger.warning(
                         f"Failed to decode JSON payload for sync_log ID {entry['change_id']}. Payload: {entry['payload'][:100]}")
@@ -32491,6 +45416,46 @@ def _delegate_store_method(store_attr: str, method_name: str) -> Callable[..., A
     return _delegated
 
 
+def _resolve_moodboard_compatibility_dataset_id(
+    self: CharactersRAGDB,
+    *,
+    owner_user_id: str,
+    conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+) -> str:
+    dataset = self.moodboard_sync_store.resolve_moodboard_compatibility_dataset_id(
+        owner_user_id=owner_user_id,
+        conn=conn,
+    )
+    if conn is not None:
+        self._set_notes_moodboard_studio_v61_dataset_scope(conn, dataset)
+    return dataset
+
+
+def _resolve_studio_compatibility_dataset_id(
+    self: CharactersRAGDB,
+    *,
+    owner_user_id: str,
+    conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+) -> str:
+    dataset = self.moodboard_sync_store.resolve_studio_compatibility_dataset_id(
+        owner_user_id=owner_user_id,
+        conn=conn,
+    )
+    if conn is not None:
+        self._set_notes_moodboard_studio_v61_dataset_scope(conn, dataset)
+    return dataset
+
+
+def _get_note_studio_document_v61_scoped(
+    self: CharactersRAGDB,
+    note_id: str,
+) -> dict[str, Any] | None:
+    if not self._supports_notes_moodboard_studio_v61():
+        return self.note_store.get_note_studio_document(note_id)
+    with self.transaction() as conn:
+        return self.note_store._fetch_note_studio_document_row(note_id, conn=conn)
+
+
 def _delegate_conversation_store_method(method_name: str) -> Callable[..., Any]:
     return _delegate_store_method("conversation_store", method_name)
 
@@ -32535,6 +45500,18 @@ for _conversation_store_method in (
     )
 
 
+for _conversation_resume_store_method in (
+    "put_behavior_snapshot",
+    "get_conversation_behavior_snapshot",
+    "get_roleplay_resume_state",
+):
+    setattr(
+        CharactersRAGDB,
+        _conversation_resume_store_method,
+        _delegate_store_method("conversation_resume_store", _conversation_resume_store_method),
+    )
+
+
 for _character_store_method in (
     "add_character_card",
     "get_character_card_by_id",
@@ -32575,6 +45552,15 @@ for _character_store_method in (
 
 for _message_store_method in (
     "add_message",
+    "lock_message_for_edit",
+    "lock_message_metadata_for_edit",
+    "get_conversation_history_snapshot",
+    "get_conversation_history_selected_content",
+    "confirm_legacy_history_projection",
+    "validate_history_selection",
+    "append_selected_history_input",
+    "append_selected_history_inputs",
+    "settle_history_admission",
     "append_message_from_sync",
     "tombstone_message_from_sync",
     "get_messages_by_sync_stable_id",
@@ -32613,8 +45599,8 @@ for _message_store_method in (
 for _note_store_method in (
     "add_note",
     "get_note_by_id",
-    "get_note_studio_document",
     "create_note_studio_document",
+    "ensure_note_studio_document",
     "upsert_note_studio_document",
     "update_note_studio_diagram_manifest",
     "list_notes",
@@ -32651,6 +45637,8 @@ for _note_store_method in (
         _delegate_store_method("note_store", _note_store_method),
     )
 
+CharactersRAGDB.get_note_studio_document = _get_note_studio_document_v61_scoped  # type: ignore[method-assign]
+
 
 for _task_store_method in (
     "create_task",
@@ -32671,14 +45659,39 @@ for _task_store_method in (
     "get_task_activity_read_state",
     "get_reconciliation_state",
     "set_reconciliation_state",
+    "create_task_projection_drift",
+    "get_task_projection_drift",
+    "list_task_projection_drifts",
+    "compare_and_set_task_projection_drift",
     "candidate_notes_for_task_discovery",
     "count_candidate_notes_for_task_discovery",
+    "resolve_task_compatibility_dataset_id",
+    "bind_local_task_graph_to_dataset",
 ):
     setattr(
         CharactersRAGDB,
         _task_store_method,
         _delegate_store_method("task_store", _task_store_method),
     )
+
+
+for _moodboard_sync_store_method in (
+    "resolve_moodboard_compatibility_dataset_id",
+    "resolve_studio_compatibility_dataset_id",
+    "bind_local_moodboard_graph_to_dataset",
+    "bind_local_studio_graph_to_dataset",
+    "page_moodboards_for_sync_bootstrap",
+    "page_moodboard_placements_for_sync_bootstrap",
+    "page_studio_documents_for_sync_bootstrap",
+):
+    setattr(
+        CharactersRAGDB,
+        _moodboard_sync_store_method,
+        _delegate_store_method("moodboard_sync_store", _moodboard_sync_store_method),
+    )
+
+CharactersRAGDB.resolve_moodboard_compatibility_dataset_id = _resolve_moodboard_compatibility_dataset_id  # type: ignore[method-assign]
+CharactersRAGDB.resolve_studio_compatibility_dataset_id = _resolve_studio_compatibility_dataset_id  # type: ignore[method-assign]
 
 
 for _keyword_store_method in (
@@ -32844,28 +45857,28 @@ class TransactionContextManager:
         if self.is_outermost_transaction:
             if exc_type:
                 logger.error(
-                    f"Transaction (outermost) failed, rolling back on thread {threading.get_ident()}: {exc_type.__name__} - {exc_val}",
-                    exc_info=False) # exc_info=exc_tb if full traceback wanted here
+                    "Transaction (outermost) failed, rolling back on thread {}: {} - {}",
+                    threading.get_ident(), exc_type.__name__, exc_val, exc_info=False) # exc_info=exc_tb if full traceback wanted here
                 try:
                     self.conn.rollback()
                     logger.debug(f"Rollback successful on thread {threading.get_ident()}.")
                 except sqlite3.Error as rb_err:
-                    logger.critical(f"Rollback FAILED on thread {threading.get_ident()}: {rb_err}", exc_info=True)
+                    logger.critical("Rollback FAILED on thread {}: {}", threading.get_ident(), rb_err, exc_info=True)
             else:
                 try:
                     self.conn.commit()
                     logger.debug(
                         f"Transaction (outermost) committed successfully on thread {threading.get_ident()}.")
                 except sqlite3.Error as commit_err:
-                    logger.error(f"Commit FAILED on thread {threading.get_ident()}, attempting rollback: {commit_err}",
-                                 exc_info=True)
+                    logger.error("Commit FAILED on thread {}, attempting rollback: {}",
+                                 threading.get_ident(), commit_err, exc_info=True)
                     try:
                         self.conn.rollback()
                         logger.debug(f"Rollback after failed commit successful on thread {threading.get_ident()}.")
                     except sqlite3.Error as rb_err_after_commit_fail:
                         logger.critical(
-                            f"Rollback after failed commit also FAILED on thread {threading.get_ident()}: {rb_err_after_commit_fail}",
-                            exc_info=True)
+                            "Rollback after failed commit also FAILED on thread {}: {}",
+                            threading.get_ident(), rb_err_after_commit_fail, exc_info=True)
                     # Re-raise the commit error so the caller knows the transaction failed.
                     # Encapsulate it if it's not already a DB-specific error from our library.
                     if not isinstance(commit_err, CharactersRAGDBError):

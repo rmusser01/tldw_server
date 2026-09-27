@@ -1,7 +1,8 @@
-import React from "react"
-import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import React from "react"
+import { describe, expect, it, vi } from "vitest"
+
 import { PromptActionsMenu } from "../PromptActionsMenu"
 
 vi.mock("react-i18next", () => ({
@@ -28,8 +29,7 @@ vi.mock("antd", () => ({
                   ? undefined
                   : `menu-item-${item.key}`
               }
-              onClick={item.onClick}
-            >
+              onClick={item.onClick}>
               {item.label}
             </button>
           ))}
@@ -81,7 +81,9 @@ describe("PromptActionsMenu", () => {
       />
     )
 
-    expect(screen.queryByTestId("menu-item-resolveConflict")).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId("menu-item-resolveConflict")
+    ).not.toBeInTheDocument()
   })
 
   it("shows share link action for synced prompts when handler is provided", async () => {
@@ -129,6 +131,32 @@ describe("PromptActionsMenu", () => {
 
     await user.click(quickTestItem)
     expect(onQuickTest).toHaveBeenCalledTimes(1)
+  })
+
+  it("opens recipes in the editor and omits legacy quick test", async () => {
+    const user = userEvent.setup()
+    const onOpenRecipe = vi.fn()
+
+    render(
+      <PromptActionsMenu
+        promptId="recipe-1"
+        syncStatus="local"
+        isRecipe
+        inlineUseInChat={false}
+        onEdit={vi.fn()}
+        onDuplicate={vi.fn()}
+        onUseInChat={onOpenRecipe}
+        onQuickTest={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByTestId("menu-item-quickTest")).not.toBeInTheDocument()
+    const openRecipe = screen.getByRole("button", {
+      name: "Open recipe editor"
+    })
+    await user.click(openRecipe)
+    expect(onOpenRecipe).toHaveBeenCalledTimes(1)
   })
 
   it("hides inline use button when inlineUseInChat is disabled and keeps overflow use action", async () => {
@@ -193,6 +221,44 @@ describe("PromptActionsMenu", () => {
     )
 
     expect(screen.queryByTestId("menu-item-retrySync")).not.toBeInTheDocument()
+  })
+
+  it("keeps pull recovery available but hides unlink for a durably locked recipe", () => {
+    render(
+      <PromptActionsMenu
+        promptId="recipe-error"
+        syncStatus="error"
+        serverId={101}
+        isRecipe
+        onEdit={vi.fn()}
+        onDuplicate={vi.fn()}
+        onUseInChat={vi.fn()}
+        onDelete={vi.fn()}
+        onPullFromServer={vi.fn()}
+        onUnlink={vi.fn()}
+      />
+    )
+
+    expect(screen.getByTestId("menu-item-pull")).toBeInTheDocument()
+    expect(screen.queryByTestId("menu-item-unlink")).not.toBeInTheDocument()
+  })
+
+  it("retains the unlink action for a legacy prompt with an error status", () => {
+    render(
+      <PromptActionsMenu
+        promptId="legacy-error"
+        syncStatus="error"
+        serverId={101}
+        onEdit={vi.fn()}
+        onDuplicate={vi.fn()}
+        onUseInChat={vi.fn()}
+        onDelete={vi.fn()}
+        onPullFromServer={vi.fn()}
+        onUnlink={vi.fn()}
+      />
+    )
+
+    expect(screen.getByTestId("menu-item-unlink")).toBeInTheDocument()
   })
 
   it("uses characters-like action button spacing classes", () => {

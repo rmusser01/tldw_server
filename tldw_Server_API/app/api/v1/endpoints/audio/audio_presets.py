@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from starlette import status
 
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     TokenScopeGuard,
     User,
     check_rate_limit,
     get_request_user,
 )
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.audio_presets import (
     AudioPresetCreateRequest,
     AudioPresetKind,
@@ -29,6 +29,11 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
+from tldw_Server_API.app.core.TTS.gateway_preflight import (
+    preflight_gateway_speech,
+    reject_gateway_persistence_authority,
+)
+from tldw_Server_API.app.core.TTS.tts_config import get_tts_config_manager
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 router = APIRouter(
@@ -39,6 +44,22 @@ router = APIRouter(
         409: {"description": "Conflict"},
         429: {"description": "Rate limit exceeded"},
     },
+)
+
+_TTS_PRESET_GATEWAY_PREFLIGHT_FIELDS = frozenset(
+    {
+        "allow_fallback",
+        "backend",
+        "extra_params",
+        "lang_code",
+        "language",
+        "model",
+        "response_format",
+        "speed",
+        "stream",
+        "target_sample_rate",
+        "voice",
+    }
 )
 
 _BROWSER_TTS_WARNING = AudioPresetValidationWarning(
@@ -57,6 +78,38 @@ def _user_id(request_user: User) -> str:
 def _normalize_audio_preset_config(kind: str, config: dict[str, Any]) -> dict[str, Any]:
     """Normalize persisted preset config without storing browser-local claims as portable."""
     normalized = dict(config or {})
+    if kind == "tts" and normalized.get("backend") is not None:
+        try:
+            reject_gateway_persistence_authority(normalized)
+            resolved = preflight_gateway_speech(
+                backend=normalized["backend"],
+                model=normalized.get("model"),
+                voice=normalized.get("voice"),
+                voice_supplied="voice" in normalized,
+                response_format=normalized.get("response_format", "mp3"),
+                allow_fallback=bool(normalized.get("allow_fallback", True)),
+                supplied_fields=frozenset(normalized).intersection(
+                    _TTS_PRESET_GATEWAY_PREFLIGHT_FIELDS
+                ),
+                gateway_specs=get_tts_config_manager().get_gateway_specs(),
+                speed=normalized.get("speed"),
+                lang_code=normalized.get("lang_code"),
+                language=normalized.get("language"),
+                target_sample_rate=normalized.get("target_sample_rate"),
+                extra_params=normalized.get("extra_params"),
+            )
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        normalized.update(
+            backend=resolved.backend,
+            model=resolved.model,
+            voice=resolved.voice,
+            response_format=resolved.response_format,
+            allow_fallback=resolved.allow_fallback,
+        )
     provider = str(normalized.get("provider") or "").strip().lower()
     if kind == "tts" and provider == "browser":
         normalized["provider"] = "browser"
@@ -93,9 +146,9 @@ def _preset_or_404(preset: dict[str, Any] | None) -> dict[str, Any]:
     ],
 )
 def list_audio_presets_endpoint(
-    kind: Optional[AudioPresetKind] = Query(default=None),
-    favorite: Optional[bool] = Query(default=None),
-    is_default: Optional[bool] = Query(default=None),
+    kind: AudioPresetKind | None = Query(default=None),
+    favorite: bool | None = Query(default=None),
+    is_default: bool | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     request_user: User = Depends(get_request_user),

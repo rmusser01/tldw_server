@@ -692,6 +692,48 @@ def test_register_pdf_ref_creates_owned_media_and_media_file(real_hydration_db, 
     assert "source_path" not in safe_metadata
 
 
+def test_overlapping_attachment_registrations_keep_independent_originals(
+    real_hydration_db: CharactersRAGDB,
+    media_db: MediaDatabase,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second hydration finishing before the first registration cannot overwrite its bytes."""
+    pdf_path = tmp_path / "source.pdf"
+    pdf_path.write_bytes(PDF_BYTES)
+    storage_root = tmp_path / "storage"
+    reference = _reference(file_id="overlapping-pdf")
+    resolved = _resolved_file(pdf_path, file_id="overlapping-pdf")
+    insert = media_db.insert_media_file
+    overlapping: list[hydration.OpenWebUIHydrationPreviewItem] = []
+    first_call = True
+    updated_bytes = PDF_BYTES + b"\nupdated"
+
+    def finish_other_hydration_before_registering(**kwargs: Any) -> str:
+        """Model another worker finishing after this worker copied but before it registered."""
+        nonlocal first_call
+        if first_call:
+            first_call = False
+            pdf_path.write_bytes(updated_bytes)
+            overlapping.append(hydration.register_non_image_reference(
+                real_hydration_db, media_db, reference, resolved,
+                owner_user_id=101, storage_root=storage_root, job_id="second-worker",
+            ))
+        return insert(**kwargs)
+
+    monkeypatch.setattr(media_db, "insert_media_file", finish_other_hydration_before_registering)
+    first = hydration.register_non_image_reference(
+        real_hydration_db, media_db, reference, resolved,
+        owner_user_id=101, storage_root=storage_root, job_id="first-worker",
+    )
+    second = overlapping[0]
+    assert first.status == second.status == "registered_media"
+    assert first.media_id == second.media_id
+    assert first.storage_path != second.storage_path
+    assert (storage_root / first.storage_path).read_bytes() == PDF_BYTES
+    assert (storage_root / second.storage_path).read_bytes() == updated_bytes
+
+
 def test_register_same_source_file_reuses_owned_media_link(real_hydration_db, media_db, tmp_path):
     pdf_path = tmp_path / "source.pdf"
     pdf_path.write_bytes(PDF_BYTES)
@@ -930,6 +972,48 @@ def test_preview_and_run_hydration_cap_response_items(tmp_path, monkeypatch):
     assert result["summary"]["warning_count"] == 5
     assert len(result["items"]) == 3
     assert len(result["warnings"]) == 3
+
+
+@pytest.mark.parametrize("failure_stage", ["copy", "registration"])
+def test_failed_hydration_retries_remove_attempt_owned_files(
+    real_hydration_db: CharactersRAGDB,
+    media_db: MediaDatabase,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_stage: str,
+) -> None:
+    """Failed copying or registration cleans up each retry's unique original file."""
+    source_path = tmp_path / "source.pdf"
+    source_path.write_bytes(PDF_BYTES)
+    storage_root = tmp_path / "storage"
+
+    def fail_copy(source: Any, target: Any, **kwargs: Any) -> None:
+        """Leave partial output before simulating a full disk."""
+        target.write(source.read(4))
+        raise OSError("disk full")
+
+    def fail_insert(**kwargs: Any) -> None:
+        """Reject database registration after the original has been copied."""
+        raise RuntimeError("registration unavailable")
+
+    if failure_stage == "copy":
+        monkeypatch.setattr(hydration.shutil, "copyfileobj", fail_copy)
+    else:
+        monkeypatch.setattr(media_db, "insert_media_file", fail_insert)
+    for _ in range(2):
+        item = hydration.register_non_image_reference(
+            real_hydration_db,
+            media_db,
+            _reference(file_id="failed-retry"),
+            _resolved_file(source_path, file_id="failed-retry"),
+            owner_user_id=101,
+            storage_root=storage_root,
+        )
+        assert item.status == "media_registration_failed"
+        assert item.media_id is not None
+        assert media_db.get_media_files(item.media_id) == []
+    assert [path for path in storage_root.rglob("*") if path.is_file()] == []
+    assert source_path.read_bytes() == PDF_BYTES
 
 
 def test_openwebui_attachment_storage_root_is_private(tmp_path, monkeypatch):

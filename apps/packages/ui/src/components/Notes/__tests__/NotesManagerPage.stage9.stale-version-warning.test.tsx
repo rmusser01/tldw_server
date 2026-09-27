@@ -128,6 +128,26 @@ vi.mock("@/components/Notes/NotesListPanel", () => ({
   default: () => <div data-testid="notes-list-panel" />
 }))
 
+// This page fixture starts with a verified owner; the interacting hook suite
+// separately exercises pending discovery, identity changes, and permission loss.
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => {
+  const config = { serverUrl: "https://notes.test", authMode: "multi-user",
+    accessToken: `test.${btoa(JSON.stringify({ sub: "7" }))}.signature` }
+  return { useCanonicalConnectionConfig: () => ({ config, loading: false }) }
+})
+vi.mock("../hooks/useNotesGraphAuthorityScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../hooks/useNotesGraphAuthorityScope")>()
+  return { ...actual, useNotesGraphAuthorityScope: () => actual.createNotesGraphAuthorityScope("https://notes.test", 7) }
+})
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: vi.fn(async () => ({ id: 7, is_active: true })) }
+}))
+vi.mock("@/hooks/useCallerCapabilities", () => {
+  const capabilities = { monitoringAlerts: "allowed", userId: 7,
+    refreshAfterForbidden: vi.fn(async () => undefined) }
+  return { useCallerCapabilities: () => capabilities }
+})
+
 const renderPage = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -218,7 +238,7 @@ describe("NotesManagerPage stage 9 stale-version warning", () => {
     })
     fireEvent.click(screen.getByTestId("notes-save-button"))
 
-    expect(await screen.findByTestId("notes-editor-revision-meta")).toHaveTextContent("Version 1")
+    await waitFor(() => expect(screen.getByTestId("notes-editor-revision-meta")).toHaveTextContent("Version 1"))
     expect(await screen.findByTestId("notes-stale-version-warning")).toHaveTextContent(
       "This note was updated elsewhere. Reload to see the latest version."
     )

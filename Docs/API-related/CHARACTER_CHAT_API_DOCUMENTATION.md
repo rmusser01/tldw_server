@@ -1000,7 +1000,7 @@ Dictionary and World Book modules estimate tokens when applying budgets. You can
 
 Endpoints:
 - GET `/api/v1/config/tokenizer` → returns current mode and settings
-- PUT `/api/v1/config/tokenizer` → updates mode (non-persistent; in-memory only)
+- PUT `/api/v1/config/tokenizer` → updates mode (admin only; non-persistent; in-memory only)
 
 Modes:
 - `whitespace` (default): counts whitespace-separated tokens

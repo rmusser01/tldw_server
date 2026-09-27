@@ -9,6 +9,10 @@ export type EffectiveSystemPromptState = {
   overrideActive: boolean
 }
 
+export type SystemPromptOverrideSnapshot = {
+  rawOverride: string | undefined
+}
+
 const getPromptContent = (prompt?: Prompt | null): string =>
   prompt?.system_prompt ?? prompt?.content ?? ""
 
@@ -42,7 +46,8 @@ export const resolveEffectiveSystemPromptState = async ({
     getPromptByIdFn
   )
   const overrideValue = typeof systemPrompt === "string" ? systemPrompt : ""
-  const overrideActive = overrideValue.trim().length > 0
+  const overrideActive =
+    overrideValue.trim().length > 0 && overrideValue !== templateContent
 
   return {
     templateContent,
@@ -67,3 +72,11 @@ export const normalizeSystemPromptOverrideValue = ({
   }
   return normalizedDraft
 }
+
+export const captureSystemPromptOverrideSnapshot = (
+  rawOverride: string | undefined
+): SystemPromptOverrideSnapshot => ({ rawOverride })
+
+export const restoreSystemPromptOverrideSnapshot = (
+  snapshot: SystemPromptOverrideSnapshot
+): string | undefined => snapshot.rawOverride

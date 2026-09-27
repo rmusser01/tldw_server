@@ -3,8 +3,12 @@ import configparser
 import importlib
 from pathlib import Path
 
+import pytest
+
 from tldw_Server_API.app.api.v1.endpoints import config_info
 from tldw_Server_API.app.core import config as config_mod
+
+pytestmark = pytest.mark.unit
 
 
 def _write_minimal_config(path: Path, *, stable_only: bool = True) -> None:
@@ -136,6 +140,81 @@ def test_docs_info_exposes_slides_and_presentation_studio_capabilities(
     assert safe_config["supported_features"]["hasPresentationStudio"] is True
     assert safe_config["capabilities"]["hasPresentationRender"] is True
     assert safe_config["supported_features"]["hasPresentationRender"] is True
+
+
+def test_docs_info_attests_reading_snapshot_pages(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Docs-info attests that Reading totals and rows share one snapshot."""
+    config_path = tmp_path / "config.txt"
+    _write_minimal_config(config_path)
+    monkeypatch.setenv("TLDW_CONFIG_PATH", str(config_path))
+
+    safe_config = config_info.load_safe_config()
+
+    assert safe_config["capabilities"]["hasReadingSnapshotPagesV1"] is True
+    assert safe_config["supported_features"]["hasReadingSnapshotPagesV1"] is True
+
+    response = asyncio.run(config_info.get_documentation_config())
+    assert response["capabilities"]["hasReadingSnapshotPagesV1"] is True
+
+
+def test_docs_info_disables_reading_snapshot_when_route_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Docs-info must not advertise a route that policy removed."""
+    config_path = tmp_path / "config.txt"
+    _write_minimal_config(config_path)
+    monkeypatch.setenv("TLDW_CONFIG_PATH", str(config_path))
+    monkeypatch.setenv("ROUTES_DISABLE", "reading")
+    monkeypatch.delenv("ROUTES_ENABLE", raising=False)
+    config_mod._route_toggle_policy.cache_clear()
+
+    safe_config = config_info.load_safe_config()
+
+    assert safe_config["capabilities"]["hasReadingSnapshotPagesV1"] is False
+    assert safe_config["supported_features"]["hasReadingSnapshotPagesV1"] is False
+
+
+def test_docs_info_attests_reading_snapshot_without_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The shipped fallback remains available without readable config."""
+    monkeypatch.setenv("TLDW_CONFIG_PATH", str(tmp_path / "missing-config.txt"))
+
+    safe_config = config_info.load_safe_config()
+    response = asyncio.run(config_info.get_documentation_config())
+
+    assert safe_config["capabilities"]["hasReadingSnapshotPagesV1"] is True
+    assert safe_config["supported_features"]["hasReadingSnapshotPagesV1"] is True
+    assert response["capabilities"]["hasReadingSnapshotPagesV1"] is True
+    assert response["supported_features"]["hasReadingSnapshotPagesV1"] is True
+
+
+def test_docs_info_retains_reading_snapshot_when_dynamic_capabilities_fail(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Late dynamic failure publishes no partially derived capability map."""
+    config_path = tmp_path / "config.txt"
+    _write_minimal_config(config_path)
+    monkeypatch.setenv("TLDW_CONFIG_PATH", str(config_path))
+
+    def fail_late_route_lookup(route_key: str, **_kwargs: object) -> bool:
+        """Fail after earlier dynamic capability values were calculated."""
+        if route_key == "slides":
+            raise RuntimeError("dynamic-capability-failure")
+        return True
+
+    monkeypatch.setattr(config_mod, "route_enabled", fail_late_route_lookup)
+
+    safe_config = config_info.load_safe_config()
+
+    assert safe_config["capabilities"] == {"hasReadingSnapshotPagesV1": True}
+    assert safe_config["supported_features"] == {"hasReadingSnapshotPagesV1": True}
 
 
 def test_docs_info_exposes_audio_capabilities_from_audio_and_websocket_routes(

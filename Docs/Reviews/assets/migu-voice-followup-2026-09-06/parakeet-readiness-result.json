@@ -1,0 +1,32 @@
+{
+  "microphone_opened": false,
+  "provider_message_sent": false,
+  "before": {
+    "text": true,
+    "voice": false,
+    "browser_microphone_required": false
+  },
+  "readiness": {
+    "event": "voice_readiness",
+    "session_id": "0af2b1de-1689-43c8-83e7-2b1fe2e7edc7",
+    "client_message_id": "readiness-c7330a7a7d6c4027bc51b453d9884bb2",
+    "ready": true,
+    "reason_code": "VOICE_READY",
+    "message": "Voice runtime is ready. Microphone capture may now be started."
+  },
+  "prepare_seconds": 0.37,
+  "after_status": 200,
+  "after": {
+    "text": true,
+    "voice": true,
+    "browser_microphone_required": true
+  },
+  "stop_while_connected_status": 200,
+  "terminal_notice_received": true,
+  "after_stop": {
+    "text": true,
+    "voice": false,
+    "browser_microphone_required": false
+  },
+  "stop_status": 200
+}

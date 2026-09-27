@@ -24,6 +24,7 @@ vi.mock("@/components/Option/CompanionHome", () => ({
 }))
 
 import OptionCompanion from "../option-companion"
+import { getRouteMetadata } from "../route-metadata"
 
 const routeRegistryPathCandidates = [
   "src/routes/route-registry.tsx",
@@ -63,6 +64,9 @@ describe("option companion route", () => {
 
   it("registers the companion workspace route in the route registry", () => {
     expect(routeRegistrySource).toMatch(/path:\s*"\/companion"/)
-    expect(routeRegistrySource).toContain('labelToken: "option:header.companion"')
+    const metadata = getRouteMetadata("/companion")
+    expect(metadata?.label).toBe("Companion")
+    expect(metadata?.group).toBe("chat")
+    expect(metadata?.availability).toContain("web")
   })
 })

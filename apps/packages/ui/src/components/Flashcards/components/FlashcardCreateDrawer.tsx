@@ -12,7 +12,7 @@ import {
   Typography
 } from "antd"
 import type { TextAreaRef } from "antd/es/input/TextArea"
-import { Plus } from "lucide-react"
+import { Loader2, Plus } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Alert } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
@@ -424,8 +424,14 @@ export const FlashcardCreateDrawer: React.FC<
             </Button>
             <Button
               onClick={handleCreateAndAddAnother}
-              loading={createMutation.isPending}
+              icon={createMutation.isPending
+                ? <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                : undefined}
               disabled={createMutation.isPending}
+              aria-label={t("option:flashcards.createAndAddAnother", {
+                defaultValue: "Create & Add Another"
+              })}
+              aria-busy={createMutation.isPending}
             >
               {t("option:flashcards.createAndAddAnother", {
                 defaultValue: "Create & Add Another"
@@ -434,8 +440,12 @@ export const FlashcardCreateDrawer: React.FC<
             <Button
               type="primary"
               onClick={handleCreate}
-              loading={createMutation.isPending}
+              icon={createMutation.isPending
+                ? <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                : undefined}
               disabled={createMutation.isPending}
+              aria-label={t("common:create", { defaultValue: "Create" })}
+              aria-busy={createMutation.isPending}
             >
               {t("common:create", { defaultValue: "Create" })}
             </Button>

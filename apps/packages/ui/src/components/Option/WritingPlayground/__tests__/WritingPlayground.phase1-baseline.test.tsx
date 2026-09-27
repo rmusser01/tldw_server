@@ -10,6 +10,9 @@ import {
 } from "@testing-library/react"
 import { useQuery } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
+import { message } from "antd"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 const mockState = vi.hoisted(() => ({
   storageValues: new Map<string, unknown>(),
@@ -20,7 +23,16 @@ const mockState = vi.hoisted(() => ({
   resolveApiProviderForModel: vi.fn(async () => null as string | null),
   streamCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
   sendCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
-  sendResponses: [] as Array<string | Promise<string>>
+  sendResponses: [] as Array<string | Promise<string>>,
+  loadSnapshot: vi.fn(),
+  cancelStream: vi.fn(),
+  streamResults: [] as AsyncGenerator<string>[],
+  responseCallbacks: [] as Array<((chunk: unknown) => void) | undefined>
+}))
+
+vi.mock("@/services/service-prompts", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+  loadServicePromptSnapshot: mockState.loadSnapshot
 }))
 
 type MockQueryResult = {
@@ -134,16 +146,21 @@ vi.mock("@/components/Common/MarkdownPreview", () => ({
 
 vi.mock("@/services/tldw/TldwChat", () => ({
   TldwChatService: class TldwChatServiceMock {
-    cancelStream() {}
+    cancelStream() { mockState.cancelStream() }
     async *streamMessage(
       messages: unknown[],
-      options: Record<string, unknown>
+      options: Record<string, unknown>,
+      callback?: (chunk: unknown) => void
     ) {
       mockState.streamCalls.push({ messages, options })
+      mockState.responseCallbacks.push(callback)
+      const result = mockState.streamResults.shift()
+      if (result) { yield* result; return }
       yield "mocked stream token"
     }
-    async sendMessage(messages: unknown[], options: Record<string, unknown>) {
+    async sendMessage(messages: unknown[], options: Record<string, unknown>, callback?: (chunk: unknown) => void) {
       mockState.sendCalls.push({ messages, options })
+      mockState.responseCallbacks.push(callback)
       return await (mockState.sendResponses.shift() ?? "mocked completion")
     }
   }
@@ -486,6 +503,35 @@ const seedManuscriptAnnotations = (
 const getEditor = () =>
   screen.getByPlaceholderText("Start writing your prompt...") as HTMLTextAreaElement
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
+
+const continuationSnapshot = (
+  id = "writing.continuation.predict",
+  system = "Continue in {my style}."
+) => {
+  const scope = new AbortController()
+  const snapshot: ServicePromptSnapshot = {
+    scopeKey: "test-user-42",
+    requestScope: { config: { serverUrl: "http://localhost:8000", authMode: "multi-user" }, userId: 42 },
+    capability: "supported",
+    definitions: {
+      [id]: {
+        definition: { id, parts: [{ key: "system", mode: "literal", required_variables: [] }] },
+        parts: { system }, source: "user", revision: "test-revision"
+      }
+    },
+    scopeSignal: scope.signal,
+    scopeInvalidatedSignal: scope.signal,
+    release: vi.fn()
+  }
+  return { snapshot, scope }
+}
+
 const selectEditorText = (editor: HTMLTextAreaElement, selectedText: string) => {
   const start = editor.value.indexOf(selectedText)
   expect(start).toBeGreaterThanOrEqual(0)
@@ -513,6 +559,13 @@ beforeEach(() => {
   mockState.streamCalls.length = 0
   mockState.sendCalls.length = 0
   mockState.sendResponses.length = 0
+  mockState.streamResults.length = 0
+  mockState.responseCallbacks.length = 0
+  mockState.cancelStream.mockReset()
+  mockState.loadSnapshot.mockReset()
+  mockState.loadSnapshot.mockImplementation(async ([id]: string[]) =>
+    continuationSnapshot(id).snapshot
+  )
   vi.mocked(updateWritingSession).mockReset()
 
   mockState.queryData.set(
@@ -557,9 +610,527 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   cleanup()
+  message.destroy()
 })
 
 describe("WritingPlayground phase1 baseline", () => {
+  describe("scoped continuation", () => {
+    it.each([
+      ["preset", "partial"], ["reject", "partial"], ["apply", "partial"],
+      ["preset", "admission"], ["reject", "admission"], ["apply", "admission"]
+    ])("prevents %s from persisting provisional continuation text at %s and resumes idle mutations", async (mutation, timing) => {
+      const original = "Intro. The old sentence. Outro."
+      const rewritten = "Intro. The sharper sentence. Outro."
+      const persistedPayloads: Record<string, unknown>[] = []
+      mockState.executeMutations = true
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: original })
+      vi.mocked(updateWritingSession).mockImplementation(async (sessionId, patch, expectedVersion) => {
+        const payload = patch.payload ?? {}
+        persistedPayloads.push(payload)
+        return {
+          id: sessionId, name: "Auto Session", payload,
+          schema_version: patch.schema_version ?? 1, version_parent_id: null,
+          created_at: "2026-03-16T12:00:00Z", last_modified: "2026-03-16T12:00:01Z",
+          deleted: false, client_id: "test-client", version: expectedVersion + 1
+        } as Awaited<ReturnType<typeof updateWritingSession>>
+      })
+      mockState.sendResponses.push(structuredReplacement("The sharper sentence."))
+      render(<WritingPlayground />)
+      selectEditorText(getEditor(), "The old sentence.")
+      fireEvent.click(screen.getByRole("button", { name: /^rewrite$/i }))
+      await waitFor(() => expect(screen.getByText("The sharper sentence.")).toBeInTheDocument())
+      await waitFor(() => {
+        expect(persistedPayloads.map((payload) => payload.prompt)).toEqual([original])
+      }, { timeout: 2000 })
+
+      const tail = deferred<string>()
+      mockState.streamResults.push((async function* () { yield " provisional"; yield await tail.promise })())
+      const { snapshot, scope } = continuationSnapshot()
+      mockState.loadSnapshot.mockResolvedValue(snapshot)
+      const mutateRevision = () => {
+        fireEvent.click(mutation === "preset"
+          ? screen.getByRole("radio", { name: /make concise/i })
+          : screen.getByRole("button", { name: new RegExp(`^${mutation}$`, "i") }))
+      }
+      vi.useFakeTimers()
+      await act(async () => {
+        fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+        if (timing === "admission") mutateRevision()
+      })
+      expect(getEditor()).toHaveValue(`${original} provisional`)
+      if (timing === "partial") mutateRevision()
+      act(() => scope.abort())
+      await act(async () => { tail.resolve(" stale"); await vi.advanceTimersByTimeAsync(800) })
+      vi.useRealTimers()
+      // Observe the real session-save boundary after the debounce, not merely
+      // whether the control looked disabled during generation.
+      expect(persistedPayloads.map((payload) => payload.prompt)).toEqual([original])
+      expect(getEditor()).toHaveValue(original)
+
+      vi.useFakeTimers()
+      mutateRevision()
+      expect(getEditor()).toHaveValue(mutation === "apply" ? rewritten : original)
+      await act(async () => { await vi.advanceTimersByTimeAsync(800) })
+      vi.useRealTimers()
+      expect(persistedPayloads).toHaveLength(2)
+      expect(persistedPayloads[1]?.prompt).not.toContain("provisional")
+      if (mutation !== "apply") expect(persistedPayloads[1]?.prompt).toBe(original)
+      if (mutation === "preset") {
+        expect(persistedPayloads[1]?.revision_preset_id).toBe("make_concise")
+      } else {
+        expect(JSON.stringify(persistedPayloads[1]?.revisions)).toContain(
+          mutation === "apply" ? '"applied"' : '"rejected"'
+        )
+      }
+    })
+
+    it.each([
+      ["predict", false, "Continue in {my style}."],
+      ["predict", true, "Continue in {my style}."],
+      ["fill", false, "Fill in {my style}."],
+      ["fill", true, "Fill in {my style}."],
+      ["predict", false, "Continue the text from the prompt. Respond with only the continuation."],
+      ["predict", true, "Continue the text from the prompt. Respond with only the continuation."],
+      ["fill", false, "Fill in the missing text between the prefix and suffix. Respond with only the missing text."],
+      ["fill", true, "Fill in the missing text between the prefix and suffix. Respond with only the missing text."]
+    ] as const)("uses selected %s instructions with streaming=%s: %s", async (mode, streaming, system) => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      const prompt = mode === "fill" ? "Opening{fill} tail" : "Opening"
+      seedWritingSession({ prompt, settings: {
+        token_streaming: streaming, temperature: 0.42, top_p: 0.88,
+        max_tokens: 333, frequency_penalty: 0.1, presence_penalty: 0.2,
+        top_k: 11, seed: 1234, stop: ["END"], use_basic_stopping_mode: false
+      } })
+      const { snapshot } = continuationSnapshot(`writing.continuation.${mode}`, system)
+      mockState.loadSnapshot.mockResolvedValue(snapshot)
+      mockState.sendResponses.push(" ending")
+      mockState.streamResults.push((async function* () { yield " ending" })())
+      render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      const calls = streaming ? mockState.streamCalls : mockState.sendCalls
+      await waitFor(() => expect(calls).toHaveLength(1))
+      expect(mockState.loadSnapshot).toHaveBeenCalledExactlyOnceWith(
+        [`writing.continuation.${mode}`], { signal: expect.any(AbortSignal) }
+      )
+      expect(calls[0]?.options).toMatchObject({
+        systemPrompt: system, requestScope: { userId: 42 },
+        signal: snapshot.scopeSignal, model: "mock-model", temperature: 0.42,
+        topP: 0.88, maxTokens: 333, frequencyPenalty: 0.1, presencePenalty: 0.2,
+        extraBody: { top_k: 11, seed: 1234, stop: ["END"] }
+      })
+      expect(calls[0]?.messages).toEqual([{ role: "user", content: mode === "fill"
+        ? "Fill in the missing text between the prefix and suffix.\n\nPrefix:\nOpening\n\nSuffix:\n tail\n\nReturn only the missing text."
+        : "Opening" }])
+      await waitFor(() => expect(getEditor()).toHaveValue(mode === "fill" ? "Opening ending tail" : "Opening ending"))
+      expect(snapshot.release).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([false, true])("bypasses prompt lookup in chat mode with streaming=%s", async (streaming) => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Opening", chat_mode: true, settings: {
+        token_streaming: streaming,
+        memory_block: { enabled: true, prefix: "", text: "Explicit instructions", suffix: "" }
+      } })
+      render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      const calls = streaming ? mockState.streamCalls : mockState.sendCalls
+      await waitFor(() => expect(calls).toHaveLength(1))
+      expect(mockState.loadSnapshot).not.toHaveBeenCalled()
+      expect(calls[0]?.options.systemPrompt).toBeUndefined()
+      expect(calls[0]?.options.requestScope).toBeUndefined()
+      expect(calls[0]?.messages).toEqual([
+        { role: "system", content: "Explicit instructions" },
+        { role: "user", content: "Opening" }
+      ])
+    })
+
+    it.each([false, true])("preserves fill template, ordered context, stop mode and logprobs with streaming=%s", async (streaming) => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Opening{fill}tail", template_name: "FIM", settings: {
+        token_streaming: streaming, logprobs: true, top_logprobs: 3,
+        use_basic_stopping_mode: true, basic_stopping_mode_type: "fill_suffix",
+        memory_block: { enabled: true, prefix: "<memory>", text: "Remember", suffix: "</memory>" },
+        context_order: "{memPrefix}{memText}{memSuffix}{prompt}"
+      } })
+      mockState.queryData.set(mockState.queryKey(["writing-templates"]), {
+        templates: [{ id: "fim", name: "FIM", payload: { fim_template: "<prefix>{prefix}<suffix>{suffix}<middle>" } }],
+        total: 1, limit: 200, offset: 0
+      })
+      const response = deferred<string>()
+      mockState.sendResponses.push(response.promise)
+      mockState.streamResults.push((async function* () { yield await response.promise })())
+      const { snapshot } = continuationSnapshot("writing.continuation.fill", "Literal {braces}")
+      const removeListener = vi.spyOn(snapshot.scopeInvalidatedSignal, "removeEventListener")
+      mockState.loadSnapshot.mockResolvedValue(snapshot)
+      render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      const calls = streaming ? mockState.streamCalls : mockState.sendCalls
+      await waitFor(() => expect(calls).toHaveLength(1))
+      expect(calls[0]?.messages).toEqual([{ role: "user", content: "<memory>Remember</memory><prefix>Opening<suffix>tail<middle>" }])
+      expect(calls[0]?.options).toMatchObject({
+        systemPrompt: "Literal {braces}", logprobs: true, topLogprobs: 3,
+        extraBody: { stop: ["ta"] }
+      })
+      await act(async () => {
+        mockState.responseCallbacks[0]?.({ choices: [{ logprobs: { content: [{ token: "ACCEPTED", logprob: -0.2, top_logprobs: [] }] } }] })
+        response.resolve(" middle ")
+      })
+      expect(getEditor()).toHaveValue("Opening middle tail")
+      expect(screen.getByRole("button", { name: "ACCEPTED" })).toBeInTheDocument()
+      expect(removeListener).toHaveBeenCalledWith("abort", expect.any(Function))
+      expect(snapshot.release).toHaveBeenCalledTimes(1)
+    })
+
+    it("keeps parsed explicit system messages ahead of chat context", async () => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "<system>Explicit rules</system><user>Hello</user>", chat_mode: true, template_name: "Chat", settings: {
+        token_streaming: false,
+        memory_block: { enabled: true, prefix: "", text: "Memory rules", suffix: "" }
+      } })
+      mockState.queryData.set(mockState.queryKey(["writing-templates"]), {
+        templates: [{ id: "chat", name: "Chat", payload: {
+          system_prefix: "<system>", system_suffix: "</system>", user_prefix: "<user>", user_suffix: "</user>"
+        } }], total: 1, limit: 200, offset: 0
+      })
+      render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await waitFor(() => expect(mockState.sendCalls).toHaveLength(1))
+      expect(mockState.loadSnapshot).not.toHaveBeenCalled()
+      expect(mockState.sendCalls[0]?.messages).toEqual([
+        { role: "system", content: "Explicit rules" },
+        { role: "system", content: "Memory rules" },
+        { role: "user", content: "Hello" }
+      ])
+      expect(mockState.sendCalls[0]?.options.systemPrompt).toBeUndefined()
+    })
+
+    it("releases an old lookup without canceling a newer pending generation", async () => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Opening" })
+      const lookup = deferred<ServicePromptSnapshot>()
+      const response = deferred<string>()
+      const first = continuationSnapshot()
+      const second = continuationSnapshot()
+      mockState.loadSnapshot.mockReturnValueOnce(lookup.promise).mockResolvedValueOnce(second.snapshot)
+      mockState.streamResults.push((async function* () { yield await response.promise })())
+      render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await waitFor(() => expect(mockState.streamCalls).toHaveLength(1))
+      await act(async () => { lookup.resolve(first.snapshot) })
+      expect(first.snapshot.release).toHaveBeenCalledTimes(1)
+      expect(second.snapshot.release).not.toHaveBeenCalled()
+      expect(mockState.cancelStream).not.toHaveBeenCalled()
+      expect(screen.getByTestId("writing-topbar-generate")).toHaveTextContent("Stop")
+      await act(async () => { response.resolve(" fresh") })
+      expect(getEditor()).toHaveValue("Opening fresh")
+      expect(second.snapshot.release).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([false, true])("rejects a scope-invalidated late lookup with streaming=%s", async (streaming) => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Opening{fill} tail", settings: { token_streaming: streaming } })
+      const lookup = deferred<ServicePromptSnapshot>()
+      const { snapshot, scope } = continuationSnapshot("writing.continuation.fill")
+      mockState.loadSnapshot.mockReturnValue(lookup.promise)
+      render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await act(async () => { scope.abort(); lookup.resolve(snapshot) })
+      expect(mockState.sendCalls).toHaveLength(0)
+      expect(mockState.streamCalls).toHaveLength(0)
+      expect(getEditor()).toHaveValue("Opening{fill} tail")
+      expect(snapshot.release).toHaveBeenCalledTimes(1)
+      expect(screen.getByTestId("writing-topbar-generate")).toHaveTextContent("Generate")
+    })
+
+    it.each(["missing", "empty", "rejected"])("rejects %s snapshot without dispatch or history", async (failure) => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Opening{fill} tail" })
+      const { snapshot } = continuationSnapshot(failure === "missing" ? "writing.continuation.predict" : "writing.continuation.fill", "  ")
+      if (failure === "rejected") mockState.loadSnapshot.mockRejectedValue(new Error("lookup failed"))
+      else mockState.loadSnapshot.mockResolvedValue(snapshot)
+      const error = vi.spyOn(message, "error")
+      render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await waitFor(() => expect(error).toHaveBeenCalledTimes(1))
+      expect(mockState.sendCalls).toHaveLength(0)
+      expect(mockState.streamCalls).toHaveLength(0)
+      expect(getEditor()).toHaveValue("Opening{fill} tail")
+      expect(screen.getByTitle("Undo generation")).toBeDisabled()
+      expect(snapshot.release).toHaveBeenCalledTimes(failure === "rejected" ? 0 : 1)
+      error.mockRestore()
+    })
+
+    it("treats a rejected scope-changing lookup as invalidation, not a current generation error", async () => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Opening{fill} tail" })
+      const lookup = deferred<ServicePromptSnapshot>()
+      mockState.loadSnapshot.mockReturnValue(lookup.promise)
+      const error = vi.spyOn(message, "error")
+      render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await act(async () => { lookup.reject(createServicePromptScopeChangedError()) })
+      expect(error).not.toHaveBeenCalled()
+      expect(mockState.loadSnapshot.mock.calls[0]?.[1].signal.aborted).toBe(true)
+      expect(getEditor()).toHaveValue("Opening{fill} tail")
+      expect(mockState.streamCalls).toHaveLength(0)
+      expect(screen.getByTitle("Undo generation")).toBeDisabled()
+      error.mockRestore()
+    })
+
+    it("preserves manually stopped partial output and undo while ignoring late chunks and errors", async () => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Opening", settings: { logprobs: true } })
+      const tail = deferred<string>()
+      mockState.streamResults.push((async function* () { yield " partial"; yield await tail.promise })())
+      const { snapshot } = continuationSnapshot()
+      mockState.loadSnapshot.mockResolvedValue(snapshot)
+      const error = vi.spyOn(message, "error")
+      render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await waitFor(() => expect(getEditor()).toHaveValue("Opening partial"))
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      expect(getEditor()).toHaveValue("Opening partial")
+      expect(snapshot.release).toHaveBeenCalledTimes(1)
+      expect(mockState.cancelStream).toHaveBeenCalledTimes(1)
+      await act(async () => { tail.reject(new Error("late failure")) })
+      expect(error).not.toHaveBeenCalled()
+      fireEvent.click(screen.getByTitle("Undo generation"))
+      expect(getEditor()).toHaveValue("Opening")
+      fireEvent.click(screen.getByTitle("Redo generation"))
+      expect(getEditor()).toHaveValue("Opening partial")
+      error.mockRestore()
+    })
+
+    it.each([false, true])("ignores old response/logprobs/finalization during a new request with streaming=%s", async (streaming) => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Opening", settings: { token_streaming: streaming, logprobs: true } })
+      const oldResponse = deferred<string>()
+      const newResponse = deferred<string>()
+      if (streaming) {
+        mockState.streamResults.push((async function* () { yield await oldResponse.promise })())
+        mockState.streamResults.push((async function* () { yield await newResponse.promise })())
+      } else mockState.sendResponses.push(oldResponse.promise, newResponse.promise)
+      const first = continuationSnapshot()
+      const second = continuationSnapshot()
+      mockState.loadSnapshot.mockResolvedValueOnce(first.snapshot).mockResolvedValueOnce(second.snapshot)
+      render(<WritingPlayground />)
+      const calls = streaming ? mockState.streamCalls : mockState.sendCalls
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await waitFor(() => expect(calls).toHaveLength(1))
+      act(() => first.scope.abort())
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await waitFor(() => expect(calls).toHaveLength(2))
+      await act(async () => {
+        mockState.responseCallbacks[0]?.({ choices: [{ logprobs: { content: [{ token: "STALE", logprob: -0.2, top_logprobs: [] }] } }] })
+        oldResponse.resolve(" stale")
+      })
+      expect(getEditor()).toHaveValue("Opening")
+      expect(screen.getByTestId("writing-topbar-generate")).toHaveTextContent("Stop")
+      expect(second.snapshot.release).not.toHaveBeenCalled()
+      expect(mockState.cancelStream).toHaveBeenCalledTimes(1)
+      await act(async () => { newResponse.resolve(" fresh") })
+      expect(getEditor()).toHaveValue("Opening fresh")
+      expect(screen.queryByText("STALE")).not.toBeInTheDocument()
+      expect(first.snapshot.release).toHaveBeenCalledTimes(1)
+      expect(second.snapshot.release).toHaveBeenCalledTimes(1)
+      fireEvent.click(screen.getByTitle("Undo generation"))
+      expect(getEditor()).toHaveValue("Opening")
+    })
+
+    it.each(["lookup", "send", "stream"])("cancels on unmount during %s and releases late leases", async (phase) => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Opening", settings: { token_streaming: phase !== "send" } })
+      const lookup = deferred<ServicePromptSnapshot>()
+      const response = deferred<string>()
+      const { snapshot } = continuationSnapshot()
+      mockState.loadSnapshot.mockReturnValue(phase === "lookup" ? lookup.promise : Promise.resolve(snapshot))
+      mockState.sendResponses.push(response.promise)
+      mockState.streamResults.push((async function* () { yield await response.promise })())
+      const view = render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      if (phase !== "lookup") await waitFor(() => expect(mockState.responseCallbacks).toHaveLength(1))
+      view.unmount()
+      expect(mockState.loadSnapshot.mock.calls[0]?.[1].signal.aborted).toBe(true)
+      await act(async () => { lookup.resolve(snapshot); response.resolve(" stale") })
+      expect(snapshot.release).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([false, true])("cancels session binding changes with streaming=%s", async (streaming) => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Opening", settings: { token_streaming: streaming } })
+      const response = deferred<string>()
+      mockState.sendResponses.push(response.promise)
+      mockState.streamResults.push((async function* () { yield " partial"; yield await response.promise })())
+      const { snapshot } = continuationSnapshot()
+      mockState.loadSnapshot.mockResolvedValue(snapshot)
+      const current = mockState.queryData.get(mockState.queryKey(["writing-session", "session-auto"])) as Record<string, unknown>
+      mockState.queryData.set(mockState.queryKey(["writing-session", "session-other"]), {
+        ...current, id: "session-other", name: "Other", payload: { prompt: "Other draft", settings: {} }
+      })
+      mockState.queryData.set(mockState.queryKey(["writing-sessions"]), {
+        sessions: [{ id: "session-auto", name: "Auto Session" }, { id: "session-other", name: "Other" }],
+        total: 2, limit: 200, offset: 0
+      })
+      render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await waitFor(() => expect(mockState.responseCallbacks).toHaveLength(1))
+      act(() => useWritingPlaygroundStore.setState({ activeSessionId: "session-other", activeSessionName: "Other" }))
+      await waitFor(() => expect(getEditor()).toHaveValue("Other draft"))
+      await act(async () => { response.resolve(" stale") })
+      expect(getEditor()).toHaveValue("Other draft")
+      expect(snapshot.release).toHaveBeenCalledTimes(1)
+      expect(screen.getByTitle("Undo generation")).toBeDisabled()
+    })
+
+    it.each([false, true])("cancels scene binding changes with streaming=%s", async (streaming) => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Session prompt", settings: { token_streaming: streaming } })
+      seedManuscriptScene("Scene A")
+      seedManuscriptScene("Scene B", { id: "scene-2" })
+      const sceneB = mockState.queryData.get(mockState.queryKey(["manuscript-scene", "scene-1"]))
+      mockState.queryData.set(mockState.queryKey(["manuscript-scene", "scene-2"]), sceneB)
+      seedManuscriptScene("Scene A")
+      useWritingPlaygroundStore.setState({ activeProjectId: "project-1", activeNodeType: "scene", activeNodeId: "scene-1" })
+      const response = deferred<string>()
+      mockState.sendResponses.push(response.promise)
+      mockState.streamResults.push((async function* () { yield " partial"; yield await response.promise })())
+      const { snapshot } = continuationSnapshot()
+      mockState.loadSnapshot.mockResolvedValue(snapshot)
+      render(<WritingPlayground />)
+      await waitFor(() => expect(getEditor()).toHaveValue("Scene A"))
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await waitFor(() => expect(mockState.responseCallbacks).toHaveLength(1))
+      act(() => useWritingPlaygroundStore.setState({ activeNodeId: "scene-2" }))
+      await waitFor(() => expect(getEditor()).toHaveValue("Scene B"))
+      await act(async () => { response.resolve(" stale") })
+      expect(getEditor()).toHaveValue("Scene B")
+      expect(snapshot.release).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([false, true])("preserves a refreshed scene version before the first continuation response with streaming=%s", async (streaming) => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Session prompt", settings: { token_streaming: streaming } })
+      seedManuscriptScene("Original scene", { version: 1 })
+      useWritingPlaygroundStore.setState({ activeProjectId: "project-1", activeNodeType: "scene", activeNodeId: "scene-1" })
+      const response = deferred<string>()
+      mockState.sendResponses.push(response.promise)
+      mockState.streamResults.push((async function* () { yield await response.promise })())
+      const view = render(<WritingPlayground />)
+      await waitFor(() => expect(getEditor()).toHaveValue("Original scene"))
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await waitFor(() => expect(mockState.responseCallbacks).toHaveLength(1))
+
+      seedManuscriptScene("Newer saved scene", { version: 2 })
+      view.rerender(<WritingPlayground />)
+      await waitFor(() => expect(getEditor()).toHaveValue("Newer saved scene"))
+      await act(async () => { response.resolve(" stale continuation") })
+
+      expect(getEditor()).toHaveValue("Newer saved scene")
+      expect(screen.getByTitle("Undo generation")).toBeDisabled()
+    })
+
+    it("does not overwrite independent editor edits during invalidation", async () => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Opening" })
+      const response = deferred<string>()
+      mockState.streamResults.push((async function* () { yield " partial"; yield await response.promise })())
+      const { snapshot, scope } = continuationSnapshot()
+      mockState.loadSnapshot.mockResolvedValue(snapshot)
+      render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await waitFor(() => expect(getEditor()).toHaveValue("Opening partial"))
+      fireEvent.change(getEditor(), { target: { value: "Independent edit" } })
+      act(() => scope.abort())
+      await act(async () => { response.resolve(" stale") })
+      expect(getEditor()).toHaveValue("Independent edit")
+      expect(screen.getByTitle("Undo generation")).toBeDisabled()
+    })
+
+    it("restores the actual manuscript, not a synthetic reroll prompt, on scope invalidation", async () => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Opening", settings: { logprobs: true } })
+      const firstResponse = deferred<string>()
+      const rerollResponse = deferred<string>()
+      mockState.streamResults.push((async function* () { yield await firstResponse.promise })())
+      mockState.streamResults.push((async function* () { yield " rerolled"; yield await rerollResponse.promise })())
+      const first = continuationSnapshot()
+      const reroll = continuationSnapshot()
+      mockState.loadSnapshot.mockResolvedValueOnce(first.snapshot).mockResolvedValueOnce(reroll.snapshot)
+      render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await waitFor(() => expect(mockState.streamCalls).toHaveLength(1))
+      await act(async () => {
+        mockState.responseCallbacks[0]?.({ choices: [{ logprobs: { content: [{ token: "ending", logprob: -0.2, top_logprobs: [] }] } }] })
+        firstResponse.resolve(" ending")
+      })
+      expect(getEditor()).toHaveValue("Opening ending")
+      fireEvent.click(screen.getByRole("button", { name: "ending" }))
+      await waitFor(() => expect(getEditor()).toHaveValue("Opening rerolled"))
+      act(() => reroll.scope.abort())
+      await act(async () => { rerollResponse.resolve(" stale") })
+      expect(getEditor()).toHaveValue("Opening ending")
+      expect(reroll.snapshot.release).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([false, true])("releases the lease after generation failure with streaming=%s", async (streaming) => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Opening", settings: { token_streaming: streaming } })
+      const response = deferred<string>()
+      mockState.sendResponses.push(response.promise)
+      mockState.streamResults.push((async function* () { yield await response.promise })())
+      const { snapshot } = continuationSnapshot()
+      mockState.loadSnapshot.mockResolvedValue(snapshot)
+      const error = vi.spyOn(message, "error")
+      render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await waitFor(() => expect(mockState.responseCallbacks).toHaveLength(1))
+      await act(async () => { response.reject(new Error("provider failed")) })
+      expect(error).toHaveBeenCalledTimes(1)
+      expect(snapshot.release).toHaveBeenCalledTimes(1)
+      expect(getEditor()).toHaveValue("Opening")
+      expect(screen.getByTestId("writing-topbar-generate")).toHaveTextContent("Generate")
+      error.mockRestore()
+    })
+
+    it("cancels lookup without removing a placeholder and releases a late snapshot", async () => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Opening{fill} tail" })
+      const lookup = deferred<ServicePromptSnapshot>()
+      const { snapshot } = continuationSnapshot("writing.continuation.fill")
+      mockState.loadSnapshot.mockReturnValue(lookup.promise)
+      render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      expect(getEditor()).toHaveValue("Opening{fill} tail")
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      expect(mockState.loadSnapshot.mock.calls[0]?.[1].signal.aborted).toBe(true)
+      await act(async () => { lookup.resolve(snapshot) })
+      expect(mockState.streamCalls).toHaveLength(0)
+      expect(getEditor()).toHaveValue("Opening{fill} tail")
+      expect(snapshot.release).toHaveBeenCalledTimes(1)
+    })
+
+    it("rolls back provisional output on scope invalidation without creating undo history", async () => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      seedWritingSession({ prompt: "Opening" })
+      const tail = deferred<string>()
+      mockState.streamResults.push((async function* () { yield " partial"; yield await tail.promise })())
+      const { snapshot, scope } = continuationSnapshot()
+      mockState.loadSnapshot.mockResolvedValue(snapshot)
+      render(<WritingPlayground />)
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      await waitFor(() => expect(getEditor()).toHaveValue("Opening partial"))
+      act(() => scope.abort())
+      await waitFor(() => expect(getEditor()).toHaveValue("Opening"))
+      await act(async () => { tail.resolve(" stale") })
+      expect(getEditor()).toHaveValue("Opening")
+      expect(screen.getByTitle("Undo generation")).toBeDisabled()
+      expect(snapshot.release).toHaveBeenCalledTimes(1)
+    })
+  })
+
   it("test mock returns empty query state when a query is disabled", () => {
     const result = useQuery({
       queryKey: ["writing-capabilities"],

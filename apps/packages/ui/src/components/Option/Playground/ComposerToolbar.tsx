@@ -1,4 +1,5 @@
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
+import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton"
 import { Button as TldwButton } from "@/components/Common/Button"
 import { PromptSelect } from "@/components/Common/PromptSelect"
 import { ConnectionStatus } from "@/components/Layouts/ConnectionStatus"
@@ -31,6 +32,7 @@ import {
   SystemPromptTemplatesModal,
   SystemPromptTemplatesButton
 } from "./playground-features"
+import { openModelSelector } from "./playground-cockpit-actions"
 
 export type ComposerToolbarProps = {
   isProMode: boolean
@@ -55,7 +57,7 @@ export type ComposerToolbarProps = {
   // Prompt select
   selectedSystemPrompt: string | undefined
   systemPrompt: string | undefined
-  setSystemPrompt: (prompt: string) => void
+  setSystemPrompt: (prompt: string | undefined) => void
   setSelectedSystemPrompt: (id: string | undefined) => void
   setSelectedQuickPrompt: (prompt: string | undefined) => void
   // Ephemeral toggle
@@ -88,6 +90,7 @@ export type ComposerToolbarProps = {
   onTemplateSelect: (template: PromptTemplate) => void
   // Pro-only: cost estimation
   selectedModel: string | null
+  currentProvider?: string | null
   resolvedProviderKey: string
   messages: any[]
   // Pro-only: context counts
@@ -95,6 +98,9 @@ export type ComposerToolbarProps = {
   uploadedFilesCount: number
   // Persistence hints
   serverChatId: string | null
+  promptAssistContextKey?: string
+  promptAssistBackendKey?: string | null
+  promptAssistAuthorizationRevision?: string | null
   showServerPersistenceHint: boolean
   onDismissServerPersistenceHint: () => void
   onFocusConnectionCard: () => void
@@ -170,11 +176,15 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     onDictationToggle,
     onTemplateSelect,
     selectedModel,
+    currentProvider,
     resolvedProviderKey,
     messages,
     selectedDocumentsCount,
     uploadedFilesCount,
     serverChatId,
+    promptAssistContextKey,
+    promptAssistBackendKey,
+    promptAssistAuthorizationRevision,
     showServerPersistenceHint,
     onDismissServerPersistenceHint,
     onFocusConnectionCard,
@@ -183,7 +193,6 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   } = props
   const toolbarSendControl =
     sendControlPlacement === "toolbar" ? sendControl : null
-
   const ephemeralDisabled = privateChatLocked || isFireFoxPrivateMode
   const [advancedControlsOpen, setAdvancedControlsOpen] = useStorage(
     "playgroundComposerAdvancedControlsOpen",
@@ -515,12 +524,30 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         setSystemPrompt={setSystemPrompt}
         setSelectedSystemPrompt={setSelectedSystemPrompt}
         setSelectedQuickPrompt={setSelectedQuickPrompt}
+        selectedModel={selectedModel}
+        currentProvider={currentProvider}
+        promptAssistContextKey={
+          promptAssistContextKey ?? serverChatId ?? "playground-draft"
+        }
+        promptAssistBackendKey={promptAssistBackendKey}
+        promptAssistAuthorizationRevision={promptAssistAuthorizationRevision}
+        onSelectModel={() =>
+          openModelSelector({
+            returnFocusSelector: "[data-testid='chat-prompt-select']"
+          })
+        }
         iconClassName="h-4 w-4"
         className="text-text-muted hover:text-text"
       />
     ),
     [
       selectedSystemPrompt,
+      selectedModel,
+      currentProvider,
+      promptAssistContextKey,
+      promptAssistBackendKey,
+      promptAssistAuthorizationRevision,
+      serverChatId,
       setSelectedQuickPrompt,
       setSelectedSystemPrompt,
       setSystemPrompt,
@@ -893,6 +920,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           {modelUsageBadge}
           <ComposerToolbarOverflow
+            serverChatId={serverChatId}
             isProMode={isProMode}
             isConnectionReady={isConnectionReady}
             contextToolsOpen={contextToolsOpen}
@@ -928,22 +956,26 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       className="flex flex-col gap-2">
       <div
         data-playground-toolbar-row="actions"
-        className="flex flex-wrap items-center gap-2 lg:flex-nowrap lg:overflow-x-auto lg:[scrollbar-width:none] lg:[&::-webkit-scrollbar]:hidden">
+        className="flex flex-wrap items-center gap-2">
         <div
           role="group"
           aria-label={casualModeContextGroupLabel}
-          className="flex min-w-0 flex-wrap items-center gap-2 text-text-muted lg:flex-nowrap">
+          className="flex min-w-0 flex-wrap items-center gap-2 text-text-muted [&>*]:shrink-0">
           {modeLauncherButton}
           {mcpControl}
           {searchContextButton}
           {promptSelectControl}
           {characterSelectControl}
           {rolePlaySetupButton}
+          <BuddyManagementButton
+            target={serverChatId ? { scope_type: "conversation", scope_id: serverChatId } : null}
+            onConversationSettings={providedRolePlayActions?.onOpenRolePlaySetup}
+          />
         </div>
         <div
           role="group"
           aria-label={runInputGroupLabel}
-          className="flex min-w-0 flex-wrap items-center gap-2 lg:ml-auto lg:flex-nowrap">
+          className="flex min-w-0 flex-wrap items-center gap-2 lg:ml-auto [&>*]:shrink-0">
           {compareControl}
           {openUIRequestButton}
           {dictationButton}
@@ -1015,6 +1047,10 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             {promptSelectControl}
             {characterSelectControl}
             {rolePlaySetupButton}
+            <BuddyManagementButton
+              target={serverChatId ? { scope_type: "conversation", scope_id: serverChatId } : null}
+              onConversationSettings={providedRolePlayActions?.onOpenRolePlaySetup}
+            />
           </div>
         </section>
         <section

@@ -1,0 +1,22 @@
+	// Test-only overlay: change advertised metadata, never the actual workspace.
+	testWorkspaceRoot := c.cfg.WorkspaceRoot
+	challengePath := c.cfg.WorkspaceRoot + "/.tldw-workspace-challenge.json"
+	challengeData, challengeErr := os.ReadFile(challengePath)
+	if challengeErr != nil && !errors.Is(challengeErr, os.ErrNotExist) {
+		return fmt.Errorf("read test workspace challenge %s: %w", challengePath, challengeErr)
+	}
+	if challengeErr == nil {
+		var challenge struct {
+			Nonce string `json:"nonce"`
+			InjectMismatch *bool `json:"inject_mismatch"`
+		}
+		if err := json.Unmarshal(challengeData, &challenge); err != nil {
+			return fmt.Errorf("decode test workspace challenge %s: %w", challengePath, err)
+		}
+		if len(challenge.Nonce) != 32 || challenge.InjectMismatch == nil {
+			return errors.New("invalid test workspace challenge")
+		}
+		if *challenge.InjectMismatch {
+			testWorkspaceRoot = "/workspace-mismatch/" + challenge.Nonce
+		}
+	}

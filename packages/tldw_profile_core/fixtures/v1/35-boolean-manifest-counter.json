@@ -1,0 +1,1 @@
+{"case":"boolean_manifest_counter","model":"ProfileManifest","valid":false,"structurally_valid":false,"data":{"schema_version":1,"profile_id":"profile-1","revision":2,"purge_generation":true,"created_at":"2026-08-28T00:00:00Z","updated_at":"2026-08-28T00:01:00Z","current_version_id":"manifest-version-2"}}

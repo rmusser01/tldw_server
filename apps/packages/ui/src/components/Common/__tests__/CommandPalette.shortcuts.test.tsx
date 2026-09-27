@@ -1,7 +1,7 @@
 import React from "react"
 import { describe, it, expect, vi } from "vitest"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { MemoryRouter, useLocation } from "react-router-dom"
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom"
 import { CommandPalette } from "../CommandPalette"
 import {
   formatShortcut,
@@ -10,6 +10,10 @@ import {
 } from "@/hooks/useKeyboardShortcuts"
 import type { ShortcutConfig } from "@/hooks/keyboard/useShortcutConfig"
 import { CHAT_PATH } from "@/routes/route-paths"
+import {
+  SETTINGS_NAVIGATION_REQUEST_EVENT,
+  type SettingsNavigationRequestDetail
+} from "@/utils/settings-return"
 
 const mockShortcutConfig: ShortcutConfig = {
   focusTextarea: { key: "Escape", shiftKey: true },
@@ -103,6 +107,92 @@ describe("CommandPalette shortcut hints", () => {
     fireEvent.click(goToChat)
 
     expect(screen.getByTestId("current-route")).toHaveTextContent(CHAT_PATH)
+  })
+
+  it("guards injected route commands and closes after declined or allowed navigation", async () => {
+    const destination = "/prompts?edit=favorite"
+    const commandAction = vi.fn()
+    const transitions = vi.fn()
+    const PromptPalette = () => {
+      const navigate = useNavigate()
+
+      return (
+        <CommandPalette
+          additionalCommands={[{
+            id: "favorite-prompt",
+            label: "Favorite prompt",
+            icon: <span aria-hidden="true" />,
+            targetPath: destination,
+            action: () => {
+              commandAction()
+              navigate(destination)
+            },
+            category: "prompt"
+          }]}
+        />
+      )
+    }
+    const RouteTransitionProbe = () => {
+      const location = useLocation()
+      const route = `${location.pathname}${location.search}`
+      React.useEffect(() => {
+        transitions(route)
+      }, [route])
+
+      return <div data-testid="guarded-route">{route}</div>
+    }
+
+    render(
+      <MemoryRouter initialEntries={["/settings/prompt"]}>
+        <PromptPalette />
+        <RouteTransitionProbe />
+      </MemoryRouter>
+    )
+    expect(transitions).toHaveBeenLastCalledWith("/settings/prompt")
+    transitions.mockClear()
+
+    const declineNavigation = vi.fn((event: Event) => {
+      event.preventDefault()
+    })
+    window.addEventListener(
+      SETTINGS_NAVIGATION_REQUEST_EVENT,
+      declineNavigation,
+      { once: true }
+    )
+
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Favorite prompt" })
+    )
+
+    expect(declineNavigation).toHaveBeenCalledOnce()
+    expect((declineNavigation.mock.calls[0][0] as CustomEvent<
+      SettingsNavigationRequestDetail
+    >).detail).toEqual({ destination })
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    )
+    expect(screen.getByTestId("guarded-route")).toHaveTextContent(
+      "/settings/prompt"
+    )
+    expect(commandAction).not.toHaveBeenCalled()
+    expect(transitions).not.toHaveBeenCalled()
+
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+    const searchInput = await screen.findByRole("textbox", {
+      name: "Search commands"
+    })
+    fireEvent.change(searchInput, { target: { value: "Favorite prompt" } })
+    await screen.findByRole("option", { name: "Favorite prompt" })
+    fireEvent.keyDown(searchInput, { key: "Enter" })
+
+    await waitFor(() =>
+      expect(screen.getByTestId("guarded-route")).toHaveTextContent(destination)
+    )
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    expect(commandAction).toHaveBeenCalledOnce()
+    expect(transitions).toHaveBeenCalledOnce()
+    expect(transitions).toHaveBeenCalledWith(destination)
   })
 
   it("shows configured shortcut hints only for actions with real keyboard bindings", async () => {

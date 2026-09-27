@@ -7,7 +7,14 @@ export type PromptListSortOrder = "ascend" | "descend" | null
 
 export type PromptListQueryState = {
   searchText: string
-  typeFilter: "all" | "system" | "quick" | "mixed"
+  typeFilter:
+    | "all"
+    | "system"
+    | "quick"
+    | "mixed"
+    | "recipe"
+    | "recipe_system"
+    | "recipe_user"
   syncFilter: "all" | PromptSyncStatus
   usageFilter: "all" | "used" | "unused"
   tagFilter: string[]
@@ -53,6 +60,8 @@ export type PromptRowVM = {
   createdAt: number
   usageCount: number
   lastUsedAt?: number | null
+  kind?: "prompt" | "recipe" | "quarantined_recipe"
+  recipeTarget?: "system" | "user"
 }
 
 export const PROMPTS_WORKSPACE_MOBILE_BREAKPOINT_PX = 768

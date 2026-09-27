@@ -12,11 +12,14 @@ satisfies every invariant (an independent oracle, so a dropped guard fails).
 from __future__ import annotations
 
 import pytest
-from hypothesis import given, settings as hyp_settings, strategies as st
+from hypothesis import given
+from hypothesis import settings as hyp_settings
+from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AdmissionRejectionReason,
     AdmissionResult,
+    BatchRenewLeasesResult,
     LifecycleResult,
     NoTransitionReason,
     OperationOutcome,
@@ -40,21 +43,29 @@ def _admission_is_consistent(
     durable_events: tuple,
 ) -> bool:
     """Independent oracle mirroring the AdmissionResult contract."""
+    is_idempotent_existing = (
+        outcome is OperationOutcome.NO_TRANSITION
+        and no_transition_reason is NoTransitionReason.IDEMPOTENT_EXISTING
+    )
     if outcome is OperationOutcome.APPLIED:
         if not was_inserted or row is None:
             return False
     else:
-        if was_inserted or durable_events:
+        if was_inserted:
             return False
+    if is_idempotent_existing and row is None:
+        return False
+    if durable_events and not (
+        outcome is OperationOutcome.APPLIED or is_idempotent_existing
+    ):
+        return False
     if outcome is OperationOutcome.NO_TRANSITION and no_transition_reason is None:
         return False
     if outcome is not OperationOutcome.NO_TRANSITION and no_transition_reason is not None:
         return False
     if outcome is OperationOutcome.ADMISSION_REJECTED and admission_rejection_reason is None:
         return False
-    if outcome is not OperationOutcome.ADMISSION_REJECTED and admission_rejection_reason is not None:
-        return False
-    return True
+    return not (outcome is not OperationOutcome.ADMISSION_REJECTED and admission_rejection_reason is not None)
 
 
 def _lifecycle_is_consistent(
@@ -73,9 +84,7 @@ def _lifecycle_is_consistent(
             return False
     if outcome is OperationOutcome.NO_TRANSITION and no_transition_reason is None:
         return False
-    if outcome is not OperationOutcome.NO_TRANSITION and no_transition_reason is not None:
-        return False
-    return True
+    return not (outcome is not OperationOutcome.NO_TRANSITION and no_transition_reason is not None)
 
 
 class TestAdmissionResultContract:
@@ -127,6 +136,10 @@ class TestAdmissionResultContract:
             outcome=OperationOutcome.NO_TRANSITION,
             no_transition_reason=NoTransitionReason.MISSING,
         )
+        AdmissionResult.existing(
+            row={"id": 1},
+            durable_events=({"type": "created", "idempotent": True},),
+        )
         AdmissionResult(
             outcome=OperationOutcome.ADMISSION_REJECTED,
             admission_rejection_reason=AdmissionRejectionReason.QUEUE_PAUSED,
@@ -145,6 +158,10 @@ class TestAdmissionResultContract:
                 "outcome": OperationOutcome.BACKEND_ERROR,
                 "no_transition_reason": NoTransitionReason.MISSING,
             },  # only no_transition carries a reason
+            {
+                "outcome": OperationOutcome.NO_TRANSITION,
+                "no_transition_reason": NoTransitionReason.IDEMPOTENT_EXISTING,
+            },  # idempotent existing requires the existing row
         ],
     )
     def test_impossible_states_raise(self, kwargs: dict) -> None:
@@ -211,3 +228,22 @@ class TestLifecycleResultContract:
     def test_impossible_states_raise(self, kwargs: dict) -> None:
         with pytest.raises(ValueError):
             LifecycleResult(**kwargs)
+
+
+@_COMMON
+@given(
+    requested=st.integers(min_value=-5, max_value=100),
+    applied=st.integers(min_value=-5, max_value=105),
+)
+def test_batch_renew_result_constructs_only_for_valid_count_pairs(
+    requested: int,
+    applied: int,
+) -> None:
+    valid = requested >= 0 and 0 <= applied <= requested
+    if valid:
+        result = BatchRenewLeasesResult(requested_count=requested, applied_count=applied)
+        assert result.requested_count == requested
+        assert result.applied_count == applied
+    else:
+        with pytest.raises(ValueError):
+            BatchRenewLeasesResult(requested_count=requested, applied_count=applied)

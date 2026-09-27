@@ -13,12 +13,15 @@ import {
 } from '@/components/Review/mediaPermalink'
 import type { MediaResultItem } from '@/components/Media/types'
 import {
+  useMediaRequestLifetime,
   deriveMediaMeta,
   extractKeywordsFromMedia,
   getErrorStatusCode,
   isMediaEndpointMissingError
 } from './useMediaSearch'
 import { MEDIA_STALE_CHECK_INTERVAL_MS } from '@/components/Review/ViewMediaPage'
+import { shouldReportMediaDetailFetchError } from '@/components/Review/mediaDetailError'
+import { extractMediaDetailContent } from '@/utils/media-detail-content'
 
 export interface UseMediaNavigationStateDeps {
   t: (key: string, opts?: Record<string, any>) => string
@@ -37,6 +40,22 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
   const location = useLocation()
 
   const [selected, setSelected] = useState<MediaResultItem | null>(null)
+  const lifetime = useMediaRequestLifetime(() => {
+    detailGeneration.current += 1
+    pendingDetailRequestRef.current = null
+    setSelected(null)
+    setSelectedContent('')
+    setSelectedDetail(null)
+    setDetailLoading(false)
+    setDetailFetchError(null)
+    setStaleSelectionNotice(null)
+    setLastFetchedId(null)
+    setPendingInitialMediaId(null)
+    setPendingInitialMediaIdSource(null)
+  })
+  const selectionRef = useRef(selected)
+  selectionRef.current = selected
+  const detailGeneration = useRef(0)
   const [pendingInitialMediaId, setPendingInitialMediaId] = useState<string | null>(null)
   const [pendingInitialMediaIdSource, setPendingInitialMediaIdSource] = useState<
     'url' | 'setting' | null
@@ -50,6 +69,12 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
   } | null>(null)
   const [staleSelectionNotice, setStaleSelectionNotice] = useState<string | null>(null)
   const [lastFetchedId, setLastFetchedId] = useState<string | number | null>(null)
+  const pendingDetailRequestRef = useRef<{
+    mediaId: string
+    promise: Promise<any>
+  } | null>(null)
+  const restoredInitialSettingRef = useRef(false)
+  const hydratedPermalinkRef = useRef<string | null>(null)
 
   const permalinkMediaId = useMemo(
     () => getMediaPermalinkIdFromSearch(location.search),
@@ -72,10 +97,12 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
     }
   }, [displayResults, hasNext, selectedIndex])
 
-  const fetchSelectedDetails = useCallback(async (item: MediaResultItem) => {
+  const fetchSelectedDetails = useCallback(async (item: MediaResultItem, signal: AbortSignal) => {
+    signal.throwIfAborted()
     if (item.kind === 'media') {
       return bgRequest<any>({
         path: `/api/v1/media/${item.id}` as any,
+        abortSignal: signal,
         method: 'GET' as any
       })
     }
@@ -83,65 +110,6 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
       return item.raw
     }
     return null
-  }, [])
-
-  const contentFromDetail = useCallback((detail: any): string => {
-    if (!detail) return ''
-
-    const firstString = (...vals: any[]): string => {
-      for (const v of vals) {
-        if (typeof v === 'string' && v.trim().length > 0) return v
-      }
-      return ''
-    }
-
-    if (typeof detail === 'string') return detail
-    if (typeof detail !== 'object') return ''
-
-    if (detail.content && typeof detail.content === 'object') {
-      const contentText = firstString(
-        detail.content.text,
-        detail.content.content,
-        detail.content.raw_text
-      )
-      if (contentText) return contentText
-    }
-
-    const fromRoot = firstString(
-      detail.text,
-      detail.transcript,
-      detail.raw_text,
-      detail.rawText,
-      detail.raw_content,
-      detail.rawContent
-    )
-    if (fromRoot) return fromRoot
-
-    const lv = detail.latest_version || detail.latestVersion
-    if (lv && typeof lv === 'object') {
-      const fromLatest = firstString(
-        lv.content,
-        lv.text,
-        lv.transcript,
-        lv.raw_text,
-        lv.rawText
-      )
-      if (fromLatest) return fromLatest
-    }
-
-    const data = detail.data
-    if (data && typeof data === 'object') {
-      const fromData = firstString(
-        data.content,
-        data.text,
-        data.transcript,
-        data.raw_text,
-        data.rawText
-      )
-      if (fromData) return fromData
-    }
-
-    return ''
   }, [])
 
   const resolveDetailFetchErrorMessage = useCallback((error: unknown): string => {
@@ -157,14 +125,20 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
   }, [t])
 
   const loadSelectedDetails = useCallback(async (item: MediaResultItem) => {
+    const signal = lifetime.current.signal
+    const generation = ++detailGeneration.current
+    const isCurrent = () => !signal.aborted && generation === detailGeneration.current &&
+      selectionRef.current?.kind === item.kind && String(selectionRef.current?.id) === String(item.id)
+    if (!isCurrent()) return false
     setDetailLoading(true)
     setDetailFetchError(null)
     setSelectedContent('')
     setSelectedDetail(null)
 
     try {
-      const detail = await fetchSelectedDetails(item)
-      const content = contentFromDetail(detail)
+      const detail = await fetchSelectedDetails(item, signal)
+      if (!isCurrent()) return false
+      const content = extractMediaDetailContent(detail)
       setSelectedContent(String(content || ''))
       setSelectedDetail(detail)
       setLastFetchedId(item.id)
@@ -179,7 +153,10 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
 
       return true
     } catch (error) {
-      console.error('Error fetching media details:', error)
+      if (!isCurrent()) return false
+      if (shouldReportMediaDetailFetchError(error)) {
+        console.error('Error fetching media details:', error)
+      }
       setSelectedContent('')
       setSelectedDetail(null)
       setDetailFetchError({
@@ -188,11 +165,11 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
       })
       return false
     } finally {
-      setDetailLoading(false)
+      if (isCurrent()) setDetailLoading(false)
     }
   }, [
-    contentFromDetail,
     fetchSelectedDetails,
+    lifetime,
     resolveDetailFetchErrorMessage
   ])
   const loadSelectedDetailsRef = useRef(loadSelectedDetails)
@@ -214,22 +191,35 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
 
   // Hydrate pending initial media from URL
   useEffect(() => {
-    if (!permalinkMediaId) return
-    if (selected?.kind === 'media' && selected?.id != null) return
+    if (!permalinkMediaId) {
+      hydratedPermalinkRef.current = null
+      return
+    }
+    if (hydratedPermalinkRef.current === permalinkMediaId) return
+    hydratedPermalinkRef.current = permalinkMediaId
+    if (selected?.kind === 'media' && String(selected.id) === permalinkMediaId) return
     setPendingInitialMediaId(permalinkMediaId)
     setPendingInitialMediaIdSource('url')
+    // Hydrate navigation changes once; clearing a deleted selection must not
+    // reselect the same cached URL before permalink synchronization runs.
   }, [permalinkMediaId, selected?.id, selected?.kind])
 
   // Hydrate pending initial media from settings
   useEffect(() => {
-    if (permalinkMediaId) return
+    if (restoredInitialSettingRef.current) return
+    if (permalinkMediaId) {
+      restoredInitialSettingRef.current = true
+      return
+    }
     if (selected?.kind === 'media' && selected?.id != null) return
     let cancelled = false
     ;(async () => {
       const lastMediaId = normalizeMediaPermalinkId(
         await getSetting(LAST_MEDIA_ID_SETTING)
       )
-      if (cancelled || !lastMediaId) return
+      if (cancelled) return
+      restoredInitialSettingRef.current = true
+      if (!lastMediaId) return
       setPendingInitialMediaId((prev) => prev ?? lastMediaId)
       setPendingInitialMediaIdSource((prev) => prev ?? 'setting')
     })()
@@ -242,12 +232,17 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
   useEffect(() => {
     if (!pendingInitialMediaId) return
 
+    const signal = lifetime.current.signal
+    if (signal.aborted) return
     const pendingId = pendingInitialMediaId
     const pendingSource = pendingInitialMediaIdSource
     const matchingResult = displayResults.find(
       (item) => item.kind === 'media' && String(item.id) === pendingId
     )
-    if (matchingResult) {
+    const pendingRequestMatches =
+      pendingDetailRequestRef.current?.mediaId === pendingId
+    if (matchingResult && !pendingRequestMatches) {
+      pendingDetailRequestRef.current = null
       setSelected(matchingResult)
       setPendingInitialMediaId(null)
       setPendingInitialMediaIdSource(null)
@@ -258,37 +253,60 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
     }
 
     let cancelled = false
-    ;(async () => {
-      try {
-        const detail = await bgRequest<any>({
+    let pendingRequest = pendingDetailRequestRef.current
+    if (!pendingRequest || pendingRequest.mediaId !== pendingId) {
+      pendingRequest = {
+        mediaId: pendingId,
+        promise: bgRequest<any>({
           path: `/api/v1/media/${pendingId}` as any,
+          abortSignal: signal,
           method: 'GET' as any
         })
-        if (cancelled) return
+      }
+      pendingDetailRequestRef.current = pendingRequest
+    }
+    ;(async () => {
+      try {
+        const detail = await pendingRequest.promise
+        if (cancelled || signal.aborted) return
 
         const resolvedId = detail?.id ?? detail?.media_id ?? pendingId
         const hydratedSelection: MediaResultItem = {
           kind: 'media',
           id: resolvedId,
-          title: detail?.title || detail?.filename || `Media ${resolvedId}`,
+          title:
+            detail?.title ||
+            detail?.source?.title ||
+            matchingResult?.title ||
+            detail?.filename ||
+            `Media ${resolvedId}`,
           snippet: detail?.snippet || detail?.summary || '',
           keywords: extractKeywordsFromMedia(detail),
           meta: deriveMediaMeta(detail),
           raw: detail
         }
 
-        setSelected(hydratedSelection)
-        setSelectedContent(String(contentFromDetail(detail) || ''))
-        setSelectedDetail(detail)
+        // Publish the fetched marker first. In extension pages, async state
+        // updates are not guaranteed to batch; selecting first can trigger the
+        // normal selection loader and turn this into a duplicate conditional
+        // GET whose bodyless 304 replaces the usable detail response.
         setLastFetchedId(resolvedId)
+        setSelected(hydratedSelection)
+        setSelectedContent(String(extractMediaDetailContent(detail) || ''))
+        setSelectedDetail(detail)
       } catch (error) {
+        if (cancelled || signal.aborted) return
         console.debug('Failed to hydrate permalink media selection', error)
       } finally {
-        if (cancelled) return
-        setPendingInitialMediaId(null)
-        setPendingInitialMediaIdSource(null)
-        if (pendingSource === 'setting') {
-          void clearSetting(LAST_MEDIA_ID_SETTING)
+        if (!cancelled && !signal.aborted) {
+          if (pendingDetailRequestRef.current === pendingRequest) {
+            pendingDetailRequestRef.current = null
+          }
+          setPendingInitialMediaId(null)
+          setPendingInitialMediaIdSource(null)
+          if (pendingSource === 'setting') {
+            void clearSetting(LAST_MEDIA_ID_SETTING)
+          }
         }
       }
     })()
@@ -297,10 +315,10 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
       cancelled = true
     }
   }, [
-    contentFromDetail,
     displayResults,
     pendingInitialMediaId,
-    pendingInitialMediaIdSource
+    pendingInitialMediaIdSource,
+    lifetime
   ])
 
   // Load selected item content
@@ -331,13 +349,17 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
     let inFlight = false
     const selectedId = String(selected.id)
     const selectedValue = selected.id
+    const signal = lifetime.current.signal
+    const isCurrent = () => !signal.aborted &&
+      selectionRef.current?.kind === 'media' && String(selectionRef.current.id) === selectedId
 
     const reconcileStaleSelection = async () => {
-      if (inFlight || cancelled) return
+      if (inFlight || cancelled || !isCurrent()) return
       inFlight = true
       try {
         await bgRequest<any>({
           path: `/api/v1/media/${selectedId}` as any,
+          abortSignal: signal,
           method: 'GET' as any
         })
       } catch (error) {
@@ -345,7 +367,7 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
         if (statusCode !== 404 && statusCode !== 410) {
           return
         }
-        if (cancelled) return
+        if (!isCurrent()) return
 
         const staleMessage = t('review:mediaPage.staleSelectionRecovered', {
           defaultValue:
@@ -358,6 +380,7 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
           (item) => String(item.id) === selectedId
         )
         const refreshed = await refetch()
+        if (!isCurrent()) return
         const refreshedResults = Array.isArray(refreshed?.data)
           ? (refreshed.data as MediaResultItem[])
           : []
@@ -406,6 +429,7 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
       window.clearInterval(interval)
     }
   }, [
+    lifetime,
     detailLoading,
     displayResults,
     message,
@@ -487,7 +511,6 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
     loadSelectedDetails,
     handleRetryDetailFetch,
     handleRefreshMedia,
-    contentFromDetail,
     selectedMediaPermalinkId,
     pendingInitialMediaIdSource,
     pendingInitialMediaId,

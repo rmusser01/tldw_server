@@ -1583,7 +1583,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     setHistoryId,
     serverChatId,
     setServerChatId
-  } = useMessageOption({ scope: chatScope })
+  } = useMessageOption({ scope: chatScope, hydrateServerChat: true })
 
   // RAG state from store
   const setRagMediaIds = useStoreMessageOption((s) => s.setRagMediaIds)
@@ -1981,9 +1981,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   )
 
   const handleCreateChatBranch = React.useCallback(
-    (messageIndex: number) => {
-      if (!Number.isInteger(messageIndex) || messageIndex < 0) return
-      void createChatBranch(messageIndex)
+    (message: Message) => {
+      if (!message.id) return
+      if (message.messageType?.startsWith("compare:")) {
+        const modelId = message.modelId || message.modelName
+        if (!modelId || !message.clusterId) return
+        void createChatBranch(message.id, {model_id: modelId, cluster_id: message.clusterId})
+        return
+      }
+      void createChatBranch(message.id)
     },
     [createChatBranch]
   )
@@ -3395,7 +3401,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                             : undefined
                         }
                         onNewBranch={
-                          msg.isBot ? () => handleCreateChatBranch(idx) : undefined
+                          msg.isBot ? () => handleCreateChatBranch(msg) : undefined
                         }
                         modelName={msg.modelName}
                         modelImage={msg.modelImage}

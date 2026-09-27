@@ -25,6 +25,10 @@ from tldw_Server_API.app.core.UserProfiles.overrides_repo import (
     UserProfileOverridesRepo,
 )
 from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import load_user_profile_catalog
+from tldw_Server_API.app.core.UserProfiles.version_gateway import (
+    ProfileVersionGateway,
+    ProfileVersionGatewayProtocol,
+)
 
 KNOWN_SECTIONS: set[str] = {
     "identity",
@@ -77,9 +81,17 @@ _PROFILE_NONCRITICAL_EXCEPTIONS = (
 class UserProfileService:
     """Service that assembles user profile data from multiple sources."""
 
-    def __init__(self, db_pool: DatabasePool):
+    def __init__(
+        self,
+        db_pool: DatabasePool,
+        *,
+        profile_version_gateway: ProfileVersionGatewayProtocol | None = None,
+    ):
         self._db_pool = db_pool
         self._orgs_repo = AuthnzOrgsTeamsRepo(db_pool)
+        self._profile_version_gateway = (
+            profile_version_gateway or ProfileVersionGateway(db_pool)
+        )
 
     @staticmethod
     def parse_sections(raw: Iterable[str] | None | str | None) -> set[str] | None:
@@ -299,47 +311,6 @@ class UserProfileService:
             return ts.replace(tzinfo=timezone.utc)
         return ts.astimezone(timezone.utc)
 
-    @staticmethod
-    def _row_value(row: Any, key: str, index: int = 0) -> Any | None:
-        if row is None:
-            return None
-        if isinstance(row, dict):
-            return row.get(key)
-        try:
-            return row[key]
-        except _PROFILE_NONCRITICAL_EXCEPTIONS:
-            pass
-        try:
-            return row[index]
-        except _PROFILE_NONCRITICAL_EXCEPTIONS:
-            return None
-
-    async def _fetch_user_updated_at_for_version(
-        self,
-        *,
-        user_id: int,
-        db_conn: Any | None,
-        lock_user: bool,
-    ) -> Any | None:
-        is_postgres_backend = bool(getattr(self._db_pool, "pool", None))
-        if is_postgres_backend:
-            query = "SELECT updated_at FROM users WHERE id = $1"
-            if lock_user:
-                query += " FOR UPDATE"
-            if db_conn is not None and hasattr(db_conn, "fetchrow"):
-                row = await db_conn.fetchrow(query, user_id)
-                return self._row_value(row, "updated_at")
-            row = await self._db_pool.fetchone(query, user_id)
-            return self._row_value(row, "updated_at")
-
-        query = "SELECT updated_at FROM users WHERE id = ?"
-        if db_conn is not None:
-            cursor = await db_conn.execute(query, (user_id,))
-            row = await cursor.fetchone()
-            return self._row_value(row, "updated_at")
-        row = await self._db_pool.fetchone(query, (user_id,))
-        return self._row_value(row, "updated_at")
-
     @classmethod
     def versions_match(cls, current: Any, expected: Any) -> bool:
         current_ts = cls._normalize_timestamp(current)
@@ -446,12 +417,13 @@ class UserProfileService:
 
     async def _get_membership_ids(self, user_id: int) -> tuple[list[int], list[int]]:
         orgs = await self._orgs_repo.list_org_memberships_for_user(user_id)
-        teams = await self._orgs_repo.list_memberships_for_user(user_id)
+        teams = await self._orgs_repo.list_active_team_memberships_for_user(user_id)
         org_ids = sorted(
             {
                 int(row["org_id"])
                 for row in orgs
                 if row.get("org_id") is not None
+                and row.get("status") in (None, "active")
             }
         )
         team_ids = sorted(
@@ -770,51 +742,14 @@ class UserProfileService:
         db_conn: Any | None = None,
         lock_user: bool = False,
     ) -> datetime:
-        user_ts = self._normalize_timestamp(user_updated_at)
-        if user_ts is None:
-            user_updated_at = await self._fetch_user_updated_at_for_version(
-                user_id=user_id,
-                db_conn=db_conn,
+        del user_updated_at
+        if db_conn is not None:
+            return await self._profile_version_gateway.read_in_transaction(
+                db_conn,
+                user_id,
                 lock_user=lock_user,
             )
-            user_ts = self._normalize_timestamp(user_updated_at)
-
-        override_ts: datetime | None = None
-        try:
-            repo = UserProfileOverridesRepo(self._db_pool)
-            await repo.ensure_tables()
-            override_raw = await repo.get_latest_update_for_user(user_id, db_conn=db_conn)
-            override_ts = self._normalize_timestamp(override_raw)
-        except _PROFILE_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("Overrides timestamp lookup failed for user {}: {}", user_id, exc)
-
-        org_override_ts: datetime | None = None
-        team_override_ts: datetime | None = None
-        try:
-            org_ids, team_ids = await self._get_membership_ids(user_id)
-            if org_ids:
-                org_repo = OrgProfileOverridesRepo(self._db_pool)
-                await org_repo.ensure_tables()
-                org_override_ts = self._normalize_timestamp(
-                    await org_repo.get_latest_update_for_orgs(org_ids)
-                )
-            if team_ids:
-                team_repo = TeamProfileOverridesRepo(self._db_pool)
-                await team_repo.ensure_tables()
-                team_override_ts = self._normalize_timestamp(
-                    await team_repo.get_latest_update_for_teams(team_ids)
-                )
-        except _PROFILE_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("Org/team override timestamp lookup failed for user {}: {}", user_id, exc)
-
-        candidates = [
-            ts
-            for ts in (user_ts, override_ts, org_override_ts, team_override_ts)
-            if ts is not None
-        ]
-        if candidates:
-            return max(candidates)
-        return datetime.now(timezone.utc)
+        return await self._profile_version_gateway.read(user_id)
 
     async def _get_byok_repo(self) -> AuthnzUserProviderSecretsRepo:
         repo = AuthnzUserProviderSecretsRepo(self._db_pool)
@@ -881,14 +816,10 @@ class UserProfileService:
         response: dict[str, Any] = {
             "catalog_version": catalog.version,
         }
-        try:
-            response["profile_version"] = await self.get_profile_version(
-                user_id=int(user["id"]),
-                user_updated_at=user.get("updated_at"),
-            )
-        except _PROFILE_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug("Failed to resolve profile version: {}", exc)
-            response["profile_version"] = datetime.now(timezone.utc)
+        response["profile_version"] = await self.get_profile_version(
+            user_id=int(user["id"]),
+            user_updated_at=user.get("updated_at"),
+        )
 
         unknown_sections = requested - KNOWN_SECTIONS
         for section in sorted(unknown_sections):

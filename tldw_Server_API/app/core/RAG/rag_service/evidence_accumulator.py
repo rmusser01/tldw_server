@@ -131,6 +131,7 @@ class EvidenceAccumulator:
         enable_gap_assessment: bool = True,
         llm_provider: Optional[str] = None,
         llm_model: Optional[str] = None,
+        credential_runtime: Any = None,
     ):
         """
         Initialize the evidence accumulator.
@@ -143,6 +144,7 @@ class EvidenceAccumulator:
             enable_gap_assessment: Use LLM for gap assessment
             llm_provider: LLM provider for gap assessment
             llm_model: LLM model for gap assessment
+            credential_runtime: Optional request-scoped provider credential runtime
         """
         self.max_rounds = max(1, min(max_rounds, 5))  # Cap at 5 rounds
         self.min_docs_per_round = min_docs_per_round
@@ -151,6 +153,19 @@ class EvidenceAccumulator:
         self.enable_gap_assessment = enable_gap_assessment
         self.llm_provider = llm_provider
         self.llm_model = llm_model
+        self.credential_runtime = credential_runtime
+        self._verification_available = True
+
+    def _trust_metadata(self) -> dict[str, Any]:
+        """Return bounded provider availability metadata for runtime-bound calls."""
+        if self.credential_runtime is None:
+            return {}
+        metadata: dict[str, Any] = {
+            "verification_available": self._verification_available,
+        }
+        if not self._verification_available:
+            metadata["failure_code"] = "provider_unavailable"
+        return metadata
 
     async def accumulate(
         self,
@@ -173,6 +188,7 @@ class EvidenceAccumulator:
             AccumulationResult with all accumulated evidence
         """
         start_time = time.time()
+        self._verification_available = True
         deadline = start_time + time_budget_sec if time_budget_sec else None
 
         # Track all documents and their hashes
@@ -209,7 +225,10 @@ class EvidenceAccumulator:
                 is_sufficient=is_sufficient,
                 sufficiency_reason=reason,
                 total_duration_sec=time.time() - start_time,
-                metadata={"initial_docs": len(initial_results)},
+                metadata={
+                    "initial_docs": len(initial_results),
+                    **self._trust_metadata(),
+                },
             )
 
         # Iterative accumulation
@@ -290,6 +309,7 @@ class EvidenceAccumulator:
                 "initial_docs": len(initial_results),
                 "final_docs": len(all_documents),
                 "docs_added": len(all_documents) - len(initial_results),
+                **self._trust_metadata(),
             },
         )
 
@@ -319,6 +339,8 @@ class EvidenceAccumulator:
             return _parse_gap_assessment(response)
         except Exception:
             logger.warning("LLM gap assessment failed, using heuristic")
+            if self.credential_runtime is not None:
+                self._verification_available = False
             return self._heuristic_assessment(query, documents)
 
     def _heuristic_assessment(
@@ -393,9 +415,15 @@ class EvidenceAccumulator:
         try:
             from .generation import AnswerGenerator
 
+            runtime_kwargs = (
+                {"credential_runtime": self.credential_runtime}
+                if self.credential_runtime is not None
+                else {}
+            )
             generator = AnswerGenerator(
                 provider=self.llm_provider,
                 model=self.llm_model,
+                **runtime_kwargs,
             )
 
             prompt = GAP_ASSESSMENT_PROMPT.format(query=query, evidence=evidence)
@@ -476,6 +504,7 @@ async def accumulate_evidence(
     retrieval_fn,
     max_rounds: int = 3,
     time_budget_sec: Optional[float] = None,
+    credential_runtime: Any = None,
 ) -> AccumulationResult:
     """
     Convenience function for evidence accumulation.
@@ -486,11 +515,15 @@ async def accumulate_evidence(
         retrieval_fn: Async function for additional retrieval
         max_rounds: Maximum number of rounds
         time_budget_sec: Optional time budget
+        credential_runtime: Optional request-scoped provider credential runtime
 
     Returns:
         AccumulationResult with all evidence
     """
-    accumulator = EvidenceAccumulator(max_rounds=max_rounds)
+    accumulator = EvidenceAccumulator(
+        max_rounds=max_rounds,
+        credential_runtime=credential_runtime,
+    )
     return await accumulator.accumulate(
         query=query,
         initial_results=initial_results,

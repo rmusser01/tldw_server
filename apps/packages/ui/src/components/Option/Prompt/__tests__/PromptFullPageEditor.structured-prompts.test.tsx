@@ -1,6 +1,7 @@
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { CLEAR_TASK_RECIPE } from "@/components/Common/PromptAssist/recipes/built-in-recipes"
 import { PromptFullPageEditor } from "../PromptFullPageEditor"
 
 const mockDraftState = {
@@ -13,29 +14,27 @@ const mockDraftState = {
   lastSaved: null
 }
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (
-      key: string,
-      fallbackOrOptions?: string | { defaultValue?: string; [k: string]: unknown }
-    ) => {
-      if (typeof fallbackOrOptions === "string") return fallbackOrOptions
-      if (fallbackOrOptions && typeof fallbackOrOptions === "object") {
-        if (fallbackOrOptions.defaultValue) {
-          return Object.entries(fallbackOrOptions).reduce(
-            (acc, [name, value]) =>
-              name === "defaultValue"
-                ? acc
-                : acc.replace(new RegExp(`{{${name}}}`, "g"), String(value)),
-            fallbackOrOptions.defaultValue
-          )
+vi.mock("react-i18next", async () => {
+  const { createInstance } = await import("i18next")
+  const i18n = createInstance()
+  await i18n.init({
+    lng: "en",
+    interpolation: { escapeValue: false },
+    resources: {
+      en: {
+        translation: {
+          managePrompts: {
+            recipe: {
+              unavailableTitle: "Localized recipe unavailable",
+              unavailableDescription: "Localized unsafe recipe description"
+            }
+          }
         }
-        return key
       }
-      return key
     }
   })
-}))
+  return { useTranslation: () => ({ t: i18n.t.bind(i18n) }) }
+})
 
 vi.mock("@/hooks/useFormDraft", () => ({
   useFormDraft: () => mockDraftState,
@@ -73,6 +72,68 @@ describe("PromptFullPageEditor structured prompts", () => {
     allTags: []
   }
 
+  it("closes a clean saved prompt without reporting unsaved changes", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false)
+    const onClose = vi.fn()
+    render(<PromptFullPageEditor {...baseProps} onClose={onClose} />)
+    fireEvent.click(screen.getByRole("button", { name: "Back to Prompts" }))
+    expect(confirm).not.toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalledOnce()
+    confirm.mockRestore()
+  })
+
+  it("prevents editing a submitted prompt while its save is pending", () => {
+    render(<PromptFullPageEditor {...baseProps} isLoading />)
+    expect(screen.getByDisplayValue("Legacy prompt")).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Convert to structured" })).toBeDisabled()
+  })
+
+  it("does not submit another save through the keyboard while one is pending", async () => {
+    const onSubmit = vi.fn()
+    render(<PromptFullPageEditor {...baseProps} onSubmit={onSubmit} isLoading />)
+    await act(async () => fireEvent.keyDown(window, { key: "s", ctrlKey: true }))
+    expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it("retains the newer draft when the save owner reports a stale completion", async () => {
+    let finish!: (value: boolean) => void
+    const onSubmit = vi.fn(() => new Promise<boolean>(resolve => { finish = resolve }))
+    const view = render(<PromptFullPageEditor {...baseProps} onSubmit={onSubmit} />)
+    fireEvent.click(screen.getByTestId("full-editor-save"))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce())
+    view.rerender(<PromptFullPageEditor {...baseProps} onSubmit={onSubmit} initialValues={{ id: "prompt-b", name: "Draft B" }} />)
+    fireEvent.change(screen.getByTestId("full-editor-name"), { target: { value: "Edited draft B" } })
+    mockDraftState.clearDraft.mockClear()
+    await act(async () => finish(false))
+    expect(mockDraftState.clearDraft).not.toHaveBeenCalled()
+    const unloading = new Event("beforeunload", { cancelable: true })
+    window.dispatchEvent(unloading)
+    expect(unloading.defaultPrevented).toBe(true)
+  })
+
+  it("localizes the quarantined recipe message", () => {
+    render(
+      <PromptFullPageEditor
+        {...baseProps}
+        initialValues={{
+          id: "unsafe-recipe",
+          name: "Unsafe recipe",
+          promptFormat: "structured",
+          promptSchemaVersion: 2,
+          structuredPromptDefinition: {
+            schema_version: 2,
+            definition_kind: "single_text_recipe"
+          }
+        }}
+      />
+    )
+
+    expect(screen.getByText("Localized recipe unavailable")).toBeInTheDocument()
+    expect(
+      screen.getByText("Localized unsafe recipe description")
+    ).toBeInTheDocument()
+  })
+
   it("converts a legacy full-page prompt into a structured prompt and locks raw fields", async () => {
     render(<PromptFullPageEditor {...baseProps} />)
 
@@ -96,7 +157,14 @@ describe("PromptFullPageEditor structured prompts", () => {
     fireEvent.click(
       screen.getByRole("button", { name: /convert to structured/i })
     )
-    fireEvent.click(screen.getByTestId("structured-block-item-legacy_user"))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Edit User Prompt block" })
+    )
+    await waitFor(() => {
+      expect(screen.getByTestId("structured-block-content")).toHaveValue(
+        "Summarize {{topic}}"
+      )
+    })
     fireEvent.change(screen.getByTestId("structured-block-content"), {
       target: { value: "Summarize {{topic}} clearly" }
     })
@@ -121,5 +189,100 @@ describe("PromptFullPageEditor structured prompts", () => {
         })
       )
     })
+  })
+
+  it("routes an exact saved v2 recipe to the recipe editor and updates its source id", async () => {
+    const onUpdateRecipe = vi.fn(async () => undefined)
+    render(
+      <PromptFullPageEditor
+        {...baseProps}
+        initialValues={{
+          id: "saved-recipe-42",
+          name: "Saved clear task",
+          promptFormat: "structured",
+          promptSchemaVersion: 2,
+          structuredPromptDefinition: structuredClone(
+            CLEAR_TASK_RECIPE.definition
+          )
+        }}
+        recipePersistenceAvailable
+        onUpdateRecipe={onUpdateRecipe}
+      />
+    )
+
+    expect(screen.getByTestId("single-field-recipe-editor")).toBeInTheDocument()
+    expect(screen.queryByTestId("full-editor-system-prompt")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Update recipe" }))
+
+    await waitFor(() => {
+      expect(onUpdateRecipe).toHaveBeenCalledWith(
+        "saved-recipe-42",
+        expect.objectContaining({
+          schema_version: 2,
+          definition_kind: "single_text_recipe"
+        })
+      )
+    })
+  })
+
+  it("keeps local recipe editing and apply available when persistence is disabled", () => {
+    const onApplyRecipe = vi.fn()
+    render(
+      <PromptFullPageEditor
+        {...baseProps}
+        initialValues={{
+          id: "saved-recipe-42",
+          name: "Saved clear task",
+          promptFormat: "structured",
+          promptSchemaVersion: 2,
+          structuredPromptDefinition: structuredClone(
+            CLEAR_TASK_RECIPE.definition
+          )
+        }}
+        recipePersistenceAvailable={false}
+        recipePersistenceUnavailableReason="Reconnect to save recipes."
+        onApplyRecipe={onApplyRecipe}
+      />
+    )
+
+    expect(screen.getByText("Reconnect to save recipes.")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Update recipe" })).toBeDisabled()
+    fireEvent.change(
+      screen.getByRole("textbox", {
+        name: "Current value for Task (not saved)"
+      }),
+      { target: { value: "Summarize the release" } }
+    )
+    const apply = screen.getByRole("button", {
+      name: "Apply to system prompt"
+    })
+    expect(apply).toBeEnabled()
+    fireEvent.click(apply)
+    expect(onApplyRecipe).toHaveBeenCalledTimes(1)
+  })
+
+  it("quarantines an invalid v2 record instead of opening either editor", () => {
+    render(
+      <PromptFullPageEditor
+        {...baseProps}
+        initialValues={{
+          id: "broken-recipe",
+          name: "Broken recipe",
+          promptFormat: "structured",
+          promptSchemaVersion: 2,
+          structuredPromptDefinition: {
+            ...structuredClone(CLEAR_TASK_RECIPE.definition),
+            definition_kind: "future_recipe"
+          }
+        }}
+      />
+    )
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Localized unsafe recipe description"
+    )
+    expect(screen.queryByTestId("single-field-recipe-editor")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("full-editor-system-prompt")).not.toBeInTheDocument()
   })
 })

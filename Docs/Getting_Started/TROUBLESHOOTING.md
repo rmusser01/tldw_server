@@ -502,7 +502,7 @@ Docker single-user WebUI quickstart uses runtime auth bootstrap. Check these whe
 
 **Symptoms:** `SyntaxError` or `ImportError` on startup due to Python 3.9 or earlier features.
 
-**Fix:** tldw\_server requires Python 3.10+. Check your version:
+**Fix:** tldw\_server requires Python 3.11+. Check your version:
 ```bash
 python3 --version
 ```

@@ -12,7 +12,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 
-
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 
 
@@ -134,7 +133,7 @@ def apply_email_label_delta(
         media_id = int(message_row["media_id"])
 
         removed_count = 0
-        for label_key in removed_map.keys():
+        for label_key in removed_map:
             label_row = self._fetchone_with_connection(
                 conn,
                 (
@@ -327,7 +326,7 @@ def reconcile_email_message_state(
         media_id = int(message_row["media_id"])
         media_row = self._fetchone_with_connection(
             conn,
-            "SELECT deleted FROM Media WHERE id = ? LIMIT 1",
+            "SELECT deleted FROM Media WHERE id = ? AND system_operation_id IS NULL LIMIT 1",
             (media_id,),
         )
         media_deleted = bool((media_row or {}).get("deleted"))

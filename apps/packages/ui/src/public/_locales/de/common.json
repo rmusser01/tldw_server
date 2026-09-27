@@ -1261,5 +1261,17 @@
   },
   "modelSelect_sort_localFirst": {
     "message": "Local-first"
+  },
+  "help_loadFailed": {
+    "message": "Die Hilfe konnte nicht geladen werden. Stelle die Verbindung wieder her, speichere deine Änderungen und lade die Seite neu."
+  },
+  "help_loading": {
+    "message": "Hilfe wird geladen…"
+  },
+  "help_confirmReload": {
+    "message": "Diese Seite neu laden? Nicht gespeicherte Änderungen können verloren gehen."
+  },
+  "help_reload": {
+    "message": "Seite neu laden"
   }
 }

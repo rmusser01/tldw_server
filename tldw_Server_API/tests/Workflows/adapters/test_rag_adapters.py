@@ -581,7 +581,7 @@ class TestWebSearchAdapter:
             return {"url": url, "content": f"full content for {url}", "extraction_successful": True}
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_article",
+            "tldw_Server_API.app.core.Web_Scraping.orchestration.scrape_article",
             fake_scrape_article,
         )
 
@@ -642,7 +642,7 @@ class TestWebSearchAdapter:
             return {"url": url, "content": "", "extraction_successful": False, "error": "blocked"}
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_article",
+            "tldw_Server_API.app.core.Web_Scraping.orchestration.scrape_article",
             fake_scrape_article,
         )
 
@@ -685,7 +685,7 @@ class TestWebSearchAdapter:
             return {"url": url, "content": "", "extraction_successful": False, "error": "blocked"}
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_article",
+            "tldw_Server_API.app.core.Web_Scraping.orchestration.scrape_article",
             fake_scrape_article,
         )
 
@@ -806,7 +806,7 @@ class TestWebSearchAdapter:
             raise RuntimeError("scrape token at /private/rag-scrape-cache")
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_article",
+            "tldw_Server_API.app.core.Web_Scraping.orchestration.scrape_article",
             fake_scrape_article,
         )
 
@@ -1467,7 +1467,7 @@ class TestSemanticCacheCheckAdapter:
 
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._get_semantic_cache_collection",
-            lambda _name: (MagicMock(), mock_collection),
+            lambda _name, _user_id: (MagicMock(), mock_collection),
         )
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._build_semantic_cache_query_embedding",
@@ -1497,7 +1497,7 @@ class TestSemanticCacheCheckAdapter:
 
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._get_semantic_cache_collection",
-            lambda _name: (MagicMock(), mock_collection),
+            lambda _name, _user_id: (MagicMock(), mock_collection),
         )
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._build_semantic_cache_query_embedding",
@@ -1545,7 +1545,7 @@ class TestSemanticCacheCheckAdapter:
 
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._get_semantic_cache_collection",
-            lambda _name: (_ for _ in ()).throw(
+            lambda _name, _user_id: (_ for _ in ()).throw(
                 RuntimeError("semantic cache exploded at /private/rag-cache")
             ),
         )
@@ -1565,7 +1565,7 @@ class TestSemanticCacheCheckAdapter:
 
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._get_semantic_cache_collection",
-            lambda _name: (None, None),
+            lambda _name, _user_id: (None, None),
         )
 
         config = {"query": "test query"}
@@ -1594,7 +1594,7 @@ class TestSemanticCacheCheckAdapter:
 
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._get_semantic_cache_collection",
-            lambda _name: (MagicMock(), mock_collection),
+            lambda _name, _user_id: (MagicMock(), mock_collection),
         )
         monkeypatch.setattr(
             "tldw_Server_API.app.core.Workflows.adapters.rag.query._build_semantic_cache_query_embedding",

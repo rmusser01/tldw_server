@@ -1,43 +1,57 @@
 /** Read the active scoped notification unread count from extension storage. */
 
-import { useEffect, useRef } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useStorage } from "@plasmohq/storage/hook"
 
 import { toUnreadCount } from "@/utils/notifications"
-import { safeStorageSerde } from "@/utils/safe-storage"
+import { createSafeStorage } from "@/utils/safe-storage"
 import { notificationRecordKeyForConfig } from "@/services/notification-runtime-scope"
 
 const ACTIVE_SCOPE_KEY = "tldw:notifications:activeScope"
 const CONFIG_KEY = "tldwConfig"
-
-type NotificationRecord = {
-  state: "connecting" | "active" | "degraded" | "auth-required" | "unavailable"
-  unreadCount: number
-  updatedAt: number
-}
-
-const storageOptions = (key: string) => ({
-  key,
-  area: "local" as const,
-  serde: safeStorageSerde
-})
+const storage = createSafeStorage({ area: "local" })
 
 export function useNotificationCount(): number {
-  const [config] = useStorage<unknown>(storageOptions(CONFIG_KEY), (value) => value)
+  const [config] = useStorage<unknown>({ key: CONFIG_KEY, instance: storage })
   const expectedScope = notificationRecordKeyForConfig(config)
-  const [activeScope] = useStorage<string | null>(storageOptions(ACTIVE_SCOPE_KEY), (value) =>
-    typeof value === "string" && value ? value : null
-  )
-  const [record] = useStorage<NotificationRecord | undefined>(
-    storageOptions(activeScope || ACTIVE_SCOPE_KEY),
-    (value) => (value && typeof value === "object" ? (value as NotificationRecord) : undefined)
-  )
-  const previousScope = useRef(activeScope)
-  const scopeChanged = previousScope.current !== activeScope
-  useEffect(() => {
-    previousScope.current = activeScope
-  }, [activeScope])
+  const [activeScope] = useStorage<unknown>({ key: ACTIVE_SCOPE_KEY, instance: storage })
+  const scope = expectedScope && activeScope === expectedScope ? expectedScope : null
+  // A fresh subscription identity also protects an A -> B -> A switch from
+  // reusing A's earlier snapshot while its new read is still pending.
+  const subscription = useMemo(() => ({ scope }), [scope])
+  const [snapshot, setSnapshot] = useState<{
+    subscription: typeof subscription
+    count: number
+  }>()
 
-  if (!expectedScope || activeScope !== expectedScope || scopeChanged) return 0
-  return toUnreadCount(record?.unreadCount)
+  useEffect(() => {
+    const key = subscription.scope
+    if (!key) return
+    let cancelled = false
+    let watchUpdated = false
+    const apply = (value: unknown) => {
+      if (cancelled) return
+      const unreadCount = value && typeof value === "object" && "unreadCount" in value
+        ? value.unreadCount
+        : undefined
+      setSnapshot({ subscription, count: toUnreadCount(unreadCount) })
+    }
+    const callbacks = {
+      [key]: (change: { newValue?: unknown }) => {
+        watchUpdated = true
+        apply(change.newValue)
+      }
+    }
+    storage.watch(callbacks)
+    void storage.get<unknown>(key).then(
+      (value) => { if (!watchUpdated) apply(value) },
+      () => { if (!watchUpdated) apply(undefined) }
+    )
+    return () => {
+      cancelled = true
+      storage.unwatch(callbacks)
+    }
+  }, [subscription])
+
+  return snapshot?.subscription === subscription ? snapshot.count : 0
 }

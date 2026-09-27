@@ -6,6 +6,7 @@ enum VSockSessionError: Error {
     case connectionRejected(String)
     case requestAlreadyInFlight(String)
     case requestTimedOut(String)
+    case protocolMismatch
     case invalidMessage(String)
     case closed
 }
@@ -390,7 +391,7 @@ final class VSockSession {
     private func validateProtocolVersion(_ payload: [String: Any]) throws {
         let protocolVersion = try requireString("protocol_version", in: payload)
         guard protocolVersion == guestProtocolVersion else {
-            throw VSockSessionError.invalidMessage("protocol_mismatch")
+            throw VSockSessionError.protocolMismatch
         }
     }
 

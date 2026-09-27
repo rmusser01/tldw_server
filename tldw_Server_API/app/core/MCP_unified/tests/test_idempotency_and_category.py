@@ -16,6 +16,10 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.run_command_mo
 from tldw_Server_API.app.core.MCP_unified.modules.registry import get_module_registry
 from tldw_Server_API.app.core.MCP_unified.monitoring.metrics import get_metrics_collector
 from tldw_Server_API.app.core.MCP_unified.protocol import IdempotencyManager, MCPProtocol, MCPRequest, RequestContext
+from tldw_Server_API.app.core.MCP_unified.tool_execution.models import (
+    IdempotencyExecutionPolicy,
+    IdempotencyRunResult,
+)
 
 
 class AllowAllRBAC:
@@ -66,26 +70,28 @@ class _CountingWriteModule(BaseModule):
 
 class _ProbeIdempotencyManager:
     def __init__(self) -> None:
-        self.bound_keys: list[str] = []
-        self.run_keys: list[str] = []
+        self.execute_keys: list[str] = []
+        self.policies: list[IdempotencyExecutionPolicy] = []
 
-    async def bind_arguments(self, key: str, arguments_hash: str, *, ttl: int, max_size: int) -> bool:
-        del arguments_hash, ttl, max_size
-        self.bound_keys.append(key)
-        return True
-
-    async def run(
+    async def execute(
         self,
         key: str,
+        arguments_hash: str,
         execute: Callable[[], Awaitable[Any]],
         *,
-        ttl: int,
-        max_size: int,
-        lock_ttl: int,
-    ) -> tuple[Any, bool]:
-        del ttl, max_size, lock_ttl
-        self.run_keys.append(key)
-        return await execute(), False
+        policy: IdempotencyExecutionPolicy,
+    ) -> IdempotencyRunResult:
+        del arguments_hash
+        self.execute_keys.append(key)
+        self.policies.append(policy)
+        return IdempotencyRunResult(
+            payload=await execute(),
+            from_cache=False,
+            persistence="none",
+        )
+
+    async def shutdown(self) -> None:
+        return None
 
 
 @pytest.mark.unit
@@ -154,8 +160,8 @@ async def test_replaced_idempotency_manager_is_used_by_runtime() -> None:
     resp = await proto.process_request(req, ctx)
 
     assert resp.error is None
-    assert probe.bound_keys
-    assert probe.run_keys == probe.bound_keys
+    assert len(probe.execute_keys) == 1
+    assert len(probe.policies) == 1
 
 
 @pytest.mark.unit
@@ -443,18 +449,28 @@ async def test_category_preserves_non_legacy_metadata_categories(
 @pytest.mark.asyncio
 async def test_idempotency_local_lock_map_prunes_with_cache_bounds() -> None:
     manager = IdempotencyManager()
+    manager._redis_attempted = True
+    manager._redis_ready = False
+    policy = IdempotencyExecutionPolicy(
+        inject_argument=False,
+        ttl_seconds=1,
+        contention_wait_seconds=1,
+        finalize_seconds=1,
+        lock_ttl_seconds=2,
+        max_entries=3,
+        max_result_bytes=4_096,
+    )
 
     async def _execute(value: str) -> dict[str, list[dict[str, str]]]:
         return {"content": [{"type": "text", "text": value}]}
 
     for idx in range(10):
         key = f"k-{idx}"
-        await manager.run(
+        await manager.execute(
             key,
+            f"args-{idx}",
             lambda i=idx: _execute(str(i)),
-            ttl=1,
-            max_size=3,
-            lock_ttl=2,
+            policy=policy,
         )
 
     # Local cache is size-bounded, and lock bookkeeping should track cache lifetime.
@@ -464,8 +480,10 @@ async def test_idempotency_local_lock_map_prunes_with_cache_bounds() -> None:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_idempotency_warns_when_redis_factory_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tldw_Server_API.app.core.MCP_unified import protocol as protocol_mod
+async def test_idempotency_marks_safe_degradation_when_redis_factory_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tldw_Server_API.app.core.MCP_unified.tool_execution import idempotency as idempotency_mod
 
     class _Config:
         """Config double that advertises Redis connection settings."""
@@ -479,19 +497,26 @@ async def test_idempotency_warns_when_redis_factory_returns_none(monkeypatch: py
         return None
 
     warnings: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+    stages: list[tuple[str, str]] = []
 
     def _record_warning(message: str, *args: Any, **kwargs: Any) -> None:
         """Record warnings emitted by the protocol logger."""
         warnings.append((message, args, kwargs))
 
-    monkeypatch.setattr(protocol_mod, "get_config", lambda: _Config())
-    monkeypatch.setattr(protocol_mod.logger, "warning", _record_warning)
+    monkeypatch.setattr(idempotency_mod, "get_config", lambda: _Config())
+    monkeypatch.setattr(idempotency_mod.logger, "warning", _record_warning)
 
-    manager = IdempotencyManager(redis_client_factory=_none_factory)
+    manager = IdempotencyManager(
+        redis_client_factory=_none_factory,
+        on_degraded=lambda stage, error_type: stages.append((stage, error_type)),
+    )
 
     assert await manager._ensure_redis() is False
     assert manager._redis_client is None
-    assert any("returned None" in message for message, _args, _kwargs in warnings)
+    assert stages == [("redis_connect", "RuntimeError")]
+    assert manager.remote_degraded is True
+    assert warnings
+    assert all("returned None" not in message for message, _args, _kwargs in warnings)
 
 
 @pytest.mark.unit

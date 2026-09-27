@@ -1,8 +1,12 @@
+import type { HistorySendTurn } from "@/types/chat-modes"
+import { settleAcceptedAssistant } from "@/services/chat-history-selection"
 import {
   getLastChatHistory,
   saveHistory,
   saveMessage,
   updateMessage,
+  acknowledgeSavedUserMessage,
+  addFileToSession,
   updateLastUsedModel as setLastUsedChatModel,
   updateLastUsedPrompt as setLastUsedChatSystemPrompt,
   updateChatHistoryCreatedAt
@@ -12,6 +16,10 @@ import { generateTitle } from "@/services/title"
 import { ChatHistory, useStoreMessageOption } from "@/store/option"
 import { updatePageTitle } from "@/utils/update-page-title"
 import { buildAssistantErrorContent } from "@/utils/chat-error-message"
+import { runChatPersistenceTransaction } from "@/db/dexie/chat-persistence-transaction"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import type { UploadedFile } from "@/db/dexie/types"
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 let didLogSetHistoryMissing = false
 
@@ -22,13 +30,21 @@ const buildFallbackHistoryTitle = (userMessage: string): string => {
 
 const generateTitleWithFallback = async (
   selectedModel: string,
-  userMessage: string
+  userMessage: string,
+  requestScope?: ServicePromptRequestScope,
+  signal?: AbortSignal
 ): Promise<string> => {
   try {
-    const title = await generateTitle(selectedModel, userMessage, userMessage)
+    const title = requestScope
+      ? await generateTitle(selectedModel, userMessage, userMessage, {
+          requestScope,
+          signal
+        })
+      : await generateTitle(selectedModel, userMessage, userMessage)
     const trimmed = typeof title === "string" ? title.trim() : ""
     return trimmed.length > 0 ? trimmed : buildFallbackHistoryTitle(userMessage)
-  } catch {
+  } catch (error) {
+    if (isRequestConfigScopeChangedError(error)) throw error
     return buildFallbackHistoryTitle(userMessage)
   }
 }
@@ -47,14 +63,18 @@ const resolveHistorySetter = (
 
   if (!didLogSetHistoryMissing) {
     didLogSetHistoryMissing = true
-    console.error("[chat] saveMessageOnError could not resolve setHistory setter", {
-      setHistoryType: typeof candidate
-    })
+    console.error(
+      "[chat] saveMessageOnError could not resolve setHistory setter",
+      {
+        setHistoryType: typeof candidate
+      }
+    )
   }
   return null
 }
 
 export const saveMessageOnError = async ({
+  historyTurn,
   e,
   history,
   setHistory,
@@ -73,7 +93,10 @@ export const saveMessageOnError = async ({
   modelId,
   userModelId,
   userMessageId,
+  userServerMessageId,
+  retryFailedTurn = false,
   assistantMessageId,
+  assistantServerMessageId,
   userParentMessageId,
   assistantParentMessageId,
   generationInfo,
@@ -83,8 +106,14 @@ export const saveMessageOnError = async ({
   prompt_id,
   reasoning_time_taken,
   isContinue,
-  documents = []
+  documents = [],
+  scopeSignal,
+  scopeInvalidatedSignal,
+  requestScope,
+  shouldAbortForScopeChange,
+  deferHistoryMetadata = false
 }: {
+  historyTurn?: HistorySendTurn
   e: any
   setHistory: (history: ChatHistory) => void
   history: ChatHistory
@@ -106,6 +135,9 @@ export const saveMessageOnError = async ({
   modelId?: string
   userModelId?: string
   userMessageId?: string
+  userServerMessageId?: string
+  retryFailedTurn?: boolean
+  assistantServerMessageId?: string
   assistantMessageId?: string
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
@@ -117,37 +149,157 @@ export const saveMessageOnError = async ({
   reasoning_time_taken?: number
   isContinue?: boolean
   documents?: ChatDocuments
+  scopeSignal?: AbortSignal
+  scopeInvalidatedSignal?: AbortSignal
+  requestScope?: ServicePromptRequestScope
+  shouldAbortForScopeChange?: () => boolean
+  deferHistoryMetadata?: boolean
 }) => {
-  const isAbort = (
+  if (historyTurn) {
+    await historyTurn.recover(
+      {
+        content: botMessage,
+        assistantId: assistantMessageId!,
+        createdAt: historyTurn.createdAt!
+      },
+      e
+    )
+    return (
+      historyTurn.capture?.view.conversation_id ??
+      historyTurn.admission?.conversation_id ??
+      historyId
+    )
+  }
+  const isAbort =
     e?.name === "AbortError" ||
     e?.message === "AbortError" ||
     e?.name?.includes?.("AbortError") ||
     e?.message?.includes?.("AbortError")
-  )
 
   const assistantContent = buildAssistantErrorContent(botMessage, e)
   const safeSetHistory = resolveHistorySetter(setHistory)
+  const errorHistory: ChatHistory = [
+    ...history,
+    {
+      role: "user",
+      content: userMessage,
+      image,
+      messageType: userMessageType ?? message_type
+    },
+    {
+      role: "assistant",
+      content: assistantContent,
+      messageType: assistantMessageType ?? message_type
+    }
+  ]
+  const persistHistoryMetadata = async (targetHistoryId: string) => {
+    if (deferHistoryMetadata) return
+    await setLastUsedChatModel(targetHistoryId, selectedModel)
+    if (prompt_id || prompt_content) {
+      await setLastUsedChatSystemPrompt(targetHistoryId, {
+        prompt_content,
+        prompt_id
+      })
+    }
+  }
+
+  if (scopeSignal || scopeInvalidatedSignal) {
+    if (
+      scopeInvalidatedSignal?.aborted &&
+      (shouldAbortForScopeChange?.() ?? true)
+    ) {
+      const error = new Error("Request scope changed")
+      error.name = "AbortError"
+      throw error
+    }
+
+    const title = historyId
+      ? null
+      : await generateTitleWithFallback(
+          selectedModel,
+          userMessage,
+          requestScope,
+          scopeSignal
+        )
+    const persistedHistoryId = await runChatPersistenceTransaction(
+      scopeInvalidatedSignal,
+      async () => {
+        const targetHistoryId =
+          historyId ?? (await saveHistory(title!, false, message_source)).id
+        const shouldSaveUser =
+          !isRegenerating && (!historyId || !isAbort || !isContinue)
+
+        if (isRegenerating && retryFailedTurn && userMessageId && userServerMessageId) {
+          await acknowledgeSavedUserMessage(targetHistoryId, userMessageId, userServerMessageId, userMessage)
+        }
+
+        if (shouldSaveUser) {
+          await saveMessage({
+            id: userMessageId,
+            serverMessageId: userServerMessageId,
+            history_id: targetHistoryId,
+            name: selectedModel,
+            role: "user",
+            content: userMessage,
+            images: [image],
+            time: 1,
+            message_type: userMessageType ?? message_type,
+            clusterId,
+            modelId: userModelId,
+            parent_message_id: userParentMessageId ?? null,
+            generationInfo,
+            metadataExtra: userMetadataExtra,
+            reasoning_time_taken,
+            documents
+          })
+        }
+
+        if (isAbort && isContinue && historyId) {
+          const lastMessage = await getLastChatHistory(targetHistoryId)
+          await updateMessage(targetHistoryId, lastMessage.id, botMessage)
+        } else {
+          await saveMessage({
+            id: assistantMessageId,
+            serverMessageId: assistantServerMessageId,
+            history_id: targetHistoryId,
+            name: selectedModel,
+            role: "assistant",
+            content: assistantContent,
+            images: [],
+            source: [],
+            time: 2,
+            message_type: assistantMessageType ?? message_type,
+            clusterId,
+            modelId,
+            parent_message_id: assistantParentMessageId ?? null,
+            generationInfo,
+            metadataExtra: assistantMetadataExtra,
+            reasoning_time_taken
+          })
+        }
+
+        await persistHistoryMetadata(targetHistoryId)
+        return targetHistoryId
+      },
+      shouldAbortForScopeChange
+    )
+
+    safeSetHistory?.(errorHistory)
+    if (!historyId) {
+      updatePageTitle(title!)
+      setHistoryId(persistedHistoryId)
+    }
+    return persistedHistoryId
+  }
 
   if (isAbort) {
-    safeSetHistory?.([
-      ...history,
-      {
-        role: "user",
-        content: userMessage,
-        image,
-        messageType: userMessageType ?? message_type
-      },
-      {
-        role: "assistant",
-        content: assistantContent,
-        messageType: assistantMessageType ?? message_type
-      }
-    ])
+    safeSetHistory?.(errorHistory)
 
     if (historyId) {
       if (!isRegenerating && !isContinue) {
         await saveMessage({
           id: userMessageId,
+          serverMessageId: userServerMessageId,
           history_id: historyId,
           name: selectedModel,
           role: "user",
@@ -172,6 +324,7 @@ export const saveMessageOnError = async ({
       } else {
         await saveMessage({
           id: assistantMessageId,
+          serverMessageId: assistantServerMessageId,
           history_id: historyId,
           name: selectedModel,
           role: "assistant",
@@ -188,13 +341,7 @@ export const saveMessageOnError = async ({
           reasoning_time_taken
         })
       }
-      await setLastUsedChatModel(historyId, selectedModel)
-      if (prompt_id || prompt_content) {
-        await setLastUsedChatSystemPrompt(historyId, {
-          prompt_content,
-          prompt_id
-        })
-      }
+      await persistHistoryMetadata(historyId)
 
       return historyId
     } else {
@@ -204,6 +351,7 @@ export const saveMessageOnError = async ({
       if (!isRegenerating) {
         await saveMessage({
           id: userMessageId,
+          serverMessageId: userServerMessageId,
           history_id: newHistoryId.id,
           name: selectedModel,
           role: "user",
@@ -223,6 +371,7 @@ export const saveMessageOnError = async ({
 
       await saveMessage({
         id: assistantMessageId,
+        serverMessageId: assistantServerMessageId,
         history_id: newHistoryId.id,
         name: selectedModel,
         role: "assistant",
@@ -239,33 +388,14 @@ export const saveMessageOnError = async ({
         reasoning_time_taken
       })
       setHistoryId(newHistoryId.id)
-      await setLastUsedChatModel(newHistoryId.id, selectedModel)
-      if (prompt_id || prompt_content) {
-        await setLastUsedChatSystemPrompt(newHistoryId.id, {
-          prompt_content,
-          prompt_id
-        })
-      }
+      await persistHistoryMetadata(newHistoryId.id)
 
       return newHistoryId.id
     }
   }
 
   // Non-abort errors: append user + assistant with error content as well
-  safeSetHistory?.([
-    ...history,
-    {
-      role: "user",
-      content: userMessage,
-      image,
-      messageType: userMessageType ?? message_type
-    },
-    {
-      role: "assistant",
-      content: assistantContent,
-      messageType: assistantMessageType ?? message_type
-    }
-  ])
+  safeSetHistory?.(errorHistory)
 
   if (historyId) {
     try {
@@ -273,6 +403,7 @@ export const saveMessageOnError = async ({
       if (!isRegenerating) {
         await saveMessage({
           id: userMessageId,
+          serverMessageId: userServerMessageId,
           history_id: historyId,
           name: selectedModel,
           role: "user",
@@ -292,6 +423,7 @@ export const saveMessageOnError = async ({
       // Save assistant error message
       await saveMessage({
         id: assistantMessageId,
+        serverMessageId: assistantServerMessageId,
         history_id: historyId,
         name: selectedModel,
         role: "assistant",
@@ -308,13 +440,7 @@ export const saveMessageOnError = async ({
         reasoning_time_taken
       })
     } catch {}
-    await setLastUsedChatModel(historyId, selectedModel)
-    if (prompt_id || prompt_content) {
-      await setLastUsedChatSystemPrompt(historyId, {
-        prompt_content,
-        prompt_id
-      })
-    }
+    await persistHistoryMetadata(historyId)
     return historyId
   } else {
     // Create new history on error
@@ -325,6 +451,7 @@ export const saveMessageOnError = async ({
       if (!isRegenerating) {
         await saveMessage({
           id: userMessageId,
+          serverMessageId: userServerMessageId,
           history_id: newHistoryId.id,
           name: selectedModel,
           role: "user",
@@ -343,6 +470,7 @@ export const saveMessageOnError = async ({
       }
       await saveMessage({
         id: assistantMessageId,
+        serverMessageId: assistantServerMessageId,
         history_id: newHistoryId.id,
         name: selectedModel,
         role: "assistant",
@@ -360,18 +488,13 @@ export const saveMessageOnError = async ({
       })
     } catch {}
     setHistoryId(newHistoryId.id)
-    await setLastUsedChatModel(newHistoryId.id, selectedModel)
-    if (prompt_id || prompt_content) {
-      await setLastUsedChatSystemPrompt(newHistoryId.id, {
-        prompt_content,
-        prompt_id
-      })
-    }
+    await persistHistoryMetadata(newHistoryId.id)
     return newHistoryId.id
   }
 }
 
 export const saveMessageOnSuccess = async ({
+  historyTurn,
   historyId,
   setHistoryId,
   isRegenerate,
@@ -389,7 +512,10 @@ export const saveMessageOnSuccess = async ({
   modelId,
   userModelId,
   userMessageId,
+  userServerMessageId,
+  retryFailedTurn = false,
   assistantMessageId,
+  assistantServerMessageId,
   userParentMessageId,
   assistantParentMessageId,
   generationInfo,
@@ -399,8 +525,14 @@ export const saveMessageOnSuccess = async ({
   prompt_content,
   reasoning_time_taken = 0,
   isContinue,
-  documents = []
+  documents = [],
+  scopeSignal,
+  scopeInvalidatedSignal,
+  requestScope,
+  deferHistoryMetadata = false,
+  sessionFilesToAdd = []
 }: {
+  historyTurn?: HistorySendTurn
   historyId: string | null
   setHistoryId: (
     historyId: string,
@@ -421,7 +553,10 @@ export const saveMessageOnSuccess = async ({
   modelId?: string
   userModelId?: string
   userMessageId?: string
+  userServerMessageId?: string
+  retryFailedTurn?: boolean
   assistantMessageId?: string
+  assistantServerMessageId?: string
   userParentMessageId?: string | null
   assistantParentMessageId?: string | null
   generationInfo?: any
@@ -432,38 +567,115 @@ export const saveMessageOnSuccess = async ({
   reasoning_time_taken?: number
   isContinue?: boolean
   documents?: ChatDocuments
+  scopeSignal?: AbortSignal
+  scopeInvalidatedSignal?: AbortSignal
+  requestScope?: ServicePromptRequestScope
+  deferHistoryMetadata?: boolean
+  sessionFilesToAdd?: UploadedFile[]
 }) => {
-  if (historyId) {
-    if (!isRegenerate && !isContinue) {
-      await saveMessage({
-        id: userMessageId,
-        history_id: historyId,
-        name: selectedModel,
-        role: "user",
-        content: message,
-        images: [image],
-        time: 1,
-        message_type: userMessageType ?? message_type,
-        clusterId,
-        modelId: userModelId,
-        parent_message_id: userParentMessageId ?? null,
-        generationInfo,
-        metadataExtra: userMetadataExtra,
-        reasoning_time_taken,
-        documents
-      })
+  if (historyTurn) {
+    if (!historyTurn.admission) throw new Error("missing_history_admission")
+    const native = historyTurn.owner.kind === "native"
+    if (
+      native &&
+      (source?.length ||
+        assistantMetadataExtra ||
+        generationInfo ||
+        reasoning_time_taken > 0)
+    ) {
+      throw new Error("unsupported_history_native_result_metadata")
     }
+    const assistant = {
+      id: assistantMessageId!,
+      history_id:
+        historyTurn.owner.kind === "unavailable"
+          ? ""
+          : historyTurn.owner.conversation_id,
+      role: "assistant",
+      name: selectedModel ?? "Assistant",
+      content: fullText,
+      createdAt: historyTurn.createdAt!,
+      images: assistantImages ?? [],
+      parent_message_id: historyTurn.admission.input_message_id,
+      ...(!native
+        ? {
+            sources: source,
+            generationInfo,
+            metadataExtra: {
+              ...assistantMetadataExtra,
+              ...(Array.isArray(generationInfo?.tool_calls)
+                ? { tool_calls: generationInfo.tool_calls }
+                : {})
+            },
+            reasoning_time_taken,
+            modelId,
+            messageType: assistantMessageType ?? message_type
+          }
+        : {})
+    }
+    await settleAcceptedAssistant(
+      historyTurn.owner,
+      historyTurn.admission,
+      assistant
+    )
+    await historyTurn.complete?.()
+    historyTurn.resultId = assistant.id
+    return historyId ?? assistant.history_id
+  }
+  if (scopeInvalidatedSignal?.aborted) {
+    const error = new Error("Request scope changed")
+    error.name = "AbortError"
+    throw error
+  }
 
-    if (isContinue) {
-      console.log("Saving Last Message")
-      const lastMessage = await getLastChatHistory(historyId)
-      console.log("lastMessage", lastMessage)
-      await updateMessage(historyId, lastMessage.id, fullText)
-    } else {
-      await saveMessage(
-        {
+  const title = historyId
+    ? null
+    : scopeSignal || requestScope
+      ? await generateTitle(selectedModel, message, message, {
+          signal: scopeInvalidatedSignal,
+          requestScope
+        })
+      : await generateTitle(selectedModel, message, message)
+
+  const persistedHistoryId = await runChatPersistenceTransaction(
+    scopeInvalidatedSignal,
+    async () => {
+      const targetHistoryId =
+        historyId ?? (await saveHistory(title!, false, message_source)).id
+
+      if (isRegenerate && retryFailedTurn && userMessageId && userServerMessageId) {
+        await acknowledgeSavedUserMessage(targetHistoryId, userMessageId, userServerMessageId, message)
+      }
+
+      if (!historyId || (!isRegenerate && !isContinue)) {
+        await saveMessage({
+          id: userMessageId,
+          serverMessageId: userServerMessageId,
+          history_id: targetHistoryId,
+          name: selectedModel,
+          role: "user",
+          content: message,
+          images: [image],
+          time: 1,
+          message_type: userMessageType ?? message_type,
+          clusterId,
+          modelId: userModelId,
+          parent_message_id: userParentMessageId ?? null,
+          generationInfo,
+          metadataExtra: userMetadataExtra,
+          reasoning_time_taken,
+          documents
+        })
+      }
+
+      if (isContinue && historyId) {
+        const lastMessage = await getLastChatHistory(targetHistoryId)
+        await updateMessage(targetHistoryId, lastMessage.id, fullText)
+      } else {
+        await saveMessage({
           id: assistantMessageId,
-          history_id: historyId,
+          serverMessageId: assistantServerMessageId,
+          history_id: targetHistoryId,
           name: selectedModel,
           role: "assistant",
           content: fullText,
@@ -477,104 +689,31 @@ export const saveMessageOnSuccess = async ({
           generationInfo,
           metadataExtra: assistantMetadataExtra,
           reasoning_time_taken
+        })
+      }
+
+      if (!deferHistoryMetadata) {
+        await setLastUsedChatModel(targetHistoryId, selectedModel!)
+        if (prompt_id || prompt_content) {
+          await setLastUsedChatSystemPrompt(targetHistoryId, {
+            prompt_content,
+            prompt_id
+          })
         }
-        // historyId,
-        // selectedModel!,
-        // "assistant",
-        // fullText,
-        // [],
-        // source,
-        // 2,
-        // message_type,
-        // generationInfo,
-        // reasoning_time_taken
-      )
-    }
-
-    await setLastUsedChatModel(historyId, selectedModel!)
-    if (prompt_id || prompt_content) {
-      await setLastUsedChatSystemPrompt(historyId, {
-        prompt_content,
-        prompt_id
-      })
-    }
-
-    await updateChatHistoryCreatedAt(historyId)
-
-    return historyId
-  } else {
-    const title = await generateTitle(selectedModel, message, message)
-    updatePageTitle(title)
-    const newHistoryId = await saveHistory(title, false, message_source)
-
-    await saveMessage(
-      {
-        id: userMessageId,
-        history_id: newHistoryId.id,
-        name: selectedModel,
-        role: "user",
-        content: message,
-        images: [image],
-        time: 1,
-        message_type: userMessageType ?? message_type,
-        clusterId,
-        modelId: userModelId,
-        parent_message_id: userParentMessageId ?? null,
-        generationInfo,
-        metadataExtra: userMetadataExtra,
-        reasoning_time_taken,
-        documents
+        if (historyId) {
+          await updateChatHistoryCreatedAt(targetHistoryId)
+        }
       }
-      // newHistoryId.id,
-      // selectedModel,
-      // "user",
-      // message,
-      // [image],
-      // [],
-      // 1,
-      // message_type,
-      // generationInfo,
-      // reasoning_time_taken
-    )
-
-    await saveMessage(
-      {
-        id: assistantMessageId,
-        history_id: newHistoryId.id,
-        name: selectedModel,
-        role: "assistant",
-        content: fullText,
-        images: assistantImages ?? [],
-        source,
-        time: 2,
-        message_type: assistantMessageType ?? message_type,
-        clusterId,
-        modelId,
-        parent_message_id: assistantParentMessageId ?? null,
-        generationInfo,
-        metadataExtra: assistantMetadataExtra,
-        reasoning_time_taken
+      for (const file of sessionFilesToAdd) {
+        await addFileToSession(targetHistoryId, file)
       }
-      // newHistoryId.id,
-      // selectedModel!,
-      // "assistant",
-      // fullText,
-      // [],
-      // source,
-      // 2,
-      // message_type,
-      // generationInfo,
-      // reasoning_time_taken
-    )
-    setHistoryId(newHistoryId.id)
-    await setLastUsedChatModel(newHistoryId.id, selectedModel!)
-    if (prompt_id || prompt_content) {
-      await setLastUsedChatSystemPrompt(newHistoryId.id, {
-        prompt_content,
-        prompt_id
-      })
+      return targetHistoryId
     }
+  )
 
-    return newHistoryId.id
+  if (!historyId) {
+    updatePageTitle(title!)
+    setHistoryId(persistedHistoryId)
   }
+  return persistedHistoryId
 }

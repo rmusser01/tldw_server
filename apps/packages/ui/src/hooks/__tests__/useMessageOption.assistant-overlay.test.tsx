@@ -298,8 +298,8 @@ vi.mock("@/store/model", () => ({
 }))
 
 vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector?: (state: Record<string, unknown>) => unknown) =>
-    selector ? selector(storeState) : storeState
+  useStoreMessageOption: Object.assign((selector?: (state: Record<string, unknown>) => unknown) =>
+    selector ? selector(storeState) : storeState, { getState: () => storeState })
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -308,6 +308,7 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 import { useMessageOption } from "@/hooks/useMessageOption"
+import { useServerChatLoader } from "@/hooks/chat/useServerChatLoader"
 
 describe("useMessageOption assistant overlay changes", () => {
   beforeEach(() => {
@@ -448,4 +449,15 @@ describe("useMessageOption assistant overlay changes", () => {
       })
     )
   })
+})
+
+it("keeps passive consumers from acquiring server hydration ownership", () => {
+  renderHook(() => useMessageOption())
+  expect(vi.mocked(useServerChatLoader)).toHaveBeenLastCalledWith(
+    expect.objectContaining({ enabled: false })
+  )
+  renderHook(() => useMessageOption({ hydrateServerChat: true, scope: { type: "global" } }))
+  expect(vi.mocked(useServerChatLoader)).toHaveBeenLastCalledWith(
+    expect.objectContaining({ enabled: true, scope: { type: "global" } })
+  )
 })

@@ -43,6 +43,9 @@ export type TtsResultMetadata = TextPreviewMetadata & {
   createdAt: string
   clientLatencyMs?: number
   audioSizeBytes?: number
+  requestedBackend?: string
+  actualBackend?: string
+  fallbackUsed?: boolean
 }
 
 export type BuildSttProvenanceTagsArgs = {
@@ -249,7 +252,14 @@ export function normalizeSttResponse(response: unknown): NormalizedSttResponse {
 export function buildTtsResultMetadata(
   text: string,
   createdAt: string,
-  extras: Pick<TtsResultMetadata, "clientLatencyMs" | "audioSizeBytes"> = {}
+  extras: Pick<
+    TtsResultMetadata,
+    | "clientLatencyMs"
+    | "audioSizeBytes"
+    | "requestedBackend"
+    | "actualBackend"
+    | "fallbackUsed"
+  > = {}
 ): TtsResultMetadata {
   return {
     ...buildTextPreview(text),

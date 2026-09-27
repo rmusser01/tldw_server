@@ -1,14 +1,26 @@
 import { createWithEqualityFn } from "zustand/traditional"
+import { browser } from "wxt/browser"
 
-import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
-import { getStoredTldwServerURL } from "@/services/tldw-server"
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+
+// Loaded on first use rather than statically imported. This module is reachable
+// from _app, and a static import here pulled TldwApiClient -- and every API domain
+// module it re-exports -- into the shared bundle that every page downloads.
+const getTldwClient = async () =>
+  (await import("@/services/tldw/TldwApiClient")).tldwClient
+import { getStoredTldwServerURL } from "@/services/tldw-server-url"
 import { apiSend } from "@/services/api-send"
+import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope"
+import { REFRESH_SESSION_INVALIDATION_PREFIX } from "@/services/tldw/single-user-credential"
 import { createSafeStorage } from "@/utils/safe-storage"
 import {
   resolveWebUiQuickstartServerUrl,
+  isExactOriginCookieSessionConfig,
+  COOKIE_SESSION_CONFIG_KEY,
   type BrowserSurface
 } from "@/services/tldw/browser-networking"
-import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
+import { getRuntimeSingleUserApiKeyOverride, isCookieSessionConfigInvalidated } from "@/services/tldw/runtime-auth-override"
+import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
 import { isPlaceholderApiKey } from "@/utils/api-key"
 import {
@@ -240,7 +252,7 @@ const setUserPersonaFlag = async (persona: UserPersona): Promise<void> => {
 
 const ensurePlaceholderConfig = async (): Promise<string | null> => {
   try {
-    const cfg = await tldwClient.getConfig()
+    const cfg = await (await getTldwClient()).getConfig()
     if (cfg?.serverUrl) return cfg.serverUrl
   } catch {
     // ignore missing config
@@ -248,7 +260,7 @@ const ensurePlaceholderConfig = async (): Promise<string | null> => {
 
   const placeholderUrl = "http://127.0.0.1:0"
   try {
-    await tldwClient.updateConfig({
+    await (await getTldwClient()).updateConfig({
       serverUrl: placeholderUrl,
       authMode: "single-user",
       apiKey: "test-bypass"
@@ -291,15 +303,6 @@ const deriveKnowledgeStatusFromHealth = (raw: unknown): KnowledgeStatus => {
     // ignore parse errors and fall back to ready
   }
   return "ready"
-}
-
-const getNormalizedOrigin = (value: string | null | undefined): string | null => {
-  if (!value) return null
-  try {
-    return new URL(String(value)).origin
-  } catch {
-    return null
-  }
 }
 
 const getCurrentBrowserOrigin = (): string | null => {
@@ -428,12 +431,6 @@ const probeServerLiveness = async (
   }
 }
 
-const CORS_ERROR_PATTERNS = [
-  /cors/i,
-  /cross-origin/i,
-  /disallowed origin/i
-]
-
 const NETWORK_BLOCK_PATTERNS = [
   /networkerror when attempting to fetch resource/i,
   /failed to fetch/i,
@@ -441,52 +438,6 @@ const NETWORK_BLOCK_PATTERNS = [
   /load failed/i,
   /the operation was aborted/i
 ]
-
-const maybeAnnotateCorsMismatchError = ({
-  error,
-  status,
-  serverUrl
-}: {
-  error: string | null
-  status: number
-  serverUrl: string | null
-}): string | null => {
-  if (!error) return error
-  const trimmed = String(error).trim()
-  if (!trimmed) return error
-  const normalized = trimmed.toLowerCase()
-  if (normalized.startsWith("likely cors mismatch:")) {
-    return trimmed
-  }
-
-  const mentionsCors = CORS_ERROR_PATTERNS.some((pattern) =>
-    pattern.test(trimmed)
-  )
-  const looksLikeNetworkBlock = NETWORK_BLOCK_PATTERNS.some((pattern) =>
-    pattern.test(trimmed)
-  )
-  if (!mentionsCors && !looksLikeNetworkBlock) {
-    return trimmed
-  }
-
-  const browserOrigin = getCurrentBrowserOrigin()
-  const backendOrigin = getNormalizedOrigin(serverUrl)
-  if (browserOrigin && backendOrigin && browserOrigin === backendOrigin && !mentionsCors) {
-    return trimmed
-  }
-
-  if (status > 0 && status < 400 && !mentionsCors) {
-    return trimmed
-  }
-
-  const browserLabel = browserOrigin || "current browser origin"
-  const backendLabel = backendOrigin || (serverUrl ? String(serverUrl) : "configured server")
-  return (
-    `Likely CORS mismatch: ${browserLabel} is not allowed by ${backendLabel}. ` +
-    `Set ALLOWED_ORIGINS to include ${browserLabel} (or disable CORS for local development). ` +
-    `Original error: ${trimmed}`
-  )
-}
 
 type ConnectionStore = {
   state: ConnectionState
@@ -527,7 +478,7 @@ const initialState: ConnectionState = {
 
 const getPersistedServerUrl = async (): Promise<string | null> => {
   try {
-    const cfg = await tldwClient.getConfig()
+    const cfg = await (await getTldwClient()).getConfig()
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
     if (quickstartWebUiServerUrl) {
       return quickstartWebUiServerUrl
@@ -561,13 +512,17 @@ const hasSingleUserApiKey = (config: Partial<TldwConfig> | null | undefined): bo
   )
 }
 
+const hasConfiguredCookieTransport = (config: Partial<TldwConfig> | null | undefined): boolean =>
+  !isCookieSessionConfigInvalidated() &&
+  isExactOriginCookieSessionConfig(config, getQuickstartWebUiServerUrl())
+
 const hasRequiredAuthForConfig = (config: Partial<TldwConfig> | null | undefined): boolean => {
   const authMode = config?.authMode ?? "single-user"
   if (authMode === "multi-user") {
     return Boolean(String(config?.accessToken || "").trim())
   }
 
-  return hasSingleUserApiKey(config)
+  return hasSingleUserApiKey(config) || hasConfiguredCookieTransport(config)
 }
 
 const deriveOnboardingConfigStep = (
@@ -604,6 +559,7 @@ const deriveOnboardingConfigStep = (
 // are being read (the store `isChecking` flag was previously only set after
 // several awaits, leaving a race window). Released at every exit path below.
 let checkInFlight = false
+let authorityGeneration = 0
 
 export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, get) => ({
   state: initialState,
@@ -617,6 +573,8 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
       return
     }
     checkInFlight = true
+    const generation = authorityGeneration
+    const isCurrent = () => generation === authorityGeneration
 
     try {
       // Load all persisted flags upfront
@@ -625,6 +583,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
       const persistedServerUrl = await getPersistedServerUrl()
       const forceUnconfigured = await getForceUnconfiguredFlag()
       const bypass = await getOfflineBypassFlag()
+      if (!isCurrent()) return
 
       const needsFirstRunSync = !prev.hasCompletedFirstRun && persistedFirstRun
       const needsPersonaSync = prev.userPersona !== persistedUserPersona
@@ -670,7 +629,6 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
             knowledgeError: null
           }
         }))
-        checkInFlight = false
         return
       }
 
@@ -683,6 +641,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           (await ensurePlaceholderConfig()) ??
           currentState.serverUrl ??
           "offline://local"
+        if (!isCurrent()) return
 
         set((s) => ({
           state: {
@@ -702,7 +661,6 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
             knowledgeError: null
           }
         }))
-        checkInFlight = false
         return
       }
 
@@ -717,7 +675,6 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
         currentState.lastCheckedAt != null &&
         now - currentState.lastCheckedAt < CONNECTED_THROTTLE_MS
       ) {
-        checkInFlight = false
         return
       }
 
@@ -739,16 +696,25 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
       }))
 
       try {
-        let cfg = await tldwClient.getConfig()
+        const client = await getTldwClient()
+        await client.initialize()
+        if (!isCurrent()) return
+        let cfg = await client.getConfig()
+        if (!isCurrent()) return
+        // Check the original binding before quickstart normalizes serverUrl.
+        // Foreign-origin cookie metadata must never become local authority.
+        const hasCookieSessionAuth = hasConfiguredCookieTransport(cfg)
         const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
         const recoveryProbeSourceServerUrl = cfg?.serverUrl ?? currentState.serverUrl ?? null
         let serverUrl = quickstartWebUiServerUrl ?? cfg?.serverUrl ?? null
 
         if (
           quickstartWebUiServerUrl &&
-          cfg?.serverUrl !== quickstartWebUiServerUrl
+          cfg?.serverUrl !== quickstartWebUiServerUrl &&
+          (cfg?.authSource !== "cookie-session" || hasCookieSessionAuth || hasSingleUserApiKey(cfg))
         ) {
-          await tldwClient.updateConfig({ serverUrl: quickstartWebUiServerUrl })
+          await (await getTldwClient()).updateConfig({ serverUrl: quickstartWebUiServerUrl })
+          if (!isCurrent()) return await get().checkOnce({ force: true })
           cfg = {
             ...(cfg || {}),
             serverUrl: quickstartWebUiServerUrl,
@@ -763,10 +729,11 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
             // fall back to the hard-coded localhost default here.
             const storedUrl = await getStoredTldwServerURL()
             if (storedUrl) {
-              await tldwClient.updateConfig({
+              await (await getTldwClient()).updateConfig({
                 serverUrl: storedUrl
               })
-              cfg = await tldwClient.getConfig()
+              if (!isCurrent()) return await get().checkOnce({ force: true })
+              cfg = await (await getTldwClient()).getConfig()
               serverUrl = cfg?.serverUrl ?? storedUrl
             }
           } catch {
@@ -774,18 +741,18 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           }
         }
 
-        const hasSingleUserApiKeyValue = hasSingleUserApiKey(cfg)
-        const missingSingleUserApiKey =
+        if (!isCurrent()) return
+        const hasSingleUserAuthValue = hasSingleUserApiKey(cfg) || hasCookieSessionAuth
+        const missingSingleUserAuth =
           Boolean(serverUrl) &&
           (cfg?.authMode ?? "single-user") === "single-user" &&
-          !hasSingleUserApiKeyValue
+          !hasSingleUserAuthValue
+        const missingMultiUserAuth = !isHostedTldwDeployment() && cfg?.authMode === "multi-user" &&
+          !cfg.accessToken && !cfg.refreshToken && !hasCookieSessionAuth
 
-        // If we have a server URL but no single-user API key, treat as
-        // unconfigured/unauthenticated instead of marking the app connected
-        // off an unauthenticated liveness check.
-        // Users must explicitly configure their own credentials in
-        // Settings/Onboarding before authenticated pages can function.
-        if (missingSingleUserApiKey) {
+        // Require credentials or same-origin cookie transport configuration
+        // before checking whether authenticated pages are ready.
+        if (missingSingleUserAuth || missingMultiUserAuth) {
           set((s) => ({
             state: {
               ...s.state,
@@ -805,7 +772,6 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
               knowledgeError: null
             }
           }))
-          checkInFlight = false
           return
         }
 
@@ -828,24 +794,28 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
               knowledgeError: null
             }
           }))
-          checkInFlight = false
           return
         }
-
-        await tldwClient.initialize()
 
         // Request health via background for detailed status codes.
         // Health endpoints may require auth; apiSend injects headers based
         // on tldwConfig (API key / access token).
         const noAuthForHealth = !cfg ||
-          (!hasSingleUserApiKeyValue &&
+          (!hasSingleUserAuthValue &&
             !cfg.accessToken &&
             cfg.authMode !== "multi-user")
+
+        // Auth sessions validate credentials without profile email-verification
+        // or operator health permissions. Cookie metadata can outlive a session.
+        const connectionProbePath = cfg?.authMode === "multi-user" ||
+          (hasCookieSessionAuth && !hasSingleUserApiKey(cfg))
+          ? "/api/v1/auth/sessions"
+          : HEALTH_LIVENESS_PATH
 
         const healthPromise = (async () => {
           try {
             const resp = await apiSend({
-              path: HEALTH_LIVENESS_PATH,
+              path: connectionProbePath,
               method: 'GET',
               timeoutMs: CONNECTION_TIMEOUT_MS,
               // Allow unauthenticated health checks when no credentials have
@@ -853,7 +823,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
               // reachable server URL. Once an API key or access token exists,
               // health should run with auth.
               noAuth: noAuthForHealth
-            })
+            }, cfg ? { readiness: { config: cfg, isCurrent } } : {})
             return { ok: Boolean(resp?.ok), status: Number(resp?.status) || 0, error: resp?.ok ? null : (resp?.error || null) }
           } catch (e) {
             return { ok: false, status: 0, error: (e as Error)?.message || 'Network error' }
@@ -866,6 +836,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           )
         ])
 
+        if (!isCurrent()) return
         const fallbackServerUrl = deriveCurrentHostRecoveryServerUrl(
           quickstartWebUiServerUrl ? recoveryProbeSourceServerUrl : serverUrl
         )
@@ -879,22 +850,25 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
             fallbackServerUrl,
             Math.min(5_000, CONNECTION_TIMEOUT_MS)
           )
+          if (!isCurrent()) return
           if (probeOk) {
             if (!quickstartWebUiServerUrl) {
-              await tldwClient.updateConfig({ serverUrl: fallbackServerUrl })
+              await (await getTldwClient()).updateConfig({ serverUrl: fallbackServerUrl })
+              if (!isCurrent()) return await get().checkOnce({ force: true })
               serverUrl = fallbackServerUrl
               cfg = {
                 ...(cfg || {}),
                 serverUrl: fallbackServerUrl
               } as TldwConfig
             }
+            if (!isCurrent()) return
             const fallbackHasSingleUserApiKey = hasSingleUserApiKey(cfg)
             const fallbackNoAuth = !cfg ||
-              (!fallbackHasSingleUserApiKey &&
+              (!fallbackHasSingleUserApiKey && !hasCookieSessionAuth &&
                 !cfg.accessToken &&
                 cfg.authMode !== "multi-user")
             const fallbackResp = await apiSend({
-              path: HEALTH_LIVENESS_PATH,
+              path: connectionProbePath,
               method: "GET",
               timeoutMs: CONNECTION_TIMEOUT_MS,
               noAuth: fallbackNoAuth
@@ -907,12 +881,9 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           }
         }
 
+        if (!isCurrent()) return
         const ok = healthResult.ok
-        const resolvedHealthError = maybeAnnotateCorsMismatchError({
-          error: healthResult.error,
-          status: healthResult.status,
-          serverUrl
-        })
+        const resolvedHealthError = healthResult.error
 
         let knowledgeStatus: KnowledgeStatus = currentState.knowledgeStatus
         let knowledgeLastCheckedAt = currentState.knowledgeLastCheckedAt
@@ -926,7 +897,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           try {
             // Add timeout to RAG health check to prevent hanging
             // Increased from 5s to 15s to avoid false "offline" status when RAG is slow but working
-            const ragPromise = tldwClient.ragHealth()
+            const ragPromise = (await getTldwClient()).ragHealth()
             const ragTimeout = new Promise<null>((resolve) =>
               setTimeout(() => resolve(null), 15000)
             )
@@ -952,6 +923,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           knowledgeError = "core-offline"
         }
 
+        if (!isCurrent()) return
         let errorKind: ConnectionState["errorKind"] = "none"
         const nextConsecutiveFailures = ok ? 0 : currentState.consecutiveFailures + 1
 
@@ -992,7 +964,6 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
               consecutiveFailures: nextConsecutiveFailures
             }
           }))
-          checkInFlight = false
           return
         }
 
@@ -1021,12 +992,8 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           }
         }))
       } catch (error) {
-        const fallbackError =
-          maybeAnnotateCorsMismatchError({
-            error: (error as Error)?.message ?? "unknown-error",
-            status: 0,
-            serverUrl: currentState.serverUrl
-          }) ?? "unknown-error"
+        if (!isCurrent()) return
+        const fallbackError = (error as Error)?.message ?? "unknown-error"
         set((s) => ({
           state: {
             ...s.state,
@@ -1046,20 +1013,14 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
           }
         }))
       }
-      // Release the in-flight guard for both the normal-completion and caught-error
-      // paths (they converge here after the try/catch above).
-      checkInFlight = false
-    } catch (guardError) {
-      // A throw anywhere above (persisted-flag reads, pre-check state syncs, or
-      // the health check) must still release the synchronous in-flight guard;
-      // otherwise every future health check would be permanently deadlocked.
-      checkInFlight = false
-      throw guardError
+    } finally {
+      // A pre-logout check must not release a newer reconnect check's guard.
+      if (isCurrent()) checkInFlight = false
     }
   },
 
   async setServerUrl(url: string) {
-    await tldwClient.updateConfig({ serverUrl: url })
+    await get().setConfigPartial({ serverUrl: url })
     await get().checkOnce()
   },
 
@@ -1079,7 +1040,7 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
       prev.mode === "demo" || prev.offlineBypass === true
     let config: TldwConfig | null = null
     try {
-      config = await tldwClient.getConfig()
+      config = await (await getTldwClient()).getConfig()
     } catch {
       // ignore config lookup failures and fall back to current state
     }
@@ -1128,8 +1089,9 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
   },
 
   async restartOnboarding() {
+    invalidateConnectionAuthority()
     const prev = get().state
-    await tldwClient.clearManualSingleUserCredentials()
+    await (await getTldwClient()).clearManualSingleUserCredentials()
     await setFirstRunCompleteFlag(false)
     set({
       state: {
@@ -1153,7 +1115,12 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
   },
 
   async setConfigPartial(config: Partial<TldwConfig>) {
-    await tldwClient.updateConfig(config)
+    const client = await getTldwClient()
+    const previous = await client.getConfig()
+    if (!connectionAuthoritiesMatch(previous, { ...previous, ...config })) {
+      invalidateConnectionAuthority()
+    }
+    await client.updateConfig(config)
     const prev = get().state
 
     let nextStep: ConnectionState["configStep"] = prev.configStep
@@ -1269,7 +1236,93 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
   }
 }))
 
+const invalidateConnectionAuthority = (): void => {
+  authorityGeneration += 1
+  checkInFlight = false
+  useConnectionStore.setState(({ state }) => ({
+    state: {
+      ...state,
+      phase: ConnectionPhase.UNCONFIGURED,
+      configStep: "auth",
+      isConnected: false,
+      isChecking: false,
+      offlineBypass: false,
+      consecutiveFailures: 0,
+      lastCheckedAt: null,
+      lastError: null,
+      lastStatusCode: null,
+      errorKind: "none",
+      knowledgeStatus: "unknown",
+      knowledgeLastCheckedAt: null,
+      knowledgeError: null
+    }
+  }))
+}
+
 if (typeof window !== "undefined") {
+  let refreshSessionCheckGeneration = 0
+  const checkRefreshSessionInvalidation = async () => {
+    const generation = ++refreshSessionCheckGeneration
+    const config = await (await getTldwClient()).getConfig()
+    if (generation === refreshSessionCheckGeneration && !isHostedTldwDeployment() &&
+      config?.authMode === "multi-user" && !config.accessToken && !config.refreshToken &&
+      config.authSource !== "cookie-session") {
+      invalidateConnectionAuthority()
+    }
+  }
+  const onRefreshSessionInvalidation = () => {
+    void checkRefreshSessionInvalidation().catch(() => undefined)
+  }
+  if (browser?.storage?.onChanged) {
+    browser.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local" || !changes || typeof changes !== "object") return
+      if (["tldwConfig", "tldwRefreshRotation", COOKIE_SESSION_CONFIG_KEY].some(key => key in changes)) {
+        refreshSessionCheckGeneration += 1
+      }
+      if (Object.keys(changes).some(key => key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX))) {
+        onRefreshSessionInvalidation()
+      }
+    })
+  }
+  window.addEventListener("tldw:auth-principal-changed", (event) => {
+    refreshSessionCheckGeneration += 1
+    if ((event as CustomEvent<{ kind?: string }>).detail?.kind === "logout") {
+      invalidateConnectionAuthority()
+    }
+  })
+  window.addEventListener("tldw:config-updated", (event) => {
+    refreshSessionCheckGeneration += 1
+    const detail = (event as CustomEvent<{ authorityChanged?: boolean; refreshSessionInvalidated?: boolean }>).detail
+    if (detail?.refreshSessionInvalidated) {
+      onRefreshSessionInvalidation()
+    } else if (detail?.authorityChanged) {
+      invalidateConnectionAuthority()
+    }
+  })
+  window.addEventListener("storage", (event) => {
+    if (event.key?.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX)) {
+      onRefreshSessionInvalidation()
+      return
+    }
+    if (event.key === null || ["tldwConfig", "tldwRefreshRotation", COOKIE_SESSION_CONFIG_KEY].includes(event.key)) {
+      refreshSessionCheckGeneration += 1
+    }
+    if (event.key === null) {
+      invalidateConnectionAuthority()
+      return
+    }
+    if (event.key !== "tldwConfig" && event.key !== COOKIE_SESSION_CONFIG_KEY) return
+    try {
+      const previous = event.oldValue ? JSON.parse(event.oldValue) : null
+      const current = event.newValue ? JSON.parse(event.newValue) : null
+      if (!current || !connectionAuthoritiesMatch(current, previous)) {
+        invalidateConnectionAuthority()
+      }
+    } catch {
+      invalidateConnectionAuthority()
+    }
+  })
+
   // Expose for Playwright tests and debugging only.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ;(window as any).__tldw_useConnectionStore = useConnectionStore

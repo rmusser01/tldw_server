@@ -17,7 +17,15 @@ The Chat module powers the `/api/v1/chat/completions` endpoint, orchestrating re
 | File / Folder | Purpose |
 | --- | --- |
 | `chat_orchestrator.py` | Orchestrates chat flows: canonical async `achat`, sync wrapper `chat`, plus provider helpers (`chat_api_call`, `chat_api_call_async`). |
-| `chat_service.py` | High-level helpers used by the FastAPI endpoint: request normalization, moderation, persistence, logging, streaming orchestration. |
+| `chat_service.py` | Compatibility facade and endpoint-facing coordinator for `/api/v1/chat/completions`. |
+| `completion_pipeline.py` | `ChatCompletionPipeline` coordinator for non-streaming and streaming execution paths. |
+| `response_processor.py` | Non-streaming choice extraction, response content mutation, structured validation, usage estimates, and assistant-name injection. |
+| `moderation_pipeline.py` | Output self-monitoring, moderation, topic-monitoring scheduling, and moderation audit/review records. |
+| `persistence_service.py` | Assistant and tool-message persistence helpers. |
+| `tool_execution_service.py` | Local tool auto-execution eligibility checks and execution orchestration. |
+| `streaming_pipeline.py` | Streaming response assembly wrapper around the existing SSE handler. |
+| `command_authorization.py` | Slash-command authorization decisions shared by dispatch and command listing. |
+| `chat_logging.py` | Safe summaries for prompt, content, tool, and exception logs. |
 | `chat_helpers.py` | Validation, character + conversation loading/creation, history assembly, ensuring default persona, etc. |
 | `prompt_template_manager.py` + `prompt_templates/` | Jinja2-based templating for system/user/assistant messages with sandboxed rendering and bundled defaults. |
 | `provider_manager.py` | Circuit breaker + health tracking for providers; used for fallback and observability scenarios. |
@@ -27,6 +35,19 @@ The Chat module powers the `/api/v1/chat/completions` endpoint, orchestrating re
 | `chat_metrics.py` | Prometheus/OpenTelemetry metric definitions specific to chat workflows. |
 | `chat_exceptions.py` / `Chat_Deps.py` | Exception types used across the stack for consistent error handling. |
 | `chat_metrics.py`, `document_generator.py`, `Workflows.py` | Secondary features: telemetry, document production, and workflow automation (delegating to `chat_orchestrator`). |
+
+---
+
+## Completion Pipeline Ownership
+`chat_service.py` remains the compatibility facade for existing imports and endpoint wiring. New behavior should be added behind `ChatCompletionPipeline` or one of its focused services:
+
+- `response_processor.py`: non-streaming choice extraction, response content mutation, structured validation, response usage estimates, and assistant-name injection.
+- `moderation_pipeline.py`: output self-monitoring, moderation, topic-monitoring scheduling, and moderation audit/review records.
+- `persistence_service.py`: assistant and tool-message persistence helpers.
+- `tool_execution_service.py`: local tool auto-execution eligibility checks and execution orchestration.
+- `streaming_pipeline.py`: streaming response assembly without changing SSE event shapes.
+- `command_authorization.py`: slash-command authorization decisions for dispatch and command listing.
+- `chat_logging.py`: safe summaries for prompt, content, tool, and exception logs.
 
 ---
 
@@ -56,7 +77,8 @@ FastAPI endpoint (app/api/v1/endpoints/chat.py)
       │                ◦ adapter registry validation + aliasing
       │                ◦ adapter from registry
       │
-      ├─► Streaming or blocking response handling (`streaming_utils`)
+      ├─► Streaming or blocking response handling
+      │       └─ `completion_pipeline`, `streaming_pipeline`, `streaming_utils`
       │
       ├─► Post-processing
       │       └─ persistence (conversation, messages)

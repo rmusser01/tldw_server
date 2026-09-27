@@ -1,6 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render as rtlRender, screen, waitFor, within } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   BuddyShellRenderContextProvider,
@@ -197,6 +197,12 @@ vi.mock("antd", async () => {
 })
 
 import SidepanelPersona from "../sidepanel-persona"
+
+// This suite renders the full 2.5k-line SidepanelPersona route with several
+// large lazily imported panels (VisualPackEditor and friends). Individual
+// tests legitimately take 3-8s of wall time under vitest, so the default 5s
+// test timeout makes the suite flake under load. Assertions are unchanged.
+vi.setConfig({ testTimeout: 30_000 })
 
 const BuddyShellContextProbe = () => {
   const context = useBuddyShellRenderContext()
@@ -436,6 +442,45 @@ describe("SidepanelPersona", () => {
 
     expect(screen.getByTestId("sidepanel-header")).toHaveTextContent("Persona Garden")
     expect(screen.getByText("Persona unavailable")).toBeInTheDocument()
+  })
+
+
+  it("keeps the live session and transcript while changing the persistent editing persona", async () => {
+    mocks.location.search = "?persona_id=research_assistant&tab=live"
+    mocks.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "test" })
+    mocks.fetchWithAuth.mockImplementation((path: string, options: any) => {
+      const data = path.includes("/catalog") ? [
+        { id: "research_assistant", name: "Research Assistant" },
+        { id: "writing-helper", name: "Writing Helper" }
+      ] : path.includes("/profiles/") ? { id: path.split("/").pop(), version: 1, voice_defaults: {}, setup: { status: "completed", version: 1, current_step: "test", completed_steps: ["persona", "voice", "commands", "safety", "test"] } }
+        : path.endsWith("/session") && options?.method === "POST" ? { session_id: "session-research", persona_id: "research_assistant" }
+        : path.includes("/sessions/session-research") ? { session_id: "session-research", persona_id: "research_assistant", turns: [] }
+        : []
+      return Promise.resolve({ ok: true, status: 200, json: async () => data })
+    })
+    render(<SidepanelPersona shell="options" />)
+    await waitForLiveSessionPanel()
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+    const ws = MockWebSocket.instances[0]
+    act(() => ws.emitOpen())
+    await screen.findByRole("button", { name: /Disconnect/ })
+    act(() => ws.emitMessage(JSON.stringify({ event: "assistant_delta", text_delta: "Still here to help" })))
+    act(() => ws.emitMessage(JSON.stringify({ type: "tool_plan", plan_id: "plan-research", steps: [{ idx: 0, tool: "search_notes", description: "Search research notes" }] })))
+    const editor = screen.getByRole("combobox", { name: "Editing persona" })
+    fireEvent.change(editor, { target: { value: "writing-helper" } })
+    await waitFor(() => expect(editor).toHaveValue("writing-helper"))
+    expect(ws.close).not.toHaveBeenCalled()
+    expect(screen.getByText("Still here to help")).toBeVisible()
+    expect(screen.getByTestId("persona-live-identity")).toHaveTextContent("Research Assistant")
+    expect(readBuddyShellContext().active_persona_id).toBe("research_assistant")
+    expect(screen.getByText("Pending tool plan")).toBeVisible()
+    fireEvent.change(screen.getByRole("textbox", { name: "Message persona" }), { target: { value: "Continue the research" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    expect(getSentPayloads(ws)).toContainEqual(expect.objectContaining({ type: "user_message", session_id: "session-research", text: "Continue the research" }))
+    fireEvent.click(screen.getByRole("tab", { name: "Profiles" }))
+    expect(screen.getByRole("combobox", { name: "Editing persona" })).toHaveValue("writing-helper")
+    expect(ws.close).not.toHaveBeenCalled()
   })
 
   it("renders Persona Garden framing while keeping live session controls", async () => {
@@ -1541,7 +1586,15 @@ describe("SidepanelPersona", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument()
     })
-    expect(await screen.findByTestId("persona-visual-pack-editor")).toBeInTheDocument()
+    // The visual pack editor is a large React.lazy chunk; give its first
+    // dynamic import more headroom than the 1s default wait.
+    expect(
+      await screen.findByTestId(
+        "persona-visual-pack-editor",
+        undefined,
+        { timeout: 15_000 }
+      )
+    ).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Visuals" })).toBeInTheDocument()
     expect(screen.queryByRole("tab", { name: "Profiles" })).not.toBeInTheDocument()
     expect(screen.queryByRole("tab", { name: "Commands" })).not.toBeInTheDocument()
@@ -1884,7 +1937,7 @@ describe("SidepanelPersona", () => {
     })
   })
 
-  it("smoke-tests setup from persona choice through starter retry and dry-run handoff", async () => {
+  it.each([false, true])("smoke-tests setup with optimistic versions (concurrent edit: %s) through starter retry and dry-run handoff", async (concurrentEdit) => {
     mocks.location.search = "?persona_id=garden-helper&tab=profiles"
     mocks.getConfig.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",
@@ -1894,6 +1947,7 @@ describe("SidepanelPersona", () => {
 
     let profileVersion = 2
     let starterAttempts = 0
+    let injectedConflict = false
     let currentVoiceDefaults = {
       confirmation_mode: "destructive_only"
     }
@@ -1983,6 +2037,19 @@ describe("SidepanelPersona", () => {
       }
       if (path.includes("/persona/profiles/garden-helper")) {
         if (method === "PATCH") {
+          if (concurrentEdit && !injectedConflict && init?.body?.setup?.current_step === "commands") {
+            profileVersion += 1
+            injectedConflict = true
+          }
+          const expectedVersion = new URL(path, "http://localhost").searchParams.get("expected_version")
+          if (expectedVersion !== null && Number(expectedVersion) !== profileVersion) {
+            return Promise.resolve({
+              ok: false,
+              status: 409,
+              error: "Profile changed; retry assistant defaults",
+              json: async () => ({})
+            })
+          }
           profileVersion += 1
           currentVoiceDefaults = {
             ...currentVoiceDefaults,
@@ -2024,6 +2091,13 @@ describe("SidepanelPersona", () => {
     })
 
     fireEvent.click(screen.getByRole("button", { name: "Save assistant defaults" }))
+
+    if (concurrentEdit) {
+      expect(await screen.findByText("Profile changed; retry assistant defaults")).toBeInTheDocument()
+      expect(currentSetup.current_step).toBe("voice")
+      expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("voice")
+      fireEvent.click(screen.getByRole("button", { name: "Save assistant defaults" }))
+    }
 
     await waitFor(() => {
       expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("commands")
@@ -2699,6 +2773,116 @@ describe("SidepanelPersona", () => {
       screen.getByText("Live session responded. Finish setup when you're ready.")
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Finish with live session" })).toBeInTheDocument()
+  })
+
+  it.each(["completed", "in_progress", "read_failed"])("preserves %s setup when choosing an existing persona", async (status) => {
+    mocks.location.search = "?persona_id=research_assistant&tab=live"
+    const savedSetup = {
+      status,
+      version: 1,
+      run_id: "existing-run",
+      current_step: "test",
+      completed_steps: ["persona", "voice", "commands", "safety"],
+      completed_at: status === "completed" ? "2026-09-05T10:00:00Z" : null,
+      last_test_type: status === "completed" ? "live_session" : null
+    }
+    const profilePatches: unknown[] = []
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { method?: string; body?: any }) => {
+      if (path.includes("/persona/catalog")) {
+        return Promise.resolve({ ok: true, json: async () => [
+          { id: "research_assistant", name: "Research Assistant" },
+          { id: "garden-helper", name: "Garden Helper" }
+        ] })
+      }
+      if (path === "/api/v1/persona/profiles/research_assistant") {
+        return Promise.resolve({ ok: true, json: async () => ({
+          id: "research_assistant", version: 1,
+          setup: { status: "not_started", current_step: "persona" }
+        }) })
+      }
+      if (path === "/api/v1/persona/profiles/garden-helper") {
+        if (init?.method === "PATCH") profilePatches.push(init.body)
+        if (status === "read_failed") {
+          return Promise.resolve({ ok: false, error: "Saved setup could not be loaded", json: async () => ({}) })
+        }
+        return Promise.resolve({ ok: true, json: async () => ({
+          id: "garden-helper", version: 5,
+          voice_defaults: { confirmation_mode: "always", tts_provider: "kokoro" },
+          setup: init?.body?.setup || savedSetup
+        }) })
+      }
+      return Promise.resolve({ ok: true, json: async () => [] })
+    })
+    render(<SidepanelPersona />)
+    fireEvent.click(await screen.findByRole("button", { name: "Use Garden Helper persona" }))
+    await waitFor(() => {
+      if (status === "read_failed") {
+        expect(screen.getByText("Saved setup could not be loaded")).toBeInTheDocument()
+        expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("persona")
+      } else if (status === "completed") {
+        expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument()
+      } else {
+        expect(screen.getByTestId("assistant-setup-current-step")).toHaveTextContent("test")
+      }
+    })
+    expect(profilePatches).toEqual([])
+  })
+
+  it("keeps the live session when setup edits another Persona and starts the next connection without the former resume target", async () => {
+    mocks.location.search = "?persona_id=research_assistant&tab=live"
+    mocks.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "" })
+    let researchReads = 0
+    const connections: Record<string, unknown>[] = []
+    mocks.fetchWithAuth.mockImplementation((path: string, init?: { body?: Record<string, unknown> }) => {
+      let data: unknown = []
+      if (path === "/api/v1/persona/catalog") data = [
+        { id: "research_assistant", name: "Research Assistant" },
+        { id: "garden-helper", name: "Garden Helper" }
+      ]
+      if (path === "/api/v1/persona/profiles/research_assistant") data = {
+        id: "research_assistant", version: 1,
+        buddy_summary: { has_buddy: true, persona_name: "Research Buddy" },
+        setup: { status: ++researchReads === 1 ? "completed" : "not_started", current_step: "persona" }
+      }
+      if (path === "/api/v1/persona/profiles/garden-helper") data = {
+        id: "garden-helper", version: 2, buddy_summary: { has_buddy: true, persona_name: "Garden Buddy" }, setup: { status: "completed", current_step: "test" }
+      }
+      if (path === "/api/v1/persona/session") {
+        connections.push(init?.body || {})
+        data = { session_id: connections.length === 1 ? "old-persona-session" : "new-persona-session", persona: { id: init?.body?.persona_id } }
+      }
+      return Promise.resolve({ ok: true, json: async () => data })
+    })
+    render(<SidepanelPersona />)
+    fireEvent.click(await screen.findByRole("button", { name: "Connect", exact: true }))
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+    act(() => { MockWebSocket.instances[0].emitOpen() })
+    await waitFor(() => expect(readBuddyShellContext().buddy_summary?.persona_name).toBe("Research Buddy"))
+    fireEvent.click(await screen.findByRole("button", { name: "Use Garden Helper persona" }))
+    await waitFor(() => expect(screen.queryByTestId("assistant-setup-overlay")).not.toBeInTheDocument())
+    expect(screen.getByRole("button", { name: /Disconnect/ })).toBeInTheDocument()
+    act(() => { MockWebSocket.instances[0].emitMessage(JSON.stringify({
+      event: "assistant_delta", session_id: "old-persona-session", text_delta: "Late former Persona reply"
+    })) })
+    expect(screen.getByText("Late former Persona reply")).toBeVisible()
+    expect(readBuddyShellContext()).toMatchObject({
+      active_persona_id: "research_assistant", buddy_summary: { persona_name: "Research Buddy" }
+    })
+    expect(MockWebSocket.instances[0].close).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: /Disconnect/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Connect", exact: true }))
+    await waitFor(() => expect(connections).toHaveLength(2))
+    expect(connections[1].persona_id).toBe("garden-helper")
+    expect(connections[1].resume_session_id).toBeUndefined()
+    expect(screen.queryByText("session: old-pers")).not.toBeInTheDocument()
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2))
+    act(() => { MockWebSocket.instances[1].emitOpen() })
+    await waitFor(() => expect(readBuddyShellContext()).toMatchObject({
+      active_persona_id: "garden-helper", buddy_summary: { persona_name: "Garden Buddy" }
+    }))
+    expect(mocks.buddyShellContextSnapshots.some((snapshot) =>
+      snapshot?.active_persona_id === "garden-helper" && snapshot?.buddy_summary?.persona_name === "Research Buddy"
+    )).toBe(false)
   })
 
   it("clears the setup live detour when setup is reset", async () => {
@@ -4656,7 +4840,7 @@ describe("SidepanelPersona", () => {
     expect(screen.getByTestId("live-wake-behavior")).toHaveTextContent("Continuous")
   })
 
-  it("stops wake listening when leaving the Live tab", async () => {
+  it("stops wake listening and pending voice preparation when leaving the Live tab", async () => {
     const originalSpeechRecognition = (window as any).SpeechRecognition
     class MockSpeechRecognition {
       continuous = false
@@ -4766,11 +4950,16 @@ describe("SidepanelPersona", () => {
       await waitFor(() => {
         expect(screen.getByTestId("live-wake-state")).toHaveTextContent("listening")
       })
+      fireEvent.click(screen.getByTestId("live-voice-start-stop"))
+      await waitFor(() => {
+        expect(getSentPayloads(ws).some((payload) => payload.type === "voice_prepare")).toBe(true)
+      })
       ws.send.mockClear()
 
       fireEvent.click(screen.getByRole("tab", { name: "Profiles" }))
 
       await waitFor(() => {
+        expect(getSentPayloads(ws).some((payload) => payload.type === "voice_stop")).toBe(true)
         expect(getSentPayloads(ws)).toEqual(
           expect.arrayContaining([
             expect.objectContaining({
@@ -4877,6 +5066,394 @@ describe("SidepanelPersona", () => {
       ).not.toBeChecked()
     })
   })
+
+  it.each([false, true])(
+    "resumes the routed Buddy session with strict mode %s and hydrates only after explicit Connect",
+    async (strict) => {
+      mocks.location.search =
+        "?persona_id=research_assistant&tab=live&session_id=buddy-session"
+      mocks.getConfig.mockResolvedValue({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user",
+        apiKey: "test"
+      })
+      mocks.fetchWithAuth.mockImplementation((path: string) => {
+        let payload: unknown = {}
+        if (path.includes("/persona/catalog"))
+          payload = [{ id: "research_assistant", name: "Research Assistant" }]
+        else if (path === "/api/v1/persona/session")
+          payload = {
+            session_id: "buddy-session",
+            persona: { id: "research_assistant" }
+          }
+        else if (path.includes("/persona/sessions/buddy-session"))
+          payload = {
+            session_id: "buddy-session",
+            persona_id: "research_assistant",
+            status: "active",
+            pending_plan: {
+              plan_id: "buddy-plan",
+              steps: [
+                {
+                  idx: 0,
+                  tool: "rag_search",
+                  args: { query: "private search" },
+                  description: "Review the original Buddy search"
+                }
+              ]
+            }
+          }
+        else if (path.includes("/persona/sessions?")) payload = []
+        return Promise.resolve({ ok: true, json: async () => payload })
+      })
+      const route = strict ? (
+        <React.StrictMode>
+          <SidepanelPersona />
+        </React.StrictMode>
+      ) : (
+        <SidepanelPersona />
+      )
+      const view = render(route)
+      await screen.findByRole("button", { name: "Connect" })
+      expect(MockWebSocket.instances).toHaveLength(0)
+      expect(
+        mocks.fetchWithAuth.mock.calls.some(
+          ([path]) => path === "/api/v1/persona/session"
+        )
+      ).toBe(false)
+      fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+      expect(mocks.fetchWithAuth).toHaveBeenCalledWith(
+        "/api/v1/persona/session",
+        {
+          method: "POST",
+          body: {
+            persona_id: "research_assistant",
+            resume_session_id: "buddy-session",
+            surface: undefined
+          }
+        }
+      )
+      const ws = MockWebSocket.instances[0]
+      act(() => ws.emitOpen())
+      const plan = await screen.findByText(/Review the original Buddy search/)
+      const checkbox = within(plan.closest("label")!).getByRole("checkbox")
+      expect(checkbox).not.toBeChecked()
+      expect(
+        getSentPayloads(ws).filter((p) => p.type === "confirm_plan")
+      ).toEqual([])
+      expect(window.localStorage.getItem("pending_plan")).toBeNull()
+      fireEvent.click(checkbox)
+      fireEvent.click(screen.getByRole("button", { name: "Confirm plan" }))
+      expect(getSentPayloads(ws)).toContainEqual({
+        type: "confirm_plan",
+        session_id: "buddy-session",
+        plan_id: "buddy-plan",
+        approved_steps: [0]
+      })
+      mocks.location.search =
+        "?persona_id=research_assistant&tab=live&session_id=another-buddy-session"
+      view.rerender(
+        strict ? (
+          <React.StrictMode>
+            <SidepanelPersona />
+          </React.StrictMode>
+        ) : (
+          <SidepanelPersona />
+        )
+      )
+      await waitFor(() =>
+        expect(
+          screen.getAllByRole("button").map((button) => button.textContent)
+        ).toContain("Connect")
+      )
+      expect(ws.close).toHaveBeenCalled()
+      expect(MockWebSocket.instances).toHaveLength(1)
+      act(() =>
+        ws.emitMessage(
+          JSON.stringify({
+            event: "tool_plan",
+            session_id: "buddy-session",
+            plan_id: "late",
+            steps: [
+              {
+                idx: 0,
+                tool: "rag_search",
+                description: "Late old socket plan"
+              }
+            ]
+          })
+        )
+      )
+      expect(screen.queryByText(/Late old socket plan/)).not.toBeInTheDocument()
+    }
+  )
+
+  it("reviews a routed Buddy plan without completing or bypassing other setup tabs", async () => {
+    mocks.location.search =
+      "?persona_id=garden-helper&tab=live&session_id=buddy-review"
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "test"
+    })
+    mocks.fetchWithAuth.mockImplementation((path: string) => {
+      let payload: unknown = {}
+      if (path.includes("/persona/catalog"))
+        payload = [{ id: "garden-helper", name: "Garden Helper" }]
+      else if (path === "/api/v1/persona/session")
+        payload = {
+          session_id: "buddy-review",
+          persona: { id: "garden-helper" }
+        }
+      else if (path.includes("/persona/sessions/buddy-review"))
+        payload = {
+          session_id: "buddy-review",
+          persona_id: "garden-helper",
+          status: "active",
+          pending_plan: {
+            plan_id: "review-plan",
+            steps: [
+              {
+                idx: 0,
+                tool: "rag_search",
+                args: {},
+                description: "Review while setup is incomplete"
+              }
+            ]
+          }
+        }
+      else if (path === "/api/v1/persona/profiles/garden-helper")
+        payload = {
+          id: "garden-helper",
+          version: 1,
+          voice_defaults: {},
+          setup: {
+            status: "in_progress",
+            version: 1,
+            current_step: "test",
+            completed_steps: ["persona", "voice", "commands", "safety"]
+          }
+        }
+      else if (path.includes("/persona/sessions?")) payload = []
+      return Promise.resolve({ ok: true, json: async () => payload })
+    })
+    const view = render(
+      <React.StrictMode>
+        <SidepanelPersona />
+      </React.StrictMode>
+    )
+    await screen.findByText(
+      "Reviewing this Buddy session. Setup is still incomplete."
+    )
+    expect(
+      screen.queryByRole("tab", { name: "Profiles" })
+    ).not.toBeInTheDocument()
+    expect(MockWebSocket.instances).toHaveLength(0)
+    expect(
+      mocks.fetchWithAuth.mock.calls.some(
+        ([path]) => path === "/api/v1/persona/session"
+      )
+    ).toBe(false)
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }))
+    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+    const ws = MockWebSocket.instances[0]
+    act(() => ws.emitOpen())
+    const label = await screen.findByText(/Review while setup is incomplete/)
+    expect(
+      within(label.closest("label")!).getByRole("checkbox")
+    ).not.toBeChecked()
+    act(() =>
+      ws.emitMessage(
+        JSON.stringify({
+          event: "assistant_delta",
+          session_id: "buddy-review",
+          text: "Ready for review"
+        })
+      )
+    )
+    expect(getSentPayloads(ws).some((p) => p.type === "confirm_plan")).toBe(
+      false
+    )
+    expect(
+      mocks.fetchWithAuth.mock.calls.some(
+        ([, init]) => init?.method === "PATCH"
+      )
+    ).toBe(false)
+    expect(
+      mocks.fetchWithAuth.mock.calls.some(([, init]) =>
+        ["setup_completed", "detour_started", "detour_returned"].includes(
+          init?.body?.event_type
+        )
+      )
+    ).toBe(false)
+    fireEvent.click(screen.getByRole("button", { name: "Return to setup" }))
+    await screen.findByTestId("assistant-setup-overlay")
+    expect(
+      screen.getByTestId("assistant-setup-current-step")
+    ).toHaveTextContent("test")
+    mocks.location.search =
+      "?persona_id=garden-helper&tab=profiles&session_id=buddy-review"
+    view.rerender(
+      <React.StrictMode>
+        <SidepanelPersona />
+      </React.StrictMode>
+    )
+    expect(screen.getByTestId("assistant-setup-overlay")).toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        "Reviewing this Buddy session. Setup is still incomplete."
+      )
+    ).not.toBeInTheDocument()
+  })
+
+  it.each(["resolve", "reject"])(
+    "keeps a newer connection pending when the old attempt settles: %s",
+    async (outcome) => {
+      mocks.location.search =
+        "?persona_id=research_assistant&tab=live&session_id=old-session"
+      mocks.getConfig.mockResolvedValue({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user",
+        apiKey: "test"
+      })
+      let resolveOld: (value: unknown) => void = () => {}
+      let rejectOld: (error: Error) => void = () => {}
+      let resolveNew: (value: unknown) => void = () => {}
+      const oldResponse = new Promise((resolve, reject) => {
+        resolveOld = resolve
+        rejectOld = reject
+      })
+      const newResponse = new Promise((resolve) => {
+        resolveNew = resolve
+      })
+      mocks.fetchWithAuth.mockImplementation((path: string, init?: { body?: { resume_session_id?: string } }) => {
+        if (path === "/api/v1/persona/session")
+          return init?.body?.resume_session_id === "old-session"
+            ? oldResponse
+            : newResponse
+        const payload = path.includes("/persona/catalog")
+          ? [{ id: "research_assistant", name: "Research Assistant" }]
+          : path.includes("/persona/sessions?")
+            ? []
+            : {}
+        return Promise.resolve({ ok: true, json: async () => payload })
+      })
+      const view = render(<SidepanelPersona />)
+      fireEvent.click(await screen.findByRole("button", { name: "Connect" }))
+      await waitFor(() =>
+        expect(
+          mocks.fetchWithAuth.mock.calls.some(
+            ([path]) => path === "/api/v1/persona/session"
+          )
+        ).toBe(true)
+      )
+      mocks.location.search =
+        "?persona_id=research_assistant&tab=live&session_id=new-session"
+      view.rerender(<SidepanelPersona />)
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: /Connect$/ })
+        ).not.toBeDisabled()
+      )
+      fireEvent.click(screen.getByRole("button", { name: /Connect$/ }))
+      await waitFor(() =>
+        expect(
+          mocks.fetchWithAuth.mock.calls.filter(
+            ([path]) => path === "/api/v1/persona/session"
+          )
+        ).toHaveLength(2)
+      )
+      await act(async () => {
+        if (outcome === "reject") rejectOld(new Error("Old attempt failed"))
+        else
+          resolveOld({
+            ok: true,
+            json: async () => ({ session_id: "old-session" })
+          })
+      })
+      await act(async () =>
+        fireEvent.click(screen.getByRole("button", { name: /Connect$/ }))
+      )
+      expect(
+        mocks.fetchWithAuth.mock.calls.filter(
+          ([path]) => path === "/api/v1/persona/session"
+        )
+      ).toHaveLength(2)
+      expect(screen.queryByText("Old attempt failed")).not.toBeInTheDocument()
+      await act(async () =>
+        resolveNew({
+          ok: true,
+          json: async () => ({ session_id: "new-session" })
+        })
+      )
+      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1))
+    }
+  )
+
+  it.each(["different-session", "route-changed"])(
+    "rejects stale Buddy handoff hydration: %s",
+    async (scenario) => {
+      mocks.location.search =
+        "?persona_id=research_assistant&tab=live&session_id=original"
+      mocks.getConfig.mockResolvedValue({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user",
+        apiKey: "test"
+      })
+      let resolveDetail: ((value: unknown) => void) | undefined
+      const detail = new Promise((resolve) => {
+        resolveDetail = resolve
+      })
+      mocks.fetchWithAuth.mockImplementation((path: string) => {
+        if (path.includes("/persona/sessions/original"))
+          return Promise.resolve({ ok: true, json: () => detail })
+        let payload: unknown = {}
+        if (path.includes("/persona/catalog"))
+          payload = [{ id: "research_assistant", name: "Research Assistant" }]
+        else if (path === "/api/v1/persona/session")
+          payload = {
+            session_id:
+              scenario === "different-session" ? "replacement" : "original"
+          }
+        else if (path.includes("/persona/sessions?")) payload = []
+        return Promise.resolve({ ok: true, json: async () => payload })
+      })
+      const view = render(<SidepanelPersona />)
+      fireEvent.click(await screen.findByRole("button", { name: "Connect" }))
+      if (scenario === "different-session") {
+        await screen.findAllByText(
+          "The server did not resume the selected Persona session."
+        )
+      } else {
+        await waitFor(() =>
+          expect(
+            mocks.fetchWithAuth.mock.calls.some(([path]) =>
+              String(path).includes("/persona/sessions/original")
+            )
+          ).toBe(true)
+        )
+        mocks.location.search =
+          "?persona_id=research_assistant&tab=live&session_id=new-route"
+        view.rerender(<SidepanelPersona />)
+        await act(async () =>
+          resolveDetail?.({
+            session_id: "original",
+            persona_id: "research_assistant",
+            status: "active",
+            pending_plan: {
+              plan_id: "stale",
+              steps: [
+                { idx: 0, tool: "rag_search", description: "Stale review" }
+              ]
+            }
+          })
+        )
+      }
+      expect(MockWebSocket.instances).toHaveLength(0)
+      expect(screen.queryByText(/Stale review/)).not.toBeInTheDocument()
+    }
+  )
 
   it("creates companion-mode persona sessions with the companion conversation surface", async () => {
     mocks.getConfig.mockResolvedValue({

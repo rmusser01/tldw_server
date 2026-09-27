@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tldw-profile-core"
+version = "0.1.0"
+description = "Canonical Personal Context Profile contract"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.0,<3", "rfc8785==0.1.4"]
+
+[tool.setuptools.package-data]
+tldw_profile_core = ["schemas/*.json", "fixtures/v1/*.json"]
+
+[tool.setuptools.data-files]
+"schemas" = [
+    "schemas/personal-context-v1.json",
+    "schemas/personal-context-v1-meta.json",
+]
+"fixtures/v1" = [
+    "fixtures/v1/01-manifest.json",
+    "fixtures/v1/02-scope.json",
+    "fixtures/v1/03-active-record.json",
+    "fixtures/v1/04-deleted-tombstone.json",
+    "fixtures/v1/05-proposal.json",
+    "fixtures/v1/06-unknown-field-version.json",
+    "fixtures/v1/07-working-context-expiry.json",
+    "fixtures/v1/08-missing-proposal-base.json",
+    "fixtures/v1/09-deleted-with-content.json",
+    "fixtures/v1/10-working-context-missing-expiry.json",
+    "fixtures/v1/11-kind-payload-mismatch.json",
+    "fixtures/v1/12-update-missing-content.json",
+    "fixtures/v1/13-create-missing-content.json",
+    "fixtures/v1/14-pending-89-day-expiry.json",
+    "fixtures/v1/15-proposal-identity-mismatch.json",
+    "fixtures/v1/16-proposal-base-mismatch.json",
+    "fixtures/v1/17-multibyte-canonical-overflow.json",
+    "fixtures/v1/18-pending-deleted-proposed-record.json",
+    "fixtures/v1/19-jcs-conformance.json",
+    "fixtures/v1/20-invalid-manifest-timestamp.json",
+    "fixtures/v1/21-naive-scope-timestamp.json",
+    "fixtures/v1/22-manifest-timestamp-order.json",
+    "fixtures/v1/23-scope-timestamp-order.json",
+    "fixtures/v1/24-record-timestamp-order.json",
+    "fixtures/v1/25-record-expiry-order.json",
+    "fixtures/v1/26-resolved-proposal-timestamp-order.json",
+    "fixtures/v1/27-submillisecond-timestamp.json",
+    "fixtures/v1/28-unsafe-manifest-integer.json",
+    "fixtures/v1/29-proposed-record-timestamp-order.json",
+    "fixtures/v1/30-numeric-epoch-timestamp.json",
+    "fixtures/v1/31-space-datetime-syntax.json",
+    "fixtures/v1/32-lowercase-datetime-syntax.json",
+    "fixtures/v1/33-four-digit-fraction-timestamp.json",
+    "fixtures/v1/34-string-manifest-counter.json",
+    "fixtures/v1/35-boolean-manifest-counter.json",
+    "fixtures/v1/36-integral-float-manifest-counter.json",
+    "fixtures/v1/37-string-no-expiry.json",
+    "fixtures/v1/38-numeric-no-expiry.json",
+    "fixtures/v1/39-string-proposal-confidence.json",
+    "fixtures/v1/40-boolean-proposal-confidence.json",
+    "fixtures/v1/41-integer-proposal-confidence.json",
+    "fixtures/v1/42-integral-float-schema-version.json",
+    "fixtures/v1/43-boolean-schema-version.json",
+    "fixtures/v1/44-string-schema-version.json",
+    "fixtures/v1/45-out-of-range-proposal-confidence.json",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

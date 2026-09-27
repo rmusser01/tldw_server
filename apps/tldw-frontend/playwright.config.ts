@@ -70,6 +70,20 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
     {
+      name: 'standalone-html-firefox',
+      testDir: 'e2e/workflows',
+      testMatch: 'presentation-studio-standalone-html.security.spec.ts',
+      retries: 0,
+      use: { ...devices['Desktop Firefox'] },
+    },
+    {
+      name: 'standalone-html-webkit',
+      testDir: 'e2e/workflows',
+      testMatch: 'presentation-studio-standalone-html.security.spec.ts',
+      retries: 0,
+      use: { ...devices['Desktop Safari'] },
+    },
+    {
       name: 'tier-1',
       testDir: 'e2e/workflows/tier-1-critical',
       use: { ...devices['Desktop Chrome'] },

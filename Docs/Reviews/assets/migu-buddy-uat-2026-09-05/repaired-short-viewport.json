@@ -1,0 +1,31 @@
+{
+  "viewport": {
+    "width": 1280,
+    "height": 360
+  },
+  "dock": {
+    "x": 938.546875,
+    "y": 16,
+    "width": 325.453125,
+    "height": 328,
+    "top": 16,
+    "right": 1264,
+    "bottom": 344,
+    "left": 938.546875
+  },
+  "popover": {
+    "x": 938.546875,
+    "y": 123,
+    "width": 325.453125,
+    "height": 221,
+    "top": 123,
+    "right": 1264,
+    "bottom": 344,
+    "left": 938.546875
+  },
+  "scroll": {
+    "client": 219,
+    "content": 331,
+    "overflow": "auto"
+  }
+}

@@ -3,7 +3,7 @@ import React from "react"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import {
   buildPresentationStudioPatchPayloadFromRecord,
-  mergePresentationStudioDraftWithRemote,
+  mergePresentationStudioDraftWithRemote
 } from "@/store/presentation-studio"
 import { usePresentationStudioStore } from "@/store/presentation-studio"
 
@@ -41,9 +41,16 @@ export const usePresentationStudioAutosave = (): void => {
         const message = toErrorMessage(error)
         if (message.includes("412") || message.includes("precondition_failed")) {
           try {
-            const latest = await tldwClient.getPresentation(projectId)
+            const detail = await tldwClient.getPresentation(projectId)
+            if (detail.record.content_kind !== "structured_slides") {
+              throw new Error("Structured presentation required")
+            }
+            if (!detail.etag) {
+              throw new Error("Presentation autosave conflict response missing ETag")
+            }
+            const latest = detail.record
             const mergedProject = mergePresentationStudioDraftWithRemote(latest, localDraft)
-            const latestEtag = toEtag(latest.version)
+            const latestEtag = detail.etag
             loadProject(mergedProject, {
               etag: latestEtag,
               preserveDirty: true

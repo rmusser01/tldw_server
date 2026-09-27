@@ -7,7 +7,8 @@ import {
   type SetupReadinessStatusResponse,
 } from "@/services/tldw/setup-readiness";
 
-const SETUP_READINESS_ERROR = "Setup readiness could not be loaded.";
+const SETUP_READINESS_ERROR =
+  "Setup readiness could not be loaded. The server may still be starting, or the connection details may be missing - retry once your tldw server is reachable.";
 
 const hasItems = <T,>(items?: T[]) => Array.isArray(items) && items.length > 0;
 
@@ -49,10 +50,10 @@ const mergeProfileFallbacks = (
   return merged;
 };
 
-export const useSetupReadinessSummary = () => {
+export const useSetupReadinessSummary = ({ enabled = true } = {}) => {
   const [status, setStatus] =
     React.useState<SetupReadinessStatusResponse | null>(null);
-  const [loading, setLoading] = React.useState(true);
+  const [loading, setLoading] = React.useState(enabled);
   const [error, setError] = React.useState<string | null>(null);
   const latestRequestId = React.useRef(0);
   const mounted = React.useRef(true);
@@ -65,6 +66,7 @@ export const useSetupReadinessSummary = () => {
   }, []);
 
   const refresh = React.useCallback(async () => {
+    if (!enabled) return null;
     const requestId = latestRequestId.current + 1;
     latestRequestId.current = requestId;
     setLoading(true);
@@ -95,11 +97,16 @@ export const useSetupReadinessSummary = () => {
         setLoading(false);
       }
     }
-  }, []);
+  }, [enabled]);
 
   React.useEffect(() => {
+    if (!enabled) {
+      latestRequestId.current += 1;
+      setLoading(false);
+      return;
+    }
     void refresh();
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   return {
     status,

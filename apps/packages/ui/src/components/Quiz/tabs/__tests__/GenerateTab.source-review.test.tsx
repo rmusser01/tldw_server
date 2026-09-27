@@ -214,3 +214,5 @@ describe("GenerateTab source-review handoff", () => {
     expect(mutateAsync).not.toHaveBeenCalled()
   })
 })
+
+vi.mock("@/services/tldw-server", () => ({ getWebSearchPrompt: vi.fn(), promptForRag: vi.fn(), LEGACY_SERVICE_PROMPT_DEFAULTS: {} }));

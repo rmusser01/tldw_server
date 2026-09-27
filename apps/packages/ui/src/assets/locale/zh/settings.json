@@ -1004,10 +1004,11 @@
     }
   },
   "onboarding": {
+    "loginSettingsError": "无法打开登录设置。请重试。",
     "title": "欢迎 —— 先帮你完成连接",
     "description": "配置服务器和身份认证，我们会在页面内验证连接和 RAG 健康状态。",
     "learnMoreTldw": "了解 tldw 服务器的工作方式",
-    "serverDocsUrl": "https://github.com/rmusser01/tldw_browser_assistant",
+    "serverDocsUrl": "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md",
     "serverUrl": {
       "placeholder": "http://127.0.0.1:8000",
       "help": "示例：http://127.0.0.1:8000",

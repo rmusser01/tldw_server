@@ -8,7 +8,7 @@ Use this profile for development, local debugging, or contributor workflows wher
 
 Prerequisites:
 
-- Python 3.10+
+- Python 3.11+
 - `ffmpeg`
 - Git
 - Bun for the WebUI (`npm` also works as a fallback)

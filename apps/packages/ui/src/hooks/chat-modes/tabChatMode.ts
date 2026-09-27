@@ -1,4 +1,3 @@
-import { promptForRag } from "~/services/tldw-server"
 import { type ChatHistory, type Message, type ToolChoice } from "~/store/option"
 import { generateHistory } from "@/utils/generate-history"
 import { humanMessageFormatter } from "@/utils/human-message"
@@ -9,11 +8,17 @@ import type { ActorSettings } from "@/types/actor"
 import { maybeInjectActorMessage } from "@/utils/actor"
 import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
+  getRequiredServicePrompt,
   runChatPipeline,
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import {
+  loadServicePromptSnapshot,
+  renderServicePromptPart,
+  type ServicePromptSnapshot
+} from "@/services/service-prompts"
 
 type TabChatModeParams = {
   selectedModel: string
@@ -27,6 +32,8 @@ type TabChatModeParams = {
   setIsProcessing: (value: boolean) => void
   setStreaming: (value: boolean) => void
   setAbortController: (controller: AbortController | null) => void
+  releaseAbortControllerIfOwned?: (signal: AbortSignal) => boolean
+  discardCurrentTurnOnAbort?: () => boolean
   historyId: string | null
   setHistoryId: (id: string) => void
   systemPromptAppendix?: string
@@ -42,6 +49,7 @@ type TabChatModeParams = {
   historyForModel?: ChatHistory
   regenerateFromMessage?: Message
   documents: ChatDocuments
+  servicePromptSnapshot?: ServicePromptSnapshot
 }
 
 const tabChatModeDefinition: ChatModeDefinition<TabChatModeParams> = {
@@ -75,42 +83,32 @@ const tabChatModeDefinition: ChatModeDefinition<TabChatModeParams> = {
     parentMessageId: ctx.resolvedAssistantParentMessageId ?? null
   }),
   preparePrompt: async (ctx) => {
-    const { ragPrompt: systemPrompt } = await promptForRag()
-    const resolvedSystemPrompt = appendSystemPromptSuffix(
-      systemPrompt,
-      ctx.systemPromptAppendix
+    const answerPrompt = getRequiredServicePrompt(
+      ctx.servicePromptSnapshot,
+      "chat.rag.answer"
     )
     const context = await getTabContents(ctx.documents)
-
-    let humanMessage = await humanMessageFormatter({
-      content: [
-        {
-          text: resolvedSystemPrompt
-            .replace("{context}", context)
-            .replace("{question}", ctx.message),
-          type: "text"
-        }
-      ],
+    const renderedSystemPrompt = renderServicePromptPart(
+      answerPrompt.definition,
+      "template",
+      answerPrompt.parts.template,
+      { context, question: ctx.message }
+    )
+    const resolvedSystemPrompt = appendSystemPromptSuffix(
+      renderedSystemPrompt,
+      ctx.systemPromptAppendix
+    )
+    const content = ctx.image.length > 0
+      ? [
+          { text: ctx.message, type: "text" as const },
+          { image_url: ctx.image, type: "image_url" as const }
+        ]
+      : [{ text: resolvedSystemPrompt, type: "text" as const }]
+    const humanMessage = await humanMessageFormatter({
+      content,
       model: ctx.selectedModel,
       useOCR: ctx.useOCR
     })
-
-    if (ctx.image.length > 0) {
-      humanMessage = await humanMessageFormatter({
-        content: [
-          {
-            text: ctx.message,
-            type: "text"
-          },
-          {
-            image_url: ctx.image,
-            type: "image_url"
-          }
-        ],
-        model: ctx.selectedModel,
-        useOCR: ctx.useOCR
-      })
-    }
 
     let applicationChatHistory = generateHistory(
       ctx.historyForModel ?? ctx.history,
@@ -144,17 +142,34 @@ export const tabChatMode = async (
   params: Omit<TabChatModeParams, "documents">
 ): Promise<ChatSubmitResult> => {
   console.log("Using tabChatMode")
-  return runChatPipeline(
-    tabChatModeDefinition,
-    message,
-    image,
-    isRegenerate,
-    messages,
-    history,
-    signal,
-    {
-      ...params,
-      documents
-    }
-  )
+  const ownsServicePromptSnapshot = !params.servicePromptSnapshot
+  const servicePromptSnapshot =
+    params.servicePromptSnapshot ??
+    (await loadServicePromptSnapshot(["chat.rag.answer"], { signal }))
+  const executionSignal = servicePromptSnapshot.scopeSignal
+  const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal
+  try {
+    getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
+    return await runChatPipeline(
+      tabChatModeDefinition,
+      message,
+      image,
+      isRegenerate,
+      messages,
+      history,
+      executionSignal,
+      {
+        ...params,
+        documents,
+        servicePromptSnapshot,
+        discardCurrentTurnOnAbort: () =>
+          scopeInvalidatedSignal.aborted,
+        releaseAbortControllerIfOwned: params.releaseAbortControllerIfOwned
+          ? () => params.releaseAbortControllerIfOwned!(signal)
+          : undefined
+      }
+    )
+  } finally {
+    if (ownsServicePromptSnapshot) servicePromptSnapshot.release()
+  }
 }

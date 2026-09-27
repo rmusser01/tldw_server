@@ -1,26 +1,34 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app
-
 
 class _StubDB:
     def __init__(self):
         self.client_id = "test-client"
 
     def get_prompt_with_project(self, prompt_id: int, include_deleted: bool = False):
-        return {"id": prompt_id, "project_id": 321}
+        return {"id": prompt_id, "project_id": 321, "project_user_id": "1"}
+
+    def get_test_cases_by_ids(self, test_case_ids: list[int]):
+        return [
+            {"id": test_case_id, "project_id": 321}
+            for test_case_id in test_case_ids
+        ]
 
     def create_optimization(self, **kwargs):
 
-        return {"id": 555, **kwargs}
+        return {"id": 555, "uuid": "optimization-555", **kwargs}
 
     def update_optimization(self, optimization_id: int, updates: dict):
-        return {"id": optimization_id, **updates}
+        return {
+            "id": optimization_id,
+            "uuid": f"optimization-{optimization_id}",
+            **updates,
+        }
 
 
 @pytest.fixture
-def override_db_dependency(monkeypatch):
+def override_db_dependency(app, monkeypatch):
     from tldw_Server_API.app.api.v1.API_Deps import prompt_studio_deps as deps
 
     async def _override_db():
@@ -38,7 +46,7 @@ def override_db_dependency(monkeypatch):
     app.dependency_overrides.pop(deps.get_prompt_studio_db, None)
 
 
-def test_create_optimization_includes_request_id_in_job_payload(monkeypatch, override_db_dependency):
+def test_create_optimization_includes_request_id_in_job_payload(app, monkeypatch, override_db_dependency):
 
 
     # Force TEST_MODE for deterministic behavior (skip background task spawn)
@@ -87,3 +95,4 @@ def test_create_optimization_includes_request_id_in_job_payload(monkeypatch, ove
     )
     assert r.status_code in (200, 201), r.text
     assert captured.get("payload", {}).get("request_id") == "req-ps-create-001"
+    assert captured.get("payload", {}).get("optimization_uuid") == "optimization-555"

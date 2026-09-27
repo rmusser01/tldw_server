@@ -1,0 +1,460 @@
+{
+  "date": "2026-09-06",
+  "backend_revision": "cdf099fff7e08fde1596ec73b98b2af4cfc8db62",
+  "frontend_revision_at_initial_observation": "73640bbb89",
+  "backend_voice_code_unchanged_by_rebase": true,
+  "window_utc": {
+    "start": "2026-09-06T16:47:07.969Z",
+    "end": "2026-09-06T16:47:15.230Z"
+  },
+  "initial_frame": {
+    "state": "idle",
+    "complete": true,
+    "natural_width": 96
+  },
+  "final_frame_count": 0,
+  "visible_error": "Visual pack did not load \u2014 rate_limited",
+  "request_metadata": [
+    {
+      "server_local_time": "2026-09-06 09:47:02.688",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b/assets/90ab636d20774ca8aeac364e9e2544c7/content",
+      "status": 200,
+      "duration_ms": 12
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:02.931",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b/assets/2a888ad08bc74678a41634f8853fc7f6/content",
+      "status": 200,
+      "duration_ms": 8
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:04.528",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b/assets/2aca9e9be7434526bbb3477a2c74f613/content",
+      "status": 200,
+      "duration_ms": 8
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:04.762",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b/assets/5f01a304d81a4e1e94aa91f712b18dea/content",
+      "status": 200,
+      "duration_ms": 7
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:08.388",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 10
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:08.390",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 13
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:08.400",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 6
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:08.652",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 12
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:08.654",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 14
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:08.665",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 8
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:08.905",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 12
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:08.908",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 15
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:08.919",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 7
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:09.149",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 12
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:09.151",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 14
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:09.161",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 6
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:09.389",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 11
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:09.390",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 11
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:09.400",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 7
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:09.626",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 11
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:09.628",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 13
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:09.639",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 7
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:09.868",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 11
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:09.871",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 14
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:09.881",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 7
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:10.330",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 11
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:10.332",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 14
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:10.344",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 8
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:10.580",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 12
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:10.582",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 14
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:10.593",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 7
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:10.833",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 12
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:10.836",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 15
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:10.847",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 7
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:11.092",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 13
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:11.094",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 16
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:11.110",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 9
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:11.349",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 15
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:11.350",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 17
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:11.365",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 10
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:11.606",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 15
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:11.609",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 18
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:11.623",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 9
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:11.862",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 16
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:11.862",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 17
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:11.889",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 10
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:12.128",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 15
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:12.131",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 18
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:12.145",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 10
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:12.394",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 13
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:12.397",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 17
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:12.413",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 9
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:12.663",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 15
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:12.667",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 19
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:12.680",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 9
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:12.938",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 14
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:12.941",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 17
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:12.954",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 9
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:13.886",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 16
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:13.889",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 19
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:13.906",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 10
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:14.162",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 16
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:14.177",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 33
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:14.235",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 15
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:14.496",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 19
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:14.499",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 22
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:14.514",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 10
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:14.771",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 200,
+      "duration_ms": 15
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:14.774",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 200,
+      "duration_ms": 18
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:14.789",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs/30a938ed-3fbf-4232-a41f-8f6d372f036b",
+      "status": 200,
+      "duration_ms": 9
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:15.039",
+      "path": "/api/v1/persona/profiles/e19c631e-e2ac-452d-9935-293af03cee4e/visual-packs",
+      "status": 429,
+      "duration_ms": 6
+    },
+    {
+      "server_local_time": "2026-09-06 09:47:15.040",
+      "path": "/api/v1/persona/live/sessions",
+      "status": 429,
+      "duration_ms": 5
+    }
+  ],
+  "cause": "Not established; host lifetime/dependencies require instrumentation during reproduction.",
+  "after_reload_and_reconnect": {
+    "idle_frame_loaded": true,
+    "screenshot_sampling_reproduced_loop": false,
+    "text_provider_reply_completed": true,
+    "text_reply_visual_state_observed": "idle"
+  },
+  "full_human_voice_visual_sequence_qualified": false,
+  "follow_up": "TASK-13211"
+}

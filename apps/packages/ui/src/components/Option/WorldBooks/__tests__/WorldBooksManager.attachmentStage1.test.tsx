@@ -1,6 +1,6 @@
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { WorldBooksManager } from "../Manager"
 
@@ -152,15 +152,19 @@ type CharacterRecord = { id: number; name: string }
 describe("WorldBooksManager attachment stage-1 scalable views", () => {
   let currentCharacters: CharacterRecord[]
   let currentAttachmentsByBook: Record<number, CharacterRecord[]>
+  let attachmentQueryError: Error | null
+  let invalidateQueriesMock: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     vi.clearAllMocks()
     mockBreakpoints.md = true
     currentCharacters = []
     currentAttachmentsByBook = { 1: [] }
+    attachmentQueryError = null
+    invalidateQueriesMock = vi.fn()
 
     useQueryClientMock.mockReturnValue({
-      invalidateQueries: vi.fn()
+      invalidateQueries: invalidateQueriesMock
     })
 
     useMutationMock.mockImplementation((opts: any) => makeUseMutationResult(opts))
@@ -175,7 +179,12 @@ describe("WorldBooksManager attachment stage-1 scalable views", () => {
         return makeUseQueryResult({ data: currentCharacters, status: "success" })
       }
       if (key === "tldw:worldBookAttachments") {
-        return makeUseQueryResult({ data: currentAttachmentsByBook, isLoading: false })
+        return makeUseQueryResult({
+          data: currentAttachmentsByBook,
+          isLoading: false,
+          isError: attachmentQueryError != null,
+          error: attachmentQueryError
+        })
       }
       return makeUseQueryResult({})
     })
@@ -291,7 +300,65 @@ describe("WorldBooksManager attachment stage-1 scalable views", () => {
     await Promise.resolve()
 
     expect(tldwClientMock.listCharacterWorldBooks).toHaveBeenCalledTimes(1)
-    expect(tldwClientMock.listCharacterWorldBooks).toHaveBeenCalledWith(1)
+    expect(tldwClientMock.listCharacterWorldBooks).toHaveBeenCalledWith(1, true)
+  })
+
+  it("retains disabled attachment metadata when the relationship reader includes disabled links", async () => {
+    currentCharacters = [
+      { id: 1, name: "Alice" },
+      { id: 2, name: "Bob" }
+    ]
+    tldwClientMock.listCharacterWorldBooks.mockImplementation(
+      async (characterId: number, includeDisabled?: boolean) =>
+        includeDisabled
+          ? [{ world_book_id: 1, attachment_enabled: characterId === 1, attachment_priority: characterId }]
+          : []
+    )
+
+    render(<WorldBooksManager />)
+
+    const attachmentQueryCall = useQueryMock.mock.calls.find((call) => {
+      const queryKey = Array.isArray(call?.[0]?.queryKey) ? call[0].queryKey : []
+      return queryKey[0] === "tldw:worldBookAttachments"
+    })
+
+    await expect(attachmentQueryCall?.[0]?.queryFn()).resolves.toEqual({
+      1: [
+        { id: 1, name: "Alice", attachment_enabled: true, attachment_priority: 1 },
+        { id: 2, name: "Bob", attachment_enabled: false, attachment_priority: 2 }
+      ]
+    })
+  })
+
+  it("surfaces a relationship transport failure instead of reporting no attachments", async () => {
+    currentCharacters = [{ id: 1, name: "Alice" }]
+    const transportError = Object.assign(new Error("service unavailable"), { status: 503 })
+    tldwClientMock.listCharacterWorldBooks.mockRejectedValue(transportError)
+
+    render(<WorldBooksManager />)
+
+    const attachmentQueryCall = useQueryMock.mock.calls.find((call) => {
+      const queryKey = Array.isArray(call?.[0]?.queryKey) ? call[0].queryKey : []
+      return queryKey[0] === "tldw:worldBookAttachments"
+    })
+
+    await expect(attachmentQueryCall?.[0]?.queryFn()).rejects.toBe(transportError)
+  })
+
+  it("treats a missing character relationship as no association", async () => {
+    currentCharacters = [{ id: 1, name: "Alice" }]
+    tldwClientMock.listCharacterWorldBooks.mockRejectedValue(
+      Object.assign(new Error("not found"), { status: 404 })
+    )
+
+    render(<WorldBooksManager />)
+
+    const attachmentQueryCall = useQueryMock.mock.calls.find((call) => {
+      const queryKey = Array.isArray(call?.[0]?.queryKey) ? call[0].queryKey : []
+      return queryKey[0] === "tldw:worldBookAttachments"
+    })
+
+    await expect(attachmentQueryCall?.[0]?.queryFn()).resolves.toEqual({})
   })
 
   it("keeps attachment hydration disabled until attachment tooling is opened", async () => {
@@ -310,6 +377,12 @@ describe("WorldBooksManager attachment stage-1 scalable views", () => {
 
     expect(attachmentQueryCalls.at(-1)?.[0]?.enabled).toBe(false)
 
+    const characterQueryCalls = useQueryMock.mock.calls.filter((call) => {
+      const queryKey = Array.isArray(call?.[0]?.queryKey) ? call[0].queryKey : []
+      return queryKey[0] === "tldw:listCharactersForWB"
+    })
+    expect(characterQueryCalls.at(-1)?.[0]?.enabled).toBe(false)
+
     // Open Tools dropdown then click Relationship Matrix
     await user.click(screen.getByRole("button", { name: "Tools" }))
     await user.click(await screen.findByText("Relationship Matrix"))
@@ -320,5 +393,55 @@ describe("WorldBooksManager attachment stage-1 scalable views", () => {
     })
 
     expect(updatedAttachmentQueryCalls.at(-1)?.[0]?.enabled).toBe(true)
+
+    const updatedCharacterQueryCalls = useQueryMock.mock.calls.filter((call) => {
+      const queryKey = Array.isArray(call?.[0]?.queryKey) ? call[0].queryKey : []
+      return queryKey[0] === "tldw:listCharactersForWB"
+    })
+    expect(updatedCharacterQueryCalls.at(-1)?.[0]?.enabled).toBe(true)
+  })
+
+  it("loads attachment candidates through the corrected character collection client", async () => {
+    currentCharacters = [{ id: 6, name: "Alice" }]
+    tldwClientMock.listCharacters.mockResolvedValue(currentCharacters)
+
+    render(<WorldBooksManager />)
+
+    const characterQueryCall = useQueryMock.mock.calls.find((call) => {
+      const queryKey = Array.isArray(call?.[0]?.queryKey) ? call[0].queryKey : []
+      return queryKey[0] === "tldw:listCharactersForWB"
+    })
+    const characterQuery = characterQueryCall?.[0]
+
+    expect(characterQuery?.queryFn).toBeTypeOf("function")
+    await expect(characterQuery.queryFn()).resolves.toEqual(currentCharacters)
+    expect(tldwClientMock.listCharacters).toHaveBeenCalledTimes(1)
+  })
+
+  it("retries failed attachment hydration through the existing query client", async () => {
+    attachmentQueryError = new Error("service unavailable")
+
+    render(<WorldBooksManager />)
+    fireEvent.click(screen.getByText("Arcana"))
+    fireEvent.click(await screen.findByRole("tab", { name: "Attachments" }))
+    const attachmentsPanel = within(
+      await screen.findByRole("tabpanel", { name: "Attachments" })
+    )
+    expect(await attachmentsPanel.findByRole("alert")).toHaveTextContent(
+      "Unable to load character attachments. Try again."
+    )
+    const retryButton = await attachmentsPanel.findByRole("button", { name: "Try again" })
+    expect(retryButton).toBeVisible()
+    expect(retryButton).toBeEnabled()
+    fireEvent.click(retryButton)
+
+    await waitFor(() => {
+      expect(invalidateQueriesMock).toHaveBeenCalledWith({
+        queryKey: ["tldw:listCharactersForWB"]
+      })
+      expect(invalidateQueriesMock).toHaveBeenCalledWith({
+        queryKey: ["tldw:worldBookAttachments"]
+      })
+    })
   })
 })

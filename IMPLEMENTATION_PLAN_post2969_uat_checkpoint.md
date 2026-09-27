@@ -1,0 +1,29 @@
+# Post-PR2969 UAT repair checkpoint
+
+Backlog: TASK13260.270. Branch: `codex/uat295-postgres-notes-20260919`.
+
+## Stage 1: Finish targeted acceptance
+**Goal**: Close remaining application findings, retaining UAT261 by user direction.
+**Success Criteria**: UAT290 normal/Character tab, draft, recovery and account controls pass; UAT332 selected/default Character account leaks (including UAT334) are repaired and verified.
+**Tests**: Causal session-storage regressions, adjacent composer/account tests, immutable native PostgreSQL acceptance.
+**Status**: Complete
+
+## Stage 2: Verify combined repairs
+**Goal**: Review and validate the complete change against latest dev.
+**Success Criteria**: Affected frontend/backend tests pass with real PostgreSQL; no new static or Bandit findings; independent review clear.
+**Tests**: Changed and adjacent test suites; ESLint/TypeScript baseline comparison; touched Python Bandit.
+**Status**: Complete
+
+## Stage 3: Publish and review
+**Goal**: Publish the checkpoint PR and address Qodo/CI feedback.
+**Success Criteria**: Latest dev included, generated captures excluded, actionable comments resolved and required checks green.
+**Tests**: PR check results and focused regressions for any review fixes.
+**Status**: In Progress
+
+PR2970 is published against dev1dfdd819b6. Qodo repairs UAT340–344 have passing regressions and independent review under TASK13260.270.2. Native334/336 acceptance passes. All seven required hosted gates pass on8ae3599714, including the API contract and pre-commit repairs. UAT347–350 repair advisory coverage ownership/reporting, CI matrix omissions and outdated frontend contracts/fixtures. Complete WebUI coverage now1483passed/0failed/14unchangedskips;195workflow/affected regression checks pass; TypeScript93diagnostics match the baseline exactly. Local review is clear. The follow-up push needs hosted checks and any new Qodo feedback addressed before merge.
+
+## Stage 4: Merge and resume
+**Goal**: Merge normally and resume the fresh four-cell A/B/C matrix.
+**Success Criteria**: Requester-written Change summary satisfies the repository gate; merge verified; next matrix starts from the integrated revision.
+**Tests**: Merge ancestry and fresh profile/source manifests.
+**Status**: Not Started

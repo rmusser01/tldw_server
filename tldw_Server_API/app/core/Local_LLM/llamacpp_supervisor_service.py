@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import weakref
 from datetime import UTC, datetime
 from ipaddress import ip_address
@@ -11,8 +12,6 @@ from typing import Any, Callable, Protocol
 from uuid import uuid4
 
 from tldw_Server_API.app.core.Local_LLM import handler_utils, llamacpp_inventory_service
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 from tldw_Server_API.app.core.Local_LLM.llamacpp_process_runner import (
     LlamaCppProcessRunner,
     validate_profile_server_args,
@@ -30,12 +29,18 @@ from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import (
 from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppPortPolicy,
     LlamaCppProfile,
-    LlamaCppProfileMode,
     LlamaCppProfileConflictError,
+    LlamaCppProfileMode,
     LlamaCppProfileNotFoundError,
     LlamaCppRuntime,
     LlamaCppRuntimeState,
 )
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
+
+from .llamacpp_snapshot_models import OperationReceipt, SnapshotRequest
+from .llamacpp_snapshot_operations import SnapshotOperationError, SnapshotOperations, disk_call
+from .llamacpp_snapshot_store import SnapshotStore
 
 RunnerFactory = Callable[[LlamaCppConfig, str], Any]
 
@@ -60,6 +65,8 @@ class LlamaCppProfileCreateInput(Protocol):
     restart_policy: dict[str, object]
     provider_alias: str | None
     tags: list[str]
+    snapshots_enabled: bool
+    snapshot_retention: int
 
 
 class LlamaCppProfileUpdateInput(Protocol):
@@ -101,9 +108,14 @@ class LlamaCppSupervisor:
         self._store_lock = asyncio.Lock()
         self._start_lock = asyncio.Lock()
         self._paused: set[str] = set()
+        self._snapshots: SnapshotOperations | None = None
+        self._snapshot_init_lock = asyncio.Lock()
+        self._snapshot_cleanup_lock = asyncio.Lock()
+        self._snapshot_launches: list[tuple[str, str, Any]] = []
+        self._shutting_down = False
 
     @classmethod
-    def from_manager(cls, manager: Any) -> "LlamaCppSupervisor":
+    def from_manager(cls, manager: Any) -> LlamaCppSupervisor:
         config = getattr(getattr(manager, "config", None), "llamacpp", None)
         if config is None:
             raise ServerError("Llama.cpp config is not available.")
@@ -122,6 +134,7 @@ class LlamaCppSupervisor:
         profile_id: str,
         request: LlamaCppProfileCreateInput,
     ) -> LlamaCppProfile:
+        self._guard_snapshots(profile_id)
         profile = LlamaCppProfile(
             profile_id=profile_id,
             name=request.name,
@@ -138,6 +151,8 @@ class LlamaCppSupervisor:
             restart_policy=dict(request.restart_policy),
             provider_alias=request.provider_alias,
             tags=list(request.tags),
+            snapshots_enabled=request.snapshots_enabled,
+            snapshot_retention=request.snapshot_retention,
         )
         self._validate_profile_launch_definition(profile)
         self._validate_runtime_port_available(profile)
@@ -152,6 +167,7 @@ class LlamaCppSupervisor:
         profile_id: str,
         request: LlamaCppProfileUpdateInput,
     ) -> LlamaCppProfile:
+        self._guard_snapshots(profile_id)
         existing = self._require_profile(profile_id)
         updates = {field: getattr(request, field) for field in request.model_fields_set}
         if "server_args" in updates and updates["server_args"] is not None:
@@ -170,6 +186,17 @@ class LlamaCppSupervisor:
             return await self._delete_profile_unlocked(profile_id)
 
     async def _delete_profile_unlocked(self, profile_id: str) -> bool:
+        self._guard_snapshots(profile_id)
+        snapshot_root = self.store.path.parent.resolve() / "llamacpp-snapshots"
+        storage_absent = self._snapshots is None and await disk_call(
+            SnapshotStore.profile_state_proven_absent,
+            snapshot_root,
+            profile_id,
+        )
+        if not storage_absent:
+            snapshots = await self._snapshot_service()
+            if await disk_call(snapshots.store.has_retained_state, profile_id):
+                raise SnapshotOperationError("delete_snapshots_first")
         runner = self._runners.get(profile_id)
         if runner is not None:
             await runner.stop()
@@ -182,6 +209,7 @@ class LlamaCppSupervisor:
             return await self._start_profile_unlocked(profile_id)
 
     async def _start_profile_unlocked(self, profile_id: str, *, restart: bool = False) -> LlamaCppRuntime:
+        self._guard_snapshots(profile_id)
         profile = self._require_profile(profile_id)
         if not profile.enabled:
             profile = await self._store_upsert(profile.model_copy(update={"enabled": True}))
@@ -196,13 +224,23 @@ class LlamaCppSupervisor:
             self._validate_runtime_port_available(profile)
             resolved = self._validate_profile_launch_definition(profile)
             launch_profile = profile.model_copy(update={"server_args": resolved.server_args})
-            runtime = await runner.start(resolved.model_path, launch_profile)
+            if profile.snapshots_enabled:
+                runner.snapshot_store = (await self._snapshot_service()).store
+            await self._cleanup_dead_snapshot_launches()
+            try:
+                runtime = await runner.start(resolved.model_path, launch_profile)
+            finally:
+                if getattr(runner, "snapshot_process", None) is not None and getattr(runner, "snapshot_working", None):
+                    launch = (profile_id, runner.snapshot_generation, runner.snapshot_process)
+                    if launch not in self._snapshot_launches:
+                        self._snapshot_launches.append(launch)
             if profile.last_runtime_failure:
                 await self._store_upsert(profile.model_copy(update={"last_runtime_failure": {}}))
             return runtime
 
     async def stop_profile(self, profile_id: str, disable: bool = False) -> LlamaCppRuntime:
         async with self._lock_for(profile_id):
+            self._guard_snapshots(profile_id, stop=True)
             profile = self._require_profile(profile_id)
             if disable and profile.enabled:
                 await self._store_upsert(profile.model_copy(update={"enabled": False}))
@@ -210,10 +248,13 @@ class LlamaCppSupervisor:
             runner = self._runners.get(profile_id)
             if runner is None:
                 return LlamaCppRuntime(profile_id=profile_id, state=LlamaCppRuntimeState.STOPPED, message="Stopped")
-            return await runner.stop()
+            result = await runner.stop()
+            await self._cleanup_dead_snapshot_launches()
+            return result
 
     async def pause_profile(self, profile_id: str) -> LlamaCppRuntime:
         async with self._lock_for(profile_id):
+            self._guard_snapshots(profile_id)
             profile = self._require_profile(profile_id)
             if profile.enabled:
                 await self._store_upsert(profile.model_copy(update={"enabled": False}))
@@ -225,6 +266,7 @@ class LlamaCppSupervisor:
 
     async def resume_profile(self, profile_id: str) -> LlamaCppRuntime:
         async with self._lock_for(profile_id):
+            self._guard_snapshots(profile_id)
             profile = self._require_profile(profile_id)
             if not profile.enabled:
                 await self._store_upsert(profile.model_copy(update={"enabled": True}))
@@ -322,6 +364,12 @@ class LlamaCppSupervisor:
             return await asyncio.to_thread(runner.tail_logs, lines)
 
     async def shutdown(self) -> None:
+        self._shutting_down = True
+        # A request can be constructing the service while shutdown starts. Its
+        # owner must become visible before we drain admissions or stop children.
+        async with self._snapshot_init_lock:
+            if self._snapshots is not None:
+                await self._snapshots.drain()
         failures: list[tuple[str, BaseException]] = []
         for profile_id in list(self._runners):
             try:
@@ -331,13 +379,115 @@ class LlamaCppSupervisor:
                         await runner.stop()
             except Exception as exc:  # noqa: BLE001 - shutdown should attempt every owned runner.
                 failures.append((profile_id, exc))
+        await self._cleanup_dead_snapshot_launches()
+        if self._snapshots is not None and not self._snapshot_launches:
+            await disk_call(self._snapshots.store.close)
         if failures:
             failed_ids = ", ".join(profile_id for profile_id, _exc in failures)
             raise RuntimeError(f"Failed to stop llama.cpp runner(s): {failed_ids}") from failures[0][1]
 
     def cleanup_sync(self) -> None:
+        if self._snapshots is not None:
+            self._shutting_down = True
+            self._snapshots.accepting = False
         for runner in list(self._runners.values()):
             runner.cleanup_sync()
+        # The fallback sends signals only. Keep the ownership fence until confirmed death.
+        if (
+            self._snapshots is not None
+            and not self._snapshots.tasks
+            and all(process.returncode is not None for _, _, process in self._snapshot_launches)
+        ):
+            self._snapshots.store.close()
+
+    def _guard_snapshots(self, profile_id: str, *, stop: bool = False):
+        if self._shutting_down:
+            raise SnapshotOperationError("server_shutting_down", 503)
+        if self._snapshots is not None:
+            self._snapshots.guard_lifecycle(profile_id, stop=stop)
+
+    async def _snapshot_service(self) -> SnapshotOperations:
+        async with self._snapshot_init_lock:
+            if self._snapshots is None:
+                if self._shutting_down:
+                    raise SnapshotOperationError("server_shutting_down", 503)
+                root = self.store.path.parent.resolve() / "llamacpp-snapshots"
+
+                def create():
+                    store = SnapshotStore(root)
+                    try:
+                        concurrency = int(os.environ.get("TLDW_LLAMACPP_SNAPSHOT_CONCURRENCY", "1"))
+                        if not 1 <= concurrency <= 32:
+                            raise ValueError("snapshot concurrency must be 1..32")
+                        return SnapshotOperations(store, concurrency=concurrency)
+                    except BaseException:
+                        store.close()
+                        raise
+
+                creation = asyncio.create_task(asyncio.to_thread(create))
+                try:
+                    self._snapshots = await asyncio.shield(creation)
+                except asyncio.CancelledError:
+                    # A completed factory owns a lock descriptor: retain it for shutdown
+                    # even when the request that initialized it has disconnected.
+                    while not creation.done():
+                        try:
+                            await asyncio.shield(creation)
+                        except asyncio.CancelledError:
+                            continue
+                    self._snapshots = creation.result()
+                    raise
+            return self._snapshots
+
+    async def _cleanup_dead_snapshot_launches(self):
+        if self._snapshots is None:
+            return
+        async with self._snapshot_cleanup_lock:
+            # Registration is synchronous on this event loop. Remove only the
+            # proven-dead entry after cleanup; never replace a ledger to which
+            # another profile may have appended while disk work was awaited.
+            for launch in tuple(self._snapshot_launches):
+                profile_id, generation, process = launch
+                if process.returncode is None:
+                    continue
+                await disk_call(self._snapshots.store.cleanup_launch, profile_id, generation)
+                self._snapshot_launches.remove(launch)
+                if self._snapshots.quarantined.get(profile_id) == generation:
+                    self._snapshots.quarantined.pop(profile_id, None)
+
+    async def snapshot_slots(self, profile_id: str) -> dict[str, object]:
+        async with self._lock_for(profile_id):
+            profile = self._require_profile(profile_id)
+            return await (await self._snapshot_service()).slots(profile, self._runners.get(profile_id))
+
+    async def snapshot_catalog(self, profile_id: str, offset: int, limit: int) -> dict[str, object]:
+        profile = self._require_profile(profile_id)
+        return await (await self._snapshot_service()).catalog(profile, self._runners.get(profile_id), offset, limit)
+
+    async def save_snapshot(self, profile_id: str, request: SnapshotRequest, actor_id: str) -> OperationReceipt:
+        async with self._lock_for(profile_id):
+            profile = self._require_profile(profile_id)
+            return await (await self._snapshot_service()).admit(
+                profile, self._runners.get(profile_id), request, actor_id, "save"
+            )
+
+    async def restore_snapshot(
+        self, profile_id: str, snapshot_id: str, request: SnapshotRequest, actor_id: str
+    ) -> OperationReceipt:
+        async with self._lock_for(profile_id):
+            profile = self._require_profile(profile_id)
+            return await (await self._snapshot_service()).admit(
+                profile, self._runners.get(profile_id), request, actor_id, "restore", snapshot_id
+            )
+
+    async def delete_snapshot(self, profile_id: str, snapshot_id: str) -> None:
+        async with self._lock_for(profile_id):
+            self._require_profile(profile_id)
+            await (await self._snapshot_service()).delete(profile_id, snapshot_id)
+
+    async def snapshot_operation(self, profile_id: str, operation_id: str) -> OperationReceipt:
+        self._require_profile(profile_id)
+        return await (await self._snapshot_service()).operation(profile_id, operation_id)
 
     async def ensure_default_profile_from_model(
         self,
@@ -352,6 +502,7 @@ class LlamaCppSupervisor:
         model_id: str,
         server_args: dict[str, object],
     ) -> LlamaCppProfile:
+        self._guard_snapshots(DEFAULT_PROFILE_ID)
         model_path = llamacpp_inventory_service.resolve_model_id(model_id)
         existing = self.store.get(DEFAULT_PROFILE_ID)
         host, port = self._resolve_default_host_port(server_args)
@@ -404,6 +555,7 @@ class LlamaCppSupervisor:
         *,
         model_label: str | None = None,
     ) -> LlamaCppProfile:
+        self._guard_snapshots(DEFAULT_PROFILE_ID)
         _ = model_label
         try:
             resolved_model_path = Path(model_path).expanduser().resolve()

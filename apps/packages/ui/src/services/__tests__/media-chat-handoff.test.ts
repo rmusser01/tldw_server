@@ -14,7 +14,8 @@ describe("media chat handoff helpers", () => {
       url: "https://example.com/video",
       title: "Demo",
       content: "Summary text",
-      mode: "rag_media"
+      mode: "rag_media",
+      ownerScope: "server:alice"
     })
 
     expect(payload).toEqual({
@@ -22,7 +23,8 @@ describe("media chat handoff helpers", () => {
       url: "https://example.com/video",
       title: "Demo",
       content: "Summary text",
-      mode: "rag_media"
+      mode: "rag_media",
+      ownerScope: "server:alice"
     })
   })
 
@@ -56,4 +58,3 @@ describe("media chat handoff helpers", () => {
     ).toBe("Let's talk about media 7.")
   })
 })
-

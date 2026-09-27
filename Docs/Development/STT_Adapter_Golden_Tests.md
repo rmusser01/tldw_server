@@ -1,257 +1,171 @@
-# STT Adapter Golden Tests (Local/GPU Profile)
+# STT Adapter Golden Tests
 
-This document describes the optional “golden” test profile for validating STT
-adapters (faster‑whisper, Parakeet, Canary) against real audio clips and
-known‑good reference transcripts. It is designed to run **only** on developer
-machines or internal GPU runners, not GitHub Actions.
+The `stt_golden` pytest profile is an opt-in real-audio regression check for
+tldw_server's native batch STT adapters. It uses the same manifest loader,
+English-ready normalization, and deterministic WER implementation as the
+standalone STT benchmark. It does not use Pipecat or an LLM judge.
 
-## Overview
+The profile is intended for developer machines or controlled release runners
+with the required models already installed. Ordinary test runs do not load a
+model or contact a provider.
 
-Goals:
-- Exercise the real STT adapters with actual audio.
-- Compare adapter output to curated reference transcripts using a simple
-  token‑level error rate (WER‑like).
-- Keep tests completely opt‑in, guarded by environment variables and markers.
+## Ground-truth rule
 
-Non‑goals:
-- No attempt to run on CI systems without GPUs.
-- No requirement to check in large audio assets; paths are driven by
-  environment variables.
+The regression manifest must contain independently sourced references:
 
-## Test Harness Location
+- `canonical-dataset` for a transcript supplied by the source corpus; or
+- `human-reviewed` for a transcript reviewed independently of the model under
+  test.
 
-- Test file: `tldw_Server_API/tests/Audio/test_stt_adapters_golden.py`
-- Markers:
-  - `@pytest.mark.stt_golden` — used to select the golden profile.
-- Environment gates:
-  - `TLDW_STT_GOLDEN_ENABLE` — must be truthy for tests to run.
-  - `TLDW_STT_GOLDEN_AUDIO_DIR` — base directory for audio + golden JSON files.
+Adapter output is only a behavior snapshot or unverified candidate. It must
+never become a scored reference merely because a model produced it.
 
-If either variable is missing or invalid, all tests in this file `skip` with a
-clear message.
+The manifest schema and scorer are owned by
+`Helper_Scripts/benchmarks/stt_bench.py`. Every selected row must include the
+`regression` profile. Audio remains outside the repository unless its license
+and inclusion have been reviewed separately.
 
-## Golden File Schema
+## Required environment
 
-Golden configuration files are JSON and live under
-`$TLDW_STT_GOLDEN_AUDIO_DIR`. Tests look for the following filename patterns:
-
-- Whisper: `whisper_*.golden.json`
-- Parakeet: `parakeet_*.golden.json`
-- Canary: `canary_*.golden.json`
-
-Each JSON file uses this schema:
-
-```json
-{
-  "audio": "audio/whisper/en/clip1.wav",
-  "model": "large-v3",
-  "language": "en",
-  "expected_text": "This is the reference transcript for clip one.",
-  "max_token_error_rate": 0.12,
-  "min_segments": 2
-}
-```
-
-Fields:
-- `audio` (str, required)
-  - Path to the audio file **relative** to `$TLDW_STT_GOLDEN_AUDIO_DIR`.
-  - The tests resolve it via `Path(base_dir) / audio`.
-- `model` (str, required)
-  - Adapter‑specific model name (e.g. `"large-v3"`, `"parakeet-standard"`,
-    `"nemo-canary-1b"`).
-- `language` (str or null, optional)
-  - Optional language hint (e.g. `"en"`); passed directly to the adapter.
-- `expected_text` (str, required)
-  - Reference transcript text used for scoring.
-- `max_token_error_rate` (float, optional)
-  - Upper bound on token‑level error rate (edit distance / reference tokens).
-  - Defaults to `0.20` when omitted (conservative).
-- `min_segments` (int, optional)
-  - Minimum expected number of segments in `artifact["segments"]`.
-  - Defaults to `1`.
-
-## How the Tests Work
-
-Common helpers in `test_stt_adapters_golden.py`:
-
-- `_require_golden_env()`
-  - Validates `TLDW_STT_GOLDEN_ENABLE` and `TLDW_STT_GOLDEN_AUDIO_DIR`.
-  - Skips tests if env is not configured.
-- `_normalize_text(text: str) -> list[str]`
-  - Lowercases, strips punctuation, splits on whitespace to produce tokens.
-- `_levenshtein(a: list[str], b: list[str]) -> int`
-  - Token‑level Levenshtein edit distance.
-- `_token_error_rate(ref: str, hyp: str) -> float`
-  - Computes `distance / len(ref_tokens)`; analogous to WER.
-- `_load_golden_cases(base: Path, pattern: str) -> list[GoldenCase]`
-  - Discovers JSON files matching the pattern.
-  - Validates each JSON and resolves `audio` to a real file.
-
-For each adapter, a test:
-
-1. Loads all matching golden cases under `TLDW_STT_GOLDEN_AUDIO_DIR`.
-2. Instantiates the adapter (`FasterWhisperAdapter`, `ParakeetAdapter`,
-   `CanaryAdapter`).
-3. Calls `adapter.transcribe_batch(...)` with:
-   - `audio_path` from the golden case.
-   - `model` and `language` from the golden case.
-   - `task="transcribe"`.
-4. Compares:
-   - `artifact["text"]` vs `expected_text` via `_token_error_rate(...)`.
-   - Asserts `TER <= max_token_error_rate`.
-   - Asserts `segments` is a list and `len(segments) >= min_segments`.
-
-Additional gating:
-- Parakeet and Canary tests call `is_nemo_available()` and skip when Nemo is
-  not importable, so CPU‑only environments are not forced to install Nemo.
-
-## Minimal Golden Setup (Recommended Starting Point)
-
-On your GPU machine (or internal GPU runner):
-
-1. Choose a base dir for goldens, e.g.:
-
-```bash
-mkdir -p /srv/tldw_stt_golden/audio/whisper/en
-mkdir -p /srv/tldw_stt_golden/audio/parakeet/en
-mkdir -p /srv/tldw_stt_golden/audio/canary/en
-```
-
-2. Place a short, clean English WAV in each directory; you can reuse the same
-file if you want all adapters to see identical audio:
-
-```bash
-cp /path/to/your_clip.wav /srv/tldw_stt_golden/audio/whisper/en/clip1.wav
-cp /path/to/your_clip.wav /srv/tldw_stt_golden/audio/parakeet/en/clip1.wav
-cp /path/to/your_clip.wav /srv/tldw_stt_golden/audio/canary/en/clip1.wav
-```
-
-3. Generate initial golden JSONs using the helper script (see next section) or
-by hand. Example for Whisper:
-
-```json
-{
-  "audio": "audio/whisper/en/clip1.wav",
-  "model": "large-v3",
-  "language": "en",
-  "expected_text": "This is the reference transcript for clip one.",
-  "max_token_error_rate": 0.12,
-  "min_segments": 2
-}
-```
-
-4. Run the golden profile:
+Set all four variables:
 
 ```bash
 export TLDW_STT_GOLDEN_ENABLE=1
 export TLDW_STT_GOLDEN_AUDIO_DIR=/srv/tldw_stt_golden
-pytest -m "stt_golden" -v
+export TLDW_STT_GOLDEN_MANIFEST=/srv/tldw_stt_golden/regression.jsonl
+export TLDW_STT_GOLDEN_TARGETS='["faster-whisper=large-v3","parakeet=parakeet-mlx"]'
 ```
 
-or via the Makefile target:
+The test skips only when `TLDW_STT_GOLDEN_ENABLE` is not truthy. Once enabled,
+missing or invalid required settings fail the run so a release job cannot pass
+without exercising a model.
+
+`TLDW_STT_GOLDEN_TARGETS` must be a JSON array. Comma-separated or
+shell-delimited target lists are rejected so provider/model boundaries remain
+unambiguous.
+
+Optional variables:
+
+- `TLDW_STT_GOLDEN_MAX_NORMALIZED_WER`: per-sample upper bound; defaults to
+  `0.20`.
+- `TLDW_STT_GOLDEN_ALLOW_NETWORK=1`: allows a planned loopback or remote
+  target. Without it, any route that sends audio outside the process is
+  rejected before transcription.
+
+Each target is resolved strictly through `SttProviderRegistry`. Before
+transcription, model loading, or network egress, the test creates a neutral
+execution plan and checks that:
+
+- the requested provider exists and supports batch transcription;
+- the selected local artifact already exists and will not download; and
+- any loopback or remote route has the separate network opt-in.
+
+The adapter must execute that exact plan. Silent fallback to another provider,
+backend, model, or network route fails the normalized artifact contract.
+
+## Running the profile
+
+Run only the golden module:
+
+```bash
+source .venv/bin/activate
+python -m pytest \
+  tldw_Server_API/tests/Audio/test_stt_adapters_golden.py \
+  -m stt_golden -v
+```
+
+The existing Makefile target can also be used after exporting the manifest and
+target variables:
 
 ```bash
 make stt-golden STT_GOLDEN_AUDIO_DIR=/srv/tldw_stt_golden
 ```
 
-## Helper Script: Generate Goldens from Current Adapters
+For every `regression` sample and configured target, the test:
 
-Helper script location:
+1. revalidates manifest containment, audio checksum, and duration;
+2. approves an exact no-download execution plan;
+3. asserts normalized artifact, non-empty segment, and actual-execution shapes;
+4. computes strict and selected-profile scores with `score_transcript`; and
+5. enforces `TLDW_STT_GOLDEN_MAX_NORMALIZED_WER`.
 
-- `Helper_Scripts/Audio/generate_stt_golden.py`
+These checks are regression evidence for the installed target configuration.
+They are not comparative performance results; use the standalone benchmark for
+cold-first/warm timing and cross-target reports.
 
-Script responsibilities:
+## Candidate snapshots
 
-- Accept CLI arguments:
-  - `--provider` (`faster-whisper`, `parakeet`, `canary`)
-  - `--audio` (absolute or relative path to audio file)
-  - `--model`
-  - `--language`
-  - `--base-dir` (your `$TLDW_STT_GOLDEN_AUDIO_DIR`)
-  - `--output` (golden JSON path)
-  - `--max-ter` (optional)
-  - `--min-segments` (optional)
-- Run the real adapter on the given audio.
-- Write a golden JSON using the adapter’s output text as `expected_text`.
-
-Example usage (Whisper):
+`Helper_Scripts/Audio/generate_stt_golden.py` can transcribe one clip into a
+candidate snapshot:
 
 ```bash
-export PYTHONPATH=.
-BASE=/srv/tldw_stt_golden
-
 python Helper_Scripts/Audio/generate_stt_golden.py \
   --provider faster-whisper \
-  --audio "$BASE/audio/whisper/en/clip1.wav" \
   --model large-v3 \
+  --audio audio/whisper/en/clip1.wav \
   --language en \
-  --base-dir "$BASE" \
-  --output "$BASE/whisper_clip1.golden.json" \
-  --max-ter 0.12 \
-  --min-segments 2
+  --base-dir /srv/tldw_stt_golden \
+  --output candidates/whisper-clip1.json
 ```
 
-Parakeet and Canary examples:
+Candidate generation uses the same strict registry and exact no-download
+preflight. Add `--allow-network` only when the selected planned target may send
+audio to loopback or a remote endpoint.
+
+The output is explicitly labeled:
+
+```json
+{
+  "artifact_type": "stt-transcript-candidate",
+  "reference_status": "unverified_candidate",
+  "candidate_text": "adapter output"
+}
+```
+
+It deliberately has no `reference` field and cannot be loaded as a scored
+manifest record.
+
+## Writing a verified manifest row
+
+When the reference came from a canonical dataset or independent human review,
+the helper can write one target-neutral JSONL manifest row without running an
+adapter:
 
 ```bash
 python Helper_Scripts/Audio/generate_stt_golden.py \
-  --provider parakeet \
-  --audio "$BASE/audio/parakeet/en/clip1.wav" \
-  --model parakeet-standard \
+  --audio audio/challenge/clip1.wav \
   --language en \
-  --base-dir "$BASE" \
-  --output "$BASE/parakeet_clip1.golden.json"
-
-python Helper_Scripts/Audio/generate_stt_golden.py \
-  --provider canary \
-  --audio "$BASE/audio/canary/en/clip1.wav" \
-  --model nemo-canary-1b \
-  --language en \
-  --base-dir "$BASE" \
-  --output "$BASE/canary_clip1.golden.json"
+  --base-dir /srv/tldw_stt_golden \
+  --output rows/challenge-clip1.jsonl \
+  --sample-id challenge-clip-1 \
+  --reference "The independently reviewed transcript." \
+  --reference-provenance human-reviewed
 ```
 
-This gives you a reproducible baseline: the golden JSONs reflect the current
-adapter behavior. Over time, you can:
+`--reference` and `--reference-provenance` must appear together.
+`--reference-provenance` accepts only `canonical-dataset` or
+`human-reviewed`, and a stable `--sample-id` is mandatory. The output is one
+compact JSONL row that round-trips through `load_and_validate_manifest`.
 
-- Tighten `max_token_error_rate` as you improve models or filters.
-- Add more clips and languages (e.g. noisy English, another language, longer
-  utterances).
+The helper supplies conservative private-regression metadata:
 
-## Makefile Integration
+- suite `private-golden-v1`;
+- annotation profile derived from the reference provenance;
+- dataset `local-golden`, version `1`, license `user-supplied`; and
+- an audio SHA-256 calculated from the selected file.
 
-The repository includes a convenience target for running the golden tests:
+Review and replace those source fields when the corpus has more specific
+dataset, version, or license metadata. Combining rows into the maintained
+manifest is an explicit review step; the helper never appends automatically.
 
-- File: `Makefile`
-- Target:
+## When to run
 
-```make
-.PHONY: stt-golden
+Run the profile:
 
-STT_GOLDEN_AUDIO_DIR ?= ./test_models/stt_golden
+- before a release that changes STT adapters or model configuration;
+- after model, CUDA, driver, or heavy dependency upgrades;
+- after preprocessing or normalization changes; and
+- when validating a new native registry target on controlled hardware.
 
-stt-golden:
-	@echo "[stt-golden] Running STT golden adapter tests against $(STT_GOLDEN_AUDIO_DIR)"
-	TLDW_STT_GOLDEN_ENABLE=1 \
-	TLDW_STT_GOLDEN_AUDIO_DIR="$(STT_GOLDEN_AUDIO_DIR)" \
-	python -m pytest tldw_Server_API/tests/Audio/test_stt_adapters_golden.py -m "stt_golden" -v
-```
-
-Example invocation:
-
-```bash
-make stt-golden STT_GOLDEN_AUDIO_DIR=/srv/tldw_stt_golden
-```
-
-## When to Run This Profile
-
-Recommended scenarios:
-- Before tagging a release that changes STT adapters, models, or config.
-- After upgrading heavy dependencies (faster‑whisper, Nemo, CUDA drivers) on
-  your GPU machines.
-- Before/after adjusting STT‑related VAD, pre‑processing, or normalization
-  logic that could affect transcripts.
-
-Because these tests are opt‑in and gated by env, they are safe to leave in the
-repo without impacting normal CI runs. You decide when and where to exercise
-them.
+Record the manifest hash, target strings, hardware, dependency versions, and
+whether network execution was enabled alongside any reported result.

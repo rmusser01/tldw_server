@@ -58,8 +58,6 @@ import { FEATURE_FLAGS, useFeatureFlag } from "@/hooks/useFeatureFlags"
 import { trackResearchWorkspaceTelemetry } from "@/utils/research-workspace-telemetry"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { WorkspaceBanner } from "./WorkspaceBanner"
-import { SharedWorkspaceBanner } from "./SharedWorkspaceBanner"
-import { SharedWorkspaceProvider } from "./SharedWorkspaceContext"
 import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ChatPane } from "./ChatPane"
 import { WorkspaceShortcutsModal } from "./WorkspaceShortcutsModal"
@@ -1283,47 +1281,6 @@ const ResearchWorkspaceBody: React.FC = () => {
   const [showShortcutsModal, setShowShortcutsModal] = React.useState(false)
   const startTutorial = useTutorialStore((s) => s.startTutorial)
 
-  // Shared workspace state (from ?shared= query param)
-  const [sharedShareId, setSharedShareId] = React.useState<number | null>(null)
-  const [sharedAccessLevel, setSharedAccessLevel] = React.useState<
-    "view_chat" | "view_chat_add" | "full_edit" | null
-  >(null)
-  const [sharedOwnerUserId, setSharedOwnerUserId] = React.useState<number | null>(null)
-  const [sharedAllowClone, setSharedAllowClone] = React.useState(false)
-
-  React.useEffect(() => {
-    try {
-      const params = new URLSearchParams(
-        getResearchWorkspaceSearchFromLocation(window.location)
-      )
-      const shareIdStr = params.get("shared")
-      if (shareIdStr) {
-        const sid = parseInt(shareIdStr, 10)
-        if (!isNaN(sid)) {
-          setSharedShareId(sid)
-          // Fetch share details
-          import("@/hooks/useSharing").then(async (mod) => {
-            try {
-              const { getTldwServerURL } = await import("@/services/tldw-server")
-              const { fetchWithTldwAuth } = await import("@/services/tldw/auth-fetch")
-              const base = await getTldwServerURL()
-              const res = await fetchWithTldwAuth(`${base}/api/v1/sharing/shared-with-me/${sid}/workspace`)
-              if (res.ok) {
-                const data = await res.json()
-                const share = data.share
-                if (share) {
-                  setSharedAccessLevel(share.access_level)
-                  setSharedOwnerUserId(share.owner_user_id)
-                  setSharedAllowClone(share.allow_clone)
-                }
-              }
-            } catch { /* ignore fetch failures */ }
-          })
-        }
-      }
-    } catch { /* ignore URL parsing failures */ }
-  }, [])
-
   // Workspace store
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
   const workspaceName = useWorkspaceStore((s) => s.workspaceName) || ""
@@ -1382,7 +1339,10 @@ const ResearchWorkspaceBody: React.FC = () => {
   const sourceStatusFailureRef = React.useRef<Record<number, number>>({})
   const workspaceStatusRequestSeqRef = React.useRef(0)
   const workspaceStatusInFlightRef = React.useRef(false)
+  const workspaceServerReconcileRequestSeqRef = React.useRef(0)
   const workspaceServerReconcileSignatureRef = React.useRef<string | null>(null)
+  const [serverWorkspaceIdentity, setServerWorkspaceIdentity] =
+    React.useState<string | null>(null)
   const isMountedRef = React.useRef(false)
   const deepResearchBundleImportRequestSeqRef = React.useRef(0)
   const [deepResearchBundleImportState, setDeepResearchBundleImportState] =
@@ -1412,6 +1372,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   } = useSourceListViewState()
   const sourceSavedViewsController = useSourceSavedViews(
     workspaceId,
+    workspaceId !== null && serverWorkspaceIdentity === workspaceId,
     sourceListViewState,
     applySourceListViewState
   )
@@ -1446,6 +1407,104 @@ const ResearchWorkspaceBody: React.FC = () => {
   React.useEffect(() => {
     workspaceServerSourcesRef.current = sources
   }, [sources])
+
+  React.useLayoutEffect(() => {
+    workspaceServerReconcileRequestSeqRef.current += 1
+    workspaceServerReconcileSignatureRef.current = null
+    setServerWorkspaceIdentity(null)
+  }, [workspaceId])
+
+  React.useEffect(() => {
+    if (!isStoreHydrated || !workspaceId) return
+
+    const canReconcileWorkspaceServer =
+      typeof tldwClient.upsertWorkspace === "function" &&
+      typeof tldwClient.getWorkspaceSources === "function" &&
+      typeof tldwClient.addWorkspaceSource === "function"
+    if (!canReconcileWorkspaceServer) {
+      if (statusGuardrailsEnabled) {
+        setWorkspaceStatusProjectionError("Workspace server sync unavailable")
+        setWorkspaceStatusProjectionLoading(false)
+      }
+      return
+    }
+
+    const activeWorkspaceId = workspaceId
+    const reconcileSignature = [
+      activeWorkspaceId,
+      workspaceName,
+      workspaceServerSourceSignature,
+      workspaceServerSelectedSourceSignature
+    ].join("::")
+    if (workspaceServerReconcileSignatureRef.current === reconcileSignature) {
+      setServerWorkspaceIdentity(activeWorkspaceId)
+      return
+    }
+
+    let cancelled = false
+    const requestSeq = ++workspaceServerReconcileRequestSeqRef.current
+    if (statusGuardrailsEnabled) {
+      setWorkspaceStatusProjectionLoading(true)
+      setWorkspaceStatusProjectionError(null)
+    }
+
+    void reconcileResearchWorkspaceServerState({
+      client: tldwClient,
+      workspaceId: activeWorkspaceId,
+      workspaceName,
+      sources: workspaceServerSourcesRef.current,
+      selectedSourceIds,
+      onWorkspaceReady: () => {
+        if (
+          !cancelled &&
+          requestSeq === workspaceServerReconcileRequestSeqRef.current
+        ) {
+          setServerWorkspaceIdentity(activeWorkspaceId)
+        }
+      }
+    })
+      .then((reconcileResult) => {
+        if (
+          cancelled ||
+          requestSeq !== workspaceServerReconcileRequestSeqRef.current
+        ) {
+          return
+        }
+        if (reconcileResult.errors.length === 0 && reconcileResult.workspaceReady) {
+          workspaceServerReconcileSignatureRef.current = reconcileSignature
+          return
+        }
+        if (statusGuardrailsEnabled) {
+          setWorkspaceStatusProjectionError("Workspace server sync unavailable")
+          if (!reconcileResult.workspaceReady) {
+            setWorkspaceStatusProjectionLoading(false)
+          }
+        }
+      })
+      .catch(() => {
+        if (
+          !cancelled &&
+          requestSeq === workspaceServerReconcileRequestSeqRef.current &&
+          statusGuardrailsEnabled
+        ) {
+          setWorkspaceStatusProjectionError("Workspace server sync unavailable")
+          setWorkspaceStatusProjectionLoading(false)
+        }
+      })
+
+    return () => {
+      cancelled = true
+      workspaceServerReconcileRequestSeqRef.current += 1
+    }
+  }, [
+    isStoreHydrated,
+    selectedSourceIds,
+    statusGuardrailsEnabled,
+    workspaceId,
+    workspaceName,
+    workspaceServerSelectedSourceSignature,
+    workspaceServerSourceSignature
+  ])
   const activeFolderSourceIds = React.useMemo(
     () =>
       activeFolderId
@@ -1826,7 +1885,6 @@ const ResearchWorkspaceBody: React.FC = () => {
     if (!statusGuardrailsEnabled) {
       workspaceStatusRequestSeqRef.current += 1
       workspaceStatusInFlightRef.current = false
-      workspaceServerReconcileSignatureRef.current = null
       workspaceProjectedSourceStatusByMediaIdRef.current = {
         workspaceId: null,
         fallbackReady: false,
@@ -1838,10 +1896,13 @@ const ResearchWorkspaceBody: React.FC = () => {
       setWorkspaceStatusProjectionLoading(false)
       return
     }
-    if (!isStoreHydrated || !workspaceId) {
+    if (
+      !isStoreHydrated ||
+      !workspaceId ||
+      serverWorkspaceIdentity !== workspaceId
+    ) {
       workspaceStatusRequestSeqRef.current += 1
       workspaceStatusInFlightRef.current = false
-      workspaceServerReconcileSignatureRef.current = null
       workspaceProjectedSourceStatusByMediaIdRef.current = {
         workspaceId: null,
         fallbackReady: false,
@@ -1861,7 +1922,6 @@ const ResearchWorkspaceBody: React.FC = () => {
     if (!hasWorkspaceContextApi && !hasLegacyWorkspaceStatusApis) {
       workspaceStatusRequestSeqRef.current += 1
       workspaceStatusInFlightRef.current = false
-      workspaceServerReconcileSignatureRef.current = null
       workspaceProjectedSourceStatusByMediaIdRef.current = {
         workspaceId,
         fallbackReady: true,
@@ -1939,38 +1999,6 @@ const ResearchWorkspaceBody: React.FC = () => {
       setWorkspaceStatusProjectionLoading(true)
       try {
         const statusProjectionErrors: string[] = []
-        const canReconcileWorkspaceServer =
-          typeof tldwClient.upsertWorkspace === "function" &&
-          typeof tldwClient.getWorkspaceSources === "function" &&
-          typeof tldwClient.addWorkspaceSource === "function"
-        const reconcileSignature = [
-          activeWorkspaceId,
-          workspaceName,
-          workspaceServerSourceSignature,
-          workspaceServerSelectedSourceSignature
-        ].join("::")
-
-        if (
-          canReconcileWorkspaceServer &&
-          workspaceServerReconcileSignatureRef.current !== reconcileSignature
-        ) {
-          const reconcileResult = await reconcileResearchWorkspaceServerState({
-            client: tldwClient,
-            workspaceId: activeWorkspaceId,
-            workspaceName,
-            sources: workspaceServerSourcesRef.current,
-            selectedSourceIds
-          })
-          if (cancelled || requestSeq !== workspaceStatusRequestSeqRef.current) {
-            return
-          }
-          if (reconcileResult.errors.length === 0 && reconcileResult.workspaceReady) {
-            workspaceServerReconcileSignatureRef.current = reconcileSignature
-          } else if (reconcileResult.errors.length > 0) {
-            statusProjectionErrors.push("Workspace server sync unavailable")
-          }
-        }
-
         if (hasWorkspaceContextApi) {
           const workspaceContext = await tldwClient.getWorkspaceContext(
             activeWorkspaceId
@@ -2082,6 +2110,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
   }, [
     isStoreHydrated,
+    serverWorkspaceIdentity,
     setSourceStatusByMediaId,
     statusGuardrailsEnabled,
     selectedSourceIds,
@@ -3617,12 +3646,6 @@ const ResearchWorkspaceBody: React.FC = () => {
   }
 
   return (
-    <SharedWorkspaceProvider
-      shareId={sharedShareId}
-      ownerUserId={sharedOwnerUserId}
-      accessLevel={sharedAccessLevel}
-      allowClone={sharedAllowClone}
-    >
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,var(--surface-2),var(--bg)_45%)] text-text">
       {messageContextHolder}
       <a
@@ -3799,7 +3822,6 @@ const ResearchWorkspaceBody: React.FC = () => {
             workspaceName={workspaceName}
             isMobile
           />
-          <SharedWorkspaceBanner />
           {deepResearchReturnBanner}
 
           {tutorialPromptBanner}
@@ -3857,7 +3879,6 @@ const ResearchWorkspaceBody: React.FC = () => {
             workspaceName={workspaceName}
             isMobile={false}
           />
-          <SharedWorkspaceBanner />
           {deepResearchReturnBanner}
 
           {tutorialPromptBanner}
@@ -4319,7 +4340,6 @@ const ResearchWorkspaceBody: React.FC = () => {
         </div>
       )}
     </div>
-    </SharedWorkspaceProvider>
   )
 }
 

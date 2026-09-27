@@ -31,6 +31,7 @@ _PATCH_FIELDS = frozenset(
         "cwd",
         "env_allowlist",
         "credential_slots",
+        "headers",
         "metadata",
         "provenance",
         "enabled",
@@ -508,12 +509,21 @@ class GatewayExternalRegistryManager:
         *,
         reason_code: str,
     ) -> None:
-        if not server.enabled or server.transport != "websocket":
+        if not server.enabled:
             return
         scheme = urlparse(server.url or "").scheme
-        if scheme not in {"ws", "wss"}:
+        if server.transport == "websocket" and scheme not in {"ws", "wss"}:
             raise self._error(
                 "Enabled websocket external servers require ws:// or wss:// URLs",
+                reason_code=reason_code,
+                server_id=server.id,
+            )
+        if server.transport in {"streamable_http", "sse"} and scheme not in {
+            "http",
+            "https",
+        }:
+            raise self._error(
+                "Enabled HTTP external servers require http:// or https:// URLs",
                 reason_code=reason_code,
                 server_id=server.id,
             )
@@ -665,7 +675,10 @@ class GatewayExternalRegistryManager:
 
     @staticmethod
     def _dump_server(server: ExternalServerDefinition) -> dict[str, Any]:
-        return server.model_dump(mode="json")
+        payload = server.model_dump(mode="json")
+        if payload.get("headers"):
+            payload["headers"] = dict.fromkeys(payload["headers"], "***")
+        return payload
 
     @staticmethod
     def _error(

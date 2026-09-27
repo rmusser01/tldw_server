@@ -1,6 +1,7 @@
 import { formatErrorMessage } from "@/utils/format-error-message"
 
 export type FlashcardsUiErrorCode =
+  | "FLASHCARDS_GROUNDING"
   | "FLASHCARDS_VERSION_CONFLICT"
   | "FLASHCARDS_NETWORK"
   | "FLASHCARDS_VALIDATION"
@@ -95,6 +96,16 @@ export const mapFlashcardsUiError = (
     formatErrorMessage(error, options.fallback)
   )
   const normalized = rawMessage.toLowerCase()
+
+  if (/\bclaim_verification_failed\b/.test(normalized)) {
+    return {
+      code: "FLASHCARDS_GROUNDING",
+      message: "The generated cards could not be verified against your source. Add clearer source details or request fewer cards, then generate again.",
+      actionLabel: "Revise source",
+      status,
+      rawMessage
+    }
+  }
 
   if (status === 409 || VERSION_CONFLICT_PATTERN.test(normalized)) {
     return {

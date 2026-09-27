@@ -1,0 +1,32 @@
+{
+  "totalCount": 2,
+  "studies": [
+    {
+      "protocolSection": {
+        "identificationModule": {
+          "nctId": "NCT90000001",
+          "briefTitle": "Synthetic bounded trial one",
+          "officialTitle": "Synthetic official trial title one"
+        },
+        "descriptionModule": {
+          "briefSummary": "<p>Synthetic summary &amp; bounded details.</p>"
+        },
+        "statusModule": {
+          "overallStatus": "RECRUITING",
+          "startDateStruct": {"date": "2026-01"},
+          "completionDateStruct": {"date": "2027"}
+        },
+        "conditionsModule": {"conditions": ["Synthetic condition"]},
+        "armsInterventionsModule": {
+          "interventions": [{"name": "Synthetic intervention"}]
+        },
+        "sponsorCollaboratorsModule": {
+          "leadSponsor": {"name": "Synthetic sponsor"}
+        },
+        "designModule": {"studyType": "INTERVENTIONAL"}
+      },
+      "hasResults": false
+    }
+  ],
+  "nextPageToken": "synthetic+token/one=="
+}

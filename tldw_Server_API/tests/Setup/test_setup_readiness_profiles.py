@@ -122,6 +122,19 @@ def test_speech_lane_carries_tts_as_secondary_metadata():
     assert speech_lane["selection"]["tts_choice"] == "kokoro"
 
 
+def test_unverified_configured_lanes_explain_their_readiness_warnings():
+    snapshot = _config_snapshot()
+    snapshot["sections"][0]["fields"][0]["value"] = "llama"
+    response = build_readiness_profiles(
+        setup_status=_setup_status(),
+        config_snapshot=snapshot,
+        audio_recommendations=_audio_recommendations(),
+    )
+    for lane in response["lanes"]:
+        if lane["status"] == "ready_with_warnings":
+            assert lane["warnings"], f"{lane['lane_id']} must explain its unverified capability"
+
+
 def test_post_setup_profiles_report_admin_required_overlay():
     response = build_readiness_profiles(
         setup_status=_setup_status(needs_setup=False),

@@ -43,7 +43,8 @@ def test_llamacpp_strict_filter_drops_top_k_from_payload_non_streaming():
         def __init__(self):
             self.closed = False
 
-        def post(self, url, headers=None, json=None, timeout=None):  # noqa: ANN001
+        def request(self, _method, _url, **kwargs):  # noqa: ANN001
+            json = kwargs.get("json")
             captured_payload.clear()
             if json:
                 captured_payload.update(json)
@@ -59,6 +60,9 @@ def test_llamacpp_strict_filter_drops_top_k_from_payload_non_streaming():
     with patch(
         "tldw_Server_API.app.core.LLM_Calls.providers.local_adapters.load_settings",
         return_value=fake_settings,
+    ), patch(
+        "tldw_Server_API.app.core.LLM_Calls.providers.local_adapters._hc_create_client",
+        side_effect=lambda **_kwargs: FakeClient(),
     ):
 
         response = chat_api_call(
@@ -77,7 +81,6 @@ def test_llamacpp_strict_filter_drops_top_k_from_payload_non_streaming():
                 "scope": ["world_books"],
                 "static_segment_fingerprint": "worldbook:v1",
             },
-            http_client_factory=lambda timeout: FakeClient(),
         )
 
     assert "top_k" not in captured_payload

@@ -7,7 +7,7 @@ from typing import Literal, Protocol
 
 from ..models import SyncDomain, SyncEnvelope
 from ..store import SyncV2Store
-
+from .guarded_product_mutation import GuardedProductMutation
 
 MaterializationStatus = Literal["applied", "conflict", "failed", "skipped"]
 
@@ -33,6 +33,7 @@ class SyncMaterializer(Protocol):
         envelope: SyncEnvelope,
         *,
         store: SyncV2Store,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> MaterializationResult:
         """Apply one accepted envelope to the live server projection."""
 

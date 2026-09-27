@@ -37,6 +37,7 @@ async def test_prompt_studio_heartbeat_renew_and_reclaim(tmp_path, monkeypatch):
     monkeypatch.setenv("PROMPT_STUDIO_JOBS_LEASE_SECONDS", "5")
     monkeypatch.setenv("PROMPT_STUDIO_JOBS_RENEW_JITTER_SECONDS", "0")
     monkeypatch.setenv("TLDW_PS_HEARTBEAT_SECONDS", "2")
+    monkeypatch.setenv("JOBS_WORKER_MAX_ITERATIONS", "1")
 
     cfg = jobs_worker._build_worker_config(worker_id="w1", queue="default")
     sdk = WorkerSDK(jm, cfg)
@@ -63,7 +64,6 @@ async def test_prompt_studio_heartbeat_renew_and_reclaim(tmp_path, monkeypatch):
         if renew_calls:
             break
         await _orig_sleep(0)
-    sdk.stop()
     try:
         await asyncio.wait_for(task, timeout=1)
     except asyncio.TimeoutError:

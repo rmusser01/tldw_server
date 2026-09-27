@@ -1,0 +1,22 @@
+{
+  "head": "c60f59a95e5d1da7a4a06d4e84863084b713c4bc",
+  "endpoint_sha256": "713b5cecfa0423743053dae662e596fd8a95f688adaa5b450c233b9b3732d311",
+  "microphone_used": false,
+  "external_provider_used": false,
+  "config_vad_filter": true,
+  "config_auto_finalize": false,
+  "results": [
+    {
+      "sample": "silence_5s",
+      "transcript": ""
+    },
+    {
+      "sample": "speech",
+      "transcript": "The blue notebook is ready."
+    },
+    {
+      "sample": "silence_then_speech",
+      "transcript": "The Blue Notebook is ready."
+    }
+  ]
+}

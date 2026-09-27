@@ -9,10 +9,11 @@ class _FakeResponse:
     def __init__(self, headers: dict, chunks: list[bytes]):
         self.headers = headers
         self._chunks = chunks
+        self.iter_content_calls = 0
 
     def iter_content(self, chunk_size: int):
-        for chunk in self._chunks:
-            yield chunk
+        self.iter_content_calls += 1
+        yield from self._chunks
 
     def raise_for_status(self) -> None:
 
@@ -68,6 +69,10 @@ def test_download_audio_rejects_when_content_length_exceeds_limit(monkeypatch, t
     expected_path = tmp_path / "file_abcdef12.mp3"
     assert not expected_path.exists()
     assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args == ("https://example.com/file.mp3",)
+    assert kwargs["stream"] is True
+    assert faux_response.iter_content_calls == 0
 
 
 @pytest.mark.unit

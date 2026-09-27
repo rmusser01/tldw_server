@@ -206,6 +206,7 @@ export function normalizeChatModelId(value: string | null | undefined): string {
 }
 
 const PROVIDER_ALIASES: Record<string, string> = {
+  "llama": "llama.cpp",
   customopenai: "custom-openai-api",
   custom_openai_api: "custom-openai-api",
   custom_openai_api2: "custom-openai-api-2",

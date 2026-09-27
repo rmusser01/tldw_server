@@ -1261,5 +1261,17 @@
   },
   "modelSelect_sort_localFirst": {
     "message": "Local-first"
+  },
+  "help_loadFailed": {
+    "message": "Det gick inte att läsa in hjälpen. Anslut igen, spara dina ändringar och ladda om sidan."
+  },
+  "help_loading": {
+    "message": "Läser in hjälp…"
+  },
+  "help_confirmReload": {
+    "message": "Ladda om den här sidan? Osparade ändringar kan gå förlorade."
+  },
+  "help_reload": {
+    "message": "Ladda om sidan"
   }
 }

@@ -23,6 +23,7 @@ https://www.dogesec.com/blog/full_text_full_history_rss_atom_blog_feeds/
 https://github.com/TimmyOVO/freshrss-filter
 https://github.com/piqoni/matcha
 
+https://gitlab.com/news-flash/news_flash
 https://www.dogesec.com/blog/full_text_rss_atom_blog_feeds/
 https://engineering.fyi/?utm_source=www.hivefive.community&utm_medium=newsletter&utm_campaign=hive-five-237-different-kinds-of-smart
 https://medium.engineering/engineering-stories-behind-the-medium-daily-digest-algorithm-part-2-c977ad0b134f?gi=7b2dc9e4c917

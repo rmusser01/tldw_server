@@ -2,6 +2,7 @@ import { apiClient } from '@web/lib/api';
 import type {
   VNAssetBulkReviewRequest,
   VNAssetGenerationRequest,
+  VNAssetGenerationPreflight,
   VNAssetGenerationStatus,
   VNAssetItem,
   VNAssetManifest,
@@ -83,6 +84,18 @@ export function startVNAssetGeneration(
 
 export function getVNAssetGeneration(packId: number): Promise<VNAssetGenerationStatus> {
   return apiClient.get(`${VN_ASSETS_BASE}/packs/${packId}/generation`);
+}
+
+export function getVNAssetGenerationPreflight(packId: number): Promise<VNAssetGenerationPreflight> {
+  return apiClient.get(`${VN_ASSETS_BASE}/packs/${packId}/generation/preflight`);
+}
+
+export function retryVNAssetSlot(
+  packId: number,
+  slotId: number,
+  request: VNAssetGenerationRequest
+): Promise<VNAssetGenerationStatus> {
+  return apiClient.post(`${VN_ASSETS_BASE}/packs/${packId}/slots/${slotId}/retry`, request);
 }
 
 export function cancelVNAssetGeneration(packId: number): Promise<VNAssetGenerationStatus> {

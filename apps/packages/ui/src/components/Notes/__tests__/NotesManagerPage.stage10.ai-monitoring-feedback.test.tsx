@@ -133,6 +133,27 @@ vi.mock("@/components/Notes/NotesListPanel", () => ({
   default: () => <div data-testid="notes-list-panel" />
 }))
 
+
+// This page fixture starts with a verified owner; the interacting hook suite
+// separately exercises pending discovery, identity changes, and permission loss.
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => {
+  const config = { serverUrl: "https://notes.test", authMode: "multi-user",
+    accessToken: `test.${btoa(JSON.stringify({ sub: "7" }))}.signature` }
+  return { useCanonicalConnectionConfig: () => ({ config, loading: false }) }
+})
+vi.mock("../hooks/useNotesGraphAuthorityScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../hooks/useNotesGraphAuthorityScope")>()
+  return { ...actual, useNotesGraphAuthorityScope: () => actual.createNotesGraphAuthorityScope("https://notes.test", 7) }
+})
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: vi.fn(async () => ({ id: 7, is_active: true })) }
+}))
+vi.mock("@/hooks/useCallerCapabilities", () => {
+  const capabilities = { monitoringAlerts: "allowed", userId: 7,
+    refreshAfterForbidden: vi.fn(async () => undefined) }
+  return { useCallerCapabilities: () => capabilities }
+})
+
 const renderPage = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -191,6 +212,7 @@ describe("NotesManagerPage stage 10 monitoring feedback", () => {
           items: [
             {
               id: 101,
+              user_id: "7",
               source: "notes.create",
               source_id: "note-monitor-1",
               rule_severity: "warning",

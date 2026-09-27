@@ -1,0 +1,17 @@
+# rls_coverage_exemptions.txt - tenant-owned tables that must NOT get an
+# owner-scoped RLS policy, with the reason each one cannot have it.
+#
+# These are different from rls_coverage_baseline.txt. A baseline entry is work
+# not yet done and the list should shrink. An exemption is a decision: adding
+# the obvious policy would break the feature, and someone checked. Every entry
+# needs a reason, and the ratchet refuses to load the file without one, so an
+# exemption is a reviewable diff rather than a silent line in a 381-entry list.
+#
+# Format: table_name: reason
+#
+# Before adding one, confirm the obvious policy actually breaks something, and
+# say how it was confirmed. "It seemed necessary" is how the treadmill started.
+
+share_tokens: Public share links are redeemed anonymously. GET /api/v1/sharing/public/{token} carries no auth dependency and resolves the token through share_token_service -> find_tokens_by_prefix, so a policy comparing owner_user_id to app.current_user_id returns zero rows and every share link stops working. Isolation here comes from the token being a secret, as with any credential-lookup table.
+
+shared_workspaces: Recipients read shares granted to them, not shares they own. get_active_share_for_user (AuthNZ/repos/shared_workspace_repo.py:215) selects by team and organization membership, so an owner-scoped policy would hide every share from the people it was shared with. The membership predicate in that query is the access control.

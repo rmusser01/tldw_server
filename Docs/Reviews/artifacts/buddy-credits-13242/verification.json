@@ -1,0 +1,49 @@
+{
+  "base_revision": "50c1f689575b1bc21ed3e78cdb193b03fe968cdd",
+  "source_sha256": "620f06958112d9be1dce0d6592842f47ada9c8c4d9f359c0ed92d878af4ab80f",
+  "export_sha256": "7ed134899859103e72296cae08bdf5d67c5177f70ad156175938b3c2c35dc001",
+  "import_completed": true,
+  "independent_copy_created": true,
+  "exact_artwork_record_preserved": true,
+  "asset_bytes_unchanged": true,
+  "export_reimport_completed": true,
+  "creator": "tldw-project",
+  "license": "Apache-2.0",
+  "notice_utf8_bytes": 11654,
+  "backend": "SQLite",
+  "physical_microphone": false,
+  "external_provider": false,
+  "persona_id": "124028a5-aaff-4ddf-810a-07e95c2765d3",
+  "pack_id": "e1a7d366-ed14-4267-b67b-e365ee2c1357",
+  "buddy_id": "5958b3e8bbba426ca5d0e9df991caa5f",
+  "restored_pack_id": "2640bd21-0268-4ca6-af32-587d1ec058eb",
+  "chatbook": {
+    "chatbook_revision": "fc7e0a0c2a3c2f03a2b5c7670a50c680760e9daf",
+    "export_sha256": "7ed134899859103e72296cae08bdf5d67c5177f70ad156175938b3c2c35dc001",
+    "native_import_passed": true,
+    "activatable": true,
+    "asset_count": 1,
+    "state_count": 18,
+    "exact_credits_retained": true,
+    "cleanup_passed": true,
+    "native_terminal_ui": false
+  },
+  "chatbook_visual_package_matches_dev": "02374bf66af4e6a594d1a63f7f2d559554714fa8",
+  "source_files_sha256": {
+    "tldw_Server_API/app/core/Persona/visual_artwork.py": "abed02ee92f55189d4d28fac072ecb1881701192a9056e3b4d022833be97e491",
+    "tldw_Server_API/app/core/Persona/visuals.py": "c090c399b00c11f3be6a29c3f9370d68fb5a2fd4575ee87f4f1c0b47eb815317",
+    "tldw_Server_API/app/core/Persona/visual_portability/preview.py": "47c6a45ed86d6c5d8f79ba9d38b4f98dc1cda08ad456e6e3a3c3b0fd9df75a18",
+    "tldw_Server_API/app/core/Persona/visual_portability/importer.py": "2e71135567e7f7160983734bea2221cd26b5c4dbea0b4bd52604390d0d6f46dc",
+    "tldw_Server_API/app/core/Persona/visual_portability/exporter.py": "316719b0b639c310bcb6e967672db1e6cb26713db524919f8391ce94aa5935ef",
+    "tldw_Server_API/app/core/Buddy/service.py": "1007b0e424f8431e112877cae5a76b3ea1aaf7403f3502a9a5e55e90438f2098"
+  },
+  "automated_tests": {
+    "final_portability_passed": 45,
+    "adjacent_ownership_manifest_asset_passed": 72,
+    "postgresql_snapshot_export_passed": true,
+    "postgresql_import_jobs_supported": false,
+    "ruff": "passed",
+    "black": "passed",
+    "bandit_findings": 0
+  }
+}

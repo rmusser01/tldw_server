@@ -1,0 +1,10 @@
+{
+  "stopped_at": "2026-09-09T05:29:04.898129+00:00",
+  "webui_session": 76704,
+  "webui_exit_code": 0,
+  "backend_pid": 17678,
+  "backend_launcher_exit_code": 0,
+  "mock_pid": 20487,
+  "mock_exit_code": 143,
+  "reason": "Qualification finished; only owned disposable processes stopped. Profiles, logs and clean Chrome artifacts retained."
+}

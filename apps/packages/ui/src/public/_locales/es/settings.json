@@ -1,4 +1,7 @@
 {
+  "onboarding_loginSettingsError": {
+    "message": "No se pudo abrir la configuración de inicio de sesión. Inténtalo de nuevo."
+  },
   "navigation_serverAndAuth": {
     "message": "Servidor y Auth"
   },

@@ -5,7 +5,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      "~": path.resolve(__dirname, "./src")
+      "~": path.resolve(__dirname, "./src"),
+      "pa-tesseract.js": path.resolve(__dirname, "../../tldw-frontend/node_modules/pa-tesseract.js")
     }
   },
   test: {

@@ -1,4 +1,8 @@
+import dataclasses
+
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
+from tldw_Server_API.app.core.Web_Scraping.extraction import pipeline
+from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
 
 
 def test_extraction_metrics_emitted_for_regex(monkeypatch):
@@ -7,7 +11,11 @@ def test_extraction_metrics_emitted_for_regex(monkeypatch):
     def fake_histogram(name, value, labels=None):
         calls.append((name, labels or {}, value))
 
-    monkeypatch.setattr(ael, "observe_histogram", fake_histogram)
+    monkeypatch.setattr(
+        pipeline,
+        "build_default_dependencies",
+        lambda: dataclasses.replace(build_default_dependencies(), observe_histogram=fake_histogram),
+    )
 
     html = "<html><body>Email: demo@example.com</body></html>"
     result = ael.extract_article_with_pipeline(

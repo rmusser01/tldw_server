@@ -6,6 +6,7 @@ import LoginPage from '@web/pages/login';
 const mockReplace = vi.fn();
 const mockPrefetch = vi.fn().mockResolvedValue(undefined);
 const mockTrackRouteAliasRedirect = vi.fn().mockResolvedValue(undefined);
+const mockGetConfig = vi.hoisted(() => vi.fn());
 const mockRouter = {
   asPath: '/login?next=%2Faccount',
   pathname: '/login',
@@ -15,6 +16,10 @@ const mockRouter = {
 
 vi.mock('next/router', () => ({
   useRouter: () => mockRouter,
+}));
+
+vi.mock('@/services/tldw/TldwApiClient', () => ({
+  tldwClient: { getConfig: mockGetConfig },
 }));
 
 vi.mock('next/link', () => ({
@@ -53,6 +58,7 @@ describe('LoginPage deployment policy', () => {
     mockPrefetch.mockResolvedValue(undefined);
     mockTrackRouteAliasRedirect.mockReset();
     mockTrackRouteAliasRedirect.mockResolvedValue(undefined);
+    mockGetConfig.mockReset().mockResolvedValue(null);
     mockRouter.asPath = '/login?next=%2Faccount';
     mockRouter.pathname = '/login';
     delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE;
@@ -62,13 +68,13 @@ describe('LoginPage deployment policy', () => {
     vi.unstubAllEnvs();
   });
 
-  it('renders an explicit self-host redirect panel instead of a blank login page', async () => {
+  it('renders an explicit redirect panel after resolving an unconfigured self-host target', async () => {
     vi.stubEnv('NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE', 'self_host');
 
     render(<LoginPage />);
 
     expect(
-      screen.getByRole('heading', { level: 1, name: 'Login is managed in local settings' })
+      await screen.findByRole('heading', { level: 1, name: 'Connect a server first' })
     ).toBeVisible();
     expect(screen.getByText('/login?next=%2Faccount')).toBeVisible();
     expect(screen.getByText('/settings/tldw?next=%2Faccount')).toBeVisible();
@@ -91,5 +97,6 @@ describe('LoginPage deployment policy', () => {
     expect(await screen.findByRole('heading', { level: 1, name: 'Sign in' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeVisible();
     expect(mockReplace).not.toHaveBeenCalled();
+    expect(mockTrackRouteAliasRedirect).not.toHaveBeenCalled();
   });
 });

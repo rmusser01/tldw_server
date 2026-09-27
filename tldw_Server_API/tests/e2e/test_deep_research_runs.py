@@ -928,7 +928,9 @@ def test_deep_research_live_progress_stream_reports_checkpoint_and_terminal_even
             return {"id": 11, "uuid": "job-11", "status": "queued", **kwargs}
 
     monkeypatch.setenv("RESEARCH_RUNS_SSE_POLL_INTERVAL", "0.05")
-    monkeypatch.setenv("RESEARCH_RUNS_SSE_TEST_MAX_SECONDS", "5.0")
+    # The bounded join below owns the assertion timeout; a producer-side wall
+    # clock cap would make terminal delivery depend on CI runner load.
+    monkeypatch.setenv("RESEARCH_RUNS_SSE_TEST_MAX_SECONDS", "0")
 
     research_db_path = tmp_path / "research.db"
     outputs_dir = tmp_path / "outputs"
@@ -959,6 +961,35 @@ def test_deep_research_live_progress_stream_reports_checkpoint_and_terminal_even
         assert create_resp.status_code == 200
         session_id = create_resp.json()["id"]
 
+    stream_cursor_ready = threading.Event()
+    expected_session_id = session_id
+    original_list_run_events_after = ResearchService.list_run_events_after
+
+    def gated_list_run_events_after(
+        self,
+        *,
+        owner_user_id: str,
+        session_id: str,
+        after_id: int,
+        limit: int | None = None,
+    ):
+        rows = original_list_run_events_after(
+            self,
+            owner_user_id=owner_user_id,
+            session_id=session_id,
+            after_id=after_id,
+            limit=limit,
+        )
+        if self is service and session_id == expected_session_id and after_id == 0:
+            stream_cursor_ready.set()
+        return rows
+
+    monkeypatch.setattr(
+        ResearchService,
+        "list_run_events_after",
+        gated_list_run_events_after,
+    )
+
     events: list[dict[str, object]] = []
     snapshot_seen = threading.Event()
     stream_thread = threading.Thread(
@@ -968,7 +999,9 @@ def test_deep_research_live_progress_stream_reports_checkpoint_and_terminal_even
         daemon=True,
     )
     stream_thread.start()
-    time.sleep(0.2)
+    assert stream_cursor_ready.wait(timeout=5.0), (
+        "SSE producer did not establish its initial event cursor"
+    )
 
     asyncio.run(
         handle_research_phase_job(
@@ -1095,6 +1128,7 @@ def test_deep_research_live_progress_stream_reports_checkpoint_and_terminal_even
 
     terminal_event = next(item for item in reversed(events) if item["event"] == "terminal")
     assert terminal_event["data"]["status"] == "completed"
+    assert terminal_event["data"]["replayed"] is False
 
 
 def test_deep_research_live_progress_stream_reconnect_replays_only_missed_events(tmp_path, monkeypatch):

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from configparser import ConfigParser
 from types import SimpleNamespace
+from unittest.mock import Mock
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -47,11 +49,164 @@ def _client_for_config(monkeypatch: pytest.MonkeyPatch, parser: ConfigParser) ->
     monkeypatch.setattr(llm_providers, "list_image_models_for_catalog", lambda: [])
     monkeypatch.setattr(llm_providers, "discover_models_from_endpoint", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(llm_providers, "apply_llm_provider_overrides_to_listing", lambda result: result)
+    monkeypatch.setattr(llm_providers, "_LLAMACPP_VISION_CACHE", {}, raising=False)
+    unavailable_props = Mock(return_value=httpx.Response(404))
+    monkeypatch.setattr(llm_providers, "_http_fetch", unavailable_props)
 
     app = FastAPI()
     app.include_router(llm_providers.router, prefix="/api/v1")
     app.state.llm_manager = SimpleNamespace(llamacpp_supervisor=None)
     return TestClient(app)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("identity_field", ["model_alias", "model_path"])
+@pytest.mark.parametrize("route", ["providers", "models/metadata"])
+def test_external_llamacpp_vision_reaches_only_its_reported_model(
+    monkeypatch, identity_field, route,
+):
+    """A real /props identity confirms image support, without enabling other models."""
+    parser = _config({"Local-API": {
+        "llama_api_IP": "http://127.0.0.1:9099/prefix/v1/chat/completions",
+        "llama_model": "vision.gguf, unrelated.gguf",
+        "llama_api_key": "test-secret",
+    }})
+    response = httpx.Response(200, json={
+        identity_field: "vision.gguf", "modalities": {"vision": True},
+    })
+    response.close = Mock(wraps=response.close)
+    probe = Mock(return_value=response)
+    with _client_for_config(monkeypatch, parser) as client:
+        monkeypatch.setattr(llm_providers, "_http_fetch", probe)
+        monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {"llama.cpp": "test-secret"})
+        result = client.get(f"/api/v1/llm/{route}")
+    assert result.status_code == 200
+    models = (result.json()["models"] if route == "models/metadata"
+              else _provider(result.json(), "llama")["models_info"])
+    vision, unrelated = [next(m for m in models if m["name"] == name)
+                         for name in ("vision.gguf", "unrelated.gguf")]
+    assert vision["capabilities"]["vision"] is True
+    assert vision["vision_support"] is True
+    assert "image" in vision["modalities"]["input"]
+    assert unrelated["capabilities"]["vision"] is False
+    request = probe.call_args.kwargs
+    assert request["url"] == "http://127.0.0.1:9099/prefix/props"
+    assert request["headers"]["Authorization"] == "Bearer test-secret"
+    assert request["allow_redirects"] is False
+    assert request["timeout"] <= 1.5
+    assert request["retry"].attempts == 1
+    assert request["configured_endpoint"].matches(request["url"])
+    response.close.assert_called_once()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("status,payload", [
+    (401, {"model_alias": "vision.gguf", "modalities": {"vision": True}}),
+    (403, {}), (500, {}), (302, {}), (200, []),
+    (200, {"model_alias": "vision.gguf", "modalities": {"vision": False}}),
+    (200, {"model_alias": "vision.gguf", "modalities": {"vision": "true"}}),
+    (200, {"model_alias": "vision.gguf", "modalities": {"vision": 1}}),
+    (200, {"model_alias": "vision.gguf", "modalities": []}),
+    (200, {"model_alias": "VISION.gguf", "modalities": {"vision": True}}),
+    (200, {"modalities": {"vision": True}}),
+])
+def test_unconfirmed_external_llamacpp_remains_text_only(monkeypatch, status, payload):
+    """Auth failures, redirects and malformed or unrelated claims cannot enable images."""
+    parser = _config({"Local-API": {
+        "llama_api_IP": "http://127.0.0.1:9099/v1", "llama_model": "vision.gguf",
+    }})
+    with _client_for_config(monkeypatch, parser) as client:
+        probe = Mock(return_value=httpx.Response(status, json=payload))
+        monkeypatch.setattr(llm_providers, "_http_fetch", probe)
+        result = client.get("/api/v1/llm/models/metadata")
+    model = _model(result.json(), "llama", "vision.gguf")
+    assert model["capabilities"]["vision"] is False
+    assert model["vision_support"] is False
+    assert model["modalities"]["input"] == ["text"]
+
+
+@pytest.mark.unit
+def test_external_llamacpp_probe_failure_does_not_break_catalog(monkeypatch):
+    """An unavailable optional properties endpoint leaves normal text Chat available."""
+    parser = _config({"Local-API": {
+        "llama_api_IP": "http://127.0.0.1:9099/v1", "llama_model": "vision.gguf",
+    }})
+    with _client_for_config(monkeypatch, parser) as client:
+        monkeypatch.setattr(llm_providers, "_http_fetch", Mock(side_effect=TimeoutError))
+        result = client.get("/api/v1/llm/models/metadata")
+    assert result.status_code == 200
+    model = _model(result.json(), "llama", "vision.gguf")
+    assert model["capabilities"]["vision"] is False
+    assert model["provider_enabled"] is True
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("path", ["", "/", "/v1/", "/completion", "/v1/chat/completions"])
+def test_external_llamacpp_props_uses_configured_origin(monkeypatch, path):
+    """Supported completion/base endpoints all resolve to the same native properties URL."""
+    parser = _config({"Local-API": {
+        "llama_api_IP": f"http://127.0.0.1:9099{path}", "llama_model": "vision.gguf",
+    }})
+    with _client_for_config(monkeypatch, parser) as client:
+        probe = Mock(return_value=httpx.Response(200, content=b"not JSON"))
+        monkeypatch.setattr(llm_providers, "_http_fetch", probe)
+        result = client.get("/api/v1/llm/models/metadata")
+    assert result.status_code == 200
+    assert probe.call_args.kwargs["url"] == "http://127.0.0.1:9099/props"
+    assert _model(result.json(), "llama", "vision.gguf")["vision_support"] is False
+
+
+@pytest.mark.unit
+def test_external_llamacpp_expired_vision_is_replaced_by_text_only_server(monkeypatch):
+    """A server restarted without a projector must not retain positive vision metadata."""
+    parser = _config({"Local-API": {
+        "llama_api_IP": "http://127.0.0.1:9099", "llama_model": "vision.gguf",
+    }})
+    clock = [0.0]
+    probe = Mock(side_effect=[httpx.Response(200, json={
+        "model_alias": "vision.gguf", "modalities": {"vision": vision},
+    }) for vision in (True, False)])
+    with _client_for_config(monkeypatch, parser) as client:
+        monkeypatch.setattr(llm_providers, "_http_fetch", probe)
+        monkeypatch.setattr(llm_providers, "_vision_cache_time", lambda: clock[0], raising=False)
+        assert _model(client.get("/api/v1/llm/models/metadata").json(), "llama", "vision.gguf")["vision_support"] is True
+        clock[0] += 31
+        model = _model(client.get("/api/v1/llm/models/metadata").json(), "llama", "vision.gguf")
+    assert model["vision_support"] is False
+    assert model["capabilities"]["vision"] is False
+    assert model["modalities"]["input"] == ["text"]
+
+
+@pytest.mark.unit
+def test_external_llamacpp_cache_rechecks_credentials_endpoint_and_expiry(monkeypatch):
+    """A capability snapshot must not survive a changed server or credential."""
+    parser = _config({"Local-API": {
+        "llama_api_IP": "http://127.0.0.1:9099/v1", "llama_model": "vision.gguf",
+        "llama_api_key": "first-key",
+    }})
+    clock = [0.0]
+    probe = Mock(side_effect=[
+        httpx.Response(200, json={"model_path": "vision.gguf", "modalities": {"vision": True}}),
+        httpx.Response(401), httpx.Response(404), httpx.Response(404),
+    ])
+    with _client_for_config(monkeypatch, parser) as client:
+        monkeypatch.setattr(llm_providers, "_http_fetch", probe)
+        monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {
+            "llama.cpp": parser.get("Local-API", "llama_api_key"),
+        })
+        monkeypatch.setattr(llm_providers, "_vision_cache_time", lambda: clock[0], raising=False)
+        assert _model(client.get("/api/v1/llm/models/metadata").json(), "llama", "vision.gguf")["vision_support"] is True
+        client.get("/api/v1/llm/providers")
+        assert probe.call_count == 1
+        parser.set("Local-API", "llama_api_key", "changed-key")
+        assert _model(client.get("/api/v1/llm/models/metadata").json(), "llama", "vision.gguf")["vision_support"] is False
+        assert probe.call_count == 2
+        parser.set("Local-API", "llama_api_IP", "http://127.0.0.1:19099/v1")
+        client.get("/api/v1/llm/providers")
+        assert probe.call_count == 3
+        clock[0] += 31
+        client.get("/api/v1/llm/providers")
+        assert probe.call_count == 4
 
 
 def _provider(data: dict[str, object], name: str) -> dict[str, object]:
@@ -205,8 +360,11 @@ def test_llama_manual_model_on_metadata_target_is_egress_blocked(
     )
 
     with _client_for_config(monkeypatch, parser) as client:
+        probe = Mock(side_effect=AssertionError("Forbidden endpoint must not receive a probe"))
+        monkeypatch.setattr(llm_providers, "_http_fetch", probe)
         models_response = client.get("/api/v1/llm/models/metadata")
 
+    probe.assert_not_called()
     assert models_response.status_code == 200, models_response.text
     model = _model(models_response.json(), "llama", "manual-llama.gguf")
     assert model["availability"] == "unavailable"

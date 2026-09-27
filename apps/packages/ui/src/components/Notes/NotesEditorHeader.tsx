@@ -426,10 +426,10 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
     }
   }
   return (
-    <div className="flex flex-col gap-3 border-b border-border bg-surface px-4 py-3 md:flex-row md:items-center md:justify-between">
-      <div className="flex flex-col gap-0.5 min-w-0">
-        <div className="flex items-center gap-2">
-          <Typography.Title level={5} className="!mb-0 truncate !text-text">
+    <div className="flex flex-col gap-3 border-b border-border bg-surface px-4 py-3 md:flex-row md:flex-wrap md:items-center md:justify-between">
+      <div className="flex min-w-0 flex-col gap-0.5 md:flex-1 md:basis-64">
+        <div className="flex flex-wrap items-center gap-2">
+          <Typography.Title level={5} className="!mb-0 max-w-full truncate !text-text">
             {displayTitle}
           </Typography.Title>
           {studioBadgeLabel ? (
@@ -487,7 +487,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
         className={
           isMobileViewport
             ? 'flex w-full flex-wrap items-center justify-start gap-2'
-            : 'flex items-center justify-end gap-2'
+            : 'flex flex-wrap items-center justify-end gap-2 md:ml-auto'
         }
         data-testid="notes-header-actions"
       >

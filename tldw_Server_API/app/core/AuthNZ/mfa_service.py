@@ -31,7 +31,7 @@ else:
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key_candidates
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
-from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, UserNotFoundError
 from tldw_Server_API.app.core.AuthNZ.repos.mfa_repo import AuthnzMfaRepo
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
 
@@ -375,9 +375,16 @@ class MFAService:
             logger.info(f"MFA disabled for user {user_id}")
             return True
 
-        except Exception as e:
-            logger.error(f"Failed to disable MFA: {e}")
+        except UserNotFoundError:
             return False
+        except DatabaseError:
+            logger.error("Failed to disable MFA")
+            raise
+        except Exception as exc:
+            logger.bind(exception_type=type(exc).__name__).error(
+                "Failed to disable MFA"
+            )
+            raise DatabaseError("Failed to disable MFA") from None
 
     async def get_user_totp_secret(self, user_id: int) -> Optional[str]:
         """Return decrypted TOTP secret for a user if configured."""
@@ -397,7 +404,12 @@ class MFAService:
                 logger.error(f"Failed to load MFA secret for user {user_id}: {exc}")
             raise DatabaseError("Failed to load MFA secret") from exc
 
-    async def get_user_mfa_status(self, user_id: int) -> dict[str, Any]:
+    async def get_user_mfa_status(
+        self,
+        user_id: int,
+        *,
+        strict: bool = False,
+    ) -> dict[str, Any]:
         """
         Get MFA status for a user
 
@@ -426,8 +438,16 @@ class MFAService:
                     "method": "totp" if enabled else None,
                 }
 
-        except Exception as e:  # noqa: BLE001 - fail safe fallback for dashboard views
-            logger.error(f"Failed to get MFA status: {e}")
+        except DatabaseError:
+            logger.error("Failed to get MFA status")
+            if strict:
+                raise
+        except Exception as exc:  # noqa: BLE001 - fail safe fallback for dashboard views
+            logger.bind(exception_type=type(exc).__name__).error(
+                "Failed to get MFA status"
+            )
+            if strict:
+                raise DatabaseError("Failed to get MFA status") from None
             # This method is used for read-only status introspection. On
             # unexpected failures we intentionally fall back to a "MFA
             # disabled" snapshot instead of propagating the error, so that

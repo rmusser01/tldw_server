@@ -1,0 +1,9 @@
+{
+  "source_revision": "220bf544b7110b0ee37fdf99a046e8a03d7ba868",
+  "tracked_diff_unchanged_after_exit": true,
+  "wrapper_reaped_child": true,
+  "termination": "SIGTERM after session stop; returncode -15",
+  "microphone_opened": false,
+  "provider_key_transmitted": false,
+  "tool_approvals_sent": false
+}

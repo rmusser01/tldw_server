@@ -36,19 +36,6 @@ function formatInteger(value: number | null | undefined): string {
   return value.toLocaleString()
 }
 
-function formatScorePercent(value: number | null | undefined): string {
-  if (!isReportedNumber(value)) return "Not reported"
-  return `${Math.round(value * 100)}%`
-}
-
-function getWeakestIncludedScore(results: RagResult[]): number | null {
-  const scores = results
-    .map((result) => result.score)
-    .filter((score): score is number => typeof score === "number" && Number.isFinite(score))
-  if (scores.length === 0) return null
-  return Math.min(...scores)
-}
-
 function buildEvidenceOriginParts(results: RagResult[]): string[] {
   if (results.length === 0) return []
 
@@ -80,20 +67,9 @@ function buildEvidenceOriginParts(results: RagResult[]): string[] {
   ].filter((value): value is string => Boolean(value))
 }
 
-function formatCandidateScoreContext(
-  score: number | null,
-  weakestIncludedScore: number | null
-): string {
-  if (score == null) return ""
-
-  const scorePercent = formatScorePercent(score)
-  if (weakestIncludedScore == null) {
-    return ` (${scorePercent})`
-  }
-
-  const scoreDelta = score - weakestIncludedScore
-  const deltaLabel = `${scoreDelta >= 0 ? "+" : ""}${Math.round(scoreDelta * 100)} pts vs weakest included`
-  return ` (${scorePercent} • ${deltaLabel})`
+function formatCandidateScoreContext(score: number | null): string {
+  // Rejected candidate scores carry no calibrated probability or common scale.
+  return isReportedNumber(score) ? ` (ranking score ${score})` : ""
 }
 
 function getCandidateReasonCategory(reason: string | null): CandidateReasonCategory | null {
@@ -158,7 +134,6 @@ export function SearchDetailsPanel({ className }: SearchDetailsPanelProps) {
   const alsoConsidered = Array.isArray(searchDetails.alsoConsidered)
     ? searchDetails.alsoConsidered
     : []
-  const weakestIncludedScore = getWeakestIncludedScore(results)
   const consideredCount = searchDetails.candidatesConsidered
   const returnedCount = searchDetails.candidatesReturned
   const consideredDocuments =
@@ -322,7 +297,7 @@ export function SearchDetailsPanel({ className }: SearchDetailsPanelProps) {
                         {reasonCategory.label}
                       </span>
                     ) : null}
-                    {formatCandidateScoreContext(candidate.score, weakestIncludedScore)}
+                    {formatCandidateScoreContext(candidate.score)}
                     {candidate.reason ? ` — ${candidate.reason}` : ""}
                   </li>
                 )

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from math import ceil
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
 from loguru import logger
@@ -14,6 +14,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
@@ -21,10 +22,11 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 from tldw_Server_API.app.core.External_Sources.connectors_service import (
     create_import_job,
     get_source_by_id,
+)
+from tldw_Server_API.app.core.External_Sources.connectors_service import (
     list_sources as list_connector_sources,
 )
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
-from tldw_Server_API.app.core.config import settings
 
 router = APIRouter(tags=["Email"])
 
@@ -209,6 +211,14 @@ async def search_email_messages(
     ),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    cursor: Annotated[
+        str | None,
+        Query(
+            max_length=4096,
+            description="Omit for offset pagination; use an empty value to start cursor pagination, "
+            "then pass next_cursor with the same query and offset=0.",
+        ),
+    ] = None,
     db: Any = Depends(get_media_db_for_user),
 ) -> dict[str, Any]:
     """Run Stage-1 email operator search."""
@@ -216,6 +226,27 @@ async def search_email_messages(
     _ensure_email_operator_search_enabled()
 
     try:
+        if cursor is not None:
+            rows, total, next_cursor = db.search_email_messages(
+                query=q,
+                include_deleted=False,
+                limit=limit,
+                offset=offset,
+                cursor=cursor,
+            )
+            has_more = next_cursor is not None
+            return {
+                "items": rows,
+                "pagination": {
+                    "mode": "cursor",
+                    "limit": limit,
+                    "total": total,
+                    "has_more": has_more,
+                    "next_cursor": next_cursor,
+                },
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+            }
         rows, total = db.search_email_messages(
             query=q,
             include_deleted=False,

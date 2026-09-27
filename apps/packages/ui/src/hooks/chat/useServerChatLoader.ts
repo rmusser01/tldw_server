@@ -1,4 +1,8 @@
+import { useHistorySelectionContext } from "./useHistorySelection"
+import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
+import { waitForChatPromotion } from "@/services/pending-chat-promotion"
 import React from "react"
+import { formatToMessage } from "@/db/dexie/helpers"
 import { shallow } from "zustand/shallow"
 import type { TFunction } from "i18next"
 import { useChatBaseState } from "@/hooks/chat/useChatBaseState"
@@ -8,8 +12,10 @@ import {
   tldwClient,
   type ServerChatMessage
 } from "@/services/tldw/TldwApiClient"
-import { getHistoriesWithMetadata, saveMessage } from "@/db/dexie/helpers"
-import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
+import { reconcileServerChatMessages, reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { watchServerChatLoadAuthority } from "@/services/server-chat-load-authority"
+import { getSelectedAssistantOperationRevision, useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { syncChatSettingsForServerChat } from "@/services/chat-settings"
 import { validateCachedServerChatId } from "@/store/workspace-sync-contract"
 import type { ChatScope } from "@/types/chat-scope"
@@ -38,11 +44,14 @@ type NotificationApi = {
 type UseServerChatLoaderOptions = {
   ensureServerChatHistoryId: (
     chatId: string,
-    title?: string
+    title?: string,
+    scopeInvalidatedSignal?: AbortSignal,
+    snapshot?: ServicePromptSnapshot
   ) => Promise<string | null>
   notification: NotificationApi
   t: TFunction
   scope?: ChatScope
+  enabled?: boolean
 }
 
 type PreserveLocalMessagesArgs = {
@@ -71,6 +80,7 @@ type FetchServerChatMessagesPage = (
 
 const SERVER_CHAT_MESSAGES_FETCH_LIMIT = 200
 const SERVER_CHAT_MESSAGES_FETCH_MAX_PAGES = 100
+const SERVER_CHAT_IMAGES_MAX_ENCODED_CHARS = 64 * 1024 * 1024
 
 const toServerMessageId = (message: Message): string | null => {
   if (typeof message.serverMessageId !== "string") return null
@@ -106,18 +116,19 @@ export const shouldPreserveLocalMessagesForServerLoad = ({
   if (isStreaming || isProcessing) return true
   if (!Array.isArray(currentMessages) || currentMessages.length === 0) return false
 
+  const serverMessageIds = new Set(
+    serverMessages.map((message) => toServerMessageId(message)).filter(Boolean)
+  )
+
   const hasUnsyncedMessages = currentMessages.some(
     (message) =>
       !toServerMessageId(message) &&
+      !serverMessageIds.has(String(message.id || "")) &&
       !isSyntheticGreetingPlaceholder(message) &&
       typeof message.message === "string" &&
       message.message.trim().length > 0
   )
   if (hasUnsyncedMessages) return true
-
-  const serverMessageIds = new Set(
-    serverMessages.map((message) => toServerMessageId(message)).filter(Boolean)
-  )
 
   return currentMessages.some((message) => {
     const serverMessageId = toServerMessageId(message)
@@ -149,6 +160,7 @@ export const shouldCommitServerChatLoadResult = ({
 }): boolean => {
   if (!requestedChatId || !activeServerChatId) return false
   if (requestedChatId !== activeServerChatId) return false
+  if (requestController?.signal.aborted) return false
   return requestController != null && requestController === activeController
 }
 
@@ -170,15 +182,22 @@ export const fetchAllServerChatMessages = async (
   )
   const messages: ServerChatMessage[] = []
   let offset = 0
+  let imageCharacters = 0
 
   for (let page = 0; page < maxPages; page += 1) {
+    options?.signal?.throwIfAborted()
     const batch = await fetchPage({
       limit,
       offset,
       signal: options?.signal
     })
+    options?.signal?.throwIfAborted()
     if (!Array.isArray(batch) || batch.length === 0) {
       break
+    }
+    imageCharacters += batch.reduce((total, message) => total + (message.images || []).reduce((size, image) => size + image.length, 0), 0)
+    if (imageCharacters > SERVER_CHAT_IMAGES_MAX_ENCODED_CHARS) {
+      throw new Error("Saved chat attachments exceed the image history limit. Local work has been retained.")
     }
     messages.push(...batch)
     offset += batch.length
@@ -259,6 +278,12 @@ const isMissingServerChatReferenceError = (error: unknown): boolean => {
 
   const message = String(candidate?.message || "").toLowerCase()
   return message.includes("404") || message.includes("not found")
+}
+
+const isDeniedServerChatError = (error: unknown): boolean => {
+  const candidate = error as { status?: unknown; response?: { status?: unknown } } | null
+  const status = Number(candidate?.status ?? candidate?.response?.status)
+  return status === 401 || status === 403
 }
 
 export const resolveServerChatAssistantIdentity = (
@@ -428,9 +453,11 @@ export const mapServerChatMessagesToPlaygroundMessages = ({
           : m.role === "system"
             ? "System"
             : "You",
-      message: mirroredImageEvent ? "" : m.content,
+      message: mirroredImageEvent || (m.role === "user" && m.version === 1 &&
+        metadataExtra?.content_placeholder_reason === "image_attachment" && m.images?.length &&
+        m.content === `<Image attachment x${m.images.length}>`) ? "" : m.content,
       sources: [],
-      images: mirroredImageDataUrl ? [mirroredImageDataUrl] : [],
+      images: mirroredImageDataUrl ? [mirroredImageDataUrl] : m.images || [],
       generationInfo,
       id: String(m.id),
       serverMessageId: String(m.id),
@@ -597,9 +624,13 @@ export const useServerChatLoader = ({
   ensureServerChatHistoryId,
   notification,
   t,
-  scope
+  scope,
+  enabled = true
 }: UseServerChatLoaderOptions) => {
-  const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
+  const selection = useHistorySelectionContext()
+  const selectionRef = React.useRef(selection)
+  selectionRef.current = selection
+  const [selectedAssistant, setSelectedAssistant, assistantMeta] = useSelectedAssistant(null)
   const {
     messages,
     streaming,
@@ -693,7 +724,12 @@ export const useServerChatLoader = ({
   }, [])
 
   React.useEffect(() => {
-    if (!serverChatId) return
+    if (!enabled) {
+      serverChatLoadRef.current.controller?.abort()
+      serverChatLoadRef.current.inFlight = false
+      return
+    }
+    if (!serverChatId || assistantMeta?.isLoading) return
     if (
       shouldSkipLoadedServerChatReload({
         activeServerChatId: serverChatId,
@@ -721,13 +757,29 @@ export const useServerChatLoader = ({
     serverChatDebounceRef.current.chatId = serverChatId
     serverChatDebounceRef.current.timer = setTimeout(() => {
       const controller = new AbortController()
+      let selectionCurrent = selectionRef.current?.fence() || (() => true)
+      let ownedSelectionRevision = getSelectedAssistantOperationRevision()
       const canCommitCurrentLoad = () =>
+        selectionCurrent() &&
+        useStoreMessageOption.getState().serverChatId === serverChatId &&
         shouldCommitServerChatLoadResult({
           requestedChatId: serverChatId,
           activeServerChatId: serverChatLoadRef.current.chatId,
           requestController: controller,
           activeController: serverChatLoadRef.current.controller
         })
+      const applyOwnedAssistantSelection = async (selection: Parameters<typeof setSelectedAssistant>[0]) => {
+        const before = ownedSelectionRevision
+        if (!canCommitCurrentLoad() || getSelectedAssistantOperationRevision() !== before) return false
+        await setSelectedAssistant(selection, { isCurrent: () => {
+          const revision = getSelectedAssistantOperationRevision()
+          // This operation increments the existing revision synchronously. A
+          // later picker operation must win even before React rerenders.
+          return canCommitCurrentLoad() && (revision === before || revision === before + 1)
+        } })
+        ownedSelectionRevision = before + 1
+        return canCommitCurrentLoad() && getSelectedAssistantOperationRevision() === ownedSelectionRevision
+      }
       serverChatLoadRef.current = {
         chatId: serverChatId,
         controller,
@@ -735,13 +787,51 @@ export const useServerChatLoader = ({
         loaded: false
       }
 
+      const rejectCurrentOwner = async (code: string) => {
+        if (!canCommitCurrentLoad()) return
+        const control = selectionRef.current
+        if (!control) {
+          setServerChatId(null)
+          return
+        }
+        const owner = control.getCurrent().owner
+        if (owner?.kind !== "native" || owner.conversation_id !== serverChatId) return
+        setServerChatLoadState("failed")
+        setServerChatLoadError(code)
+        await control.open({ kind: "unavailable", code })
+      }
+
       const loadServerChat = async () => {
         let didLoadSuccessfully = false
+        let snapshot: ServicePromptSnapshot | undefined
+        let stopWatchingAuthority: (() => void) | undefined
+        let pendingAssistantPresentation: Promise<unknown> | undefined
         try {
           setIsLoading(true)
           setServerChatLoadState("loading")
           setServerChatLoadError(null)
-          await tldwClient.initialize().catch(() => null)
+          snapshot = await loadServicePromptSnapshot([], { signal: controller.signal })
+          snapshot.scopeInvalidatedSignal.addEventListener("abort", () => controller.abort(), { once: true })
+          if (snapshot.scopeSignal.aborted || !canCommitCurrentLoad()) return
+          stopWatchingAuthority = watchServerChatLoadAuthority(snapshot, controller)
+          await waitForChatPromotion(setServerChatId, useStoreMessageOption.getState().historyId, snapshot, { waitUntilSaved: true })
+          if (!canCommitCurrentLoad()) return
+          const selectionState = selectionRef.current?.getCurrent()
+          if (selectionState?.error === "unbound_server_mirror" || selectionState?.owner?.kind === "unavailable") {
+            setServerChatLoadState("failed")
+            setServerChatLoadError(selectionState.error || "history_owner_unavailable")
+            return
+          }
+          const control = selectionRef.current
+          if (control?.settingsMode?.(serverChatId, scope) === "pending") {
+            if (!await control.loadConversation({serverChatId, scope, temporary: temporaryChat})) return
+            selectionCurrent = control.fence()
+          }
+          if (control?.settingsMode?.(serverChatId, scope) === "pending") return
+          const forkChild = control?.settingsMode?.(serverChatId, scope) === "fork"
+          const forkOwner = forkChild ? control?.getCurrent().owner : null
+          if (forkChild && (forkOwner?.kind !== "native" || !forkOwner.validate_lease())) return
+          if (!forkChild) await tldwClient.initialize().catch(() => null)
 
           let assistantName = "Assistant"
           let chatTitle = serverChatTitle || ""
@@ -749,12 +839,15 @@ export const useServerChatLoader = ({
           let assistantKind = serverChatAssistantKind
           let assistantId = serverChatAssistantId
           let personaMemoryMode = serverChatPersonaMemoryMode
+          let restoreAssistantSelection = true
 
           if (!serverChatMetaLoaded) {
             try {
               const chat = await tldwClient.getChat(
                 serverChatId,
-                scope ? { scope } : undefined
+                forkOwner?.kind === "native"
+                  ? { scope: forkOwner.scope, requestScope: forkOwner.request_scope, signal: snapshot.scopeSignal }
+                  : { scope, signal: snapshot.scopeSignal, requestScope: snapshot.requestScope }
               )
               if (!canCommitCurrentLoad()) {
                 return
@@ -771,7 +864,15 @@ export const useServerChatLoader = ({
                 expectedScope: scope || { type: "global" }
               })
               if (!validatedServerChatId) {
+                if (selectionRef.current) {
+                  await rejectCurrentOwner("server_chat_scope_mismatch")
+                } else {
+                setMessages([])
+                setHistory([])
+                setServerChatTitle(null)
+                setIsLoading(false)
                 setServerChatId(null)
+                }
                 return
               }
               const meta = chat as unknown as Record<string, unknown>
@@ -782,6 +883,7 @@ export const useServerChatLoader = ({
               assistantId = resolvedAssistantIdentity.assistantId
               characterId = resolvedAssistantIdentity.characterId
               personaMemoryMode = resolvedAssistantIdentity.personaMemoryMode
+              restoreAssistantSelection = getSelectedAssistantOperationRevision() === ownedSelectionRevision
               setServerChatTitle(chatTitle || "")
               setServerChatCharacterId(characterId)
               setServerChatAssistantKind(assistantKind)
@@ -814,21 +916,20 @@ export const useServerChatLoader = ({
               )
               setServerChatMetaLoaded(true)
             } catch (error) {
-              if (isMissingServerChatReferenceError(error) && canCommitCurrentLoad()) {
-                setServerChatId(null)
-                return
-              }
+              if (isMissingServerChatReferenceError(error) || isDeniedServerChatError(error)) throw error
               // ignore metadata failures; still try to load messages
             }
           }
 
           const deferredAssistantPresentationPromise = (async () => {
+            if (!restoreAssistantSelection) return null
             let syncedSettings = null
             if (assistantKind == null && characterId == null) {
               try {
-                syncedSettings = await syncChatSettingsForServerChat({
+                syncedSettings = forkChild ? control?.getCurrent().forkSettings ?? null : await syncChatSettingsForServerChat({
                   historyId: null,
                   serverChatId,
+                  scope,
                   allowScratchFallback: false
                 })
               } catch {
@@ -838,7 +939,9 @@ export const useServerChatLoader = ({
 
             if (assistantKind === "persona" && assistantId) {
               try {
-                const persona = await tldwClient.getPersonaProfile(assistantId)
+                const persona = await tldwClient.getPersonaProfile(assistantId, {
+                  signal: snapshot!.scopeSignal, requestScope: snapshot!.requestScope
+                })
                 if (persona) {
                   if (!canCommitCurrentLoad()) {
                     return null
@@ -849,7 +952,7 @@ export const useServerChatLoader = ({
                     id: assistantId,
                     name: nextAssistantName
                   })
-                  await setSelectedAssistant(selection)
+                  if (!await applyOwnedAssistantSelection(selection)) return null
                   return {
                     assistantName: nextAssistantName,
                     assistantAvatarUrl: selection?.avatar_url ?? null
@@ -870,7 +973,7 @@ export const useServerChatLoader = ({
                   id: assistantId,
                   name: "Persona"
                 })
-                await setSelectedAssistant(selection)
+                if (!await applyOwnedAssistantSelection(selection)) return null
                 return {
                   assistantName: selection?.name || "Persona",
                   assistantAvatarUrl: selection?.avatar_url ?? null
@@ -878,7 +981,9 @@ export const useServerChatLoader = ({
               }
             } else if (characterId != null) {
               try {
-                const character = await tldwClient.getCharacter(characterId)
+                const character = await tldwClient.getCharacter(characterId, {
+                  signal: snapshot!.scopeSignal, requestScope: snapshot!.requestScope
+                })
                 if (character) {
                   if (!canCommitCurrentLoad()) {
                     return null
@@ -887,7 +992,7 @@ export const useServerChatLoader = ({
                     ...character,
                     id: String(character.id ?? characterId)
                   })
-                  await setSelectedAssistant(selection)
+                  if (!await applyOwnedAssistantSelection(selection)) return null
                   return {
                     assistantName:
                       selection?.name ||
@@ -920,13 +1025,13 @@ export const useServerChatLoader = ({
               const selection =
                 effectiveAssistantStateToSelection(fallbackState)
               if (selection) {
-                await setSelectedAssistant(selection)
+                if (!await applyOwnedAssistantSelection(selection)) return null
                 return {
                   assistantName: selection.name,
                   assistantAvatarUrl: selection.avatar_url ?? null
                 }
               }
-              await setSelectedAssistant(null)
+              if (!await applyOwnedAssistantSelection(null)) return null
               return null
             }
 
@@ -944,33 +1049,48 @@ export const useServerChatLoader = ({
             const selection =
               effectiveAssistantStateToSelection(effectiveAssistantState)
             if (selection) {
-              await setSelectedAssistant(selection)
+              if (!await applyOwnedAssistantSelection(selection)) return null
               return {
                 assistantName: selection.name,
                 assistantAvatarUrl: selection.avatar_url ?? null
               }
             }
-            await setSelectedAssistant(null)
+            if (!await applyOwnedAssistantSelection(null)) return null
             return null
           })()
 
-          const list = await fetchAllServerChatMessages(
+          pendingAssistantPresentation = deferredAssistantPresentationPromise
+
+          const list = forkChild ? [] : await fetchAllServerChatMessages(
             ({ limit, offset, signal }) =>
               tldwClient.listChatMessages(
                 serverChatId,
                 {
                   include_deleted: "false",
                   include_metadata: "true",
+                  include_images: "true",
+                  render_placeholders: assistantKind === "character" || characterId != null ? "true" : "false",
                   limit,
                   offset
                 },
-                scope ? { signal, scope } : { signal }
+                { signal, scope, requestScope: snapshot!.requestScope }
               ),
             {
               signal: controller.signal
             }
           )
 
+          if (list.some(message => message.role === "user" && (message.images?.length ?? 0) > 1)) {
+            throw new Error("This conversation has multiple images in one user message. Chat currently supports one image per turn. Your local work has been kept; open a new conversation to continue.")
+          }
+          if (!canCommitCurrentLoad()) return
+          const currentSelection = selectionRef.current?.getCurrent()
+          if (selectionRef.current && !(currentSelection?.owner?.kind === "native" && currentSelection.owner.conversation_id === serverChatId && currentSelection.capture)) {
+            if (!await selectionRef.current.loadConversation({ serverChatId, scope, temporary: temporaryChat })) return
+            selectionCurrent = selectionRef.current.fence()
+            if (!canCommitCurrentLoad()) return
+          }
+          const hasSelectedHistory = selectionRef.current?.getCurrent().capture?.status === "captured"
           const mappedMessages = mapServerChatMessagesToPlaygroundMessages({
             serverMessages: list,
             assistantName,
@@ -979,33 +1099,24 @@ export const useServerChatLoader = ({
           if (!canCommitCurrentLoad()) {
             return
           }
-          const history = mappedMessages.map((message) => ({
-            role: message.role,
-            content: message.message,
-            messageType: message.messageType
-          }))
-
           const currentMessages = messagesRef.current
           const shouldPreserveLocal = shouldPreserveLocalMessagesForServerLoad({
-            currentMessages,
-            serverMessages: mappedMessages,
-            isStreaming: streamingRef.current,
-            isProcessing: processingRef.current
+            currentMessages, serverMessages: mappedMessages,
+            isStreaming: streamingRef.current, isProcessing: processingRef.current
           })
-
           const shouldPreserveAtCommit = shouldPreserveLocalMessagesForServerLoad({
-            currentMessages: messagesRef.current,
-            serverMessages: mappedMessages,
-            isStreaming: streamingRef.current,
-            isProcessing: processingRef.current
+            currentMessages: messagesRef.current, serverMessages: mappedMessages,
+            isStreaming: streamingRef.current, isProcessing: processingRef.current
           })
-
-          if (!shouldPreserveLocal && !shouldPreserveAtCommit) {
-            setHistory(history)
-            setMessages(mappedMessages)
+          const active = selectionRef.current
+            ? shouldPreserveLocal || shouldPreserveAtCommit
+            : streamingRef.current || processingRef.current
+          if (!hasSelectedHistory && !active) {
+            const merged = reconcileServerChatMessages(useStoreMessageOption.getState().messages, mappedMessages)
+            setHistory(excludeLocalRagDiagnostics(merged).map(message => ({ role: message.role, content: message.message, image: message.images?.[0], messageType: message.messageType })))
+            setMessages(merged)
           }
-          const shouldApplyDeferredAssistantPresentation =
-            !shouldPreserveLocal && !shouldPreserveAtCommit
+          const shouldApplyDeferredAssistantPresentation = !hasSelectedHistory && !active
           if (shouldApplyDeferredAssistantPresentation) {
             void deferredAssistantPresentationPromise
               .then((presentation) => {
@@ -1030,12 +1141,21 @@ export const useServerChatLoader = ({
                 })
               })
           }
-          if (!temporaryChat && !shouldPreserveLocal && !shouldPreserveAtCommit) {
+          if (!selectionRef.current && !temporaryChat && !active) {
+            if (!canCommitCurrentLoad()) {
+              return
+            }
+            const beforeMirror = useStoreMessageOption.getState().messages
             try {
               const localHistoryId = await ensureServerChatHistoryId(
                 serverChatId,
-                chatTitle || undefined
+                chatTitle || undefined,
+                snapshot.scopeSignal,
+                snapshot
               )
+              if (!canCommitCurrentLoad()) {
+                return
+              }
               if (localHistoryId) {
                 try {
                   await syncChatSettingsForServerChat({
@@ -1046,54 +1166,35 @@ export const useServerChatLoader = ({
                 } catch {
                   // Best-effort settings sync.
                 }
-                const metadataMap = await getHistoriesWithMetadata([
-                  localHistoryId
-                ])
-                const existingMeta = metadataMap.get(localHistoryId)
-                if (!existingMeta || existingMeta.messageCount === 0) {
-                  const now = Date.now()
-                  await Promise.all(
-                    mappedMessages.map((m, index) => {
-                      const parsedCreatedAt =
-                        typeof m.createdAt === "number"
-                          ? m.createdAt
-                          : Number.NaN
-                      const resolvedCreatedAt = Number.isNaN(parsedCreatedAt)
-                        ? now + index
-                        : parsedCreatedAt
-                      const role = m.role ?? (m.isBot ? "assistant" : "user")
-                      const name = m.name || (role === "assistant" ? assistantName : "You")
-                      return saveMessage({
-                        id: String(m.id || ""),
-                        history_id: localHistoryId,
-                        name,
-                        role,
-                        content: m.message,
-                        images: Array.isArray(m.images) ? m.images : [],
-                        source: [],
-                        generationInfo:
-                          m.generationInfo &&
-                          typeof m.generationInfo === "object" &&
-                          !Array.isArray(m.generationInfo)
-                            ? m.generationInfo
-                            : undefined,
-                        time: index,
-                        message_type: m.messageType,
-                        clusterId: m.clusterId,
-                        modelId: m.modelId,
-                        modelName: m.modelName || assistantName,
-                        modelImage: m.modelImage,
-                        parent_message_id: m.parentMessageId ?? null,
-                        metadataExtra: m.metadataExtra,
-                        createdAt: resolvedCreatedAt
-                      })
-                    })
-                  )
-                }
+                if (!canCommitCurrentLoad() || streamingRef.current || processingRef.current) return
+                const mirror = await reconcileServerChatMirror({
+                  historyId: localHistoryId, chatId: serverChatId,
+                  ownerKey: serverChatMirrorOwnerKey(snapshot), messages: mappedMessages,
+                  localMessages: useStoreMessageOption.getState().messages,
+                  signal: snapshot.scopeSignal
+                })
+                if (!canCommitCurrentLoad() || streamingRef.current || processingRef.current ||
+                  useStoreMessageOption.getState().historyId !== localHistoryId) return
+                const merged = reconcileServerChatMessages(
+                  useStoreMessageOption.getState().messages,
+                  formatToMessage(mirror.rows),
+                  beforeMirror
+                ).map(message => {
+                  const id = message.serverMessageId ? mirror.localIds.get(message.serverMessageId) : undefined
+                  return id && message.id !== id ? { ...message, id } : message
+                })
+                setHistory(excludeLocalRagDiagnostics(merged).map(message => ({ role: message.role, content: message.message, image: message.images?.[0], messageType: message.messageType })))
+                setMessages(merged)
               }
             } catch {
+              if (!canCommitCurrentLoad()) {
+                return
+              }
               // Local mirror is best-effort for server chats.
             }
+          }
+          if (!canCommitCurrentLoad()) {
+            return
           }
           if (chatTitle) {
             updatePageTitle(chatTitle)
@@ -1107,8 +1208,18 @@ export const useServerChatLoader = ({
             e instanceof Error && e.name === "AbortError"
               ? true
               : message.toLowerCase().includes("abort")
-          if (!isAbort && isMissingServerChatReferenceError(e) && canCommitCurrentLoad()) {
-            setServerChatId(null)
+          if (!isAbort && canCommitCurrentLoad() &&
+            (isMissingServerChatReferenceError(e) || isDeniedServerChatError(e))) {
+            if (selectionRef.current) {
+              await rejectCurrentOwner(isMissingServerChatReferenceError(e) ? "server_chat_not_found" : "server_chat_access_denied")
+            } else {
+              setMessages([])
+              setHistory([])
+              setServerChatTitle(null)
+              updatePageTitle()
+              setIsLoading(false)
+              setServerChatId(null)
+            }
             return
           }
           if (!isAbort && canCommitCurrentLoad()) {
@@ -1126,6 +1237,12 @@ export const useServerChatLoader = ({
             })
           }
         } finally {
+          if (useStoreMessageOption.getState().serverChatId === serverChatId) setIsLoading(false)
+          // Messages are ready independently of optional profile enrichment.
+          // Keep this load's authority alive until that guarded work settles.
+          await pendingAssistantPresentation?.catch(() => undefined)
+          stopWatchingAuthority?.()
+          snapshot?.release()
           if (serverChatLoadRef.current.controller === controller) {
             serverChatLoadRef.current = {
               chatId: serverChatId,
@@ -1134,7 +1251,6 @@ export const useServerChatLoader = ({
               loaded: didLoadSuccessfully
             }
           }
-          setIsLoading(false)
         }
       }
 
@@ -1148,6 +1264,8 @@ export const useServerChatLoader = ({
       }
     }
   }, [
+    enabled,
+    assistantMeta?.isLoading,
     ensureServerChatHistoryId,
     notification,
     serverChatAssistantId,

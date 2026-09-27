@@ -30,18 +30,60 @@ permissions:
   contents: read
 
 concurrency:
-  group: pypi-package-${{ github.event.pull_request.number || github.ref }}
+  group: pypi-package-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  admission:
+    if: >-
+      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/license-first-admission.yml
+    with:
+      workflow_file: pypi-package.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
+  # The pull_request path reports to the PR, so it is the one branch protection
+  # sees -- but it used to start every gate immediately, in parallel with the
+  # license audit it is supposed to follow. This makes it wait for the verdict.
+  await_license:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/license-first-await.yml
+    permissions:
+      contents: read
+      statuses: read
+
   build-and-check:
     name: Build and Validate Distributions
+    needs: [admission, await_license]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Setup Python

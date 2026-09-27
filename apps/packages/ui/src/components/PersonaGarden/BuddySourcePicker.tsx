@@ -37,10 +37,10 @@ export const BuddySourcePicker: React.FC<BuddySourcePickerProps> = ({
     {
       source: "bundled",
       label: t("sidepanel:personaGarden.visuals.builder.bundledSource", {
-        defaultValue: "Bundled Buddy"
+        defaultValue: "Browse ready-made Buddies"
       }),
       description: t("sidepanel:personaGarden.visuals.builder.bundledSourceHelp", {
-        defaultValue: "Start from one of the reviewed Basic defaults."
+        defaultValue: "Return to the artwork gallery."
       }),
       icon: <PackageOpen className="h-4 w-4" />,
       tag: t("sidepanel:personaGarden.visuals.builder.recommendedTag", {

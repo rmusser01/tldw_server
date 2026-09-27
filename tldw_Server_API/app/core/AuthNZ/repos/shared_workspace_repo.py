@@ -36,6 +36,10 @@ def _load_json_dict(raw: Any) -> dict[str, Any]:
     return {}
 
 
+def _iso_timestamp(value: Any) -> Any:
+    return value.isoformat() if isinstance(value, datetime) else value
+
+
 def _normalize_share_scope_type(scope_type: str | None) -> str:
     value = (scope_type or "").strip().lower()
     if value in {"organization", "orgs"}:
@@ -74,8 +78,20 @@ class SharedWorkspaceRepo:
 
     async def ensure_tables(self) -> None:
         required = {"shared_workspaces", "share_tokens", "share_audit_log", "sharing_config"}
+        if self._is_postgres_backend():
+            catalog_query = """
+                SELECT table_name AS name
+                FROM information_schema.tables
+                WHERE table_schema = current_schema()
+                  AND table_name IN (
+                      'shared_workspaces', 'share_tokens',
+                      'share_audit_log', 'sharing_config'
+                  )
+            """
+        else:
+            catalog_query = "SELECT name FROM sqlite_master WHERE type='table'"
         rows = await self.db_pool.fetchall(
-            "SELECT name FROM sqlite_master WHERE type='table'",
+            catalog_query,
             (),
         )
         existing = {
@@ -89,6 +105,17 @@ class SharedWorkspaceRepo:
                 "Sharing tables are missing. Run AuthNZ migrations. "
                 f"Missing: {sorted(missing)}"
             )
+        if self._is_postgres_backend():
+            from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
+                sharing_schema_issues_pg,
+            )
+
+            issues = await sharing_schema_issues_pg(self.db_pool)
+            if issues:
+                raise RuntimeError(
+                    "Sharing schema contract mismatch. Run AuthNZ migrations. "
+                    f"Issues: {issues}"
+                )
 
     @staticmethod
     def _row_to_dict(row: Any) -> dict[str, Any]:
@@ -112,6 +139,8 @@ class SharedWorkspaceRepo:
         out = dict(row)
         out["allow_clone"] = _to_bool(out.get("allow_clone"))
         out["is_revoked"] = out.get("revoked_at") is not None
+        for field in ("created_at", "updated_at", "revoked_at"):
+            out[field] = _iso_timestamp(out.get(field))
         return out
 
     @staticmethod
@@ -123,6 +152,8 @@ class SharedWorkspaceRepo:
         out["use_count"] = int(out.get("use_count") or 0)
         out["is_password_protected"] = bool(out.get("password_hash"))
         out["is_revoked"] = out.get("revoked_at") is not None
+        for field in ("expires_at", "created_at", "revoked_at"):
+            out[field] = _iso_timestamp(out.get(field))
         return out
 
     # ── shared_workspaces CRUD ──
@@ -180,6 +211,124 @@ class SharedWorkspaceRepo:
             (int(share_id),),
         )
         return self._normalize_share_row(self._row_to_dict(row) if row else None)
+
+    async def get_active_share_for_user(
+        self,
+        share_id: int,
+        user_id: int,
+    ) -> dict[str, Any] | None:
+        """Return an active share when current database membership permits access."""
+        row = await self.db_pool.fetchone(
+            """
+            SELECT sw.id, sw.workspace_id, sw.owner_user_id,
+                   sw.share_scope_type, sw.share_scope_id,
+                   sw.access_level, sw.allow_clone, sw.created_by,
+                   sw.created_at, sw.updated_at, sw.revoked_at
+            FROM shared_workspaces sw
+            WHERE sw.id = ?
+              AND sw.revoked_at IS NULL
+              AND (
+                  (
+                      sw.share_scope_type = 'team'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM teams t
+                          JOIN organizations o ON o.id = t.org_id
+                          WHERE t.id = sw.share_scope_id
+                            AND COALESCE(t.is_active, FALSE) = TRUE
+                            AND COALESCE(o.is_active, FALSE) = TRUE
+                      )
+                  )
+                  OR (
+                      sw.share_scope_type = 'org'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM organizations o
+                          WHERE o.id = sw.share_scope_id
+                            AND COALESCE(o.is_active, FALSE) = TRUE
+                      )
+                  )
+              )
+              AND (
+                  sw.owner_user_id = ?
+                  OR (
+                      sw.share_scope_type = 'team'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM team_members tm
+                          WHERE tm.team_id = sw.share_scope_id
+                            AND tm.user_id = ?
+                            AND tm.status = 'active'
+                      )
+                  )
+                  OR (
+                      sw.share_scope_type = 'org'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM org_members om
+                          WHERE om.org_id = sw.share_scope_id
+                            AND om.user_id = ?
+                            AND om.status = 'active'
+                      )
+                  )
+              )
+            """,
+            (int(share_id), int(user_id), int(user_id), int(user_id)),
+        )
+        return self._normalize_share_row(self._row_to_dict(row) if row else None)
+
+    async def list_active_shares_for_user(self, user_id: int) -> list[dict[str, Any]]:
+        """List active shares granted by current membership, excluding owned shares."""
+        rows = await self.db_pool.fetchall(
+            """
+            SELECT sw.id, sw.workspace_id, sw.owner_user_id,
+                   sw.share_scope_type, sw.share_scope_id,
+                   sw.access_level, sw.allow_clone, sw.created_by,
+                   sw.created_at, sw.updated_at, sw.revoked_at
+            FROM shared_workspaces sw
+            WHERE sw.revoked_at IS NULL
+              AND sw.owner_user_id <> ?
+              AND (
+                  (
+                      sw.share_scope_type = 'team'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM teams t
+                          JOIN organizations o ON o.id = t.org_id
+                          WHERE t.id = sw.share_scope_id
+                            AND COALESCE(t.is_active, FALSE) = TRUE
+                            AND COALESCE(o.is_active, FALSE) = TRUE
+                      )
+                      AND EXISTS (
+                          SELECT 1
+                          FROM team_members tm
+                          WHERE tm.team_id = sw.share_scope_id
+                            AND tm.user_id = ?
+                            AND tm.status = 'active'
+                      )
+                  )
+                  OR (
+                      sw.share_scope_type = 'org'
+                      AND EXISTS (
+                          SELECT 1
+                          FROM organizations o
+                          WHERE o.id = sw.share_scope_id
+                            AND COALESCE(o.is_active, FALSE) = TRUE
+                      )
+                      AND EXISTS (
+                          SELECT 1
+                          FROM org_members om
+                          WHERE om.org_id = sw.share_scope_id
+                            AND om.user_id = ?
+                            AND om.status = 'active'
+                      )
+                  )
+              )
+            ORDER BY sw.created_at DESC, sw.id DESC
+            """,
+            (int(user_id), int(user_id), int(user_id)),
+        )
+        return [self._normalize_share_row(self._row_to_dict(row)) or {} for row in rows]
 
     async def list_shares_for_workspace(
         self,
@@ -499,9 +648,9 @@ class SharedWorkspaceRepo:
                    owner_user_id, share_id, token_id, metadata_json,
                    ip_address, user_agent, created_at
             FROM share_audit_log
-            WHERE (? IS NULL OR owner_user_id = ?)
-              AND (? IS NULL OR resource_type = ?)
-              AND (? IS NULL OR resource_id = ?)
+            WHERE (CAST(? AS BIGINT) IS NULL OR owner_user_id = ?)
+              AND (CAST(? AS TEXT) IS NULL OR resource_type = ?)
+              AND (CAST(? AS TEXT) IS NULL OR resource_id = ?)
             ORDER BY created_at DESC
             LIMIT ? OFFSET ?
             """,
@@ -520,6 +669,7 @@ class SharedWorkspaceRepo:
         for r in rows:
             d = self._row_to_dict(r)
             d["metadata"] = _load_json_dict(d.get("metadata_json"))
+            d["created_at"] = _iso_timestamp(d.get("created_at"))
             result.append(d)
         return result
 
@@ -534,9 +684,9 @@ class SharedWorkspaceRepo:
             """
             SELECT COUNT(*) AS cnt
             FROM share_audit_log
-            WHERE (? IS NULL OR owner_user_id = ?)
-              AND (? IS NULL OR resource_type = ?)
-              AND (? IS NULL OR resource_id = ?)
+            WHERE (CAST(? AS BIGINT) IS NULL OR owner_user_id = ?)
+              AND (CAST(? AS TEXT) IS NULL OR resource_type = ?)
+              AND (CAST(? AS TEXT) IS NULL OR resource_id = ?)
             """,
             (
                 owner_user_id,
@@ -571,6 +721,7 @@ class SharedWorkspaceRepo:
         for row in rows:
             data = self._row_to_dict(row)
             data["metadata"] = _load_json_dict(data.get("metadata_json"))
+            data["created_at"] = _iso_timestamp(data.get("created_at"))
             result.append(data)
         return result
 
@@ -586,7 +737,7 @@ class SharedWorkspaceRepo:
             SELECT config_key, config_value
             FROM sharing_config
             WHERE scope_type = ? AND (
-                (scope_id IS NULL AND ? IS NULL) OR scope_id = ?
+                (scope_id IS NULL AND CAST(? AS INTEGER) IS NULL) OR scope_id = ?
             )
             """,
             (scope_type, scope_id, scope_id),
@@ -603,7 +754,22 @@ class SharedWorkspaceRepo:
         updated_by: int | None = None,
     ) -> None:
         ts = self._ts()
-        # Upsert: try update first, then insert
+        if self._is_postgres_backend() and scope_id is None:
+            await self.db_pool.execute(
+                """
+                INSERT INTO sharing_config (
+                    scope_type, scope_id, config_key, config_value, updated_by, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT (scope_type, config_key) WHERE scope_id IS NULL
+                DO UPDATE SET
+                    config_value = excluded.config_value,
+                    updated_by = excluded.updated_by,
+                    updated_at = excluded.updated_at
+                """,
+                (scope_type, scope_id, config_key, config_value, updated_by, ts),
+            )
+            return
+
         await self.db_pool.execute(
             """
             INSERT INTO sharing_config (scope_type, scope_id, config_key, config_value, updated_by, updated_at)

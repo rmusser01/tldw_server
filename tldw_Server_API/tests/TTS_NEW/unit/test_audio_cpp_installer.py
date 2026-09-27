@@ -1,0 +1,277 @@
+from __future__ import annotations
+
+import shutil
+from pathlib import Path
+
+import pytest
+
+
+def _workspace_test_dir(name: str) -> Path:
+    root = Path.cwd() / "models" / "audio_cpp" / "test_artifacts" / name
+    if root.exists():
+        shutil.rmtree(root)
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+@pytest.mark.unit
+def test_audio_cpp_installer_builds_repo_local_runtime_layout():
+    from Helper_Scripts.TTS_Installers.install_tts_audio_cpp import build_runtime_layout
+
+    repo_root = Path(__file__).resolve().parents[4]
+
+    layout = build_runtime_layout(Path("models") / "audio_cpp", repo_root=repo_root, platform_name="linux")
+
+    assert layout.provider_name == "audio_cpp"
+    assert layout.runtime_base.relative_to(repo_root).as_posix() == "models/audio_cpp"
+    assert layout.binary_path.relative_to(repo_root).as_posix() == "models/audio_cpp/_build/bin/audiocpp_server"
+    assert layout.model_path.relative_to(repo_root).as_posix() == "models/audio_cpp/PocketTTS-GGUF/english"
+    assert layout.server_config_path.relative_to(repo_root).as_posix() == "models/audio_cpp/server.json"
+    assert layout.shared_scratch_dir.relative_to(repo_root).as_posix() == "models/audio_cpp/runtime/scratch"
+
+
+@pytest.mark.unit
+def test_audio_cpp_installer_patches_config_without_enabling_provider_by_default():
+    from Helper_Scripts.TTS_Installers.install_tts_audio_cpp import build_runtime_layout, patch_tts_config
+
+    test_root = _workspace_test_dir("installer_patch_disabled")
+    config_path = test_root / "tts_providers_config.yaml"
+    config_path.write_text(
+        """
+providers:
+  audio_cpp:
+    enabled: false
+    base_url: "http://127.0.0.1:8080"
+    extra_params:
+      managed: false
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    repo_root = test_root / "repo"
+    layout = build_runtime_layout(Path("models") / "audio_cpp", repo_root=repo_root, platform_name="linux")
+
+    changed = patch_tts_config(
+        config_path=config_path,
+        layout=layout,
+        repo_root=repo_root,
+        enable_provider=False,
+        base_url="http://127.0.0.1:9010",
+    )
+
+    content = config_path.read_text(encoding="utf-8")
+    assert changed is True
+    assert "audio_cpp:\n    enabled: false" in content
+    assert 'base_url: "http://127.0.0.1:9010"' in content
+    assert 'binary_path: "models/audio_cpp/_build/bin/audiocpp_server"' in content
+    assert 'model_path: "models/audio_cpp/PocketTTS-GGUF/english"' in content
+    assert 'server_config_path: "models/audio_cpp/server.json"' in content
+    assert "HF_TOKEN" not in content
+    assert "api_key" not in content
+
+
+@pytest.mark.unit
+def test_audio_cpp_installer_can_enable_provider_when_requested():
+    from Helper_Scripts.TTS_Installers.install_tts_audio_cpp import build_runtime_layout, patch_tts_config
+
+    test_root = _workspace_test_dir("installer_patch_enabled")
+    config_path = test_root / "tts_providers_config.yaml"
+    config_path.write_text("providers:\n", encoding="utf-8")
+    repo_root = test_root / "repo"
+    layout = build_runtime_layout(Path("models") / "audio_cpp", repo_root=repo_root, platform_name="linux")
+
+    patch_tts_config(
+        config_path=config_path,
+        layout=layout,
+        repo_root=repo_root,
+        enable_provider=True,
+        base_url="http://127.0.0.1:8080",
+    )
+
+    content = config_path.read_text(encoding="utf-8")
+    assert "audio_cpp:\n    enabled: true" in content
+    assert "extra_params:\n      managed: true" in content
+
+
+@pytest.mark.unit
+def test_audio_cpp_installer_builds_explicit_clone_build_and_model_manager_commands():
+    from Helper_Scripts.TTS_Installers.install_tts_audio_cpp import (
+        build_clone_command,
+        build_cmake_build_command,
+        build_cmake_configure_command,
+        build_model_manager_command,
+    )
+
+    test_root = _workspace_test_dir("installer_commands")
+    source_dir = test_root / "external" / "audio.cpp"
+    build_dir = test_root / "build"
+    install_dir = test_root / "install"
+
+    assert build_clone_command("https://github.com/0xShug0/audio.cpp", source_dir) == [
+        "git",
+        "clone",
+        "--depth",
+        "1",
+        "https://github.com/0xShug0/audio.cpp",
+        str(source_dir),
+    ]
+    assert build_cmake_configure_command(
+        source_dir=source_dir,
+        build_dir=build_dir,
+        backend="cuda",
+    ) == [
+        "cmake",
+        "-S",
+        str(source_dir),
+        "-B",
+        str(build_dir),
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DAUDIOCPP_DEPLOYMENT_BUILD=ON",
+        f"-DCMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE={build_dir.resolve() / 'bin'}",
+        "-DENGINE_ENABLE_CUDA=ON",
+        "-DENGINE_ENABLE_HIP=OFF",
+        "-DENGINE_ENABLE_VULKAN=OFF",
+        "-DENGINE_ENABLE_METAL=OFF",
+    ]
+    assert build_cmake_build_command(build_dir) == [
+        "cmake",
+        "--build",
+        str(build_dir),
+        "--config",
+        "Release",
+        "--target",
+        "audiocpp_server",
+    ]
+    assert build_model_manager_command(
+        source_dir=source_dir,
+        package_id="pocket_tts_english_q8_0",
+        models_root=install_dir / "models",
+        python_executable="python",
+    ) == [
+        "python",
+        str(source_dir / "tools" / "model_manager_v2.py"),
+        "install",
+        "pocket_tts_english_q8_0",
+        "--models-root",
+        str(install_dir / "models"),
+    ]
+
+
+@pytest.mark.unit
+def test_audio_cpp_installer_builds_windows_binary_layout():
+    from Helper_Scripts.TTS_Installers.install_tts_audio_cpp import build_runtime_layout
+
+    repo_root = Path(__file__).resolve().parents[4]
+
+    layout = build_runtime_layout(Path("models") / "audio_cpp", repo_root=repo_root, platform_name="win32")
+
+    assert layout.binary_path.relative_to(repo_root).as_posix() == "models/audio_cpp/_build/bin/audiocpp_server.exe"
+
+
+@pytest.mark.unit
+def test_installer_config_uses_custom_build_output_and_backend(tmp_path, monkeypatch):
+    import yaml
+    from Helper_Scripts.TTS_Installers import install_tts_audio_cpp as installer
+
+    config = tmp_path / "providers.yaml"
+    config.write_text("providers:\n", encoding="utf-8")
+    monkeypatch.setattr(installer, "resolve_repo_root", lambda: tmp_path)
+    installer.main(
+        ["--build-dir", "custom-build", "--backend", "metal", "--config-path", str(config), "--patch-config"]
+    )
+    provider = yaml.safe_load(config.read_text())["providers"]["audio_cpp"]
+    assert provider["binary_path"] == "custom-build/bin/audiocpp_server"
+    assert provider["backend"] == "metal"
+    assert provider["extra_params"]["server"]["backend"] == "metal"
+    assert provider["extra_params"]["server"]["model"]["default_voice_preset"] == {"voice_id": "alba"}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("backend", ["cpu", "cuda", "hip", "vulkan", "metal"])
+def test_installer_enables_only_selected_backend(backend, tmp_path):
+    from Helper_Scripts.TTS_Installers.install_tts_audio_cpp import build_cmake_configure_command
+
+    command = build_cmake_configure_command(source_dir=tmp_path, build_dir=tmp_path / "build", backend=backend)
+    enabled = [arg for arg in command if arg.startswith("-DENGINE_ENABLE_") and arg.endswith("=ON")]
+    assert enabled == ([] if backend == "cpu" else [f"-DENGINE_ENABLE_{backend.upper()}=ON"])
+
+
+@pytest.mark.unit
+def test_installer_keeps_original_config_when_atomic_replace_fails(tmp_path, monkeypatch):
+    from Helper_Scripts.TTS_Installers import install_tts_audio_cpp as installer
+
+    config = tmp_path / "providers.yaml"
+    original = "providers:\n  openai:\n    enabled: true\n"
+    config.write_text(original)
+
+    def failed_replace(self, target):
+        raise OSError("replacement interrupted")
+
+    monkeypatch.setattr(Path, "replace", failed_replace)
+    with pytest.raises(OSError, match="replacement interrupted"):
+        installer.patch_tts_config(
+            config_path=config, layout=installer.build_runtime_layout(Path("models/audio_cpp"), tmp_path)
+        )
+    assert config.read_text() == original
+    assert list(tmp_path.iterdir()) == [config]
+
+
+@pytest.mark.unit
+def test_installer_preserves_config_permissions_and_symlink(tmp_path):
+    import os
+    import stat
+
+    from Helper_Scripts.TTS_Installers import install_tts_audio_cpp as installer
+
+    if os.name == "nt":
+        pytest.skip("POSIX permissions and unprivileged symlinks")
+    config = tmp_path / "providers.yaml"
+    config.write_text("providers:\n")
+    config.chmod(0o640)
+    alias = tmp_path / "linked.yaml"
+    alias.symlink_to(config)
+    installer.patch_tts_config(
+        config_path=alias, layout=installer.build_runtime_layout(Path("models/audio_cpp"), tmp_path)
+    )
+    assert alias.is_symlink()
+    assert "audio_cpp:" in config.read_text()
+    assert stat.S_IMODE(config.stat().st_mode) == 0o640
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("ownership_failure", [False, True])
+def test_installer_preserves_target_ownership_before_replacing_config(tmp_path, monkeypatch, ownership_failure):
+    import os
+
+    from Helper_Scripts.TTS_Installers import install_tts_audio_cpp as installer
+
+    if not hasattr(os, "chown"):
+        pytest.skip("POSIX file ownership")
+    config = tmp_path / "providers.yaml"
+    original = "providers:\n"
+    config.write_text(original)
+    original_stat = Path.stat
+    target_fields = list(config.stat())
+    target_fields[4] += 1
+    target_fields[5] += 1
+    target_stat = os.stat_result(target_fields)
+    monkeypatch.setattr(
+        Path, "stat", lambda path, **kwargs: target_stat if path == config else original_stat(path, **kwargs)
+    )
+    ownership_changes = []
+
+    def chown(path, uid, gid):
+        ownership_changes.append((uid, gid))
+        if ownership_failure:
+            raise PermissionError("cannot preserve config ownership")
+
+    monkeypatch.setattr(os, "chown", chown)
+    layout = installer.build_runtime_layout(Path("models/audio_cpp"), tmp_path)
+    if ownership_failure:
+        with pytest.raises(PermissionError, match="ownership"):
+            installer.patch_tts_config(config_path=config, layout=layout)
+        assert config.read_text() == original
+    else:
+        installer.patch_tts_config(config_path=config, layout=layout)
+        assert ownership_changes == [(target_stat.st_uid, target_stat.st_gid)]
+    assert list(tmp_path.iterdir()) == [config]

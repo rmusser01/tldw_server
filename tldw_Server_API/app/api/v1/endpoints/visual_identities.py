@@ -32,6 +32,7 @@ from tldw_Server_API.app.api.v1.schemas.visual_identity_schemas import (
     VisualIdentityResolveResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
 from tldw_Server_API.app.core.DB_Management.VisualIdentity_DB import VisualIdentityRepository
@@ -54,6 +55,7 @@ from tldw_Server_API.app.core.Visual_Identities.jobs import create_visual_identi
 from tldw_Server_API.app.core.Visual_Identities.service import (
     VisualIdentityService,
     VisualIdentityServiceError,
+    validate_visual_identity_actor,
 )
 from tldw_Server_API.app.core.Visual_Identities.source_context import canonicalize_source_context
 from tldw_Server_API.app.core.Visual_Identities.storage import (
@@ -72,6 +74,7 @@ router = APIRouter()
 _IMMUTABLE_ASSET_CACHE_CONTROL = "private, max-age=31536000, immutable"
 _UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
 _API_PREFIX = "/api/v1/visual-identities"
+_UNSUPPORTED_METADATA_BACKEND = "visual_identity_metadata_backend_unsupported"
 _READ_LIMIT = Depends(rbac_rate_limit("visual-identities.read"))
 _WRITE_LIMIT = Depends(rbac_rate_limit("visual-identities.write"))
 _DELETE_LIMIT = Depends(rbac_rate_limit("visual-identities.delete"))
@@ -87,6 +90,8 @@ def _service(
     jobs_manager: JobManager = Depends(_job_manager),
 ) -> VisualIdentityService:
     owner_user_id = _current_user_id(current_user)
+    if db.backend_type == BackendType.POSTGRESQL:
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=_UNSUPPORTED_METADATA_BACKEND)
     return VisualIdentityService(db, owner_user_id=owner_user_id, jobs_manager=jobs_manager)
 
 
@@ -445,9 +450,15 @@ def _create_asset_from_stored_metadata(
 )
 async def get_visual_identity_capabilities(
     current_user: User = Depends(get_request_user),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> VisualIdentityCapabilitiesResponse:
     _current_user_id(current_user)
-    return VisualIdentityCapabilitiesResponse.model_validate(build_visual_identity_capabilities())
+    metadata_supported = db.backend_type == BackendType.SQLITE
+    return VisualIdentityCapabilitiesResponse(
+        **build_visual_identity_capabilities(),
+        metadata_supported=metadata_supported,
+        metadata_unavailable_reason=None if metadata_supported else _UNSUPPORTED_METADATA_BACKEND,
+    )
 
 
 @router.get(
@@ -1092,10 +1103,30 @@ async def resolve_visual_identity_binding(
     override_pack_id: int | None = Query(default=None, ge=1),
     override_pack_version_id: int | None = Query(default=None, ge=1),
     allow_override_fallback: bool = Query(default=False),
-    service: VisualIdentityService = Depends(_service),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+    jobs_manager: JobManager = Depends(_job_manager),
 ) -> VisualIdentityResolveResponse:
     normalized_expression = _normalize_expression_or_422(expression_key)
+    owner_user_id = _current_user_id(current_user)
     try:
+        if db.backend_type == BackendType.POSTGRESQL:
+            normalized_actor_id = validate_visual_identity_actor(db, owner_user_id, actor_kind, actor_id)
+            if override_pack_id is not None or override_pack_version_id is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                    detail=_UNSUPPORTED_METADATA_BACKEND,
+                )
+            return VisualIdentityResolveResponse(
+                actor_kind=actor_kind,
+                actor_id=normalized_actor_id,
+                requested_expression_key=normalized_expression,
+                fallback_reason="metadata_backend_unsupported",
+                role_id=role_id,
+                role_label=role_label,
+                resolution_source="placeholder",
+            )
+        service = VisualIdentityService(db, owner_user_id=owner_user_id, jobs_manager=jobs_manager)
         resolved = service.resolve_expression_asset(
             actor_kind=actor_kind,
             actor_id=actor_id,

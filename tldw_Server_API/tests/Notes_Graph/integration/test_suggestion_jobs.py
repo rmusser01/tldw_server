@@ -1,0 +1,1363 @@
+from __future__ import annotations
+
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
+from threading import Barrier, Event, get_ident
+from types import SimpleNamespace
+
+import pytest
+
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Notes_Graph import suggestion_service
+from tldw_Server_API.app.core.Notes_Graph.suggestion_content import content_fingerprint
+from tldw_Server_API.app.core.Notes_Graph.suggestion_generation import SuggestionGenerationError
+from tldw_Server_API.app.core.Notes_Graph.suggestion_jobs import (
+    JOB_DOMAIN,
+    JOB_PAYLOAD_KEYS,
+    JOB_QUEUE,
+    JOB_RESULT_KEYS,
+    JOB_TYPE,
+    PublicationReceiptError,
+    SuggestionAdmissionService,
+    SuggestionPublisher,
+    validate_publication_receipt,
+)
+from tldw_Server_API.app.core.Notes_Graph.suggestion_maintenance import (
+    MaintenanceScope,
+    SuggestionMaintenance,
+)
+from tldw_Server_API.app.core.Notes_Graph.suggestion_observability import (
+    SuggestionErrorCode,
+    SuggestionEventName,
+)
+from tldw_Server_API.app.core.Notes_Graph.suggestion_service import (
+    SuggestionWorker,
+    SuggestionWorkerCancelled,
+)
+
+pytestmark = pytest.mark.integration
+
+NOW = datetime(2026, 8, 27, 16, 0, tzinfo=timezone.utc)
+DATASET_ID = "dataset-1"
+SOURCE_ID = "10000000-0000-4000-8000-000000000001"
+
+
+@pytest.fixture()
+def stores(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_NOTES", JOB_QUEUE)
+    notes = CharactersRAGDB(str(tmp_path / "notes.db"), client_id="owner-1")
+    notes.add_note("Source", "source body", note_id=SOURCE_ID)
+    with notes.transaction() as conn:
+        conn.execute(
+            "INSERT INTO note_task_scope_authority(owner_user_id,dataset_id) VALUES (?,?)",
+            (notes.client_id, DATASET_ID),
+        )
+    jobs = JobManager(tmp_path / "jobs.db")
+    try:
+        yield notes, jobs
+    finally:
+        notes.close_all_connections()
+
+
+def _admit(notes, jobs, *, key="request-1", model="model-a", now=NOW):
+    note = notes.get_note_by_id(SOURCE_ID, include_deleted=True)
+    assert note is not None
+    service = SuggestionAdmissionService(
+        store=notes.note_graph_suggestion_store,
+        jobs=jobs,
+        owner_user_id="owner-1",
+    )
+    return service.admit(
+        dataset_id=DATASET_ID,
+        source_note_id=SOURCE_ID,
+        source_fingerprint=content_fingerprint(note["title"], note["content"]),
+        provider="openai",
+        model=model,
+        capability_revision=f"sha256:{'a' * 64}",
+        prompt_contract_version="notes-graph-suggestions-v1",
+        idempotency_key=key,
+        now=now,
+    )
+
+
+def _expected_run_envelope(run) -> dict[str, object]:
+    return {
+        "run_id": run.id,
+        "provider": run.provider,
+        "model": run.model,
+        "state": run.state.value,
+        "revision": run.revision,
+        "created_at": run.created_at,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "suggestion_count": run.suggestion_count,
+        "related_note_count": run.related_note_count,
+        "tag_count": run.tag_count,
+        "invalid_item_count": run.invalid_item_count,
+        "cancellation_available": run.state.value in {"admitting", "queued", "running"},
+        "error_code": run.error_code,
+        "guidance_key": run.guidance_key,
+    }
+
+
+@pytest.mark.asyncio
+async def test_sync_pipeline_cleanup_runs_on_the_callback_thread() -> None:
+    callback_threads: list[int] = []
+    cleanup_threads: list[int] = []
+
+    result = await suggestion_service._invoke(
+        lambda: callback_threads.append(get_ident()) or "ok",
+        sync_cleanup=lambda: cleanup_threads.append(get_ident()),
+    )
+
+    assert result == "ok"
+    assert callback_threads == cleanup_threads
+    assert callback_threads != [get_ident()]
+
+
+def test_admission_uses_content_free_exact_job_contract_and_replays(stores) -> None:
+    notes, jobs = stores
+    first = _admit(notes, jobs)
+    replay = _admit(notes, jobs)
+
+    assert first.run.id == first.job["idempotency_key"]
+    assert replay.run is None
+    assert replay.replay_envelope["run_id"] == first.run.id
+    assert (first.job["domain"], first.job["queue"], first.job["job_type"]) == (
+        JOB_DOMAIN,
+        JOB_QUEUE,
+        JOB_TYPE,
+    )
+    assert first.job["owner_user_id"] == "owner-1"
+    assert int(first.job["max_retries"]) == 0
+    assert set(first.job["payload"]) == JOB_PAYLOAD_KEYS
+    assert "owner_user_id" not in first.job["payload"]
+    assert first.run.job_id == first.job["uuid"]
+    assert first.run.expected_completion_token.startswith("placeholder_")
+    assert replay.disposition == "terminal_replay"
+    assert replay.replay_envelope == _expected_run_envelope(first.run)
+    assert jobs.count_jobs(domain=JOB_DOMAIN, owner_user_id="owner-1") == 1
+
+
+def test_terminal_admission_replay_returns_the_stored_envelope_without_jobs_lookup(
+    stores,
+    monkeypatch,
+) -> None:
+    notes, jobs = stores
+    first = _admit(notes, jobs, key="terminal-envelope")
+    monkeypatch.setattr(
+        jobs,
+        "get_job_or_archived_by_idempotency_key",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("terminal replay must not consult Jobs")),
+    )
+
+    replay = _admit(notes, jobs, key="terminal-envelope")
+
+    assert replay.disposition == "terminal_replay"
+    assert replay.replay_envelope == _expected_run_envelope(first.run)
+    assert replay.job is None
+
+
+def test_admission_recovers_before_enqueue_and_never_calls_provider(stores, monkeypatch) -> None:
+    notes, jobs = stores
+    original = jobs.create_job
+    calls = 0
+
+    def interrupted(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ConnectionError("jobs unavailable")
+        return original(**kwargs)
+
+    monkeypatch.setattr(jobs, "create_job", interrupted)
+    with pytest.raises(ConnectionError):
+        _admit(notes, jobs, key="resume-before-enqueue")
+    recovered = _admit(notes, jobs, key="resume-before-enqueue")
+
+    assert recovered.run.state.value == "queued"
+    assert calls == 2
+
+
+def test_admission_replay_recovers_job_committed_before_bind_and_before_limits(
+    stores,
+    monkeypatch,
+) -> None:
+    notes, jobs = stores
+    store = notes.note_graph_suggestion_store
+    original_bind = store.bind_admitted_run
+    bind_calls = 0
+
+    def interrupt_after_enqueue(**kwargs):
+        nonlocal bind_calls
+        bind_calls += 1
+        if bind_calls == 1:
+            raise ConnectionError("interrupted after Jobs commit")
+        return original_bind(**kwargs)
+
+    monkeypatch.setattr(store, "bind_admitted_run", interrupt_after_enqueue)
+    with pytest.raises(ConnectionError, match="after Jobs commit"):
+        _admit(notes, jobs, key="resume-after-enqueue")
+
+    monkeypatch.setattr(
+        jobs,
+        "create_job",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("replay must recover before new admission")),
+    )
+    recovered = _admit(notes, jobs, key="resume-after-enqueue")
+
+    assert recovered.run.state.value == "queued"
+    assert recovered.job["idempotency_key"] == recovered.run.id
+    assert bind_calls == 2
+    assert jobs.count_jobs(domain=JOB_DOMAIN, owner_user_id="owner-1") == 1
+
+
+def test_admission_enforces_owner_active_and_hourly_limits(stores) -> None:
+    notes, jobs = stores
+    _admit(notes, jobs, key="active-1")
+    with pytest.raises(RuntimeError, match="notes_graph_owner_active_run_conflict"):
+        _admit(notes, jobs, key="active-2", model="model-b")
+
+
+def test_sqlite_concurrent_owner_admission_inserts_only_one_active_job(stores) -> None:
+    notes, jobs = stores
+    create_barrier = Barrier(2)
+
+    class RacingJobs:
+        def create_job(self, **kwargs):
+            create_barrier.wait(timeout=5)
+            return jobs.create_job(**kwargs)
+
+        def __getattr__(self, name):
+            return getattr(jobs, name)
+
+    def admit(key: str, model: str):
+        try:
+            return _admit(notes, RacingJobs(), key=key, model=model)
+        except RuntimeError as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(
+                lambda args: admit(*args),
+                (("concurrent-active-a", "model-a"), ("concurrent-active-b", "model-b")),
+            )
+        )
+
+    admitted = [result for result in results if not isinstance(result, Exception)]
+    rejected = [result for result in results if isinstance(result, Exception)]
+    assert len(admitted) == 1
+    assert [str(error) for error in rejected] == ["notes_graph_owner_active_run_conflict"]
+    assert (
+        jobs.count_jobs(
+            domain=JOB_DOMAIN,
+            queue=JOB_QUEUE,
+            job_type=JOB_TYPE,
+            owner_user_id="owner-1",
+        )
+        == 1
+    )
+
+
+def test_admission_enforces_twenty_per_owner_per_hour(stores) -> None:
+    notes, jobs = stores
+    note = notes.get_note_by_id(SOURCE_ID, include_deleted=True)
+    assert note is not None
+    fingerprint = content_fingerprint(note["title"], note["content"])
+    payload = {
+        "schema_version": 1,
+        "run_id": "historical-run",
+        "dataset_id": DATASET_ID,
+        "source_note_id": SOURCE_ID,
+        "source_fingerprint": fingerprint,
+        "provider": "openai",
+        "model": "model-a",
+        "capability_revision": f"sha256:{'a' * 64}",
+        "prompt_contract_version": "notes-graph-suggestions-v1",
+    }
+
+    for index in range(20):
+        jobs.create_job(
+            domain=JOB_DOMAIN,
+            queue=JOB_QUEUE,
+            job_type=JOB_TYPE,
+            payload=payload,
+            owner_user_id="owner-1",
+            idempotency_key=f"historical-{index}",
+            max_retries=0,
+        )
+    conn = jobs._connect()
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE jobs SET status='completed',created_at=?,completed_at=? WHERE domain=?",
+                (
+                    NOW.strftime("%Y-%m-%d %H:%M:%S.%f"),
+                    NOW.strftime("%Y-%m-%d %H:%M:%S.%f"),
+                    JOB_DOMAIN,
+                ),
+            )
+    finally:
+        conn.close()
+    with pytest.raises(RuntimeError, match="notes_graph_admission_rate_limited"):
+        _admit(notes, jobs, key="rate-21")
+
+
+def _stage_and_complete(notes, jobs):
+    admitted = _admit(notes, jobs)
+    acquired = jobs.acquire_next_job(
+        domain=JOB_DOMAIN,
+        queue=JOB_QUEUE,
+        job_type=JOB_TYPE,
+        worker_id="worker-1",
+        lease_seconds=30,
+    )
+    assert acquired is not None
+    running = notes.note_graph_suggestion_store.start_run(
+        dataset_id=DATASET_ID,
+        run_id=admitted.run.id,
+        expected_state="queued",
+        expected_revision=admitted.run.revision,
+        expected_job_id=acquired["uuid"],
+        acquired_completion_token=acquired["lease_id"],
+        now=NOW,
+    )
+    digest = f"sha256:{'d' * 64}"
+    publishing = notes.note_graph_suggestion_store.stage_suggestions(
+        dataset_id=DATASET_ID,
+        run_id=running.id,
+        expected_state="running",
+        expected_revision=running.revision,
+        expected_job_id=acquired["uuid"],
+        expected_completion_token=acquired["lease_id"],
+        result_digest=digest,
+        candidates=(),
+        invalid_item_count=0,
+        now=NOW,
+    )
+    result = {
+        "run_id": running.id,
+        "result_digest": digest,
+        "candidate_count": 0,
+        "evidence_count": 0,
+        "validated_count": 0,
+        "dropped_count": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+    }
+    assert set(result) == JOB_RESULT_KEYS
+    return admitted, acquired, publishing, result
+
+
+def test_publication_is_stage_before_complete_receipt_bound_and_replay_safe(stores) -> None:
+    notes, jobs = stores
+    admitted, acquired, publishing, result = _stage_and_complete(notes, jobs)
+    publisher = SuggestionPublisher(
+        jobs=jobs,
+        store_factory=lambda owner: notes.note_graph_suggestion_store,
+    )
+
+    with pytest.raises(PublicationReceiptError, match="receipt_pending"):
+        publisher.publish(
+            run=publishing,
+            job_uuid=acquired["uuid"],
+            owner_user_id="owner-1",
+            dataset_id=DATASET_ID,
+            now=NOW,
+        )
+    assert jobs.complete_job(
+        int(acquired["id"]),
+        result=result,
+        worker_id="worker-1",
+        lease_id=acquired["lease_id"],
+        completion_token=acquired["lease_id"],
+    )
+    published = publisher.publish(
+        run=publishing,
+        job_uuid=acquired["uuid"],
+        owner_user_id="owner-1",
+        dataset_id=DATASET_ID,
+        now=NOW,
+    )
+    with pytest.raises(RuntimeError, match="notes_graph_publication_receipt_mismatch"):
+        publisher.publish(
+            run=publishing,
+            job_uuid=acquired["uuid"],
+            owner_user_id="owner-1",
+            dataset_id=DATASET_ID,
+            now=NOW,
+        )
+
+    assert publishing.state.value == "publishing"
+    assert published.state.value == "succeeded"
+
+
+def test_publication_activates_from_archived_terminal_job(stores) -> None:
+    notes, jobs = stores
+    _admitted, acquired, publishing, result = _stage_and_complete(notes, jobs)
+    assert jobs.complete_job(
+        int(acquired["id"]),
+        result=result,
+        worker_id="worker-1",
+        lease_id=acquired["lease_id"],
+        completion_token=acquired["lease_id"],
+    )
+    conn = jobs._connect()
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE jobs SET completed_at='2000-01-01 00:00:00' WHERE id=?",
+                (int(acquired["id"]),),
+            )
+    finally:
+        conn.close()
+    assert jobs.prune_jobs(statuses=["completed"], older_than_days=1) == 1
+    assert jobs.get_job_by_uuid(acquired["uuid"]) is None
+    archived = jobs.get_job_or_archived_by_uuid(
+        acquired["uuid"],
+        domain=JOB_DOMAIN,
+        owner_user_id="owner-1",
+    )
+    assert archived is not None and archived["archived"] is True
+
+    published = SuggestionPublisher(
+        jobs=jobs,
+        store_factory=lambda _owner: notes.note_graph_suggestion_store,
+    ).publish(
+        run=publishing,
+        job_uuid=acquired["uuid"],
+        owner_user_id="owner-1",
+        dataset_id=DATASET_ID,
+        now=NOW,
+    )
+
+    assert published is not None and published.state.value == "succeeded"
+
+
+def test_maintenance_activates_archived_only_publication_with_claimed_lease(stores) -> None:
+    notes, jobs = stores
+    _admitted, acquired, publishing, result = _stage_and_complete(notes, jobs)
+    assert jobs.complete_job(
+        int(acquired["id"]),
+        result=result,
+        worker_id="worker-1",
+        lease_id=acquired["lease_id"],
+        completion_token=acquired["lease_id"],
+    )
+    conn = jobs._connect()
+    try:
+        with conn:
+            conn.execute(
+                "UPDATE jobs SET completed_at='2000-01-01 00:00:00' WHERE id=?",
+                (int(acquired["id"]),),
+            )
+    finally:
+        conn.close()
+    assert jobs.prune_jobs(statuses=["completed"], older_than_days=31) == 1
+    assert jobs.get_job_by_uuid(acquired["uuid"]) is None
+
+    maintenance_result = SuggestionMaintenance(
+        jobs=jobs,
+        scopes=(MaintenanceScope(notes.note_graph_suggestion_store, DATASET_ID),),
+    ).run_pass(now=NOW)
+
+    activated = notes.note_graph_suggestion_store.get_run(
+        dataset_id=DATASET_ID,
+        run_id=publishing.id,
+    )
+    assert (maintenance_result.reconciled, activated.state.value) == (1, "succeeded")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("uuid", "wrong-job"),
+        ("owner_user_id", "wrong-owner"),
+        ("domain", "wrong-domain"),
+        ("queue", "wrong-queue"),
+        ("job_type", "wrong-type"),
+        ("status", "failed"),
+        ("completion_token", "wrong-token"),
+    ],
+)
+def test_publication_receipt_rejects_every_immutable_mismatch(field, value) -> None:
+    run = SimpleNamespace(
+        id="run-1",
+        job_id="job-1",
+        owner_user_id="owner-1",
+        expected_completion_token="lease-1",
+        result_digest=f"sha256:{'1' * 64}",
+    )
+    job = {
+        "uuid": "job-1",
+        "owner_user_id": "owner-1",
+        "domain": JOB_DOMAIN,
+        "queue": JOB_QUEUE,
+        "job_type": JOB_TYPE,
+        "status": "completed",
+        "completion_token": "lease-1",
+        "result": {
+            "run_id": "run-1",
+            "result_digest": f"sha256:{'1' * 64}",
+            "candidate_count": 0,
+            "evidence_count": 0,
+            "validated_count": 0,
+            "dropped_count": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        },
+    }
+    job[field] = value
+    with pytest.raises(PublicationReceiptError, match="receipt_mismatch"):
+        validate_publication_receipt(job=job, run=run, owner_user_id="owner-1")
+
+
+def test_publication_receipt_rejects_run_and_digest_mismatch() -> None:
+    run = SimpleNamespace(
+        id="run-1",
+        job_id="job-1",
+        owner_user_id="owner-1",
+        expected_completion_token="lease-1",
+        result_digest=f"sha256:{'1' * 64}",
+    )
+    base = {
+        "uuid": "job-1",
+        "owner_user_id": "owner-1",
+        "domain": JOB_DOMAIN,
+        "queue": JOB_QUEUE,
+        "job_type": JOB_TYPE,
+        "status": "completed",
+        "completion_token": "lease-1",
+        "result": {
+            "run_id": "run-1",
+            "result_digest": f"sha256:{'1' * 64}",
+            "candidate_count": 0,
+            "evidence_count": 0,
+            "validated_count": 0,
+            "dropped_count": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        },
+    }
+    for key, value in (("run_id", "wrong-run"), ("result_digest", f"sha256:{'2' * 64}")):
+        job = {**base, "result": {**base["result"], key: value}}
+        with pytest.raises(PublicationReceiptError, match="receipt_mismatch"):
+            validate_publication_receipt(job=job, run=run, owner_user_id="owner-1")
+
+
+def test_default_worker_prepare_builds_request_and_freshness_returns_none(
+    monkeypatch,
+) -> None:
+    source = SimpleNamespace(note_id=SOURCE_ID, title="Source", content="body")
+    retrieval = SimpleNamespace(source_note_id=SOURCE_ID)
+    prepared = object()
+    captured: dict[str, object] = {}
+
+    class Store:
+        def load_source_note(self, **kwargs):
+            assert kwargs == {"dataset_id": DATASET_ID, "note_id": SOURCE_ID}
+            return source
+
+    def build_request(**kwargs):
+        captured.update(kwargs)
+        return prepared
+
+    monkeypatch.setattr(suggestion_service, "build_generation_request", build_request)
+
+    assert (
+        suggestion_service._default_prepare(
+            store=Store(),
+            dataset_id=DATASET_ID,
+            retrieval=retrieval,
+        )
+        is prepared
+    )
+    assert captured == {
+        "retrieval": retrieval,
+        "source_title": "Source",
+        "source_content": "body",
+    }
+    assert (
+        suggestion_service._default_freshness_check(
+            store=Store(),
+            dataset_id=DATASET_ID,
+            running=SimpleNamespace(
+                source_note_id=SOURCE_ID,
+                source_fingerprint=content_fingerprint("Source", "body"),
+            ),
+            generated=SimpleNamespace(relationships=()),
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocking_phase", ("load", "retrieve", "stage"))
+async def test_worker_yields_the_event_loop_during_sync_pipeline_work(
+    blocking_phase: str,
+) -> None:
+    started = Event()
+    release = Event()
+    run = SimpleNamespace(
+        id="run-1",
+        revision=7,
+        job_id="job-1",
+        expected_completion_token="placeholder-1",
+        state=SimpleNamespace(value="queued"),
+        source_note_id=SOURCE_ID,
+        source_fingerprint=f"sha256:{'a' * 64}",
+        provider="openai",
+        model="model-a",
+        capability_revision="cap-v1",
+        prompt_contract_version="notes-graph-suggestions-v1",
+        created_at=(NOW - timedelta(seconds=30)).isoformat(),
+    )
+
+    def block(phase: str) -> None:
+        if blocking_phase != phase:
+            return
+        started.set()
+        if not release.wait(timeout=1):
+            raise AssertionError(f"event loop could not release synchronous worker {phase}")
+
+    class Store:
+        def get_run(self, **_kwargs):
+            block("load")
+            return run
+
+        def start_run(self, **_kwargs):
+            return SimpleNamespace(
+                **{
+                    **run.__dict__,
+                    "revision": 8,
+                    "state": SimpleNamespace(value="running"),
+                    "expected_completion_token": "lease-1",
+                }
+            )
+
+        def stage_suggestions(self, **_kwargs):
+            block("stage")
+            return SimpleNamespace(state=SimpleNamespace(value="publishing"))
+
+    def retrieve(**_kwargs):
+        block("retrieve")
+        return object()
+
+    worker = SuggestionWorker(
+        store_factory=lambda _owner: Store(),
+        retrieve=retrieve,
+        prepare=lambda **_kwargs: object(),
+        resolve_capability=lambda **_kwargs: (
+            SimpleNamespace(revision="cap-v1", generation_available=True),
+            object(),
+        ),
+        generate=lambda **_kwargs: SimpleNamespace(
+            relationships=(),
+            tags=(),
+            validation_counts={},
+            input_tokens=0,
+            output_tokens=0,
+        ),
+        freshness_check=lambda **_kwargs: None,
+        cancellation_requested=lambda _job: False,
+        now=lambda: NOW,
+    )
+    task = asyncio.create_task(
+        worker.handle(
+            {
+                "uuid": "job-1",
+                "owner_user_id": "owner-1",
+                "domain": JOB_DOMAIN,
+                "queue": JOB_QUEUE,
+                "job_type": JOB_TYPE,
+                "lease_id": "lease-1",
+                "payload": {
+                    "schema_version": 1,
+                    "run_id": "run-1",
+                    "dataset_id": DATASET_ID,
+                    "source_note_id": SOURCE_ID,
+                    "source_fingerprint": f"sha256:{'a' * 64}",
+                    "provider": "openai",
+                    "model": "model-a",
+                    "capability_revision": "cap-v1",
+                    "prompt_contract_version": "notes-graph-suggestions-v1",
+                },
+            }
+        )
+    )
+
+    assert await asyncio.to_thread(started.wait, 0.5) is True
+    release.set()
+    result = await task
+
+    assert result["run_id"] == "run-1"
+
+
+@pytest.mark.asyncio
+async def test_worker_revalidates_immediately_before_one_call_and_fences_stage(
+    monkeypatch,
+) -> None:
+    events: list[str] = []
+    telemetry: list[tuple[str, object]] = []
+    run = SimpleNamespace(
+        id="run-1",
+        revision=7,
+        job_id="job-1",
+        expected_completion_token="placeholder-1",
+        state=SimpleNamespace(value="queued"),
+        source_note_id=SOURCE_ID,
+        source_fingerprint=f"sha256:{'a' * 64}",
+        provider="openai",
+        model="model-a",
+        capability_revision="cap-v1",
+        prompt_contract_version="notes-graph-suggestions-v1",
+        created_at=(NOW - timedelta(seconds=30)).isoformat(),
+    )
+
+    class Store:
+        def get_run(self, **kwargs):
+            events.append("load")
+            assert kwargs == {"dataset_id": DATASET_ID, "run_id": "run-1"}
+            return run
+
+        def start_run(self, **kwargs):
+            events.append("start")
+            assert kwargs["expected_revision"] == 7
+            assert kwargs["expected_job_id"] == "job-1"
+            assert kwargs["acquired_completion_token"] == "lease-1"
+            return SimpleNamespace(**{**run.__dict__, "revision": 8, "expected_completion_token": "lease-1"})
+
+        def stage_suggestions(self, **kwargs):
+            events.append("stage")
+            assert kwargs["expected_job_id"] == "job-1"
+            assert kwargs["expected_completion_token"] == "lease-1"
+            return SimpleNamespace(state=SimpleNamespace(value="publishing"))
+
+    async def generate(**_kwargs):
+        assert events[-1] == "capability"
+        events.append("provider")
+        return SimpleNamespace(
+            relationships=(),
+            tags=(),
+            validation_counts={"relationship_items_received": 2},
+            input_tokens=17,
+            output_tokens=5,
+        )
+
+    def cancellation(_job):
+        events.append("cancellation")
+        return False
+
+    tick = 0
+
+    def clock():
+        nonlocal tick
+        value = NOW + timedelta(seconds=tick)
+        tick += 1
+        return value
+
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_event",
+        lambda event, **kwargs: telemetry.append(("event", (event, kwargs))),
+    )
+    for name in (
+        "record_candidate_counts",
+        "record_provider_usage",
+        "record_queue_latency",
+        "record_run_duration",
+        "record_validation_counts",
+    ):
+        monkeypatch.setattr(
+            suggestion_service,
+            name,
+            lambda *args, _name=name, **kwargs: telemetry.append((_name, (args, kwargs))),
+        )
+
+    worker = SuggestionWorker(
+        store_factory=lambda _owner: Store(),
+        retrieve=lambda **_kwargs: events.append("retrieve") or object(),
+        prepare=lambda **_kwargs: events.append("prepare") or object(),
+        resolve_capability=lambda **_kwargs: (
+            events.append("capability") or (SimpleNamespace(revision="cap-v1", generation_available=True), object())
+        ),
+        generate=generate,
+        freshness_check=lambda **_kwargs: None,
+        cancellation_requested=cancellation,
+        now=clock,
+    )
+    result = await worker.handle(
+        {
+            "uuid": "job-1",
+            "owner_user_id": "owner-1",
+            "domain": JOB_DOMAIN,
+            "queue": JOB_QUEUE,
+            "job_type": JOB_TYPE,
+            "lease_id": "lease-1",
+            "payload": {
+                "schema_version": 1,
+                "run_id": "run-1",
+                "dataset_id": DATASET_ID,
+                "source_note_id": SOURCE_ID,
+                "source_fingerprint": f"sha256:{'a' * 64}",
+                "provider": "openai",
+                "model": "model-a",
+                "capability_revision": "cap-v1",
+                "prompt_contract_version": "notes-graph-suggestions-v1",
+            },
+        }
+    )
+
+    assert events == [
+        "load",
+        "start",
+        "retrieve",
+        "prepare",
+        "cancellation",
+        "capability",
+        "provider",
+        "cancellation",
+        "stage",
+    ]
+    assert set(result) == JOB_RESULT_KEYS
+    assert (result["input_tokens"], result["output_tokens"], result["dropped_count"]) == (
+        17,
+        5,
+        2,
+    )
+    event_names = [detail[0].value for kind, detail in telemetry if kind == "event"]
+    assert event_names == [
+        "shortlist_completed",
+        "provider_started",
+        "provider_completed",
+        "validation_rejected",
+        "staged",
+    ]
+    assert {kind for kind, _detail in telemetry} >= {
+        "record_candidate_counts",
+        "record_provider_usage",
+        "record_queue_latency",
+        "record_run_duration",
+        "record_validation_counts",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("revision", "generation_available"),
+    [("cap-v2", True), ("cap-v1", False)],
+)
+async def test_worker_capability_rejection_does_not_start_or_call_provider(
+    revision,
+    generation_available,
+    monkeypatch,
+) -> None:
+    recorded: list[tuple[str, object]] = []
+    provider_calls = 0
+    payload = {
+        "schema_version": 1,
+        "run_id": "run-capability-rejected",
+        "dataset_id": DATASET_ID,
+        "source_note_id": SOURCE_ID,
+        "source_fingerprint": f"sha256:{'a' * 64}",
+        "provider": "openai",
+        "model": "model-a",
+        "capability_revision": "cap-v1",
+        "prompt_contract_version": "notes-graph-suggestions-v1",
+    }
+    queued = SimpleNamespace(
+        id=payload["run_id"],
+        revision=2,
+        job_id="job-capability-rejected",
+        state=SimpleNamespace(value="queued"),
+        created_at=(NOW - timedelta(seconds=5)).isoformat(),
+        **{
+            key: payload[key]
+            for key in (
+                "source_note_id",
+                "source_fingerprint",
+                "provider",
+                "model",
+                "capability_revision",
+                "prompt_contract_version",
+            )
+        },
+    )
+
+    class Store:
+        def get_run(self, **_kwargs):
+            return queued
+
+        def start_run(self, **_kwargs):
+            return SimpleNamespace(
+                **{
+                    **queued.__dict__,
+                    "revision": 3,
+                    "expected_completion_token": "lease-capability-rejected",
+                }
+            )
+
+        def stage_suggestions(self, **_kwargs):
+            raise AssertionError("capability rejection must not stage")
+
+    async def generate(**_kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        raise AssertionError("capability rejection must not call the provider")
+
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_event",
+        lambda event, **kwargs: recorded.append(("event", (event, kwargs))),
+    )
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_run_error",
+        lambda code: recorded.append(("error", code)),
+    )
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_run_duration",
+        lambda duration: recorded.append(("duration", duration)),
+    )
+    monkeypatch.setattr(suggestion_service, "record_queue_latency", lambda _value: None)
+
+    worker = SuggestionWorker(
+        store_factory=lambda _owner: Store(),
+        retrieve=lambda **_kwargs: SimpleNamespace(candidates=()),
+        prepare=lambda **_kwargs: object(),
+        resolve_capability=lambda **_kwargs: (
+            SimpleNamespace(
+                revision=revision,
+                generation_available=generation_available,
+            ),
+            object(),
+        ),
+        generate=generate,
+        freshness_check=lambda **_kwargs: None,
+        cancellation_requested=lambda _job: False,
+        now=lambda: NOW,
+    )
+
+    with pytest.raises(
+        suggestion_service.SuggestionWorkerError,
+        match=SuggestionErrorCode.CAPABILITIES_CHANGED.value,
+    ):
+        await worker.handle(
+            {
+                "uuid": "job-capability-rejected",
+                "owner_user_id": "owner-1",
+                "domain": JOB_DOMAIN,
+                "queue": JOB_QUEUE,
+                "job_type": JOB_TYPE,
+                "lease_id": "lease-capability-rejected",
+                "payload": payload,
+            }
+        )
+
+    lifecycle = [detail[0] for kind, detail in recorded if kind == "event"]
+    assert SuggestionEventName.PROVIDER_STARTED not in lifecycle
+    assert (
+        SuggestionEventName.FAILED,
+        {
+            "run_id": payload["run_id"],
+            "job_id": "job-capability-rejected",
+            "error_code": SuggestionErrorCode.CAPABILITIES_CHANGED,
+        },
+    ) in [detail for kind, detail in recorded if kind == "event"]
+    assert provider_calls == 0
+    assert ("error", SuggestionErrorCode.CAPABILITIES_CHANGED) in recorded
+    assert any(kind == "duration" for kind, _detail in recorded)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("state", SimpleNamespace(value="running")),
+        ("job_id", "wrong-job"),
+        ("source_note_id", "wrong-source"),
+        ("source_fingerprint", f"sha256:{'b' * 64}"),
+        ("provider", "wrong-provider"),
+        ("model", "wrong-model"),
+        ("capability_revision", "wrong-capability"),
+        ("prompt_contract_version", "wrong-prompt-contract"),
+    ],
+)
+async def test_worker_rejects_run_binding_mismatch_before_start_or_external_work(
+    field,
+    value,
+) -> None:
+    payload = {
+        "schema_version": 1,
+        "run_id": "run-1",
+        "dataset_id": DATASET_ID,
+        "source_note_id": SOURCE_ID,
+        "source_fingerprint": f"sha256:{'a' * 64}",
+        "provider": "openai",
+        "model": "model-a",
+        "capability_revision": "cap-v1",
+        "prompt_contract_version": "notes-graph-suggestions-v1",
+    }
+    immutable_keys = (
+        "source_note_id",
+        "source_fingerprint",
+        "provider",
+        "model",
+        "capability_revision",
+        "prompt_contract_version",
+    )
+    run_fields = {
+        "id": "run-1",
+        "revision": 7,
+        "job_id": "job-1",
+        "state": SimpleNamespace(value="queued"),
+        **{key: payload[key] for key in immutable_keys},
+    }
+    run_fields[field] = value
+    calls: list[str] = []
+
+    class Store:
+        def get_run(self, **_kwargs):
+            calls.append("load")
+            return SimpleNamespace(**run_fields)
+
+        def start_run(self, **_kwargs):
+            calls.append("start")
+            raise AssertionError("mismatched run must not start")
+
+    worker = SuggestionWorker(
+        store_factory=lambda owner: calls.append(f"owner:{owner}") or Store(),
+        retrieve=lambda **_kwargs: calls.append("retrieve"),
+        prepare=lambda **_kwargs: calls.append("prepare"),
+        resolve_capability=lambda **_kwargs: calls.append("capability"),
+        generate=lambda **_kwargs: calls.append("provider"),
+        freshness_check=lambda **_kwargs: calls.append("freshness"),
+        cancellation_requested=lambda _job: False,
+        now=lambda: NOW,
+    )
+
+    with pytest.raises(RuntimeError, match="notes_graph_job_contract_invalid"):
+        await worker.handle(
+            {
+                "uuid": "job-1",
+                "owner_user_id": "owner-1",
+                "domain": JOB_DOMAIN,
+                "queue": JOB_QUEUE,
+                "job_type": JOB_TYPE,
+                "lease_id": "lease-1",
+                "payload": payload,
+            }
+        )
+
+    assert calls == ["owner:owner-1", "load"]
+
+
+@pytest.mark.asyncio
+async def test_worker_revision_cas_failure_prevents_retrieval_and_provider() -> None:
+    calls: list[str] = []
+    payload = {
+        "schema_version": 1,
+        "run_id": "run-1",
+        "dataset_id": DATASET_ID,
+        "source_note_id": SOURCE_ID,
+        "source_fingerprint": f"sha256:{'a' * 64}",
+        "provider": "openai",
+        "model": "model-a",
+        "capability_revision": "cap-v1",
+        "prompt_contract_version": "notes-graph-suggestions-v1",
+    }
+    immutable_keys = (
+        "source_note_id",
+        "source_fingerprint",
+        "provider",
+        "model",
+        "capability_revision",
+        "prompt_contract_version",
+    )
+
+    class Store:
+        def get_run(self, **_kwargs):
+            calls.append("load")
+            return SimpleNamespace(
+                id="run-1",
+                revision=11,
+                job_id="job-1",
+                state=SimpleNamespace(value="queued"),
+                **{key: payload[key] for key in immutable_keys},
+            )
+
+        def start_run(self, **kwargs):
+            calls.append(f"start:{kwargs['expected_revision']}")
+            raise RuntimeError("notes_graph_run_conflict")
+
+    worker = SuggestionWorker(
+        store_factory=lambda _owner: Store(),
+        retrieve=lambda **_kwargs: calls.append("retrieve"),
+        prepare=lambda **_kwargs: calls.append("prepare"),
+        resolve_capability=lambda **_kwargs: calls.append("capability"),
+        generate=lambda **_kwargs: calls.append("provider"),
+        freshness_check=lambda **_kwargs: calls.append("freshness"),
+        cancellation_requested=lambda _job: False,
+        now=lambda: NOW,
+    )
+
+    with pytest.raises(RuntimeError, match="notes_graph_run_conflict"):
+        await worker.handle(
+            {
+                "uuid": "job-1",
+                "owner_user_id": "owner-1",
+                "domain": JOB_DOMAIN,
+                "queue": JOB_QUEUE,
+                "job_type": JOB_TYPE,
+                "lease_id": "lease-1",
+                "payload": payload,
+            }
+        )
+
+    assert calls == ["load", "start:11"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_on_check", [1, 2])
+async def test_worker_cancellation_before_or_after_call_never_stages(
+    cancel_on_check,
+    monkeypatch,
+) -> None:
+    checks = 0
+    calls = 0
+    capability_calls = 0
+    staged = False
+    telemetry: list[tuple[str, object]] = []
+
+    def cancel(_job):
+        nonlocal checks
+        checks += 1
+        return checks == cancel_on_check
+
+    async def generate(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return SimpleNamespace(
+            relationships=(),
+            tags=(),
+            validation_counts={},
+            input_tokens=1,
+            output_tokens=1,
+        )
+
+    def resolve_capability(**_kwargs):
+        nonlocal capability_calls
+        capability_calls += 1
+        return SimpleNamespace(revision="cap-v1", generation_available=True), object()
+
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_event",
+        lambda event, **kwargs: telemetry.append(("event", (event, kwargs))),
+    )
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_run_error",
+        lambda code: telemetry.append(("error", code)),
+    )
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_run_duration",
+        lambda duration: telemetry.append(("duration", duration)),
+    )
+    monkeypatch.setattr(suggestion_service, "record_queue_latency", lambda _value: None)
+    monkeypatch.setattr(suggestion_service, "record_provider_usage", lambda **_kwargs: None)
+
+    class Store:
+        def get_run(self, **_kwargs):
+            return SimpleNamespace(
+                id="run-1",
+                revision=2,
+                job_id="job-1",
+                source_note_id=SOURCE_ID,
+                source_fingerprint=f"sha256:{'a' * 64}",
+                provider="openai",
+                model="model-a",
+                capability_revision="cap-v1",
+                prompt_contract_version="notes-graph-suggestions-v1",
+                state=SimpleNamespace(value="queued"),
+                created_at=(NOW - timedelta(seconds=1)).isoformat(),
+            )
+
+        def start_run(self, **_kwargs):
+            return SimpleNamespace(id="run-1", revision=3, job_id="job-1", expected_completion_token="lease-1")
+
+        def stage_suggestions(self, **_kwargs):
+            nonlocal staged
+            staged = True
+
+    worker = SuggestionWorker(
+        store_factory=lambda _owner: Store(),
+        retrieve=lambda **_kwargs: object(),
+        prepare=lambda **_kwargs: object(),
+        resolve_capability=resolve_capability,
+        generate=generate,
+        freshness_check=lambda **_kwargs: None,
+        cancellation_requested=cancel,
+        now=lambda: NOW,
+    )
+    with pytest.raises(SuggestionWorkerCancelled):
+        await worker.handle(
+            {
+                "uuid": "job-1",
+                "owner_user_id": "owner-1",
+                "domain": JOB_DOMAIN,
+                "queue": JOB_QUEUE,
+                "job_type": JOB_TYPE,
+                "lease_id": "lease-1",
+                "payload": {
+                    "schema_version": 1,
+                    "run_id": "run-1",
+                    "dataset_id": DATASET_ID,
+                    "source_note_id": SOURCE_ID,
+                    "source_fingerprint": f"sha256:{'a' * 64}",
+                    "provider": "openai",
+                    "model": "model-a",
+                    "capability_revision": "cap-v1",
+                    "prompt_contract_version": "notes-graph-suggestions-v1",
+                },
+            }
+        )
+
+    assert calls == (0 if cancel_on_check == 1 else 1)
+    assert capability_calls == (0 if cancel_on_check == 1 else 1)
+    assert staged is False
+    assert any(kind == "event" and detail[0].value == "cancelled" for kind, detail in telemetry)
+    assert ("error", SuggestionErrorCode.GENERATION_CANCELLED) in telemetry
+    assert any(kind == "duration" for kind, _detail in telemetry)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure_phase", "expected_event", "expected_code"),
+    [
+        ("provider", "failed", SuggestionErrorCode.PROVIDER_UNAVAILABLE),
+        ("freshness", "stale", SuggestionErrorCode.FINGERPRINT_STALE),
+    ],
+)
+async def test_worker_records_closed_failure_and_stale_lifecycle(
+    failure_phase,
+    expected_event,
+    expected_code,
+    monkeypatch,
+) -> None:
+    recorded: list[tuple[str, object]] = []
+    payload = {
+        "schema_version": 1,
+        "run_id": "run-observability",
+        "dataset_id": DATASET_ID,
+        "source_note_id": SOURCE_ID,
+        "source_fingerprint": f"sha256:{'a' * 64}",
+        "provider": "openai",
+        "model": "model-a",
+        "capability_revision": "cap-v1",
+        "prompt_contract_version": "notes-graph-suggestions-v1",
+    }
+    queued = SimpleNamespace(
+        id=payload["run_id"],
+        revision=2,
+        job_id="job-observability",
+        state=SimpleNamespace(value="queued"),
+        created_at=(NOW - timedelta(seconds=5)).isoformat(),
+        **{
+            key: payload[key]
+            for key in (
+                "source_note_id",
+                "source_fingerprint",
+                "provider",
+                "model",
+                "capability_revision",
+                "prompt_contract_version",
+            )
+        },
+    )
+
+    class Store:
+        def get_run(self, **_kwargs):
+            return queued
+
+        def start_run(self, **_kwargs):
+            return SimpleNamespace(
+                **{
+                    **queued.__dict__,
+                    "revision": 3,
+                    "expected_completion_token": "lease-observability",
+                }
+            )
+
+        def stage_suggestions(self, **_kwargs):
+            raise AssertionError("failed work must not stage")
+
+    async def generate(**_kwargs):
+        if failure_phase == "provider":
+            raise SuggestionGenerationError("notes_graph_provider_call_failed")
+        return SimpleNamespace(
+            relationships=(),
+            tags=(),
+            validation_counts={},
+            input_tokens=4,
+            output_tokens=2,
+        )
+
+    def freshness(**_kwargs):
+        if failure_phase == "freshness":
+            raise suggestion_service.SuggestionWorkerError("notes_graph_fingerprint_stale")
+
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_event",
+        lambda event, **kwargs: recorded.append(("event", (event, kwargs))),
+    )
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_run_error",
+        lambda code: recorded.append(("error", code)),
+    )
+    monkeypatch.setattr(
+        suggestion_service,
+        "record_run_duration",
+        lambda duration: recorded.append(("duration", duration)),
+    )
+    monkeypatch.setattr(suggestion_service, "record_queue_latency", lambda _value: None)
+    monkeypatch.setattr(suggestion_service, "record_provider_usage", lambda **_kwargs: None)
+
+    worker = SuggestionWorker(
+        store_factory=lambda _owner: Store(),
+        retrieve=lambda **_kwargs: SimpleNamespace(candidates=()),
+        prepare=lambda **_kwargs: object(),
+        resolve_capability=lambda **_kwargs: (
+            SimpleNamespace(revision="cap-v1", generation_available=True),
+            object(),
+        ),
+        generate=generate,
+        freshness_check=freshness,
+        cancellation_requested=lambda _job: False,
+        now=lambda: NOW,
+    )
+
+    with pytest.raises(suggestion_service.SuggestionWorkerError):
+        await worker.handle(
+            {
+                "uuid": "job-observability",
+                "owner_user_id": "owner-1",
+                "domain": JOB_DOMAIN,
+                "queue": JOB_QUEUE,
+                "job_type": JOB_TYPE,
+                "lease_id": "lease-observability",
+                "payload": payload,
+            }
+        )
+
+    lifecycle = [detail[0].value for kind, detail in recorded if kind == "event"]
+    assert expected_event in lifecycle
+    assert ("error", expected_code) in recorded
+    assert any(kind == "duration" for kind, _detail in recorded)

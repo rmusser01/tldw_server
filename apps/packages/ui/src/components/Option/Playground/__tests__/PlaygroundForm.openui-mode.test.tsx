@@ -1,8 +1,58 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+import { useMilestoneStore } from "@/store/milestones"
+import { DISCUSS_MEDIA_PROMPT_SETTING } from "@/services/settings/ui-settings"
+import { useChatActions } from "@/hooks/chat/useChatActions"
+import { useStoreMessageOption } from "@/store/option"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence"
+import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
+import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
+import type { TldwApiClientCore } from "@/services/tldw/TldwApiClient"
+const handoff = vi.hoisted(() => ({ scope: "server-a:alice" as string | null, get: vi.fn(), clear: vi.fn(), setRagMediaIds: vi.fn() }))
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => handoff.scope }))
+
+// These cases keep the Form, submit hook, action router, session restore, RAG
+// pipeline and request serializer real. Only network/DB and unrelated UI are fixtures.
+const sourceFlow = vi.hoisted(() => ({
+  enabled: false,
+  request: vi.fn(),
+  stream: vi.fn(),
+  getFullChatData: vi.fn(),
+  snapshot: null as ServicePromptSnapshot | null,
+  restore: null as null | (() => Promise<unknown>),
+  sessionReady: false,
+  config: { serverUrl: "https://handoff.test", authMode: "single-user" as const, apiKey: "synthetic-handoff" }
+}))
+vi.mock("@/services/background-proxy", () => ({ bgRequest: (...args: unknown[]) => sourceFlow.request(...args) }))
+vi.mock("@/services/service-prompts", async () => ({
+  ...await vi.importActual<typeof import("@/services/service-prompts")>("@/services/service-prompts"),
+  loadServicePromptSnapshot: async () => sourceFlow.snapshot
+}))
+vi.mock("@/models", () => ({ pageAssistModel: async () => ({ stream: sourceFlow.stream }) }))
+vi.mock("@/services/actor-settings", () => ({ getActorSettingsForChat: async () => null }))
+vi.mock("@/db/dexie/nickname", () => ({ getModelNicknameByID: async () => null }))
+vi.mock("@/services/chat-settings", () => ({ syncChatSettingsForServerChat: async () => null }))
+vi.mock("@/services/tldw/server-capabilities", () => ({ getServerCapabilities: async () => ({ hasChatSaveToDb: true }) }))
+vi.mock("@/services/title", () => ({ generateTitle: async () => "Cedar saved chat" }))
+vi.mock("@/services/app", async () => ({
+  ...await vi.importActual<typeof import("@/services/app")>("@/services/app"),
+  getNoOfRetrievedDocs: async () => 8
+}))
+vi.mock("@/utils/resolve-api-provider", async () => ({
+  ...await vi.importActual<typeof import("@/utils/resolve-api-provider")>("@/utils/resolve-api-provider"),
+  resolveApiProviderForModel: async () => "openai"
+}))
+vi.mock("@/hooks/utils/messageHelpers", async () => ({
+  ...await vi.importActual<typeof import("@/hooks/utils/messageHelpers")>("@/hooks/utils/messageHelpers"),
+  createSaveMessageOnSuccess: () => async () => "cedar-local",
+  createSaveMessageOnError: () => async () => "cedar-local"
+}))
 
 const onSubmitMock = vi.hoisted(() =>
   vi.fn(async (_payload: unknown) => ({ status: "submitted" as const }))
@@ -74,6 +124,8 @@ const createMessageOptionState = () => ({
   selectedKnowledge: null,
   ragMediaIds: []
 })
+
+vi.mock("@/components/Chat/composer/PromptAssistComposerAction", () => ({ PromptAssistComposerAction: () => null }))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -256,20 +308,27 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 vi.mock("~/hooks/useMessageOption", () => ({
-  useMessageOption: () => messageOptionState.value
+  useMessageOption: () => {
+    // The fixture is selected before mount and reset only after cleanup.
+    const useOptions = sourceFlow.enabled ? useSourceFlowActions : useStaticMessageOptions
+    return useOptions()
+  }
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector: (state: any) => unknown) =>
-    selector({
-      setRagMediaIds: vi.fn(),
+vi.mock("@/store/option", async () => {
+  const actual = await vi.importActual<typeof import("@/store/option")>("@/store/option")
+  return { ...actual, useStoreMessageOption: Object.assign(
+    (selector: (state: any) => unknown, equality?: (left: unknown, right: unknown) => boolean) => sourceFlow.enabled
+      ? actual.useStoreMessageOption(selector, equality)
+      : selector({
+      setRagMediaIds: handoff.setRagMediaIds,
       setRagPinnedResults: vi.fn()
-    })
-}))
+    }), actual.useStoreMessageOption) }
+})
 
 vi.mock("@/store/model", () => ({
   useStoreChatModelSettings: (selector: (state: any) => unknown) =>
-    selector({
+    (selector ?? ((state: unknown) => state))({
       systemPrompt: "",
       setSystemPrompt: vi.fn(),
       temperature: 0.7,
@@ -324,7 +383,9 @@ vi.mock("~/store/webui", () => ({
 vi.mock("@/hooks/useConnectionState", () => ({
   useConnectionState: () => ({
     phase: "connected",
-    isConnected: true
+    isConnected: true,
+    serverUrl: sourceFlow.config.serverUrl,
+    lastConfigUpdatedAt: 0
   })
 }))
 
@@ -497,19 +558,25 @@ vi.mock("@/services/settings/registry", async () => {
 
   return {
     ...actual,
-    clearSetting: vi.fn(),
-    getSetting: vi.fn(async () => undefined)
+    clearSetting: handoff.clear,
+    getSetting: handoff.get
   }
 })
 
-vi.mock("@/db/dexie/helpers", () => ({
-  getAllPrompts: vi.fn(async () => [])
+vi.mock("@/db/dexie/helpers", async () => ({
+  ...await vi.importActual<typeof import("@/db/dexie/helpers")>("@/db/dexie/helpers"),
+  getAllPrompts: vi.fn(async () => []),
+  getFullChatData: (...args: unknown[]) => sourceFlow.getFullChatData(...args),
+  getSessionFiles: async () => [],
+  updateLastUsedModel: async () => undefined,
+  updateChatHistoryCreatedAt: async () => undefined
 }))
 
 vi.mock("@/services/tldw-server", () => ({
   defaultEmbeddingModelForRag: vi.fn(async () => "embedding"),
   fetchChatModels: vi.fn(async () => []),
-  fetchImageModels: vi.fn(async () => [])
+  fetchImageModels: vi.fn(async () => []),
+  systemPromptForNonRagOption: async () => ""
 }))
 
 vi.mock("@/services/search", () => ({
@@ -519,6 +586,8 @@ vi.mock("@/services/search", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
+    getConfig: async () => sourceFlow.config,
+    ragSearch: (query: string, options: unknown) => chatRagMethods.ragSearch.call({ normalizeRagQuery: (value: string) => value } as unknown as TldwApiClientCore, query, options),
     createResearchRun: vi.fn(async () => ({})),
     updateChat: vi.fn(async () => ({}))
   }
@@ -630,7 +699,15 @@ vi.mock("../PlaygroundComposerNotices", () => ({
 }))
 
 vi.mock("../PlaygroundKnowledgeSection", () => ({
-  PlaygroundKnowledgeSection: () => null
+  PlaygroundKnowledgeSection: ({ fileRetrievalEnabled, onFileRetrievalChange }: {
+    fileRetrievalEnabled: boolean
+    onFileRetrievalChange: (enabled: boolean) => void
+  }) => sourceFlow.enabled ? (
+    <label>
+      Source retrieval
+      <input type="checkbox" checked={fileRetrievalEnabled} onChange={event => onFileRetrievalChange(event.target.checked)} />
+    </label>
+  ) : null
 }))
 
 vi.mock("../CompareToggle", () => ({
@@ -782,6 +859,8 @@ vi.mock("../hooks", async () => {
 
       return {
         form,
+        beginPromptAssistReset: vi.fn(() => 1),
+        markPromptAssistAttemptSaved: vi.fn(),
         typing: false,
         setMessageValue: (value: string) =>
           setValues((prev) => ({ ...prev, message: value })),
@@ -1035,10 +1114,492 @@ vi.mock("@/utils/onboarding-ingestion-telemetry", () => ({
 
 import { PlaygroundForm } from "../PlaygroundForm"
 
+function useSourceFlowActions() {
+  const state = useStoreMessageOption((value) => value)
+  const [abortController, setAbortController] = React.useState<AbortController | null>(null)
+  const actions = useChatActions({
+    ...state,
+    abortController,
+    setAbortController,
+    t: (_key: string, fallback?: string) => fallback || _key,
+    notification: { error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn() },
+    currentChatModelSettings: { apiProvider: "openai", setSystemPrompt: vi.fn() },
+    ensureServerChatHistoryId: async () => "cedar-local",
+    compareModeActive: false,
+    compareFeatureEnabled: false,
+    markCompareHistoryCreated: vi.fn(),
+    selectedAssistant: null,
+    selectedCharacter: null,
+    isCharacterConversation: false,
+    setSelectedModel: state.setSelectedModel
+  } as Parameters<typeof useChatActions>[0])
+  return { ...createMessageOptionState(), ...state, ...actions }
+}
+
+function useStaticMessageOptions() {
+  return messageOptionState.value
+}
+
+function SourceFlowHarness() {
+  const session = usePlaygroundSessionPersistence()
+  sourceFlow.restore = session.restoreSession
+  sourceFlow.sessionReady = session.sessionScopeReady
+  return <PlaygroundForm droppedFiles={[]} />
+}
+
+const defer = <T,>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((done) => { resolve = done })
+  return { promise, resolve }
+}
+
+const cedarRows = [
+  { id: "cedar-question", history_id: "cedar-local", role: "user", content: "Tell me about the old Cedar garden.", images: [], sources: [], createdAt: 1 },
+  { id: "cedar-answer", history_id: "cedar-local", role: "assistant", content: "Cedar has a green gate.", images: [], sources: [], createdAt: 2 }
+]
+const cedarData = { historyInfo: { id: "cedar-local", title: "Cedar saved chat", server_chat_id: "cedar-server" }, messages: cedarRows }
+const rowanPayload = { ownerScope: "server-a:alice", mediaId: "42", title: "Rowan.md", content: "Summarize this source.", mode: "rag_media" }
+const rowanText = "The Rowan archive keeps violet maps in the east room."
+
+describe("Home source handoff through the real Chat and RAG send boundary", () => {
+  beforeEach(() => {
+    sourceFlow.enabled = true
+    sourceFlow.sessionReady = false
+    sourceFlow.restore = null
+    sourceFlow.config.serverUrl = "https://handoff.test"
+    sourceFlow.config.apiKey = "synthetic-handoff"
+    localStorage.clear()
+    sessionStorage.clear()
+    useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
+    useStoreMessageOption.setState({ selectedModel: "openai:gpt-4o-mini", temporaryChat: false, fileRetrievalEnabled: false })
+    usePlaygroundSessionStore.getState().clearSession()
+    const scopeKey = buildChatSurfaceScopeKeyFromConfig(sourceFlow.config)
+    usePlaygroundSessionStore.getState().saveSession({
+      scopeKey, historyId: "cedar-local", serverChatId: "cedar-server", chatMode: "normal", ragMediaIds: null
+    })
+    const controller = new AbortController()
+    sourceFlow.snapshot = {
+      scopeKey, requestScope: { config: sourceFlow.config, userId: 1 },
+      scopeSignal: controller.signal, scopeInvalidatedSignal: controller.signal,
+      capability: "supported", release: vi.fn(),
+      definitions: Object.fromEntries(["chat.rag.answer", "chat.rag.question_rewrite"].map((id) => [id, {
+        definition: { id, parts: [{ key: "template", mode: "template", required_variables: ["context", "question"] }] },
+        parts: { template: "Source evidence: {context}\nQuestion: {question}" }, source: "packaged", revision: null
+      }]))
+    }
+    handoff.scope = "server-a:alice"
+    handoff.get.mockReset().mockResolvedValue(undefined)
+    handoff.clear.mockReset().mockResolvedValue(undefined)
+    sourceFlow.getFullChatData.mockReset().mockResolvedValue(cedarData)
+    sourceFlow.request.mockReset().mockResolvedValue({ results: [{ content: rowanText, metadata: { media_id: 42, title: "Rowan.md" } }] })
+    sourceFlow.stream.mockReset().mockImplementation(async function* () { yield { content: "Rowan keeps violet maps in the east room." } })
+    messageOptionState.value = createMessageOptionState()
+  })
+
+  afterEach(() => { cleanup(); sourceFlow.enabled = false })
+
+  const consume = async (payload: unknown = rowanPayload) => {
+    await act(async () => window.dispatchEvent(new CustomEvent("tldw:discuss-media", { detail: payload })))
+    await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Rowan.md\n\nSummarize this source."))
+  }
+  const restore = async () => {
+    await waitFor(() => expect(sourceFlow.sessionReady).toBe(true))
+    await act(async () => { await sourceFlow.restore!() })
+  }
+  const send = async () => {
+    await userEvent.setup().click(screen.getAllByRole("button", { name: "Send" })[0])
+    await waitFor(() => expect(useStoreMessageOption.getState().streaming).toBe(false))
+  }
+
+  const persistSourceSession = async (enabled = true, failedRetrieval = false) => {
+    const view = render(<SourceFlowHarness />)
+    await restore()
+    await consume()
+    if (failedRetrieval) {
+      sourceFlow.request.mockRejectedValueOnce(new Error("Source unavailable"))
+      await send()
+      expect(sourceFlow.stream).not.toHaveBeenCalled()
+    }
+    await act(async () => useStoreMessageOption.getState().setFileRetrievalEnabled(enabled))
+    // Exercise the real unmount flush, including its asynchronous scope lookup.
+    await act(async () => view.unmount())
+    await waitFor(() => expect(usePlaygroundSessionStore.getState().ragMediaIds).toEqual([42]))
+    return localStorage.getItem("tldw-playground-session")!
+  }
+
+  const rehydrateColdSession = async (serialized: string) => {
+    await act(async () => {
+      useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
+      useStoreMessageOption.setState({ selectedModel: "openai:gpt-4o-mini", temporaryChat: false })
+      usePlaygroundSessionStore.setState(usePlaygroundSessionStore.getInitialState(), true)
+      sessionStorage.clear()
+      localStorage.setItem("tldw-playground-session", serialized)
+      await usePlaygroundSessionStore.persist.rehydrate()
+    })
+    sourceFlow.restore = null
+    sourceFlow.sessionReady = false
+    sourceFlow.request.mockClear()
+    sourceFlow.stream.mockClear()
+  }
+
+  it.each([false, true])("restores source activation through cold persistence and Send (prior retrieval failure=%s)", async failedRetrieval => {
+    await rehydrateColdSession(await persistSourceSession(true, failedRetrieval))
+    render(<SourceFlowHarness />)
+    await restore()
+    await userEvent.setup().type(screen.getByTestId("composer-textarea"), "Where does Rowan keep the maps?")
+    await send()
+
+    expect(sourceFlow.request).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/rag/search",
+      body: expect.objectContaining({ include_media_ids: [42], sources: ["media_db"] })
+    }))
+    expect(JSON.stringify(sourceFlow.stream.mock.calls[0][0])).toContain(rowanText)
+    expect(useStoreMessageOption.getState().messages.at(-1)?.sources[0]?.pageContent).toBe(rowanText)
+    expect(useStoreMessageOption.getState().serverChatId).toBe("cedar-server")
+  })
+
+  it.each(["explicit-false", "legacy-missing"])("keeps %s retrieval disabled after cold rehydrate", async savedFlag => {
+    const persisted = JSON.parse(await persistSourceSession(false))
+    if (savedFlag === "legacy-missing") delete persisted.state.fileRetrievalEnabled
+    await rehydrateColdSession(JSON.stringify(persisted))
+    render(<SourceFlowHarness />)
+    await restore()
+    await userEvent.setup().type(screen.getByTestId("composer-textarea"), "Continue the ordinary conversation.")
+    await send()
+
+    expect(sourceFlow.request).not.toHaveBeenCalled()
+    expect(sourceFlow.stream).toHaveBeenCalledTimes(1)
+    expect(useStoreMessageOption.getState().fileRetrievalEnabled).toBe(false)
+  })
+
+  it.each(["account", "server"])("rejects source activation from a cold session owned by another %s", async changed => {
+    await rehydrateColdSession(await persistSourceSession())
+    if (changed === "account") sourceFlow.config.apiKey = "synthetic-other-owner"
+    else sourceFlow.config.serverUrl = "https://other-handoff.test"
+    render(<SourceFlowHarness />)
+    await restore()
+
+    expect(useStoreMessageOption.getState().serverChatId).toBeNull()
+    expect(useStoreMessageOption.getState().ragMediaIds).toBeNull()
+    expect(useStoreMessageOption.getState().fileRetrievalEnabled).toBe(false)
+  })
+
+  it.each(["before-restore", "during-restore"])("preserves a newer explicit retrieval toggle off %s", async order => {
+    await rehydrateColdSession(await persistSourceSession())
+    const historyRead = defer<typeof cedarData>()
+    sourceFlow.getFullChatData.mockClear()
+    if (order === "during-restore") sourceFlow.getFullChatData.mockReturnValue(historyRead.promise)
+    render(<SourceFlowHarness />)
+    await waitFor(() => expect(sourceFlow.sessionReady).toBe(true))
+    let restoring: Promise<unknown> | undefined
+    if (order === "during-restore") {
+      await act(async () => { restoring = sourceFlow.restore!() })
+      await waitFor(() => expect(sourceFlow.getFullChatData).toHaveBeenCalledTimes(1))
+    }
+    // Reach the real Form's user callback, including a return to the initial
+    // false value. A value comparison alone cannot protect this newer intent.
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("checkbox", { name: "Source retrieval" }))
+    await user.click(screen.getByRole("checkbox", { name: "Source retrieval" }))
+    if (order === "during-restore") await act(async () => { historyRead.resolve(cedarData); await restoring })
+    else await restore()
+    await user.type(screen.getByTestId("composer-textarea"), "Continue the ordinary conversation.")
+    await send()
+
+    expect(sourceFlow.request).not.toHaveBeenCalled()
+    expect(useStoreMessageOption.getState().fileRetrievalEnabled).toBe(false)
+    expect(useStoreMessageOption.getState().serverChatId).toBe("cedar-server")
+  })
+
+  it.each([
+    { order: "restore-first", priorSource: false },
+    { order: "handoff-first", priorSource: false },
+    { order: "restore-first", priorSource: true },
+    { order: "handoff-first", priorSource: true },
+    { order: "handoff-before-restore", priorSource: true }
+  ])("retrieves Rowan before generation with old Cedar history ($order, prior source=$priorSource)", async ({ order, priorSource }) => {
+    if (priorSource) usePlaygroundSessionStore.getState().saveSession({ chatMode: "rag", ragMediaIds: [7] })
+    const payload = defer<unknown>()
+    handoff.get.mockImplementation((key) => key === DISCUSS_MEDIA_PROMPT_SETTING ? payload.promise : Promise.resolve(undefined))
+    handoff.clear.mockImplementation(async () => { handoff.get.mockResolvedValue(undefined) })
+    const historyRead = defer<typeof cedarData>()
+    if (order === "handoff-first") sourceFlow.getFullChatData.mockReturnValue(historyRead.promise)
+    render(<SourceFlowHarness />)
+    await waitFor(() => expect(sourceFlow.sessionReady).toBe(true))
+    let restoring: Promise<unknown> | undefined
+    if (order === "restore-first") await restore()
+    else if (order === "handoff-first") await act(async () => { restoring = sourceFlow.restore!() })
+    await act(async () => { payload.resolve(rowanPayload) })
+    await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Rowan.md\n\nSummarize this source."))
+    if (order === "handoff-first") await act(async () => { historyRead.resolve(cedarData); await restoring })
+    if (order === "handoff-before-restore") await restore()
+    expect(useStoreMessageOption.getState().history).toHaveLength(2)
+    await send()
+    expect(sourceFlow.request).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/rag/search", method: "POST",
+      body: expect.objectContaining({ include_media_ids: [42], sources: ["media_db"] }),
+      servicePromptConfig: expect.objectContaining({ serverUrl: sourceFlow.config.serverUrl }),
+      headers: expect.objectContaining({ "X-TLDW-Expected-User-ID": "1" })
+    }))
+    expect(sourceFlow.stream).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(sourceFlow.stream.mock.calls[0][0])).toContain(rowanText)
+    expect(useStoreMessageOption.getState().messages.at(-1)?.sources[0]?.pageContent).toBe(rowanText)
+    expect(useStoreMessageOption.getState().chatMode).toBe("rag")
+  })
+
+  it.each(["empty", "error"])("does not generate from the old conversation after %s selected-source retrieval", async (outcome) => {
+    if (outcome === "empty") sourceFlow.request.mockResolvedValue({ results: [] })
+    else sourceFlow.request.mockRejectedValue(new Error("Source unavailable"))
+    render(<SourceFlowHarness />)
+    await restore()
+    await consume()
+    await send()
+    expect(sourceFlow.request).toHaveBeenCalledTimes(1)
+    expect(sourceFlow.stream).not.toHaveBeenCalled()
+    expect(useStoreMessageOption.getState().messages.at(-1)?.message).toMatch(/selected source|selected media/i)
+  })
+
+  it("keeps a full-content ordinary handoff on the ordinary path", async () => {
+    render(<SourceFlowHarness />)
+    await restore()
+    await act(async () => useStoreMessageOption.setState({ fileRetrievalEnabled: true, ragMediaIds: [7], chatMode: "rag" }))
+    await act(async () => window.dispatchEvent(new CustomEvent("tldw:discuss-media", { detail: { mediaId: "42", title: "Rowan.md", content: rowanText, mode: "chat" } })))
+    await send()
+    expect(sourceFlow.request).not.toHaveBeenCalled()
+    expect(sourceFlow.stream).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(sourceFlow.stream.mock.calls[0][0])).toContain(rowanText)
+  })
+
+  it("does not arm retrieval or seed the composer for a different owner's handoff", async () => {
+    render(<SourceFlowHarness />)
+    await restore()
+    const intentRevision = usePlaygroundSessionStore.getState().sourceSelectionRevision
+    await act(async () => window.dispatchEvent(new CustomEvent("tldw:discuss-media", { detail: { ...rowanPayload, ownerScope: "server-a:bob" } })))
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("")
+    expect(useStoreMessageOption.getState().fileRetrievalEnabled).toBe(false)
+    expect(useStoreMessageOption.getState().ragMediaIds).toBeNull()
+    expect(sourceFlow.request).not.toHaveBeenCalled()
+    expect(usePlaygroundSessionStore.getState().sourceSelectionRevision).toBe(intentRevision)
+  })
+
+  it("discards an earlier owner's storage read through A to B to A", async () => {
+    const intentRevision = usePlaygroundSessionStore.getState().sourceSelectionRevision
+    const oldRead = defer<unknown>()
+    let readStarted = false
+    handoff.get.mockImplementation((key) => {
+      if (key === DISCUSS_MEDIA_PROMPT_SETTING && !readStarted) {
+        readStarted = true
+        return oldRead.promise
+      }
+      return Promise.resolve(undefined)
+    })
+    const view = render(<SourceFlowHarness />)
+    await waitFor(() => expect(readStarted).toBe(true))
+    handoff.scope = "server-a:bob"
+    view.rerender(<SourceFlowHarness />)
+    await act(async () => {})
+    handoff.scope = "server-a:alice"
+    view.rerender(<SourceFlowHarness />)
+    await act(async () => { oldRead.resolve(rowanPayload) })
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("")
+    expect(useStoreMessageOption.getState().fileRetrievalEnabled).toBe(false)
+    expect(sourceFlow.request).not.toHaveBeenCalled()
+    expect(usePlaygroundSessionStore.getState().sourceSelectionRevision).toBe(intentRevision)
+  })
+
+  it("does not publish a late source answer after the captured request authority is invalidated", async () => {
+    const retrieval = defer<unknown>()
+    const authority = new AbortController()
+    sourceFlow.snapshot = { ...sourceFlow.snapshot!, scopeSignal: authority.signal, scopeInvalidatedSignal: authority.signal }
+    sourceFlow.request.mockReturnValue(retrieval.promise)
+    sourceFlow.stream.mockImplementation(async function* (_history, options) {
+      options.signal.throwIfAborted()
+      yield { content: "late answer" }
+    })
+    render(<SourceFlowHarness />)
+    await restore()
+    await consume()
+    await userEvent.setup().click(screen.getAllByRole("button", { name: "Send" })[0])
+    await waitFor(() => expect(sourceFlow.request).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      authority.abort()
+      retrieval.resolve({ results: [{ content: rowanText, metadata: { media_id: 42 } }] })
+    })
+    await waitFor(() => expect(useStoreMessageOption.getState().streaming).toBe(false))
+    for (const [, options] of sourceFlow.stream.mock.calls) expect(options.signal.aborted).toBe(true)
+    expect(useStoreMessageOption.getState().messages.map((message) => message.id)).toEqual(["cedar-question", "cedar-answer"])
+    expect(useStoreMessageOption.getState().historyId).toBe("cedar-local")
+  })
+
+  it.each(["before-restore", "during-restore"])("preserves an accepted same-value Rowan handoff %s", async (order) => {
+    useStoreMessageOption.setState({ chatMode: "rag", ragMediaIds: [42], fileRetrievalEnabled: true })
+    usePlaygroundSessionStore.getState().saveSession({ chatMode: "rag", ragMediaIds: [7] })
+    const historyRead = defer<typeof cedarData>()
+    if (order === "during-restore") sourceFlow.getFullChatData.mockReturnValue(historyRead.promise)
+    render(<SourceFlowHarness />)
+    await waitFor(() => expect(sourceFlow.sessionReady).toBe(true))
+    let restoring: Promise<unknown> | undefined
+    if (order === "during-restore") await act(async () => { restoring = sourceFlow.restore!() })
+    await consume()
+    if (order === "during-restore") await act(async () => { historyRead.resolve(cedarData); await restoring })
+    else await restore()
+    await send()
+    expect(sourceFlow.request.mock.calls[0][0].body.include_media_ids).toEqual([42])
+    expect(JSON.stringify(sourceFlow.stream.mock.calls[0][0])).toContain(rowanText)
+  })
+
+  it.each(["before-restore", "during-restore"])("preserves an accepted same-value ordinary handoff %s", async (order) => {
+    useStoreMessageOption.setState({ chatMode: "normal", ragMediaIds: null, fileRetrievalEnabled: true })
+    usePlaygroundSessionStore.getState().saveSession({ chatMode: "rag", ragMediaIds: [7] })
+    const historyRead = defer<typeof cedarData>()
+    if (order === "during-restore") sourceFlow.getFullChatData.mockReturnValue(historyRead.promise)
+    render(<SourceFlowHarness />)
+    await waitFor(() => expect(sourceFlow.sessionReady).toBe(true))
+    let restoring: Promise<unknown> | undefined
+    if (order === "during-restore") await act(async () => { restoring = sourceFlow.restore!() })
+    await act(async () => window.dispatchEvent(new CustomEvent("tldw:discuss-media", { detail: { mediaId: "42", title: "Rowan.md", content: rowanText, mode: "chat" } })))
+    if (order === "during-restore") await act(async () => { historyRead.resolve(cedarData); await restoring })
+    else await restore()
+    await send()
+    expect(sourceFlow.request).not.toHaveBeenCalled()
+    expect(JSON.stringify(sourceFlow.stream.mock.calls[0][0])).toContain(rowanText)
+    expect(useStoreMessageOption.getState().chatMode).toBe("normal")
+    expect(useStoreMessageOption.getState().history.slice(0, 2).map((row) => row.content)).toEqual(cedarRows.map((row) => row.content))
+  })
+
+  it("preserves accepted source intent through Rowan to Cedar to Rowan while restore is pending", async () => {
+    useStoreMessageOption.setState({ chatMode: "rag", ragMediaIds: [42], fileRetrievalEnabled: true })
+    usePlaygroundSessionStore.getState().saveSession({ chatMode: "rag", ragMediaIds: [7] })
+    const historyRead = defer<typeof cedarData>()
+    sourceFlow.getFullChatData.mockReturnValue(historyRead.promise)
+    render(<SourceFlowHarness />)
+    await waitFor(() => expect(sourceFlow.sessionReady).toBe(true))
+    let restoring!: Promise<unknown>
+    await act(async () => { restoring = sourceFlow.restore!() })
+    await consume()
+    await act(async () => window.dispatchEvent(new CustomEvent("tldw:discuss-media", { detail: { ...rowanPayload, title: "Cedar.md", mediaId: "7" } })))
+    await consume()
+    await act(async () => { historyRead.resolve(cedarData); await restoring })
+    await send()
+    expect(sourceFlow.request.mock.calls[0][0].body.include_media_ids).toEqual([42])
+  })
+
+  it("allows a later requested restore on the same hook to replay saved source selection", async () => {
+    render(<SourceFlowHarness />)
+    await restore()
+    await consume()
+    await act(async () => usePlaygroundSessionStore.getState().saveSession({ chatMode: "rag", ragMediaIds: [7] }))
+    await restore()
+    expect(useStoreMessageOption.getState().ragMediaIds).toEqual([7])
+    expect(useStoreMessageOption.getState().chatMode).toBe("rag")
+  })
+
+  it.each(["conversation", "account"])("does not apply the initial selection baseline to a different persisted %s", async (changed) => {
+    render(<SourceFlowHarness />)
+    await waitFor(() => expect(sourceFlow.sessionReady).toBe(true))
+    await consume()
+    if (changed === "account") sourceFlow.config.apiKey = "synthetic-other-owner"
+    sourceFlow.getFullChatData.mockResolvedValue({ ...cedarData, historyInfo: { ...cedarData.historyInfo, id: "other-local", server_chat_id: "other-server" } })
+    await act(async () => usePlaygroundSessionStore.getState().saveSession({ scopeKey: buildChatSurfaceScopeKeyFromConfig(sourceFlow.config), historyId: "other-local", serverChatId: "other-server", chatMode: "rag", ragMediaIds: [7] }))
+    await restore()
+    expect(useStoreMessageOption.getState().ragMediaIds).toEqual([7])
+    expect(useStoreMessageOption.getState().serverChatId).toBe("other-server")
+  })
+
+  it("hydrates the real localStorage session synchronously before the handoff owner mounts", async () => {
+    const persisted = JSON.parse(localStorage.getItem("tldw-playground-session")!)
+    persisted.state.chatMode = "rag"
+    persisted.state.ragMediaIds = [7]
+    sessionStorage.clear()
+    localStorage.setItem("tldw-playground-session", JSON.stringify(persisted))
+    let hydrated = false
+    const unsubscribe = usePlaygroundSessionStore.persist.onFinishHydration(() => { hydrated = true })
+    void usePlaygroundSessionStore.persist.rehydrate()
+    // No await: the configured browser storage and migration both hydrate synchronously.
+    expect(hydrated).toBe(true)
+    expect(usePlaygroundSessionStore.persist.hasHydrated()).toBe(true)
+    expect(usePlaygroundSessionStore.getState().ragMediaIds).toEqual([7])
+    unsubscribe()
+    render(<SourceFlowHarness />)
+    await consume()
+    await restore()
+    await send()
+    expect(sourceFlow.request.mock.calls[0][0].body.include_media_ids).toEqual([42])
+  })
+})
+
 describe("PlaygroundForm OpenUI mode", () => {
   beforeEach(() => {
-    onSubmitMock.mockClear()
+    onSubmitMock.mockReset().mockResolvedValue({ status: "submitted" })
+    handoff.scope = "server-a:alice"
+    handoff.get.mockReset().mockResolvedValue(undefined)
+    handoff.clear.mockReset().mockResolvedValue(undefined)
+    handoff.setRagMediaIds.mockReset()
+    useMilestoneStore.getState().resetMilestones()
     messageOptionState.value = createMessageOptionState()
+  })
+
+  it("consumes legacy unowned handoffs when token-derived identity is unavailable", async () => {
+    handoff.scope = null
+    handoff.get.mockImplementation(async (setting) => setting === DISCUSS_MEDIA_PROMPT_SETTING ? { mediaId: "42", title: "Legacy review", content: "Discuss", mode: "rag_media" } : undefined)
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Legacy review\n\nDiscuss"))
+    expect(handoff.setRagMediaIds).toHaveBeenCalledWith([42])
+    expect(handoff.clear).toHaveBeenCalledWith(DISCUSS_MEDIA_PROMPT_SETTING)
+  })
+
+  it("waits for a resolved identity before applying or clearing an owned handoff", async () => {
+    handoff.scope = null
+    handoff.get.mockImplementation(async (setting) => setting === DISCUSS_MEDIA_PROMPT_SETTING ? { ownerScope: "server-a:alice", mediaId: "42", title: "Owned source", content: "Discuss", mode: "rag_media" } : undefined)
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await act(async () => {})
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("")
+    expect(handoff.setRagMediaIds).not.toHaveBeenCalled()
+    expect(handoff.clear).not.toHaveBeenCalledWith(DISCUSS_MEDIA_PROMPT_SETTING)
+    handoff.scope = "server-a:alice"
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    await waitFor(() => expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Owned source\n\nDiscuss"))
+    expect(handoff.clear).toHaveBeenCalledWith(DISCUSS_MEDIA_PROMPT_SETTING)
+  })
+
+  it.each(["server-a:alice", "server-a:bob"])("only applies a saved source owned by %s when identity matches", async (ownerScope) => {
+    handoff.get.mockImplementation(async (setting) => setting === DISCUSS_MEDIA_PROMPT_SETTING ? { ownerScope, mediaId: "42", title: "Private source", content: "Summarize", mode: "rag_media" } : undefined)
+    render(<PlaygroundForm droppedFiles={[]} />)
+    await waitFor(() => expect(handoff.clear).toHaveBeenCalledWith(DISCUSS_MEDIA_PROMPT_SETTING))
+    if (ownerScope === handoff.scope) {
+      expect(screen.getByTestId("composer-textarea")).toHaveValue("Chat with this media: Private source\n\nSummarize")
+      expect(handoff.setRagMediaIds).toHaveBeenCalledWith([42])
+    } else {
+      expect(screen.getByTestId("composer-textarea")).toHaveValue("")
+      expect(handoff.setRagMediaIds).not.toHaveBeenCalled()
+    }
+  })
+
+  it("does not apply a saved source after identity changes while storage resolves", async () => {
+    let resolve!: (value: unknown) => void
+    handoff.get.mockImplementation((setting) => setting === DISCUSS_MEDIA_PROMPT_SETTING ? new Promise(done => { resolve = done }) : Promise.resolve(undefined))
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await waitFor(() => expect(resolve).toBeTypeOf("function"))
+    const firstResolve = resolve
+    handoff.scope = "server-a:bob"
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    await act(async () => { firstResolve({ ownerScope: "server-a:alice", mediaId: "42", title: "Private source", content: "Summarize" }) })
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("")
+  })
+
+  it.each(["submitted", "failed", "skipped"])("records normal Chat milestone only for %s and its original owner", async (status) => {
+    let resolve!: (value: unknown) => void
+    onSubmitMock.mockImplementation(() => new Promise(done => { resolve = done }) as never)
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    await user.type(screen.getByTestId("composer-textarea"), "Hello")
+    await user.click(screen.getAllByRole("button", { name: "Send" })[0])
+    await waitFor(() => expect(resolve).toBeTypeOf("function"))
+    handoff.scope = "server-a:bob"
+    view.rerender(<PlaygroundForm droppedFiles={[]} />)
+    await act(async () => { resolve({ status, errorMessage: "Failed", reason: "Skipped" }) })
+    expect(useMilestoneStore.getState().scopedMilestones["server-a:alice"]?.first_chat != null).toBe(status === "submitted")
+    expect(useMilestoneStore.getState().scopedMilestones["server-a:bob"]?.first_chat).toBeUndefined()
   })
 
   it("sends the next prompt with OpenUI request overrides", async () => {

@@ -2,14 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from json import JSONDecodeError
-import os
-from collections.abc import Awaitable, Callable
 from typing import Any, Protocol, TypedDict
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import load_server_config_snapshot
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+    _extract_runtime_api_key,
+    _extract_runtime_auth_source,
+    merge_server_fallback_snapshot,
+    resolve_static_server_fallback_from_snapshot,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    configured_provider_model_from_snapshot,
+)
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     decrypt_byok_payload,
@@ -19,12 +30,16 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAuthenticationError,
     ChatBadRequestError,
     ChatProviderError,
+    SanitizedProviderStreamError,
 )
+from tldw_Server_API.app.core.Chat.streaming_utils import (
+    sanitized_provider_stream_exception,
+)
+from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.services import admin_byok_service, admin_orgs_service
-
 
 BYOK_VALIDATION_DOMAIN = "byok"
 BYOK_VALIDATION_JOB_TYPE = "validation_sweep"
@@ -36,6 +51,7 @@ class ByokValidationCandidate(TypedDict, total=False):
     provider: str
     api_key: str
     credential_fields: dict[str, Any] | None
+    auth_source: str | None
     source: str
     scope_type: str
     scope_id: int
@@ -48,6 +64,47 @@ class CandidateLoadResult:
 
     candidates: list[ByokValidationCandidate]
     error_count: int = 0
+
+
+def _validation_candidate_from_payload(
+    payload: dict[str, Any],
+    *,
+    provider: str,
+    source: str,
+    scope_type: str | None = None,
+    scope_id: int | None = None,
+    user_id: int | None = None,
+) -> ByokValidationCandidate:
+    """Build one candidate using the credential runtime's source precedence."""
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid BYOK credential payload")
+    api_key = _extract_runtime_api_key(payload)
+    auth_source = _extract_runtime_auth_source(
+        payload,
+        require_access_for_oauth=True,
+    )
+    if not api_key or not auth_source:
+        raise ValueError("Invalid BYOK credential payload")
+    credential_fields = payload.get("credential_fields")
+    if credential_fields is not None and not isinstance(credential_fields, dict):
+        raise ValueError("Invalid BYOK credential payload")
+
+    candidate: ByokValidationCandidate = {
+        "provider": provider,
+        "api_key": api_key,
+        "credential_fields": (
+            dict(credential_fields) if credential_fields is not None else None
+        ),
+        "auth_source": auth_source,
+        "source": source,
+    }
+    if scope_type is not None:
+        candidate["scope_type"] = scope_type
+    if scope_id is not None:
+        candidate["scope_id"] = scope_id
+    if user_id is not None:
+        candidate["user_id"] = user_id
+    return candidate
 
 
 class SharedByokRepoProtocol(Protocol):
@@ -140,11 +197,11 @@ async def _get_repo() -> ValidationRunsRepoProtocol:
 
 def _per_provider_limit() -> int:
     """Return the max concurrent validation calls per provider."""
-    raw_value = (os.getenv("ADMIN_BYOK_VALIDATION_PER_PROVIDER_CONCURRENCY") or "2").strip()
-    try:
-        return max(1, int(raw_value))
-    except ValueError:
-        return 2
+    from tldw_Server_API.app.core.AuthNZ.byok_testing import (
+        provider_credential_validation_per_provider_capacity,
+    )
+
+    return provider_credential_validation_per_provider_capacity()
 
 
 def _redact_validation_failure(exc: Exception) -> str:
@@ -154,6 +211,34 @@ def _redact_validation_failure(exc: Exception) -> str:
     if isinstance(exc, ChatProviderError):
         return "provider_validation_failed"
     return "provider_validation_failed"
+
+
+def _validation_job_public_failure(exc: Exception) -> Exception:
+    """Return a detached-safe failure for the Jobs finalizer."""
+    if isinstance(exc, SanitizedProviderStreamError):
+        return sanitized_provider_stream_exception(exc.code)
+    if isinstance(exc, ByokResolutionError):
+        return ByokResolutionError(exc.code, exc.provider)
+    return sanitized_provider_stream_exception("provider_unavailable")
+
+
+async def _mark_validation_failed_best_effort(
+    repo: ValidationRunsRepoProtocol,
+    run_id: str,
+    exc: Exception,
+) -> None:
+    """Record a bounded run failure without replacing its public exception."""
+    try:
+        await repo.mark_failed(
+            run_id,
+            error_message=_redact_validation_failure(exc),
+        )
+    except Exception as mark_exc:  # noqa: BLE001
+        logger.warning(
+            "BYOK validation failure status update failed: run_id={} error_type={}",
+            run_id,
+            type(mark_exc).__name__,
+        )
 
 
 async def enqueue_byok_validation_run(
@@ -204,6 +289,13 @@ async def _load_team_scoped_shared_candidates(
                     continue
                 try:
                     payload = decrypt_byok_payload(loads_envelope(str(full_row["encrypted_blob"])))
+                    candidate = _validation_candidate_from_payload(
+                        payload,
+                        provider=str(row["provider"]),
+                        source="shared",
+                        scope_type="team",
+                        scope_id=team_id,
+                    )
                 except (JSONDecodeError, TypeError, ValueError) as exc:
                     error_count += 1
                     logger.warning(
@@ -213,16 +305,7 @@ async def _load_team_scoped_shared_candidates(
                         type(exc).__name__,
                     )
                     continue
-                items.append(
-                    {
-                        "provider": str(row["provider"]),
-                        "api_key": payload["api_key"],
-                        "credential_fields": payload.get("credential_fields"),
-                        "source": "shared",
-                        "scope_type": "team",
-                        "scope_id": team_id,
-                    }
-                )
+                items.append(candidate)
         if len(teams) < limit:
             break
         offset += limit
@@ -264,6 +347,13 @@ async def load_default_validation_candidates(run: dict[str, Any]) -> CandidateLo
             continue
         try:
             payload = decrypt_byok_payload(loads_envelope(str(full_row["encrypted_blob"])))
+            candidate = _validation_candidate_from_payload(
+                payload,
+                provider=str(row["provider"]),
+                source="shared",
+                scope_type=scope_type,
+                scope_id=scope_id,
+            )
         except (JSONDecodeError, TypeError, ValueError) as exc:
             error_count += 1
             logger.warning(
@@ -274,16 +364,7 @@ async def load_default_validation_candidates(run: dict[str, Any]) -> CandidateLo
                 type(exc).__name__,
             )
             continue
-        candidates.append(
-            {
-                "provider": str(row["provider"]),
-                "api_key": payload["api_key"],
-                "credential_fields": payload.get("credential_fields"),
-                "source": "shared",
-                "scope_type": scope_type,
-                "scope_id": scope_id,
-            }
-        )
+        candidates.append(candidate)
     candidates.extend(team_load_result.candidates)
     error_count += team_load_result.error_count
 
@@ -309,6 +390,12 @@ async def load_default_validation_candidates(run: dict[str, Any]) -> CandidateLo
                     continue
                 try:
                     payload = decrypt_byok_payload(loads_envelope(str(full_row["encrypted_blob"])))
+                    candidate = _validation_candidate_from_payload(
+                        payload,
+                        provider=row_provider,
+                        source="user",
+                        user_id=user_id,
+                    )
                 except (JSONDecodeError, TypeError, ValueError) as exc:
                     error_count += 1
                     logger.warning(
@@ -318,15 +405,7 @@ async def load_default_validation_candidates(run: dict[str, Any]) -> CandidateLo
                         type(exc).__name__,
                     )
                     continue
-                candidates.append(
-                    {
-                        "provider": row_provider,
-                        "api_key": payload["api_key"],
-                        "credential_fields": payload.get("credential_fields"),
-                        "source": "user",
-                        "user_id": user_id,
-                    }
-                )
+                candidates.append(candidate)
         offset += limit
         if offset >= total:
             break
@@ -350,6 +429,7 @@ async def _run_validation_scan(
     initial_error_count: int = 0,
     max_workers: int | None = None,
     per_provider_limit: int | None = None,
+    server_config_snapshot: Mapping[str, Any] | None = None,
 ) -> dict[str, int]:
     """Validate candidate credentials with bounded concurrency per provider."""
     if not candidates:
@@ -360,7 +440,13 @@ async def _run_validation_scan(
             "error_count": initial_error_count,
         }
 
-    provider_limit = per_provider_limit or _per_provider_limit()
+    if per_provider_limit is None:
+        provider_limit = _per_provider_limit()
+    else:
+        try:
+            provider_limit = min(8, max(1, int(per_provider_limit)))
+        except (TypeError, ValueError):
+            provider_limit = _per_provider_limit()
     semaphores: dict[str, asyncio.Semaphore] = {}
     counts = {
         "keys_checked": len(candidates),
@@ -374,15 +460,61 @@ async def _run_validation_scan(
         semaphore = semaphores.setdefault(provider, asyncio.Semaphore(provider_limit))
         async with semaphore:
             try:
-                await test_provider_credentials_fn(
-                    provider=provider,
-                    api_key=str(candidate["api_key"]),
-                    credential_fields=candidate.get("credential_fields"),
-                    model=None,
-                )
+                validation_kwargs: dict[str, Any] = {
+                    "provider": provider,
+                    "api_key": str(candidate["api_key"]),
+                    "credential_fields": candidate.get("credential_fields"),
+                    "model": None,
+                }
+                if server_config_snapshot is not None:
+                    base_fallback = resolve_static_server_fallback_from_snapshot(
+                        provider,
+                        server_config_snapshot,
+                    )
+                    candidate_fields = candidate.get("credential_fields")
+                    if candidate_fields is None:
+                        candidate_fields = {}
+                    candidate_fallback = merge_server_fallback_snapshot(
+                        provider,
+                        base_fallback,
+                        api_key=str(candidate["api_key"]),
+                        credential_fields=candidate_fields,
+                        auth_source=candidate.get("auth_source"),
+                        provider_config={},
+                    )
+                    app_config = dict(candidate_fallback.app_config or {})
+                    model = configured_provider_model_from_snapshot(
+                        provider,
+                        app_config,
+                    )
+                    if not model:
+                        raise ChatProviderError(
+                            provider=provider,
+                            message="Provider validation configuration is unavailable",
+                            status_code=503,
+                        )
+                    validation_kwargs.update(
+                        {
+                            "api_key": candidate_fallback.api_key,
+                            "credential_fields": dict(
+                                candidate_fallback.credential_fields
+                            ),
+                            "app_config": app_config,
+                            "model": model,
+                            "include_override_model": False,
+                        }
+                    )
+                await test_provider_credentials_fn(**validation_kwargs)
                 return "valid"
             except (ChatAuthenticationError, ChatBadRequestError):
                 return "invalid"
+            except SanitizedProviderStreamError as exc:
+                if exc.code in {
+                    "provider_authentication_failed",
+                    "provider_configuration_invalid",
+                }:
+                    return "invalid"
+                raise
 
     queue: asyncio.Queue[ByokValidationCandidate | None] = asyncio.Queue()
     for candidate in candidates:
@@ -441,35 +573,47 @@ async def handle_byok_validation_job(
     if not run_id:
         raise ValueError("missing_run_id")
 
-    repo = repo or await _get_repo()
-    run = await repo.get_run(run_id)
+    try:
+        repo = repo or await _get_repo()
+    except Exception as exc:  # noqa: BLE001 - sanitize repository initialization failures
+        raise_detached_error(_validation_job_public_failure(exc))
+
+    try:
+        run = await repo.get_run(run_id)
+    except Exception as exc:  # noqa: BLE001 - persist bounded failure across the Jobs boundary
+        await _mark_validation_failed_best_effort(repo, run_id, exc)
+        raise_detached_error(_validation_job_public_failure(exc))
     if not run:
         raise ValueError("missing_run")
 
     job_id = str(job.get("id")) if job.get("id") is not None else None
-    await repo.mark_running(run_id, job_id=job_id)
-
     loader = candidate_loader or load_default_validation_candidates
     validator = test_provider_credentials_fn or test_provider_credentials
 
     try:
+        await repo.mark_running(run_id, job_id=job_id)
         load_result = _normalize_candidate_load_result(await loader(run))
+        server_config_snapshot = (
+            load_server_config_snapshot()
+            if validator is test_provider_credentials
+            else None
+        )
         summary = await _run_validation_scan(
             load_result.candidates,
             test_provider_credentials_fn=validator,
             initial_error_count=load_result.error_count,
+            server_config_snapshot=server_config_snapshot,
+        )
+        await repo.mark_complete(
+            run_id,
+            keys_checked=int(summary["keys_checked"]),
+            valid_count=int(summary["valid_count"]),
+            invalid_count=int(summary["invalid_count"]),
+            error_count=int(summary["error_count"]),
         )
     except Exception as exc:
-        await repo.mark_failed(run_id, error_message=_redact_validation_failure(exc))
-        raise
-
-    await repo.mark_complete(
-        run_id,
-        keys_checked=int(summary["keys_checked"]),
-        valid_count=int(summary["valid_count"]),
-        invalid_count=int(summary["invalid_count"]),
-        error_count=int(summary["error_count"]),
-    )
+        await _mark_validation_failed_best_effort(repo, run_id, exc)
+        raise_detached_error(_validation_job_public_failure(exc))
 
     logger.info(
         "BYOK validation job completed: run_id={} job_id={} keys_checked={} valid={} invalid={} errors={}",

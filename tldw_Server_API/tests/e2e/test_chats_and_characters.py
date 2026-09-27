@@ -138,6 +138,8 @@ def test_character_persona_influences_context_and_sender_name(authenticated_clie
         "append_user_message": "Please introduce yourself in one line.",
         "save_to_db": True,
         "stream": False,
+        "provider": "local-llm",
+        "model": "local-test",
     }
     resp = api.client.post(f"/api/v1/chats/{chat_id}/complete-v2", json=complete_body)
     try:

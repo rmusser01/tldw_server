@@ -1,0 +1,257 @@
+{
+  "version": 1,
+  "selection_vectors": [
+    {
+      "name": "unicode_send",
+      "selection": {
+        "version": 1,
+        "owner_key": "local:é",
+        "conversation_id": "会話",
+        "interpretation": {
+          "kind": "parent_graph_v1"
+        },
+        "cursor": {
+          "kind": "after_message",
+          "message_id": "a🌿"
+        },
+        "selection_revision": 7,
+        "purpose": "send",
+        "messages": [
+          {
+            "id": "a🌿",
+            "revision": "rev:画像#1"
+          }
+        ],
+        "fences": {
+          "conversation": "c",
+          "history": "h",
+          "settings": "s"
+        },
+        "storage_context_digest": "storage:ref-42",
+        "request_context_digest": "request:overlay-9",
+        "selection_digest": ""
+      },
+      "canonical_json": "[1,\"local:é\",\"会話\",[\"parent_graph_v1\",null],[\"after_message\",\"a🌿\"],\"send\",[[\"a🌿\",\"rev:画像#1\"]],\"storage:ref-42\",\"request:overlay-9\"]",
+      "selection_digest": "4ab831170088e3c5018d9257a7181c44db775d6fee1e64ed94d038360e11abad"
+    },
+    {
+      "name": "before_first",
+      "selection": {
+        "version": 1,
+        "owner_key": "local:p",
+        "conversation_id": "c",
+        "interpretation": {
+          "kind": "parent_graph_v1"
+        },
+        "cursor": {
+          "kind": "before_message",
+          "message_id": "u1"
+        },
+        "selection_revision": 8,
+        "purpose": "send",
+        "messages": [],
+        "fences": {
+          "conversation": "2",
+          "history": "4",
+          "settings": "1"
+        },
+        "storage_context_digest": "storage:settings-1",
+        "request_context_digest": "request:composer-2",
+        "selection_digest": ""
+      },
+      "canonical_json": "[1,\"local:p\",\"c\",[\"parent_graph_v1\",null],[\"before_message\",\"u1\"],\"send\",[],\"storage:settings-1\",\"request:composer-2\"]",
+      "selection_digest": "2688f0203045c558c164212073f4c3d5c4e228443948289c95c4166b9dc15749"
+    },
+    {
+      "name": "legacy_fork",
+      "selection": {
+        "version": 1,
+        "owner_key": "server:account-7",
+        "conversation_id": "c-fork",
+        "interpretation": {
+          "kind": "legacy_linear_v1",
+          "projection_id": "review-2"
+        },
+        "cursor": {
+          "kind": "after_message",
+          "message_id": "img-1"
+        },
+        "selection_revision": 11,
+        "purpose": "fork",
+        "messages": [
+          {
+            "id": "u1",
+            "revision": "text-v2"
+          },
+          {
+            "id": "img-1",
+            "revision": "image-ref:sha256-abc"
+          }
+        ],
+        "fences": {
+          "conversation": "9",
+          "history": "22",
+          "settings": "5"
+        },
+        "storage_context_digest": "storage:retained-image-abc",
+        "request_context_digest": "request:copy-policy-v1",
+        "selection_digest": ""
+      },
+      "canonical_json": "[1,\"server:account-7\",\"c-fork\",[\"legacy_linear_v1\",\"review-2\"],[\"after_message\",\"img-1\"],\"fork\",[[\"u1\",\"text-v2\"],[\"img-1\",\"image-ref:sha256-abc\"]],\"storage:retained-image-abc\",\"request:copy-policy-v1\"]",
+      "selection_digest": "a6ba38aea3b12cbc670e368a33b4523e34b871d47435cad48b5283791bf039ce"
+    }
+  ],
+  "comparison_vector": {
+    "model_id": "A",
+    "boundary_id": "uA",
+    "expected_path_ids": [
+      "u1",
+      "a1",
+      "u2",
+      "a2",
+      "uA"
+    ],
+    "selection": {
+      "version": 1,
+      "owner_key": "local:p",
+      "conversation_id": "compare-c",
+      "model_id": "A",
+      "cluster_id": "r3",
+      "cursor": {
+        "kind": "after_message",
+        "message_id": "uA"
+      },
+      "messages": [
+        {
+          "id": "u1",
+          "revision": "1"
+        },
+        {
+          "id": "a1",
+          "revision": "1"
+        },
+        {
+          "id": "u2",
+          "revision": "1"
+        },
+        {
+          "id": "a2",
+          "revision": "1"
+        },
+        {
+          "id": "uA",
+          "revision": "1"
+        }
+      ],
+      "fences": {
+        "conversation": "1",
+        "history": "1",
+        "settings": "1"
+      },
+      "storage_context_digest": "storage:comparison",
+      "request_context_digest": "request:A-policy",
+      "selection_digest": ""
+    },
+    "canonical_json": "[1,\"comparison\",\"local:p\",\"compare-c\",\"A\",\"r3\",[\"after_message\",\"uA\"],[[\"u1\",\"1\"],[\"a1\",\"1\"],[\"u2\",\"1\"],[\"a2\",\"1\"],[\"uA\",\"1\"]],\"storage:comparison\",\"request:A-policy\"]",
+    "selection_digest": "990a2a97fa6199136429aa313d85e8c1e5374a18c62af08df1e539a3b6fa9b9f",
+    "source_rows": [
+      {
+        "id": "u1",
+        "revision": "1",
+        "parent_id": null,
+        "role": "user",
+        "settled": true,
+        "conversation_id": "compare-c",
+        "comparison": {
+          "cluster_id": "r1",
+          "model_id": null,
+          "common": true
+        }
+      },
+      {
+        "id": "a1",
+        "revision": "1",
+        "parent_id": "u1",
+        "role": "assistant",
+        "settled": true,
+        "conversation_id": "compare-c",
+        "comparison": {
+          "cluster_id": "r1",
+          "model_id": "A",
+          "common": false
+        }
+      },
+      {
+        "id": "b1",
+        "revision": "1",
+        "parent_id": "u1",
+        "role": "assistant",
+        "settled": true,
+        "conversation_id": "compare-c",
+        "comparison": {
+          "cluster_id": "r1",
+          "model_id": "B",
+          "common": false
+        }
+      },
+      {
+        "id": "u2",
+        "revision": "1",
+        "parent_id": "b1",
+        "role": "user",
+        "settled": true,
+        "conversation_id": "compare-c",
+        "comparison": {
+          "cluster_id": "r2",
+          "model_id": null,
+          "common": true
+        }
+      },
+      {
+        "id": "a2",
+        "revision": "1",
+        "parent_id": "u2",
+        "role": "assistant",
+        "settled": true,
+        "conversation_id": "compare-c",
+        "comparison": {
+          "cluster_id": "r2",
+          "model_id": "A",
+          "common": false
+        }
+      },
+      {
+        "id": "b2",
+        "revision": "1",
+        "parent_id": "u2",
+        "role": "assistant",
+        "settled": true,
+        "conversation_id": "compare-c",
+        "comparison": {
+          "cluster_id": "r2",
+          "model_id": "B",
+          "common": false
+        }
+      },
+      {
+        "id": "uA",
+        "revision": "1",
+        "parent_id": "b2",
+        "role": "user",
+        "settled": true,
+        "conversation_id": "compare-c",
+        "comparison": {
+          "cluster_id": "r3",
+          "model_id": "A",
+          "common": false
+        }
+      }
+    ]
+  },
+  "fork_excluded_context": [
+    "draft",
+    "prefill",
+    "old_summary",
+    "old_compaction_content"
+  ]
+}

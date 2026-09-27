@@ -5,6 +5,8 @@ import type { TtsPresetKey } from "@/hooks/useTtsPlayground"
 
 type Props = {
   provider: string
+  backend?: string
+  allowFallback?: boolean
   model: string
   voice: string
   format: string
@@ -23,6 +25,8 @@ const PRESET_TOOLTIPS: Record<TtsPresetKey, string> = {
 
 export function TtsProviderStrip({
   provider,
+  backend,
+  allowFallback,
   model,
   voice,
   format,
@@ -54,6 +58,28 @@ export function TtsProviderStrip({
         </>
       ) : (
         <>
+          {backend && (
+            <Tooltip title={`Backend: ${backend}`}>
+              <Tag
+                className="cursor-pointer"
+                onClick={() => onLabelClick("advanced")}
+              >
+                {backend}
+              </Tag>
+            </Tooltip>
+          )}
+
+          {backend && allowFallback === false && (
+            <Tooltip title="Configured backend fallback is disabled">
+              <Tag
+                className="cursor-pointer"
+                onClick={() => onLabelClick("advanced")}
+              >
+                Fallback off
+              </Tag>
+            </Tooltip>
+          )}
+
           <Tooltip title={`Model: ${model}`}>
             <Tag
               className="cursor-pointer"

@@ -1,8 +1,13 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
+
+const authority = vi.hoisted(() => ({ scope: "alice-notes" as string | null, online: true }))
+vi.mock("../hooks/useNotesGraphAuthorityScope", () => ({
+  useNotesGraphAuthorityScope: () => authority.scope
+}))
 
 const {
   mockBgRequest,
@@ -67,7 +72,7 @@ vi.mock("@/services/background-proxy", () => ({
 }))
 
 vi.mock("@/hooks/useServerOnline", () => ({
-  useServerOnline: () => true
+  useServerOnline: () => authority.online
 }))
 
 vi.mock("@/context/demo-mode", () => ({
@@ -140,11 +145,13 @@ const renderPage = () => {
       mutations: { retry: false }
     }
   })
-  return render(
+  const page = () => (
     <QueryClientProvider client={queryClient}>
       <NotesManagerPage />
     </QueryClientProvider>
   )
+  const view = render(page())
+  return { ...view, queryClient, rerenderPage: () => view.rerender(page()) }
 }
 
 const configureCommonRequests = (neighborsPayload: Record<string, any>) => {
@@ -194,6 +201,8 @@ const configureCommonRequests = (neighborsPayload: Record<string, any>) => {
 describe("NotesManagerPage stage 27 source link surfacing", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    authority.scope = "alice-notes"
+    authority.online = true
     mockConfirmDanger.mockResolvedValue(true)
     mockGetSetting.mockResolvedValue(null)
     mockSetSetting.mockResolvedValue(undefined)
@@ -204,6 +213,99 @@ describe("NotesManagerPage stage 27 source link surfacing", () => {
     mockGetChat.mockResolvedValue(null)
     mockListChatMessages.mockResolvedValue([])
     mockGetCharacter.mockResolvedValue(null)
+  })
+
+  it("opens and edits an ordinary note without requesting graph data", async () => {
+    configureCommonRequests({ nodes: [], edges: [] })
+    localStorage.setItem("notes-section-connections", "true")
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-source-1"))
+    const title = await screen.findByDisplayValue("Source note")
+    fireEvent.change(title, { target: { value: "Updated title" } })
+    await act(async () => {})
+    expect(title).toHaveValue("Updated title")
+    expect(screen.getByTestId("notes-section-connections-toggle")).toHaveAttribute("aria-expanded", "false")
+    expect(mockBgRequest.mock.calls.filter(([request]) => String(request.path).includes("/neighbors"))).toHaveLength(0)
+    localStorage.removeItem("notes-section-connections")
+  })
+
+  it("reports denied connections without retrying after the user opens the section", async () => {
+    configureCommonRequests({ nodes: [], edges: [] })
+    const requests = mockBgRequest.getMockImplementation()!
+    mockBgRequest.mockImplementation((request) => {
+      if (String(request.path).includes("/neighbors")) {
+        return Promise.reject(Object.assign(new Error("Permission denied: missing notes.graph.read"), { status: 403 }))
+      }
+      return requests(request)
+    })
+    const view = renderPage()
+    view.queryClient.setQueryData(["note-graph-neighbors", "alice-notes", "note-source-1", 0], {
+      nodes: [{ id: "source:web:media-77", type: "source", label: "Previously loaded source" }],
+      edges: [{ id: "cached-edge", source: "note-source-1", target: "source:web:media-77", type: "source_membership" }]
+    })
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-source-1"))
+    await screen.findByDisplayValue("Source note")
+    fireEvent.click(screen.getByTestId("notes-section-connections-toggle"))
+    expect(await screen.findByText("Note connections are unavailable for this account.")).toBeVisible()
+    expect(screen.queryByText("Previously loaded source")).toBeNull()
+    expect(screen.queryByTestId("notes-related-retry")).toBeNull()
+    fireEvent.click(screen.getByTestId("notes-section-connections-toggle"))
+    fireEvent.click(screen.getByTestId("notes-section-connections-toggle"))
+    await act(async () => { window.dispatchEvent(new Event("focus")) })
+    authority.online = false
+    view.rerenderPage()
+    authority.online = true
+    view.rerenderPage()
+    await act(async () => {})
+    expect(mockBgRequest.mock.calls.filter(([request]) => String(request.path).includes("/neighbors"))).toHaveLength(1)
+  })
+
+  it("shows connections as not loaded when opened offline, then loads after reconnecting", async () => {
+    configureCommonRequests({ nodes: [], edges: [] })
+    const view = renderPage()
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-source-1"))
+    await screen.findByDisplayValue("Source note")
+    authority.online = false
+    view.rerenderPage()
+    fireEvent.click(screen.getByTestId("notes-section-connections-toggle"))
+    expect(await screen.findByText("Connect to the server to load note connections.")).toBeVisible()
+    expect(screen.queryByTestId("notes-manual-links-empty")).toBeNull()
+    expect(screen.queryByTestId("notes-related-empty")).toBeNull()
+    expect(screen.queryByTestId("notes-backlinks-empty")).toBeNull()
+    expect(mockBgRequest.mock.calls.filter(([request]) => String(request.path).includes("/neighbors"))).toHaveLength(0)
+    authority.online = true
+    view.rerenderPage()
+    expect(await screen.findByTestId("notes-related-empty")).toBeVisible()
+    expect(mockBgRequest.mock.calls.filter(([request]) => String(request.path).includes("/neighbors"))).toHaveLength(1)
+  })
+
+  it("discards a graph response after authority changes and requires a new explicit request", async () => {
+    configureCommonRequests({ nodes: [], edges: [] })
+    const requests = mockBgRequest.getMockImplementation()!
+    let resolveGraph!: (value: unknown) => void
+    mockBgRequest.mockImplementation((request) => {
+      if (String(request.path).includes("/neighbors")) return new Promise(resolve => { resolveGraph = resolve })
+      return requests(request)
+    })
+    const view = renderPage()
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-source-1"))
+    fireEvent.click(await screen.findByTestId("notes-section-connections-toggle"))
+    await waitFor(() => expect(resolveGraph).toBeDefined())
+    authority.scope = "bob-notes"
+    view.rerenderPage()
+    await act(async () => { resolveGraph({ nodes: [{ id: "source:web:private", type: "source", label: "Private source" }], edges: [] }) })
+    await waitFor(() => expect(view.queryClient.getQueryData(["note-graph-neighbors", "alice-notes", "note-source-1", 0])).toBeNull())
+    expect(screen.queryByText("Private source")).toBeNull()
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-source-1"))
+    await screen.findByDisplayValue("Source note")
+    expect(screen.getByTestId("notes-section-connections-toggle")).toHaveAttribute("aria-expanded", "false")
+    expect(mockBgRequest.mock.calls.filter(([request]) => String(request.path).includes("/neighbors"))).toHaveLength(1)
+    authority.scope = "alice-notes"
+    view.rerenderPage()
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-source-1"))
+    await screen.findByDisplayValue("Source note")
+    expect(screen.getByTestId("notes-section-connections-toggle")).toHaveAttribute("aria-expanded", "false")
+    expect(mockBgRequest.mock.calls.filter(([request]) => String(request.path).includes("/neighbors"))).toHaveLength(1)
   })
 
   it("renders sorted source chips and navigates to media permalink IDs", async () => {
@@ -234,6 +336,7 @@ describe("NotesManagerPage stage 27 source link surfacing", () => {
     renderPage()
 
     fireEvent.click(await screen.findByTestId("notes-open-button-note-source-1"))
+    fireEvent.click(await screen.findByTestId("notes-section-connections-toggle"))
     const sourceChipNodes = await screen.findAllByTestId(/notes-source-link-/)
     const sourceLabels = sourceChipNodes.map((node) => node.textContent?.trim())
     expect(sourceLabels).toEqual(["Web source: media-77", "YouTube source: media-21"])
@@ -267,6 +370,7 @@ describe("NotesManagerPage stage 27 source link surfacing", () => {
     renderPage()
 
     fireEvent.click(await screen.findByTestId("notes-open-button-note-source-1"))
+    fireEvent.click(await screen.findByTestId("notes-section-connections-toggle"))
     fireEvent.click(await screen.findByText("Web source: https://example.com/article"))
 
     expect(openSpy).toHaveBeenCalledWith(
@@ -302,6 +406,7 @@ describe("NotesManagerPage stage 27 source link surfacing", () => {
     renderPage()
 
     fireEvent.click(await screen.findByTestId("notes-open-button-note-source-1"))
+    fireEvent.click(await screen.findByTestId("notes-section-connections-toggle"))
     expect(await screen.findByText("Captured article title")).toBeInTheDocument()
   })
 })

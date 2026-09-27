@@ -1,9 +1,13 @@
 # test_structured_prompt_validator.py
 # Unit tests for structured prompt definition validation
 
+import pytest
+
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts.validator import (
     validate_prompt_definition,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def _make_definition(**overrides):
@@ -52,6 +56,17 @@ def test_validator_accepts_valid_definition():
     errors = validate_prompt_definition(_make_definition())
 
     assert errors == []
+
+
+def test_discriminated_parser_preserves_v1_compatibility():
+    from tldw_Server_API.app.core.Prompt_Management import structured_prompts
+
+    payload = _make_definition()
+    parsed = structured_prompts.parse_prompt_definition(payload)
+    assert isinstance(parsed, structured_prompts.PromptDefinition)
+    assert isinstance(parsed, structured_prompts.MultiMessagePromptDefinitionV1)
+    assert parsed.model_dump(exclude_unset=True) == payload
+    assert validate_prompt_definition(parsed) == []
 
 
 def test_validator_rejects_duplicate_variable_names():

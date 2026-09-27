@@ -292,10 +292,12 @@ class ACPSessionsDB:
 
     def __init__(self, db_path: str | None = None) -> None:
         if db_path is None:
-            db_path = os.path.join(
-                os.path.dirname(__file__),
-                "..", "..", "..", "Databases", "acp_sessions.db",
-            )
+            db_path = str(os.getenv("ACP_SESSIONS_DB_PATH") or "").strip()
+            if not db_path:
+                db_path = os.path.join(
+                    os.path.dirname(__file__),
+                    "..", "..", "..", "Databases", "acp_sessions.db",
+                )
         self._db_path = os.path.abspath(db_path)
         self._conn_local = threading.local()
         self._initialized = False

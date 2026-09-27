@@ -625,8 +625,8 @@ def test_missing_api_key_for_required_provider(
     # Do NOT enable TEST_MODE here, since TEST_MODE enables auto-mock for some providers and bypasses 503.
     monkeypatch.delenv("TEST_MODE", raising=False)
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.AuthNZ.byok_runtime.resolve_server_default_key",
-        lambda _provider: None,
+        "tldw_Server_API.app.core.AuthNZ.provider_credential_runtime.load_server_config_snapshot",
+        lambda: {},
     )
     from unittest.mock import patch as _patch
 
@@ -672,8 +672,12 @@ def test_keyless_provider_proceeds_without_key(  # Added default_chat_request_da
     monkeypatch.delenv("CUSTOM_OPENAI_API_KEY_99", raising=False)
     monkeypatch.delenv("CUSTOM_OPENAI_API_KEY_1", raising=False)
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.AuthNZ.byok_runtime.resolve_server_default_key",
-        lambda _provider: None,
+        "tldw_Server_API.app.core.AuthNZ.provider_credential_runtime.load_server_config_snapshot",
+        lambda: {
+            "custom_openai_api": {
+                "api_ip": "http://custom-openai.test/v1",
+            },
+        },
     )
 
     with (
@@ -683,7 +687,24 @@ def test_keyless_provider_proceeds_without_key(  # Added default_chat_request_da
         patch("tldw_Server_API.app.api.v1.schemas.chat_request_schemas.get_api_keys", return_value={}),
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_chat_api_call,
     ):
-        mock_chat_api_call.return_value = {"id": "res_custom_openai"}
+        mock_chat_api_call.return_value = {
+            "id": "res_custom_openai",
+            "object": "chat.completion",
+            "created": 1,
+            "model": "test-model-unit",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": "ok"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            },
+        }
         request_data_keyless = default_chat_request_data.model_copy(update={"api_provider": "custom-openai-api"})
 
         response = client.post_with_csrf(
@@ -695,6 +716,9 @@ def test_keyless_provider_proceeds_without_key(  # Added default_chat_request_da
         mock_chat_api_call.assert_called_once()
         api_key = mock_chat_api_call.call_args[1].get("api_key")
         assert api_key is None, f"Expected None for custom-openai-api, got: {api_key!r}"
+        assert mock_chat_api_call.call_args[1]["app_config"]["custom_openai_api"]["api_ip"] == (
+            "http://custom-openai.test/v1"
+        )
     # Clean up only the overrides we added (not the auth override from fixture)
     app.dependency_overrides.pop(get_media_db_for_user, None)
     app.dependency_overrides.pop(get_chacha_db_for_user, None)
@@ -706,63 +730,70 @@ def test_keyless_provider_proceeds_without_key(  # Added default_chat_request_da
 @patch("tldw_Server_API.app.core.Chat.chat_service.load_template")
 @patch("tldw_Server_API.app.core.Chat.chat_service.apply_template_to_string")
 @pytest.mark.parametrize(
-    "error_type, expected_status, expected_detail_substring",
+    "error_type, expected_status, expected_detail_substring, expected_error_code",
     [
         (
             ChatAuthenticationError(provider="test", message="Auth failed detail from lib"),
             # Error from perform_chat_api_call
-            status.HTTP_401_UNAUTHORIZED,
-            "unauthorized",
+            status.HTTP_502_BAD_GATEWAY,
+            "could not be authenticated",
+            "provider_authentication_failed",
         ),
         (
             ChatRateLimitError(provider="test", message="Rate limit detail from lib"),
             status.HTTP_429_TOO_MANY_REQUESTS,
             "rate limit exceeded",
+            None,
         ),
         (
             ChatBadRequestError(provider="test", message="Bad request detail from lib"),
             status.HTTP_400_BAD_REQUEST,
             "invalid request",
+            None,
         ),
         (
             ChatConfigurationError(provider="test", message="Config error from lib"),  # This is a 5xx type error
             status.HTTP_503_SERVICE_UNAVAILABLE,  # Endpoint maps ChatConfigurationError to 503
-            "The chat service is temporarily unavailable.",
-        ),  # Endpoint masks 5xx details
+            "selected provider configuration is invalid",
+            "provider_configuration_invalid",
+        ),
         (
             ChatProviderError(
                 provider="test", message="Provider issue from lib", status_code=503
-            ),  # This is a 5xx type error
-            status.HTTP_503_SERVICE_UNAVAILABLE,
-            "The chat service is temporarily unavailable.",
+            ),
+            status.HTTP_502_BAD_GATEWAY,
+            "The chat service provider is currently unavailable.",
+            None,
         ),
         (
             ChatProviderError(provider="test", message="Provider non-HTTP issue from lib", status_code=502),
             # This is a 5xx type error
             status.HTTP_502_BAD_GATEWAY,
             "The chat service provider is currently unavailable.",
+            None,
         ),
         (
             ChatAPIError(
                 provider="test", message="Generic API issue from lib", status_code=500
-            ),  # This is a 5xx type error
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            "An internal server error occurred.",
+            ),
+            status.HTTP_502_BAD_GATEWAY,
+            "The chat service provider is currently unavailable.",
+            None,
         ),
-        # Case: A non-library, non-HTTPException error from perform_chat_api_call (e.g., a raw ValueError)
-        # The endpoint's final `except Exception` catches this.
+        # Untyped provider-boundary failures use the canonical bounded 502 contract.
         (
             ValueError("Value error from shim"),
-            status.HTTP_500_INTERNAL_SERVER_ERROR,  # Endpoint's generic catch-all
-            "An unexpected internal server error occurred.",
+            status.HTTP_502_BAD_GATEWAY,
+            "The chat service provider is currently unavailable.",
+            None,
         ),
-        # Case: An HTTPException raised directly by perform_chat_api_call
-        # The endpoint's general exception handler will catch this and return 500
+        # Untrusted provider HTTP details and status codes are bounded as well.
         (
             HTTPException(status_code=418, detail="I'm a teapot from shim"),
-            status.HTTP_500_INTERNAL_SERVER_ERROR,  # General exception handler catches this
-            "An unexpected internal server error occurred.",
-        ),  # Generic error message
+            status.HTTP_502_BAD_GATEWAY,
+            "The chat service provider is currently unavailable.",
+            None,
+        ),
     ],
 )
 def test_chat_api_call_exception_handling_unit(
@@ -777,6 +808,7 @@ def test_chat_api_call_exception_handling_unit(
     error_type,
     expected_status,
     expected_detail_substring,
+    expected_error_code,
 ):
     mock_load_template.return_value = DEFAULT_RAW_PASSTHROUGH_TEMPLATE
     mock_apply_template.side_effect = lambda template_str, data: data.get(
@@ -799,11 +831,16 @@ def test_chat_api_call_exception_handling_unit(
 
     response_json = response.json()
     assert "detail" in response_json, "Response JSON should contain a 'detail' field"
-    response_detail_text = response_json["detail"]
+    response_detail = response_json["detail"]
 
-    # For string details, check if the expected substring is present.
-    # For dict details (e.g. Pydantic validation errors), this check might need adjustment,
-    # but for these specific exception handlings, detail is expected to be a string.
+    if expected_error_code is not None:
+        assert isinstance(response_detail, dict)
+        assert set(response_detail) == {"error_code", "message"}
+        assert response_detail["error_code"] == expected_error_code
+        response_detail_text = response_detail["message"]
+    else:
+        response_detail_text = response_detail
+
     assert isinstance(
         response_detail_text, str
     ), f"Response detail should be a string, got {type(response_detail_text)}"
@@ -1183,7 +1220,24 @@ def test_create_chat_completion_with_tools_unit(
     mock_load_template.return_value = DEFAULT_RAW_PASSTHROUGH_TEMPLATE
     mock_chat_api_call.return_value = {
         "id": "chatcmpl-tools",
-        "choices": [{"message": {"role": "assistant", "tool_calls": []}}],
+        "object": "chat.completion",
+        "created": 1,
+        "model": "test-model-unit",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "ok",
+                },
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 1,
+            "completion_tokens": 1,
+            "total_tokens": 2,
+        },
     }
 
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_media_db

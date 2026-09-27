@@ -1,9 +1,9 @@
 import React from "react"
+import { useTranslation } from "react-i18next"
 import {
   Button,
   Card,
   Empty,
-  List,
   Space,
   Tag,
   Tooltip,
@@ -20,6 +20,7 @@ import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 const { Text } = Typography
 
 interface LlamacppRuntimePanelProps {
+  onSnapshots?: (profileId: string) => void
   profiles: LlamacppProfile[]
   runtimes: LlamacppRuntime[]
   loading?: boolean
@@ -57,7 +58,10 @@ const stateColor = (state?: LlamacppRuntimeState) => {
   }
 }
 
-const formatEndpoint = (profile?: LlamacppProfile, runtime?: LlamacppRuntime) => {
+const formatEndpoint = (
+  profile?: LlamacppProfile,
+  runtime?: LlamacppRuntime
+) => {
   if (runtime?.endpoint) return runtime.endpoint
   const host = runtime?.host || profile?.host
   const port = runtime?.port ?? profile?.port
@@ -76,7 +80,9 @@ const modelLabel = (row: RuntimeRow) =>
   "No model selected"
 
 const uniqueStrings = (values: Array<string | null | undefined>) =>
-  Array.from(new Set(values.map((value) => value?.trim()).filter(Boolean) as string[]))
+  Array.from(
+    new Set(values.map((value) => value?.trim()).filter(Boolean) as string[])
+  )
 
 const basename = (value?: string | null) => {
   const trimmed = value?.trim()
@@ -140,6 +146,7 @@ const capabilityWarnings = (row: RuntimeRow) =>
   ])
 
 export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
+  onSnapshots,
   profiles,
   runtimes,
   loading = false,
@@ -152,8 +159,11 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
   onResume,
   onUseInChat
 }) => {
+  const { t } = useTranslation()
   const rows = React.useMemo<RuntimeRow[]>(() => {
-    const runtimeByProfile = new Map(runtimes.map((runtime) => [runtime.profile_id, runtime]))
+    const runtimeByProfile = new Map(
+      runtimes.map((runtime) => [runtime.profile_id, runtime])
+    )
     const profileRows = profiles.map((profile) => ({
       profileId: profile.profile_id,
       profile,
@@ -196,11 +206,12 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
             description="No llama.cpp runtime profiles are available."
           />
         ) : (
-          <List
-            size="small"
-            bordered
-            dataSource={rows}
-            renderItem={(row) => {
+          <ul
+            role="list"
+            aria-label="Runtime profiles"
+            className="m-0 list-none divide-y divide-border rounded-lg border border-border p-0"
+          >
+            {rows.map((row) => {
               const label = profileLabel(row)
               const state = row.runtime?.state || "defined"
               const endpoint = formatEndpoint(row.profile, row.runtime)
@@ -213,6 +224,19 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
               const warnings = capabilityWarnings(row)
               const tags = capabilityTags(row, projector)
               const actions: React.ReactNode[] = []
+
+              if (row.profile && onSnapshots) {
+                actions.push(
+                  <Button
+                    key="snapshots"
+                    size="small"
+                    onClick={() => onSnapshots(row.profileId)}
+                    aria-label={`${t("settings:admin.snapshots.title", "Slot snapshots")}: ${label}`}
+                  >
+                    {t("settings:admin.snapshots.title", "Slot snapshots")}
+                  </Button>
+                )
+              }
 
               if (isRunning) {
                 actions.push(
@@ -292,8 +316,11 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
               }
 
               return (
-                <List.Item actions={actions}>
-                  <Space orientation="vertical" size={4} className="w-full">
+                <li
+                  key={row.profileId}
+                  className="flex flex-col gap-3 px-4 py-2 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <Space orientation="vertical" size={4} className="min-w-0 flex-1">
                     <Space wrap size="small">
                       <Text strong>{label}</Text>
                       <Tag color={stateColor(state)}>{state}</Tag>
@@ -304,7 +331,9 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
                         </Tag>
                       ))}
                       {projector && <Tag color="purple">mmproj</Tag>}
-                      {row.profile?.enabled === false && <Tag color="orange">disabled</Tag>}
+                      {row.profile?.enabled === false && (
+                        <Tag color="orange">disabled</Tag>
+                      )}
                       {row.runtime?.pid && <Tag>pid {row.runtime.pid}</Tag>}
                       {port && <Tag>{port}</Tag>}
                       {row.runtime?.restart_count ? (
@@ -336,10 +365,11 @@ export const LlamacppRuntimePanel: React.FC<LlamacppRuntimePanelProps> = ({
                       </Space>
                     )}
                   </Space>
-                </List.Item>
+                  <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>
+                </li>
               )
-            }}
-          />
+            })}
+          </ul>
         )}
       </Space>
     </Card>

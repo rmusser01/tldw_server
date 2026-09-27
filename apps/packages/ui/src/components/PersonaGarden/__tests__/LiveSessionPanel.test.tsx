@@ -73,11 +73,12 @@ const defaultVoiceCardProps = (): React.ComponentProps<typeof AssistantVoiceCard
 })
 
 describe("LiveSessionPanel", () => {
-  it("renders the assistant voice card before status panels", () => {
+  it("keeps approvals, transcript and composer ahead of optional voice and diagnostics", () => {
     render(
       <LiveSessionPanel
         controls={<div>controls</div>}
         assistantVoice={<div data-testid="assistant-voice-slot">voice card</div>}
+        diagnostics={<div>diagnostics</div>}
         error={<div>errors</div>}
         pendingPlan={<div>plan</div>}
         transcript={<div>transcript</div>}
@@ -87,6 +88,11 @@ describe("LiveSessionPanel", () => {
 
     expect(screen.getByTestId("assistant-voice-slot")).toBeInTheDocument()
     expect(screen.getByText("errors")).toBeInTheDocument()
+    const before = (first: string, second: string) => expect(screen.getByText(first).compareDocumentPosition(screen.getByText(second)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    before("plan", "transcript")
+    before("transcript", "composer")
+    before("composer", "voice card")
+    before("composer", "diagnostics")
   })
 })
 

@@ -190,6 +190,48 @@ def test_quickstart_mentions_lower_level_auth_init_equivalent() -> None:
 
 
 @pytest.mark.unit
+def test_minimal_deployment_uses_supported_local_profile_commands() -> None:
+    """Keep the minimal local path aligned with the maintained Make targets."""
+    guide = Path("Docs/Deployment/minimal-deploy.md").read_text(encoding="utf-8")
+
+    for command in (
+        "make install-local",
+        "make setup-local-single",
+        "make start-local-single",
+        "make verify-local-single",
+    ):
+        assert command in guide
+
+
+@pytest.mark.unit
+def test_minimal_deployment_uses_supported_docker_compose_file() -> None:
+    """Keep the Docker path on the maintained production image definition."""
+    guide = Path("Docs/Deployment/minimal-deploy.md").read_text(encoding="utf-8")
+
+    assert "Dockerfiles/docker-compose.single-user.yml" in guide
+    assert "build: ." not in guide
+
+
+@pytest.mark.unit
+def test_minimal_deployment_published_copy_matches_source() -> None:
+    """Keep the hosted minimal deployment guide aligned with its source."""
+    source = Path("Docs/Deployment/minimal-deploy.md").read_text(encoding="utf-8")
+    published = Path("Docs/Published/Deployment/minimal-deploy.md").read_text(encoding="utf-8")
+
+    assert published == source
+
+
+@pytest.mark.unit
+def test_minimal_deployment_documents_observable_reversible_recovery() -> None:
+    """Keep silent-exit capture and backup-first invariant recovery discoverable."""
+    guide = Path("Docs/Deployment/minimal-deploy.md").read_text(encoding="utf-8")
+
+    assert "2>&1 | tee" in guide
+    assert "Single-user bootstrap invariant check failed" in guide
+    assert "--non-interactive" in guide
+
+
+@pytest.mark.unit
 def test_local_profile_runs_webui_setup_before_bun_dev() -> None:
     """Ensure WebUI setup commands precede starting the dev server."""
     local_profile = Path("Docs/Getting_Started/Profile_Local_Single_User.md").read_text(encoding="utf-8")

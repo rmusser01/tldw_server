@@ -151,15 +151,6 @@ vi.mock('@/services/settings/ui-settings', () => ({
   MEDIA_REVIEW_VIEW_MODE_SETTING: { key: 'mediaReviewViewMode', defaultValue: 'spread' }
 }))
 
-vi.mock('@/utils/media-detail-content', () => ({
-  extractMediaDetailContent: (detail: any) =>
-    detail?.content ||
-    detail?.transcription ||
-    detail?.text ||
-    detail?.analysis ||
-    ''
-}))
-
 vi.mock('@/components/Media/DiffViewModal', () => ({
   DiffViewModal: ({
     open,
@@ -704,7 +695,7 @@ describe('MediaReviewPage stage 1 selection limit clarity', () => {
     await waitFor(() => {
       expect(mocks.setChatMode).toHaveBeenCalledWith('rag')
       expect(mocks.setRagMediaIds).toHaveBeenCalledWith([1, 2])
-      expect(mocks.navigate).toHaveBeenCalledWith('/')
+    expect(mocks.navigate).toHaveBeenCalledWith('/chat')
     })
 
     const discussEvent = dispatchSpy.mock.calls

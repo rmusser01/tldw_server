@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   getOpenAPISpec: vi.fn(),
   bgRequest: vi.fn(),
+  isActiveCookieSessionConfig: vi.fn(),
+  getRuntimeSingleUserApiKeyOverride: vi.fn(),
+  isHostedTldwDeployment: vi.fn(),
   storageGet: vi.fn(async (key: string) => cacheState.values.get(key)),
   storageSet: vi.fn(async (key: string, value: unknown) => {
     cacheState.values.set(key, value)
@@ -22,12 +25,24 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
       (mocks.getConfig as (...args: unknown[]) => unknown)(...args),
     getOpenAPISpec: (...args: unknown[]) =>
       (mocks.getOpenAPISpec as (...args: unknown[]) => unknown)(...args)
-  }
+  },
+  isActiveCookieSessionConfig: (...args: unknown[]) =>
+    (mocks.isActiveCookieSessionConfig as (...args: unknown[]) => unknown)(...args)
 }))
 
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: (...args: unknown[]) =>
     (mocks.bgRequest as (...args: unknown[]) => unknown)(...args)
+}))
+
+vi.mock("@/services/tldw/runtime-auth-override", () => ({
+  getRuntimeSingleUserApiKeyOverride: (...args: unknown[]) =>
+    (mocks.getRuntimeSingleUserApiKeyOverride as (...args: unknown[]) => unknown)(...args)
+}))
+
+vi.mock("@/services/tldw/deployment-mode", () => ({
+  isHostedTldwDeployment: (...args: unknown[]) =>
+    (mocks.isHostedTldwDeployment as (...args: unknown[]) => unknown)(...args)
 }))
 
 vi.mock("@/utils/safe-storage", () => ({
@@ -41,6 +56,12 @@ vi.mock("@/utils/safe-storage", () => ({
 
 const importCapabilitiesModule = async () =>
   import("@/services/tldw/server-capabilities")
+
+const isIngestionSourceCapabilitiesRequest = (request: unknown): boolean =>
+  typeof request === "object" &&
+  request !== null &&
+  (request as { path?: unknown }).path ===
+    "/api/v1/ingestion-sources/capabilities"
 
 const serverCapabilitiesPathCandidates = [
   "src/services/tldw/server-capabilities.ts",
@@ -78,6 +99,9 @@ describe("server capabilities docs-info merge", () => {
     mocks.getConfig.mockReset()
     mocks.getOpenAPISpec.mockReset()
     mocks.bgRequest.mockReset()
+    mocks.isActiveCookieSessionConfig.mockReset()
+    mocks.getRuntimeSingleUserApiKeyOverride.mockReset()
+    mocks.isHostedTldwDeployment.mockReset()
     mocks.storageGet.mockReset()
     mocks.storageSet.mockReset()
     mocks.storageGet.mockImplementation(async (key: string) =>
@@ -90,6 +114,9 @@ describe("server capabilities docs-info merge", () => {
       serverUrl: "http://127.0.0.1:8000",
       authMode: "single-user"
     })
+    mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue(null)
+    mocks.isActiveCookieSessionConfig.mockReturnValue(false)
+    mocks.isHostedTldwDeployment.mockReturnValue(false)
   })
 
   afterEach(() => {
@@ -261,7 +288,158 @@ describe("server capabilities docs-info merge", () => {
     expect(capabilities.hasIngestionSources).toBe(true)
   })
 
+  it("defers protected source capability probing without configured credentials", async () => {
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "ingestion-sources-unconfigured" },
+      paths: {
+        "/api/v1/ingestion-sources": {},
+        "/api/v1/ingestion-sources/{source_id}": {},
+        "/api/v1/ingestion-sources/capabilities": {}
+      }
+    })
+    mocks.bgRequest.mockResolvedValue({})
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.hasIngestionSources).toBe(true)
+    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBeNull()
+    expect(
+      mocks.bgRequest.mock.calls.some(
+        ([request]) =>
+          isIngestionSourceCapabilitiesRequest(request)
+      )
+    ).toBe(false)
+  })
+
+  it.each([
+    [
+      "a manual single-user key",
+      { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "configured-single-user-key" },
+      { runtimeApiKey: null, activeCookieSession: false, hosted: false }
+    ],
+    [
+      "a multi-user token",
+      { serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "configured-access-token" },
+      { runtimeApiKey: null, activeCookieSession: false, hosted: false }
+    ],
+    [
+      "an active cookie session",
+      { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", authSource: "cookie-session" },
+      { runtimeApiKey: null, activeCookieSession: true, hosted: false }
+    ],
+    [
+      "a runtime single-user key",
+      { serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" },
+      { runtimeApiKey: "runtime-single-user-key", activeCookieSession: false, hosted: false }
+    ],
+    [
+      "a hosted session transport",
+      null,
+      { runtimeApiKey: null, activeCookieSession: false, hosted: true }
+    ]
+  ])("probes source capabilities with %s", async (_label, config, transport) => {
+    mocks.getConfig.mockResolvedValue(config)
+    mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue(transport.runtimeApiKey)
+    mocks.isActiveCookieSessionConfig.mockReturnValue(transport.activeCookieSession)
+    mocks.isHostedTldwDeployment.mockReturnValue(transport.hosted)
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "authenticated-source-capability" },
+      paths: {
+        "/api/v1/ingestion-sources": {},
+        "/api/v1/ingestion-sources/capabilities": {}
+      }
+    })
+    mocks.bgRequest.mockImplementation(async (request: { path?: unknown }) =>
+      isIngestionSourceCapabilitiesRequest(request)
+        ? { can_create_local_directory: true }
+        : {}
+    )
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBe(true)
+    expect(
+      mocks.bgRequest.mock.calls.some(
+        ([request]) =>
+          isIngestionSourceCapabilitiesRequest(request)
+      )
+    ).toBe(true)
+  })
+
+  it.each([
+    ["a placeholder manual key", { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "REPLACE_ME" }],
+    ["an inactive cookie session", { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", authSource: "cookie-session" }]
+  ])("defers source capability probing with %s", async (label, config) => {
+    mocks.getConfig.mockResolvedValue(config)
+    mocks.isActiveCookieSessionConfig.mockReturnValue(false)
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "unauthenticated-source-capability" },
+      paths: {
+        "/api/v1/ingestion-sources": {},
+        "/api/v1/ingestion-sources/capabilities": {}
+      }
+    })
+    mocks.bgRequest.mockResolvedValue({})
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const capabilities = await getServerCapabilities()
+
+    expect(capabilities.hasIngestionSources).toBe(true)
+    expect(capabilities.canCreateLocalDirectoryIngestionSource).toBeNull()
+    expect(
+      mocks.bgRequest.mock.calls.some(
+        ([request]) =>
+          isIngestionSourceCapabilitiesRequest(request)
+      )
+    ).toBe(false)
+  })
+
+  it("recovers unknown source entitlements after credentials are configured", async () => {
+    mocks.getConfig
+      .mockResolvedValueOnce({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user"
+      })
+      .mockResolvedValueOnce({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: "single-user",
+        apiKey: "configured-after-discovery-key"
+      })
+    mocks.getOpenAPISpec.mockResolvedValue({
+      info: { version: "source-capability-recovery" },
+      paths: {
+        "/api/v1/ingestion-sources": {},
+        "/api/v1/ingestion-sources/capabilities": {}
+      }
+    })
+    mocks.bgRequest.mockImplementation(async (request: { path?: unknown }) =>
+      isIngestionSourceCapabilitiesRequest(request)
+        ? { can_create_local_directory: true }
+        : {}
+    )
+
+    const { getServerCapabilities } = await importCapabilitiesModule()
+    const beforeConfiguration = await getServerCapabilities()
+    const afterConfiguration = await getServerCapabilities()
+
+    expect(beforeConfiguration.canCreateLocalDirectoryIngestionSource).toBeNull()
+    expect(afterConfiguration.canCreateLocalDirectoryIngestionSource).toBe(true)
+    expect(
+      mocks.bgRequest.mock.calls.filter(
+        ([request]) =>
+          isIngestionSourceCapabilitiesRequest(request)
+      )
+    ).toHaveLength(1)
+  })
+
   it("merges authenticated local-directory source creation capability", async () => {
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "configured-single-user-key"
+    })
     mocks.getOpenAPISpec.mockResolvedValue({
       info: { version: "ingestion-sources-local-directory-version" },
       paths: {
@@ -294,6 +472,11 @@ describe("server capabilities docs-info merge", () => {
   })
 
   it("keeps generic ingestion sources enabled when authenticated source capabilities fail", async () => {
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "configured-single-user-key"
+    })
     mocks.getOpenAPISpec.mockResolvedValue({
       info: { version: "ingestion-sources-capabilities-fail" },
       paths: {
@@ -317,6 +500,11 @@ describe("server capabilities docs-info merge", () => {
   })
 
   it("best-effort probes source capabilities for older authoritative source specs", async () => {
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "configured-single-user-key"
+    })
     mocks.getOpenAPISpec.mockResolvedValue({
       info: { version: "ingestion-sources-without-entitlement-route" },
       paths: {
@@ -411,6 +599,11 @@ describe("server capabilities docs-info merge", () => {
   })
 
   it("checks authenticated source capabilities through the bundled fallback spec", async () => {
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "configured-single-user-key"
+    })
     mocks.getOpenAPISpec.mockRejectedValue(new Error("openapi unavailable"))
     mocks.bgRequest.mockImplementation(async (request: any) => {
       if (request.path === "/api/v1/ingestion-sources/capabilities") {
@@ -686,6 +879,11 @@ describe("server capabilities docs-info merge", () => {
         hasIngestionSources: true,
         canCreateLocalDirectoryIngestionSource: false
       }
+    })
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "single-user",
+      apiKey: "configured-single-user-key"
     })
     mocks.getOpenAPISpec.mockResolvedValue({
       info: { version: "cache-v5-entitlement-version" },

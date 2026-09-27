@@ -239,13 +239,39 @@ class VNAssetGenerationRequest(BaseModel):
         le=DEFAULT_VN_ASSET_SLOT_VARIANT_LIMIT,
     )
     options: dict[str, Any] = Field(default_factory=dict)
+    source_batch_id: int | None = Field(default=None, strict=True, ge=1)
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=160)
+
+
+class VNAssetSlotPreflight(BaseModel):
+    """API-process configuration check for an effective slot backend."""
+
+    slot_id: int
+    backend: str | None = None
+    model: str | None = None
+    status: Literal["configured", "missing_configuration", "unavailable", "unknown"]
+    message: str | None = None
+
+
+class VNAssetGenerationPreflightResponse(BaseModel):
+    """Advisory checks; local flags do not establish external worker health."""
+
+    scope: Literal["api_process_configuration"] = "api_process_configuration"
+    worker_health: Literal["unknown"] = "unknown"
+    local_workers_enabled: bool
+    warnings: list[str] = Field(default_factory=list)
+    slots: list[VNAssetSlotPreflight] = Field(default_factory=list)
 
 
 class VNAssetGenerationStatusResponse(BaseModel):
     """Serialized VN asset generation batch status."""
 
     batch_id: int | None = None
+    source_batch_id: int | None = None
+    recipe_available: bool | None = None
+    selected_slot_ids: list[int] = Field(default_factory=list)
+    failed_slot_batch_ids: dict[int, int] = Field(default_factory=dict)
+    failed_slot_recipe_available: dict[int, bool] = Field(default_factory=dict)
     job_batch_id: str | None = None
     status: str
     total_slots: int = 0

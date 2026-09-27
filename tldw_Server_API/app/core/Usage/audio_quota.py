@@ -602,7 +602,7 @@ async def _get_user_override_limits(user_id: int) -> dict[str, float | None]:
 async def get_daily_minutes_used(user_id: int) -> float:
     pool = await get_db_pool()
     await _ensure_tables(pool)
-    day = datetime.now(timezone.utc).date().isoformat()
+    day = datetime.now(timezone.utc).date()
     try:
         if pool.pool:
             row = await pool.fetchrow(
@@ -615,7 +615,7 @@ async def get_daily_minutes_used(user_id: int) -> float:
             rows = await pool.fetch(
                 "SELECT minutes_used FROM audio_usage_daily WHERE user_id=? AND day=?",
                 user_id,
-                day,
+                day.isoformat(),
             )
             return float(rows[0][0]) if rows else 0.0
     except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
@@ -687,7 +687,7 @@ async def _backfill_audio_usage_daily_to_ledger(ledger: ResourceDailyLedger) -> 
         # Ensure legacy tables exist if callers created them previously; this
         # is a no-op when they do not.
         await _ensure_tables(pool)
-        day = datetime.now(timezone.utc).date().isoformat()
+        day = datetime.now(timezone.utc).date()
         rows = []
         if pool.pool:
             try:
@@ -703,7 +703,7 @@ async def _backfill_audio_usage_daily_to_ledger(ledger: ResourceDailyLedger) -> 
             try:
                 rows = await pool.fetch(
                     "SELECT user_id, minutes_used FROM audio_usage_daily WHERE user_id IS NOT NULL AND day=?",
-                    day,
+                    day.isoformat(),
                 )
                 iterable = [(int(r[0]), float(r[1])) for r in rows or []]
             except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
@@ -982,7 +982,7 @@ async def _ledger_remaining_minutes(user_id: int, daily_limit_minutes: float) ->
 async def increment_jobs_started(user_id: int) -> None:
     pool = await get_db_pool()
     await _ensure_tables(pool)
-    day = datetime.now(timezone.utc).date().isoformat()
+    day = datetime.now(timezone.utc).date()
     try:
         if pool.pool:
             await pool.execute(
@@ -1002,7 +1002,7 @@ async def increment_jobs_started(user_id: int) -> None:
                 ON CONFLICT(user_id, day) DO UPDATE SET jobs_started = jobs_started + 1
                 """,
                 user_id,
-                day,
+                day.isoformat(),
             )
     except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
         logger.debug("increment_jobs_started failed")

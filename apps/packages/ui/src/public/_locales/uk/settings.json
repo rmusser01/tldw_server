@@ -1,4 +1,7 @@
 {
+  "onboarding_loginSettingsError": {
+    "message": "Не вдалося відкрити налаштування входу. Спробуйте ще раз."
+  },
   "navigation_serverAndAuth": {
     "message": "Сервер та автентифікація"
   },

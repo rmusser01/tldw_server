@@ -330,3 +330,78 @@ def test_load_audio_for_parakeet_nemo_fails_when_wav_conversion_fails(
         atlib._load_audio_for_parakeet_nemo(str(compressed_audio))
 
     assert fake_soundfile.read.call_count == 1
+
+
+@pytest.mark.unit
+def test_planned_parakeet_onnx_failure_never_falls_back_to_whisper(
+    monkeypatch,
+    tmp_path,
+):
+    """An immutable local plan must not enter the legacy Whisper fallback."""
+    spa = __import__(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio."
+        "stt_provider_adapter",
+        fromlist=["stt_provider_adapter"],
+    )
+    audio_file = tmp_path / "sample.wav"
+    audio_file.write_bytes(b"\x00" * 2048)
+    route = spa.SttExecutionRoute(
+        route_id="neutral-1",
+        provider="parakeet",
+        model_label="parakeet-tdt-0.6b-v3-onnx",
+        artifact_id=None,
+        identity_resolved=False,
+        backend="onnxruntime",
+        source="local",
+        audio_egress=spa.SttAudioEgress.NONE,
+        endpoint_id=None,
+        device="cpu",
+        compute_type=None,
+        dtype=None,
+        decoding_ids=(("language_contract", "fixed:en")[0],),
+        local_model_available=True,
+        would_download=False,
+    )
+    descriptor = spa.SttExecutionDescriptor(
+        requested_provider="parakeet",
+        requested_model_label="parakeet-tdt-0.6b-v3-onnx",
+        resolved_provider="parakeet",
+        resolved_model_label="parakeet-tdt-0.6b-v3-onnx",
+        routes=(route,),
+        honors_task=True,
+        honors_language=True,
+        honors_prompt_absence=True,
+        honors_hotword_absence=True,
+        honors_diarization=True,
+        honors_word_timestamps=True,
+        decoding_settings=(("language_contract", "fixed:en"),),
+        source_modules=(
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter",
+        ),
+        dependency_distributions=("onnxruntime",),
+    )
+    plan = spa.SttBatchExecutionPlan(
+        descriptor=descriptor,
+        task="transcribe",
+        language="en",
+        runtime_settings=(
+            ("device", "cpu"),
+            ("model_path", str(tmp_path / "missing-model")),
+            ("variant", "onnx"),
+        ),
+    )
+    monkeypatch.setattr(
+        atlib,
+        "get_whisper_model",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Whisper fallback should not run")
+        ),
+    )
+
+    with pytest.raises(Exception, match="model|ONNX|local"):
+        atlib.speech_to_text(
+            str(audio_file),
+            whisper_model="parakeet-tdt-0.6b-v3-onnx",
+            selected_source_lang="en",
+            execution_plan=plan,
+        )

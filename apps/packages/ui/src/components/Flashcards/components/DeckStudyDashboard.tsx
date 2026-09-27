@@ -48,7 +48,7 @@ const buildRows = (
         mature: asCount(deck.mature),
         total: asCount(deck.total),
         deckName,
-        readyCount: asCount(deck.due) + asCount(deck.learning) + asCount(deck.new)
+        readyCount: asCount(deck.due) + asCount(deck.new)
       }
     })
     .sort((left, right) => {

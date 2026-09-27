@@ -49,7 +49,9 @@ async def debug_schema(
             media_columns = _table_columns("Media")
             media_mods_columns = _table_columns("MediaModifications")
 
-            cursor.execute("SELECT COUNT(*) FROM Media")
+            cursor.execute(
+                "SELECT COUNT(*) FROM Media WHERE system_operation_id IS NULL"
+            )
             media_count_row = cursor.fetchone()
             media_count = int(media_count_row[0]) if media_count_row else 0
 

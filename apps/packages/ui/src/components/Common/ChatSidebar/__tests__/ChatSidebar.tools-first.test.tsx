@@ -92,11 +92,11 @@ vi.mock("@/store/route-transition", () => ({
 }))
 
 vi.mock("../ServerChatList", () => ({
-  ServerChatList: () => <div data-testid="server-chat-list" />
+  ServerChatList: ({ onConversationSelected }: { onConversationSelected?: () => void }) => <div data-testid="server-chat-list"><button onClick={onConversationSelected}>Accept server selection</button></div>
 }))
 
 vi.mock("../FolderChatList", () => ({
-  FolderChatList: () => <div data-testid="folder-chat-list" />
+  FolderChatList: ({ onConversationSelected }: { onConversationSelected?: () => void }) => <div data-testid="folder-chat-list"><button onClick={onConversationSelected}>Accept folder selection</button></div>
 }))
 
 vi.mock("../../QuickChatHelper", () => ({
@@ -147,6 +147,16 @@ describe("ChatSidebar tools-first reset", () => {
     })
   })
 
+  it.each(["server", "folders"])("forwards only the explicit accepted %s selection", (tab) => {
+    settingState.activeTab = tab
+    const onConversationSelected = vi.fn()
+    renderSidebar({ onConversationSelected })
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+    expect(onConversationSelected).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: tab === "server" ? "Accept server selection" : "Accept folder selection" }))
+    expect(onConversationSelected).toHaveBeenCalledTimes(1)
+  })
+
   it("direct expanded mount opens shortcuts and keeps recent conversations collapsed", async () => {
     const { rerender } = renderSidebar()
 
@@ -168,6 +178,40 @@ describe("ChatSidebar tools-first reset", () => {
     ).toHaveAttribute("aria-expanded", "false")
     expect(screen.getByTestId("chat-sidebar-shortcut-quick-ingest")).toBeInTheDocument()
     expect(screen.queryByTestId("server-chat-list")).not.toBeInTheDocument()
+  })
+
+  it("keeps expanded shortcuts and recent controls in one scroller outside the fixed footer", () => {
+    const shortcuts = [
+      "quick-ingest", "chat", "prompts", "characters", "chat-dictionaries",
+      "world-books", "notes", "knowledge-qa", "media", "document-workspace",
+      "research-workspace", "kanban-playground", "watchlists"
+    ]
+    settingState.shortcutsCollapsed = false
+    settingState.shortcutSelection = shortcuts
+    renderSidebar()
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+
+    const sidebar = screen.getByTestId("chat-sidebar")
+    const search = screen.getByTestId("chat-sidebar-search")
+    const scroller = search.closest(".overflow-y-auto")
+    const settings = screen.getByTestId("chat-sidebar-settings")
+
+    expect(scroller).not.toBeNull()
+    expect(scroller).toHaveClass("min-h-0", "flex-1")
+    for (const id of shortcuts) {
+      expect(scroller).toContainElement(
+        screen.getByTestId(`chat-sidebar-shortcut-${id}`)
+      )
+    }
+    expect(scroller).toContainElement(screen.getByLabelText("Chat view"))
+    expect(scroller).not.toContainElement(settings)
+    expect(settings.parentElement).toHaveClass("shrink-0")
+    expect(sidebar).toHaveClass("overflow-hidden")
+    expect(sidebar.querySelectorAll(".overflow-y-auto")).toHaveLength(1)
+
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+    expect(screen.queryByTestId("chat-sidebar-search")).not.toBeInTheDocument()
+    expect(settings).toBeVisible()
   })
 
   it("renders shortcuts in the saved sidepanel order", () => {

@@ -1,0 +1,34 @@
+{
+  "stream": {
+    "url": "ws://127.0.0.1:9101/api/v1/persona/stream",
+    "frames": [
+      {
+        "event": "notice",
+        "keys": [
+          "event",
+          "session_id",
+          "timestamp_ms",
+          "event_seq",
+          "level",
+          "message",
+          "reason_code"
+        ]
+      },
+      {
+        "event": "tool_plan",
+        "keys": [
+          "event",
+          "session_id",
+          "timestamp_ms",
+          "event_seq",
+          "plan_id",
+          "steps",
+          "memory",
+          "companion",
+          "persona_id"
+        ]
+      }
+    ]
+  },
+  "ui": "PERSONA BUDDY\nMigu UAT Repaired\nHelps ingest, search, and summarize content\nMigu UAT Repaired\nMigu UAT Repaired\nStart\nStop\nSend\nOpen Full Live View\nChoose/Change Buddy"
+}

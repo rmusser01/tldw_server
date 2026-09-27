@@ -22,6 +22,8 @@ https://huggingface.co/papers/2412.07626
 https://github.com/rcarmo/python-office-mcp-server
 https://github.com/kklimuk/docx-cli
 https://github.com/oxbshw/watch-skill
+https://github.com/AlexandrosGounis/pdfx
+https://github.com/baidu/Unlimited-OCR
 https://towardsdatascience.com/ai-powered-information-extraction-and-matchmaking-0408c93ec1b9/
 https://github.com/databridge-org/databridge-core
 https://github.com/cocoindex-io/cocoindex

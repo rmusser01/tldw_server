@@ -792,9 +792,9 @@ class AuthnzApiKeysRepo:
                             llm_allowed_endpoints, llm_allowed_providers, llm_allowed_models,
                             metadata
                         ) VALUES (
-                            $1,$2,$3,$4,$5,$6,$7,'active',$8,
-                            TRUE,$9,$10,$11,
-                            $12,$13,$14,$15,$16::jsonb,$17::jsonb,$18::jsonb,
+                            $1, $2, $3, $4, $5, $6, $7, 'active', $8,
+                            TRUE, $9, $10, $11,
+                            $12, $13, $14, $15, $16::jsonb, $17::jsonb, $18::jsonb,
                             ($19)::jsonb
                         ) RETURNING id
                         """,
@@ -829,9 +829,9 @@ class AuthnzApiKeysRepo:
                             llm_allowed_endpoints, llm_allowed_providers, llm_allowed_models,
                             metadata
                         ) VALUES (
-                            $1,$2,$3,$4,$5,$6,$7,'active',$8,
-                            TRUE,$9,$10,$11,
-                            $12,$13,$14,$15,$16,$17,$18,
+                            $1, $2, $3, $4, $5, $6, $7, 'active', $8,
+                            TRUE, $9, $10, $11,
+                            $12, $13, $14, $15, $16, $17, $18,
                             $19
                         ) RETURNING id
                         """,

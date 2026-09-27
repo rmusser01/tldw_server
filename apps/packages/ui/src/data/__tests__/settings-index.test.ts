@@ -40,4 +40,12 @@ describe("settings index RAG discoverability", () => {
       results.some((setting) => setting.id === "setting-rag-chat-max-context")
     ).toBe(true)
   })
+
+  it("sends reusable Prompt Library searches to the workspace", () => {
+    const results = searchSettings("prompt library", translate)
+    const promptLibrary = results.find((setting) => setting.id === "setting-prompts")
+
+    expect(promptLibrary?.route).toBe("/prompts")
+    expect(promptLibrary?.defaultLabel).toBe("Prompt Library")
+  })
 })

@@ -1,12 +1,12 @@
 """Pydantic schemas for study-pack requests, jobs, and provenance responses."""
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any, Literal, Optional
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
-
 
 StudyPackSourceType = Literal["note", "media", "message"]
 StudyPackStatus = Literal["active", "superseded"]
@@ -83,6 +83,12 @@ class StudyPackSummaryResponse(BaseModel):
     client_id: str
     version: int
 
+    @field_validator("created_at", "last_modified", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
+
 
 StudyPackJobApiStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 
@@ -134,6 +140,12 @@ class FlashcardCitationResponse(BaseModel):
     deleted: bool
     client_id: str
     version: int
+
+    @field_validator("created_at", "last_modified", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
 
 
 class FlashcardDeepDiveTarget(BaseModel):

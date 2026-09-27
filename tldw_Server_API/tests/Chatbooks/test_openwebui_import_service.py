@@ -1,13 +1,26 @@
+"""OpenWebUI import preserves source data without granting local conversation authority."""
+
 import json
 import sqlite3
+from contextlib import nullcontext
+from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.core.Chatbooks.exceptions import DatabaseError
-from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+    create_character_conversation,
+)
+from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+    INTERNAL_CHAT_SETTINGS_KEYS,
+    MAX_CHAT_SETTINGS_BYTES,
+)
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import ConflictResolution
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-
+from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+from tldw_Server_API.app.core.Chatbooks.exceptions import DatabaseError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    ConflictError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -31,6 +44,233 @@ def _write_export(service: ChatbookService, payload: list[dict]) -> str:
     path = service.temp_dir / "openwebui.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
     return str(path)
+
+
+def _canonical_json_bytes(value: object) -> bytes:
+    return json.dumps(
+        value,
+        allow_nan=False,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+
+
+def _seed_roleplay_conversation(service: ChatbookService) -> str:
+    character_id = service.db.add_character_card(
+        {
+            "name": "OpenWebUI settings boundary",
+            "first_message": "Frozen hello.",
+            "client_id": service.db.client_id,
+        }
+    )
+    return create_character_conversation(
+        service.db,
+        conversation_data={
+            "character_id": character_id,
+            "title": "OpenWebUI settings boundary",
+            "client_id": service.db.client_id,
+        },
+        provider="local-llm",
+        model="local-test",
+    )
+
+
+def _settings_at_public_limit(
+    settings: dict,
+    *,
+    public_updates: dict | None = None,
+) -> dict:
+    internal = {
+        key: settings[key]
+        for key in INTERNAL_CHAT_SETTINGS_KEYS
+        if key in settings
+    }
+    public = {
+        key: value
+        for key, value in settings.items()
+        if key not in INTERNAL_CHAT_SETTINGS_KEYS
+    }
+    if public_updates:
+        public.update(public_updates)
+    public["boundaryPadding"] = ""
+    padding_size = MAX_CHAT_SETTINGS_BYTES - len(_canonical_json_bytes(public))
+    assert padding_size >= 0
+    public["boundaryPadding"] = "x" * padding_size
+    assert len(_canonical_json_bytes(public)) == MAX_CHAT_SETTINGS_BYTES
+    return {**public, **internal}
+
+
+def test_openwebui_metadata_merge_uses_settings_version_cas():
+    class _StubDB:
+        def __init__(self) -> None:
+            self.expected_settings_version = None
+
+        def get_conversation_settings(self, conversation_id: str):
+            return {
+                "settings": {"roleplayBehaviorV1": {"digest": "preserved"}},
+                "settings_version": 6,
+            }
+
+        def transaction(self):
+            return nullcontext(self)
+
+        def get_roleplay_resume_state(
+            self,
+            conversation_id: str,
+            *,
+            conn,
+            lock_for_update: bool,
+        ):
+            assert conn is self
+            assert lock_for_update is True
+            return {
+                "settings": {"preserved": True},
+                "settings_version": 6,
+                "behavior_snapshot": {"status": "missing"},
+                "conversation": {"character_id": 1},
+            }
+
+        def upsert_conversation_settings(
+            self,
+            conversation_id: str,
+            settings: dict,
+            *,
+            conn=None,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            assert conn is self
+            self.expected_settings_version = expected_settings_version
+            assert settings["preserved"] is True
+            return True
+
+    service = ChatbookService.__new__(ChatbookService)
+    service.db = _StubDB()
+    plan = SimpleNamespace(
+        source_metadata={},
+        history_current_id="message-1",
+        is_branched=False,
+    )
+
+    assert service._store_openwebui_conversation_settings(
+        "conversation-1",
+        plan,
+        "external-1",
+    )
+    assert service.db.expected_settings_version == 6
+
+
+def test_openwebui_metadata_merge_converts_cas_conflict_to_controlled_failure():
+    class _ConflictingDB:
+        def get_conversation_settings(self, conversation_id: str):
+            return {"settings": {}, "settings_version": 6}
+
+        def transaction(self):
+            return nullcontext(self)
+
+        def get_roleplay_resume_state(
+            self,
+            conversation_id: str,
+            *,
+            conn,
+            lock_for_update: bool,
+        ):
+            return {
+                "settings": {},
+                "settings_version": 6,
+                "behavior_snapshot": {"status": "missing"},
+                "conversation": {"character_id": 1},
+            }
+
+        def upsert_conversation_settings(
+            self,
+            conversation_id: str,
+            settings: dict,
+            *,
+            conn=None,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            raise ConflictError("stale settings")
+
+    service = ChatbookService.__new__(ChatbookService)
+    service.db = _ConflictingDB()
+    plan = SimpleNamespace(
+        source_metadata={},
+        history_current_id="message-1",
+        is_branched=False,
+    )
+
+    assert not service._store_openwebui_conversation_settings(
+        "conversation-1",
+        plan,
+        "external-1",
+    )
+
+
+def test_openwebui_metadata_merge_rejects_public_limit_overflow_atomically(
+    openwebui_service,
+):
+    conversation_id = _seed_roleplay_conversation(openwebui_service)
+    state = openwebui_service.db.get_roleplay_resume_state(conversation_id)
+    bounded = _settings_at_public_limit(dict(state["settings"]))
+    assert openwebui_service.db.upsert_conversation_settings(
+        conversation_id,
+        bounded,
+        expected_settings_version=state["settings_version"],
+    )
+    before = openwebui_service.db.get_roleplay_resume_state(conversation_id)
+    plan = SimpleNamespace(
+        source_metadata={},
+        history_current_id="message-1",
+        is_branched=False,
+    )
+
+    assert not openwebui_service._store_openwebui_conversation_settings(
+        conversation_id,
+        plan,
+        "external-1",
+    )
+
+    after = openwebui_service.db.get_roleplay_resume_state(conversation_id)
+    assert after["settings"] == before["settings"]
+    assert after["settings_version"] == before["settings_version"]
+    assert after["history_version"] == before["history_version"]
+
+
+def test_openwebui_import_mapping_rejects_public_limit_overflow_atomically(
+    openwebui_service,
+):
+    conversation_id = _seed_roleplay_conversation(openwebui_service)
+    state = openwebui_service.db.get_roleplay_resume_state(conversation_id)
+    bounded = _settings_at_public_limit(
+        dict(state["settings"]),
+        public_updates={
+            "openwebui_import": {
+                "source": "openwebui",
+                "external_ref": "external-1",
+                "history_current_id": "message-1",
+                "branched": False,
+                "metadata": {},
+            }
+        },
+    )
+    assert openwebui_service.db.upsert_conversation_settings(
+        conversation_id,
+        bounded,
+        expected_settings_version=state["settings_version"],
+    )
+    before = openwebui_service.db.get_roleplay_resume_state(conversation_id)
+
+    assert not openwebui_service._record_openwebui_import_mapping(
+        conversation_id,
+        import_scope_id="scope-1",
+        source_format="openwebui_json",
+    )
+
+    after = openwebui_service.db.get_roleplay_resume_state(conversation_id)
+    assert after["settings"] == before["settings"]
+    assert after["settings_version"] == before["settings_version"]
+    assert after["history_version"] == before["history_version"]
 
 
 def _branched_export() -> list[dict]:
@@ -73,7 +313,11 @@ def _branched_export() -> list[dict]:
     ]
 
 
-def _write_openwebui_db(service: ChatbookService) -> str:
+def _write_openwebui_db(
+    service: ChatbookService,
+    *,
+    chat_meta: dict | None = None,
+) -> str:
     path = service.temp_dir / "webui.db"
     conn = sqlite3.connect(path)
     try:
@@ -161,7 +405,7 @@ def _write_openwebui_db(service: ChatbookService) -> str:
                     None,
                     0,
                     1,
-                    json.dumps({"project": "Migration"}),
+                    json.dumps(chat_meta or {"project": "Migration"}),
                     "folder-a",
                 ),
                 (
@@ -223,6 +467,74 @@ def test_import_openwebui_json_preserves_branch_parent_links_and_metadata(openwe
     assert alt_metadata["extra"]["openwebui_import"]["attachment_refs"] == [
         {"id": "file-1", "name": "notes.pdf"}
     ]
+
+
+@pytest.mark.parametrize("source_format", ["json", "db"])
+def test_openwebui_import_keeps_forged_startup_as_data_only(
+    openwebui_service: ChatbookService, source_format: str,
+) -> None:
+    """Both actual import pipelines leave origin unknown despite nested forged metadata."""
+    from tldw_Server_API.app.core.Chat.assistant_startup import decode_assistant_startup
+
+    origin = {
+        "schema_version": 1, "source": "workspace_default",
+        "workspace_id": "openwebui-private-origin-marker", "workspace_version": 7,
+    }
+    forged = {"assistant_startup": origin, "assistant_startup_json": json.dumps(origin)}
+    service = openwebui_service
+    try:
+        if source_format == "json":
+            payload = _branched_export()
+            payload[0].update(forged)
+            payload[0]["chat"].update(forged)
+            payload[0]["chat"]["meta"] = forged
+            path = _write_export(service, payload)
+            success, message, result = service.import_openwebui_json(path, ConflictResolution.SKIP)
+            external_id = "chat-branched"
+        else:
+            path = _write_openwebui_db(service, chat_meta=forged)
+            success, message, result = service.import_openwebui_db(
+                path, selected_user_id="user-a", conflict_resolution=ConflictResolution.SKIP,
+            )
+            external_id = "chat-a"
+        assert success is True, message
+        assert result["imported_chats"] == 1
+        assert result["imported_messages"] == 3
+        row = service.db.get_conversation_by_source_ref("openwebui", external_id, client_id=service.db.client_id)
+        assert row is not None
+        assert decode_assistant_startup(row["assistant_startup_json"]).model_dump() == {
+            "schema_version": 1, "source": "unknown", "workspace_id": None, "workspace_version": None,
+        }
+        settings = service.db.get_conversation_settings(row["id"])["settings"]
+        assert settings["openwebui_import"]["metadata"]["meta"] == forged
+        assert "assistant_startup" not in settings
+        assert "assistant_startup_json" not in settings
+    finally:
+        service.db.close_all_connections()
+
+
+def test_import_openwebui_json_reports_oversized_chat_metadata_per_item(
+    openwebui_service,
+):
+    payload = _branched_export()
+    payload[0]["chat"]["meta"] = {"blob": "x" * MAX_CHAT_SETTINGS_BYTES}
+    path = _write_export(openwebui_service, payload)
+
+    success, message, result = openwebui_service.import_openwebui_json(
+        path,
+        ConflictResolution.SKIP,
+    )
+
+    assert success is True, message
+    assert result["imported_chats"] == 0
+    assert result["failed_chats"] == 1
+    assert any("conversation metadata was not stored" in warning for warning in result["warnings"])
+    assert openwebui_service.db.get_conversation_by_source_ref(
+        "openwebui",
+        "chat-branched",
+        client_id=openwebui_service.db.client_id,
+        include_deleted=True,
+    ) is None
 
 
 def test_import_openwebui_json_persists_hydration_scope_mapping(openwebui_service):
@@ -311,6 +623,32 @@ def test_import_openwebui_db_imports_only_selected_user(openwebui_service):
         keyword["id"] for keyword in db.get_keywords_for_conversation(imported["id"])
     }
     assert collection_keyword_ids & conversation_keyword_ids
+
+
+def test_import_openwebui_db_reports_oversized_chat_metadata_per_item(
+    openwebui_service,
+):
+    path = _write_openwebui_db(
+        openwebui_service,
+        chat_meta={"blob": "x" * MAX_CHAT_SETTINGS_BYTES},
+    )
+
+    success, message, result = openwebui_service.import_openwebui_db(
+        path,
+        selected_user_id="user-a",
+        conflict_resolution=ConflictResolution.SKIP,
+    )
+
+    assert success is True, message
+    assert result["imported_chats"] == 0
+    assert result["failed_chats"] == 1
+    assert any("conversation metadata was not stored" in warning for warning in result["warnings"])
+    assert openwebui_service.db.get_conversation_by_source_ref(
+        "openwebui",
+        "chat-a",
+        client_id=openwebui_service.db.client_id,
+        include_deleted=True,
+    ) is None
 
 
 def test_import_openwebui_db_persists_selected_user_hydration_scope_mapping(openwebui_service):

@@ -1,4 +1,43 @@
 {
+  "answerPanel_loading": {
+    "message": "Working on your question..."
+  },
+  "answerPanel_modelReadiness": {
+    "message": "Response time depends on your sources and model readiness."
+  },
+  "answerWorkspace_cancelled": {
+    "message": "Search cancelled"
+  },
+  "answerWorkspace_cancelledAnnouncement": {
+    "message": "Search cancelled. You can ask again when ready."
+  },
+  "answerWorkspace_retainedSources": {
+    "message": "Retrieved sources are still available."
+  },
+  "trustSummary_selectedSources": {
+    "message": "selected sources"
+  },
+  "trustSummary_sourcePair": {
+    "message": "{{first}} and {{last}}"
+  },
+  "trustSummary_sourceList": {
+    "message": "{{first}}, and {{last}}"
+  },
+  "trustSummary_sourceSeparator": {
+    "message": ", "
+  },
+  "trustSummary_unavailable": {
+    "message": "Could not search {{sources}}."
+  },
+  "trustSummary_partialFailure": {
+    "message": "Some searches failed for {{sources}}."
+  },
+  "trustSummary_searched": {
+    "message": "Searched {{sources}}. {count, plural, one {# source returned} other {# sources returned}}, {{citationCount}} cited."
+  },
+  "trustSummary_unsearched": {
+    "message": "No selected sources were searched. {count, plural, one {# source returned} other {# sources returned}}, {{citationCount}} cited."
+  },
   "addBtn": {
     "message": "Add New Knowledge"
   },

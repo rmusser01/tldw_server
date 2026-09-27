@@ -131,3 +131,68 @@ def test_subtitle_export_defaults_words_per_cue():
         alignment=_valid_alignment(),
     )
     assert req.words_per_cue == 12
+
+
+def test_job_request_round_trips_gateway_fields_at_all_supported_scopes():
+    req = AudiobookJobRequest(
+        project_title="Gateway book",
+        source=_valid_source(),
+        chapters=[
+            ChapterSelection(
+                chapter_id="ch_001",
+                include=True,
+                tts_backend="gateway:chapter",
+                tts_allow_fallback=False,
+            )
+        ],
+        output=_valid_output(),
+        tts_backend="openrouter",
+        tts_allow_fallback=True,
+        tts_model="Vendor/Exact-TTS",
+    )
+
+    payload = req.model_dump()
+
+    assert payload["tts_backend"] == "openrouter"
+    assert payload["tts_allow_fallback"] is True
+    assert payload["chapters"][0]["tts_backend"] == "gateway:chapter"
+    assert payload["chapters"][0]["tts_allow_fallback"] is False
+
+
+def test_batch_item_round_trips_gateway_fields_without_changing_legacy_fields():
+    item = AudiobookJobItem(
+        source=_valid_source(),
+        chapters=_valid_chapters(),
+        tts_backend="company",
+        tts_allow_fallback=False,
+        tts_provider="openai",
+        tts_model="Vendor/Exact-TTS",
+    )
+    req = AudiobookJobRequest(
+        project_title="Batch",
+        items=[item],
+        output=_valid_output(),
+    )
+
+    assert req.items is not None
+    assert req.items[0].tts_backend == "company"
+    assert req.items[0].tts_allow_fallback is False
+    assert req.items[0].tts_provider == "openai"
+    assert req.items[0].tts_model == "Vendor/Exact-TTS"
+
+
+@pytest.mark.parametrize("scope", ["chapter", "item", "request"])
+def test_gateway_backend_rejects_blank_values_at_every_scope(scope):
+    with pytest.raises(ValidationError, match="tts_backend must not be blank"):
+        if scope == "chapter":
+            ChapterSelection(chapter_id="ch_001", include=True, tts_backend=" \t")
+        elif scope == "item":
+            AudiobookJobItem(source=_valid_source(), tts_backend=" \t")
+        else:
+            AudiobookJobRequest(
+                project_title="Gateway book",
+                source=_valid_source(),
+                chapters=_valid_chapters(),
+                output=_valid_output(),
+                tts_backend=" \t",
+            )

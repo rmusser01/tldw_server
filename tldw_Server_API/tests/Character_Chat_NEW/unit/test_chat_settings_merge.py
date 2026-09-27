@@ -1,10 +1,113 @@
+"""Settings merge and public response conversion preserve independent authorities."""
+
+from collections.abc import Iterator
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI, HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as sessions
-from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import GreetingSelectRequest
+from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import ConversationListItem, ConversationMetadata
+from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import ChatSessionListItem, GreetingSelectRequest
+from tldw_Server_API.app.core.Character_Chat import character_conversation_factory
+from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+    build_materialized_behavior_controls,
+)
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
+from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import (
+    build_materialized_behavior_settings,
+)
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
+
+
+@pytest.fixture
+def conversion_db(tmp_path: Path) -> Iterator[CharactersRAGDB]:
+    """Use real scoped storage when checking response conversion."""
+    db = CharactersRAGDB(tmp_path / "conversion.db", client_id="owner")
+    try:
+        yield db
+    finally:
+        db.close_all_connections()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "settings_row",
+    [
+        None,
+        {
+            "settings": {"greetingsChecksum": "bootstrap-only"},
+            "last_modified": datetime(2026, 8, 25, tzinfo=timezone.utc),
+        },
+    ],
+)
+async def test_get_chat_settings_returns_empty_settings_without_user_overrides(
+    settings_row: dict[str, object] | None,
+) -> None:
+    """Bootstrap-only settings are omitted from the user override response."""
+    class _StubDB:
+        """Return a known chat with the parametrized settings row."""
+
+        def get_conversation_by_id(self, chat_id: str) -> dict[str, object]:
+            """Return the requested global conversation."""
+            return {
+                "id": chat_id,
+                "client_id": "1",
+                "scope_type": "global",
+                "character_id": None,
+            }
+
+        def get_conversation_settings(
+            self,
+            chat_id: str,
+        ) -> dict[str, object] | None:
+            """Return the configured persisted settings row."""
+            return settings_row
+
+    class _StubUser:
+        """Represent the owner of the stub conversation."""
+
+        id = "1"
+
+    response = await sessions.get_chat_settings(
+        chat_id="chat-with-default-settings",
+        scope_type=None,
+        workspace_id=None,
+        db=_StubDB(),  # type: ignore[arg-type]
+        current_user=_StubUser(),  # type: ignore[arg-type]
+    )
+
+    assert response.settings == {}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_get_chat_settings_keeps_unknown_chat_not_found() -> None:
+    """A missing conversation remains a 404 instead of an empty response."""
+    class _StubDB:
+        """Return no conversation for the requested identifier."""
+
+        def get_conversation_by_id(self, chat_id: str) -> None:
+            """Report that the conversation does not exist."""
+            return None
+
+    class _StubUser:
+        """Represent the caller of the missing-chat request."""
+
+        id = "1"
+
+    with pytest.raises(HTTPException) as exc_info:
+        await sessions.get_chat_settings(
+            chat_id="missing-chat",
+            scope_type=None,
+            workspace_id=None,
+            db=_StubDB(),  # type: ignore[arg-type]
+            current_user=_StubUser(),  # type: ignore[arg-type]
+        )
+
+    assert exc_info.value.status_code == 404
 
 
 @pytest.mark.unit
@@ -135,6 +238,22 @@ def test_merge_conversation_settings_preserves_unknown_keys():
 
 
 @pytest.mark.unit
+def test_public_chat_settings_hides_internal_resume_contract_keys_without_mutation():
+    stored = {
+        "schemaVersion": 2,
+        "authorNote": "visible",
+        "roleplayResumeV1": {"resumeEligible": True},
+        "roleplayBehaviorV1": {"schemaVersion": 1, "values": {}},
+    }
+
+    public = sessions._public_chat_settings(stored)
+
+    assert public == {"schemaVersion": 2, "authorNote": "visible"}
+    assert "roleplayResumeV1" in stored
+    assert "roleplayBehaviorV1" in stored
+
+
+@pytest.mark.unit
 def test_merge_conversation_settings_preserves_assistant_overlay_payload():
     server = {
         "schemaVersion": 2,
@@ -171,9 +290,17 @@ def test_persist_auto_summary_settings_upsert_does_not_touch_conversation_metada
         def __init__(self) -> None:
             self.upsert_calls = 0
             self.update_conversation_calls = 0
+            self.expected_settings_version: int | None = None
 
-        def upsert_conversation_settings(self, conversation_id: str, settings: dict[str, object]) -> bool:
+        def upsert_conversation_settings(
+            self,
+            conversation_id: str,
+            settings: dict[str, object],
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
             self.upsert_calls += 1
+            self.expected_settings_version = expected_settings_version
             return True
 
         def update_conversation(self, conversation_id: str, update_data: dict[str, object], expected_version: int) -> bool:
@@ -193,14 +320,17 @@ def test_persist_auto_summary_settings_upsert_does_not_touch_conversation_metada
         threshold=10,
         window=20,
         compressed_count=3,
+        expected_settings_version=7,
     )
 
     assert db.upsert_calls == 1
+    assert db.expected_settings_version == 7
     assert db.update_conversation_calls == 0
 
 
 @pytest.mark.unit
-def test_convert_db_conversation_to_response_includes_settings_payload():
+def test_convert_db_conversation_to_response_includes_settings_payload(conversion_db: CharactersRAGDB) -> None:
+    """Projection retains the requested public settings payload."""
     conv = {
         "id": "chat-1",
         "character_id": 7,
@@ -211,14 +341,15 @@ def test_convert_db_conversation_to_response_includes_settings_payload():
     }
     settings = {"greetingEnabled": True, "authorNote": "test"}
 
-    response = sessions._convert_db_conversation_to_response(conv, settings=settings)
+    response = sessions._convert_db_conversation_to_response(conv, db=conversion_db, user_id="owner", settings=settings)
 
     assert response.id == "chat-1"
     assert response.settings == settings
 
 
 @pytest.mark.unit
-def test_convert_db_conversation_to_response_defaults_settings_none():
+def test_convert_db_conversation_to_response_defaults_settings_none(conversion_db: CharactersRAGDB) -> None:
+    """Omitted settings remain omitted rather than acquiring startup fields."""
     conv = {
         "id": "chat-2",
         "character_id": 9,
@@ -227,14 +358,15 @@ def test_convert_db_conversation_to_response_defaults_settings_none():
         "version": 1,
     }
 
-    response = sessions._convert_db_conversation_to_response(conv)
+    response = sessions._convert_db_conversation_to_response(conv, db=conversion_db, user_id="owner")
 
     assert response.id == "chat-2"
     assert response.settings is None
 
 
 @pytest.mark.unit
-def test_convert_db_conversation_to_response_does_not_infer_tracked_identity_from_character_id():
+def test_convert_db_conversation_to_response_does_not_infer_tracked_identity_from_character_id(conversion_db: CharactersRAGDB) -> None:
+    """Legacy identity normalization remains independent of startup projection."""
     conv = {
         "id": "chat-3",
         "character_id": 11,
@@ -245,11 +377,43 @@ def test_convert_db_conversation_to_response_does_not_infer_tracked_identity_fro
         "version": 1,
     }
 
-    response = sessions._convert_db_conversation_to_response(conv)
+    response = sessions._convert_db_conversation_to_response(conv, db=conversion_db, user_id="owner")
 
     assert response.character_id == 11
     assert response.assistant_kind is None
     assert response.assistant_id is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("hidden", [False, True])
+def test_startup_projection_does_not_change_settings_or_resume_authority(
+    conversion_db: CharactersRAGDB, hidden: bool,
+) -> None:
+    """Source visibility cannot invent snapshot validity, fences, or greeting settings."""
+    db = conversion_db
+    db.upsert_workspace("conversion-origin", "Origin")
+    cid = db.add_conversation({"title": "Converted"}, assistant_startup=AssistantStartup(
+        source="workspace_default", workspace_id="conversion-origin", workspace_version=1,
+    ))
+    if hidden:
+        db.delete_workspace("conversion-origin", expected_version=1)
+    row = db.get_conversation_by_id(cid)
+    settings = {"greetingEnabled": False, "authorNote": "Kept"}
+    state = {"behavior_snapshot": {"status": "missing"}, "resume_eligible": False,
+             "resume_ineligible_reason": "behavior_snapshot_missing", "settings_version": 4, "history_version": 7}
+    detail = sessions._convert_db_conversation_to_response(row, db=db, user_id="owner", settings=settings, resume_state=state)
+    listed = sessions._convert_db_conversation_to_list_item(row, db=db, user_id="owner", settings=settings)
+    expected = {"schema_version": 1, "source": "unknown" if hidden else "workspace_default",
+                "workspace_id": None if hidden else "conversion-origin", "workspace_version": None if hidden else 1}
+    assert detail.assistant_startup.model_dump() == expected
+    assert listed.assistant_startup.model_dump() == expected
+    assert detail.settings == listed.settings == {"greetingEnabled": False, "authorNote": "Kept"}
+    assert detail.behavior_snapshot.status == "missing"
+    assert detail.resume_eligible is False
+    assert detail.resume_ineligible_reason == "behavior_snapshot_missing"
+    assert (detail.settings_version, detail.history_version) == (4, 7)
+    assert {"behavior_snapshot", "resume_eligible", "settings_version", "history_version"}.isdisjoint(listed.model_dump())
+    assert db.get_conversation_by_id(cid)["assistant_startup_json"] == row["assistant_startup_json"]
 
 
 @pytest.mark.unit
@@ -265,6 +429,13 @@ def test_openapi_exposes_include_settings_query_params():
     list_params = schema["paths"]["/api/v1/chats/"]["get"]["parameters"]
     list_param_names = {param["name"] for param in list_params}
     assert "include_settings" in list_param_names
+
+
+@pytest.mark.unit
+def test_response_schemas_mark_startup_read_only() -> None:
+    """Generated contracts describe local history as output, never caller authority."""
+    for model in (ChatSessionListItem, ConversationListItem, ConversationMetadata):
+        assert model.model_json_schema()["properties"]["assistant_startup"]["readOnly"] is True
 
 
 @pytest.mark.unit
@@ -289,6 +460,9 @@ def test_openapi_exposes_chat_trash_query_params_and_routes():
 @pytest.mark.asyncio
 async def test_select_greeting_returns_500_when_settings_persist_fails():
     class _StubDB:
+        def __init__(self) -> None:
+            self.expected_settings_version: int | None = None
+
         def get_conversation_by_id(self, chat_id: str) -> dict[str, object]:
             return {"id": chat_id, "client_id": "1", "character_id": 7}
 
@@ -296,10 +470,60 @@ async def test_select_greeting_returns_500_when_settings_persist_fails():
             return {"id": character_id, "name": "Test Character", "first_message": "Hello!", "alternate_greetings": ["Hi!"]}
 
         def get_conversation_settings(self, chat_id: str) -> dict[str, object]:
-            return {"settings": {}}
+            return {"settings": {}, "settings_version": 4}
 
-        def upsert_conversation_settings(self, chat_id: str, settings: dict[str, object]) -> bool:
+        def upsert_conversation_settings(
+            self,
+            chat_id: str,
+            settings: dict[str, object],
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            self.expected_settings_version = expected_settings_version
             return False
+
+    class _StubUser:
+        id = "1"
+
+    db = _StubDB()
+    with pytest.raises(HTTPException) as exc_info:
+        await sessions.select_greeting(
+            chat_id="chat-1",
+            body=GreetingSelectRequest(index=0),
+            db=db,  # type: ignore[arg-type]
+            current_user=_StubUser(),  # type: ignore[arg-type]
+        )
+
+    assert exc_info.value.status_code == 500
+    assert "Failed to persist greeting selection" in str(exc_info.value.detail)
+    assert db.expected_settings_version == 4
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_select_greeting_returns_409_on_concurrent_settings_change():
+    class _StubDB:
+        def get_conversation_by_id(self, chat_id: str) -> dict[str, object]:
+            return {"id": chat_id, "client_id": "1", "character_id": 7}
+
+        def get_character_card_by_id(self, character_id: int) -> dict[str, object]:
+            return {
+                "id": character_id,
+                "name": "Test Character",
+                "first_message": "Hello!",
+            }
+
+        def get_conversation_settings(self, chat_id: str) -> dict[str, object]:
+            return {"settings": {}, "settings_version": 4}
+
+        def upsert_conversation_settings(
+            self,
+            chat_id: str,
+            settings: dict[str, object],
+            *,
+            expected_settings_version: int | None = None,
+        ) -> bool:
+            raise ConflictError("stale settings")
 
     class _StubUser:
         id = "1"
@@ -312,5 +536,146 @@ async def test_select_greeting_returns_500_when_settings_persist_fails():
             current_user=_StubUser(),  # type: ignore[arg-type]
         )
 
-    assert exc_info.value.status_code == 500
-    assert "Failed to persist greeting selection" in str(exc_info.value.detail)
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.unit
+def test_prompt_completion_settings_inventory_classifies_every_consumed_control():
+    expected_behavior_fields = {
+        "assistantOverlay",
+        "authorNote",
+        "authorNoteEnabled",
+        "authorNoteExcludeFromPrompt",
+        "authorNoteGmOnly",
+        "authorNoteInjectionPosition",
+        "authorNotePlacement",
+        "authorNotePosition",
+        "autoSummaryEnabled",
+        "autoSummaryMessageThreshold",
+        "autoSummaryRecentWindow",
+        "autoSummaryThresholdMessages",
+        "autoSummaryWindowMessages",
+        "characterMemoryById",
+        "chatGenerationOverride",
+        "chatPresetOverrideId",
+        "conversationContext",
+        "generationOverrides",
+        "greetingEnabled",
+        "greetingScope",
+        "greetingSelectionId",
+        "memoryScope",
+        "model",
+        "participantCharacterIds",
+        "participant_character_ids",
+        "pinnedMessageIds",
+        "presetScope",
+        "promptPreset",
+        "prompt_preset",
+        "provider",
+        "summary",
+        "turnTakingMode",
+        "useCharacterDefault",
+    }
+    inventory = getattr(sessions, "PROMPT_COMPLETION_SETTING_CLASSIFICATION", {})
+    assert expected_behavior_fields <= {
+        key for key, classification in inventory.items() if classification == "behavior"
+    }
+
+
+@pytest.mark.unit
+def test_materialized_behavior_record_rejects_oversize_payload():
+    values = {
+        "base_snapshot": {
+            "schema_version": 1,
+            "digest": "sha256:" + ("0" * 64),
+        },
+        "behavior_controls": {
+            "applied_overrides": {},
+            "author_note": {
+                "enabled": True,
+                "gm_only": False,
+                "exclude_from_prompt": False,
+                "position": "before_system",
+            },
+            "auto_summary": {
+                "enabled": False,
+                "threshold_messages": 40,
+                "window_messages": 12,
+            },
+            "greeting": {
+                "enabled": True,
+                "scope": "chat",
+                "selection_id": None,
+                "use_character_default": True,
+            },
+            "memory_scope": "shared",
+            "pinned_message_ids": [],
+            "preset_scope": "character",
+            "prompt_context": {},
+            "turn_taking_mode": "single",
+        },
+        "effective_completion": {
+            "provider": "local-llm",
+            "model": "local-test",
+            "sampling": {
+                "temperature": 0.7,
+                "top_p": 1.0,
+                "repetition_penalty": 1.0,
+                "stop": [],
+            },
+        },
+        "memory": {"author_note": "x" * (1024 * 1024)},
+    }
+    with pytest.raises(InputError, match="exceeds maximum"):
+        build_materialized_behavior_settings(values)
+
+
+@pytest.mark.unit
+def test_materialized_reference_ids_are_deduplicated_and_bounded_before_lookup():
+    normalize_participants = getattr(
+        character_conversation_factory,
+        "normalize_materialized_participant_ids",
+        None,
+    )
+    normalize_world_books = getattr(
+        character_conversation_factory,
+        "normalize_materialized_world_book_ids",
+        None,
+    )
+    assert callable(normalize_participants)
+    assert callable(normalize_world_books)
+    assert normalize_participants(1, [1, "2", 2, 3, "3"]) == [1, 2, 3]
+    assert normalize_world_books([1, "1", 2, 2, 3]) == [1, 2, 3]
+    with pytest.raises(InputError, match="at most 33"):
+        normalize_participants(1, list(range(2, 35)))
+    with pytest.raises(InputError, match="at most 64"):
+        normalize_world_books(list(range(1, 66)))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("authorNoteEnabled", "false"),
+        ("authorNoteGmOnly", 1),
+        ("authorNoteExcludeFromPrompt", 0),
+        ("greetingEnabled", "true"),
+        ("useCharacterDefault", 1),
+        ("autoSummaryEnabled", "false"),
+    ],
+)
+def test_materialized_behavior_controls_reject_non_boolean_known_flags(
+    field: str,
+    value: object,
+) -> None:
+    with pytest.raises(InputError, match=field):
+        build_materialized_behavior_controls({field: value})
+
+
+@pytest.mark.unit
+def test_settings_endpoint_rejects_non_boolean_behavior_flags() -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        sessions._validate_chat_settings_payload({"greetingEnabled": "false"})
+
+    assert exc_info.value.status_code == 422
+    assert "greetingEnabled" in str(exc_info.value.detail)

@@ -156,6 +156,13 @@ def iter_core_router_specs() -> Iterable[RouterSpec]:
             route_key="chat",
             attr_name="conversations_alias_router",
         ),
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.chat_macros",
+            log_name="chat_macros",
+            prefix=f"{API_V1_PREFIX}/chat/macros",
+            tags=("chat-macros",),
+            route_key="chat-macros",
+        ),
     ):
         append_imported_router_spec(specs, chat_spec)
 

@@ -1,4 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { createInstance } from "i18next"
+import { I18nextProvider } from "react-i18next"
+import knowledgeEn from "@/assets/locale/en/knowledge.json"
+import ICUWithInterpolation from "@/i18n/icu-format"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { AnswerPanel } from "../AnswerPanel"
 
@@ -69,7 +73,13 @@ describe("AnswerPanel workspace handoff", () => {
   })
 
   it("queues workspace prefill payload and navigates to workspace route", async () => {
-    render(<AnswerPanel />)
+    const i18n = createInstance().use(ICUWithInterpolation)
+    await i18n.init({
+      lng: "en", fallbackLng: "en", defaultNS: "knowledge",
+      resources: { en: { knowledge: knowledgeEn } },
+      interpolation: { escapeValue: false },
+    })
+    render(<I18nextProvider i18n={i18n}><AnswerPanel /></I18nextProvider>)
 
     fireEvent.click(screen.getByRole("button", { name: "Continue in editor" }))
 

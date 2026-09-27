@@ -8,7 +8,15 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import normalize_provider_name
+from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
+from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+    ProviderCredentialAliasConflictError,
+    fold_provider_credential_rows,
+)
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import (
+    canonical_provider_name,
+    provider_lookup_names,
+)
 
 
 def _normalize_scope_type(scope_type: str) -> str:
@@ -49,7 +57,9 @@ class AuthnzOrgProviderSecretsRepo:
                     "'python -m tldw_Server_API.app.core.AuthNZ.initialize')."
                 )
         except Exception as exc:
-            logger.error(f"AuthnzOrgProviderSecretsRepo.ensure_tables failed: {exc}")
+            logger.bind(error_type=type(exc).__name__).error(
+                "AuthnzOrgProviderSecretsRepo.ensure_tables failed"
+            )
             raise
 
     @staticmethod
@@ -69,6 +79,139 @@ class AuthnzOrgProviderSecretsRepo:
             )
         return dict(row)
 
+    @staticmethod
+    def _select_authoritative_row(
+        rows: list[dict[str, Any]],
+        canonical: str,
+    ) -> dict[str, Any] | None:
+        """Choose the authoritative stored row without rewriting its spelling."""
+        canonical_rows = [
+            row
+            for row in rows
+            if str(row.get("provider") or "").strip().lower() == canonical
+        ]
+        if len(canonical_rows) > 1:
+            raise ProviderCredentialAliasConflictError(
+                "conflicting canonical provider credentials"
+            )
+        if canonical_rows:
+            return canonical_rows[0]
+        if len(rows) > 1:
+            raise ProviderCredentialAliasConflictError(
+                "conflicting legacy provider credentials"
+            )
+        return rows[0] if rows else None
+
+    async def _canonicalize_provider_identity(
+        self,
+        conn: Any,
+        scope_type: str,
+        scope_id: int,
+        provider: str,
+        *,
+        postgres: bool,
+    ) -> None:
+        """Lock and collapse every stored spelling for one provider identity."""
+        scope_norm = _normalize_scope_type(scope_type)
+        provider_norm = canonical_provider_name(provider)
+        lookup_names = provider_lookup_names(provider_norm)
+
+        if postgres:
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+                "org_provider_secrets",
+                f"{scope_norm}:{int(scope_id)}:{provider_norm}",
+            )
+            rows = await conn.fetch(
+                """
+                SELECT provider, revoked_at
+                FROM org_provider_secrets
+                WHERE scope_type = $1 AND scope_id = $2
+                  AND provider = ANY($3::text[])
+                ORDER BY provider
+                FOR UPDATE
+                """,
+                scope_norm,
+                int(scope_id),
+                list(lookup_names),
+            )
+        else:
+            placeholders = ", ".join("?" for _ in lookup_names)
+            cursor = await conn.execute(
+                f"""
+                SELECT provider, revoked_at
+                FROM org_provider_secrets
+                WHERE scope_type = ? AND scope_id = ?
+                  AND provider IN ({placeholders})
+                ORDER BY provider
+                """,  # nosec B608
+                (scope_norm, int(scope_id), *lookup_names),
+            )
+            rows = await cursor.fetchall()
+
+        materialized_rows = [self._row_to_dict(row) for row in rows]
+        fold_provider_credential_rows(
+            materialized_rows,
+            identity_fields=("scope_type", "scope_id"),
+            include_revoked=True,
+        )
+        stored_names = {
+            str(row.get("provider") or "") for row in materialized_rows
+        }
+
+        if provider_norm in stored_names:
+            legacy_names = tuple(name for name in lookup_names if name != provider_norm)
+            if not legacy_names:
+                return
+            if postgres:
+                await conn.execute(
+                    """
+                    DELETE FROM org_provider_secrets
+                    WHERE scope_type = $1 AND scope_id = $2
+                      AND provider = ANY($3::text[])
+                    """,
+                    scope_norm,
+                    int(scope_id),
+                    list(legacy_names),
+                )
+            else:
+                legacy_placeholders = ", ".join("?" for _ in legacy_names)
+                await conn.execute(
+                    f"""
+                    DELETE FROM org_provider_secrets
+                    WHERE scope_type = ? AND scope_id = ?
+                      AND provider IN ({legacy_placeholders})
+                    """,  # nosec B608
+                    (scope_norm, int(scope_id), *legacy_names),
+                )
+            return
+
+        if not materialized_rows:
+            return
+
+        stored_provider = str(materialized_rows[0].get("provider") or "")
+        if postgres:
+            await conn.execute(
+                """
+                UPDATE org_provider_secrets
+                SET provider = $1
+                WHERE scope_type = $2 AND scope_id = $3 AND provider = $4
+                """,
+                provider_norm,
+                scope_norm,
+                int(scope_id),
+                stored_provider,
+            )
+        else:
+            await conn.execute(
+                """
+                UPDATE org_provider_secrets
+                SET provider = ?
+                WHERE scope_type = ? AND scope_id = ? AND provider = ?
+                """,
+                (provider_norm, scope_norm, int(scope_id), stored_provider),
+            )
+
     async def upsert_secret(
         self,
         *,
@@ -83,80 +226,100 @@ class AuthnzOrgProviderSecretsRepo:
         updated_by: int | None = None,
     ) -> dict[str, Any]:
         scope_norm = _normalize_scope_type(scope_type)
-        provider_norm = normalize_provider_name(provider)
+        provider_norm = canonical_provider_name(provider)
         metadata_json = json.dumps(metadata) if metadata is not None else None
         try:
-            if getattr(self.db_pool, "pool", None) is not None:
-                ts = self._normalize_datetime_for_postgres(updated_at)
-                row = await self.db_pool.fetchone(
+            postgres = getattr(self.db_pool, "pool", None) is not None
+            async with self.db_pool.transaction() as conn:
+                await self._canonicalize_provider_identity(
+                    conn,
+                    scope_norm,
+                    scope_id,
+                    provider_norm,
+                    postgres=postgres,
+                )
+
+                if postgres:
+                    ts = self._normalize_datetime_for_postgres(updated_at)
+                    row = await conn.fetchrow(
+                        """
+                        INSERT INTO org_provider_secrets (
+                            scope_type, scope_id, provider, encrypted_blob, key_hint, metadata,
+                            created_by, updated_by, created_at, updated_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
+                        ON CONFLICT (scope_type, scope_id, provider) DO UPDATE SET
+                            encrypted_blob = EXCLUDED.encrypted_blob,
+                            key_hint = EXCLUDED.key_hint,
+                            metadata = EXCLUDED.metadata,
+                            updated_at = EXCLUDED.updated_at,
+                            updated_by = EXCLUDED.updated_by,
+                            revoked_at = NULL,
+                            revoked_by = NULL
+                        RETURNING id, scope_type, scope_id, provider, key_hint, metadata, created_at, updated_at,
+                                  last_used_at, created_by, updated_by, revoked_by, revoked_at
+                        """,
+                        scope_norm,
+                        int(scope_id),
+                        provider_norm,
+                        encrypted_blob,
+                        key_hint,
+                        metadata_json,
+                        created_by,
+                        updated_by,
+                        ts,
+                    )
+                    return self._row_to_dict(row) if row else {}
+
+                await conn.execute(
                     """
                     INSERT INTO org_provider_secrets (
                         scope_type, scope_id, provider, encrypted_blob, key_hint, metadata,
                         created_by, updated_by, created_at, updated_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9)
-                    ON CONFLICT (scope_type, scope_id, provider) DO UPDATE SET
-                        encrypted_blob = EXCLUDED.encrypted_blob,
-                        key_hint = EXCLUDED.key_hint,
-                        metadata = EXCLUDED.metadata,
-                        updated_at = EXCLUDED.updated_at,
-                        updated_by = EXCLUDED.updated_by,
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(scope_type, scope_id, provider) DO UPDATE SET
+                        encrypted_blob = excluded.encrypted_blob,
+                        key_hint = excluded.key_hint,
+                        metadata = excluded.metadata,
+                        updated_at = excluded.updated_at,
+                        updated_by = excluded.updated_by,
                         revoked_at = NULL,
                         revoked_by = NULL
-                    RETURNING id, scope_type, scope_id, provider, key_hint, metadata, created_at, updated_at,
-                              last_used_at, created_by, updated_by, revoked_by, revoked_at
                     """,
-                    scope_norm,
-                    int(scope_id),
-                    provider_norm,
-                    encrypted_blob,
-                    key_hint,
-                    metadata_json,
-                    created_by,
-                    updated_by,
-                    ts,
+                    (
+                        scope_norm,
+                        int(scope_id),
+                        provider_norm,
+                        encrypted_blob,
+                        key_hint,
+                        metadata_json,
+                        created_by,
+                        updated_by,
+                        updated_at.isoformat(),
+                        updated_at.isoformat(),
+                    ),
                 )
+                cursor = await conn.execute(
+                    """
+                    SELECT id, scope_type, scope_id, provider, key_hint, metadata, created_at, updated_at,
+                           last_used_at, created_by, updated_by, revoked_by, revoked_at
+                    FROM org_provider_secrets
+                    WHERE scope_type = ? AND scope_id = ? AND provider = ?
+                    """,
+                    (scope_norm, int(scope_id), provider_norm),
+                )
+                row = await cursor.fetchone()
                 return self._row_to_dict(row) if row else {}
-
-            await self.db_pool.execute(
-                """
-                INSERT INTO org_provider_secrets (
-                    scope_type, scope_id, provider, encrypted_blob, key_hint, metadata,
-                    created_by, updated_by, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(scope_type, scope_id, provider) DO UPDATE SET
-                    encrypted_blob = excluded.encrypted_blob,
-                    key_hint = excluded.key_hint,
-                    metadata = excluded.metadata,
-                    updated_at = excluded.updated_at,
-                    updated_by = excluded.updated_by,
-                    revoked_at = NULL,
-                    revoked_by = NULL
-                """,
-                (
-                    scope_norm,
-                    int(scope_id),
-                    provider_norm,
-                    encrypted_blob,
-                    key_hint,
-                    metadata_json,
-                    created_by,
-                    updated_by,
-                    updated_at.isoformat(),
-                    updated_at.isoformat(),
-                ),
+        except TransactionError as exc:
+            if isinstance(exc.__cause__, ProviderCredentialAliasConflictError):
+                raise exc.__cause__ from None
+            logger.bind(error_type=type(exc).__name__).error(
+                "AuthnzOrgProviderSecretsRepo.upsert_secret failed"
             )
-            row = await self.db_pool.fetchone(
-                """
-                SELECT id, scope_type, scope_id, provider, key_hint, metadata, created_at, updated_at, last_used_at,
-                       created_by, updated_by, revoked_by, revoked_at
-                FROM org_provider_secrets
-                WHERE scope_type = ? AND scope_id = ? AND provider = ?
-                """,
-                (scope_norm, int(scope_id), provider_norm),
-            )
-            return self._row_to_dict(row) if row else {}
+            raise
         except Exception as exc:
-            logger.error(f"AuthnzOrgProviderSecretsRepo.upsert_secret failed: {exc}")
+            logger.bind(error_type=type(exc).__name__).error(
+                "AuthnzOrgProviderSecretsRepo.upsert_secret failed"
+            )
             raise
 
     async def fetch_secret(
@@ -168,46 +331,210 @@ class AuthnzOrgProviderSecretsRepo:
         include_revoked: bool = False,
     ) -> dict[str, Any] | None:
         scope_norm = _normalize_scope_type(scope_type)
-        provider_norm = normalize_provider_name(provider)
         try:
-            if getattr(self.db_pool, "pool", None) is not None:
-                revoked_clause = "" if include_revoked else " AND revoked_at IS NULL"
-                # Bandit B105 false positive: SQL template, not a hardcoded secret.
-                fetch_secret_sql_template = (  # nosec B105
-                    """
-                    SELECT id, scope_type, scope_id, provider, encrypted_blob, key_hint, metadata,
-                           created_at, updated_at, last_used_at, created_by, updated_by, revoked_by, revoked_at
-                    FROM org_provider_secrets
-                    WHERE scope_type = $1 AND scope_id = $2 AND provider = $3{revoked_clause}
-                    """
-                )
-                fetch_secret_sql = fetch_secret_sql_template.format_map(locals())  # nosec B608
-                row = await self.db_pool.fetchone(
-                    fetch_secret_sql,
-                    scope_norm,
-                    int(scope_id),
-                    provider_norm,
+            canonical, *legacy_names = provider_lookup_names(provider)
+            rows = await self._fetch_secrets_for_providers(
+                scope_norm,
+                scope_id,
+                (canonical, *legacy_names),
+            )
+            row = self._select_authoritative_row(rows, canonical)
+            return row if row is not None and (include_revoked or row.get("revoked_at") is None) else None
+        except Exception as exc:
+            logger.bind(error_type=type(exc).__name__).error(
+                "AuthnzOrgProviderSecretsRepo.fetch_secret failed"
+            )
+            raise
+
+    async def fetch_authorized_secret_for_user(
+        self,
+        scope_type: str,
+        scope_id: int,
+        user_id: int,
+        provider: str,
+    ) -> dict[str, Any] | None:
+        """Atomically fetch the authoritative shared row for an active user.
+
+        Revoked rows are returned deliberately so a revoked canonical provider
+        remains authoritative over any stale active legacy alias.  The runtime
+        rejects that row before decrypting it.
+        """
+        scope_norm = _normalize_scope_type(scope_type)
+        try:
+            canonical, *legacy_names = provider_lookup_names(provider)
+            rows = await self._fetch_authorized_secrets_for_providers(
+                scope_norm,
+                scope_id,
+                user_id,
+                (canonical, *legacy_names),
+            )
+            return self._select_authoritative_row(rows, canonical)
+        except Exception as exc:
+            logger.bind(error_type=type(exc).__name__).error(
+                "AuthnzOrgProviderSecretsRepo.fetch_authorized_secret_for_user failed"
+            )
+            raise
+
+    async def _fetch_authorized_secrets_for_providers(
+        self,
+        scope_type: str,
+        scope_id: int,
+        user_id: int,
+        providers: tuple[str, ...],
+    ) -> list[dict[str, Any]]:
+        """Read every provider alias through one authorized database snapshot."""
+        select_fields = """
+            SELECT s.id, s.scope_type, s.scope_id, s.provider, s.encrypted_blob,
+                   s.key_hint, s.metadata, s.created_at, s.updated_at,
+                   s.last_used_at, s.created_by, s.updated_by, s.revoked_by,
+                   s.revoked_at
+            FROM org_provider_secrets s
+        """
+        is_postgres = getattr(self.db_pool, "pool", None) is not None
+        if is_postgres:
+            provider_placeholders = ", ".join(f"${index}" for index in range(3, 3 + len(providers)))
+            user_placeholder = f"${3 + len(providers)}"
+        else:
+            provider_placeholders = ", ".join("?" for _provider in providers)
+            user_placeholder = "?"
+
+        # Provider and user values remain bound parameters; only placeholder tokens are interpolated.
+        if scope_type == "team":
+            if is_postgres:
+                sql = select_fields + (
+                    f"""
+                    JOIN team_members tm
+                      ON tm.team_id = s.scope_id
+                     AND tm.user_id = {user_placeholder}
+                     AND tm.status = 'active'
+                    JOIN teams t
+                      ON t.id = s.scope_id
+                     AND t.is_active = TRUE
+                    JOIN organizations o
+                      ON o.id = t.org_id
+                     AND o.is_active = TRUE
+                    JOIN users u
+                      ON u.id = {user_placeholder}
+                     AND u.is_active = TRUE
+                    WHERE s.scope_type = $1
+                      AND s.scope_id = $2
+                      AND s.provider IN ({provider_placeholders})
+                """
                 )
             else:
-                revoked_clause = "" if include_revoked else " AND revoked_at IS NULL"
-                # Bandit B105 false positive: SQL template, not a hardcoded secret.
-                fetch_secret_sql_template = (  # nosec B105
-                    """
-                    SELECT id, scope_type, scope_id, provider, encrypted_blob, key_hint, metadata,
-                           created_at, updated_at, last_used_at, created_by, updated_by, revoked_by, revoked_at
-                    FROM org_provider_secrets
-                    WHERE scope_type = ? AND scope_id = ? AND provider = ?{revoked_clause}
-                    """
+                sql = select_fields + (
+                    f"""
+                    JOIN team_members tm
+                      ON tm.team_id = s.scope_id
+                     AND tm.user_id = {user_placeholder}
+                     AND tm.status = 'active'
+                    JOIN teams t
+                      ON t.id = s.scope_id
+                     AND t.is_active = 1
+                    JOIN organizations o
+                      ON o.id = t.org_id
+                     AND o.is_active = 1
+                    JOIN users u
+                      ON u.id = {user_placeholder}
+                     AND u.is_active = 1
+                    WHERE s.scope_type = ?
+                      AND s.scope_id = ?
+                      AND s.provider IN ({provider_placeholders})
+                """
                 )
-                fetch_secret_sql = fetch_secret_sql_template.format_map(locals())  # nosec B608
-                row = await self.db_pool.fetchone(
-                    fetch_secret_sql,
-                    (scope_norm, int(scope_id), provider_norm),
+        else:
+            if is_postgres:
+                sql = select_fields + (
+                    f"""
+                    JOIN org_members om
+                      ON om.org_id = s.scope_id
+                     AND om.user_id = {user_placeholder}
+                     AND om.status = 'active'
+                    JOIN organizations o
+                      ON o.id = s.scope_id
+                     AND o.is_active = TRUE
+                    JOIN users u
+                      ON u.id = {user_placeholder}
+                     AND u.is_active = TRUE
+                    WHERE s.scope_type = $1
+                      AND s.scope_id = $2
+                      AND s.provider IN ({provider_placeholders})
+                """
                 )
-            return self._row_to_dict(row) if row else None
-        except Exception as exc:
-            logger.error(f"AuthnzOrgProviderSecretsRepo.fetch_secret failed: {exc}")
-            raise
+            else:
+                sql = select_fields + (
+                    f"""
+                    JOIN org_members om
+                      ON om.org_id = s.scope_id
+                     AND om.user_id = {user_placeholder}
+                     AND om.status = 'active'
+                    JOIN organizations o
+                      ON o.id = s.scope_id
+                     AND o.is_active = 1
+                    JOIN users u
+                      ON u.id = {user_placeholder}
+                     AND u.is_active = 1
+                    WHERE s.scope_type = ?
+                      AND s.scope_id = ?
+                      AND s.provider IN ({provider_placeholders})
+                """
+                )
+
+        if is_postgres:
+            rows = await self.db_pool.fetchall(
+                sql,
+                scope_type,
+                int(scope_id),
+                *providers,
+                int(user_id),
+            )
+        else:
+            rows = await self.db_pool.fetchall(
+                sql,
+                (
+                    int(user_id),
+                    int(user_id),
+                    scope_type,
+                    int(scope_id),
+                    *providers,
+                ),
+            )
+        return [self._row_to_dict(row) for row in rows]
+
+    async def _fetch_secrets_for_providers(
+        self,
+        scope_type: str,
+        scope_id: int,
+        providers: tuple[str, ...],
+    ) -> list[dict[str, Any]]:
+        """Read every alias for one scope through a single database snapshot."""
+        if getattr(self.db_pool, "pool", None) is not None:
+            rows = await self.db_pool.fetchall(
+                """
+                SELECT id, scope_type, scope_id, provider, encrypted_blob, key_hint, metadata,
+                       created_at, updated_at, last_used_at, created_by, updated_by, revoked_by, revoked_at
+                FROM org_provider_secrets
+                WHERE scope_type = $1 AND scope_id = $2
+                  AND provider = ANY($3::text[])
+                """,
+                scope_type,
+                int(scope_id),
+                list(providers),
+            )
+        else:
+            placeholders = ", ".join("?" for _provider in providers)
+            sql = f"""
+                SELECT id, scope_type, scope_id, provider, encrypted_blob, key_hint, metadata,
+                       created_at, updated_at, last_used_at, created_by, updated_by, revoked_by, revoked_at
+                FROM org_provider_secrets
+                WHERE scope_type = ? AND scope_id = ?
+                  AND provider IN ({placeholders})
+                """  # nosec B608
+            rows = await self.db_pool.fetchall(
+                sql,
+                (scope_type, int(scope_id), *providers),
+            )
+        return [self._row_to_dict(row) for row in rows]
 
     async def list_secrets(
         self,
@@ -221,7 +548,7 @@ class AuthnzOrgProviderSecretsRepo:
             raise ValueError("scope_type is required when scope_id is provided")
 
         scope_norm = _normalize_scope_type(scope_type) if scope_type else None
-        provider_norm = normalize_provider_name(provider) if provider else None
+        provider_norm = canonical_provider_name(provider) if provider else None
 
         try:
             if getattr(self.db_pool, "pool", None) is not None:
@@ -236,12 +563,6 @@ class AuthnzOrgProviderSecretsRepo:
                     clauses.append(f"scope_id = ${idx}")
                     params.append(int(scope_id))
                     idx += 1
-                if provider_norm:
-                    clauses.append(f"provider = ${idx}")
-                    params.append(provider_norm)
-                    idx += 1
-                if not include_revoked:
-                    clauses.append("revoked_at IS NULL")
                 where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
                 list_secrets_sql_template = """
                     SELECT id, scope_type, scope_id, provider, key_hint, metadata, created_at, updated_at, last_used_at,
@@ -264,11 +585,6 @@ class AuthnzOrgProviderSecretsRepo:
                 if scope_id is not None:
                     clauses.append("scope_id = ?")
                     params.append(int(scope_id))
-                if provider_norm:
-                    clauses.append("provider = ?")
-                    params.append(provider_norm)
-                if not include_revoked:
-                    clauses.append("revoked_at IS NULL")
                 where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
                 list_secrets_sql_template = """
                     SELECT id, scope_type, scope_id, provider, key_hint, metadata, created_at, updated_at, last_used_at,
@@ -283,9 +599,18 @@ class AuthnzOrgProviderSecretsRepo:
                     tuple(params),
                 )
 
-            return [self._row_to_dict(row) for row in rows]
+            folded = fold_provider_credential_rows(
+                [self._row_to_dict(row) for row in rows],
+                identity_fields=("scope_type", "scope_id"),
+                include_revoked=include_revoked,
+            )
+            if provider_norm:
+                folded = [row for row in folded if row.get("provider") == provider_norm]
+            return folded
         except Exception as exc:
-            logger.error(f"AuthnzOrgProviderSecretsRepo.list_secrets failed: {exc}")
+            logger.bind(error_type=type(exc).__name__).error(
+                "AuthnzOrgProviderSecretsRepo.list_secrets failed"
+            )
             raise
 
     async def delete_secret(
@@ -298,68 +623,91 @@ class AuthnzOrgProviderSecretsRepo:
         revoked_at: datetime | None = None,
     ) -> bool:
         scope_norm = _normalize_scope_type(scope_type)
-        provider_norm = normalize_provider_name(provider)
         revoked_ts = revoked_at or datetime.now(timezone.utc)
         try:
-            if getattr(self.db_pool, "pool", None) is not None:
-                ts = self._normalize_datetime_for_postgres(revoked_ts)
-                result = await self.db_pool.execute(
+            provider_norm = canonical_provider_name(provider)
+            postgres = getattr(self.db_pool, "pool", None) is not None
+            async with self.db_pool.transaction() as conn:
+                await self._canonicalize_provider_identity(
+                    conn,
+                    scope_norm,
+                    scope_id,
+                    provider_norm,
+                    postgres=postgres,
+                )
+                if postgres:
+                    ts = self._normalize_datetime_for_postgres(revoked_ts)
+                    result = await conn.execute(
+                        """
+                        UPDATE org_provider_secrets
+                        SET revoked_at = $1, revoked_by = $2, updated_at = $1, updated_by = $3
+                        WHERE scope_type = $4 AND scope_id = $5 AND provider = $6
+                          AND revoked_at IS NULL
+                        """,
+                        ts,
+                        revoked_by,
+                        revoked_by,
+                        scope_norm,
+                        int(scope_id),
+                        provider_norm,
+                    )
+                    if isinstance(result, str):
+                        parts = result.split()
+                        if parts and parts[-1].isdigit():
+                            return int(parts[-1]) > 0
+                    return True
+
+                cursor = await conn.execute(
                     """
                     UPDATE org_provider_secrets
-                    SET revoked_at = $1, revoked_by = $2, updated_at = $1, updated_by = $3
-                    WHERE scope_type = $4 AND scope_id = $5 AND provider = $6 AND revoked_at IS NULL
+                    SET revoked_at = ?, revoked_by = ?, updated_at = ?, updated_by = ?
+                    WHERE scope_type = ? AND scope_id = ? AND provider = ?
+                      AND revoked_at IS NULL
                     """,
-                    ts,
-                    revoked_by,
-                    revoked_by,
-                    scope_norm,
-                    int(scope_id),
-                    provider_norm,
+                    (
+                        revoked_ts.isoformat(),
+                        revoked_by,
+                        revoked_ts.isoformat(),
+                        revoked_by,
+                        scope_norm,
+                        int(scope_id),
+                        provider_norm,
+                    ),
                 )
-                if isinstance(result, str):
-                    parts = result.split()
-                    if parts and parts[-1].isdigit():
-                        return int(parts[-1]) > 0
-                return True
-
-            cursor = await self.db_pool.execute(
-                """
-                UPDATE org_provider_secrets
-                SET revoked_at = ?, revoked_by = ?, updated_at = ?, updated_by = ?
-                WHERE scope_type = ? AND scope_id = ? AND provider = ? AND revoked_at IS NULL
-                """,
-                (
-                    revoked_ts.isoformat(),
-                    revoked_by,
-                    revoked_ts.isoformat(),
-                    revoked_by,
-                    scope_norm,
-                    int(scope_id),
-                    provider_norm,
-                ),
+                rowcount = getattr(cursor, "rowcount", 0)
+                return rowcount > 0
+        except TransactionError as exc:
+            if isinstance(exc.__cause__, ProviderCredentialAliasConflictError):
+                raise exc.__cause__ from None
+            logger.bind(error_type=type(exc).__name__).error(
+                "AuthnzOrgProviderSecretsRepo.delete_secret failed"
             )
-            rowcount = getattr(cursor, "rowcount", 0)
-            return rowcount > 0
+            raise
         except Exception as exc:
-            logger.error(f"AuthnzOrgProviderSecretsRepo.delete_secret failed: {exc}")
+            logger.bind(error_type=type(exc).__name__).error(
+                "AuthnzOrgProviderSecretsRepo.delete_secret failed"
+            )
             raise
 
     async def touch_last_used(self, scope_type: str, scope_id: int, provider: str, used_at: datetime) -> None:
         scope_norm = _normalize_scope_type(scope_type)
-        provider_norm = normalize_provider_name(provider)
         try:
+            row = await self.fetch_secret(scope_norm, scope_id, provider)
+            if row is None:
+                return
+            stored_provider = str(row.get("provider") or "")
             if getattr(self.db_pool, "pool", None) is not None:
                 ts = self._normalize_datetime_for_postgres(used_at)
                 await self.db_pool.execute(
                     """
                     UPDATE org_provider_secrets
                     SET last_used_at = $1, updated_at = $1
-                    WHERE scope_type = $2 AND scope_id = $3 AND provider = $4
+                    WHERE scope_type = $2 AND scope_id = $3 AND provider = $4 AND revoked_at IS NULL
                     """,
                     ts,
                     scope_norm,
                     int(scope_id),
-                    provider_norm,
+                    stored_provider,
                 )
                 return
 
@@ -367,10 +715,12 @@ class AuthnzOrgProviderSecretsRepo:
                 """
                 UPDATE org_provider_secrets
                 SET last_used_at = ?, updated_at = ?
-                WHERE scope_type = ? AND scope_id = ? AND provider = ?
+                WHERE scope_type = ? AND scope_id = ? AND provider = ? AND revoked_at IS NULL
                 """,
-                (used_at.isoformat(), used_at.isoformat(), scope_norm, int(scope_id), provider_norm),
+                (used_at.isoformat(), used_at.isoformat(), scope_norm, int(scope_id), stored_provider),
             )
         except Exception as exc:
-            logger.error(f"AuthnzOrgProviderSecretsRepo.touch_last_used failed: {exc}")
+            logger.bind(error_type=type(exc).__name__).error(
+                "AuthnzOrgProviderSecretsRepo.touch_last_used failed"
+            )
             raise

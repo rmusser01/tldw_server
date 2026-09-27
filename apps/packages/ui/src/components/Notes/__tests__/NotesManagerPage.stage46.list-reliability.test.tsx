@@ -4,6 +4,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", () => ({
+  useNotesGraphAuthorityScope: () => "test-notes-authority"
+}))
+
 const {
   mockBgRequest,
   mockMessageSuccess,
@@ -256,7 +260,7 @@ describe("NotesManagerPage stage 46 list reliability", () => {
     })
 
     const latestRecentWrite = mockSetSetting.mock.calls
-      .filter(([setting]) => setting?.key === "tldw:notesRecentOpened")
+      .filter(([setting]) => setting?.key === "tldw:notesRecentOpened:test-notes-authority")
       .at(-1)
 
     expect(latestRecentWrite?.[1]).toEqual([])
@@ -348,7 +352,7 @@ describe("NotesManagerPage stage 46 list reliability", () => {
     })
 
     const latestRecentWrite = mockSetSetting.mock.calls
-      .filter(([setting]) => setting?.key === "tldw:notesRecentOpened")
+      .filter(([setting]) => setting?.key === "tldw:notesRecentOpened:test-notes-authority")
       .at(-1)
 
     expect(latestRecentWrite?.[1]).toEqual([])

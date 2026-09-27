@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from importlib import import_module
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from fastapi import FastAPI
@@ -164,7 +165,7 @@ def test_resolve_deep_dive_target_prefers_exact_locator_then_workspace_route_the
         "source_id": "note-2",
         "citation_ordinal": 1,
         "route_kind": "workspace_route",
-        "route": "/notes/note-2",
+        "route": "/notes?source_ref_id=note-2",
         "available": True,
         "fallback_reason": None,
     }
@@ -346,7 +347,7 @@ def test_build_flashcard_assistant_context_includes_pack_and_provenance_payload(
         "source_id": note_id,
         "citation_ordinal": 0,
         "route_kind": "exact_locator",
-        "route": f"/notes/{note_id}?locator=anchor%3Aslow-start",
+        "route": f"/notes?locator=anchor%3Aslow-start&source_ref_id={note_id}",
         "available": True,
         "fallback_reason": None,
     }
@@ -393,8 +394,33 @@ def test_flashcard_assistant_endpoint_returns_top_level_provenance_fields(
         "source_id": note_id,
         "citation_ordinal": 0,
         "route_kind": "exact_locator",
-        "route": f"/notes/{note_id}?locator=anchor%3Aaimd",
+        "route": f"/notes?locator=anchor%3Aaimd&source_ref_id={note_id}",
         "available": True,
         "fallback_reason": None,
     }
     assert payload["study_pack"] is None  # nosec B101
+
+
+@pytest.mark.parametrize("source_id", ["note-1", "note /?&雪"])
+@pytest.mark.parametrize(
+    "locator,expected_locator,route_kind",
+    [
+        (None, {}, "workspace_route"),
+        ({}, {}, "workspace_route"),
+        ({"note_id": "note-1"}, {"note_id": ["note-1"]}, "exact_locator"),
+        ({"section": "A&B", "empty": ""}, {"section": ["A&B"]}, "exact_locator"),
+        ({"source_ref_id": "wrong-note"}, {}, "exact_locator"),
+        ("anchor:slow-start", {"locator": ["anchor:slow-start"]}, "exact_locator"),
+    ],
+)
+def test_note_deep_dive_uses_registered_route_and_authoritative_source(
+    source_id, locator, expected_locator, route_kind
+):
+    target = _load_provenance_module().resolve_deep_dive_target(
+        [{"source_type": "note", "source_id": source_id, "locator": locator}]
+    )
+    route = urlsplit(target["route"])
+    assert route.path == "/notes"
+    assert parse_qs(route.query) == {**expected_locator, "source_ref_id": [source_id]}
+    assert target["route_kind"] == route_kind
+    assert target["source_id"] == source_id

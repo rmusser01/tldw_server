@@ -292,33 +292,22 @@ const confirmCharacterSwitchIfNeeded = async (
   await expect(modal).toBeHidden({ timeout: 15000 })
 }
 
+// Each test launches a fresh extension profile for one account. Require exactly
+// one owned assistant record so another account can never satisfy this probe.
 const readSelectedCharacterFromStorage = async (page: any) =>
   page.evaluate(async () => {
-    const read = (area: any) =>
-      new Promise<any>((resolve) => {
-        if (!area?.get) {
-          resolve(null)
-          return
-        }
-        area.get(["selectedCharacter"], (items: any) => {
-          resolve(items?.selectedCharacter ?? null)
-        })
-      })
-    const sync = (window as any)?.chrome?.storage?.sync
-      ? await read((window as any).chrome.storage.sync)
-      : null
-    const local = (window as any)?.chrome?.storage?.local
-      ? await read((window as any).chrome.storage.local)
-      : null
-    const value = local ?? sync
-    if (typeof value === "string") {
-      try {
-        return JSON.parse(value)
-      } catch {
-        return value
-      }
+    const area = (window as any).chrome?.storage?.local
+    if (!area?.get) return null
+    const items = await new Promise<Record<string, unknown>>(resolve => area.get(null, resolve))
+    const records = Object.entries(items).filter(([key]) => key.startsWith("selectedAssistant:owner:"))
+    if (records.length !== 1) return null
+    const [key, raw] = records[0]
+    let record: any = raw
+    if (typeof raw === "string") {
+      try { record = JSON.parse(raw) } catch { return null }
     }
-    return value
+    if (!record?.ownerKey || key !== `selectedAssistant:owner:${record.ownerKey}`) return null
+    return record.selection?.kind === "character" ? record.selection : null
   })
 
 const waitForGreeting = async (page: any, characterName: string) => {
@@ -657,36 +646,6 @@ test.describe("Playground character selection", () => {
       await setSelectedModel(page, selectedModelId)
       await dismissWorkflowHubIfVisible(page)
       await enterCharacterChatModeIfAvailable(page)
-      await page.evaluate(() => {
-        const w = window as any
-        if (w.__tldwStorageWrapped) return
-        w.__tldwStorageWrapped = true
-        w.__tldwStorageWrites = []
-        w.__tldwSelectedCharacterSnapshot = null
-        const wrap = (area: any, label: string) => {
-          if (!area?.set || area.__tldwWrapped) return
-          const original = area.set.bind(area)
-          area.__tldwWrapped = true
-          area.set = (items: Record<string, unknown>, callback?: () => void) => {
-            try {
-              w.__tldwStorageWrites.push({ label, items })
-              if (items && Object.prototype.hasOwnProperty.call(items, "selectedCharacter")) {
-                w.__tldwSelectedCharacterSnapshot = items.selectedCharacter
-              }
-            } catch {}
-            return original(items, callback)
-          }
-        }
-        try {
-          // @ts-ignore
-          const storage = chrome?.storage
-          wrap(storage?.sync, "sync")
-          wrap(storage?.local, "local")
-        } catch {
-          // ignore storage wrapping failures
-        }
-      })
-
       const composerInput = page.locator("#textarea-message")
       await expect(composerInput).toBeVisible({ timeout: 15000 })
 
@@ -728,7 +687,7 @@ test.describe("Playground character selection", () => {
           .info()
           .outputPath("character-storage-missing.json")
         fs.writeFileSync(debugPath, JSON.stringify(debugPayload, null, 2))
-        throw new Error("selectedCharacter was not stored after selection.")
+        throw new Error("An owned Character assistant was not stored after selection.")
       }
       expect(String(storageSnapshot.id)).toBe(String(character.id))
 

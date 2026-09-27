@@ -2,6 +2,16 @@
 
 This guide shows example configurations for running tldw_server behind a reverse proxy with TLS and WebSocket support.
 
+These are custom, non-production examples. The reviewed production boundary is
+the [production reference deployment](Production_Reference_Deployment.md) with
+`Dockerfiles/Production/Caddyfile`; do not treat a legacy overlay or copied
+snippet as a substitute for that standalone reference.
+
+Checked-in starting points:
+
+- Caddy: `Helper_Scripts/Samples/Caddy/Caddyfile.compose`
+- Nginx: `Helper_Scripts/Samples/Nginx/nginx.conf`
+
 Important endpoints needing WebSocket upgrade:
 - `/api/v1/audio/stream/transcribe`
 - `/api/v1/mcp/*`
@@ -71,7 +81,7 @@ services:
     image: nginx:stable
     volumes:
       # Use the provided sample and adjust paths/domains
-      - ./Samples/Nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./Helper_Scripts/Samples/Nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
     ports:
       - "443:443"
@@ -129,7 +139,8 @@ Notes
 - Adjust timeouts using Traefik middleware if needed for long-lived streaming.
 
 Sample dynamic config file
-- See `Samples/Traefik/traefik-dynamic.yml` for a ready-to-copy dynamic configuration. Mount it into Traefik, for example:
+- See `Helper_Scripts/Samples/Traefik/traefik-dynamic.yml` for a ready-to-copy
+  non-production dynamic configuration. Mount it into Traefik, for example:
 
 ```yaml
 services:
@@ -145,7 +156,7 @@ services:
       - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ./Samples/Traefik:/etc/traefik/dynamic:ro
+      - ./Helper_Scripts/Samples/Traefik:/etc/traefik/dynamic:ro
       - ./letsencrypt:/letsencrypt
     ports:
       - "80:80"

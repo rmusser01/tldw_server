@@ -5,7 +5,8 @@ import type {
   ScheduledTask,
   ScheduledTaskAuditEventResponse,
   ScheduledTaskDefinitionResponse,
-  ScheduledTaskPreviewResponse
+  ScheduledTaskPreviewResponse,
+  ScheduledTaskRunResponse
 } from "@/services/scheduled-tasks-control-plane"
 import {
   formatScheduledTaskTimestamp,
@@ -23,6 +24,8 @@ export interface ScheduledTaskDetailDrawerProps {
   task: ScheduledTask | null
   latestResult?: ScheduledTaskResultItem | null
   automationDefinition?: ScheduledTaskDefinitionResponse | null
+  automationRuns?: ScheduledTaskRunResponse[]
+  automationResults?: ScheduledTaskResultItem[]
   automationPreviewHistory?: ScheduledTaskPreviewResponse[]
   automationAuditEvents?: ScheduledTaskAuditEventResponse[]
   onClose: () => void
@@ -33,6 +36,9 @@ export interface ScheduledTaskDetailDrawerProps {
   onResumeAutomationDefinition?: (task: ScheduledTask) => void
   onArchiveAutomationDefinition?: (task: ScheduledTask) => void
   onDuplicateAutomationDefinition?: (task: ScheduledTask) => void
+  onRunAutomationDefinition?: (task: ScheduledTask) => void
+  onMarkAutomationDefinitionSolved?: (task: ScheduledTask) => void
+  onReopenAutomationDefinition?: (task: ScheduledTask) => void
 }
 
 const WATCHLISTS_WORKSPACE_COPY =
@@ -117,7 +123,11 @@ const renderTaskActions = ({
   onPauseAutomationDefinition,
   onResumeAutomationDefinition,
   onArchiveAutomationDefinition,
-  onDuplicateAutomationDefinition
+  onDuplicateAutomationDefinition,
+  onRunAutomationDefinition,
+  onMarkAutomationDefinitionSolved,
+  onReopenAutomationDefinition,
+  automationDefinition
 }: {
   task: ScheduledTask
   onEditReminder: (task: ScheduledTask) => void
@@ -127,6 +137,10 @@ const renderTaskActions = ({
   onResumeAutomationDefinition?: (task: ScheduledTask) => void
   onArchiveAutomationDefinition?: (task: ScheduledTask) => void
   onDuplicateAutomationDefinition?: (task: ScheduledTask) => void
+  onRunAutomationDefinition?: (task: ScheduledTask) => void
+  onMarkAutomationDefinitionSolved?: (task: ScheduledTask) => void
+  onReopenAutomationDefinition?: (task: ScheduledTask) => void
+  automationDefinition?: ScheduledTaskDefinitionResponse | null
 }): React.ReactNode => {
   if (isNativeReminderTask(task)) {
     return (
@@ -146,6 +160,7 @@ const renderTaskActions = ({
       typeof task.source_ref?.["lifecycle"] === "string" ? task.source_ref["lifecycle"] : task.status
     const isPaused = lifecycle === "paused"
     const isArchived = lifecycle === "archived"
+    const isSolved = automationDefinition?.resolution_state === "solved"
 
     return (
       <Space wrap>
@@ -155,6 +170,12 @@ const renderTaskActions = ({
           disabled={!onEditAutomationDefinition}
         >
           Edit definition
+        </Button>
+        <Button
+          onClick={() => onRunAutomationDefinition?.(task)}
+          disabled={!onRunAutomationDefinition || isArchived || isSolved}
+        >
+          Run now
         </Button>
         {isPaused ? (
           <Button
@@ -185,6 +206,21 @@ const renderTaskActions = ({
         >
           Duplicate definition
         </Button>
+        {isSolved ? (
+          <Button
+            onClick={() => onReopenAutomationDefinition?.(task)}
+            disabled={!onReopenAutomationDefinition}
+          >
+            Reopen
+          </Button>
+        ) : (
+          <Button
+            onClick={() => onMarkAutomationDefinitionSolved?.(task)}
+            disabled={!onMarkAutomationDefinitionSolved || isArchived}
+          >
+            Mark solved
+          </Button>
+        )}
       </Space>
     )
   }
@@ -208,6 +244,8 @@ export const ScheduledTaskDetailDrawer: React.FC<ScheduledTaskDetailDrawerProps>
   task,
   latestResult = null,
   automationDefinition = null,
+  automationRuns = [],
+  automationResults = [],
   automationPreviewHistory = [],
   automationAuditEvents = [],
   onClose,
@@ -217,7 +255,10 @@ export const ScheduledTaskDetailDrawer: React.FC<ScheduledTaskDetailDrawerProps>
   onPauseAutomationDefinition,
   onResumeAutomationDefinition,
   onArchiveAutomationDefinition,
-  onDuplicateAutomationDefinition
+  onDuplicateAutomationDefinition,
+  onRunAutomationDefinition,
+  onMarkAutomationDefinitionSolved,
+  onReopenAutomationDefinition
 }) => {
   const productStatus = task ? getScheduledTaskProductStatus(task) : null
   const isAutomationTask = task ? isAutomationDefinitionTask(task) : false
@@ -279,6 +320,9 @@ export const ScheduledTaskDetailDrawer: React.FC<ScheduledTaskDetailDrawerProps>
                 <Descriptions.Item label="Definition health">
                   {automationDefinition.health}
                 </Descriptions.Item>
+                <Descriptions.Item label="Resolution">
+                  {automationDefinition.resolution_state ?? "open"}
+                </Descriptions.Item>
                 <Descriptions.Item label="Definition schedule">
                   {stringifyCompact(automationDefinition.schedule)}
                 </Descriptions.Item>
@@ -310,7 +354,11 @@ export const ScheduledTaskDetailDrawer: React.FC<ScheduledTaskDetailDrawerProps>
                 onPauseAutomationDefinition,
                 onResumeAutomationDefinition,
                 onArchiveAutomationDefinition,
-                onDuplicateAutomationDefinition
+                onDuplicateAutomationDefinition,
+                onRunAutomationDefinition,
+                onMarkAutomationDefinitionSolved,
+                onReopenAutomationDefinition,
+                automationDefinition
               })}
             </Space>
           </div>
@@ -318,8 +366,36 @@ export const ScheduledTaskDetailDrawer: React.FC<ScheduledTaskDetailDrawerProps>
           {isAutomationTask ? (
             <>
               <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-                Execution is not available yet
+                Runs and results are available here when this server supports the Scheduled Tasks execution API.
               </Typography.Paragraph>
+              <div>
+                <Typography.Title level={5}>Run history</Typography.Title>
+                {automationRuns.length > 0 ? (
+                  <Space orientation="vertical" size={4}>
+                    {automationRuns.map((run) => (
+                      <Typography.Text key={run.id}>
+                        {run.id} · {run.status} · {run.outcome}
+                      </Typography.Text>
+                    ))}
+                  </Space>
+                ) : (
+                  <Typography.Text type="secondary">No runs loaded.</Typography.Text>
+                )}
+              </div>
+              <div>
+                <Typography.Title level={5}>Results</Typography.Title>
+                {automationResults.length > 0 ? (
+                  <Space orientation="vertical" size={4}>
+                    {automationResults.map((result) => (
+                      <Typography.Text key={result.id}>
+                        {result.title} · {result.reviewState ?? "unread"}
+                      </Typography.Text>
+                    ))}
+                  </Space>
+                ) : (
+                  <Typography.Text type="secondary">No results loaded.</Typography.Text>
+                )}
+              </div>
               <div>
                 <Typography.Title level={5}>Preview history</Typography.Title>
                 {automationPreviewHistory.length > 0 ? (

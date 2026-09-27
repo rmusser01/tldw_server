@@ -139,10 +139,11 @@ class ExternalServerDefinition(BaseModel):
 
     id: str
     name: str
-    transport: Literal["stdio", "websocket"]
+    transport: Literal["stdio", "websocket", "streamable_http", "sse"]
     command: list[str] = Field(default_factory=list)
     url: str | None = None
     cwd: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
     env_allowlist: list[str] = Field(default_factory=list)
     credential_slots: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -158,7 +159,7 @@ class ExternalServerDefinition(BaseModel):
         """Treat explicit null list fields as omitted safe defaults."""
         return _copy_list(value)
 
-    @field_validator("metadata", "provenance", mode="before")
+    @field_validator("metadata", "provenance", "headers", mode="before")
     @classmethod
     def _coerce_mapping(cls, value: Any) -> dict[str, Any]:
         """Treat explicit null mapping fields as omitted safe defaults."""
@@ -177,8 +178,8 @@ class ExternalServerDefinition(BaseModel):
             return self
         if self.transport == "stdio" and not self.command:
             raise ValueError("stdio transport requires a non-empty command")
-        if self.transport == "websocket" and not self.url:
-            raise ValueError("websocket transport requires a non-empty url")
+        if self.transport in ("websocket", "streamable_http", "sse") and not self.url:
+            raise ValueError(f"{self.transport} transport requires a non-empty url")
         return self
 
 

@@ -1,0 +1,99 @@
+---
+id: TASK-12987
+title: Add dedicated audio.cpp batch STT provider
+status: Done
+assignee: []
+created_date: '2026-07-26 03:27'
+updated_date: '2026-07-26 15:04'
+labels:
+  - stt
+  - benchmark
+  - audio-cpp
+dependencies: []
+references:
+  - Docs/superpowers/specs/2026-07-25-audio-cpp-batch-stt-provider-design.md
+  - >-
+    Docs/superpowers/plans/2026-07-25-audio-cpp-batch-stt-provider-implementation-plan.md
+  - 'https://github.com/0xShug0/audio.cpp/blob/main/app/server/README.md'
+priority: medium
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Add a first-class external-server-only audio.cpp STT adapter and provider registration. The adapter must connect to a user-managed audiocpp_server, validate the pinned HTTP contract, support ordinary batch transcription and the native STT benchmark, and never download, build, launch, restart, terminate, or silently fall back from audio.cpp.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 Registers canonical audio-cpp provider with audiocpp and audio_cpp aliases.
+- [x] #2 Uses network-free planning followed by consent-gated health/model discovery and WAV multipart transcription.
+- [x] #3 Records descriptive audio.cpp backend/model metadata while leaving weight identity unresolved and policy gates ineligible.
+- [x] #4 Supports strict and normalized benchmark scoring with separate cold-first and warm timing.
+- [x] #5 Normal CI uses fake transports and upstream-shaped fixtures; live audio.cpp coverage is opt-in.
+- [x] #6 Configuration and user documentation describe setup, limitations, network consent, and true cold-start procedure.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Follow Docs/superpowers/plans/2026-07-25-audio-cpp-batch-stt-provider-implementation-plan.md task-by-task using TDD, focused commits, independent review, Bandit, and PR gates.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-07-25: Human-approved external-server-only design is recorded in Docs/superpowers/specs/2026-07-25-audio-cpp-batch-stt-provider-design.md. Scope is WAV batch transcription, network-free planning, consent-gated discovery, unresolved weight identity, and no fallback, retry, download, conversion, or process supervision. Independent design review and re-review approved the hardened spec.
+
+The approved implementation plan is Docs/superpowers/plans/2026-07-25-audio-cpp-batch-stt-provider-implementation-plan.md. Independent plan review led to cross-event-loop single-flight cache semantics, raw-origin path validation, and complete declared PCM-payload validation. Plan re-review approved it. Execution uses subagent-driven TDD with spec and quality reviews per task.
+
+Task 1 complete at 2c7058d348. TDD RED: 8 expected failures and 2 passes from missing metadata opt-in. GREEN: 15 finalizer tests and 107 adapter tests; Ruff, scoped Bandit, compile, and diff checks clean. Spec review approved. Quality review approved after isolating the 9-key allowlist regression from metadata-size validation.
+
+Task 2 complete at d9d4e52d7112a3885ce1258a88e07f7c96668d0a. Initial TDD RED covered the missing module and selector behavior. Review-driven RED then confirmed 6 origin boundary-whitespace failures, 2 host-validation failures (IPvFuture and 254-character DNS), and 1 leaked exploding-__float__ failure. GREEN: 127 dedicated audio.cpp tests and 12 config regressions; Ruff, compileall, diff check, and scoped Bandit with 0 findings. Independent spec re-review returned Spec compliant; independent quality re-review found no issues and approved proceeding. Commit scope is exactly the five planned Task 2 files.
+
+Active stage: Task 3, bounded pinned audio.cpp HTTP response contract and strict PCM RIFF/WAVE validation. No HTTP execution, discovery cache, or adapter registration is in scope for this stage.
+
+Task 3 complete at 6046350092. TDD evidence: initial contract/WAV RED 54 failures plus 1 provenance pass, then 55 GREEN; clarified boundary RED 16 then GREEN 16; JSON exception RED/GREEN 1; wave.open mandate RED/GREEN 1; quality-fix selection RED 3 of 9 with 6 characterization passes, then 9 GREEN. Final full module 195 passed. Ruff format/check, compileall, git diff checks, and scoped Bandit (0 findings/errors) passed. Spec review first required replacing the bespoke RIFF parser with standard wave.open; amended re-review passed. Quality review found relative-base duplication and a potentially hanging FIFO regression plus four test-hardening items; all were fixed, and final spec and quality re-reviews approved with no remaining issues. Scope is exactly the three planned Task 3 files and contains no HTTP/cache/adapter behavior. Active stage: Task 4, secure discovery single-flight cache and no-retry multipart execution over an injected fakeable transport.
+
+Task 4 quality-review fix pass: verified and addressed seven Important findings plus both Minor findings with TDD. RED evidence: 30 selected regressions produced 20 expected failures/10 characterization passes, demonstrating unconsumed cancelled-follower exceptions, single-cancel cleanup, loop-keyed default client leakage risk, same-loop sync deadlock risk, omitted frozen-route invariants, post-buffer response limits, status-after-body classification, timing-based cross-loop tests, and synchronous WAV validation. A separate cancellation-handoff RED showed an off-loop WAV handle could be abandoned after caller cancellation. GREEN implementation adds identity-safe leader-loop tracking and fail-fast, consumes follower wrapper exceptions without cancelling shared work, cancellation-hardened response/client/WAV cleanup, one trust_env=False exact-transport client per real transcription, complete route invariant checks, status-before-content handling, off-loop leak-free WAV validation, deterministic event-based cross-loop tests, and an opt-in decoded-body streaming limit in afetch that skips non-2xx bodies (including the HTTPX error-body hook) and observes at most limit+1 bytes. Verification: 487 audio.cpp + full HTTP-client tests passed; Ruff passed on new/changed scope (existing http_client TRY203 and legacy test import-order baselines excluded); compileall and git diff --check passed; Bandit scanned both touched production files with 0 findings.
+
+Task 4 second quality-review fix pass: strict TDD RED selected 8 bounded-transport regressions with 5 expected failures and 3 characterization passes. Failures proved HTTPX and aiohttp consumed compressed 2xx bodies, bounded requests did not override caller Accept-Encoding, and aiohttp did not disable auto-decompression. GREEN forces Accept-Encoding identity, disables aiohttp auto-decompression only for bounded calls, rejects encoded 2xx responses before body iteration, reconstructs loaded HTTPX responses before restoring copied original headers, skips encoded non-2xx bodies while preserving usable status/headers, retains exact limit+1 streaming bounds, and marks diagnostic cross-loop threads daemon while keeping release/join cleanup. Verification: focused 8 passed; full audio.cpp plus HTTP-client suites 491 passed; Ruff lint clean with documented legacy TRY203/I001 exclusions; compileall and git diff --check clean; Bandit scanned 6506 LOC across both Task 4 production modules with 0 findings/errors. Whole-file Ruff formatting remains a pre-existing baseline and was not mechanically rewritten.
+
+Task 4 final hardening after quality approval: bounded HTTPX identity responses now use raw iteration, reject the first boundary-crossing transport chunk before copying it, and never allocate an extra decoded rechunk buffer. The regression distinguishes raw from decoded iteration, uses an oversized first chunk plus an unconsumed sentinel, and clarifies that the application accumulator is bounded while transport-owned chunk allocation remains the HTTP transport's responsibility. Main-agent verification: 7 focused bounded-response tests passed; full audio.cpp plus HTTP-client suites passed 492/492; focused Ruff passed with only documented legacy TRY203/I001 exclusions; Bandit remained 0 findings/errors over the touched production scope. Task 4 final HEAD will be amended with this hardening. Active stage after final re-review: Task 5 provider registration and immutable planning.
+
+Task 5 started at clean HEAD 15e1be89f5. Scope: register AudioCppAdapter and enforce network-free immutable planning with canonical/aliased selector normalization. TDD RED will cover registration, strict lookup, disabled discovery, selector precedence/defaults, reset hook, frozen runtime authorization, unsupported semantics, no config/network reread, and pre-I/O mismatch rejection.
+
+Task 5 implementation pass ready for independent spec/quality review. Corrected initial RED: 290 selected tests produced 26 expected failures and 264 characterization passes from missing enum/adapter/registration/selector/reset behavior. Additional self-review RED/GREEN: exact runtime snapshot enforcement failed 1 of 2 then passed 2/2; invalid prefixed selectors demonstrated 3/3 fallback failures then passed 3/3 after moving audio.cpp resolution outside the legacy Whisper fallback boundary. Final GREEN: 504/504 across test_audio_cpp_stt.py, test_stt_provider_adapter.py, and test_stt_execution_plan_network.py. Implementation registers canonical audio-cpp plus audiocpp/audio_cpp aliases, network-free neutral-v1 planning, exact six-key metadata opt-in, frozen origin/model/timeout/transport, unresolved no-download routes, config-free planned execution, ordinary selector normalization, strict fail-closed resolution, and registry cache reset. The required network regression exposed one pre-existing VibeVoice test helper that had not accepted Task 1's metadata_allowlist keyword; the minimal two-line test-only compatibility update is included in test_stt_execution_plan_network.py. Verification: Ruff check clean on all touched Python files; compileall and git diff --check clean; scoped Bandit JSON reports 0 errors and 0 findings. Whole-file Ruff format check remains a pre-existing baseline on the same files (confirmed against HEAD), so no unrelated mechanical rewrite was performed. Self-review found no raw origin serialization, secret fields, network I/O during planning, config reread during planned execution, fallback/retry/download path, or selector collision remaining.
+
+Task 5 independent quality review fix: verified case-insensitive provider routing exposed a case-sensitive normalize_audio_cpp_model boundary in no-plan execution. TDD RED: focused selector/no-plan suite had 9 expected uppercase canonical/alias failures and 10 lowercase/control passes. Minimal fix lowercases only the selector comparison while preserving the exact server model suffix. GREEN: focused 19/19; exact Task 5 three-file regression 513/513. Quality gates: Ruff clean, compileall clean, git diff --check clean, scoped Bandit 0 errors/0 findings. Separate follow-up commit pending.
+
+Task 5 test-quality follow-up: made selector normalization cases explicit input/expected pairs. Added mixed-case suffix preservation coverage (AUDIO-CPP:Whisper-Small -> Whisper-Small) through normalize_audio_cpp_model and ordinary/no-plan AudioCppAdapter.transcribe_batch, plus uppercase exact AUDIO-CPP/AUDIOCPP/AUDIO_CPP selectors resolving to configured Default-Model through transcribe_batch. No production changes were needed. Verification: focused selector suite 24/24; exact three-file Task 5 regression 518/518; Ruff and git diff --check clean. Bandit not rerun because this follow-up changes tests and Backlog evidence only.
+
+Task 6 implementation pass: added ordinary POST /api/v1/audio/transcriptions coverage using a generated WAV, audio-cpp:whisper-small, the real SttProviderRegistry/AudioCppAdapter, and only the dedicated audio.cpp transcription boundary faked. The test proves canonical audio-cpp adapter selection, whisper-small normalization, response text preservation, canonical WAV delivery, and no fallback lookup. Added real-adapter benchmark preflight coverage proving missing network consent fails, explicit consent succeeds with unresolved/no-download routing, and persisted execution-contract JSON exposes only the opaque endpoint ID rather than audio_cpp_origin or its URL. Added audio.cpp worker classification/scoring coverage proving whitespace-only text becomes status=empty with an empty hypothesis and 100% deletion score rather than adapter_error. Initial targeted runs passed as characterization (API 1/1; benchmark selection 5/5), so no production dispatcher change was justified. Fresh verification: API audio_cpp 1/1; complete test_stt_bench plus integration 400/400; compileall and git diff --check clean. Ruff passes all non-I001 rules; changed scope has exactly the same 8 pre-existing I001 findings as HEAD and none in new blocks. Bandit skipped because Task 6 changes tests and Backlog evidence only.
+
+Task 7 documentation pass complete: added the user-managed audio.cpp operator workflow, protocol contract, compact benchmark README guidance, and CPU/GPU setup links; refreshed the three published mirrors. Corrected the protocol artifact lifecycle so run.json/results.jsonl are authoritative after run and report creates summary.json/summary.md. Audited the existing guide and retained its supported parakeet target plus the exact external=external:<provider> syntax. Verification: new documentation contract tests 5/5 passed; existing relevant documentation suites 64/64 passed; stt_bench.py run --help succeeded with --allow-network-targets; published mirrors are byte-identical; git diff --check clean. Mirror refresh produced only the three expected published-guide diffs. Bandit skipped because this task changes documentation and documentation tests only.
+
+Task 7 quality-review follow-up started: verified audio-cpp=audio-cpp already fails coordinator preflight, but nested canonical/alias selector-prefixed benchmark models can currently be normalized by AudioCppAdapter.plan_batch_execution and bypass exact requested-model comparison. Scope is direct planner and native preflight regressions, strict exact benchmark model validation while preserving ordinary no-plan selector behavior, corrected result-persistence/privacy documentation, mirrors, and focused/full verification.
+
+Task 7 quality-review follow-up complete: direct audio.cpp planning now requires a safe exact server model ID and rejects canonical/alias selector tokens plus selector-prefixed forms case-insensitively. Ordinary no-plan transcription still accepts canonical/alias prefixed and exact selectors by normalizing them against one validated config snapshot before building the immutable plan. TDD RED: 18/18 expected failures (12 direct planner, 6 native preflight). Focused GREEN: 29/29. Full selector/API/network suite: 539/539 passed. Full benchmark plus integration suite: 406/406 passed. Documentation/mirror suite: 70/70 passed. Documentation now records only requested/resolved model labels, generic audio_cpp_http route/egress, and opaque endpoint as persisted identity; discovered backend/family/mode are request-local and not persisted to benchmark results. The audio.cpp command uses errors-only retention with an explicit privacy warning. Published refresh reran; the changed user guide is byte-identical to its mirror and unchanged CPU/GPU guides remain byte-identical to theirs. Ruff, compileall, and git diff --check passed. Scoped Bandit scanned 3852 LOC across the two touched production files with 0 errors and 0 findings. No live audio.cpp binary/model was required.
+
+Task 8 complete after rebasing cleanly onto current origin/dev. Final feature matrix: 951 passed with 10 warnings. Adjacent changed tests: 240 passed, 1 optional environment skip. Documentation regressions: 46 passed. CLI help succeeded. Changed-file pre-commit hooks and git diff checks passed. Bandit reported zero findings across the full touched production scope; the final event-loop fix scan also reported zero findings across 1,384 LOC. Independent complete-diff review ran 1,023 focused tests and found one P2 event-loop issue. TDD demonstrated the blocking failure, commit 6954f0f107 offloaded audio.cpp endpoint transcription, and focused re-review approved it after 330 tests with compile, diff, and Bandit clean. The final focused test matrix remained 951 passed. A live smoke was intentionally skipped because no operator-managed audio.cpp server, exact model, authorized WAV, and explicit runtime consent were supplied. PR #2759 remains based on dev and requires the requesters own human-written Change summary before merge. Audio.cpp commits after rebase: 20d125679d, 9624acb036, 61e0c4935d, 9f0d99afd4, f301458f90, f3650520e6, c70b0ceb92, af40daddf8, 7d8226bbc7, 76ceb0617c, 7cd2e79906, 6954f0f107.
+
+Final PR refresh: dev advanced again to d710e5a5ee, so the branch was rebased a second time. One ci.yml conflict was an already-upstreamed ShellCheck annotation; resolution kept the newer dev workflow plus this PRs benchmark test-directory additions. Post-rebase feature verification remained 951 passed with 10 warnings, git diff --check passed, and the branch is 0 behind origin/dev. A 72-test CI workflow-contract sweep produced 70 passes and 2 failures; both failures reproduced unchanged in a detached origin/dev worktree and concern the newly upstreamed preflight-python-310 job, while its dedicated contract test passed. Actionlint was unavailable locally. Final current audio.cpp/closeout commits are 8f6639fdd8, 70d5fc2120, f85d6e4c35, 5e9b3b86a5, a125a05cc3, 5d1c8ae262, c626dd17ec, 408e7a4d11, d358d7c577, 7d669d5f79, 297c7dfc27, 7b171275ef, 515f52bfbf, and e3d823b839.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added a first-class external-server-only audio.cpp batch STT provider for ordinary OpenAI-compatible transcription and the native deterministic benchmark. The implementation provides canonical and alias registration, strict configuration and selectors, immutable network-free planning, explicit benchmark network consent, pinned health/model/transcription contract parsing, secure bounded HTTP execution, strict WAV handling, unresolved weight identity, cold-first and warm timing, deterministic strict and normalized scoring integration, fake-transport coverage, operator documentation, and an event-loop-safe API path. All focused verification and independent review gates passed; live execution remains opt-in and PR merge remains blocked until the requester supplies the required human-authored Change summary.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

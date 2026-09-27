@@ -48,6 +48,15 @@ class _RepoBackedWorkerDB:
         self.upsert_calls.append(kwargs)
         return {"email_message_id": 901}
 
+    def get_media_by_id(self, media_id: int, **_kwargs: Any) -> dict[str, Any]:
+        return dict(_FakeMediaRepository.calls[media_id - 1])
+
+    def get_document_version(self, media_id: int, **_kwargs: Any) -> dict[str, Any]:
+        return {"safe_metadata": _FakeMediaRepository.calls[media_id - 1]["safe_metadata"]}
+
+    def execute_query(self, _query: str, _params: Any) -> Any:
+        return SimpleNamespace(fetchone=lambda: None)
+
 
 class _FakeMediaRepository:
     calls: list[dict[str, Any]] = []

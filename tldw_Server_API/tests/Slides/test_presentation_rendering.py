@@ -1,25 +1,25 @@
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from PIL import Image, ImageChops
 
 from tldw_Server_API.app.core.Slides.presentation_rendering import (
-    MAX_RENDER_SLIDES,
-    MAX_RENDER_SLIDE_DURATION_SECONDS,
-    PresentationRenderError,
     _TRANSITION_DURATION_SECONDS,
+    MAX_RENDER_SLIDE_DURATION_SECONDS,
+    MAX_RENDER_SLIDES,
+    PresentationRenderError,
     _build_transition_video_command,
-    load_presentation_render_snapshot,
     _probe_media_duration_seconds,
+    _render_slide_frame,
     _resolve_effective_slide_duration_seconds,
     _resolve_ffmpeg_timeout_seconds,
     _resolve_slide_audio_duration_seconds,
     _resolve_slide_transition_filter,
-    _render_slide_frame,
     _run_ffmpeg_command,
+    load_presentation_render_snapshot,
     render_presentation_video,
 )
 
@@ -49,6 +49,7 @@ def test_render_slide_frame_draws_slide_text_content(tmp_path):
 
 def test_load_presentation_render_snapshot_accepts_richer_style_snapshot_metadata():
     db = SimpleNamespace(
+        get_presentation_kind=lambda *_args, **_kwargs: SimpleNamespace(content_kind="structured_slides"),
         get_presentation_version=lambda **kwargs: SimpleNamespace(
             payload_json=json.dumps(
                 {
@@ -73,7 +74,7 @@ def test_load_presentation_render_snapshot_accepts_richer_style_snapshot_metadat
                     },
                 }
             )
-        )
+        ),
     )
 
     snapshot = load_presentation_render_snapshot(
@@ -93,21 +94,39 @@ def test_load_presentation_render_snapshot_accepts_richer_style_snapshot_metadat
     }
 
 
+def test_load_snapshot_rejects_standalone_before_loading_or_parsing_version_payload():
+    version_loads: list[str] = []
+
+    def _version_must_not_load(**_kwargs):
+        version_loads.append("loaded")
+        raise AssertionError("standalone source payload must not be loaded")
+
+    db = SimpleNamespace(
+        get_presentation_kind=lambda *_args, **_kwargs: SimpleNamespace(content_kind="standalone_html"),
+        get_presentation_version=_version_must_not_load,
+    )
+
+    with pytest.raises(
+        PresentationRenderError,
+        match="operation_not_supported_for_content_kind",
+    ) as rejected:
+        load_presentation_render_snapshot(
+            db,
+            presentation_id="html-deck",
+            presentation_version=1,
+        )
+
+    assert rejected.value.code == "operation_not_supported_for_content_kind"
+    assert version_loads == []
+
+
 def test_resolve_slide_audio_duration_prefers_metadata_and_probes_asset_when_needed(monkeypatch, tmp_path):
     audio_path = tmp_path / "slide.wav"
     audio_path.write_bytes(b"audio")
 
     assert (
         _resolve_slide_audio_duration_seconds(
-            {
-                "metadata": {
-                    "studio": {
-                        "audio": {
-                            "duration_ms": 18_000
-                        }
-                    }
-                }
-            },
+            {"metadata": {"studio": {"audio": {"duration_ms": 18_000}}}},
             audio_path=None,
         )
         == 18.0
@@ -120,15 +139,7 @@ def test_resolve_slide_audio_duration_prefers_metadata_and_probes_asset_when_nee
 
     assert (
         _resolve_slide_audio_duration_seconds(
-            {
-                "metadata": {
-                    "studio": {
-                        "audio": {
-                            "asset_ref": "output:1"
-                        }
-                    }
-                }
-            },
+            {"metadata": {"studio": {"audio": {"asset_ref": "output:1"}}}},
             audio_path=audio_path,
         )
         == 12.5
@@ -154,9 +165,7 @@ def test_probe_media_duration_logs_ffprobe_failures(monkeypatch, tmp_path):
     )
 
     assert _probe_media_duration_seconds(media_path) is None
-    assert logged_messages == [
-        f"ffprobe duration probe failed for {media_path}: ffprobe timed out after 5 seconds"
-    ]
+    assert logged_messages == [f"ffprobe duration probe failed for {media_path}: ffprobe timed out after 5 seconds"]
 
 
 def test_resolve_effective_slide_duration_and_transition_filter():
@@ -194,10 +203,7 @@ def test_build_transition_video_command_offsets_xfade_after_prior_cut_boundaries
     filter_complex = command[filter_index]
 
     assert "concat=n=2:v=1:a=0" in filter_complex
-    assert (
-        f"xfade=transition=wipeleft:duration={_TRANSITION_DURATION_SECONDS:.2f}:offset=9.00"
-        in filter_complex
-    )
+    assert f"xfade=transition=wipeleft:duration={_TRANSITION_DURATION_SECONDS:.2f}:offset=9.00" in filter_complex
 
 
 def test_render_presentation_video_builds_slide_segments_from_visuals_and_audio(tmp_path, monkeypatch):
@@ -269,7 +275,7 @@ def test_render_presentation_video_builds_slide_segments_from_visuals_and_audio(
                 "content": "Point A\nPoint B",
                 "speaker_notes": "Longer narration for the second slide",
                 "metadata": {},
-            }
+            },
         ],
         output_format="mp4",
         output_dir=tmp_path,
@@ -290,9 +296,7 @@ def test_render_presentation_video_builds_slide_segments_from_visuals_and_audio(
     assert result.byte_size == len(b"video-bytes")
 
 
-def test_render_presentation_video_pads_narrated_cut_only_segments_to_manual_duration(
-    tmp_path, monkeypatch
-):
+def test_render_presentation_video_pads_narrated_cut_only_segments_to_manual_duration(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Slides.presentation_rendering._resolve_ffmpeg_path",
         lambda: "/usr/bin/ffmpeg",
@@ -359,9 +363,7 @@ def test_render_presentation_video_pads_narrated_cut_only_segments_to_manual_dur
     assert "concat" in captured_commands[1]
 
 
-def test_render_presentation_video_uses_filtered_transition_assembly_for_transitioned_decks(
-    tmp_path, monkeypatch
-):
+def test_render_presentation_video_uses_filtered_transition_assembly_for_transitioned_decks(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Slides.presentation_rendering._resolve_ffmpeg_path",
         lambda: "/usr/bin/ffmpeg",
@@ -432,9 +434,7 @@ def test_render_presentation_video_uses_filtered_transition_assembly_for_transit
         if "-filter_complex" in command and any("xfade=transition=wipeleft" in part for part in command)
     ]
     assert transition_commands
-    visual_segment_commands = [
-        command for command in captured_commands if "-loop" in command and "-an" in command
-    ]
+    visual_segment_commands = [command for command in captured_commands if "-loop" in command and "-an" in command]
     assert visual_segment_commands
     first_visual = visual_segment_commands[0]
     duration_index = first_visual.index("-t") + 1

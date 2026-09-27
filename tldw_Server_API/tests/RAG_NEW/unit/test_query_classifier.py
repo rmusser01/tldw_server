@@ -1,14 +1,23 @@
+import asyncio
 import io
 
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+)
 from tldw_Server_API.app.core.RAG.rag_service.query_classifier import (
     _parse_classification_response,
+    classify_and_reformulate,
     classify_query,
     reformulate_query,
 )
-
+from tldw_Server_API.tests.RAG_NEW.unit.test_generation_executor import (
+    _install_blocking_sync_chat_adapter,
+    _install_explicit_chat_capture,
+    _RecordingCredentialRuntime,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -103,3 +112,223 @@ async def test_reformulate_query_fallback_log_sanitizes_llm_exception(monkeypatc
     assert "sk-reformulate-secret" not in log_output
     assert "/Users/example/private/prompts/history.txt" not in log_output
     assert "reformulation failed with token" not in log_output
+
+
+@pytest.mark.asyncio
+async def test_classify_query_uses_explicit_runtime_credentials(monkeypatch):
+    runtime = _RecordingCredentialRuntime()
+    stage_metadata: dict[str, object] = {}
+    captured = _install_explicit_chat_capture(
+        monkeypatch,
+        (
+            '{"skip_search":false,"search_local_db":true,"search_web":false,'
+            '"search_academic":false,"search_discussions":false,'
+            '"standalone_query":"credential runtime research",'
+            '"detected_intent":"factual","confidence":0.9,'
+            '"reasoning":"requires retrieval"}'
+        ),
+    )
+
+    result = await classify_query(
+        "credential runtime research",
+        llm_provider="anthropic",
+        llm_model="claude-test",
+        credential_runtime=runtime,
+        stage_metadata=stage_metadata,
+    )
+
+    assert result.reasoning == "requires retrieval"
+    assert runtime.resolved == ["anthropic"]
+    assert runtime.resolved_models == ["claude-test"]
+    assert runtime.marked == [runtime.handle]
+    assert captured["kwargs"]["api_key"] == "runtime-only-key"
+    assert captured["kwargs"]["app_config"] == runtime.handle.app_config
+    assert captured["kwargs"]["credentials_resolved"] is True
+    assert captured["kwargs"][PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY] is runtime.handle
+    assert stage_metadata == {"verification_available": True}
+
+
+@pytest.mark.asyncio
+async def test_classify_query_runtime_failure_lowers_trust_without_detail():
+    class FailingRuntime:
+        async def resolve(self, _provider):
+            raise RuntimeError("secret-key /private/credential-store.db")
+
+    stage_metadata: dict[str, object] = {}
+    result = await classify_query(
+        "latest credential runtime research",
+        llm_provider="anthropic",
+        llm_model="claude-test",
+        credential_runtime=FailingRuntime(),
+        stage_metadata=stage_metadata,
+    )
+
+    assert result.confidence <= 0.5
+    assert result.reasoning == "provider_unavailable"
+    assert stage_metadata == {
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+    assert "secret-key" not in str(result)
+    assert "/private/" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_reformulate_query_runtime_failure_records_bounded_trust():
+    class FailingRuntime:
+        async def resolve(self, _provider):
+            raise RuntimeError("secret-key /private/credential-store.db")
+
+    stage_metadata: dict[str, object] = {}
+    result = await reformulate_query(
+        "what about it?",
+        [{"role": "user", "content": "Explain credential runtimes."}],
+        llm_provider="anthropic",
+        llm_model="claude-test",
+        credential_runtime=FailingRuntime(),
+        stage_metadata=stage_metadata,
+    )
+
+    assert result == "what about it?"
+    assert stage_metadata == {
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+    assert "secret-key" not in str(stage_metadata)
+    assert "/private/" not in str(stage_metadata)
+
+
+@pytest.mark.asyncio
+async def test_reformulate_query_runtime_success_records_verified(monkeypatch):
+    runtime = _RecordingCredentialRuntime()
+    _install_explicit_chat_capture(monkeypatch, "standalone credential runtime query")
+    stage_metadata: dict[str, object] = {}
+
+    result = await reformulate_query(
+        "what about it?",
+        [{"role": "user", "content": "Explain credential runtimes."}],
+        llm_provider="anthropic",
+        llm_model="claude-test",
+        credential_runtime=runtime,
+        stage_metadata=stage_metadata,
+    )
+
+    assert result == "standalone credential runtime query"
+    assert runtime.resolved_models == ["claude-test"]
+    assert stage_metadata == {"verification_available": True}
+
+
+@pytest.mark.asyncio
+async def test_combined_reformulation_does_not_erase_classification_unavailability(
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    runtime = _RecordingCredentialRuntime()
+    responses = iter(
+        [
+            RuntimeError("secret-key /private/credential-store.db"),
+            "standalone credential runtime question",
+        ]
+    )
+
+    async def fake_chat_call(**_kwargs):
+        response = next(responses)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call)
+    stage_metadata: dict[str, object] = {}
+
+    result = await classify_and_reformulate(
+        "what about it",
+        [{"role": "user", "content": "Explain credential runtimes."}],
+        llm_provider="anthropic",
+        llm_model="claude-test",
+        credential_runtime=runtime,
+        stage_metadata=stage_metadata,
+    )
+
+    assert result.standalone_query == "standalone credential runtime question"
+    assert result.confidence <= 0.5
+    assert result.reasoning == "provider_unavailable"
+    assert stage_metadata == {
+        "failure_code": "provider_unavailable",
+        "verification_available": False,
+    }
+    assert "secret-key" not in str(result)
+    assert "/private/" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_classify_query_without_runtime_keeps_legacy_call_shape(monkeypatch):
+    from tldw_Server_API.app.core.Chat import chat_service
+
+    captured: dict[str, object] = {}
+
+    async def fake_chat_call(**kwargs):
+        captured.update(kwargs)
+        return (
+            '{"skip_search":false,"search_local_db":true,"search_web":false,'
+            '"standalone_query":"legacy config","confidence":0.8}'
+        )
+
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_chat_call)
+
+    await classify_query(
+        "legacy config",
+        llm_provider="openai",
+        llm_model="gpt-test",
+    )
+
+    assert "api_key" not in captured
+    assert "app_config" not in captured
+    assert "credentials_resolved" not in captured
+
+
+@pytest.mark.parametrize("stage", ["classify", "reformulate"])
+@pytest.mark.asyncio
+async def test_query_stage_cancellation_marks_completed_sync_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+) -> None:
+    runtime = _RecordingCredentialRuntime()
+    response = (
+        '{"skip_search":false,"search_local_db":true,"search_web":false,'
+        '"standalone_query":"runtime query","confidence":0.9}'
+        if stage == "classify"
+        else "standalone runtime query"
+    )
+    entered, release = _install_blocking_sync_chat_adapter(monkeypatch, response)
+    if stage == "classify":
+        operation = classify_query(
+            "latest runtime credential research",
+            llm_provider="anthropic",
+            llm_model="claude-test",
+            credential_runtime=runtime,
+        )
+    else:
+        operation = reformulate_query(
+            "what about its concurrency behavior?",
+            [{"role": "user", "content": "Explain credential runtimes."}],
+            llm_provider="anthropic",
+            llm_model="claude-test",
+            credential_runtime=runtime,
+        )
+    task = asyncio.create_task(operation)
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)
+        task.cancel()
+        await asyncio.sleep(0.03)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1.0)
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    assert runtime.marked == [runtime.handle]

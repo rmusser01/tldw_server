@@ -1,11 +1,29 @@
 import { defineConfig, devices } from '@playwright/test';
 
-import { getProjectEnv } from './tests/e2e/real-backend/helpers/project-env';
+import {
+  getProjectEnv,
+  getRequestedRealBackendProjects,
+} from './tests/e2e/real-backend/helpers/project-env';
 
 const rawBaseUrl = process.env.TLDW_ADMIN_UI_URL || 'http://127.0.0.1:3001';
 const baseURL = rawBaseUrl.replace('localhost', '127.0.0.1');
 const webCommand = process.env.TLDW_ADMIN_UI_CMD || 'bun run dev -- --hostname 127.0.0.1';
 const shouldAutoStart = process.env.TLDW_ADMIN_UI_AUTOSTART !== 'false';
+const requestedRealBackendProjects = getRequestedRealBackendProjects(process.argv);
+const shouldStartRealBackendUiServers = process.argv.some((arg) => (
+  arg.includes('real-backend') || arg.includes('chromium-real-')
+));
+if (
+  shouldAutoStart
+  && shouldStartRealBackendUiServers
+  && requestedRealBackendProjects.length !== 1
+) {
+  throw new Error(
+    'Real-backend Playwright runs require exactly one real-backend project per process. '
+    + 'Use `bun run test:real-backend` to run both projects sequentially.',
+  );
+}
+const requestedRealBackendProject = requestedRealBackendProjects[0];
 
 const realJwtProject = getProjectEnv('chromium-real-jwt');
 const realSingleUserProject = getProjectEnv('chromium-real-single-user');
@@ -19,10 +37,26 @@ const baseUiEnv = {
   NEXT_TELEMETRY_DISABLED: '1',
 };
 
-const realBackendUiServers = shouldAutoStart
+const genericUiServers = shouldAutoStart && !shouldStartRealBackendUiServers
   ? [
       {
-        command: `bunx next dev -p ${realJwtProject.uiPort} --hostname 127.0.0.1`,
+        command: webCommand,
+        url: baseURL,
+        reuseExistingServer: true,
+        timeout: 120_000,
+        env: {
+          ...baseUiEnv,
+          AUTH_MODE: process.env.AUTH_MODE || 'single_user',
+          NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5999',
+        },
+      },
+    ]
+  : [];
+
+const realBackendUiServers = shouldAutoStart && shouldStartRealBackendUiServers
+  ? [
+      ...(requestedRealBackendProject === 'chromium-real-jwt' ? [{
+        command: `bunx next start -p ${realJwtProject.uiPort} --hostname 127.0.0.1`,
         url: realJwtProject.uiBaseUrl,
         // These auth-mode-specific UI servers must boot with the exact backend URL
         // and auth env for the current project; reusing a stale process leaks config.
@@ -35,9 +69,9 @@ const realBackendUiServers = shouldAutoStart
           TLDW_ADMIN_E2E_REAL_BACKEND: 'true',
           TEST_MODE: 'true',
         },
-      },
-      {
-        command: `bunx next dev -p ${realSingleUserProject.uiPort} --hostname 127.0.0.1`,
+      }] : []),
+      ...(requestedRealBackendProject === 'chromium-real-single-user' ? [{
+        command: `bunx next start -p ${realSingleUserProject.uiPort} --hostname 127.0.0.1`,
         url: realSingleUserProject.uiBaseUrl,
         // These auth-mode-specific UI servers must boot with the exact backend URL
         // and auth env for the current project; reusing a stale process leaks config.
@@ -51,7 +85,7 @@ const realBackendUiServers = shouldAutoStart
           TLDW_ADMIN_E2E_REAL_BACKEND: 'true',
           TEST_MODE: 'true',
         },
-      },
+      }] : []),
     ]
   : [];
 
@@ -73,20 +107,7 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
   webServer: shouldAutoStart
-    ? [
-        {
-          command: webCommand,
-          url: baseURL,
-          reuseExistingServer: true,
-          timeout: 120_000,
-          env: {
-            ...baseUiEnv,
-            AUTH_MODE: process.env.AUTH_MODE || 'single_user',
-            NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5999',
-          },
-        },
-        ...realBackendUiServers,
-      ]
+    ? [...genericUiServers, ...realBackendUiServers]
     : undefined,
   projects: [
     {

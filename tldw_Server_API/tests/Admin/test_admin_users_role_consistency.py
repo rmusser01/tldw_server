@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import pytest
 from fastapi import HTTPException
 
+from tldw_Server_API.app.api.v1.endpoints.admin import admin_rbac
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import UserUpdateRequest
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _guard_sql
 from tldw_Server_API.app.services import admin_users_service
 
 
@@ -28,12 +32,16 @@ class _RoleState:
 
 
 class _Cursor:
-    def __init__(self, row=None, *, rowcount: int = 1) -> None:
+    def __init__(self, row=None, *, rows=None, rowcount: int = 1) -> None:
         self._row = row
+        self._rows = rows or []
         self.rowcount = rowcount
 
     async def fetchone(self):
         return self._row
+
+    async def fetchall(self):
+        return self._rows
 
 
 class _SqliteRoleDb:
@@ -41,9 +49,26 @@ class _SqliteRoleDb:
         self.state = state
         self.commit_count = 0
         self.events: list[str] = []
+        self._authnz_profile_user_backend = "sqlite"
+        self._authnz_profile_user_guard_identity = self
 
-    async def execute(self, query: str, params=()):
-        normalized = " ".join(query.split()).lower()
+    async def execute(self, query: object, params=()):
+        concrete = _guard_sql(
+            query,
+            backend="sqlite",
+            connection_identity=self,
+            operation="execute",
+        )
+        normalized = " ".join(concrete.split()).lower()
+        if "source_tag" in normalized:
+            if "select users.id, users.profile_version" in normalized and "where users.id = ?" in normalized:
+                self.events.append("lock-user")
+            rows = (
+                [("user", int(params[0]), "2026-07-26T12:00:00.000000Z")]
+                if self.state.user_exists
+                else []
+            )
+            return _Cursor(rows=rows)
         if normalized.startswith("select id") and "from roles" in normalized:
             role = self.state.roles.get(str(params[0]))
             return _Cursor(role)
@@ -52,7 +77,10 @@ class _SqliteRoleDb:
             return _Cursor((42,) if self.state.user_exists else None)
         if normalized.startswith("select 1 from users"):
             return _Cursor((1,) if self.state.user_exists else None)
-        if normalized.startswith("update users"):
+        if normalized.startswith("update main.users"):
+            if "set profile_version" in normalized:
+                self.events.append("touch-user")
+                return _Cursor(rowcount=1 if self.state.user_exists else 0)
             self.events.append("update-user")
             if not self.state.user_exists:
                 return _Cursor(rowcount=0)
@@ -83,9 +111,17 @@ class _PostgresRoleDb:
     def __init__(self, state: _RoleState) -> None:
         self.state = state
         self.events: list[str] = []
+        self._authnz_profile_user_backend = "postgres"
+        self._authnz_profile_user_guard_identity = self
 
-    async def fetchrow(self, query: str, *params):
-        normalized = " ".join(query.split()).lower()
+    async def fetchrow(self, query: object, *params):
+        concrete = _guard_sql(
+            query,
+            backend="postgres",
+            connection_identity=self,
+            operation="fetchrow",
+        )
+        normalized = " ".join(concrete.split()).lower()
         if normalized.startswith("select id") and "from roles" in normalized:
             role = self.state.roles.get(str(params[0]))
             if role is None:
@@ -94,7 +130,7 @@ class _PostgresRoleDb:
         if normalized.startswith("select id") and "from users" in normalized:
             self.events.append("lock-user")
             return {"id": 42} if self.state.user_exists else None
-        if normalized.startswith("update users"):
+        if normalized.startswith("update public.users"):
             self.events.append("update-user")
             if not self.state.user_exists:
                 return None
@@ -104,8 +140,47 @@ class _PostgresRoleDb:
             return {"id": int(params[-1])}
         raise AssertionError(f"Unexpected PostgreSQL fetchrow: {query}")
 
-    async def execute(self, query: str, *params):
-        normalized = " ".join(query.split()).lower()
+    async def fetch(self, query: object, *params):
+        concrete = _guard_sql(
+            query,
+            backend="postgres",
+            connection_identity=self,
+            operation="fetch",
+        )
+        normalized = " ".join(concrete.split()).lower()
+        if "source_tag" not in normalized:
+            raise AssertionError(f"Unexpected PostgreSQL fetch: {query}")
+        if "for update" in normalized:
+            self.events.append("lock-user")
+        if not self.state.user_exists:
+            return []
+        return [
+            {
+                "source_tag": "user",
+                "source_id": int(params[0]),
+                "candidate_value": datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc),
+            }
+        ]
+
+    async def execute(self, query: object, *params):
+        concrete = _guard_sql(
+            query,
+            backend="postgres",
+            connection_identity=self,
+            operation="execute",
+        )
+        normalized = " ".join(concrete.split()).lower()
+        if normalized.startswith("update public.users"):
+            if "set profile_version" in normalized:
+                self.events.append("touch-user")
+                return "UPDATE 1" if self.state.user_exists else "UPDATE 0"
+            self.events.append("update-user")
+            if not self.state.user_exists:
+                return "UPDATE 0"
+            self.state.legacy_role = str(params[0])
+            if "is_superuser = false" in normalized:
+                self.state.is_superuser = False
+            return "UPDATE 1"
         if normalized.startswith("delete from user_roles"):
             self.events.append("delete-memberships")
             selected_role_id = int(params[-1])
@@ -174,7 +249,7 @@ async def test_update_user_keeps_one_system_role_and_preserves_custom_grants(
     assert state.legacy_role == target_role
     assert state.memberships == expected_memberships
     if backend == "sqlite":
-        assert db.commit_count == 1
+        assert db.commit_count == 0
 
 
 @pytest.mark.asyncio
@@ -202,6 +277,11 @@ async def test_update_user_unknown_role_fails_without_mutating_role_state(monkey
     assert state.memberships == {2, 9}
     if backend == "sqlite":
         assert db.commit_count == 0
+
+
+def test_request_scoped_admin_operations_do_not_commit_their_connection() -> None:
+    assert "await db.commit()" not in inspect.getsource(admin_users_service)
+    assert "await db.commit()" not in inspect.getsource(admin_rbac)
 
 
 @pytest.mark.asyncio

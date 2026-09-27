@@ -12,7 +12,13 @@ from typing import Any
 from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
     PersonaVisualPortabilityRepository,
 )
+from tldw_Server_API.app.core.Persona.visual_artwork import artwork_manifest_for_import
+from tldw_Server_API.app.core.Persona.visual_manifest_assets import remap_visual_manifest_assets
 from tldw_Server_API.app.core.Persona.visual_portability.archive import normalize_member_name
+from tldw_Server_API.app.core.Persona.visual_portability.codex_pet import (
+    CODEX_PET_SCHEMA_VERSION,
+    load_codex_pet_archive,
+)
 from tldw_Server_API.app.core.Persona.visual_portability.commit_eligibility import (
     import_preview_plan_from_stored_json,
     is_import_preview_plan_committable,
@@ -22,10 +28,6 @@ from tldw_Server_API.app.core.Persona.visual_portability.constants import (
     TRUST_MODE_TRUSTED_RESTORE,
     TRUST_MODE_UNTRUSTED_IMPORT,
 )
-from tldw_Server_API.app.core.Persona.visual_portability.codex_pet import (
-    CODEX_PET_SCHEMA_VERSION,
-    load_codex_pet_archive,
-)
 from tldw_Server_API.app.core.Persona.visual_portability.fingerprints import sha256_file
 from tldw_Server_API.app.core.Persona.visual_portability.preview import (
     PersonaVisualPackImportPreviewer,
@@ -34,10 +36,8 @@ from tldw_Server_API.app.core.Persona.visual_portability.preview import (
     _section_list,
     _section_record,
 )
-from tldw_Server_API.app.core.Persona.visual_manifest_assets import remap_visual_manifest_assets
 from tldw_Server_API.app.core.Persona.visual_service import PersonaVisualService
 from tldw_Server_API.app.core.Persona.visuals import validate_visual_manifest
-
 
 _REPLACEABLE_IMPORT_TARGET_STATUSES = frozenset({"draft", "review", "failed"})
 
@@ -172,7 +172,7 @@ class PersonaVisualPackImporter:
                         id_maps["assets"][source_asset_id] = str(imported["id"])
                     imported_assets.append(imported)
 
-            visual_manifest = pack.get("visual_manifest") if isinstance(pack.get("visual_manifest"), dict) else {}
+            visual_manifest = artwork_manifest_for_import(pack)
             remapped_manifest = remap_visual_manifest_assets(visual_manifest, id_maps["assets"])
             asset_ids = {str(asset["id"]) for asset in imported_assets}
             asset_dimensions = {
@@ -302,10 +302,14 @@ class PersonaVisualPackImporter:
                     id_maps["assets"][source_asset_id] = str(imported["id"])
                 imported_assets.append(imported)
 
-            visual_manifest = pack.get("visual_manifest") if isinstance(
-                pack.get("visual_manifest"),
-                dict,
-            ) else {}
+            visual_manifest = (
+                pack.get("visual_manifest")
+                if isinstance(
+                    pack.get("visual_manifest"),
+                    dict,
+                )
+                else {}
+            )
             remapped_manifest = remap_visual_manifest_assets(visual_manifest, id_maps["assets"])
             asset_ids = {str(asset["id"]) for asset in imported_assets}
             asset_dimensions = {

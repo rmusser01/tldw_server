@@ -1015,10 +1015,11 @@
     }
   },
   "onboarding": {
+    "loginSettingsError": "無法開啟登入設定。請再試一次。",
     "title": "歡迎 — 讓我們完成連線",
     "description": "設定你的伺服器與驗證，我們會即時檢查連線與 RAG 健康狀態。",
     "learnMoreTldw": "了解 tldw 伺服器的運作方式",
-    "serverDocsUrl": "https://github.com/rmusser01/tldw_browser_assistant",
+    "serverDocsUrl": "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md",
     "serverUrl": {
       "placeholder": "例如 http://127.0.0.1:8000",
       "help": "範例：http://127.0.0.1:8000",

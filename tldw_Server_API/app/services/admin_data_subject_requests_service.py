@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.data_subject_requests_repo import (
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 from tldw_Server_API.app.services import admin_scope_service
 
 _CATEGORY_DEFS: tuple[dict[str, str], ...] = (
@@ -187,8 +188,8 @@ async def _count_chat_messages(user_id: int) -> int:
 
 def _get_chroma_manager_for_user(user_id: int):
     """Create a ChromaDBManager for the given user using lazy import."""
-    from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
     from tldw_Server_API.app.core.config import settings as app_settings
+    from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
 
     embedding_config: dict = {}
     user_db_base = app_settings.get("USER_DB_BASE_DIR")
@@ -203,30 +204,43 @@ def _get_chroma_manager_for_user(user_id: int):
 
 
 async def _count_embeddings(user_id: int) -> int:
-    """Count vector embeddings across all ChromaDB collections for a user."""
+    """Count every collection, rejecting unavailable or partial coverage."""
 
     def _count_sync() -> int:
         try:
             manager = _get_chroma_manager_for_user(user_id)
         except Exception as exc:
-            logger.debug("ChromaDB not available for user {}: {}", user_id, exc)
-            return 0
+            logger.debug("ChromaDB not available for user {}: {}", user_id, type(exc).__name__)
+            # Match the manager's configured base and path policy without creating
+            # storage. Only confirmed absence makes an unavailable optional store empty.
+            try:
+                from tldw_Server_API.app.core.config import settings as app_settings
+
+                user_db_base = app_settings.get("USER_DB_BASE_DIR") or (
+                    Path(__file__).resolve().parents[3] / "Databases" / "user_databases"
+                )
+                chroma_dir = (
+                    DatabasePaths.resolve_user_base_directory(user_id, base_dir_override=user_db_base)
+                    / "chroma_storage"
+                )
+                try:
+                    chroma_dir.stat()
+                except FileNotFoundError:
+                    return 0
+            except Exception as storage_exc:
+                raise DataSubjectRequestCoverageUnavailableError(
+                    "DSR embedding storage availability could not be determined"
+                ) from storage_exc
+            raise DataSubjectRequestCoverageUnavailableError("DSR embedding store could not be opened") from exc
         try:
             collections = manager.list_collections()
             total = 0
             for col in collections:
-                try:
-                    total += col.count()
-                except Exception as exc:
-                    logger.debug(
-                        "Failed to count ChromaDB collection for user {}: {}",
-                        user_id,
-                        exc,
-                    )
+                total += col.count()
             return total
         except Exception as exc:
-            logger.debug("Failed to count embeddings for user {}: {}", user_id, exc)
-            return 0
+            logger.debug("Failed to count embeddings for user {}: {}", user_id, type(exc).__name__)
+            raise DataSubjectRequestCoverageUnavailableError("DSR embedding count unavailable") from exc
 
     return await asyncio.to_thread(_count_sync)
 
@@ -254,28 +268,22 @@ async def _build_summary_for_user(
     user_id: int,
     selected_categories: list[str],
 ) -> list[dict[str, Any]]:
-    media_records, chat_messages, notes, audit_events, embeddings = await asyncio.gather(
-        _count_media_records(user_id),
-        _count_chat_messages(user_id),
-        _count_notes(user_id),
-        _count_audit_events(user_id),
-        _count_embeddings(user_id),
-    )
-    count_map = {
-        "media_records": media_records,
-        "chat_messages": chat_messages,
-        "notes": notes,
-        "audit_events": audit_events,
-        "embeddings": embeddings,
+    counters = {
+        "media_records": _count_media_records,
+        "chat_messages": _count_chat_messages,
+        "notes": _count_notes,
+        "audit_events": _count_audit_events,
+        "embeddings": _count_embeddings,
     }
+    selected_entries = [entry for entry in _CATEGORY_DEFS if entry["key"] in selected_categories]
+    counts = await asyncio.gather(*(counters[entry["key"]](user_id) for entry in selected_entries))
     return [
         {
             "key": entry["key"],
             "label": entry["label"],
-            "count": int(count_map.get(entry["key"], 0)),
+            "count": int(count),
         }
-        for entry in _CATEGORY_DEFS
-        if entry["key"] in selected_categories
+        for entry, count in zip(selected_entries, counts)
     ]
 
 
@@ -327,7 +335,7 @@ async def preview_data_subject_request(
             selected_categories=selected_categories,
         )
     except DataSubjectRequestCoverageUnavailableError as exc:
-        logger.warning("DSR preview unavailable for user {}: {}", user["id"], exc)
+        logger.warning("DSR preview unavailable for user {}: {}", user["id"], type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="requester_data_unavailable",
@@ -439,6 +447,7 @@ def _sqlite_hard_delete_sync(path: Path, statements: list[tuple[str, tuple]]) ->
         return 0
     total = 0
     with sqlite3.connect(path) as conn:
+        configure_sqlite_connection(conn, use_wal=False, synchronous=None)
         for sql, params in statements:
             cursor = conn.execute(sql, params)
             total += cursor.rowcount
@@ -474,7 +483,19 @@ async def _erase_notes(user_id: int) -> int:
     return await asyncio.to_thread(
         _sqlite_hard_delete_sync,
         path,
-        [("DELETE FROM notes", ())],
+        [
+            (
+                "DELETE FROM note_edges WHERE from_note_id IN (SELECT id FROM notes) "
+                "OR to_note_id IN (SELECT id FROM notes)",
+                (),
+            ),
+            (
+                "DELETE FROM note_wikilink_edges WHERE source_note_id IN (SELECT id FROM notes) "
+                "OR target_note_id IN (SELECT id FROM notes)",
+                (),
+            ),
+            ("DELETE FROM notes", ()),
+        ],
     )
 
 
@@ -490,22 +511,25 @@ async def _erase_embeddings(user_id: int) -> int:
         try:
             manager = _get_chroma_manager_for_user(user_id)
         except Exception as exc:
-            # Check whether a chroma_storage directory exists for this user.
-            # If it does, data might be present and we must not silently succeed.
-            from tldw_Server_API.app.core.config import settings as app_settings
+            # Match the manager's normalization without creating storage. As in
+            # preview, only confirmed absence makes an unavailable store empty.
+            try:
+                from tldw_Server_API.app.core.config import settings as app_settings
 
-            user_db_base = app_settings.get("USER_DB_BASE_DIR")
-            if not user_db_base:
-                project_root = Path(__file__).resolve().parents[3]
-                user_db_base = str(project_root / "Databases" / "user_databases")
-            chroma_dir = Path(user_db_base) / str(user_id) / "chroma_storage"
-            if chroma_dir.exists():
-                raise RuntimeError(
-                    f"ChromaDB unavailable for user {user_id} but chroma_storage "
-                    f"directory exists — cannot confirm erasure: {exc}"
-                ) from exc
-            # No storage directory → nothing to erase
-            return 0
+                user_db_base = app_settings.get("USER_DB_BASE_DIR") or (
+                    Path(__file__).resolve().parents[3] / "Databases" / "user_databases"
+                )
+                chroma_dir = (
+                    DatabasePaths.resolve_user_base_directory(user_id, base_dir_override=user_db_base)
+                    / "chroma_storage"
+                )
+                try:
+                    chroma_dir.stat()
+                except FileNotFoundError:
+                    return 0
+            except Exception as storage_exc:
+                raise RuntimeError("DSR embedding storage availability could not be determined") from storage_exc
+            raise RuntimeError("DSR embedding store unavailable; cannot confirm erasure") from exc
 
         try:
             collections = manager.list_collections()
@@ -522,7 +546,7 @@ async def _erase_embeddings(user_id: int) -> int:
                 logger.debug(
                     "Failed to count ChromaDB collection before deletion for user {}: {}",
                     user_id,
-                    exc,
+                    type(exc).__name__,
                 )
             try:
                 manager.delete_collection(col.name)
@@ -605,8 +629,8 @@ async def execute_dsr_erasure(
         try:
             count = await handler(user_id)
             results[category] = {"deleted_count": count, "status": "ok"}
-        except Exception as exc:
-            logger.error("DSR erasure failed for category '{}' user {}: {}", category, user_id, exc)
+        except Exception:
+            logger.error("DSR erasure failed for category '{}' user {}", category, user_id)
             errors[category] = "Erasure handler failed"
             results[category] = {
                 "deleted_count": 0,

@@ -32,6 +32,16 @@ describe("Layout chat sidebar reset signal", () => {
     )
   })
 
+  it("binds the legacy header state to the Drawer and keeps it open on desktop", () => {
+    const source = readFileSync(layoutSourcePath, "utf8")
+
+    expect(source).toContain("const headerSidebarCollapsed = showChatSidebar")
+    expect(source).toContain(": !sidebarOpen")
+    expect(source).toContain("sidebarCollapsed={headerSidebarCollapsed}")
+    expect(source).toContain("if (!showChatSidebar) return")
+    expect(source).not.toContain("if (isMobile && !showChatSidebar) return")
+  })
+
   it("does not render a chat-specific collapsed rail edge affordance", () => {
     const source = readFileSync(layoutSourcePath, "utf8")
 

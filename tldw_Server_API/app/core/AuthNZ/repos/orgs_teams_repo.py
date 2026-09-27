@@ -280,7 +280,7 @@ class AuthnzOrgsTeamsRepo:
                 total = (
                     await self.db_pool.fetchval(
                         f"SELECT COUNT(*) FROM organizations{where_clause}",  # nosec B608
-                        *params,
+                        params,
                     )
                     if with_total
                     else 0

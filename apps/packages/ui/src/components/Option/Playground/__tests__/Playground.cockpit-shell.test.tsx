@@ -43,6 +43,7 @@ const messageOptionState = vi.hoisted(() => ({
     selectedModel: "openai:gpt-4.1-mini",
     selectedCharacter: null,
     setSelectedCharacter: vi.fn(),
+    assistantSelectionMeta: { isLoading: false, assistantKey: "account-a", isCurrent: () => true },
     selectedAssistant: null as {
       kind: "character" | "persona";
       id: string;
@@ -129,6 +130,11 @@ const routerNavigateState = vi.hoisted(() => ({
   navigate: vi.fn(),
 }));
 
+vi.mock("@/services/service-prompts", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+  resolveServicePromptScope: async () => ({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" })
+}));
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -210,9 +216,13 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: tldwClientState,
 }));
 
-vi.mock("@/services/tldw-server", () => ({
-  fetchChatModels: tldwServerState.fetchChatModels,
-}));
+vi.mock("@/services/tldw-server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/tldw-server")>()
+  return {
+    ...actual,
+    fetchChatModels: tldwServerState.fetchChatModels
+  }
+})
 
 vi.mock("@/components/Option/Playground/CharacterChatSessionsPanel", () => ({
   CharacterChatSessionsPanel: (props: Record<string, unknown>) => {
@@ -532,7 +542,7 @@ describe("Playground cockpit shell", () => {
     });
   });
 
-  it("clears the loaded character chat when the selected tracked character changes", async () => {
+  it("preserves the loaded character chat during background selection hydration", async () => {
     storageState.values.set("playgroundChatWorkflowMode", "character");
     messageOptionState.value.serverChatId = "chat-character-a";
     messageOptionState.value.serverChatCharacterId = "character-a";
@@ -582,12 +592,8 @@ describe("Playground cockpit shell", () => {
     vi.mocked(messageOptionState.value.setServerChatPersonaMemoryMode).mockClear();
     vi.mocked(messageOptionState.value.setServerChatMetaLoaded).mockClear();
 
-    messageOptionState.value.selectedAssistant = {
-      kind: "character",
-      id: "character-b",
-      name: "Character B",
-      metadata: { selectionMode: "tracked" },
-    };
+    // useMessageOption keeps selectedAssistant bound to the loaded chat;
+    // its raw selectedCharacter can still hydrate a different preference.
     messageOptionState.value.selectedCharacter = {
       id: "character-b",
       name: "Character B",
@@ -595,29 +601,23 @@ describe("Playground cockpit shell", () => {
 
     rerender(<Playground />);
 
-    await waitFor(() => {
-      expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(null);
+    // Explicit picker changes are exercised by the coordinator integration tests.
+    // A hydrated preference does not replace the loaded conversation's identity.
+    expect(characterSessionsPanelState.props.at(-1)).toMatchObject({
+      activeServerChatId: "chat-character-a",
+      activeCharacterId: "character-a",
     });
-    expect(messageOptionState.value.setHistoryId).toHaveBeenCalledWith(null, {
-      preserveServerChatId: false,
-    });
-    expect(messageOptionState.value.setHistory).toHaveBeenCalledWith([]);
-    expect(messageOptionState.value.setMessages).toHaveBeenCalledWith([]);
-    expect(messageOptionState.value.setServerChatCharacterId).toHaveBeenCalledWith(
-      null,
-    );
-    expect(messageOptionState.value.setServerChatAssistantKind).toHaveBeenCalledWith(
-      null,
-    );
-    expect(messageOptionState.value.setServerChatAssistantId).toHaveBeenCalledWith(
-      null,
-    );
-    expect(
+    for (const setter of [
+      messageOptionState.value.setServerChatId,
+      messageOptionState.value.setHistoryId,
+      messageOptionState.value.setHistory,
+      messageOptionState.value.setMessages,
+      messageOptionState.value.setServerChatCharacterId,
+      messageOptionState.value.setServerChatAssistantKind,
+      messageOptionState.value.setServerChatAssistantId,
       messageOptionState.value.setServerChatPersonaMemoryMode,
-    ).toHaveBeenCalledWith(null);
-    expect(messageOptionState.value.setServerChatMetaLoaded).toHaveBeenCalledWith(
-      false,
-    );
+      messageOptionState.value.setServerChatMetaLoaded,
+    ]) expect(setter).not.toHaveBeenCalled();
   });
 
   it("shows the starter deck for a true blank chat state", async () => {
@@ -666,7 +666,7 @@ describe("Playground cockpit shell", () => {
       ).toHaveTextContent("Character Chat");
     });
     await waitFor(() => {
-      expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route");
+      expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route", { requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" } });
     });
     expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -696,7 +696,7 @@ describe("Playground cockpit shell", () => {
     render(<Playground />);
 
     await waitFor(() => {
-      expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route");
+      expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route", { requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" } });
     });
     expect(routerNavigateState.navigate).not.toHaveBeenCalledWith(
       {
@@ -729,7 +729,7 @@ describe("Playground cockpit shell", () => {
     const { rerender } = render(<Playground />);
 
     await waitFor(() => {
-      expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route");
+      expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route", { requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" } });
     });
     await waitFor(() => {
       expect(
@@ -801,7 +801,7 @@ describe("Playground cockpit shell", () => {
 	    const { rerender } = render(<Playground />);
 
 	    await waitFor(() => {
-	      expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route");
+	      expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route", { requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" } });
 	    });
 	    expect(messageOptionState.value.setHistoryId).toHaveBeenCalledWith(null, {
 	      preserveServerChatId: false,
@@ -868,7 +868,7 @@ describe("Playground cockpit shell", () => {
     const { rerender } = render(<Playground />);
 
     await waitFor(() => {
-      expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route");
+      expect(tldwClientState.getCharacter).toHaveBeenCalledWith("char-route", { requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" } });
     });
 
     messageOptionState.value.serverChatId = null;

@@ -124,6 +124,21 @@ _EXPECTED_FAMILY_LEDGER_ROWS = {
     "medrxiv": ("sourclip-2026-07-13-0022", "medRxiv"),
 }
 
+_EXPECTED_CLINICAL_FAMILY_LEDGER_ROWS = {
+    "clinicaltrials_gov": (
+        "sourclip-2026-07-13-0026",
+        "clinicaltrials_gov_studies_search_direct",
+        "clinicaltrials_gov_api_v2",
+        "native_nct_record",
+    ),
+    "pubmed_central": (
+        "sourclip-2026-07-13-0027",
+        "pubmed_central_esearch_summary_direct",
+        "ncbi_eutils_pmc",
+        "ncbi_pmc_database",
+    ),
+}
+
 
 def _ledger_rows() -> dict[str, dict[str, object]]:
     payload = json.loads(_LEDGER_PATH.read_text(encoding="utf-8"))
@@ -134,6 +149,12 @@ def _ledger_rows() -> dict[str, dict[str, object]]:
 def _family_ledger_rows() -> dict[str, dict[str, object]]:
     payload = json.loads(_LEDGER_PATH.read_text(encoding="utf-8"))
     wanted_inventory_ids = {values[0] for values in _EXPECTED_FAMILY_LEDGER_ROWS.values()}
+    return {row["inventory_id"]: row for row in payload["rows"] if row["inventory_id"] in wanted_inventory_ids}
+
+
+def _clinical_family_ledger_rows() -> dict[str, dict[str, object]]:
+    payload = json.loads(_LEDGER_PATH.read_text(encoding="utf-8"))
+    wanted_inventory_ids = {values[0] for values in _EXPECTED_CLINICAL_FAMILY_LEDGER_ROWS.values()}
     return {row["inventory_id"]: row for row in payload["rows"] if row["inventory_id"] in wanted_inventory_ids}
 
 
@@ -282,6 +303,63 @@ def test_biorxiv_medrxiv_ledger_rows_bind_exact_shadow_routes_and_readiness() ->
         assert all(entry.state is ReadinessState.READY for entry in family_entries.values())
         assert all(entry.credential_status is CredentialStatus.NOT_REQUIRED for entry in family_entries.values())
         assert {entry.reason for entry in family_entries.values()} == {f"{mode.value}_ready"}
+
+
+def test_clinicaltrials_pubmed_central_rows_bind_exact_shadow_routes_and_readiness() -> None:
+    from tldw_Server_API.app.core.Research.discovery.clinicaltrials_pubmed_central import (
+        clinicaltrials_pubmed_central_shadow_readiness,
+        clinicaltrials_pubmed_central_shadow_registry,
+    )
+
+    registry = clinicaltrials_pubmed_central_shadow_registry()
+    ledger_rows = _clinical_family_ledger_rows()
+    expected_ids = {values[0] for values in _EXPECTED_CLINICAL_FAMILY_LEDGER_ROWS.values()}
+
+    assert set(ledger_rows) == expected_ids
+    for source_id, (
+        inventory_id,
+        route_id,
+        backend_id,
+        runtime_attribution,
+    ) in _EXPECTED_CLINICAL_FAMILY_LEDGER_ROWS.items():
+        source = registry.get_source(source_id)
+        route = registry.get_route(route_id)
+        row = ledger_rows[inventory_id]
+        matching_candidates = [
+            candidate for candidate in row["route_candidates"] if candidate["route_candidate_id"] == route_id
+        ]
+
+        assert row["canonical_targets"] == [source_id]
+        assert row["implementation_state"] == "implemented"
+        assert row["fixture_state"] == "passed"
+        assert row["live_state"] == "not_run"
+        assert row["certifications"] == []
+        assert source.route_references == (SourceRouteReference(route_id, None),)
+        assert len(matching_candidates) == 1
+        candidate = matching_candidates[0]
+        assert route.backend_id == candidate["planned_backend_id"] == backend_id
+        assert route.route_kind.value == candidate["route_kind"] == RouteKind.DIRECT.value
+        assert route.credential_requirement.value == candidate["credential_requirement"] == "none"
+        assert (
+            tuple(mode.value for mode in route.query_modes) == tuple(candidate["query_modes"]) == ("general_free_text",)
+        )
+        assert route.source_constraint.value == candidate["source_constraint"] == "native_corpus"
+        assert route.attribution_basis == runtime_attribution
+        assert candidate["attribution_basis"] == "native_response"
+        assert candidate["source_constraint_predicate"] is None
+
+    changed_route_ids = {
+        "pubmed_ncbi_eutils_pubmed_direct",
+        "clinicaltrials_gov_studies_search_direct",
+        "pubmed_central_esearch_summary_direct",
+    }
+    for mode in (ExecutionMode.OFFLINE_FIXTURE, ExecutionMode.SYNTHETIC):
+        readiness = clinicaltrials_pubmed_central_shadow_readiness(mode)
+        entries = {entry.route_id: entry for entry in readiness.routes if entry.route_id in changed_route_ids}
+
+        assert set(entries) == changed_route_ids
+        assert all(entry.state is ReadinessState.READY for entry in entries.values())
+        assert all(entry.credential_status is CredentialStatus.NOT_REQUIRED for entry in entries.values())
 
 
 def test_foundation_routes_declare_exact_pagination_and_figshare_body_shape() -> None:

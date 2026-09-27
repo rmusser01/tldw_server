@@ -3,7 +3,7 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 
 interface ReviewProgressProps {
-  dueCount: number
+  remainingCount: number
   reviewedCount: number
   deckName?: string
   availableNowCount?: number
@@ -13,7 +13,7 @@ interface ReviewProgressProps {
 }
 
 export const ReviewProgress: React.FC<ReviewProgressProps> = ({
-  dueCount,
+  remainingCount,
   reviewedCount,
   deckName,
   availableNowCount,
@@ -22,13 +22,16 @@ export const ReviewProgress: React.FC<ReviewProgressProps> = ({
   learningCount
 }) => {
   const { t } = useTranslation(["option"])
-  const remaining = Math.max(0, dueCount - reviewedCount)
+  const remaining = Math.max(0, remainingCount)
   // Average time per card in seconds (based on typical flashcard review time of 10-20s)
   const avgTimePerCard = 15
   const estimatedMinutes = Math.ceil((remaining * avgTimePerCard) / 60)
 
   const statusMessageParts = [t("option:flashcards.progressStatus", {
-    defaultValue: "{{remaining}} cards remaining, {{reviewed}} reviewed",
+    defaultValue: remaining === 1
+      ? "{{remaining}} card remaining, {{reviewed}} reviewed"
+      : "{{remaining}} cards remaining, {{reviewed}} reviewed",
+    count: remaining,
     remaining,
     reviewed: reviewedCount
   })]
@@ -66,7 +69,7 @@ export const ReviewProgress: React.FC<ReviewProgressProps> = ({
   }
   const statusMessage = statusMessageParts.join(", ")
 
-  if (dueCount === 0) return null
+  if (remaining === 0) return null
 
   return (
     <div
@@ -85,7 +88,10 @@ export const ReviewProgress: React.FC<ReviewProgressProps> = ({
         </span>
         <span className="text-2xl font-bold text-primary" aria-hidden="true">{remaining}</span>
         <span className="text-sm text-text-muted" aria-hidden="true">
-          {t("option:flashcards.cardsRemaining", { defaultValue: "cards remaining" })}
+          {t("option:flashcards.cardsRemaining", {
+            defaultValue: remaining === 1 ? "card remaining" : "cards remaining",
+            count: remaining
+          })}
         </span>
       </div>
       <div className="hidden h-8 w-px bg-border sm:block" aria-hidden="true" />

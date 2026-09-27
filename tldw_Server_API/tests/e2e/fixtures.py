@@ -415,8 +415,9 @@ class APIClient:
         title: str,
         media_type: str = "document",
         generate_embeddings: bool = False,
+        perform_analysis: bool = True,
     ) -> Dict[str, Any]:
-        """Upload a media file."""
+        """Upload a media file, optionally without provider-backed analysis."""
         with open(file_path, "rb") as f:
             # The endpoint expects 'files' (plural) not 'file'
             files = {"files": (os.path.basename(file_path), f, "application/octet-stream")}
@@ -425,7 +426,8 @@ class APIClient:
                 "media_type": media_type,
                 "overwrite_existing": "true",  # Allow overwrite for test re-runs
                 "keep_original_file": "false",
-                "generate_embeddings": str(generate_embeddings).lower()  # Convert bool to string
+                "generate_embeddings": str(generate_embeddings).lower(),
+                "perform_analysis": str(perform_analysis).lower(),
             }
             response = self.client.post(
                 f"{API_PREFIX}/media/add",
@@ -671,7 +673,7 @@ class APIClient:
 
         return self._handle_rate_limit(_update)
 
-    def delete_note(self, note_id: int) -> Dict[str, Any]:
+    def delete_note(self, note_id: str | int) -> Dict[str, Any]:
         """Delete a note."""
         response = self.client.delete(f"{API_PREFIX}/notes/{note_id}")
         response.raise_for_status()
@@ -1218,7 +1220,7 @@ class TestDataTracker:
 
     def __init__(self):
         self.media_ids: List[int] = []
-        self.note_ids: List[int] = []
+        self.note_ids: List[str | int] = []
         self.prompt_ids: List[int] = []
         self.character_ids: List[int] = []
         self.chat_ids: List[str] = []
@@ -1238,7 +1240,8 @@ class TestDataTracker:
     def add_media(self, media_id: int):
         self.media_ids.append(media_id)
 
-    def add_note(self, note_id: int):
+    def add_note(self, note_id: str | int):
+        """Track a note ID for end-of-session cleanup."""
         self.note_ids.append(note_id)
 
     def add_prompt(self, prompt_id: int):

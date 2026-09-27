@@ -84,13 +84,13 @@ describe("NotesEditorHeader stage 2 touch layout", () => {
     expect(overflowButton.className).toContain("min-w-[44px]")
   })
 
-  it("preserves compact desktop toolbar density", () => {
+  it("keeps compact desktop controls while allowing toolbar wrapping", () => {
     responsiveState.isMobile = false
     renderHeader()
 
     const actions = screen.getByTestId("notes-header-actions")
     expect(actions.className).not.toContain("w-full")
-    expect(actions.className).not.toContain("flex-wrap")
+    expect(actions.className).toContain("flex-wrap")
 
     const saveButton = screen.getByTestId("notes-save-button")
     const overflowButton = screen.getByTestId("notes-overflow-menu-button")

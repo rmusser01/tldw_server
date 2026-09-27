@@ -86,13 +86,17 @@ export const getLatestChatErrorBannerEntry = (
 ): PlaygroundChatErrorBannerEntry | null => {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const entry = messages[index]
-    const message = getCandidateMessageText(entry)
-    if (!isAssistantLikeMessage(entry) || !message) {
-      continue
+    const role = typeof entry?.role === "string" ? entry.role.toLowerCase() : ""
+    if (role === "user" || (!role && entry?.isBot === false)) {
+      return null
     }
+    if (!isAssistantLikeMessage(entry)) continue
+
+    const message = getCandidateMessageText(entry)
     const payload = decodeChatErrorPayload(message)
+    // A newer reply or streaming placeholder supersedes historical failures.
     if (!payload) {
-      continue
+      return null
     }
     return {
       ...payload,

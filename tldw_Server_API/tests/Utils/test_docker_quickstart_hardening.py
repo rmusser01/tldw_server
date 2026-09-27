@@ -74,6 +74,29 @@ def test_makefile_quickstart_docker_targets_use_opt_in_build_flag():
     _require("--build" not in start_docker_single, "Expected no hardcoded --build in start-docker-single target")
 
 
+def test_makefile_production_targets_require_explicit_operator_inputs():
+    """Production entry points should fail closed and keep preflight offline."""
+    text = _read_text("Makefile")
+
+    for target in ("production-preflight", "production-deploy", "production-rollback"):
+        _require(target in text, f"Expected Makefile target: {target}")
+        block = _target_block(text, target)
+        _require(
+            'test -n "$(PRODUCTION_ENV_FILE)"' in block,
+            f"Expected {target} to require PRODUCTION_ENV_FILE",
+        )
+
+    preflight = _target_block(text, "production-preflight")
+    rollback = _target_block(text, "production-rollback")
+    _require("production_preflight.py" in preflight, "Expected canonical preflight CLI")
+    _require("docker compose up" not in preflight, "Preflight must remain offline")
+    _require(
+        'test -n "$(PRODUCTION_MANIFEST)"' in rollback,
+        "Expected rollback to require a verified manifest",
+    )
+    _require("--restore-artifacts" in rollback, "Expected explicit restore-backed rollback")
+
+
 def test_api_dockerfile_avoids_expensive_copy_and_recursive_chown_layers():
     """The API Dockerfile should avoid heavyweight copy and chown steps."""
     text = _read_text("Dockerfiles/Dockerfile.prod")
@@ -85,6 +108,41 @@ def test_api_dockerfile_avoids_expensive_copy_and_recursive_chown_layers():
         "Expected Dockerfile.prod API copy to use --chown",
     )
     _require("RUN mkdir -p /app/Databases" in text, "Expected Dockerfile.prod to create /app/Databases")
+
+
+def test_api_dockerfile_excludes_protected_frontend_and_bundles_legal_files():
+    """The GPL API image must not bundle protected frontend source."""
+    text = _read_text("Dockerfiles/Dockerfile.prod")
+
+    transfer_lines = tuple(
+        line.strip() for line in text.splitlines() if line.lstrip().upper().startswith(("COPY ", "ADD "))
+    )
+    _require(
+        transfer_lines
+        == (
+            "COPY pyproject.toml README.md LICENSE /app/",
+            "COPY LICENSES /app/LICENSES",
+            "COPY tldw_Server_API /app/tldw_Server_API",
+            "COPY apps/mcp-unified/src /app/apps/mcp-unified/src",
+            "COPY packages/tldw_profile_core/src /app/packages/tldw_profile_core/src",
+            "COPY --from=builder /install /usr/local",
+            "COPY --chown=appuser:appuser tldw_Server_API /app/tldw_Server_API",
+            "COPY --chown=appuser:appuser Docs /app/Docs",
+            "COPY --chown=appuser:appuser Helper_Scripts /app/Helper_Scripts",
+            "COPY --chown=appuser:appuser LICENSE /app/LICENSE",
+            "COPY --chown=appuser:appuser LICENSES /app/LICENSES",
+            "COPY --chown=appuser:appuser THIRD_PARTY_NOTICES.txt /app/THIRD_PARTY_NOTICES.txt",
+            "COPY Dockerfiles/entrypoints/tldw-app-first-run.sh /usr/local/bin/tldw-app-first-run",
+        ),
+        "Expected Dockerfile.prod to use only the reviewed explicit COPY allowlist and no ADD",
+    )
+    runtime = text.split("FROM python:3.12-slim AS runtime", maxsplit=1)[1]
+    for required_copy in (
+        "LICENSE /app/LICENSE",
+        "LICENSES /app/LICENSES",
+        "THIRD_PARTY_NOTICES.txt /app/THIRD_PARTY_NOTICES.txt",
+    ):
+        _require(required_copy in runtime, f"Expected runtime API image legal copy: {required_copy}")
 
 
 def test_api_dockerfile_uses_runtime_env_for_uvicorn_workers_and_log_level():
@@ -169,7 +227,8 @@ def test_webui_dockerfile_copies_only_required_workspace_sources():
         "Expected Dockerfile.webui to copy only the extension prepare shim needed for install scripts",
     )
     _require(
-        "COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json" in text,
+        "COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json"
+        in text,
         "Expected Dockerfile.webui to copy the voice assistant package manifest for frozen lockfile workspace resolution",
     )
     _require(

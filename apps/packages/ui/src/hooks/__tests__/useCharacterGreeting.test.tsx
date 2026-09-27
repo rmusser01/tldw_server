@@ -14,8 +14,7 @@ const mocks = vi.hoisted(() => ({
   settings: null as Record<string, unknown> | null,
   updateSettings: vi.fn(),
   initialize: vi.fn(),
-  getCharacter: vi.fn(),
-  selectedCharacterStorageGet: vi.fn()
+  getCharacter: vi.fn()
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -39,15 +38,6 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     initialize: mocks.initialize,
     getCharacter: mocks.getCharacter
   }
-}))
-
-vi.mock("@/utils/selected-character-storage", () => ({
-  SELECTED_CHARACTER_STORAGE_KEY: "selectedCharacter",
-  selectedCharacterStorage: {
-    get: mocks.selectedCharacterStorageGet
-  },
-  parseSelectedCharacterValue: (value: unknown) =>
-    value && typeof value === "object" ? value : null
 }))
 
 const applyMessageUpdate = (
@@ -83,8 +73,6 @@ describe("useCharacterGreeting", () => {
     mocks.initialize.mockReset()
     mocks.initialize.mockResolvedValue(null)
     mocks.getCharacter.mockReset()
-    mocks.selectedCharacterStorageGet.mockReset()
-    mocks.selectedCharacterStorageGet.mockResolvedValue(null)
   })
 
   it("schedules greeting updates with React.startTransition", async () => {
@@ -108,7 +96,6 @@ describe("useCharacterGreeting", () => {
         historyState = applyHistoryUpdate(historyState, next)
       }
     )
-    const setSelectedCharacter = vi.fn()
 
     renderHook(() =>
       useCharacterGreeting({
@@ -119,8 +106,7 @@ describe("useCharacterGreeting", () => {
         historyId: "history-1",
         messagesLength: messageState.length,
         setMessages,
-        setHistory,
-        setSelectedCharacter
+        setHistory
       })
     )
 
@@ -174,7 +160,6 @@ describe("useCharacterGreeting", () => {
         historyState = applyHistoryUpdate(historyState, next)
       }
     )
-    const setSelectedCharacter = vi.fn()
 
     const { rerender } = renderHook(() =>
       useCharacterGreeting({
@@ -185,8 +170,7 @@ describe("useCharacterGreeting", () => {
         historyId: "history-1",
         messagesLength: messageState.length,
         setMessages,
-        setHistory,
-        setSelectedCharacter
+        setHistory
       })
     )
 
@@ -234,7 +218,6 @@ describe("useCharacterGreeting", () => {
       }
     )
     const setHistory = vi.fn()
-    const setSelectedCharacter = vi.fn()
 
     renderHook(() =>
       useCharacterGreeting({
@@ -245,8 +228,7 @@ describe("useCharacterGreeting", () => {
         historyId: "history-legacy-selection",
         messagesLength: messageState.length,
         setMessages,
-        setHistory,
-        setSelectedCharacter
+        setHistory
       })
     )
 
@@ -273,7 +255,6 @@ describe("useCharacterGreeting", () => {
         historyState = applyHistoryUpdate(historyState, next)
       }
     )
-    const setSelectedCharacter = vi.fn()
 
     renderHook(() =>
       useCharacterGreeting({
@@ -284,8 +265,7 @@ describe("useCharacterGreeting", () => {
         historyId: "history-server",
         messagesLength: messageState.length,
         setMessages,
-        setHistory,
-        setSelectedCharacter
+        setHistory
       })
     )
 
@@ -314,7 +294,6 @@ describe("useCharacterGreeting", () => {
         historyState = applyHistoryUpdate(historyState, next)
       }
     )
-    const setSelectedCharacter = vi.fn()
 
     renderHook(() =>
       useCharacterGreeting({
@@ -325,8 +304,7 @@ describe("useCharacterGreeting", () => {
         historyId: "history-overlay",
         messagesLength: messageState.length,
         setMessages,
-        setHistory,
-        setSelectedCharacter
+        setHistory
       })
     )
 
@@ -339,12 +317,7 @@ describe("useCharacterGreeting", () => {
     expect(mocks.getCharacter).not.toHaveBeenCalled()
   })
 
-  it("does not hydrate selected character from legacy storage while overlay mode is active", async () => {
-    mocks.selectedCharacterStorageGet.mockResolvedValue({
-      id: "char-stale",
-      name: "Stale Guide",
-      greeting: "Old greeting"
-    })
+  it("does not fetch a greeting while overlay mode is active", async () => {
     const selectedCharacter = {
       id: "char-overlay",
       name: "Overlay Guide",
@@ -352,7 +325,6 @@ describe("useCharacterGreeting", () => {
     } as Character
     const setMessages = vi.fn()
     const setHistory = vi.fn()
-    const setSelectedCharacter = vi.fn()
 
     renderHook(() =>
       useCharacterGreeting({
@@ -363,26 +335,19 @@ describe("useCharacterGreeting", () => {
         historyId: "history-overlay-storage",
         messagesLength: 0,
         setMessages,
-        setHistory,
-        setSelectedCharacter
+        setHistory
       })
     )
 
     await waitFor(() => {
-      expect(setSelectedCharacter).not.toHaveBeenCalled()
+      expect(mocks.getCharacter).not.toHaveBeenCalled()
     })
-    expect(mocks.selectedCharacterStorageGet).not.toHaveBeenCalled()
+    expect(setMessages).not.toHaveBeenCalled()
   })
 
-  it("does not sync selected character from storage during server chat load", async () => {
-    mocks.selectedCharacterStorageGet.mockResolvedValue({
-      id: "char-stale",
-      name: "Stale character",
-      greeting: "Old greeting"
-    })
+  it("does not fetch a greeting during server chat load", async () => {
     const setMessages = vi.fn()
     const setHistory = vi.fn()
-    const setSelectedCharacter = vi.fn()
 
     renderHook(() =>
       useCharacterGreeting({
@@ -393,18 +358,17 @@ describe("useCharacterGreeting", () => {
         historyId: "history-server",
         messagesLength: 0,
         setMessages,
-        setHistory,
-        setSelectedCharacter
+        setHistory
       })
     )
 
     await waitFor(() => {
-      expect(setSelectedCharacter).not.toHaveBeenCalled()
+      expect(mocks.getCharacter).not.toHaveBeenCalled()
     })
-    expect(mocks.selectedCharacterStorageGet).not.toHaveBeenCalled()
+    expect(setMessages).not.toHaveBeenCalled()
   })
 
-  it("does not refetch a character after merging fetched details for the same id", async () => {
+  it("hydrates the greeting avatar without refetching the same character", async () => {
     const initialCharacter = {
       id: "char-loop",
       name: "Loop Guide",
@@ -416,7 +380,7 @@ describe("useCharacterGreeting", () => {
       alternateGreetings: ["Hydrated greeting"]
     } as Character
 
-    let selectedCharacter = initialCharacter
+    const selectedCharacter = initialCharacter
     let messageState: Message[] = []
     let historyState: ChatHistory = []
     const setMessages = vi.fn(
@@ -429,11 +393,6 @@ describe("useCharacterGreeting", () => {
         historyState = applyHistoryUpdate(historyState, next)
       }
     )
-    const setSelectedCharacter = vi.fn((next: Character | null) => {
-      if (next) {
-        selectedCharacter = next
-      }
-    })
 
     mocks.getCharacter.mockResolvedValue(fetchedCharacter)
 
@@ -447,8 +406,7 @@ describe("useCharacterGreeting", () => {
           historyId: "history-loop",
           messagesLength: messageState.length,
           setMessages,
-          setHistory,
-          setSelectedCharacter
+          setHistory
         }),
       {
         initialProps: {
@@ -458,7 +416,7 @@ describe("useCharacterGreeting", () => {
     )
 
     await waitFor(() => {
-      expect(setSelectedCharacter).toHaveBeenCalledTimes(1)
+      expect(messageState[0]?.modelImage).toBe("https://example.com/avatar.png")
     })
     expect(mocks.getCharacter).toHaveBeenCalledTimes(1)
 
@@ -509,7 +467,6 @@ describe("useCharacterGreeting", () => {
         historyState = applyHistoryUpdate(historyState, next)
       }
     )
-    const setSelectedCharacter = vi.fn()
 
     const { rerender } = renderHook(
       ({ currentCharacter }: { currentCharacter: Character | null }) =>
@@ -521,8 +478,7 @@ describe("useCharacterGreeting", () => {
           historyId: "history-stable",
           messagesLength: messageState.length,
           setMessages,
-          setHistory,
-          setSelectedCharacter
+          setHistory
         }),
       {
         initialProps: {
@@ -576,7 +532,6 @@ describe("useCharacterGreeting", () => {
         historyState = applyHistoryUpdate(historyState, next)
       }
     )
-    const setSelectedCharacter = vi.fn()
 
     const { rerender } = renderHook(
       ({
@@ -594,8 +549,7 @@ describe("useCharacterGreeting", () => {
           historyId: "history-hydrated-greeting",
           messagesLength,
           setMessages,
-          setHistory,
-          setSelectedCharacter
+          setHistory
         }),
       {
         initialProps: {

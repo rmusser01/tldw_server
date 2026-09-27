@@ -3282,7 +3282,16 @@ def test_flashcard_assistant_respond_persists_user_and_assistant_messages(
     assert created.status_code == 200
     card_uuid = created.json()["uuid"]
 
-    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+    async def fake_generate_reply(
+        *,
+        action: str,
+        context: dict[str, Any],
+        message: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        guidance: str | None = None,
+    ) -> dict[str, Any]:
+        """Supply a controlled reply while preserving the generation call contract."""
         assert action == "explain"
         assert context["flashcard"]["uuid"] == card_uuid
         return {
@@ -3342,7 +3351,16 @@ def test_flashcard_assistant_respond_returns_409_for_stale_thread_version(
 
     call_count = 0
 
-    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+    async def fake_generate_reply(
+        *,
+        action: str,
+        context: dict[str, Any],
+        message: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        guidance: str | None = None,
+    ) -> dict[str, Any]:
+        """Supply a controlled reply while preserving the generation call contract."""
         nonlocal call_count
         call_count += 1
         return {
@@ -3380,7 +3398,16 @@ def test_flashcard_assistant_respond_returns_400_for_input_error(
     assert created.status_code == 200
     card_uuid = created.json()["uuid"]
 
-    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+    async def fake_generate_reply(
+        *,
+        action: str,
+        context: dict[str, Any],
+        message: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        guidance: str | None = None,
+    ) -> dict[str, Any]:
+        """Supply a controlled reply while preserving the generation call contract."""
         raise InputError("invalid study assistant action")
 
     monkeypatch.setattr(
@@ -3410,7 +3437,16 @@ def test_flashcard_assistant_respond_returns_500_for_db_error(
     assert created.status_code == 200
     card_uuid = created.json()["uuid"]
 
-    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+    async def fake_generate_reply(
+        *,
+        action: str,
+        context: dict[str, Any],
+        message: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        guidance: str | None = None,
+    ) -> dict[str, Any]:
+        """Supply a controlled reply while preserving the generation call contract."""
         raise CharactersRAGDBError("flashcard assistant reply backend unavailable")
 
     monkeypatch.setattr(
@@ -3441,7 +3477,16 @@ def test_flashcard_assistant_respond_returns_409_for_db_conflict(
     assert created.status_code == 200
     card_uuid = created.json()["uuid"]
 
-    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+    async def fake_generate_reply(
+        *,
+        action: str,
+        context: dict[str, Any],
+        message: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        guidance: str | None = None,
+    ) -> dict[str, Any]:
+        """Supply a controlled reply while preserving the generation call contract."""
         return {
             "assistant_text": "The glomerulus is the filtration tuft in the nephron.",
             "structured_payload": {},
@@ -3513,7 +3558,16 @@ def test_flashcard_assistant_fact_check_returns_required_payload_keys(
     assert created.status_code == 200
     card_uuid = created.json()["uuid"]
 
-    async def fake_generate_reply(*, action, context, message=None, provider=None, model=None):
+    async def fake_generate_reply(
+        *,
+        action: str,
+        context: dict[str, Any],
+        message: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        guidance: str | None = None,
+    ) -> dict[str, Any]:
+        """Supply a controlled reply while preserving the generation call contract."""
         assert action == "fact_check"
         return {
             "assistant_text": "Filtration occurs in the glomerulus.",
@@ -3576,7 +3630,16 @@ def test_analytics_summary_returns_daily_metrics_and_deck_progress(client_with_f
     first_uuid = first.json()["uuid"]
     second_uuid = second.json()["uuid"]
 
-    # One successful recall + one lapse to verify retention/lapse calculations
+    # Graduate the second card so Again is a lapse of learned material. This
+    # setup review is part of today's history; its absent answer time is ignored.
+    r = client_with_flashcards_db.post(
+        "/api/v1/flashcards/review",
+        json={"card_uuid": second_uuid, "rating": 5},
+        headers=AUTH_HEADERS,
+    )
+    assert r.status_code == 200
+
+    # One successful recall + one actual lapse, in addition to graduation.
     r = client_with_flashcards_db.post(
         "/api/v1/flashcards/review",
         json={"card_uuid": first_uuid, "rating": 3, "answer_time_ms": 2500},
@@ -3585,7 +3648,7 @@ def test_analytics_summary_returns_daily_metrics_and_deck_progress(client_with_f
     assert r.status_code == 200
     r = client_with_flashcards_db.post(
         "/api/v1/flashcards/review",
-        json={"card_uuid": second_uuid, "rating": 1, "answer_time_ms": 4500},
+        json={"card_uuid": second_uuid, "rating": 0, "answer_time_ms": 4500},
         headers=AUTH_HEADERS,
     )
     assert r.status_code == 200
@@ -3595,11 +3658,11 @@ def test_analytics_summary_returns_daily_metrics_and_deck_progress(client_with_f
     assert r.status_code == 200
     payload = r.json()
 
-    assert payload["reviewed_today"] == 2
+    assert payload["reviewed_today"] == 3
     assert payload["study_streak_days"] >= 1
     assert payload["avg_answer_time_ms_today"] == pytest.approx(3500.0)
-    assert payload["retention_rate_today"] == pytest.approx(50.0)
-    assert payload["lapse_rate_today"] == pytest.approx(50.0)
+    assert payload["retention_rate_today"] == pytest.approx(200.0 / 3)
+    assert payload["lapse_rate_today"] == pytest.approx(100.0 / 3)
     assert payload.get("generated_at")
 
     deck = next((d for d in payload["decks"] if d["deck_id"] == deck_id), None)

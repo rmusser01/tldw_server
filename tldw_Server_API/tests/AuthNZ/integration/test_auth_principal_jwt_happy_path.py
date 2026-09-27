@@ -1,5 +1,4 @@
-import os
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 from fastapi import APIRouter, Depends, FastAPI, Request
@@ -9,9 +8,8 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
     get_current_user,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
 pytestmark = pytest.mark.integration
 
@@ -30,13 +28,13 @@ def _attach_whoami_router(app: FastAPI) -> None:
     async def whoami_jwt_happy(
         request: Request,
         principal: AuthPrincipal = Depends(get_auth_principal),
-        user: Dict[str, Any] = Depends(get_current_user),
+        user: dict[str, Any] = Depends(get_current_user),
         request_user: User = Depends(get_request_user),
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         auth_ctx = getattr(request.state, "auth", None)
         if auth_ctx is not None:
             cp = auth_ctx.principal
-            state_auth_principal: Dict[str, Any] | None = {
+            state_auth_principal: dict[str, Any] | None = {
                 "principal_id": getattr(cp, "principal_id", None),
                 "kind": getattr(cp, "kind", None),
                 "user_id": getattr(cp, "user_id", None),
@@ -45,6 +43,8 @@ def _attach_whoami_router(app: FastAPI) -> None:
                 "permissions": getattr(cp, "permissions", None),
                 "org_ids": getattr(cp, "org_ids", None),
                 "team_ids": getattr(cp, "team_ids", None),
+                "active_org_id": getattr(cp, "active_org_id", None),
+                "active_team_id": getattr(cp, "active_team_id", None),
             }
         else:
             state_auth_principal = None
@@ -59,6 +59,8 @@ def _attach_whoami_router(app: FastAPI) -> None:
                 "permissions": principal.permissions,
                 "org_ids": principal.org_ids,
                 "team_ids": principal.team_ids,
+                "active_org_id": principal.active_org_id,
+                "active_team_id": principal.active_team_id,
             },
             "user": {
                 "id": user.get("id"),
@@ -73,12 +75,18 @@ def _attach_whoami_router(app: FastAPI) -> None:
                 "roles": list(getattr(request_user, "roles", []) or []),
                 "permissions": list(getattr(request_user, "permissions", []) or []),
                 "is_admin": bool(getattr(request_user, "is_admin", False)),
+                "org_ids": list(getattr(request_user, "org_ids", []) or []),
+                "team_ids": list(getattr(request_user, "team_ids", []) or []),
+                "active_org_id": getattr(request_user, "active_org_id", None),
+                "active_team_id": getattr(request_user, "active_team_id", None),
             },
             "state": {
                 "user_id": getattr(request.state, "user_id", None),
                 "api_key_id": getattr(request.state, "api_key_id", None),
                 "org_ids": getattr(request.state, "org_ids", None),
                 "team_ids": getattr(request.state, "team_ids", None),
+                "active_org_id": getattr(request.state, "active_org_id", None),
+                "active_team_id": getattr(request.state, "active_team_id", None),
             },
             "state_auth_principal": state_auth_principal,
         }
@@ -184,10 +192,21 @@ async def test_multi_user_jwt_happy_path_principal_matches_state(
     assert state_auth_principal["api_key_id"] == principal["api_key_id"]
     assert state_auth_principal["org_ids"] == principal["org_ids"]
     assert state_auth_principal["team_ids"] == principal["team_ids"]
+    assert state_auth_principal["active_org_id"] == principal["active_org_id"]
+    assert state_auth_principal["active_team_id"] == principal["active_team_id"]
 
     # Org/team membership is mirrored between principal and request.state
     assert state["org_ids"] == principal["org_ids"]
     assert state["team_ids"] == principal["team_ids"]
+    assert state["active_org_id"] == principal["active_org_id"]
+    assert state["active_team_id"] == principal["active_team_id"]
+
+    # The legacy request-user compatibility object must expose the same
+    # post-validation scope used by AuthPrincipal and request.state.
+    assert request_user["org_ids"] == principal["org_ids"]
+    assert request_user["team_ids"] == principal["team_ids"]
+    assert request_user["active_org_id"] == principal["active_org_id"]
+    assert request_user["active_team_id"] == principal["active_team_id"]
 
     # Claims on AuthPrincipal, get_current_user, and get_request_user should be aligned
     assert principal["roles"] == user["roles"] == request_user["roles"]

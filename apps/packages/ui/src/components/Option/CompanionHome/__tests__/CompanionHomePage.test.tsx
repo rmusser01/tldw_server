@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
@@ -8,10 +8,13 @@ const mocks = vi.hoisted(() => ({
   fetchCompanionHomeSnapshot: vi.fn(),
   fetchPersonalizationProfile: vi.fn(),
   listScheduledTasks: vi.fn(),
+  listScheduledTaskResults: vi.fn(),
   listNotifications: vi.fn(),
   updatePersonalizationOptIn: vi.fn(),
   loadCompanionHomeLayout: vi.fn(),
   saveCompanionHomeLayout: vi.fn(),
+  callerRefresh: vi.fn(),
+  callerForbidden: vi.fn(),
   capabilitiesState: {
     capabilities: { hasPersonalization: true, hasPersona: true },
     loading: false
@@ -23,6 +26,34 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => mocks.capabilitiesState
+}))
+
+vi.mock("@/hooks/useConnectionState", () => ({ useIsConnected: () => true }))
+vi.mock("@/hooks/useCallerCapabilities", async () => {
+  const { buildChatSurfaceScopeKeyFromConfig } = await import("@/services/chat-surface-scope")
+  return {
+  useCallerCapabilities: () => ({
+    scheduledTasks: "allowed", notifications: "allowed", monitoringAlerts: "denied",
+    loading: false, userId: 7,
+    scopeKey: `${buildChatSurfaceScopeKeyFromConfig({ serverUrl: "https://home.test", authMode: "multi-user" }, { userId: 7 })}:manual`,
+    refresh: mocks.callerRefresh, refreshAfterForbidden: mocks.callerForbidden
+  })
+  }
+})
+vi.mock("@/services/tldw/TldwApiClient", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/services/tldw/TldwApiClient")>()
+  return { ...actual, tldwClient: {
+    ...actual.tldwClient,
+    getConfig: async () => null,
+    ensureConfigForRequest: async () => ({ serverUrl: "https://home.test", authMode: "multi-user" })
+  } }
+})
+vi.mock("@/services/service-prompts", () => ({
+  isServicePromptScopeUnresolvedError: () => false,
+  loadServicePromptSnapshot: async (_ids: string[], { signal }: { signal: AbortSignal }) => ({
+    requestScope: { config: { serverUrl: "https://home.test", authMode: "multi-user" }, userId: 7 },
+    scopeSignal: signal, release: vi.fn()
+  })
 }))
 
 vi.mock("@/design-system", async () => {
@@ -66,7 +97,9 @@ vi.mock("@/services/scheduled-tasks-control-plane", async () => {
 
   return {
     ...actual,
-    listScheduledTasks: (...args: unknown[]) => mocks.listScheduledTasks(...args)
+    listScheduledTasks: (...args: unknown[]) => mocks.listScheduledTasks(...args),
+    listScheduledTaskResults: (...args: unknown[]) =>
+      mocks.listScheduledTaskResults(...args)
   }
 })
 
@@ -283,6 +316,13 @@ describe("CompanionHomePage", () => {
       partial: false,
       errors: []
     })
+    mocks.listScheduledTaskResults.mockResolvedValue({
+      items: [],
+      total: 0,
+      limit: 50,
+      offset: 0,
+      has_more: false
+    })
     mocks.listNotifications.mockResolvedValue({
       items: [],
       total: 0
@@ -364,6 +404,7 @@ describe("CompanionHomePage", () => {
     renderPage()
 
     expect(await screen.findByText("Companion setup required")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Personalization configuration guide" })).toHaveAttribute("href", "https://github.com/rmusser01/tldw_server/blob/main/Docs/Product/Personalization_Design.md#current-status-v02x-dev")
     expect(screen.getByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /Source monitor/i })).toHaveAttribute(
       "href",
@@ -383,13 +424,19 @@ describe("CompanionHomePage", () => {
   })
 
   it("renders the default core dashboard cards", async () => {
+    const snapshot = createDeferred<ReturnType<typeof buildSnapshot>>()
+    mocks.fetchCompanionHomeSnapshot.mockReturnValueOnce(snapshot.promise)
     renderPage()
 
     await waitFor(() => {
       expect(mocks.fetchCompanionHomeSnapshot).toHaveBeenCalledWith("options")
     })
 
-    expect(screen.getByRole("heading", { name: "Inbox Preview" })).toBeInTheDocument()
+    expect(screen.getByText("Loading your companion home dashboard.")).toBeInTheDocument()
+    await act(async () => {
+      snapshot.resolve(buildSnapshot())
+    })
+    expect(await screen.findByRole("heading", { name: "Inbox Preview" })).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Needs Attention" })).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Resume Work" })).toBeInTheDocument()
@@ -402,6 +449,25 @@ describe("CompanionHomePage", () => {
     expect(within(summary).getByText("Goals")).toBeInTheDocument()
     expect(within(summary).getByText("Reading")).toBeInTheDocument()
     expect(within(summary).getByText("Resume")).toBeInTheDocument()
+  })
+
+  it.each([
+    [false, false, true, "Registry setup required"],
+    [true, false, true, "Enable Companion"],
+    [true, true, true, "Temporarily unavailable"],
+    [true, true, false, "Reading queue is clear"]
+  ])("classifies an empty reading queue by its actual prerequisites (%s, %s, %s)", async (available, enabled, degraded, label) => {
+    mocks.capabilitiesState.capabilities = { hasPersonalization: available, hasPersona: true }
+    mocks.fetchPersonalizationProfile.mockResolvedValue({ enabled })
+    mocks.fetchCompanionHomeSnapshot.mockResolvedValue(buildSnapshot({
+      readingQueue: [],
+      degradedSources: degraded ? ["reading"] : []
+    }))
+    renderPage()
+    const heading = await screen.findByRole("heading", { name: "Reading Queue" })
+    const card = within(heading.closest("section")!)
+    expect(card.getAllByText(label).length).toBeGreaterThan(0)
+    if (!available) expect(mocks.fetchCompanionHomeSnapshot).not.toHaveBeenCalled()
   })
 
   it("renders scheduled-task result and failure signals in Automation Inbox", async () => {
@@ -439,6 +505,90 @@ describe("CompanionHomePage", () => {
     expect(screen.getByText("Needs attention")).toBeInTheDocument()
   })
 
+  it("prefers surfaced normalized scheduled-task results in Automation Inbox", async () => {
+    mocks.listScheduledTaskResults.mockResolvedValueOnce({
+      total: 2,
+      limit: 50,
+      offset: 0,
+      has_more: false,
+      items: [
+        {
+          id: "rq-result-42",
+          definition_id: "definition-7",
+          run_id: "run-42",
+          kind: "finding",
+          title: "Possible answer found",
+          summary: "One relevant source matched the open question.",
+          answer: "The latest policy memo mentions the missing constraint.",
+          answer_mode: "generated_answer",
+          confidence: { label: "medium" },
+          source_refs: [
+            {
+              source_id: "media-9",
+              title: "Policy memo",
+              snippet: "Short redacted evidence excerpt",
+              citation_ref: "memo#p4"
+            }
+          ],
+          dedupe_key: "rq:def-7:policy",
+          visibility_destination: { home: true, results: true },
+          review_state: "unread",
+          created_at: "2030-01-03T09:00:00Z",
+          updated_at: "2030-01-03T09:00:00Z"
+        },
+        {
+          id: "rq-result-dismissed",
+          definition_id: "definition-8",
+          run_id: "run-43",
+          kind: "finding",
+          title: "Dismissed answer",
+          summary: "This should stay out of Home after review.",
+          answer: null,
+          answer_mode: "evidence_only",
+          confidence: { label: "low" },
+          source_refs: [],
+          dedupe_key: "rq:def-8:dismissed",
+          visibility_destination: { home: true, results: true },
+          review_state: "dismissed",
+          created_at: "2030-01-03T08:00:00Z",
+          updated_at: "2030-01-03T08:00:00Z"
+        },
+        {
+          id: "rq-result-results-only",
+          definition_id: "definition-9",
+          run_id: "run-44",
+          kind: "finding",
+          title: "Results only answer",
+          summary: "This result should remain on the Scheduled Tasks results tab.",
+          answer: null,
+          answer_mode: "evidence_only",
+          confidence: { label: "medium" },
+          source_refs: [],
+          dedupe_key: "rq:def-9:results-only",
+          visibility_destination: { home: false, results: true },
+          review_state: "unread",
+          created_at: "2030-01-03T07:00:00Z",
+          updated_at: "2030-01-03T07:00:00Z"
+        }
+      ]
+    })
+
+    renderPage()
+
+    expect(await screen.findByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /Possible answer found/i })).toHaveAttribute(
+      "href",
+      "/scheduled-tasks?tab=results&result_id=rq-result-42"
+    )
+    expect(screen.getByText("New result")).toBeInTheDocument()
+    expect(screen.getByText("Scheduled Tasks")).toBeInTheDocument()
+    expect(screen.queryByText("Dismissed answer")).not.toBeInTheDocument()
+    expect(screen.queryByText("Results only answer")).not.toBeInTheDocument()
+    expect(mocks.listScheduledTaskResults).toHaveBeenCalledWith({ limit: 50 }, expect.objectContaining({
+      servicePromptConfig: expect.objectContaining({ expectedUserId: 7 })
+    }))
+  })
+
   it("keeps Companion Home usable when scheduled-task loading fails", async () => {
     mocks.listScheduledTasks.mockRejectedValueOnce(new Error("scheduled tasks unavailable"))
 
@@ -448,6 +598,28 @@ describe("CompanionHomePage", () => {
     expect(screen.getByText("Unread reflection")).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
     expect(screen.getByText("Automation signals unavailable")).toBeInTheDocument()
+  })
+
+  it("surfaces partial automation state when normalized result loading fails", async () => {
+    mocks.listScheduledTasks.mockResolvedValueOnce({
+      items: [buildScheduledTask()],
+      total: 1,
+      partial: false,
+      errors: []
+    })
+    mocks.listScheduledTaskResults.mockRejectedValueOnce(
+      new Error("scheduled task results unavailable")
+    )
+
+    renderPage()
+
+    expect(await screen.findByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /Release monitor/i })).toHaveAttribute(
+      "href",
+      "/scheduled-tasks?tab=results&result_id=202"
+    )
+    expect(screen.getByText("Partial automation data")).toBeInTheDocument()
+    expect(screen.getByText("Scheduled-task results could not be loaded.")).toBeInTheDocument()
   })
 
   it("dedupes notification-derived automation signals against projected task results", async () => {
@@ -479,7 +651,9 @@ describe("CompanionHomePage", () => {
 
     expect(await screen.findByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
     expect(screen.getAllByRole("link", { name: /Release monitor/i })).toHaveLength(1)
-    expect(mocks.listNotifications).toHaveBeenCalledWith({ limit: 50 })
+    expect(mocks.listNotifications).toHaveBeenCalledWith({ limit: 50 }, expect.objectContaining({
+      servicePromptConfig: expect.objectContaining({ expectedUserId: 7 })
+    }))
   })
 
   it("does not flash the default core layout before the persisted layout resolves", async () => {

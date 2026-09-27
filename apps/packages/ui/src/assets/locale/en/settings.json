@@ -19,6 +19,262 @@
   "setupRecovery": {
     "title": "Setup & Recovery"
   },
+  "servicePrompts": {
+    "title": "Workflow prompts",
+    "description": "Review and customize the instructions used by supported content workflows.",
+    "definitions": {
+      "writingFeedbackMood": {
+        "label": "Writing feedback: Mood",
+        "description": "Controls mood classification guidance. The seven allowed moods, one-word response, passage and provider settings remain fixed."
+      },
+      "writingFeedbackEcho": {
+        "label": "Writing feedback: Echo",
+        "description": "Controls the five reader reactions. Persona identities, rotation, passage and provider settings remain fixed."
+      },
+      "writingAgentQuick": {
+        "label": "Writing Agent: Quick",
+        "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
+      },
+      "writingAgentPlanning": {
+        "label": "Writing Agent: Planning",
+        "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
+      },
+      "writingAgentBrainstorm": {
+        "label": "Writing Agent: Brainstorm",
+        "description": "Controls writing assistance instructions. Manuscript context and provider settings remain fixed."
+      },
+      "writingContinuationPredict": {
+        "label": "Writing continuation: Predict",
+        "description": "Controls non-chat continuation instructions. Context, fill templates, stopping rules and provider settings remain fixed."
+      },
+      "writingContinuationFill": {
+        "label": "Writing continuation: Fill",
+        "description": "Controls non-chat continuation instructions. Context, fill templates, stopping rules and provider settings remain fixed."
+      },
+      "studyAssistantExplain": {
+        "label": "Study explanation",
+        "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed."
+      },
+      "studyAssistantMnemonic": {
+        "label": "Study mnemonic",
+        "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed."
+      },
+      "studyAssistantFollowup": {
+        "label": "Study follow-up",
+        "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed."
+      },
+      "studyAssistantFreeform": {
+        "label": "Study freeform response",
+        "description": "Controls study response guidance. Grounding instructions, study context and provider settings remain fixed."
+      },
+      "chatRagAnswer": {
+        "label": "RAG answer",
+        "description": "Controls how retrieved context and the current question are presented to the model."
+      },
+      "chatRagQuestionRewrite": {
+        "label": "RAG follow-up rewrite",
+        "description": "Controls how a conversational follow-up is rewritten into a standalone retrieval query."
+      },
+      "chatWebSearchAnswer": {
+        "label": "Web-search answer",
+        "description": "Controls how normalized web-search results are presented for the final answer."
+      },
+      "chatTitleGeneration": {
+        "label": "Conversation title",
+        "description": "Controls the instruction used to generate automatic conversation titles."
+      },
+      "imagePromptRefinement": {
+        "label": "Image prompt refinement",
+        "description": "Controls the semantic instructions used to refine image-generation prompt drafts."
+      },
+      "mediaTextTranslation": {
+        "label": "Text translation",
+        "description": "Controls the visible instructions used by synchronous text translation."
+      },
+      "mediaDocumentSummarization": {
+        "label": "Document summarization",
+        "description": "Controls system instructions for synchronous document analysis. Without a saved override, server defaults apply."
+      },
+      "mediaDocumentInsights": {
+        "label": "Document Insights",
+        "description": "Controls analysis and presentation guidance for document insights. JSON output requirements and requested categories remain fixed."
+      },
+      "mediaPdfSummarization": {
+        "label": "PDF summarization",
+        "description": "Controls system instructions for synchronous PDF analysis. Without a saved override, server defaults apply."
+      },
+      "mediaEbookSummarization": {
+        "label": "EPUB summarization",
+        "description": "Controls system instructions for synchronous EPUB analysis. Without a saved override, server defaults apply."
+      },
+      "mediaAudioAnalysis": {
+        "label": "Audio summarization",
+        "description": "Controls system and user instructions for synchronous audio analysis. Without a saved override, server defaults apply."
+      },
+      "mediaVideoSummarization": {
+        "label": "Video summarization",
+        "description": "Controls system instructions and recursive final-summary instructions for synchronous video analysis. Without a saved override, server defaults apply."
+      },
+      "mediaWebSummarization": {
+        "label": "Web article summarization",
+        "description": "Controls summary instructions for synchronous web scraping and web-content ingestion. Reset restores each scraping engine's existing defaults; the displayed defaults are the deployed web-article prompts."
+      },
+      "mediaEmailSummarization": {
+        "label": "Email summarization",
+        "description": "Controls system instructions for synchronous email analysis. Without a saved override, server defaults apply."
+      },
+      "notesTitleGenerate": {
+        "label": "Notes title",
+        "description": "Controls the wording used by LLM-backed automatic Notes titles."
+      }
+    },
+    "workflows": {
+      "writingAgent": "Writing Playground AI Agent",
+      "writingContinuation": "Writing Playground continuation",
+      "writingFeedback": "Writing Playground feedback",
+      "studyAssistantFlashcard": "Flashcard Study Assistant",
+      "studyAssistantQuiz": "Quiz Study Assistant",
+      "mainChatRag": "Main chat RAG",
+      "tabChatRag": "Tab chat RAG",
+      "documentChatRag": "Document chat RAG",
+      "sidepanelRag": "Sidepanel RAG",
+      "mainChatWebSearch": "Main chat web search",
+      "compareWebSearch": "Compare web search",
+      "automaticConversationTitles": "Automatic conversation titles",
+      "imagePromptRefinement": "Image prompt refinement",
+      "textTranslation": "Text translation",
+      "documentSummarization": "Synchronous document analysis",
+      "pdfSummarization": "Synchronous PDF analysis",
+      "ebookSummarization": "Synchronous EPUB analysis",
+      "emailSummarization": "Synchronous email analysis",
+      "audioAnalysis": "Synchronous audio analysis",
+      "videoSummarization": "Synchronous video analysis",
+      "webSummarization": "Synchronous web scraping and ingestion",
+      "documentInsights": "Document workspace insights",
+      "automaticNotesTitles": "Automatic Notes titles"
+    },
+    "titleGeneration": {
+      "note": "Automatic title generation is enabled or disabled in Chat settings.",
+      "openChatSettings": "Open Chat settings"
+    },
+    "parts": {
+      "classifierGuidance": "Classifier guidance",
+      "classificationSemantics": "Classification instructions",
+      "alexSystem": "Alex instructions",
+      "samSystem": "Sam instructions",
+      "maxSystem": "Max instructions",
+      "rileySystem": "Riley instructions",
+      "jordanSystem": "Jordan instructions",
+      "guidance": "Guidance",
+      "template": "Template",
+      "system": "System instructions",
+      "user": "User instructions",
+      "finalSummary": "Final-summary instructions",
+      "systemSemantics": "Refinement guidance",
+      "analysisGuidance": "Analysis guidance",
+      "presentationGuidance": "Presentation guidance",
+      "rewriteSemantics": "Rewrite guidance",
+      "titleInstruction": "Title instruction",
+      "userTemplate": "User template"
+    },
+    "scope": {
+      "server": "Server",
+      "account": "Account scope",
+      "workflows": "Affected workflows",
+      "changedTitle": "Server or account changed",
+      "changedDescription": "Choose a workflow prompt again after the new server and account scope loads. The previous draft cannot be saved."
+    },
+    "states": {
+      "loadingScope": "Loading server and account scope…",
+      "loadingCatalog": "Loading workflow prompts…",
+      "loadingDetail": "Loading workflow prompt…",
+      "chooseTitle": "Choose a workflow prompt",
+      "chooseDescription": "Select a definition to review its affected workflows and instructions.",
+      "packaged": "Server default",
+      "customized": "Customized",
+      "dirty": "Unsaved"
+    },
+    "actions": {
+      "openLibrary": "Open reusable Prompts workspace",
+      "retry": "Retry",
+      "preview": "Preview",
+      "save": "Save changes",
+      "reset": "Reset to default",
+      "resetConfirm": "Reset"
+    },
+    "errors": {
+      "scopeTitle": "Unable to resolve the connected server and account.",
+      "scopeDescription": "Check the connection and credentials, then try again.",
+      "catalogTitle": "Unable to load workflow prompts",
+      "catalogDescription": "The connected server returned an error. No local values were changed.",
+      "detailTitle": "Unable to load this workflow prompt",
+      "saveFailed": "Unable to save this workflow prompt.",
+      "resetFailed": "Unable to reset this workflow prompt.",
+      "reloadFailed": "Unable to reload the server value."
+    },
+    "unsupported": {
+      "title": "Workflow prompts require a server update",
+      "description": "This older server does not support server-synced editing. Existing browser-local prompt behavior remains active until the server is updated."
+    },
+    "corrupt": {
+      "title": "Saved customization is unavailable",
+      "description": "The saved value cannot be read safely. Reset it to restore the server default.",
+      "resetAction": "Reset corrupt customization",
+      "rebound": "The saved customization changed. The latest revision was loaded. Retry reset."
+    },
+    "conflict": {
+      "title": "This prompt changed on the server.",
+      "description": "Your complete local draft is preserved. Reload only when you are ready to replace it.",
+      "reload": "Reload server value"
+    },
+    "reset": {
+      "title": "Reset {{name}}?",
+      "content": "This will permanently remove the saved customization. There is no history or undo."
+    },
+    "operations": {
+      "saving": "Saving workflow prompt…",
+      "saved": "Workflow prompt saved.",
+      "resetting": "Resetting workflow prompt…",
+      "reset": "Workflow prompt reset to the server default."
+    },
+    "variables": {
+      "label": "Required variables"
+    },
+    "preview": {
+      "label": "Prompt preview",
+      "title": "Local preview"
+    },
+    "listLabel": "Workflow prompt definitions",
+    "editorLabel": "{{name}} editor",
+    "detailRegionLabel": "Workflow prompt details",
+    "migration": {
+      "title": "Browser-local workflow prompts found",
+      "description": "Review these browser-local values before using Chat with this server. Imported overrides are saved to the connected server and account. Portable backups do not include Service Prompt overrides.",
+      "readFailed": "Unable to read browser-local workflow prompts.",
+      "readFailedDescription": "No browser-local values were changed. Retry the browser storage check.",
+      "prepareFailed": "Unable to prepare this import. The browser-local values were preserved.",
+      "repairLabel": "Repair {{name}}",
+      "importAction": "Import to this server",
+      "discardButton": "Discard local values",
+      "replaceTitle": "Replace saved customizations?",
+      "replaceContent": "Importing will replace saved customizations for: {{names}}.",
+      "replaceAction": "Replace and import",
+      "discardTitle": "Discard browser-local workflow prompts?",
+      "discardContent": "This permanently removes only the three mapped browser-local values.",
+      "discardAction": "Discard",
+      "importFailed": "Import failed. The browser-local value was preserved.",
+      "discardFailed": "Discard failed. The browser-local value was preserved.",
+      "remaining_one": "{{count}} browser-local prompt still needs attention.",
+      "remaining_other": "{{count}} browser-local prompts still need attention."
+    },
+    "unsaved": {
+      "leave": "Discard unsaved workflow prompt changes?",
+      "changePrompt": "Discard unsaved changes and open another workflow prompt?"
+    },
+    "backup": {
+      "portableExclusion": "Portable backups do not include server- and account-scoped Service Prompt overrides."
+    }
+  },
   "worldBooksNav": "World Books",
   "chatDictionariesNav": "Chat Dictionaries",
   "chatbooksNav": "Chatbooks settings",
@@ -27,10 +283,11 @@
     "subtitle": "Back up and restore account data, with selective export available when you need a smaller archive.",
     "exportTitle": "Create backup",
     "exportMode": "Export mode",
-    "backupAllMode": "Backup all account data",
+    "backupAllMode": "Backup supported account data",
     "selectiveMode": "Selective export",
-    "backupAllTitle": "Backup all account data",
+    "backupAllTitle": "Backup supported account data",
     "backupAllDescription": "Includes all restorable account records, stored media artifacts, embeddings, generated content, and pointer metadata tracked by tldw.",
+    "backupAllExclusions": "This portable backup does not include Service Prompt overrides.",
     "backupAllScope": "Backup all scope",
     "scopeLoadError": "Unable to load backup scope",
     "scopeTotal": "Total items",
@@ -62,6 +319,86 @@
   "evaluationsSettingsNav": "Evaluations",
   "promptStudioNav": "Prompt Studio",
   "chatSettingsNav": "Chat",
+  "chatMacrosNav": "Chat Macros",
+  "chatMacroEditor": {
+    "title": "Macro editor",
+    "editor": "Macro editor",
+    "mode": "Editor mode",
+    "guided": "Guided",
+    "yaml": "YAML",
+    "identity": "Macro identity",
+    "name": "Name",
+    "command": "Command",
+    "description": "Description",
+    "execution": "Execution settings",
+    "outputProfile": "Output profile",
+    "maxBranches": "Max branches",
+    "concurrency": "Concurrency",
+    "timeout": "Timeout (s)",
+    "mergePrompt": "Merge prompt",
+    "branches": "Branches",
+    "addBranch": "Add branch",
+    "branchLabel": "Branch label",
+    "branchOutput": "Branch output",
+    "branchPrompt": "Branch prompt",
+    "moveBranchUp": "Move branch up",
+    "moveBranchDown": "Move branch down",
+    "deleteBranch": "Delete branch",
+    "source": "Macro source",
+    "sourceYaml": "Macro YAML",
+    "upload": "Upload macro YAML",
+    "download": "Download macro YAML",
+    "copy": "Copy macro YAML",
+    "save": "Save macro",
+    "saving": "Saving",
+    "clone": "Clone macro",
+    "delete": "Delete macro",
+    "confirmDelete": "Delete",
+    "cancel": "Cancel",
+    "deleteTitle": "Delete macro?",
+    "deleteContent": "This macro will be permanently removed.",
+    "validationPassed": "Server validation passed.",
+    "validatedNameMismatch": "Validated macro name must match the selected macro.",
+    "copied": "YAML copied.",
+    "copyError": "Unable to copy YAML.",
+    "importError": "Unable to import YAML.",
+    "guidedSourceError": "Unable to generate YAML.",
+    "guidedUnavailable": "This YAML cannot be edited in Guided mode."
+  },
+  "outputProfileEditor": {
+    "title": "Output profiles",
+    "description": "Choose how macro results are organized and which branch outputs are included.",
+    "profile": "Profile",
+    "newProfileName": "New profile name",
+    "addProfile": "Add profile",
+    "deleteProfile": "Delete profile",
+    "defaultProtected": "The default profile cannot be deleted.",
+    "responseFormat": "Response format",
+    "structuredSections": "Structured sections",
+    "singleResponse": "Single response",
+    "includeBranchOutputs": "Include branch outputs",
+    "sections": "Sections",
+    "addSection": "Add section",
+    "sectionKey": "Section key {{index}}",
+    "sectionHeading": "Section heading {{index}}",
+    "moveSectionUp": "Move section {{index}} up",
+    "moveSectionDown": "Move section {{index}} down",
+    "removeSection": "Remove section {{index}}",
+    "save": "Save profiles",
+    "saving": "Saving",
+    "saved": "Output profiles saved.",
+    "saveFailed": "Failed to save output profiles.",
+    "requestFailed": "Request failed ({{status}})",
+    "validation": {
+      "profileKey": "Profile names must use lowercase letters, numbers, and underscores.",
+      "profileDuplicate": "A profile with this name already exists.",
+      "sectionsRequired": "A profile must contain at least one section.",
+      "tooManySections": "A profile can contain at most 10 sections.",
+      "sectionDuplicate": "Section keys must be unique.",
+      "sectionKey": "Section keys must use lowercase letters, numbers, and underscores.",
+      "headingLength": "Section headings must be 128 characters or fewer."
+    }
+  },
   "quickIngestSettingsNav": "Quick Ingest",
   "speechSettingsNav": "Speech",
   "audioSourcePicker": {
@@ -378,6 +715,9 @@
     }
   },
   "admin": {
+    "users": {
+      "passwordGuidance": "Use a long, unique password with uppercase and lowercase letters, a number, and a symbol. Avoid your username and sequences or repeats of three characters."
+    },
     "adminGuardForbiddenTitle": "Admin access required for these controls",
     "adminGuardNotFoundTitle": "Admin APIs are not available on this server",
     "adminGuardForbiddenBody": "Sign in as an admin user on your tldw server to view and manage users, roles, and system statistics.",
@@ -1054,6 +1394,65 @@
     "option2": "RAG",
     "questionPrompt": "Question Prompt",
     "search": "Search titles and contents",
+    "structured": {
+      "blockEditor": {
+        "nameLabel": "Block name",
+        "roleLabel": "Block role",
+        "sectionKey": "Section key",
+        "contentLabel": "Block content",
+        "enabledLabel": "Block enabled",
+        "templateLabel": "Block uses variables"
+      },
+      "blockList": {
+        "edit": "Edit {{name}} block",
+        "moveUp": "Move {{name}} up",
+        "moveDown": "Move {{name}} down",
+        "remove": "Remove {{name}}",
+        "number": "Block {{index}}",
+        "disabled": " • disabled"
+      },
+      "variables": {
+        "number": "Variable {{index}}",
+        "unnamed": "variable {{index}}",
+        "remove": "Remove {{name}}",
+        "nameLabel": "Variable name",
+        "inputTypeLabel": "Variable input type",
+        "label": "Label",
+        "labelLabel": "Variable label",
+        "maxLength": "Maximum length",
+        "maxLengthLabel": "Variable maximum length",
+        "description": "Description",
+        "descriptionLabel": "Variable description",
+        "options": "Options, one per line",
+        "optionsLabel": "Variable options",
+        "savedDefaultToggleLabel": "Use a saved starter default for {{name}}",
+        "saveDefault": "Save a starter default",
+        "savedDefault": "Starter default (saved)",
+        "savedDefaultLabel": "Starter default for {{name}} (saved)",
+        "requiredLabel": "Variable required",
+        "runtimeDescription": "Current inputs used only for this preview. They are not saved.",
+        "previewDescription": "Sample values passed to the backend preview endpoint.",
+        "currentValue": "{{name}} current value (not saved)",
+        "currentValueLabel": "Current value for {{name}} (not saved)"
+      }
+    },
+    "recipe": {
+      "starterTitle": "Structured recipe",
+      "starterDescription": "Start with ordered blocks, labels, variables, and editable default instructions.",
+      "starterAction": "Build a recipe",
+      "badge": "Recipe",
+      "targetSystem": "System",
+      "targetUser": "User",
+      "filters": {
+        "all": "Recipes",
+        "system": "System recipes",
+        "user": "User recipes"
+      },
+      "openEditor": "Open recipe editor",
+      "cardOpenLabel": "Open recipe editor for {{name}}",
+      "unavailableTitle": "Recipe unavailable",
+      "unavailableDescription": "This saved recipe cannot be opened safely. Its structured definition is invalid or uses an unsupported version."
+    },
     "filter": {
       "all": "All",
       "system": "System",
@@ -1524,7 +1923,7 @@
       "duplicate": "Duplicate character {{name}}",
       "viewConversations": "View conversations for {{name}}",
       "viewVersionHistory": "View version history for {{name}}",
-      "searchResults": "{{count}} characters found"
+      "searchResults": "{count, plural, one {# character found} other {# characters found}}"
     },
     "confirm": {
       "delete": "Are you sure you want to delete this character? This action cannot be undone."
@@ -2020,10 +2419,11 @@
   "saveFailed": "Failed to save settings",
   "siteAccessGranted": "Host permission granted for {{origin}}",
   "onboarding": {
+    "loginSettingsError": "Login settings could not be opened. Try again.",
     "title": "Welcome to tldw Browser Assistant— Let’s get you connected",
     "description": "Connect this extension to your tldw server (a separate app running on your machine or server). We’ll walk through adding the URL, API key, and checking that everything is reachable.",
     "exploreWithoutServer": "You can explore the UI without a server; some features (chat, media ingest, Knowledge search) will stay disabled until you connect.",
-    "serverDocsUrl": "https://github.com/rmusser01/tldw_browser_assistant",
+    "serverDocsUrl": "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md",
     "serverDocsCta": "Learn how tldw server works",
     "learnMoreTldw": "Learn how tldw server works",
     "serverUrl": {
@@ -2447,7 +2847,7 @@
     "privateModeDescription": "Firefox Private Mode does not support saving data to IndexedDB. Please add custom model from a normal window."
   },
   "serverOverview": {
-    "docsUrl": "https://github.com/rmusser01/tldw_browser_assistant"
+    "docsUrl": "https://github.com/rmusser01/tldw_server/blob/main/Docs/Getting_Started/README.md"
   },
   "dataManagement": {
     "navTitle": "Data Management",

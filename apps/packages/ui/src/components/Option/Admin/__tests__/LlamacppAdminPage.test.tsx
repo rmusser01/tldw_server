@@ -1045,11 +1045,28 @@ describe("LlamacppAdminPage", () => {
     })
   })
 
-  it("gates controls when admin APIs are unavailable", async () => {
+  it("keeps the page usable and names the runtime outage on a 503", async () => {
+    // Regression: a 503 (llama.cpp runtime down) used to be misdiagnosed as
+    // "Admin APIs not available" and blanked the whole page.
     apiMock.getLlamacppStatus.mockRejectedValueOnce(
       new Error(
         "Request failed: 503 (GET /api/v1/admin/llamacpp/status) config=/Users/dev/.config/tldw/config.txt"
       )
+    )
+
+    render(<LlamacppAdminPage />)
+
+    expect(
+      await screen.findByText(
+        "The llama.cpp runtime is not available on this server. Install or start llama.cpp, then retry."
+      )
+    ).toBeTruthy()
+    expect(screen.queryByText("Admin APIs not available")).toBeNull()
+  })
+
+  it("gates controls when admin APIs are genuinely missing (404)", async () => {
+    apiMock.getLlamacppStatus.mockRejectedValueOnce(
+      new Error("Request failed: 404 (GET /api/v1/admin/llamacpp/status)")
     )
 
     render(<LlamacppAdminPage />)

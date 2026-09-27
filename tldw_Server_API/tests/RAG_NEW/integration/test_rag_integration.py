@@ -1,32 +1,287 @@
 """
 Integration tests for RAG system.
 
-Tests the complete RAG pipeline with real components and databases.
-No mocking - uses actual implementations.
+Tests the complete RAG pipeline with real components and databases while patching
+external provider boundaries where deterministic integration coverage requires it.
 """
 
+import inspect
+import json
 import warnings
+from types import SimpleNamespace
 
 import pytest
+from loguru import logger
+
 pytestmark = pytest.mark.integration
 import asyncio
 import time
-from pathlib import Path
-from typing import List, Dict, Any
-import numpy as np
-from uuid import uuid4
 from datetime import datetime
+from pathlib import Path
 
+from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionStatus,
+    ResolvedByokCredentials,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCredentialRuntime,
+)
 from tldw_Server_API.app.core.DB_Management.backends.factory import reset_managed_sqlite_backends
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
-from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
-from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
-from tldw_Server_API.app.core.RAG.rag_service.types import Document, SearchResult, DataSource
-from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
-    MultiDatabaseRetriever,
-    RetrievalConfig
-)
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import MultiDatabaseRetriever, RetrievalConfig
 from tldw_Server_API.app.core.RAG.rag_service.semantic_cache import SemanticCache
+from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
+
+_RAG_USER_SECRET = "sk-rag-user-secret-must-not-leak"
+
+
+def _resolved_rag_user_credential(
+    provider: str,
+    api_key: str,
+) -> ResolvedByokCredentials:
+    return ResolvedByokCredentials(
+        provider=provider,
+        api_key=api_key,
+        app_config={f"{provider}_api": {"model": "runtime-model"}},
+        credential_fields={},
+        source="user",
+        allowlisted=True,
+        status=ByokResolutionStatus.RESOLVED,
+        auth_source="api_key",
+    )
+
+
+def test_internal_rag_caller_keeps_legacy_optional_runtime_contract():
+    """System callers may continue omitting the execution credential runtime."""
+    parameter = inspect.signature(unified_rag_pipeline).parameters["credential_runtime"]
+
+    assert parameter.default is None
+
+
+@pytest.mark.asyncio
+async def test_rag_cache_hit_regenerates_with_current_distinct_provider_credentials(
+    populated_media_db,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+    from tldw_Server_API.app.core.RAG.rag_service import (
+        advanced_cache,
+        database_retrievers,
+    )
+
+    class FakeVectorStore:
+        _initialized = True
+
+        async def initialize(self):
+            self._initialized = True
+
+        async def search(self, **_kwargs):
+            return [
+                SimpleNamespace(
+                    id="vector-doc",
+                    content="Runtime vector evidence about RAG.",
+                    metadata={"media_id": "vector-doc", "kind": "chunk"},
+                    score=0.95,
+                )
+            ]
+
+    embedding_config = {
+        "embedding_config": {
+            "default_model_id": "openai:text-embedding-3-small",
+            "models": {
+                "openai:text-embedding-3-small": SimpleNamespace(
+                    provider="openai"
+                ),
+            },
+        }
+    }
+    embedding_calls: list[dict[str, object]] = []
+    generation_calls: list[dict[str, object]] = []
+
+    def create_embeddings(
+        texts,
+        user_app_config,
+        model_id_override=None,
+        **kwargs,
+    ):
+        from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
+            bind_openai_embedding_credentials,
+        )
+
+        provider_credentials = kwargs.pop("_provider_call_credentials", None)
+        require_provider_credentials = kwargs.pop(
+            "_require_provider_call_credentials",
+            False,
+        )
+        if require_provider_credentials or provider_credentials is not None:
+            (
+                kwargs["api_key_override"],
+                kwargs["base_url_override"],
+                _runtime_openai_config,
+            ) = bind_openai_embedding_credentials(
+                provider_credentials=provider_credentials,
+                credentials_resolved=kwargs.get("credentials_resolved") is True,
+                api_key_override=kwargs.get("api_key_override"),
+                base_url_override=kwargs.get("base_url_override"),
+            )
+            kwargs["credentials_resolved"] = True
+        embedding_calls.append(
+            {
+                "texts": list(texts),
+                "config": user_app_config,
+                "model": model_id_override,
+                **kwargs,
+            }
+        )
+        return [[1.0, 0.0]]
+
+    async def generate_answer(**kwargs):
+        generation_calls.append(dict(kwargs))
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            f"current credential answer {len(generation_calls)}"
+                        ),
+                    }
+                }
+            ],
+            "usage": {"total_tokens": 4},
+        }
+
+    monkeypatch.setattr(
+        database_retrievers,
+        "create_from_settings_for_user",
+        lambda *_args, **_kwargs: FakeVectorStore(),
+    )
+    monkeypatch.setattr(
+        Embeddings_Create,
+        "get_embedding_config",
+        lambda: embedding_config,
+    )
+    monkeypatch.setattr(
+        Embeddings_Create,
+        "create_embeddings_batch",
+        create_embeddings,
+    )
+    monkeypatch.setattr(
+        chat_service,
+        "perform_chat_api_call_async",
+        generate_answer,
+    )
+
+    resolution_calls: dict[str, list[str]] = {"first": [], "second": []}
+
+    def make_runtime(label: str) -> ProviderCredentialRuntime:
+        async def resolver(
+            provider: str,
+            **_kwargs,
+        ) -> ResolvedByokCredentials:
+            resolution_calls[label].append(provider)
+            return _resolved_rag_user_credential(
+                provider,
+                f"{_RAG_USER_SECRET}-{label}-{provider}",
+            )
+
+        def fail_server_fallback(_provider: str) -> str | None:
+            raise AssertionError("server credential fallback used")
+
+        return ProviderCredentialRuntime(
+            user_id=42,
+            team_ids=[],
+            org_ids=[],
+            trusted_base_url_override=False,
+            fallback_resolver=fail_server_fallback,
+            resolver=resolver,
+        )
+
+    common_kwargs = {
+        "query": "How does retrieval augmented generation work?",
+        "sources": ["media_db"],
+        "search_mode": "hybrid",
+        "top_k": 3,
+        "enable_cache": True,
+        "enable_reranking": False,
+        "enable_generation": True,
+        "generation_provider": "anthropic",
+        "generation_model": "claude-test",
+        "media_db_path": str(populated_media_db.db_path),
+        "user_id": "42",
+    }
+
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, format="{message}")
+    first_runtime = make_runtime("first")
+    second_runtime = make_runtime("second")
+    try:
+        with scoped_context(
+            user_id=42,
+            org_ids=[],
+            team_ids=[],
+            active_org_id=None,
+            active_team_id=None,
+            is_admin=False,
+        ):
+            first = await unified_rag_pipeline(
+                **common_kwargs,
+                credential_runtime=first_runtime,
+            )
+            await first_runtime.close()
+            second = await unified_rag_pipeline(
+                **common_kwargs,
+                credential_runtime=second_runtime,
+            )
+            await second_runtime.close()
+        registered_cache = advanced_cache.get_registered_semantic_cache()
+        assert registered_cache is not None
+        registered_cache.save()
+    finally:
+        await first_runtime.close()
+        await second_runtime.close()
+        logger.remove(sink_id)
+
+    assert first.cache_hit is False
+    assert second.cache_hit is True
+    assert first.generated_answer == "current credential answer 1"
+    assert second.generated_answer == "current credential answer 2"
+    assert resolution_calls == {
+        "first": ["openai", "anthropic"],
+        "second": ["anthropic"],
+    }
+    assert len(embedding_calls) == 1
+    assert (
+        embedding_calls[0]["api_key_override"]
+        == f"{_RAG_USER_SECRET}-first-openai"
+    )
+    assert embedding_calls[0]["credentials_resolved"] is True
+    assert "_provider_call_credentials" not in embedding_calls[0]
+    assert "_require_provider_call_credentials" not in embedding_calls[0]
+    assert [call["api_key"] for call in generation_calls] == [
+        f"{_RAG_USER_SECRET}-first-anthropic",
+        f"{_RAG_USER_SECRET}-second-anthropic",
+    ]
+    assert all(
+        call["credentials_resolved"] is True for call in generation_calls
+    )
+
+    cache_files = [
+        path
+        for path in (tmp_path / "semantic_cache").rglob("*")
+        if path.is_file()
+    ]
+    assert cache_files
+    cache_bytes = b"".join(path.read_bytes() for path in cache_files)
+    assert _RAG_USER_SECRET.encode() not in cache_bytes
+    assert b"current credential answer" not in cache_bytes
+    assert _RAG_USER_SECRET not in "".join(logs)
+    assert _RAG_USER_SECRET not in first.model_dump_json()
+    assert _RAG_USER_SECRET not in second.model_dump_json()
 
 
 @pytest.mark.integration
@@ -364,22 +619,42 @@ class TestCacheIntegration:
             persist_path=str(cache_dir / "cache.pkl")
         )
 
-        # Store documents
-        await cache.set("test query", sample_documents, ttl=3600)
+        # Store the real Document payload produced by the retrieval pipeline.
+        await cache.set(
+            "test query",
+            {
+                "documents": sample_documents,
+                "answer": "STALE_SENTINEL",
+                "metadata": {"generation_model": "stale-model"},
+            },
+            ttl=3600,
+        )
 
         # Exact match retrieval
         cached = await cache.get("test query")
         assert cached is not None
-        assert len(cached) == len(sample_documents)
+        assert len(cached["documents"]) == len(sample_documents)
+        assert set(cached) == {"documents", "metadata"}
+        assert cached["metadata"] == {
+            "kind": "retrieval_documents",
+            "schema_version": 1,
+        }
+
+        cache.save()
+        json.loads(Path(cache.persist_path).read_text())
+        reloaded = SemanticCache(persist_path=cache.persist_path)
+        persisted = await reloaded.get("test query")
+        assert persisted == cached
+        assert "STALE_SENTINEL" not in Path(cache.persist_path).read_text()
 
         # Similar query retrieval
-        similar_cached = await cache.get("test question")
+        await cache.get("test question")
         # Depends on similarity threshold and implementation
 
         # Cache expiry
         await cache.set("expiring query", sample_documents, ttl=1)
         await asyncio.sleep(1.1)
-        expired = await cache.get("expiring query")
+        await cache.get("expiring query")
         # Should be None or empty after TTL
 
         # No explicit close in this implementation
@@ -440,12 +715,13 @@ class TestErrorRecoveryIntegration:
             )
             from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
             assert isinstance(result, UnifiedRAGResponse)
-            assert isinstance(result.errors, list) and any('Simulated DB failure' in e for e in result.errors)
+            assert isinstance(result.errors, list) and 'document_retrieval_failed' in result.errors
 
     @pytest.mark.asyncio
     async def test_partial_retrieval_failure(self, populated_media_db):
         """If one source fails, results from other sources are still returned."""
         from unittest.mock import patch
+
         from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import MultiDatabaseRetriever, RetrievalConfig
         from tldw_Server_API.app.core.RAG.rag_service.types import DataSource
 
@@ -479,7 +755,8 @@ class TestErrorRecoveryIntegration:
     async def test_retry_mechanism(self, populated_media_db):
         """Simulate transient failures and ensure subsequent call succeeds."""
         from unittest.mock import patch
-        from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
+
+        from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
         class FlakyRetriever:
             attempts = 0
@@ -507,7 +784,7 @@ class TestErrorRecoveryIntegration:
             )
             from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGResponse
             assert isinstance(r1, UnifiedRAGResponse)
-            assert isinstance(r1.errors, list) and any('Transient error' in e for e in r1.errors)
+            assert isinstance(r1.errors, list) and 'document_retrieval_failed' in r1.errors
 
             # Second call: still failing
             r2 = await unified_rag_pipeline(
@@ -518,7 +795,7 @@ class TestErrorRecoveryIntegration:
                 fallback_on_error=True
             )
             assert isinstance(r2, UnifiedRAGResponse)
-            assert isinstance(r2.errors, list) and any('Transient error' in e for e in r2.errors)
+            assert isinstance(r2.errors, list) and 'document_retrieval_failed' in r2.errors
 
             # Third call: should succeed and return a pydantic response
             r3 = await unified_rag_pipeline(
@@ -600,8 +877,9 @@ class TestPerformanceIntegration:
     @pytest.mark.asyncio
     async def test_memory_usage(self, populated_media_db):
         """Test memory usage doesn't grow unbounded."""
-        import psutil
         import gc
+
+        import psutil
 
         process = psutil.Process()
 

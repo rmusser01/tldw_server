@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 
 import pytest
 
@@ -7,7 +8,6 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio.event_broadcaster 
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.mcts_optimizer import MCTSOptimizer
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.optimization_engine import OptimizationEngine
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_runner import TestRunner
-
 
 pytestmark = pytest.mark.integration
 
@@ -45,13 +45,19 @@ def _as_dict(value):
     raise AssertionError(f"Expected dict-like value, got: {type(value)}")
 
 
+@pytest.mark.parametrize("deferred_transport", [False, True])
 @pytest.mark.parametrize("n_sims,throttle_every", [(3, 5), (20, 4)])
 def test_mcts_ws_schema_and_persistence_match_throttle_cadence(
     prompt_studio_dual_backend_db,
     monkeypatch,
     n_sims,
     throttle_every,
+    deferred_transport,
 ):
+    if deferred_transport:
+        from tldw_Server_API.app.core.Prompt_Management.prompt_studio import mcts_optimizer
+
+        monkeypatch.setattr(mcts_optimizer, "ws_connection_manager", None)
     monkeypatch.setenv("PROMPT_STUDIO_ENABLE_MCTS", "true")
 
     _label, db = prompt_studio_dual_backend_db
@@ -90,6 +96,7 @@ def test_mcts_ws_schema_and_persistence_match_throttle_cadence(
     monkeypatch.setattr(TestRunner, "run_single_test", _fake_run_single_test, raising=True)
 
     lifecycle_events = []
+    completion_statuses = []
     iteration_payloads = []
 
     async def _capture_event(self, event_type, data, client_ids=None, project_id=None):
@@ -101,6 +108,9 @@ def test_mcts_ws_schema_and_persistence_match_throttle_cadence(
             EventType.OPTIMIZATION_COMPLETED.value,
         }:
             lifecycle_events.append(et)
+            if et == EventType.OPTIMIZATION_COMPLETED.value:
+                current = db.get_optimization(opt["id"]) or {}
+                completion_statuses.append(str(current.get("status") or "").lower())
         return None
 
     from tldw_Server_API.app.core.Prompt_Management.prompt_studio import event_broadcaster as eb_mod
@@ -112,6 +122,7 @@ def test_mcts_ws_schema_and_persistence_match_throttle_cadence(
 
     assert lifecycle_events.count(EventType.OPTIMIZATION_STARTED.value) == 1
     assert lifecycle_events.count(EventType.OPTIMIZATION_COMPLETED.value) == 1
+    assert completion_statuses == ["completed"]
 
     expected_iterations = _expected_throttled_iterations(n_sims, throttle_every)
     seen_iterations = [int(p["iteration"]) for p in iteration_payloads]
@@ -254,3 +265,47 @@ def test_mcts_final_trace_persisted(prompt_studio_dual_backend_db, monkeypatch):
     trace = fm["trace"]
     assert "best_path" in trace and "top_candidates" in trace
     assert "debug_top_scores_by_depth" in trace
+
+
+def test_mcts_without_optional_transport_still_persists_results(
+    prompt_studio_dual_backend_db, monkeypatch
+):
+    """An unavailable optional WebSocket endpoint must not prevent optimization."""
+    from tldw_Server_API.app.core.Prompt_Management.prompt_studio import mcts_optimizer
+
+    monkeypatch.setenv("PROMPT_STUDIO_ENABLE_MCTS", "true")
+    monkeypatch.setattr(mcts_optimizer, "ws_connection_manager", None)
+    monkeypatch.setitem(
+        sys.modules,
+        "tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket",
+        None,
+    )
+    _label, db = prompt_studio_dual_backend_db
+    project, prompt, case = _seed_minimal_prompt_and_case(db)
+    opt = db.create_optimization(
+        project_id=project["id"],
+        name="No optional transport",
+        initial_prompt_id=prompt["id"],
+        optimizer_type="mcts",
+        optimization_config={
+            "optimizer_type": "mcts",
+            "target_metric": "accuracy",
+            "strategy_params": {"mcts_simulations": 1, "feedback_enabled": False},
+        },
+        max_iterations=1,
+        status="pending",
+    )
+    db.update_optimization(opt["id"], {"test_case_ids": [case["id"]]})
+
+    async def fake_proposals(self, system_so_far, segment_text, k):
+        return [system_so_far]
+
+    async def fake_evaluation(self, **kwargs):
+        return {"success": True, "scores": {"aggregate_score": 0.33}}
+
+    monkeypatch.setattr(MCTSOptimizer, "_propose_candidates", fake_proposals)
+    monkeypatch.setattr(TestRunner, "run_single_test", fake_evaluation)
+    asyncio.run(OptimizationEngine(db).optimize(opt["id"]))
+
+    assert db.get_optimization(opt["id"])["status"] == "completed"  # nosec B101
+    assert db.list_optimization_iterations(opt["id"], page=1, per_page=10)["iterations"]  # nosec B101

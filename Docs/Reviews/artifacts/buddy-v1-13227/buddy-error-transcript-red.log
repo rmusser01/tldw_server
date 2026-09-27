@@ -1,0 +1,354 @@
+
+ RUN  v4.0.18 /private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui
+
+(node:21795) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx > presents a saved chat failure without its encoded envelope or diagnostic details
+react-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: 'NO_I18NEXT_INSTANCE' }
+
+ ❯ src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx (5 tests | 1 failed) 1507ms
+   × presents a saved chat failure without its encoded envelope or diagnostic details 1143ms
+   ✓ never relabels old transcript content as a newly selected conversation 56ms
+   ✓ preserves an ambiguous send's request identity on retry 99ms
+   ✓ hides stale content on access failure and clears the fetch error after recovery 22ms
+   ✓ does not start speech after unmount while its authorized transcript read is pending 186ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx > presents a saved chat failure without its encoded envelope or diagnostic details
+TestingLibraryElementError: Unable to find an element with the text: The reply timed out. Try again in a moment.. This could be because the text is broken up by multiple elements. In this case, you can provide a function for your text matcher to make your matcher more flexible.
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"Buddy conversation"[39m
+      [33mclass[39m=[32m"space-y-3 text-sm text-text"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"Conversation history: Research one"[39m
+        [33mclass[39m=[32m"max-h-[35dvh] min-h-24 space-y-3 overflow-y-auto rounded-md border border-border p-3"[39m
+        [33mrole[39m=[32m"log"[39m
+      [36m>[39m
+        [36m<div>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"mb-1 font-semibold"[39m
+          [36m>[39m
+            [0mAssistant[0m
+          [36m</p>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"whitespace-pre-wrap break-words leading-6"[39m
+          [36m>[39m
+            [0m__tldw_error__:{"summary":"The reply timed out.","hint":"Try again in a moment.","detail":"Internal upstream timeout diagnostic"}[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<div>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"mb-1 font-semibold"[39m
+          [36m>[39m
+            [0mYou[0m
+          [36m</p>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"whitespace-pre-wrap break-words leading-6"[39m
+          [36m>[39m
+            [0mKeep this ordinary message.
+Including its second line.[0m
+          [36m</p>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<form[39m
+        [33mclass[39m=[32m"space-y-2"[39m
+      [36m>[39m
+        [36m<label[39m
+          [33mclass[39m=[32m"block font-medium"[39m
+          [33mfor[39m=[32m"buddy-reply"[39m
+        [36m>[39m
+          [0mReply to[0m
+          [0m [0m
+          [0mResearch one[0m
+        [36m</label>[39m
+        [36m<textarea[39m
+          [33mclass[39m=[32m"block w-full resize-y rounded-md border border-border bg-surface p-3 text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"[39m
+          [33mid[39m=[32m"buddy-reply"[39m
+          [33mmaxlength[39m=[32m"12000"[39m
+          [33mrows[39m=[32m"3"[39m
+        [36m/>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+            [33mdisabled[39m=[32m""[39m
+            [33mtype[39m=[32m"submit"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-btn-icon"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-send"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"16"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"16"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m21.854 2.147-10.94 10.939"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+            [36m<span>[39m
+              [0mSend[0m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+        [36m<details>[39m
+          [36m<summary[39m
+            [33mclass[39m=[32m"cursor-pointer text-text-muted"[39m
+          [36m>[39m
+            [0mReply model settings[0m
+          [36m</summary>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mt-2 grid gap-2 sm:grid-cols-2"[39m
+          [36m>[39m
+            [36m<label>[39m
+              [0mModel override (optional)[0m
+              [36m<input[39m
+                [33mclass[39m=[32m"w-full rounded border border-border bg-surface p-2"[39m
+                [33mplaceholder[39m=[32m"Use conversation setting"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0mProvider override (optional)[0m
+              [36m<input[39m
+                [33mclass[39m=[32m"w-full rounded border border-border bg-surface p-2"[39m
+                [33mplaceholder[39m=[32m"Use conversation setting"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+            [36m</label>[39m
+          [36m</div>[39m
+        [36m</details>[39m
+      [36m</form>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center gap-2 border-t border-border pt-3"[39m
+      [36m>[39m
+        [36m<label[39m
+          [33mclass[39m=[32m"flex items-center gap-2"[39m
+        [36m>[39m
+          [36m<input[39m
+            [33mtype[39m=[32m"checkbox"[39m
+          [36m/>[39m
+          [36m<svg[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"lucide lucide-volume2 lucide-volume-2"[39m
+            [33mfill[39m=[32m"none"[39m
+            [33mheight[39m=[32m"16"[39m
+            [33mstroke[39m=[32m"currentColor"[39m
+            [33mstroke-linecap[39m=[32m"round"[39m
+            [33mstroke-linejoin[39m=[32m"round"[39m
+            [33mstroke-width[39m=[32m"2"[39m
+            [33mviewBox[39m=[32m"0 0 24 24"[39m
+            [33mwidth[39m=[32m"16"[39m
+            [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+          [36m>[39m
+            [36m<path[39m
+              [33md[39m=[32m"M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"[39m
+            [36m/>[39m
+            [36m<path[39m
+              [33md[39m=[32m"M16 9a5 5 0 0 1 0 6"[39m
+            [36m/>[39m
+            [36m<path[39m
+              [33md[39m=[32m"M19.364 18.364a9 9 0 0 0 0-12.728"[39m
+            [36m/>[39m
+          [36m</svg>[39m
+          [0mRead new responses aloud[0m
+        [36m</label>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+
+Ignored nodes: comments, script, style
+[36m<body>[39m
+  [36m<div>[39m
+    [36m<section[39m
+      [33maria-label[39m=[32m"Buddy conversation"[39m
+      [33mclass[39m=[32m"space-y-3 text-sm text-text"[39m
+    [36m>[39m
+      [36m<div[39m
+        [33maria-label[39m=[32m"Conversation history: Research one"[39m
+        [33mclass[39m=[32m"max-h-[35dvh] min-h-24 space-y-3 overflow-y-auto rounded-md border border-border p-3"[39m
+        [33mrole[39m=[32m"log"[39m
+      [36m>[39m
+        [36m<div>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"mb-1 font-semibold"[39m
+          [36m>[39m
+            [0mAssistant[0m
+          [36m</p>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"whitespace-pre-wrap break-words leading-6"[39m
+          [36m>[39m
+            [0m__tldw_error__:{"summary":"The reply timed out.","hint":"Try again in a moment.","detail":"Internal upstream timeout diagnostic"}[0m
+          [36m</p>[39m
+        [36m</div>[39m
+        [36m<div>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"mb-1 font-semibold"[39m
+          [36m>[39m
+            [0mYou[0m
+          [36m</p>[39m
+          [36m<p[39m
+            [33mclass[39m=[32m"whitespace-pre-wrap break-words leading-6"[39m
+          [36m>[39m
+            [0mKeep this ordinary message.
+Including its second line.[0m
+          [36m</p>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+      [36m<form[39m
+        [33mclass[39m=[32m"space-y-2"[39m
+      [36m>[39m
+        [36m<label[39m
+          [33mclass[39m=[32m"block font-medium"[39m
+          [33mfor[39m=[32m"buddy-reply"[39m
+        [36m>[39m
+          [0mReply to[0m
+          [0m [0m
+          [0mResearch one[0m
+        [36m</label>[39m
+        [36m<textarea[39m
+          [33mclass[39m=[32m"block w-full resize-y rounded-md border border-border bg-surface p-3 text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"[39m
+          [33mid[39m=[32m"buddy-reply"[39m
+          [33mmaxlength[39m=[32m"12000"[39m
+          [33mrows[39m=[32m"3"[39m
+        [36m/>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"flex flex-wrap items-center justify-between gap-2"[39m
+        [36m>[39m
+          [36m<button[39m
+            [33mclass[39m=[32m"ant-btn css-dev-only-do-not-override-3uaqrl css-var-root ant-btn-primary ant-btn-color-primary ant-btn-variant-solid"[39m
+            [33mdisabled[39m=[32m""[39m
+            [33mtype[39m=[32m"submit"[39m
+          [36m>[39m
+            [36m<span[39m
+              [33mclass[39m=[32m"ant-btn-icon"[39m
+            [36m>[39m
+              [36m<svg[39m
+                [33maria-hidden[39m=[32m"true"[39m
+                [33mclass[39m=[32m"lucide lucide-send"[39m
+                [33mfill[39m=[32m"none"[39m
+                [33mheight[39m=[32m"16"[39m
+                [33mstroke[39m=[32m"currentColor"[39m
+                [33mstroke-linecap[39m=[32m"round"[39m
+                [33mstroke-linejoin[39m=[32m"round"[39m
+                [33mstroke-width[39m=[32m"2"[39m
+                [33mviewBox[39m=[32m"0 0 24 24"[39m
+                [33mwidth[39m=[32m"16"[39m
+                [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+              [36m>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"[39m
+                [36m/>[39m
+                [36m<path[39m
+                  [33md[39m=[32m"m21.854 2.147-10.94 10.939"[39m
+                [36m/>[39m
+              [36m</svg>[39m
+            [36m</span>[39m
+            [36m<span>[39m
+              [0mSend[0m
+            [36m</span>[39m
+          [36m</button>[39m
+        [36m</div>[39m
+        [36m<details>[39m
+          [36m<summary[39m
+            [33mclass[39m=[32m"cursor-pointer text-text-muted"[39m
+          [36m>[39m
+            [0mReply model settings[0m
+          [36m</summary>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mt-2 grid gap-2 sm:grid-cols-2"[39m
+          [36m>[39m
+            [36m<label>[39m
+              [0mModel override (optional)[0m
+              [36m<input[39m
+                [33mclass[39m=[32m"w-full rounded border border-border bg-surface p-2"[39m
+                [33mplaceholder[39m=[32m"Use conversation setting"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+            [36m</label>[39m
+            [36m<label>[39m
+              [0mProvider override (optional)[0m
+              [36m<input[39m
+                [33mclass[39m=[32m"w-full rounded border border-border bg-surface p-2"[39m
+                [33mplaceholder[39m=[32m"Use conversation setting"[39m
+                [33mvalue[39m=[32m""[39m
+              [36m/>[39m
+            [36m</label>[39m
+          [36m</div>[39m
+        [36m</details>[39m
+      [36m</form>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"flex flex-wrap items-center gap-2 border-t border-border pt-3"[39m
+      [36m>[39m
+        [36m<label[39m
+          [33mclass[39m=[32m"flex items-center gap-2"[39m
+        [36m>[39m
+          [36m<input[39m
+            [33mtype[39m=[32m"checkbox"[39m
+          [36m/>[39m
+          [36m<svg[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"lucide lucide-volume2 lucide-volume-2"[39m
+            [33mfill[39m=[32m"none"[39m
+            [33mheight[39m=[32m"16"[39m
+            [33mstroke[39m=[32m"currentColor"[39m
+            [33mstroke-linecap[39m=[32m"round"[39m
+            [33mstroke-linejoin[39m=[32m"round"[39m
+            [33mstroke-width[39m=[32m"2"[39m
+            [33mviewBox[39m=[32m"0 0 24 24"[39m
+            [33mwidth[39m=[32m"16"[39m
+            [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+          [36m>[39m
+            [36m<path[39m
+              [33md[39m=[32m"M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"[39m
+            [36m/>[39m
+            [36m<path[39m
+              [33md[39m=[32m"M16 9a5 5 0 0 1 0 6"[39m
+            [36m/>[39m
+            [36m<path[39m
+              [33md[39m=[32m"M19.364 18.364a9 9 0 0 0 0-12.728"[39m
+            [36m/>[39m
+          [36m</svg>[39m
+          [0mRead new responses aloud[0m
+        [36m</label>[39m
+      [36m</div>[39m
+    [36m</section>[39m
+  [36m</div>[39m
+[36m</body>[39m
+ ❯ waitForWrapper ../../../../../../Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/wait-for.js:163:27
+ ❯ ../../../../../../Users/macbook-dev/Documents/GitHub/tldw_server2/apps/node_modules/.bun/@testing-library+dom@10.4.1/node_modules/@testing-library/dom/dist/query-helpers.js:86:33
+ ❯ src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx:105:16
+    103|   })
+    104|   render(<BuddyInteraction {...props} />)
+    105|   await screen.findByText("The reply timed out. Try again in a moment.…
+       |                ^
+    106|   const history = screen.getByRole("log", {
+    107|     name: "Conversation history: Research one"
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 4 passed (5)
+   Start at  22:15:15
+   Duration  4.24s (transform 225ms, setup 226ms, import 1.27s, tests 1.51s, environment 1.05s)

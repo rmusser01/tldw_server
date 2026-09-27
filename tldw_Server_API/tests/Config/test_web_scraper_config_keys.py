@@ -45,3 +45,46 @@ def test_web_scraper_router_config_keys(monkeypatch, tmp_path):
     assert ws_cfg["custom_scrapers_yaml_path"] == custom_scrapers_yaml_path
     assert ws_cfg["web_scraper_default_backend"] == "curl"
     assert ws_cfg["web_scraper_ua_mode"] == "rotate"
+
+
+def test_web_scraper_transport_uses_supplied_environment(monkeypatch, tmp_path):
+    """Keep browser transport resolution inside the caller's environment snapshot."""
+    from tldw_Server_API.app.core import config as cfg
+
+    monkeypatch.setenv("WEB_BROWSER_TRANSPORT_MODE", "disabled")
+
+    class FakeConfig:
+        """Return fallbacks for unrelated configuration fields."""
+
+        def get(self, _section, _key, fallback=None):
+            """Return the supplied fallback."""
+            return fallback
+
+        def getboolean(self, _section, _key, fallback=False):
+            """Return the supplied boolean fallback."""
+            return fallback
+
+        def getint(self, _section, _key, fallback=0):
+            """Return the supplied integer fallback."""
+            return fallback
+
+        def has_section(self, _section):
+            """Report no optional sections."""
+            return False
+
+        def __contains__(self, _section):
+            """Report no mapped sections."""
+            return False
+
+        def __getitem__(self, _section):
+            """Return an empty section mapping."""
+            return {}
+
+    monkeypatch.setattr(cfg, "load_comprehensive_config", FakeConfig)
+
+    data = cfg.load_and_log_configs(
+        environment={"WEB_BROWSER_TRANSPORT_MODE": "auto"}
+    )
+
+    assert data is not None
+    assert data["web_scraper"]["web_browser_transport_mode"] == "auto"

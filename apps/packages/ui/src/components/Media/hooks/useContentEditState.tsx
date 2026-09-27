@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { message } from 'antd'
+import { useAntdMessage } from '@/hooks/useAntdMessage'
 import { bgRequest } from '@/services/background-proxy'
 import { useConfirmDanger } from '@/components/Common/confirm-danger'
 import type { MediaResultItem } from '../types'
@@ -37,6 +37,7 @@ export function useContentEditState(deps: UseContentEditStateDeps) {
   } = deps
 
   const confirmDanger = useConfirmDanger()
+  const message = useAntdMessage()
 
   const [editingKeywords, setEditingKeywords] = useState<string[]>([])
   const [savingKeywords, setSavingKeywords] = useState(false)
@@ -332,7 +333,7 @@ export function useContentEditState(deps: UseContentEditStateDeps) {
         setSavingKeywords(false)
       }
     },
-    [mediaDetail, onKeywordsUpdated, resolveNoteVersion, selectedMedia, t]
+    [mediaDetail, message, onKeywordsUpdated, resolveNoteVersion, selectedMedia, t]
   )
 
   const handleSaveKeywords = useCallback((newKeywords: string[]) => {
@@ -350,7 +351,7 @@ export function useContentEditState(deps: UseContentEditStateDeps) {
     const ok = await confirmDanger({
       title: t('common:confirmTitle', { defaultValue: 'Please confirm' }),
       content: t('review:mediaPage.deleteItemConfirm', {
-        defaultValue: 'Delete this item? This cannot be undone.'
+        defaultValue: 'Move this item to Trash? You can restore it from Trash.'
       }),
       okText: t('common:delete', { defaultValue: 'Delete' }),
       cancelText: t('common:cancel', { defaultValue: 'Cancel' })
@@ -370,7 +371,7 @@ export function useContentEditState(deps: UseContentEditStateDeps) {
     } finally {
       setDeletingItem(false)
     }
-  }, [confirmDanger, deletingItem, mediaDetail, onDeleteItem, selectedMedia, t])
+  }, [confirmDanger, deletingItem, mediaDetail, message, onDeleteItem, selectedMedia, t])
 
   const openContentEditModal = useCallback(() => {
     setEditingContentText(content)

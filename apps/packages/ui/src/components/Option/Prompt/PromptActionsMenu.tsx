@@ -24,6 +24,7 @@ interface PromptActionsMenuProps {
   syncStatus?: PromptSyncStatus
   serverId?: number | null
   inlineUseInChat?: boolean
+  isRecipe?: boolean
   onEdit: () => void
   onDuplicate: () => void
   onUseInChat: () => void
@@ -44,6 +45,7 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
   syncStatus,
   serverId,
   inlineUseInChat = true,
+  isRecipe = false,
   onEdit,
   onDuplicate,
   onUseInChat,
@@ -61,6 +63,7 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
 
   const isSynced = !!serverId || syncStatus === "synced"
   const isConflict = syncStatus === "conflict"
+  const isRecipeRecoveryLocked = isRecipe && syncStatus === "error"
   const canSync = !disabled && (onPushToServer || onPullFromServer)
 
   const syncItems: MenuProps["items"] = canSync ? [
@@ -102,7 +105,7 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
       onClick: onPullFromServer
     }] : []),
     // Unlink option (for synced prompts)
-    ...(onUnlink && isSynced ? [{
+    ...(onUnlink && isSynced && !isRecipeRecoveryLocked ? [{
       key: "unlink",
       label: t("managePrompts.sync.unlink", { defaultValue: "Unlink from Server" }),
       icon: <Unlink className="size-4" />,
@@ -117,9 +120,13 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
       ? [
           {
             key: "useInChat",
-            label: t("option:promptInsert.useInChat", {
-              defaultValue: "Use in chat"
-            }),
+            label: isRecipe
+              ? t("managePrompts.recipe.openEditor", {
+                  defaultValue: "Open recipe editor"
+                })
+              : t("option:promptInsert.useInChat", {
+                  defaultValue: "Use in chat"
+                }),
             icon: <MessageCircle className="size-4" />,
             disabled,
             onClick: onUseInChat
@@ -129,7 +136,7 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
           }
         ]
       : []),
-    ...(onQuickTest
+    ...(onQuickTest && !isRecipe
       ? [
           {
             key: "quickTest",
@@ -209,15 +216,28 @@ export const PromptActionsMenu: React.FC<PromptActionsMenuProps> = ({
 
       {inlineUseInChat && (
         <Tooltip
-          title={t("option:promptInsert.useInChatTooltip", {
-            defaultValue: "Open chat and insert this prompt into the composer."
-          })}
+          title={
+            isRecipe
+              ? t("managePrompts.recipe.openEditor", {
+                  defaultValue: "Open recipe editor"
+                })
+              : t("option:promptInsert.useInChatTooltip", {
+                  defaultValue:
+                    "Open chat and insert this prompt into the composer."
+                })
+          }
         >
           <button
             type="button"
-            aria-label={t("option:promptInsert.useInChat", {
-              defaultValue: "Use in chat"
-            })}
+            aria-label={
+              isRecipe
+                ? t("managePrompts.recipe.openEditor", {
+                    defaultValue: "Open recipe editor"
+                  })
+                : t("option:promptInsert.useInChat", {
+                    defaultValue: "Use in chat"
+                  })
+            }
             data-testid={`prompt-use-${promptId}`}
             onClick={onUseInChat}
             disabled={disabled}

@@ -1,0 +1,376 @@
+from __future__ import annotations
+
+import json
+import shutil
+from pathlib import Path
+
+import pytest
+
+from tldw_Server_API.app.core.TTS.tts_exceptions import (
+    TTSProviderInitializationError,
+    TTSValidationError,
+)
+
+
+class _FakeProcess:
+    def __init__(self, *, stderr_text: str = "") -> None:
+        self.returncode = None
+        self.terminate_called = False
+        self.kill_called = False
+        self.stderr_text = stderr_text
+
+    async def wait(self) -> int:
+        self.returncode = 0
+        return 0
+
+    def terminate(self) -> None:
+        self.terminate_called = True
+        self.returncode = 0
+
+    def kill(self) -> None:
+        self.kill_called = True
+        self.returncode = -9
+
+
+class _ReadyClient:
+    def __init__(self, *, base_url: str, **_kwargs) -> None:
+        self.base_url = base_url
+        self.health_calls = 0
+
+    async def health(self) -> dict[str, str]:
+        self.health_calls += 1
+        return {"status": "ok"}
+
+    async def close(self) -> None:
+        return None
+
+
+class _NeverReadyClient:
+    def __init__(self, *, base_url: str, **_kwargs) -> None:
+        self.base_url = base_url
+
+    async def health(self) -> dict[str, str]:
+        raise RuntimeError("raw stderr: token=secret C:/Users/GDesktop-1/Working/tldw/models/audio_cpp/server.json")
+
+    async def close(self) -> None:
+        return None
+
+
+def _workspace_test_dir(name: str) -> Path:
+    root = Path.cwd() / "models" / "audio_cpp" / "test_artifacts" / name
+    if root.exists():
+        shutil.rmtree(root)
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _provider_config(test_root: Path, *, host: str = "127.0.0.1") -> dict[str, object]:
+    return {
+        "base_url": "http://127.0.0.1:8080",
+        "model": "audio-cpp/pocket-tts",
+        "model_path": "models/audio_cpp/pocket-tts",
+        "binary_path": str(test_root / "bin" / "audiocpp_server"),
+        "timeout": 300,
+        "extra_params": {
+            "managed": True,
+            "allow_remote_base_url": False,
+            "server": {
+                "host": host,
+                "port": 8080,
+                "autoselect_port": True,
+                "port_probe_max": 3,
+                "startup_timeout_seconds": 0.05,
+                "healthcheck_interval_seconds": 0.01,
+                "startup_backoff_seconds": 5,
+                "idle_shutdown_seconds": 1,
+                "terminate_timeout_seconds": 0.1,
+                "server_config_path": "models/audio_cpp/server.json",
+                "models_root": "models/audio_cpp",
+                "shared_scratch_dir": "models/audio_cpp/runtime/scratch",
+                "lazy_load": True,
+                "device": 0,
+                "threads": 1,
+                "model": {
+                    "id": "pocket-tts",
+                    "family": "pocket_tts",
+                    "path": "models/audio_cpp/pocket-tts",
+                    "task": "tts",
+                    "mode": "offline",
+                },
+            },
+        },
+    }
+
+
+@pytest.mark.unit
+def test_sidecar_rejects_non_loopback_host():
+    from tldw_Server_API.app.core.TTS.adapters.audio_cpp_sidecar_supervisor import (
+        AudioCppSidecarSupervisor,
+    )
+
+    test_root = _workspace_test_dir("sidecar_rejects_non_loopback")
+
+    with pytest.raises(TTSValidationError, match="loopback"):
+        AudioCppSidecarSupervisor(
+            _provider_config(test_root, host="0.0.0.0"),
+            repo_root=test_root,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_sidecar_autoselects_port_renders_config_and_uses_fixed_command(monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters import audio_cpp_sidecar_supervisor as supervisor_module
+    from tldw_Server_API.app.core.TTS.adapters.audio_cpp_sidecar_supervisor import AudioCppSidecarSupervisor
+
+    probed_ports: list[int] = []
+    spawned: list[tuple[tuple[object, ...], dict[str, object]]] = []
+    test_root = _workspace_test_dir("sidecar_autoselect")
+
+    def _fake_is_port_free(host: str, port: int) -> bool:
+        assert host == "127.0.0.1"
+        probed_ports.append(port)
+        return port == 8082
+
+    async def _fake_spawn(*args, **kwargs):
+        spawned.append((args, kwargs))
+        return _FakeProcess()
+
+    monkeypatch.setattr(supervisor_module, "is_port_free", _fake_is_port_free, raising=True)
+    monkeypatch.setattr(supervisor_module.asyncio, "create_subprocess_exec", _fake_spawn, raising=True)
+    monkeypatch.setattr(supervisor_module, "AudioCppClient", _ReadyClient, raising=True)
+    monkeypatch.setenv("HF_TOKEN", "secret-token")
+    monkeypatch.setenv("OPENAI_API_KEY", "secret-key")
+
+    supervisor = AudioCppSidecarSupervisor(_provider_config(test_root), repo_root=test_root)
+
+    base_url = await supervisor.ensure_started()
+
+    assert base_url == "http://127.0.0.1:8082"
+    assert supervisor.port == 8082
+    assert probed_ports == [8080, 8081, 8082]
+    assert len(spawned) == 1
+
+    command, kwargs = spawned[0]
+    assert command == (str(test_root / "bin" / "audiocpp_server"), "--config", str(supervisor.server_config_path))
+    assert kwargs["cwd"] == str(test_root)
+    assert "HF_TOKEN" not in kwargs["env"]
+    assert "OPENAI_API_KEY" not in kwargs["env"]
+
+    server_config = json.loads(supervisor.server_config_path.read_text(encoding="utf-8"))
+    assert server_config["host"] == "127.0.0.1"
+    assert server_config["port"] == 8082
+    assert server_config["models"][0]["id"] == "pocket-tts"
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_startup_timeout_terminates_process_records_backoff_and_sanitizes_error(monkeypatch):
+    from tldw_Server_API.app.core.TTS.adapters import audio_cpp_sidecar_supervisor as supervisor_module
+    from tldw_Server_API.app.core.TTS.adapters.audio_cpp_sidecar_supervisor import AudioCppSidecarSupervisor
+
+    process = _FakeProcess(stderr_text="token=secret full local path")
+    test_root = _workspace_test_dir("sidecar_timeout")
+
+    async def _fake_spawn(*args, **kwargs):  # noqa: ARG001
+        return process
+
+    monkeypatch.setattr(supervisor_module, "is_port_free", lambda host, port: True, raising=True)
+    monkeypatch.setattr(supervisor_module.asyncio, "create_subprocess_exec", _fake_spawn, raising=True)
+    monkeypatch.setattr(supervisor_module, "AudioCppClient", _NeverReadyClient, raising=True)
+
+    supervisor = AudioCppSidecarSupervisor(_provider_config(test_root), repo_root=test_root)
+
+    with pytest.raises(TTSProviderInitializationError) as excinfo:
+        await supervisor.ensure_started()
+
+    assert process.terminate_called is True
+    assert supervisor.last_failure_at is not None
+    message = str(excinfo.value)
+    assert "token=secret" not in message
+    assert str(supervisor.server_config_path) not in message
+
+
+@pytest.mark.unit
+async def test_cancelled_startup_terminates_child_and_closes_health_client(monkeypatch, tmp_path):
+    import asyncio
+
+    from tldw_Server_API.app.core.TTS.adapters import audio_cpp_sidecar_supervisor as module
+
+    process = _FakeProcess()
+    started = asyncio.Event()
+    clients = []
+
+    class WaitingClient(_ReadyClient):
+        closed = False
+
+        async def health(self):
+            started.set()
+            await asyncio.Event().wait()
+
+        async def close(self):
+            self.closed = True
+
+    def client_factory(**kwargs):
+        client = WaitingClient(**kwargs)
+        clients.append(client)
+        return client
+
+    async def spawn(*args, **kwargs):
+        return process
+
+    monkeypatch.setattr(module, "is_port_free", lambda host, port: True)
+    monkeypatch.setattr(module, "AudioCppClient", client_factory)
+    monkeypatch.setattr(module.asyncio, "create_subprocess_exec", spawn)
+    supervisor = module.AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
+    task = asyncio.create_task(supervisor.ensure_started())
+    await asyncio.wait_for(started.wait(), 2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert process.terminate_called
+    assert clients[0].closed
+    assert supervisor.base_url is None
+    assert not supervisor.server_config_path.exists()
+
+
+@pytest.mark.unit
+async def test_restart_closes_previous_health_client(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.TTS.adapters import audio_cpp_sidecar_supervisor as module
+
+    clients = []
+
+    class Client(_ReadyClient):
+        closed = False
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            clients.append(self)
+
+        async def close(self):
+            self.closed = True
+
+    async def spawn(*args, **kwargs):
+        return _FakeProcess()
+
+    monkeypatch.setattr(module, "is_port_free", lambda host, port: True)
+    monkeypatch.setattr(module, "AudioCppClient", Client)
+    monkeypatch.setattr(module.asyncio, "create_subprocess_exec", spawn)
+    supervisor = module.AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
+    await supervisor.ensure_started()
+    supervisor._process.returncode = 1
+    await supervisor.ensure_started()
+    assert clients[0].closed
+    await supervisor.shutdown()
+    assert clients[1].closed
+
+
+@pytest.mark.unit
+def test_supervisors_do_not_share_generated_config_paths(tmp_path):
+    from tldw_Server_API.app.core.TTS.adapters.audio_cpp_sidecar_supervisor import AudioCppSidecarSupervisor
+
+    first = AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
+    second = AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
+    assert first.server_config_path != second.server_config_path
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("payload", [{}, {"service": "other"}, {"status": "starting"}, {"status": "unknown"}])
+async def test_sidecar_rejects_health_without_positive_status(payload, tmp_path):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.TTS.adapters.audio_cpp_sidecar_supervisor import AudioCppSidecarSupervisor
+
+    supervisor = AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
+    supervisor._client = AsyncMock()
+    supervisor._client.health.return_value = payload
+    assert not await supervisor._probe_health()
+
+
+@pytest.mark.unit
+async def test_sidecar_retries_next_port_after_bind_race(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.TTS.adapters import audio_cpp_sidecar_supervisor as module
+
+    occupied = set()
+    spawned_ports = []
+    clients = []
+
+    class Client(_ReadyClient):
+        closed = False
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            clients.append(self)
+
+        async def close(self):
+            self.closed = True
+
+    async def spawn(*args, **kwargs):
+        port = json.loads(Path(args[2]).read_text())["port"]
+        spawned_ports.append(port)
+        process = _FakeProcess()
+        if len(spawned_ports) == 1:
+            occupied.add(port)
+            process.returncode = 1
+        return process
+
+    monkeypatch.setattr(module, "is_port_free", lambda host, port: port not in occupied)
+    monkeypatch.setattr(module, "AudioCppClient", Client)
+    monkeypatch.setattr(module.asyncio, "create_subprocess_exec", spawn)
+    supervisor = module.AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
+    try:
+        assert await supervisor.ensure_started() == "http://127.0.0.1:8081"
+        assert spawned_ports == [8080, 8081]
+        assert clients[0].closed
+        assert supervisor.last_failure_at is None
+    finally:
+        await supervisor.shutdown()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("autoselect,probe_max", [(True, 1), (False, 3), (True, 0)])
+async def test_port_race_retries_are_bounded(monkeypatch, tmp_path, autoselect, probe_max):
+    from tldw_Server_API.app.core.TTS.adapters import audio_cpp_sidecar_supervisor as module
+
+    occupied = set()
+
+    async def spawn(*args, **kwargs):
+        occupied.add(json.loads(Path(args[2]).read_text())["port"])
+        process = _FakeProcess()
+        process.returncode = 1
+        return process
+
+    config = _provider_config(tmp_path)
+    config["extra_params"]["server"].update(autoselect_port=autoselect, port_probe_max=probe_max)
+    monkeypatch.setattr(module, "is_port_free", lambda host, port: port not in occupied)
+    monkeypatch.setattr(module, "AudioCppClient", _ReadyClient)
+    monkeypatch.setattr(module.asyncio, "create_subprocess_exec", spawn)
+    supervisor = module.AudioCppSidecarSupervisor(config, repo_root=tmp_path)
+    with pytest.raises(TTSProviderInitializationError):
+        await supervisor.ensure_started()
+    assert len(occupied) == (probe_max + 1 if autoselect else 1)
+    assert supervisor.last_failure_at is not None
+    assert supervisor.base_url is None
+    assert not supervisor.server_config_path.exists()
+
+
+@pytest.mark.unit
+async def test_exhausted_ports_after_collision_record_backoff(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.TTS.adapters import audio_cpp_sidecar_supervisor as module
+
+    spawned = False
+
+    async def spawn(*args, **kwargs):
+        nonlocal spawned
+        spawned = True
+        process = _FakeProcess()
+        process.returncode = 1
+        return process
+
+    monkeypatch.setattr(module, "is_port_free", lambda host, port: not spawned)
+    monkeypatch.setattr(module, "AudioCppClient", _ReadyClient)
+    monkeypatch.setattr(module.asyncio, "create_subprocess_exec", spawn)
+    supervisor = module.AudioCppSidecarSupervisor(_provider_config(tmp_path), repo_root=tmp_path)
+    with pytest.raises(TTSProviderInitializationError):
+        await supervisor.ensure_started()
+    assert supervisor.last_failure_at is not None

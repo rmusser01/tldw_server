@@ -77,7 +77,6 @@ except ImportError as exc:  # pragma: no cover - provide safe fallbacks
 from .model_utils import normalize_model_and_variant
 
 _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

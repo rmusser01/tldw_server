@@ -672,7 +672,7 @@ test.describe("Skills parity (extension)", () => {
       await newSkill.focus()
       await newSkill.press("Enter")
       const newSkillDialog = page.getByRole("dialog", {
-        name: "New Skill: untitled",
+        name: /^New Skill:/,
       })
       await expect(newSkillDialog).toBeVisible()
       expect(await hasNoHorizontalOverflow(page)).toBe(true)

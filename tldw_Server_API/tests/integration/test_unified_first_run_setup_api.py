@@ -351,8 +351,7 @@ def test_first_run_mcp_tools_routes_are_rate_limited():
         path = getattr(route, "path", None)
         methods = getattr(route, "methods", set()) or set()
         dependencies = {
-            dependency.call
-            for dependency in getattr(getattr(route, "dependant", None), "dependencies", [])
+            dependency.call for dependency in getattr(getattr(route, "dependant", None), "dependencies", [])
         }
         for method in methods:
             routes_by_key[(method, path)] = dependencies
@@ -1022,7 +1021,7 @@ def test_first_run_provider_save_places_new_key_in_api_section(
     state_path = tmp_path / "first_run_state.json"
     config_path = tmp_path / "config.txt"
     config_path.write_text(
-        "[API]\n" "default_api = openai\n" "\n" "[Local-API]\n" "ollama_api_IP = http://127.0.0.1:11434/v1\n",
+        "[API]\ndefault_api = openai\n\n[Local-API]\nollama_api_IP = http://127.0.0.1:11434/v1\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
@@ -1142,9 +1141,7 @@ def test_first_run_provider_save_marks_existing_local_endpoint_key_configured(
     state_path = tmp_path / "first_run_state.json"
     config_path = tmp_path / "config.txt"
     config_path.write_text(
-        "[API]\ndefault_api = openai\n\n"
-        "[Local-API]\n"
-        "ollama_api_key = local-existing-token\n",
+        "[API]\ndefault_api = openai\n\n[Local-API]\nollama_api_key = local-existing-token\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
@@ -1345,6 +1342,7 @@ def test_first_run_first_chat_endpoint_failure_does_not_record_or_echo_raw_detai
     [
         {"provider": "sk-secret-token", "model": "gpt-4.1-mini"},
         {"provider": "openai", "model": "/Users/me/.env"},
+        {"provider": "llamacpp", "model": "/opt/models/sk-secret-model.gguf"},
     ],
 )
 def test_first_run_first_chat_endpoint_rejects_unsafe_provider_or_model_before_verify(
@@ -2683,6 +2681,84 @@ def test_first_run_state_rejects_unsupported_public_step_data(
     assert "sk-raw" not in str(state_response.json())
 
 
+@pytest.mark.parametrize(
+    "model_id",
+    ["../../Language_Models/Qwen3.8-27B.gguf", "/opt/models/local.gguf", r"C:\models\local.gguf", r"\\server\share\model.gguf", "C:/x", "/x"],
+)
+@pytest.mark.parametrize("authenticated", [False, True, "unprivileged"])
+def test_first_run_provider_model_identifier_roundtrips_path_like_ids(monkeypatch, tmp_path, setup_client, model_id, authenticated):
+    """Persist local identifiers while disclosing paths only to configuration administrators."""
+    from fastapi import HTTPException
+    async def resolve_principal(request):
+        if not authenticated:
+            raise HTTPException(401, "Not authenticated")
+        return SimpleNamespace(permissions=["system.configure"] if authenticated is True else ["notes.read"])
+    monkeypatch.setattr(setup_endpoint, "get_auth_principal", resolve_principal)
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={"step": "providers", "data": {"default_provider": "llamacpp", "default_model": model_id}},
+    )
+
+    assert response.status_code == 200
+    assert model_id not in response.text
+    resumed = setup_client.get("/api/v1/setup/first-run/state")
+    assert resumed.json()["step_data"]["providers"].get("default_model") == (model_id if authenticated is True else None)
+    assert FirstRunStateStore(state_path).load().step_data["providers"]["default_model"] == model_id
+
+    from tldw_Server_API.app.core.Setup import first_chat_verifier
+
+    async def _fake_call_chat_completion(*, provider, model, prompt):
+        assert provider == "llamacpp"
+        assert model == model_id
+        return {"id": "chatcmpl-local", "choices": [{"message": {"content": "Hello."}}]}
+
+    monkeypatch.setattr(first_chat_verifier, "_call_chat_completion", _fake_call_chat_completion)
+    verified = setup_client.post(
+        "/api/v1/setup/first-run/first-chat",
+        json={"provider": "llamacpp", "model": model_id},
+    )
+    assert verified.status_code == 200
+    assert verified.json()["status"] == "ready"
+    assert verified.json()["model"] == model_id
+    resumed_chat = setup_client.get("/api/v1/setup/first-run/state").json()["first_chat"]
+    assert resumed_chat["completed"] is True
+    assert resumed_chat["model"] == (model_id if authenticated is True else None)
+    skipped = setup_client.post("/api/v1/setup/first-run/skip", json={"reason": "later"})
+    assert skipped.status_code == 200
+    assert model_id not in skipped.text
+
+
+def test_first_run_state_rejects_path_model_for_hosted_provider(monkeypatch, tmp_path, setup_client):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={"step": "providers", "data": {"default_provider": "openai", "default_model": "/Users/me/.env"}},
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize("model_id", ["/opt/models/sk-secret-model.gguf", "hf_abcdef1234567890"])
+def test_first_run_provider_model_identifier_still_rejects_secret_values(monkeypatch, tmp_path, setup_client, model_id):
+    """The model-ID path exception must not allow credential-shaped values."""
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+
+    response = setup_client.post(
+        "/api/v1/setup/first-run/state",
+        json={"step": "providers", "data": {"default_provider": "llamacpp", "default_model": model_id}},
+    )
+
+    assert response.status_code == 400
+    assert model_id not in str(FirstRunStateStore(state_path).load().step_data)
+
+
 def test_first_run_state_rejects_secret_like_allowed_public_step_value(
     monkeypatch,
     tmp_path,
@@ -3095,3 +3171,10 @@ def test_blocked_first_run_state_rejected_by_shared_write_guard(
 
     assert response.status_code == 409
     assert response.json()["detail"] == "state_blocked"
+
+
+@pytest.mark.parametrize("model_id", ["org/model", "llama3:8b", "local-model.gguf"])
+def test_public_setup_keeps_opaque_model_names(model_id):
+    provider = {"default_provider": "llamacpp", "default_model": model_id}
+    assert setup_endpoint._public_first_run_step_data("providers", provider)["default_model"] == model_id
+    assert setup_endpoint._public_first_chat_payload({"provider": "llamacpp", "model": model_id})["model"] == model_id

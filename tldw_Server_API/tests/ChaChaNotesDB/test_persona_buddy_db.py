@@ -1,4 +1,3 @@
-import sqlite3
 from contextlib import contextmanager
 from collections.abc import Iterator
 from pathlib import Path
@@ -31,18 +30,40 @@ def db_instance(db_path: Path) -> Iterator[CharactersRAGDB]:
     db.close_connection()
 
 
-def test_migration_v39_to_latest_creates_persona_buddies_table(db_path: Path) -> None:
-    seeded = CharactersRAGDB(db_path, "seed-client")
-    seeded.close_connection()
+def test_migration_v39_to_latest_creates_persona_buddies_table(
+    db_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conversation_id = "6366587d-0381-41a2-8883-c5d334957537"
 
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute(
-            "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
-            (39, CharactersRAGDB._SCHEMA_NAME),
-        )
-        conn.execute("DROP TABLE IF EXISTS persona_buddies")
-        conn.commit()
+    def initialize_historical_v39(db: CharactersRAGDB) -> None:
+        # Current initialization also repairs newer schemas; build only the
+        # historical base and real migration steps for this seed database.
+        with db.transaction() as conn:
+            db._apply_schema_v4(conn)
+            steps = db._sqlite_linear_migration_steps()
+            for version in range(4, 39):
+                steps[version](conn)
+                assert db._get_db_version(conn) == version + 1
+
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 39)
+        patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical_v39)
+        seeded = CharactersRAGDB(db_path, "seed-client")
+        try:
+            with seeded.transaction() as conn:
+                assert seeded._get_db_version(conn) == 39
+                tables = {
+                    row["name"]
+                    for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+                }
+                assert {"persona_buddies", "note_attachments"}.isdisjoint(tables)
+                # Seed only columns present in the historical conversation schema.
+                conn.execute(
+                    "INSERT INTO conversations (id, root_id, title, client_id) VALUES (?, ?, ?, ?)",
+                    (conversation_id, conversation_id, "Retained from v39", "seed-client"),
+                )
+        finally:
+            seeded.close_connection()
 
     migrated = CharactersRAGDB(db_path, "migration-check-client")
     raw_conn = migrated.get_connection()
@@ -77,6 +98,9 @@ def test_migration_v39_to_latest_creates_persona_buddies_table(db_path: Path) ->
     assert "version" in buddy_columns
     assert "idx_persona_buddies_user" in buddy_indexes
     assert ("persona_profiles", "persona_id", "id") in fk_targets
+    conversation = migrated.get_conversation_by_id(conversation_id)
+    assert conversation["title"] == "Retained from v39"
+    assert conversation["client_id"] == "seed-client"
     migrated.close_connection()
 
 

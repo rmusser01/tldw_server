@@ -19,13 +19,13 @@ export class KanbanPage extends BasePage {
 
   async assertPageReady(): Promise<void> {
     await waitForAppShell(this.page, 30_000)
-    // Wait for the heading or the empty-state gallery
-    const heading = this.page.getByText("Kanban Playground")
-    const emptyState = this.page.getByText("Organize research tasks, track projects with boards and cards.")
-    await Promise.race([
-      heading.first().waitFor({ state: "visible", timeout: 20_000 }),
-      emptyState.first().waitFor({ state: "visible", timeout: 20_000 }),
-    ]).catch(() => {})
+    await expect(this.heading).toBeVisible({ timeout: 20_000 })
+    // The heading renders before the initial boards request settles. Wait for
+    // either the zero-board empty state or a populated gallery card so callers
+    // do not sample the transient blank body.
+    await expect(
+      this.emptyStateMessage.or(this.boardGalleryCards.first())
+    ).toBeVisible({ timeout: 20_000 })
   }
 
   // -- Locators --------------------------------------------------------------
@@ -37,7 +37,10 @@ export class KanbanPage extends BasePage {
 
   /** Empty state description shown when no boards exist */
   get emptyStateMessage(): Locator {
-    return this.page.getByText("Organize research tasks, track projects with boards and cards.")
+    return this.page.getByText(
+      "Organize research tasks, track projects with boards and cards.",
+      { exact: true }
+    )
   }
 
   /** Board selector dropdown */

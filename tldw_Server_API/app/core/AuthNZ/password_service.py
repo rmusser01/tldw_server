@@ -199,7 +199,7 @@ class PasswordService:
 
         # If there are any errors, raise exception
         if errors:
-            raise WeakPasswordError("; ".join(errors))
+            raise WeakPasswordError("; ".join(errors), public_requirements=tuple(errors))
 
     def _has_sequential_chars(self, password: str, max_sequence: int = 3) -> bool:
         """Check if password has sequential characters (e.g., 'abc', '123')"""
@@ -226,18 +226,25 @@ class PasswordService:
         """Check if password has repeated characters (e.g., 'aaa', '111')"""
         return any(len(set(password[i:i + max_repeat])) == 1 for i in range(len(password) - max_repeat + 1))
 
-    def generate_secure_password(self, length: int = 16) -> str:
+    def generate_secure_password(
+        self,
+        length: int = 16,
+        username: Optional[str] = None,
+    ) -> str:
         """
-        Generate a cryptographically secure random password
+        Generate a cryptographically secure password accepted by the active policy.
 
         Args:
-            length: Length of password to generate (minimum 12)
+            length: Requested password length.
+            username: Optional username to exclude from the generated password.
 
         Returns:
-            Secure random password string
+            A secure random password accepted by ``validate_password_strength``.
+
+        Raises:
+            RuntimeError: If no valid password can be generated within the retry bound.
         """
-        if length < 12:
-            length = 12
+        length = max(length, 12, self.min_length)
 
         # Character sets to use
         lowercase = string.ascii_lowercase
@@ -245,23 +252,28 @@ class PasswordService:
         digits = string.digits
         special = "!@#$%^&*()_+-=[]{}|;:,.<>?"
 
-        # Ensure at least one character from each set
-        password = [
-            secrets.choice(lowercase),
-            secrets.choice(uppercase),
-            secrets.choice(digits),
-            secrets.choice(special)
-        ]
-
-        # Fill the rest with random characters from all sets
         all_chars = lowercase + uppercase + digits + special
-        for _ in range(length - 4):
-            password.append(secrets.choice(all_chars))
+        for _ in range(32):
+            # Ensure at least one character from each set.
+            password = [
+                secrets.choice(lowercase),
+                secrets.choice(uppercase),
+                secrets.choice(digits),
+                secrets.choice(special),
+            ]
+            password.extend(secrets.choice(all_chars) for _ in range(length - 4))
+            secrets.SystemRandom().shuffle(password)
+            candidate = "".join(password)
 
-        # Shuffle the password
-        secrets.SystemRandom().shuffle(password)
+            try:
+                self.validate_password_strength(candidate, username)
+            except WeakPasswordError:
+                continue
+            return candidate
 
-        return ''.join(password)
+        raise RuntimeError(
+            "Unable to generate a password that satisfies the configured policy"
+        )
 
     def generate_registration_code(self, length: int = 24) -> str:
         """

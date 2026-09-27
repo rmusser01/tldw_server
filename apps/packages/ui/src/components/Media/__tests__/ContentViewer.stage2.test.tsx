@@ -81,12 +81,13 @@ describe('ContentViewer stage 2 ergonomics', () => {
       />
     )
 
-    const plainContent = screen.getByText(/First line/)
+    const contentRegion = screen.getByRole('region', { name: 'Media content' })
+    const plainContent = contentRegion.querySelector('pre')
     expect(plainContent).toHaveClass('text-sm')
 
     fireEvent.click(screen.getByRole('button', { name: 'Text size L' }))
 
-    expect(screen.getByText(/First line/)).toHaveClass('text-base')
+    expect(contentRegion.querySelector('pre')).toHaveClass('text-base')
   })
 
   it('shows and executes the back-to-top action after deep scroll', () => {

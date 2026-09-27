@@ -12,6 +12,7 @@ import {
   type APIResponse,
   type Locator,
   type Page,
+  type Request,
   type Response,
 } from '@playwright/test';
 import { captureAllApiCalls, type CapturedApiCall } from '../utils/api-assertions';
@@ -42,6 +43,12 @@ type RealChatModelSelection = {
   provider: string;
   model: string;
   key: string;
+};
+
+type DeterministicChatReadiness = RealChatModelSelection & {
+  providerId: 'custom-openai-api';
+  modelId: string;
+  reason?: string;
 };
 
 type CockpitLayoutSeed = {
@@ -427,6 +434,7 @@ const normalizeCockpitProviderKey = (provider: string): string => {
   const normalized = provider.trim().toLowerCase();
   if (normalized === 'llama.cpp') return 'llamacpp';
   if (normalized === 'local-llm') return 'local';
+  if (normalized === 'custom_openai_api') return 'custom-openai-api';
   return normalized;
 };
 
@@ -483,10 +491,49 @@ const buildConfiguredChatModelSelection = (payload: any): RealChatModelSelection
 const getConfiguredChatModelSelection = async (
   request: APIRequestContext
 ): Promise<RealChatModelSelection> => {
-  const providers = await apiGet<any>(request, '/api/v1/llm/providers');
+  const providers = await apiGet<unknown>(request, '/api/v1/llm/providers');
   expect(providers.status).toBe(200);
   expect(extractConfiguredProviders(providers.body).length).toBeGreaterThan(0);
   return buildConfiguredChatModelSelection(providers.body);
+};
+
+const getDeterministicChatReadiness = async (
+  request: APIRequestContext
+): Promise<DeterministicChatReadiness> => {
+  const providers = await apiGet<unknown>(request, '/api/v1/llm/providers');
+  expect(providers.status).toBe(200);
+
+  const provider = extractConfiguredProviders(providers.body).find(
+    (candidate) =>
+      normalizeCockpitProviderKey(String(candidate?.name || '')) === 'custom-openai-api' &&
+      Array.isArray(candidate?.models) &&
+      candidate.models.length > 0
+  );
+
+  if (!provider) {
+    throw new Error(
+      'Deterministic live Chat UAT requires a configured custom-openai-api provider with a chat model'
+    );
+  }
+
+  const providerName = String(provider.name || '').trim();
+  const rawModel =
+    typeof provider.default_model === 'string' && provider.default_model.trim().length > 0
+      ? provider.default_model.trim()
+      : String(provider.models[0] || '').trim();
+  const modelId = normalizeConfiguredChatModelId(providerName, rawModel);
+
+  if (!modelId) {
+    throw new Error('Configured custom-openai-api provider has no usable chat model');
+  }
+
+  return {
+    provider: providerName,
+    providerId: 'custom-openai-api',
+    model: modelId,
+    modelId,
+    key: `custom-openai-api:${modelId}`,
+  };
 };
 
 const seedRealServerConfig = async (
@@ -545,6 +592,10 @@ const seedRealServerConfig = async (
       const config = {
         serverUrl: configuredServerUrl,
         authMode: 'single-user',
+        authSource: 'manual',
+        credentialSource: 'manual',
+        apiKeyPersistence: 'device',
+        apiKeyServerOrigin: new URL(configuredServerUrl).origin,
         apiKey: configuredApiKey,
         requestTimeoutMs: 60_000,
         chatRequestTimeoutMs: 120_000,
@@ -730,7 +781,7 @@ const deleteLocalPrompt = async (page: Page, promptId: string) => {
 
 const trackRealApiHits = (page: Page) => {
   const hits: ApiHit[] = [];
-  const watchedPaths = ['/api/v1/health', '/api/v1/llm/providers', '/api/v1/llm/models/metadata'];
+  const watchedPaths = ['/health', '/api/v1/llm/providers', '/api/v1/llm/models/metadata'];
 
   const onResponse = (response: Response) => {
     const url = new URL(response.url());
@@ -1012,21 +1063,22 @@ const assertHealthResponse = (health: { status: number; body: any }) => {
   expect(['ok', 'healthy', 'degraded']).toContain(health.body?.status);
 };
 
-const waitForChatCompletionAttempt = (page: Page, timeout = 15_000) => {
+const isChatCompletionRequest = (page: Page, request: Request) => {
   const backendOrigin = new URL(serverUrl).origin;
   const pageOrigin = new URL(page.url()).origin;
+  const url = new URL(request.url());
+  if (url.origin !== backendOrigin && url.origin !== pageOrigin) return false;
+  return (
+    (url.pathname === '/api/v1/chat/completions' ||
+      /^\/api\/v1\/chats\/[^/]+\/complete-v2$/.test(url.pathname) ||
+      /^\/api\/v1\/chats\/[^/]+\/completions$/.test(url.pathname)) &&
+    request.method() === 'POST'
+  );
+};
 
+const waitForChatCompletionAttempt = (page: Page, timeout = 15_000) => {
   return page.waitForResponse(
-    (response) => {
-      const url = new URL(response.url());
-      if (url.origin !== backendOrigin && url.origin !== pageOrigin) return false;
-      return (
-        (url.pathname === '/api/v1/chat/completions' ||
-          /^\/api\/v1\/chats\/[^/]+\/complete-v2$/.test(url.pathname) ||
-          /^\/api\/v1\/chats\/[^/]+\/completions$/.test(url.pathname)) &&
-        response.request().method() === 'POST'
-      );
-    },
+    (response) => isChatCompletionRequest(page, response.request()),
     { timeout }
   );
 };
@@ -1112,8 +1164,9 @@ const assertChatCompletionRenderedOrRecoverable = async (
   });
 };
 
-const assertProviderQualifiedPayload = async (page: Page, response: Response) => {
-  const payload = response.request().postDataJSON() as any;
+const assertProviderQualifiedPayload = async (page: Page, responseOrRequest: Response | Request) => {
+  const request = 'request' in responseOrRequest ? responseOrRequest.request() : responseOrRequest;
+  const payload = request.postDataJSON() as any;
   expect(payload).toBeTruthy();
   expect(typeof payload.model).toBe('string');
   expect(payload.model.trim().length).toBeGreaterThan(0);
@@ -1432,7 +1485,7 @@ const sendChatTurnAndCapture = async (
       .then(() => true)
       .catch(() => false);
     if (stopStreamingVisible) {
-      await stopStreaming.click().catch(() => undefined);
+      await stopStreaming.click({ timeout: 2_000 }).catch(() => undefined);
     }
     const settleAfterStopMs = options.settleAfterStopMs ?? 1_000;
     if (settleAfterStopMs > 0) {
@@ -1467,6 +1520,19 @@ const sendChatTurnAndCapture = async (
     response,
     calls,
   };
+};
+
+const expectDeterministicMockReply = async (page: Page): Promise<void> => {
+  const assistantMessage = page
+    .getByRole('log', { name: /chat messages/i })
+    .locator(
+      "article[aria-label*='Assistant message'], [data-role='assistant'], [data-message-role='assistant'], .assistant-message"
+    )
+    .last();
+
+  await expect(assistantMessage).toContainText(/mock provider returned a deterministic success/i, {
+    timeout: 30_000,
+  });
 };
 
 const waitForSuccessfulChatMessagesLoad = (page: Page, chatId: string, timeout = 60_000) => {
@@ -1913,9 +1979,11 @@ test.describe('/chat cockpit real-server parity', () => {
     });
 
     await switchChatLayoutMode(page, 'cockpit');
-    await expect(modeSummary).toHaveText('Cockpit rails hidden. Chat and composer remain active.');
-    await expect(page.getByTestId('playground-cockpit-left-rail-restore')).toBeVisible();
-    await expect(page.getByTestId('playground-cockpit-right-rail-restore')).toBeVisible();
+    await expect(modeSummary).toHaveText('Context and runtime rails visible.');
+    await expect(page.getByTestId('playground-cockpit-left-rail')).toBeVisible();
+    await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
+    await expect(page.getByTestId('playground-cockpit-left-rail-restore')).toBeHidden();
+    await expect(page.getByTestId('playground-cockpit-right-rail-restore')).toBeHidden();
     await page.evaluate(() => {
       localStorage.setItem('playgroundChatLayoutMode', JSON.stringify('cockpit'));
       localStorage.setItem('playgroundChatContextRailVisible', JSON.stringify(true));
@@ -1958,7 +2026,7 @@ test.describe('/chat cockpit real-server parity', () => {
 
     const failingApiHits = apiTracker.hits.filter((hit) => hit.status >= 400);
     expect(failingApiHits).toEqual([]);
-    expect(apiTracker.hits.some((hit) => hit.path === '/api/v1/health')).toBe(true);
+    expect(apiTracker.hits.some((hit) => hit.path === '/health')).toBe(true);
 
     apiTracker.dispose();
   });
@@ -2263,7 +2331,15 @@ test.describe('/chat cockpit real-server parity', () => {
       'hide mobile context rail'
     );
     mobileRails = await waitForMobileCockpitPanel(page, 'runtime');
-    await expect(mobileRails.getByRole('tab', { name: 'Context' })).toHaveCount(0);
+    await expect(
+      mobileRails.getByRole('tab', { name: 'Context', exact: true })
+    ).toHaveCount(0);
+    await expect(
+      mobileRails.getByRole('tab', {
+        name: 'Restore context sidechannel',
+        exact: true,
+      })
+    ).toBeVisible();
     await expect(mobileRails.getByRole('tab', { name: 'Runtime' })).toBeVisible();
     await expect(mobileRails.getByTestId('playground-cockpit-mobile-panel-summary')).toHaveText(
       'Runtime panel active. Composer draft remains available below.'
@@ -2388,11 +2464,7 @@ test.describe('/chat cockpit real-server parity', () => {
       fullPage: true,
     });
 
-    await mobileRails.getByRole('button', { name: 'Return to focus chat' }).click();
-    await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
-      'data-mode',
-      'focus'
-    );
+    await switchChatLayoutMode(page, 'focus');
     await expect(page.getByTestId('playground-cockpit-mobile-rails')).toHaveCount(0);
     await assertCoreComposerControls(page, { mobile: true, composerOnly: true });
     await expectMobileDraftReachable();
@@ -2472,7 +2544,11 @@ test.describe('/chat cockpit real-server parity', () => {
 
     const health = await apiGet<any>(request, '/api/v1/health');
     assertHealthResponse(health);
-    const chatModelSelection = await getConfiguredChatModelSelection(request);
+    const chatModelSelection = await getDeterministicChatReadiness(request);
+    expect(chatModelSelection).toMatchObject({
+      providerId: 'custom-openai-api',
+      modelId: expect.any(String),
+    });
 
     const characterName = `Cockpit Rail ${Date.now()}`;
     const created = await apiPost<any>(request, '/api/v1/characters', {
@@ -2572,37 +2648,34 @@ test.describe('/chat cockpit real-server parity', () => {
         fullPage: true,
       });
 
-      const plainReturnCapture = captureAllApiCalls(page);
       await assistantContextSource.getByRole('button', { name: 'Clear assistant' }).click();
       await assertRuntimeAssistantCleared(runtimeInspector);
       await expect(assistantContextSource).toHaveCount(0);
       await expect(composerAssistant).toHaveAttribute('aria-label', /Select character or persona/i);
 
       const plainPrompt = `Plain return after character clear ${Date.now()}`;
-      const plainCompletionAttempt = waitForChatCompletionAttempt(page, 90_000).catch(() => null);
-      await page.getByTestId('chat-input').fill(plainPrompt);
-      await page.getByRole('button', { name: /send message/i }).click();
-      await plainCompletionAttempt;
-      const stopStreaming = page.getByRole('button', { name: /stop streaming response/i });
-      if (await stopStreaming.isVisible({ timeout: 10_000 }).catch(() => false)) {
-        await stopStreaming.click().catch(() => undefined);
-      }
-      await page.waitForTimeout(1_500);
-      const plainReturnCalls = await plainReturnCapture.stop();
-      const plainCreateCall = findChatCreateCall(plainReturnCalls);
-      expect(plainCreateCall).toBeDefined();
-      expect(plainCreateCall?.requestBody).toEqual(
-        expect.objectContaining({
-          source: 'webui-chat',
-        })
-      );
-      const plainCreatePayload =
-        plainCreateCall?.requestBody && typeof plainCreateCall.requestBody === 'object'
-          ? (plainCreateCall.requestBody as Record<string, unknown>)
+      const plainTurn = await sendChatTurnAndCapture(page, plainPrompt);
+      const plainCompletionCall = findConversationTurnCall(plainTurn.calls);
+      expect(plainCompletionCall).toBeDefined();
+      const plainCompletionPayload =
+        plainCompletionCall?.requestBody && typeof plainCompletionCall.requestBody === 'object'
+          ? (plainCompletionCall.requestBody as Record<string, unknown>)
           : {};
-      expect(plainCreatePayload).not.toHaveProperty('character_id');
-      expect(plainCreatePayload).not.toHaveProperty('assistant_kind');
-      expect(plainCreatePayload).not.toHaveProperty('assistant_id');
+      expect(plainCompletionPayload).not.toHaveProperty('character_id');
+      expect(plainCompletionPayload).not.toHaveProperty('assistant_kind');
+      expect(plainCompletionPayload).not.toHaveProperty('assistant_id');
+
+      const plainChatId = extractConversationChatIdFromCall(plainCompletionCall);
+      expect(plainChatId).toBeTruthy();
+      const plainChatDetails = await getChatDetails(request, String(plainChatId));
+      expect(plainChatDetails.status).toBe(200);
+      expect(plainChatDetails.body).toMatchObject({
+        id: plainChatId,
+        character_id: null,
+        assistant_kind: null,
+        assistant_id: null,
+      });
+      await expectDeterministicMockReply(page);
     } finally {
       await apiDelete(
         request,
@@ -2744,7 +2817,11 @@ test.describe('/chat cockpit real-server parity', () => {
 
     const health = await apiGet<any>(request, '/api/v1/health');
     assertHealthResponse(health);
-    const chatModelSelection = await getConfiguredChatModelSelection(request);
+    const chatModelSelection = await getDeterministicChatReadiness(request);
+    expect(chatModelSelection).toMatchObject({
+      providerId: 'custom-openai-api',
+      modelId: expect.any(String),
+    });
 
     const timestamp = Date.now();
     let character: DisposableCharacter | null = null;
@@ -2754,16 +2831,17 @@ test.describe('/chat cockpit real-server parity', () => {
 
       await openDesktopChatCockpit(page, chatModelSelection);
 
-      const trackedStartCapture = captureAllApiCalls(page);
       await selectAssistantFromRuntimeRail(page, {
         tab: 'Characters',
         assistantName: character.name,
       });
-      const trackedStartCalls = await trackedStartCapture.stop();
       await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(
         character.firstMessage
       );
-      const createCall = findChatCreateCall(trackedStartCalls);
+
+      const prompt = `Tracked character proof ${timestamp}`;
+      const turn = await sendChatTurnAndCapture(page, prompt);
+      const createCall = findChatCreateCall(turn.calls);
       expect(createCall).toBeDefined();
       const trackedCharacterId = (createCall?.requestBody as Record<string, unknown> | null)
         ?.character_id;
@@ -2780,13 +2858,19 @@ test.describe('/chat cockpit real-server parity', () => {
         character_id: Number(character.id),
         assistant_kind: 'character',
       });
+      await expectDeterministicMockReply(page);
 
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
         timeout: 60_000,
       });
       await assertNoBlockingServerDialog(page);
+      await expect(page.getByTestId('character-chat-readiness-panel')).toBeHidden({
+        timeout: 60_000,
+      });
       await assertCoreComposerControls(page);
+      await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(prompt);
+      await expectDeterministicMockReply(page);
 
       const runtimeInspector = getDesktopRuntimeInspector(page);
       await expect(runtimeInspector).toContainText('Character selected', {
@@ -2808,7 +2892,11 @@ test.describe('/chat cockpit real-server parity', () => {
 
     const health = await apiGet<any>(request, '/api/v1/health');
     assertHealthResponse(health);
-    const chatModelSelection = await getConfiguredChatModelSelection(request);
+    const chatModelSelection = await getDeterministicChatReadiness(request);
+    expect(chatModelSelection).toMatchObject({
+      providerId: 'custom-openai-api',
+      modelId: expect.any(String),
+    });
 
     const timestamp = Date.now();
     let persona: DisposablePersona | null = null;
@@ -2828,9 +2916,7 @@ test.describe('/chat cockpit real-server parity', () => {
       });
 
       const prompt = `Tracked persona proof ${timestamp}`;
-      const turn = await sendChatTurnAndCapture(page, prompt, {
-        stopStreamingAfterRequest: true,
-      });
+      const turn = await sendChatTurnAndCapture(page, prompt);
       const createCall = findChatCreateCall(turn.calls);
 
       expect(createCall).toBeDefined();
@@ -2852,13 +2938,19 @@ test.describe('/chat cockpit real-server parity', () => {
         assistant_kind: 'persona',
         assistant_id: persona.id,
       });
+      await expectDeterministicMockReply(page);
 
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
         timeout: 60_000,
       });
       await assertNoBlockingServerDialog(page);
+      await expect(page.getByTestId('character-chat-readiness-panel')).toBeHidden({
+        timeout: 60_000,
+      });
       await assertCoreComposerControls(page);
+      await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(prompt);
+      await expectDeterministicMockReply(page);
 
       const runtimeInspector = getDesktopRuntimeInspector(page);
       await expect(runtimeInspector).toContainText('Persona selected', {
@@ -2926,7 +3018,7 @@ test.describe('/chat cockpit real-server parity', () => {
     apiTracker.dispose();
   });
 
-  test('captures streaming stop and regenerate controls through the real cockpit', async ({
+  test('captures streaming stop and the selected-history regeneration gate through the real cockpit', async ({
     page,
     request,
   }, testInfo) => {
@@ -2955,12 +3047,15 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(regenerateControl).toBeDisabled();
 
     const prompt = `Cockpit streaming controls proof ${Date.now()}: reply with a concise numbered list.`;
-    const completionAttempt = waitForChatCompletionAttempt(page, 90_000).catch(() => null);
+    const completionAttempt = page.waitForRequest(
+      (request) => isChatCompletionRequest(page, request),
+      { timeout: 90_000 }
+    );
 
     await page.getByTestId('chat-input').fill(prompt);
     await page.getByRole('button', { name: /send message/i }).click();
-    const completionResponse = await completionAttempt;
-    expect(completionResponse).toBeTruthy();
+    const completionRequest = await completionAttempt;
+    await assertProviderQualifiedPayload(page, completionRequest);
 
     const runtimeStop = runtimeInspector.getByRole('button', { name: 'Stop generation' });
     const messageStop = page.getByRole('button', { name: /Stop streaming response/i }).first();
@@ -2980,7 +3075,7 @@ test.describe('/chat cockpit real-server parity', () => {
       if (expectStreamingControlEvidence) {
         throw new Error(note);
       }
-      await assertChatCompletionRenderedOrRecoverable(page, completionResponse);
+      await assertChatCompletionRenderedOrRecoverable(page);
     } else {
       const clickedStopControl =
         (await clickFirstAvailableControl([stopControl, ...stopCandidates])) ?? null;
@@ -2996,36 +3091,31 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(runtimeStop).toBeDisabled({ timeout: 30_000 });
     }
 
-    if (completionResponse) {
-      await assertProviderQualifiedPayload(page, completionResponse);
-    }
-
-    if (!(await regenerateControl.isEnabled())) {
-      const followUpAttempt = waitForChatCompletionAttempt(page, 90_000).catch(() => null);
-      await page.getByTestId('chat-input').fill('Reply with one short sentence.');
+    await expect(runtimeStop).toBeDisabled({ timeout: 30_000 });
+    await expect(messageStop).toBeHidden({ timeout: 30_000 });
+    const assistantMessages = page
+      .getByRole('log', { name: /chat messages/i })
+      .locator("article[aria-label*='Assistant message']");
+    if ((await assistantMessages.count()) === 0) {
+      // Stopping before the first token correctly removes the empty assistant
+      // stub. Complete another turn so the history gate has a response to gate.
+      await expect(regenerateControl).toBeDisabled();
+      await expect(
+        runtimeInspector.getByText('Regenerate becomes available after an assistant response.')
+      ).toBeVisible();
+      const followUpCompletion = waitForChatCompletionAttempt(page, 90_000);
+      await page.getByTestId('chat-input').fill('Reply with one short sentence to verify the saved-history regeneration gate.');
       await page.getByRole('button', { name: /send message/i }).click();
-      const followUpResponse = await followUpAttempt;
-      expect(followUpResponse).toBeTruthy();
-      await assertChatCompletionRenderedOrRecoverable(page, followUpResponse);
-      await assertProviderQualifiedPayload(page, followUpResponse!);
+      const followUpResponse = await followUpCompletion;
+      expect(followUpResponse.status()).toBeLessThan(400);
+      await assertProviderQualifiedPayload(page, followUpResponse);
+      await waitForStreamComplete(page, 60_000);
     }
-
-    await expect(regenerateControl).toBeEnabled({ timeout: 30_000 });
+    await expect(assistantMessages.last()).toBeVisible();
+    await expect(regenerateControl).toBeDisabled({ timeout: 30_000 });
+    await expect(runtimeInspector.getByText('Regeneration is unavailable for selected history.')).toBeVisible();
     await page.screenshot({
-      path: testInfo.outputPath('chat-cockpit-regenerate-ready.png'),
-      fullPage: true,
-    });
-
-    const regenerateAttempt = waitForChatCompletionAttempt(page, 90_000).catch(() => null);
-    await regenerateControl.click();
-    const regenerateResponse = await regenerateAttempt;
-    expect(regenerateResponse).toBeTruthy();
-    await assertChatCompletionRenderedOrRecoverable(page, regenerateResponse);
-    if (regenerateResponse) {
-      await assertProviderQualifiedPayload(page, regenerateResponse);
-    }
-    await page.screenshot({
-      path: testInfo.outputPath('chat-cockpit-regenerated-response.png'),
+      path: testInfo.outputPath('chat-cockpit-regenerate-selected-history-gated.png'),
       fullPage: true,
     });
   });

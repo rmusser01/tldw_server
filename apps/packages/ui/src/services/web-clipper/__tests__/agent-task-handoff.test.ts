@@ -246,6 +246,93 @@ describe("web clipper agent-task handoff storage", () => {
     await expect(readPendingWebClipAgentTaskRequest()).resolves.toBeNull()
   })
 
+  it.each(["callback", "promise", "both"] as const)(
+    "preserves storage receivers with %s APIs",
+    async (mode) => {
+      const request = createRequest()
+      const area = {
+        entries: new Map<string, unknown>(),
+        get(key: string, callback?: (items: Record<string, unknown>) => void) {
+          const result = { [key]: this.entries.get(key) }
+          if (mode !== "promise") callback?.(result)
+          if (mode !== "callback") return Promise.resolve(result)
+        },
+        set(items: Record<string, unknown>, callback?: () => void) {
+          for (const [key, value] of Object.entries(items)) {
+            this.entries.set(key, value)
+          }
+          if (mode !== "promise") callback?.()
+          if (mode !== "callback") return Promise.resolve()
+        },
+        remove(key: string, callback?: () => void) {
+          this.entries.delete(key)
+          if (mode !== "promise") callback?.()
+          if (mode !== "callback") return Promise.resolve()
+        }
+      }
+      vi.stubGlobal("chrome", { storage: { session: area } })
+
+      await writePendingWebClipAgentTaskRequest(request)
+      expect(area.entries.get(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)).toEqual(request)
+      expect(window.sessionStorage.length).toBe(0)
+      await expect(readPendingWebClipAgentTaskRequest()).resolves.toEqual(request)
+      await clearPendingWebClipAgentTaskRequest()
+      expect(area.entries.size).toBe(0)
+      await expect(readPendingWebClipAgentTaskRequest()).resolves.toBeNull()
+    }
+  )
+
+  it("uses browser fallback when extension storage methods are missing", async () => {
+    vi.stubGlobal("chrome", { storage: { session: {} } })
+    const request = createRequest()
+
+    await writePendingWebClipAgentTaskRequest(request)
+    expect(window.sessionStorage.getItem(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)).toBe(JSON.stringify(request))
+    await expect(readPendingWebClipAgentTaskRequest()).resolves.toEqual(request)
+    await clearPendingWebClipAgentTaskRequest()
+    await expect(readPendingWebClipAgentTaskRequest()).resolves.toBeNull()
+  })
+
+  it("keeps the callback result when a local storage API also resolves a Promise", async () => {
+    const request = createRequest()
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: {
+          get(key: string, callback?: (items: Record<string, unknown>) => void) {
+            callback?.({ [key]: request })
+            return Promise.resolve({ [key]: createRequest({ id: "later-result" }) })
+          }
+        }
+      }
+    })
+
+    await expect(readPendingWebClipAgentTaskRequest()).resolves.toEqual(request)
+  })
+
+  it.each(["throw", "reject"] as const)(
+    "uses browser fallback when extension storage methods %s",
+    async (mode) => {
+      const fail = () => {
+        const error = new Error("storage unavailable")
+        if (mode === "throw") throw error
+        return Promise.reject(error)
+      }
+      vi.stubGlobal("chrome", {
+        storage: { session: { get: fail, set: fail, remove: fail } }
+      })
+      const request = createRequest()
+      const warning = vi.spyOn(console, "warn").mockImplementation(() => {})
+      try {
+        await writePendingWebClipAgentTaskRequest(request)
+        await expect(readPendingWebClipAgentTaskRequest()).resolves.toEqual(request)
+        await clearPendingWebClipAgentTaskRequest()
+        expect(window.sessionStorage.getItem(WEB_CLIPPER_PENDING_AGENT_TASK_STORAGE_KEY)).toBeNull()
+      } finally {
+        warning.mockRestore()
+      }
+    }
+  )
+
   it("expires stale browser fallback handoffs", async () => {
     const staleRequest = createRequest({
       createdAt: STALE_CREATED_AT

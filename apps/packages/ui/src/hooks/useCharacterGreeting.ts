@@ -13,11 +13,6 @@ import { replaceUserDisplayNamePlaceholders } from "@/utils/chat-display-name"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord"
 import type { AssistantSelectionMode } from "@/types/assistant-selection"
-import {
-  SELECTED_CHARACTER_STORAGE_KEY,
-  selectedCharacterStorage,
-  parseSelectedCharacterValue
-} from "@/utils/selected-character-storage"
 
 type UseCharacterGreetingOptions = {
   playgroundReady: boolean
@@ -32,7 +27,6 @@ type UseCharacterGreetingOptions = {
   setHistory: (
     historyOrUpdater: ChatHistory | ((prev: ChatHistory) => ChatHistory)
   ) => void
-  setSelectedCharacter: (next: Character | null) => void
 }
 
 export const useCharacterGreeting = ({
@@ -43,8 +37,7 @@ export const useCharacterGreeting = ({
   historyId,
   messagesLength,
   setMessages,
-  setHistory,
-  setSelectedCharacter
+  setHistory
 }: UseCharacterGreetingOptions) => {
   const [userDisplayName] = useStorage("chatUserDisplayName", "")
   const resolvedServerChatId =
@@ -78,6 +71,34 @@ export const useCharacterGreeting = ({
   const chatWasEmptyRef = React.useRef(false)
   const selectedCharacterIdRef = React.useRef<string | null>(null)
   const lastCharacterIdRef = React.useRef<string | null>(null)
+  const selectionContext = React.useMemo(() => ({
+    playgroundReady, characterId: selectedCharacter?.id,
+    selectedCharacterMode, serverChatId, historyId
+  }), [
+    playgroundReady, selectedCharacter?.id, selectedCharacterMode, serverChatId, historyId
+  ])
+  const selectionContextRef = React.useRef(selectionContext)
+  const selectionGenerationRef = React.useRef(0)
+  if (selectionContextRef.current !== selectionContext) {
+    selectionContextRef.current = selectionContext
+    selectionGenerationRef.current += 1
+  }
+  React.useEffect(() => {
+    const invalidate = (event: Event) => {
+      if (event.type === "tldw:config-updated" &&
+          !(event as CustomEvent<{ authorityChanged?: boolean }>).detail?.authorityChanged) return
+      selectionGenerationRef.current += 1
+      greetingFetchRef.current = null
+      greetingFetchedRef.current = null
+    }
+    window.addEventListener("tldw:auth-principal-changed", invalidate)
+    window.addEventListener("tldw:config-updated", invalidate)
+    return () => {
+      selectionGenerationRef.current += 1
+      window.removeEventListener("tldw:auth-principal-changed", invalidate)
+      window.removeEventListener("tldw:config-updated", invalidate)
+    }
+  }, [])
   const greetingSettingsRef = React.useRef({
     greetingSelectionId,
     greetingsChecksum,
@@ -97,41 +118,6 @@ export const useCharacterGreeting = ({
     greetingSelectionId,
     greetingsChecksum,
     useCharacterDefault
-  ])
-
-  React.useEffect(() => {
-    if (!playgroundReady) return
-    if (serverChatId != null) return
-    if (selectedCharacterMode === "overlay") return
-    let cancelled = false
-    const syncSelection = async () => {
-      try {
-        const storedRaw = await selectedCharacterStorage.get(
-          SELECTED_CHARACTER_STORAGE_KEY
-        )
-        const stored = parseSelectedCharacterValue<Character>(storedRaw)
-        if (!stored?.id || cancelled) return
-        const storedId = String(stored.id)
-        const currentId = selectedCharacter?.id
-          ? String(selectedCharacter.id)
-          : null
-        if (storedId !== currentId) {
-          setSelectedCharacter(stored)
-        }
-      } catch {
-        // ignore
-      }
-    }
-    void syncSelection()
-    return () => {
-      cancelled = true
-    }
-  }, [
-    playgroundReady,
-    selectedCharacter?.id,
-    selectedCharacterMode,
-    serverChatId,
-    setSelectedCharacter
   ])
 
   React.useEffect(() => {
@@ -185,8 +171,10 @@ export const useCharacterGreeting = ({
     lastCharacterIdRef.current = characterId
     const characterName = selectedCharacter.name || "Assistant"
     const characterAvatarUrl = selectedCharacter.avatar_url ?? null
+    const selectionGeneration = selectionGenerationRef.current
     const isCurrentSelection = () =>
-      selectedCharacterIdRef.current === characterId
+      selectedCharacterIdRef.current === characterId &&
+      selectionGenerationRef.current === selectionGeneration
 
     const upsertGreeting = (
       greetingValue: string,
@@ -318,6 +306,7 @@ export const useCharacterGreeting = ({
       options: GreetingOption[],
       avatarUrl: string | null
     ) => {
+      if (!isCurrentSelection()) return
       const currentSettings = greetingSettingsRef.current
       const storedSelectionId = currentSettings.greetingSelectionId
       const storedChecksum = currentSettings.greetingsChecksum
@@ -394,21 +383,22 @@ export const useCharacterGreeting = ({
             return
           }
           const full = await tldwClient.getCharacter(characterId)
-          greetingFetchedRef.current = characterId
           if (
             !isCurrentSelection() ||
             greetingFetchRef.current !== characterId
           ) {
             return
           }
+          greetingFetchedRef.current = characterId
           const fetchedEntries = collectGreetingEntries(full)
           const resolvedEntries =
             fetchedEntries.length > 0 ? fetchedEntries : greetingEntries
           const resolvedOptions = buildGreetingOptionsFromEntries(
             resolvedEntries
           )
+          const nextAvatar = full?.avatar_url ?? characterAvatarUrl
           if (resolvedOptions.length > 0) {
-            resolveAndPersistGreeting(resolvedOptions, characterAvatarUrl)
+            resolveAndPersistGreeting(resolvedOptions, nextAvatar)
           } else if (
             greetingSettingsRef.current.greetingSelectionId ||
             greetingSettingsRef.current.greetingsChecksum
@@ -418,20 +408,8 @@ export const useCharacterGreeting = ({
               greetingsChecksum: null
             })
           }
-          const nextAvatar =
-            full?.avatar_url ?? selectedCharacter.avatar_url ?? null
-          const mergedCharacter = full
-            ? {
-                ...selectedCharacter,
-                ...full,
-                avatar_url: nextAvatar
-              }
-            : {
-                ...selectedCharacter,
-                avatar_url: nextAvatar
-              }
-          setSelectedCharacter(mergedCharacter)
         } catch {
+          if (!isCurrentSelection()) return
           greetingFetchedRef.current = characterId
           if (fallbackGreeting) {
             resolveAndPersistGreeting(
@@ -446,7 +424,7 @@ export const useCharacterGreeting = ({
             )
           }
         } finally {
-          if (greetingFetchRef.current === characterId) {
+          if (isCurrentSelection() && greetingFetchRef.current === characterId) {
             greetingFetchRef.current = null
           }
         }
@@ -460,7 +438,6 @@ export const useCharacterGreeting = ({
     historyId,
     setHistory,
     setMessages,
-    setSelectedCharacter,
     messagesLength,
     userDisplayName,
     greetingSelectionId,

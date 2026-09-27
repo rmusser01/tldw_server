@@ -1,17 +1,35 @@
 """Integration coverage for `/rag/search/stream` profile and event parity."""
 
+import json
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app as fastapi_app
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
-
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import (
+    is_valid_rag_terminal_event,
+    may_replay_non_stream,
+)
+from tldw_Server_API.app.main import app as fastapi_app
 
 pytestmark = pytest.mark.integration
+
+_TERMINAL_EVENT_FIXTURE = (
+    Path(__file__).resolve().parents[2] / "fixtures" / "rag_terminal_stream_events.json"
+)
+
+
+def test_rag_terminal_stream_contract_matches_shared_fixture() -> None:
+    fixture = json.loads(_TERMINAL_EVENT_FIXTURE.read_text(encoding="utf-8"))
+
+    assert fixture["schema_version"] == 1
+    for case in fixture["cases"]:
+        assert is_valid_rag_terminal_event(case["event"]) is case["valid"], case["name"]
+        assert may_replay_non_stream(case["event"]) is case["may_replay"], case["name"]
 
 
 @pytest.fixture(autouse=True)
@@ -26,6 +44,8 @@ def client_with_stream_overrides(
     monkeypatch: pytest.MonkeyPatch,
     auth_headers: dict[str, str],
 ) -> Iterator[TestClient]:
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+
     async def override_user():
         return User(id=1, username="tester", email=None, is_active=True)
 
@@ -34,10 +54,11 @@ def client_with_stream_overrides(
 
     fastapi_app.dependency_overrides[get_request_user] = override_user
     fastapi_app.dependency_overrides[check_rate_limit] = _noop
+    monkeypatch.setattr(rag_ep, "_build_credential_runtime", lambda *_args: None)
 
     try:
-        from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user as _get_media_db
         from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user as _get_chacha_db
+        from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user as _get_media_db
 
         class StubDB:
             def __init__(self, path: str):
@@ -66,8 +87,8 @@ def test_rag_streaming_parity_generation_and_hybrid_sources(
 ) -> None:
 
 
-    from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
     import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
     captured = {"retrieve_kwargs": None, "generation_config": None}
 
@@ -114,7 +135,9 @@ def test_rag_streaming_parity_generation_and_hybrid_sources(
 
     with client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp:
         assert resp.status_code == 200
-        next(resp.iter_lines(), None)
+        stream_events = [json.loads(raw) for raw in resp.iter_lines() if raw]
+
+    assert stream_events[-1]["type"] == "complete"
 
     retrieve_kwargs = captured["retrieve_kwargs"]
     assert retrieve_kwargs is not None
@@ -148,7 +171,7 @@ def test_rag_streaming_generation_provider_override(
             self.retrievers = {}
 
         async def retrieve(self, query, **kwargs):
-            from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
+            from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
             return [
                 Document(
@@ -184,7 +207,7 @@ def test_rag_streaming_generation_provider_override(
 
     with client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp:
         assert resp.status_code == 200
-        next(resp.iter_lines(), None)
+        list(resp.iter_lines())
 
     generation_config = captured["generation_config"]
     assert generation_config is not None
@@ -304,7 +327,7 @@ def test_rag_streaming_generation_uses_shared_resolved_payload(
 
     with client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp:
         assert resp.status_code == 200
-        next(resp.iter_lines(), None)
+        list(resp.iter_lines())
 
     pipeline_kwargs = captured["pipeline_kwargs"]
     assert pipeline_kwargs is not None
@@ -331,8 +354,8 @@ def test_rag_streaming_emits_research_progress_before_generation(
     import asyncio
     from types import SimpleNamespace
 
-    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
     import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
     async def _fake_unified_pipeline(**kwargs: Any) -> Any:
         callback = kwargs.get("research_progress_callback")
@@ -394,17 +417,6 @@ def test_rag_streaming_emits_research_progress_before_generation(
 
             evt = _json.loads(raw)
             events.append(evt)
-            event_types = {item.get("type") for item in events}
-            if {
-                "research_reasoning",
-                "research_searching",
-                "research_results",
-                "research_complete",
-                "contexts",
-                "delta",
-            }.issubset(event_types):
-                break
-
     types = [evt.get("type") for evt in events]
     assert "research_reasoning" in types
     assert "research_searching" in types
@@ -412,6 +424,16 @@ def test_rag_streaming_emits_research_progress_before_generation(
     assert "research_complete" in types
     assert "contexts" in types
     assert "delta" in types
+    assert types[-1] == "complete"
+    assert events[-1] == {
+        "schema_version": 1,
+        "type": "complete",
+        "code": "complete",
+        "upstream_dispatched": True,
+        "output_emitted": True,
+        "allow_non_stream_fallback": False,
+        "message": "Search completed.",
+    }
     assert types.index("research_reasoning") < types.index("contexts")
     assert types.index("research_complete") < types.index("delta")
 
@@ -420,8 +442,8 @@ def test_rag_streaming_preserves_delta_and_claim_events(
     monkeypatch: pytest.MonkeyPatch,
     client_with_stream_overrides: TestClient,
 ) -> None:
-    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
     import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
     async def _fake_unified_pipeline(**kwargs: Any) -> Any:
         return rag_ep.UnifiedSearchResult(
@@ -486,6 +508,121 @@ def test_rag_streaming_preserves_delta_and_claim_events(
     assert len(overlay_events) >= 2
     assert len(final_events) == 1
     assert final_events[0].get("claim_count") == 2
+    assert events[-1]["type"] == "complete"
+    assert events[-1]["output_emitted"] is True
+
+
+def test_rag_streaming_emits_explicit_clean_empty_completion(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+) -> None:
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+
+    async def _fake_unified_pipeline(**kwargs: Any) -> Any:
+        return rag_ep.UnifiedSearchResult(
+            documents=[],
+            query=str(kwargs.get("query", "")),
+            expanded_queries=[],
+            metadata={},
+            timings={},
+            citations=[],
+            feedback_id=None,
+            generated_answer=None,
+            cache_hit=False,
+            errors=[],
+            security_report=None,
+            total_time=0.0,
+        )
+
+    async def _fake_generate_streaming_response(context: Any, **kwargs: Any) -> Any:
+        async def _gen():
+            if False:
+                yield ""
+
+        context.stream_generator = _gen()
+        context.metadata = {"streaming": True}
+        return context
+
+    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", _fake_unified_pipeline)
+    monkeypatch.setattr(rag_ep, "generate_streaming_response", _fake_generate_streaming_response)
+
+    events = []
+    with client_with_stream_overrides.stream(
+        "POST",
+        "/api/v1/rag/search/stream",
+        json={"query": "empty stream", "enable_generation": True},
+    ) as resp:
+        assert resp.status_code == 200
+        events = [json.loads(raw) for raw in resp.iter_lines() if raw]
+
+    assert events[-1] == {
+        "schema_version": 1,
+        "type": "complete",
+        "code": "complete",
+        "upstream_dispatched": True,
+        "output_emitted": False,
+        "allow_non_stream_fallback": False,
+        "message": "Search completed.",
+    }
+
+
+def test_rag_streaming_partial_provider_error_is_terminal_and_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+) -> None:
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
+
+    sentinel = "sk-secret-must-not-cross-stream-boundary"
+
+    async def _fake_unified_pipeline(**kwargs: Any) -> Any:
+        return rag_ep.UnifiedSearchResult(
+            documents=[],
+            query=str(kwargs.get("query", "")),
+            expanded_queries=[],
+            metadata={},
+            timings={},
+            citations=[],
+            feedback_id=None,
+            generated_answer=None,
+            cache_hit=False,
+            errors=[],
+            security_report=None,
+            total_time=0.0,
+        )
+
+    async def _fake_generate_streaming_response(context: Any, **kwargs: Any) -> Any:
+        async def _gen():
+            yield "partial"
+            raise ChatAuthenticationError(sentinel, provider="openai")
+
+        context.stream_generator = _gen()
+        context.metadata = {"streaming": True}
+        return context
+
+    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", _fake_unified_pipeline)
+    monkeypatch.setattr(rag_ep, "generate_streaming_response", _fake_generate_streaming_response)
+
+    with client_with_stream_overrides.stream(
+        "POST",
+        "/api/v1/rag/search/stream",
+        json={"query": "partial failure", "enable_generation": True},
+    ) as resp:
+        assert resp.status_code == 200
+        raw_events = [raw for raw in resp.iter_lines() if raw]
+        events = [json.loads(raw) for raw in raw_events]
+
+    assert events[-1] == {
+        "schema_version": 1,
+        "type": "error",
+        "code": "provider_authentication_failed",
+        "status_code": 502,
+        "upstream_dispatched": True,
+        "output_emitted": True,
+        "allow_non_stream_fallback": False,
+        "message": "The selected provider credentials could not be authenticated.",
+    }
+    assert sentinel not in "".join(raw_events)
 
 
 def test_rag_streaming_profile_defaults_affect_generation_config(
@@ -501,7 +638,7 @@ def test_rag_streaming_profile_defaults_affect_generation_config(
             self.retrievers = {}
 
         async def retrieve(self, query, **kwargs):
-            from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
+            from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
             return [
                 Document(
@@ -537,7 +674,7 @@ def test_rag_streaming_profile_defaults_affect_generation_config(
 
     with client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp:
         assert resp.status_code == 200
-        next(resp.iter_lines(), None)
+        list(resp.iter_lines())
 
     generation_config = captured["generation_config"]
     assert generation_config is not None
@@ -558,7 +695,7 @@ def test_rag_streaming_profile_fast_applies_instruction_prompt(
             self.retrievers = {}
 
         async def retrieve(self, query, **kwargs):
-            from tldw_Server_API.app.core.RAG.rag_service.types import Document, DataSource
+            from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
             return [
                 Document(
@@ -593,7 +730,7 @@ def test_rag_streaming_profile_fast_applies_instruction_prompt(
 
     with client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp:
         assert resp.status_code == 200
-        next(resp.iter_lines(), None)
+        list(resp.iter_lines())
 
     generation_config = captured["generation_config"]
     assert generation_config is not None
@@ -607,8 +744,8 @@ def test_rag_streaming_agentic_path_uses_profile_resolved_defaults(
 ) -> None:
     from types import SimpleNamespace
 
-    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
     import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
 
     captured: dict[str, Any] = {"agentic_kwargs": None}
 
@@ -663,7 +800,7 @@ def test_rag_streaming_agentic_path_uses_profile_resolved_defaults(
 
     with client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp:
         assert resp.status_code == 200
-        next(resp.iter_lines(), None)
+        list(resp.iter_lines())
 
     agentic_kwargs = captured["agentic_kwargs"]
     assert agentic_kwargs is not None
@@ -819,7 +956,7 @@ def test_rag_streaming_agentic_path_uses_bundle_contracts_without_re_resolving(
 
     with client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp:
         assert resp.status_code == 200
-        next(resp.iter_lines(), None)
+        list(resp.iter_lines())
 
     assert captured["context_builder_calls"] == 1
     agentic_kwargs = captured["agentic_kwargs"]

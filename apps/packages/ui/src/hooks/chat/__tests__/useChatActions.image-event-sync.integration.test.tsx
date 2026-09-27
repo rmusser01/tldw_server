@@ -18,6 +18,7 @@ const {
   streamCharacterChatCompletionMock,
   persistCharacterCompletionMock,
   normalChatModeMock,
+  savedSuccessPayloads,
   updateMessageMediaMock,
   chatSettingsState,
   storageValues,
@@ -31,6 +32,7 @@ const {
   })),
   createChatMock: vi.fn(),
   normalChatModeMock: vi.fn(),
+  savedSuccessPayloads: [] as unknown[],
   updateMessageMediaMock: vi.fn(async (_messageId: string, _payload: any) => null),
   chatSettingsState: {
     value: { imageEventSyncMode: "off" as "off" | "on" }
@@ -39,6 +41,13 @@ const {
   storeOptionState: {
     value: { selectedModel: "deepseek-chat" as string | null }
   }
+}))
+
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async (_ids: unknown, { signal }: { signal: AbortSignal }) => ({
+    scopeKey: "scope:test-chat", requestScope: { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }, userId: null },
+    scopeSignal: signal, scopeInvalidatedSignal: signal, definitions: {}, capability: "unchecked", release: vi.fn()
+  })
 }))
 
 vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
@@ -65,8 +74,10 @@ vi.mock("@/hooks/utils/messageHelpers", () => ({
   validateBeforeSubmit: vi.fn(() => true),
   createSaveMessageOnSuccess: vi.fn(
     () =>
-      async (_payload?: unknown): Promise<string | null> =>
-        "history-image-sync"
+      async (payload?: unknown): Promise<string | null> => {
+        savedSuccessPayloads.push(payload)
+        return "history-image-sync"
+      }
   ),
   createSaveMessageOnError: vi.fn(
     () =>
@@ -117,7 +128,7 @@ vi.mock("@/utils/selected-character-storage", () => ({
   selectedCharacterSyncStorage: {
     get: vi.fn(async () => null)
   },
-  parseSelectedCharacterValue: vi.fn(() => null)
+  parseSelectedCharacterValue: vi.fn((value: unknown) => value)
 }))
 
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
@@ -152,6 +163,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     createChat: createChatMock,
     streamCharacterChatCompletion: streamCharacterChatCompletionMock,
     persistCharacterCompletion: persistCharacterCompletionMock,
+    getChatSettings: vi.fn(async () => ({ settings: null })),
     initialize: vi.fn(async () => null),
     getMessage: vi.fn(async () => ({ version: 1 })),
     editMessage: vi.fn(async () => null)
@@ -240,6 +252,9 @@ const createHookOptions = (
     serverChatId: "server-chat-1",
     serverChatTitle: "Image Sync Chat",
     serverChatCharacterId: null,
+    serverChatAssistantKind: null,
+    serverChatAssistantId: null,
+    serverChatPersonaMemoryMode: null,
     serverChatState: "in-progress",
     serverChatTopic: null,
     serverChatClusterId: null,
@@ -248,6 +263,9 @@ const createHookOptions = (
     setServerChatId: vi.fn(),
     setServerChatTitle: vi.fn(),
     setServerChatCharacterId: vi.fn(),
+    setServerChatAssistantKind: vi.fn(),
+    setServerChatAssistantId: vi.fn(),
+    setServerChatPersonaMemoryMode: vi.fn(),
     setServerChatMetaLoaded: vi.fn(),
     setServerChatState: vi.fn(),
     setServerChatVersion: vi.fn(),
@@ -320,6 +338,7 @@ describe("useChatActions image event sync integration", () => {
     storageValues.set(PLAYGROUND_IMAGE_EVENT_SYNC_DEFAULT_STORAGE_KEY, "off")
     chatSettingsState.value = { imageEventSyncMode: "off" }
     storeOptionState.value = { selectedModel: "deepseek-chat" }
+    savedSuccessPayloads.length = 0
 
     normalChatModeMock.mockImplementation(
       async (
@@ -411,6 +430,61 @@ describe("useChatActions image event sync integration", () => {
     )
   })
 
+  it("includes scoped image sync metadata in the deferred local save", async () => {
+    addChatMessageMock.mockResolvedValueOnce({ id: "server-message-42" })
+    const scopeController = new AbortController()
+    const requestScope = Object.freeze({
+      config: Object.freeze({
+        serverUrl: "https://scope.example",
+        authMode: "multi-user" as const
+      }),
+      userId: 7
+    })
+    normalChatModeMock.mockImplementationOnce(
+      async (
+        _message: string,
+        _image: string,
+        _isRegenerate: boolean,
+        _messages: any[],
+        _history: any[],
+        _signal: AbortSignal,
+        params: any
+      ) => {
+        await params.saveMessageOnSuccess({
+          historyId: "history-image-sync",
+          conversationId: "server-chat-1",
+          saveToDb: false,
+          message: "sunlit city skyline",
+          fullText: "",
+          assistantMessageId: "assistant-image-1",
+          userMessageType: IMAGE_GENERATION_USER_MESSAGE_TYPE,
+          assistantMessageType: IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
+          assistantImages: ["data:image/png;base64,AAAA"],
+          generationInfo: defaultInitialMessages[0].generationInfo,
+          imageEventSyncPolicy: params.imageEventSyncPolicy,
+          scopeSignal: scopeController.signal,
+          scopeInvalidatedSignal: scopeController.signal,
+          requestScope
+        })
+      }
+    )
+    const { options } = createHookOptions()
+    const { result } = renderHook(() => useChatActions(options))
+
+    await invokeImageSubmit(result.current.onSubmit, "on")
+
+    expect(savedSuccessPayloads).toHaveLength(1)
+    const persisted = savedSuccessPayloads[0] as any
+    expect(persisted.generationInfo.image_generation.sync).toEqual(
+      expect.objectContaining({
+        status: "synced",
+        mode: "on",
+        policy: "on",
+        serverMessageId: "server-message-42"
+      })
+    )
+  })
+
   it("records failed sync status when server mirroring fails", async () => {
     addChatMessageMock.mockRejectedValueOnce(new Error("mirror timeout"))
     const { options, getCurrentMessages } = createHookOptions()
@@ -482,20 +556,28 @@ describe("useChatActions image event sync integration", () => {
         id: 7,
         name: "Guide"
       },
-      serverChatCharacterId: 7
+      selectedAssistant: {
+        kind: "character", id: "7", name: "Guide",
+        metadata: { selectionMode: "tracked" }
+      },
+      serverChatCharacterId: 7,
+      serverChatAssistantKind: "character",
+      serverChatAssistantId: "7"
     })
     const { result } = renderHook(() => useChatActions(options))
 
     await act(async () => {
-      await result.current.onSubmit({
+      const outcome = await result.current.onSubmit({
         message: "Stay in character",
         image: "",
         requestOverrides: {
           selectedModel: "anthropic/claude-4.5-sonnet"
         }
       })
+      expect(outcome).toEqual({ status: "submitted" })
     })
 
+    expect(options.notification.error.mock.calls).toEqual([])
     expect(streamCharacterChatCompletionMock).toHaveBeenCalledTimes(1)
     expect(streamCharacterChatCompletionMock.mock.calls[0]?.[1]).toEqual(
       expect.objectContaining({
@@ -550,10 +632,20 @@ describe("useChatActions character stream throttling integration", () => {
     const { options, setMessages, getCurrentMessages } = createHookOptions([])
     options.serverChatId = null
     options.serverChatCharacterId = null
+    options.selectedAssistant = {
+      kind: "character",
+      id: "101",
+      name: "Stream Character",
+      metadata: { selectionMode: "tracked" }
+    }
     options.selectedCharacter = {
       id: 101,
       name: "Stream Character",
       avatar_url: ""
+    }
+    options.selectedAssistant = {
+      kind: "character", id: "101", name: "Stream Character",
+      metadata: { selectionMode: "tracked" }
     }
     options.selectedModel = "openrouter/openai/gpt-4.1-mini"
     options.currentChatModelSettings.apiProvider = "openrouter"
@@ -569,6 +661,7 @@ describe("useChatActions character stream throttling integration", () => {
 
     // Fake timers freeze the throttle window so this bound stays deterministic in CI.
     expect(setMessages.mock.calls.length).toBeLessThan(40)
+    expect(options.notification.error.mock.calls).toEqual([])
     expect(streamCharacterChatCompletionMock).toHaveBeenCalledTimes(1)
     expect(normalChatModeMock).not.toHaveBeenCalled()
 
@@ -605,10 +698,17 @@ describe("useChatActions character stream throttling integration", () => {
 
     const { options } = createHookOptions([])
     options.serverChatId = "chat-character-1"
+    options.serverChatCharacterId = 101
+    options.serverChatAssistantKind = "character"
+    options.serverChatAssistantId = "101"
     options.selectedCharacter = {
       id: 101,
       name: "Stream Character",
       avatar_url: ""
+    }
+    options.selectedAssistant = {
+      kind: "character", id: "101", name: "Stream Character",
+      metadata: { selectionMode: "tracked" }
     }
 
     const { result } = renderHook(() => useChatActions(options))
@@ -625,6 +725,16 @@ describe("useChatActions character stream throttling integration", () => {
       expect.any(String),
       expect.objectContaining({
         assistant_message_id: expect.any(String)
+      }),
+      expect.objectContaining({
+        requestScope: expect.objectContaining({
+          config: expect.objectContaining({
+            serverUrl: "http://127.0.0.1:8000",
+            authMode: "single-user"
+          }),
+          userId: null
+        }),
+        signal: expect.any(AbortSignal)
       })
     )
     expect(
@@ -658,10 +768,17 @@ describe("useChatActions character stream throttling integration", () => {
 
     const { options } = createHookOptions([])
     options.serverChatId = "server-chat-1"
+    options.serverChatCharacterId = 101
+    options.serverChatAssistantKind = "character"
+    options.serverChatAssistantId = "101"
     options.selectedCharacter = {
       id: 101,
       name: "Stream Character",
       avatar_url: ""
+    }
+    options.selectedAssistant = {
+      kind: "character", id: "101", name: "Stream Character",
+      metadata: { selectionMode: "tracked" }
     }
 
     const { result } = renderHook(() => useChatActions(options))

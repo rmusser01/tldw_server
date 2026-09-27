@@ -2,8 +2,8 @@ from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
 class _FakeCursor:
@@ -44,6 +44,7 @@ def test_deck_parent_cycle_check_locks_parent_chain_for_postgres(
         property(lambda _self: backend_type),
     )
     db = object.__new__(CharactersRAGDB)
+    db.client_id = "hierarchy-owner"
     conn = _RecordingConnection(
         [
             {"id": 2, "parent_deck_id": 3},

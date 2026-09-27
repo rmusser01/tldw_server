@@ -1671,6 +1671,7 @@ class GatewayExternalRuntimeManager:
             tuple(server.command),
             server.url,
             server.cwd,
+            tuple(sorted(server.headers.items())),
             tuple(server.env_allowlist),
             tuple(server.credential_slots),
         )

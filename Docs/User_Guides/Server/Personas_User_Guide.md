@@ -1,6 +1,8 @@
 # Personas User Guide
 
-Last Updated: 2026-06-01
+For a step-by-step browser walkthrough, see the [Persona Buddy guide](../WebUI_Extension/Persona_Buddy_Guide.md): setup, Migu, dragging, live voice, approvals, and troubleshooting.
+
+Last Updated: 2026-09-07
 
 ## Overview
 
@@ -226,6 +228,9 @@ Common client frame types include:
 
 - `user_message`: send a text turn.
 - `voice_config`: update voice runtime settings for a session.
+- `voice_prepare`: initialize the selected speech services before capturing audio.
+- `voice_stop`: release this connection's prepared speech runtime.
+- `cancel`: cancel active and queued turns for the owned session.
 - `wake_activation` and `wake_deactivation`: manage manually armed wake phrase state.
 - `voice_commit`: commit a transcript as a Persona Live turn.
 - `audio_chunk`: send bounded audio chunks for live STT/TTS handling.
@@ -235,6 +240,7 @@ Common client frame types include:
 Common server events include:
 
 - `notice`: status, warning, error, and recovery messages.
+- `voice_readiness`: correlated preparation result; capture may begin only when `ready` is true.
 - `tool_plan`: proposed tool plan requiring client confirmation when needed.
 - `tool_call` and `tool_result`: tool execution lifecycle.
 - `assistant_delta`: assistant text output.
@@ -242,6 +248,68 @@ Common server events include:
 
 The stream enforces feature flags, authentication, policy checks, tool
 confirmation, audio limits, and rate limits.
+
+### Preparing voice with the selected provider
+
+Open the exact Buddy session in Full Live, choose **Connect** if needed, and
+then **Start listening**. Preparation checks the configured Chat target and
+prepares the selected STT and TTS services before the browser requests microphone
+access. Under **Profiles**, choose **TTS provider**, optionally set **TTS model**
+and **TTS voice**, and choose **Save assistant defaults**. Blank model and voice
+fields use the selected provider's applicable defaults. A blank voice uses the
+server's configured voice only when the selected provider is its default provider;
+otherwise the selected adapter resolves its default. Browser-wide voice preferences
+do not override a blank Persona voice. The **browser** provider uses its native
+default voice when this field is blank.
+
+After saving changes, choose **Disconnect → Connect** if Live was connected.
+Connected sessions keep their original voice settings until reconnect; returning
+from Profiles or retrying Start does not refresh them. Live shows the provider,
+model selection and voice for the current connection. A “default model” or
+“default voice” label leaves that value for the provider to resolve.
+
+The provider list includes **browser**, registered server providers, and configured
+speech gateways. Browser speech uses the browser's speech synthesis and available
+voices. Local server providers need their models, voice assets, and dependencies;
+remote providers and gateways need the appropriate configuration and credentials.
+The legacy Persona **tldw** value remains an alias for **kokoro**. Kokoro is an
+available provider, not a prerequisite for every Persona voice session.
+**Use browser fallback** inherits the browser-wide provider preference rather than
+forcing browser speech. Persona Live does not silently switch providers on
+preparation or synthesis failure. See [TTS setup](../WebUI_Extension/TTS-SETUP-GUIDE.md).
+
+Recorded physical tests used Parakeet ONNX and Kokoro; Whisper was also tested.
+These are historical test choices, not qualification of every provider or browser
+voice. A failed preparation returns setup feedback; no substitute transcript or
+audio is generated. Browser speech support and audible playback must be checked
+in the browser itself.
+
+WebSocket clients send `voice_config`, then `voice_prepare` with a unique
+`client_message_id`. Wait for the matching `voice_readiness` event. For STT,
+use a supported selected model such as `tiny.en` for Whisper or `parakeet-onnx`
+for Parakeet ONNX. Set `tts.provider` to `browser`, a registered server provider,
+or a configured speech gateway ID; optional `tts.model` and `tts.voice` select
+provider-supported values. The server must have the selected local models and a
+configured default Chat provider/model. Preparation resolves the Chat target;
+it does not require a server-static Chat key or certify Chat admission. Each
+submitted turn enters the authenticated Chat route, which resolves effective
+credentials (including applicable BYOK) and enforces access policy, moderation,
+and budget. A failed preparation does not authorize capture. The WebUI cancels
+a preparation that exceeds its 30-second wait and offers retry guidance.
+
+Voice readiness belongs to the connection and session. Session summaries report
+`capabilities.voice=true` only while an owned runtime is prepared. Stop, changes
+to voice settings, runtime failures and disconnect invalidate readiness. REST
+session Stop also notifies the connected client so it can release its microphone
+and playback. Pending microphone permission responses cannot restart capture
+after Stop or navigation.
+
+Typed turns on one connection execute in session order. Explicit cancellation
+invalidates both active and queued turns; a later send can start even when a
+provider delays cancellation. Clients match transcript, readiness and TTS events
+to the current session and request, and consume binary audio only after the
+matching `tts_audio` metadata. Full Live stops on playback failure and offers a
+retry rather than silently resuming recording.
 
 ## State, Memory, and Exemplars
 
@@ -411,3 +479,30 @@ explicitly activate a valid pack.
 - `Docs/Code_Documentation/Persona_Visual_Packs.md` - Persona Visual Pack ownership, activation, import/export, and renderer notes.
 - `Docs/User_Guides/WebUI_Extension/Persona_Live_Wake_Phrases.md` - wake phrase behavior in the WebUI/extension surfaces.
 - `Docs/Operations/Persona_Memory_ChaCha_Cutover_Rollback_Runbook_2026_02_22.md` - memory cutover and rollback notes.
+
+
+Persona Live shows provisional recognition under **Last heard**. Recognition may
+revise those words as more speech arrives; the conversation transcript records
+the committed utterance once. With Auto-commit off, use **Send now** when finished.
+Choosing manual control does not indicate a VAD failure or a stalled automatic
+turn. **Send now** is available only while the current voice turn is listening
+and has recognized speech. Sending consumes that turn once; stopping, finishing,
+or disconnecting disables the button even though **Last heard** remains visible.
+
+### Voice recording rate limits
+
+Persona accepts up to 300 audio chunks per rolling minute by default, enough for the browser microphone cadence. Operators can override `PERSONA_AUDIO_CHUNKS_PER_MINUTE` (1–1200); a lower setting can interrupt continuous browser capture. If this limit is reached, the browser stops recording and asks you to wait one minute before retrying **Start listening**. **Send now** commits recognized speech; **Stop voice** cancels the turn.
+
+Persona Whisper uses local speech filtering to reduce words inferred from silence. This remains enabled when Auto-commit is off: the filter decides which audio contains speech, while **Send now** still decides when to submit the turn. Filtering reduces silence hallucinations but does not guarantee perfect recognition.
+
+Persona Whisper and Parakeet ONNX revise the complete current spoken turn so words crossing an internal decode boundary are not appended twice. Keep each turn within 30 seconds, including silence. If that buffer fills, voice stops with a shorter-turn retry message. **Send now** submits the turn; a new Start begins with a fresh transcript.
+
+Whisper and Parakeet ONNX recognition run in the background so incoming audio and Stop stay
+responsive. **Send now** commits the transcript currently shown; automatic turn
+detection waits for recognition through the detected speech boundary. If a
+stopped decoder is still finishing, starting voice again shows a busy message
+until cleanup completes. Stop always discards its late transcript.
+
+Changing Persona through setup or Live ends the former connection and clears its resume selection, transcript and pending approvals. Use **Connect** to begin a session for the newly selected Persona. Previously saved setup and voice defaults remain available.
+
+Use **Refresh catalog** to reload bundled Buddy choices. If loading fails, **Retry catalog** repeats the read without copying, activating, or replacing the current pack. The button is disabled during the request. If voice prepares but a submitted turn fails, read the Chat error and check authenticated access, effective credentials, and budget; preparation alone does not certify Chat admission.

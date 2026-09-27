@@ -12,7 +12,12 @@ import contextlib
 import hashlib
 import re
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
+
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCallCredentials,
+)
 
 
 class PromptQualityScorer:
@@ -62,28 +67,54 @@ class PromptQualityScorer:
             score += min(1.5, overlap * 0.5)
         return float(max(0.0, min(10.0, score)))
 
-    def _cache_key(self, system_text: str, user_text: str) -> str:
+    def _cache_key(
+        self,
+        system_text: str,
+        user_text: str,
+        scorer_model: str | None = None,
+        cache_scope: str | None = None,
+    ) -> str:
         h = hashlib.sha256()
         h.update(system_text.encode("utf-8", errors="ignore"))
         h.update(b"\0")
         h.update(user_text.encode("utf-8", errors="ignore"))
         h.update(b"\0")
-        h.update((self._scorer_model or "").encode("utf-8"))
+        h.update((scorer_model or self._scorer_model or "").encode("utf-8"))
+        h.update(b"\0")
+        h.update((cache_scope or "").encode("utf-8", errors="ignore"))
         return h.hexdigest()
 
-    async def score_prompt_async(self, *, system_text: str, user_text: str) -> float:
+    async def score_prompt_async(
+        self,
+        *,
+        system_text: str,
+        user_text: str,
+        model_config: dict[str, Any] | None = None,
+        scorer_model: str | None = None,
+        provider_credentials: ProviderCallCredentials | None = None,
+        on_provider_success: Callable[[], Awaitable[None]] | None = None,
+        strict_provider_errors: bool = False,
+        cache_scope: str | None = None,
+        use_cache: bool = True,
+    ) -> float:
         """Return a quality score in [0..10] with optional LLM assist.
 
         Combines heuristic with LLM score (if configured) using a simple blend.
         Uses a TTL cache to reduce token usage.
         """
         base = self._heuristic(system_text=system_text, user_text=user_text)
-        if not (self._executor and self._scorer_model):
+        selected_model = scorer_model or self._scorer_model
+        if not (self._executor and selected_model):
             return base
 
-        key = self._cache_key(system_text, user_text)
+        key = self._cache_key(
+            system_text,
+            user_text,
+            selected_model,
+            cache_scope,
+        )
         now = time.time()
-        hit = self._cache.get(key)
+        hit = self._cache.get(key) if use_cache else None
         if hit and hit[1] > now:
             return hit[0]
 
@@ -93,11 +124,22 @@ class PromptQualityScorer:
             "User prompt (context):\n" + (user_text[:1500] if user_text else "") + "\n\nScore:"
         )
         try:
+            selected_config = model_config or {}
+            parameters = dict(selected_config.get("parameters") or {})
+            parameters.update({"temperature": 0.0, "max_tokens": 5})
             res = await self._executor._call_llm(
-                provider="openai",  # Uses configured dispatcher; can be adapted
-                model=self._scorer_model,
+                provider=str(selected_config.get("provider") or "openai"),
+                model=selected_model,
                 prompt=prompt,
-                parameters={"temperature": 0.0, "max_tokens": 5},
+                parameters=parameters,
+                api_key_override=selected_config.get("api_key"),
+                app_config=selected_config.get("app_config"),
+                credentials_resolved=(
+                    selected_config.get("credentials_resolved") is True
+                ),
+                provider_credentials=provider_credentials,
+                timeout_seconds=parameters.get("timeout_seconds"),
+                on_provider_success=on_provider_success,
             )
             text = (res or {}).get("content", "").strip()
             if self._on_tokens:
@@ -106,9 +148,12 @@ class PromptQualityScorer:
             m = re.search(r"\d+(?:\.\d+)?", text)
             llm_score = float(m.group(0)) if m else base
             final = float(max(0.0, min(10.0, 0.6 * base + 0.4 * llm_score)))
-            self._cache[key] = (final, now + self._cache_ttl)
+            if use_cache:
+                self._cache[key] = (final, now + self._cache_ttl)
             return final
         except Exception:
+            if strict_provider_errors:
+                raise
             return base
 
     @staticmethod

@@ -34,7 +34,7 @@ export default defineConfig({
       '../packages/ui/src/**/__tests__/**/*.test.{ts,tsx}',
       '../packages/ui/src/**/__tests__/**/*.spec.{ts,tsx}',
     ],
-    exclude: ['node_modules/**', 'dist/**', 'build/**', 'pages/**'],
+    exclude: ['**/node_modules/**', '**/.next*/**', 'dist/**', 'build/**', 'pages/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text-summary', 'json-summary'],

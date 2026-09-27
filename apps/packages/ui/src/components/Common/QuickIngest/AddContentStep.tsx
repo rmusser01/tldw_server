@@ -892,13 +892,14 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         <Button
           onClick={goNext}
           disabled={!canProceed}
-          aria-label={qi("wizard.configureItems", "Configure {{count}} items", {
+          aria-label={qi("wizard.configureItems", "Configure {count, plural, one {# item} other {# items}}", {
             count: validItemCount,
           })}
         >
-          {qi("wizard.configureItems", "Configure {{count}} items >", {
+          {qi("wizard.configureItems", "Configure {count, plural, one {# item} other {# items}}", {
             count: validItemCount,
           })}
+          <span aria-hidden="true"> &gt;</span>
         </Button>
       </div>
     </div>

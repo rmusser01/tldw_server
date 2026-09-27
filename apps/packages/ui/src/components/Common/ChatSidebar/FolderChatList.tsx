@@ -19,11 +19,12 @@ import { cn } from "@/libs/utils"
 
 interface FolderChatListProps {
   className?: string
+  onConversationSelected?: () => void
 }
 
 const MISSING_CHAT_BATCH_SIZE = 5
 
-export function FolderChatList({ className }: FolderChatListProps) {
+export function FolderChatList({ className, onConversationSelected }: FolderChatListProps) {
   const { t } = useTranslation(["common"])
   const { isConnected } = useConnectionState()
   const checkConnection = useConnectionStore((state) => state.checkOnce)
@@ -164,6 +165,7 @@ export function FolderChatList({ className }: FolderChatListProps) {
         missingFolderChatById.get(conversationId)
       if (cachedChat) {
         selectServerChat(cachedChat)
+        onConversationSelected?.()
         return
       }
 
@@ -171,6 +173,7 @@ export function FolderChatList({ className }: FolderChatListProps) {
         await tldwClient.initialize()
         const chat = await tldwClient.getChat(conversationId)
         selectServerChat(chat)
+        onConversationSelected?.()
       } catch (error) {
         console.error(
           "Failed to load server chat for folder conversation:",
@@ -184,7 +187,7 @@ export function FolderChatList({ className }: FolderChatListProps) {
         )
       }
     },
-    [missingFolderChatById, selectServerChat, serverChatById, t]
+    [missingFolderChatById, onConversationSelected, selectServerChat, serverChatById, t]
   )
 
   const handleCreateFolder = async () => {

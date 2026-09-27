@@ -133,7 +133,7 @@ readinessProbe:
 
 ## 5. Security Headers
 
-Configured in `next.config.js` via the `headers()` function. Applied to all routes (`/:path*`).
+Configured in `next.config.mjs` via the `headers()` function. Applied to all routes (`/:path*`).
 
 | Header | Value | Notes |
 |--------|-------|-------|
@@ -151,7 +151,7 @@ The `poweredByHeader` option is set to `false` to suppress the `X-Powered-By: Ne
 
 ### Sentry
 
-If `NEXT_PUBLIC_SENTRY_DSN` is set, `@sentry/nextjs` is activated via `next.config.js`. Error boundaries and unhandled exceptions are reported automatically. Sentry is configured with `silent: true` and `disableLogger: true` to avoid noisy build output.
+If `NEXT_PUBLIC_SENTRY_DSN` is set, `@sentry/nextjs` is activated via `next.config.mjs`. Error boundaries and unhandled exceptions are reported automatically. Sentry is configured with `silent: true` and `disableLogger: true` to avoid noisy build output.
 
 ### Structured Logging
 

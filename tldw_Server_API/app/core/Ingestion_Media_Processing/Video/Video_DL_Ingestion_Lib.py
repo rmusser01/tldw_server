@@ -915,6 +915,7 @@ def process_videos(
     perform_diarization:bool = False,
     user_id: Optional[int] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
+    final_summary_prompt: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Processes multiple videos or local file paths, transcribes, summarizes,
@@ -935,6 +936,7 @@ def process_videos(
     :param perform_analysis: If True, perform analysis on the transcript.
     :param custom_prompt: The user’s custom text prompt for summarization.
     :param system_prompt: The system prompt for the LLM.
+    :param final_summary_prompt: Resolved recursive synthesis instructions; None preserves legacy defaults.
     :param perform_chunking: If True, break transcripts into chunks before summarizing.
     :param chunk_method: "words", "sentences", etc.
     :param max_chunk_size: Maximum chunk size for chunking.
@@ -1099,6 +1101,7 @@ def process_videos(
                 perform_analysis=perform_analysis,
                 custom_prompt=custom_prompt,
                 system_prompt=system_prompt,
+                final_summary_prompt=final_summary_prompt,
                 perform_chunking=perform_chunking,
                 chunk_method=chunk_method,
                 max_chunk_size=max_chunk_size,
@@ -1308,6 +1311,7 @@ def process_single_video(
     keep_original: bool = False,
     user_id: Optional[int] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
+    final_summary_prompt: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Processes a single video/file: Extracts metadata, downloads if URL,
@@ -1316,6 +1320,7 @@ def process_single_video(
     'input_ref' should hold the original URL/path passed in video_input.
     'processing_source' should hold the path of the file actually processed.
     cancel_check: Optional callable that returns True when processing should be cancelled.
+    final_summary_prompt: Recursive synthesis instructions; None preserves legacy custom/default selection.
     Hotwords are forwarded to STT providers that support them (for example
     VibeVoice-ASR) and ignored elsewhere.
     """
@@ -1628,7 +1633,10 @@ def process_single_video(
                                  logger.info("Performing recursive summarization on chunk summaries.")
                                  combined_chunk_summaries = "\n\n---\n\n".join(chunk_summaries) # Use separator
                                  try:
-                                     analysis_text = analyze(api_name, combined_chunk_summaries, custom_prompt or "Summarize the key points from the preceding text sections.", None, system_message=system_prompt)  # Pass None for api_key
+                                     synthesis_prompt = final_summary_prompt if final_summary_prompt is not None else (
+                                         custom_prompt or "Summarize the key points from the preceding text sections."
+                                     )
+                                     analysis_text = analyze(api_name, combined_chunk_summaries, synthesis_prompt, None, system_message=system_prompt)  # Pass None for api_key
                                  except _VIDEO_NONCRITICAL_EXCEPTIONS as rec_summ_err:
                                      warn_msg = f"Recursive summarization failed: {rec_summ_err}"
                                      logging.warning(warn_msg)

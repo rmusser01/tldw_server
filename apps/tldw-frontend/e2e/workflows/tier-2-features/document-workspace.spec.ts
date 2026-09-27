@@ -230,6 +230,9 @@ test.describe("Document Workspace", () => {
       authedPage,
       diagnostics,
     }) => {
+      await authedPage.addInitScript(() => {
+        localStorage.setItem("dw-tips-tour-completed", "true")
+      })
       workspace = new DocumentWorkspacePage(authedPage)
       await workspace.goto()
       await workspace.assertPageReady()
@@ -241,12 +244,17 @@ test.describe("Document Workspace", () => {
 
       await workspace.shortcutsButton.click()
 
-      // Expect a modal or dialog to appear with shortcut information
-      const modal = authedPage.locator(".ant-modal")
-      await expect(modal.first()).toBeVisible({ timeout: 5_000 })
+      const dialog = authedPage.getByRole("dialog", {
+        name: /^Keyboard Shortcuts$/i,
+      })
+      await expect(dialog).toBeVisible({ timeout: 5_000 })
+      await expect(
+        dialog.getByRole("heading", { name: /^Keyboard Shortcuts$/i })
+      ).toBeVisible()
 
-      // Close
-      await authedPage.keyboard.press("Escape")
+      await dialog.getByRole("button", { name: /^Close$/i }).click()
+      await expect(dialog).not.toBeVisible()
+      await expect(workspace.openDocumentButton).toBeVisible()
 
       await assertNoCriticalErrors(diagnostics)
     })

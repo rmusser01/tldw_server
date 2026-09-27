@@ -95,7 +95,8 @@ const setExtensionStorage = async (
 
 const launchExtension = async (
   userDataDir: string,
-  extensionPath: string
+  extensionPath: string,
+  seedStartupState = true
 ): Promise<{ context: BrowserContext; page: Page; extensionId: string }> => {
   mkdirSync(path.join(userDataDir, "home"), { recursive: true })
   const context = await chromium.launchPersistentContext(userDataDir, {
@@ -117,11 +118,13 @@ const launchExtension = async (
   })
   try {
     const extensionId = await resolveExtensionId(context)
-    await setExtensionStorage(context, "local", {
-      __e2eSeeded: true,
-      __tldw_first_run_complete: true,
-      tldw_skip_landing_hub: true
-    })
+    if (seedStartupState) {
+      await setExtensionStorage(context, "local", {
+        __e2eSeeded: true,
+        __tldw_first_run_complete: true,
+        tldw_skip_landing_hub: true
+      })
+    }
     const page = context.pages()[0] || (await context.newPage())
     return { context, page, extensionId }
   } catch (startupError) {
@@ -186,18 +189,21 @@ const saveManualConnection = async (
     await rememberControl.click()
   }
   await page.getByRole("button", { name: /^save$/i }).click()
+  const storageArea = remember ? "local" : "session"
+  const storageKey = remember ? "tldwConfig" : "tldwManualSessionApiKey"
   await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          new Promise<unknown>((resolve) => {
-            chrome.storage.local.get("tldwConfig", (items) =>
-              resolve(items.tldwConfig)
-            )
-          })
+    .poll(async () =>
+      JSON.stringify(
+        await page.evaluate(
+          ({ area, key }) =>
+            new Promise<unknown>((resolve) => {
+              chrome.storage[area].get(key, (items) => resolve(items[key]))
+            }),
+          { area: storageArea, key: storageKey }
+        )
       )
     )
-    .not.toBeUndefined()
+    .toContain(MANUAL_API_KEY)
 }
 
 const extensionStorageValue = async (
@@ -346,7 +352,8 @@ test.describe.serial("manual extension API-key persistence", () => {
     {
       const { context, page, extensionId } = await launchExtension(
         profile,
-        extensionPath
+        extensionPath,
+        false
       )
       try {
         expect(extensionId).toBe(originalExtensionId)
@@ -482,7 +489,8 @@ test.describe.serial("manual extension API-key persistence", () => {
     {
       const { context, page, extensionId } = await launchExtension(
         profile,
-        extensionPath
+        extensionPath,
+        false
       )
       try {
         expect(extensionId).toBe(originalExtensionId)

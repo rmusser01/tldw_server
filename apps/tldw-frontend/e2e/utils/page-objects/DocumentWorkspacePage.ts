@@ -1,7 +1,7 @@
 /**
  * Page Object for Document Workspace route
  */
-import { type Page, type Locator, expect } from "@playwright/test"
+import { type Page, type Locator } from "@playwright/test"
 import { BasePage, type InteractiveElement } from "./BasePage"
 import { waitForAppShell, waitForConnection } from "../helpers"
 
@@ -52,7 +52,7 @@ export class DocumentWorkspacePage extends BasePage {
 
   /** Open document (plus) button in the header */
   get openDocumentButton(): Locator {
-    return this.page.getByRole("button", { name: /open document/i })
+    return this.page.getByTestId("document-open-picker-button")
   }
 
   /** Keyboard shortcuts button in the header */

@@ -2752,5 +2752,8 @@
   },
   "header_connectionCard_connectedCaption": {
     "message": "Chat og værktøjer er nu tilgængelige i Indstillinger og sidepanelet."
+  },
+  "notesSearch_offlineSaveUnavailable": {
+    "message": "Offline-gemning er ikke tilgængelig, før din konto og lokale lagring er bekræftet. Dine ændringer er fortsat ikke gemt."
   }
 }

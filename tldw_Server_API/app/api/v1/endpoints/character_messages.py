@@ -4,18 +4,27 @@ API endpoints for message management within character chat sessions.
 Provides CRUD operations for messages in conversations.
 """
 
+import io
+import uuid
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Literal, Optional
-import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, Response, status
 from loguru import logger
+from PIL import Image
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
+
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    get_request_user,
+    require_expected_user,
+)
 
 # Database and authentication dependencies
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
@@ -27,11 +36,10 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     MessageResponse,
     MessageUpdate,
 )
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 
 # Character chat helpers
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
-    edit_message_content,
     find_messages_in_conversation,
     map_sender_to_role,
     post_message_to_conversation,
@@ -39,19 +47,27 @@ from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
     replace_placeholders,
     retrieve_message_details,
 )
+from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+    materialize_roleplay_behavior_settings,
+)
 
 # Rate limiting
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import get_character_rate_limiter
+from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+    validate_chat_settings_storage,
+)
 from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
     build_character_system_prompt,
 )
 from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.chacha.message_store import MAX_CHAT_ATTACHMENT_READ_BYTES
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.server_origin import (
     SyncServerOriginIdempotencyConflictError,
@@ -142,6 +158,35 @@ def _convert_db_message_to_response(msg_data: dict[str, Any]) -> MessageResponse
         has_image=bool(msg_data.get('image_data')),
         version=msg_data.get('version', 1)
     )
+
+
+def _complete_message_images(message: dict[str, Any]) -> list[str]:
+    """Expand every stored attachment, or fail the entire opt-in read."""
+    import base64
+
+    images = message.get("images") or []
+    if not images and (message.get("image_data") is not None or message.get("image_mime_type") is not None):
+        images = [message]
+    result = []
+    for image in images:
+        data = image.get("image_data")
+        if isinstance(data, memoryview):
+            data = data.tobytes()
+        mime = image.get("image_mime_type")
+        detected_mime = _detect_image_mime_type(data) if isinstance(data, bytes) and data else None
+        if not detected_mime or not isinstance(mime, str) or detected_mime != mime:
+            raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete or invalid. Reload after repairing the source message.")
+        if len(data) > int(settings.get("MAX_MESSAGE_IMAGE_BYTES", 5 * 1024 * 1024)):
+            raise HTTPException(status_code=413, detail="A saved chat attachment exceeds the image read limit.")
+        try:
+            with Image.open(io.BytesIO(data)) as decoded:
+                decoded.verify()
+            with Image.open(io.BytesIO(data)) as decoded:
+                decoded.load()
+        except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
+            raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete or invalid.") from exc
+        result.append(f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}")
+    return result
 
 
 def _message_sync_http_error(exc: Exception) -> HTTPException:
@@ -264,11 +309,13 @@ def _verify_message_access(
     message_id: str,
     user_id: int,
     scope: ConversationScopeParams | None = None,
+    *,
+    include_deleted: bool = False,
 ) -> dict[str, Any]:
     """
     Verify user has access to a message using DB abstractions.
     """
-    message = db.get_message_by_id(message_id)
+    message = db.get_message_by_id(message_id, include_deleted=include_deleted)
     if not message:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -306,9 +353,11 @@ def _resolve_message_scope(
 
 @router.post("/chats/{chat_id}/messages", response_model=MessageResponse,
              status_code=status.HTTP_201_CREATED,
-             summary="Send a message in a chat", tags=["Messages"])
+             summary="Send a message in a chat", tags=["Messages"],
+             dependencies=[Depends(require_expected_user)])
 async def send_message(
     message_data: MessageCreate,
+    request: Request,
     chat_id: str = Path(..., description="Chat session ID"),
     scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
     workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
@@ -437,7 +486,12 @@ async def send_message(
                     detail="Failed to decode image data. Please provide valid base64-encoded image."
                 ) from e
 
+        history_admission = None
+        versioned = message_data.tldw_history_selection_v1 is not None or message_data.tldw_history_admission_v1 is not None
         sync_service = _active_message_sync_service(current_user, scope)
+        if versioned and sync_service is not None:
+            raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "sync_owner_unsupported"})
+
         if sync_service is not None and image_data is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -446,7 +500,29 @@ async def send_message(
                     "message": "Sync v2 M1 does not support binary chat message attachments.",
                 },
             )
-        if sync_service is not None:
+        if versioned:
+            from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+            from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
+            data = {"id": message_data.id, "sender": sender_override, "content": message_data.content,
+                    "image_data": image_data, "image_mime_type": image_mime_type}
+            if "parent_message_id" in message_data.model_fields_set:
+                data["parent_message_id"] = message_data.parent_message_id
+            try:
+                owner = native_history_owner_key(request, current_user.id)
+                if message_data.tldw_history_selection_v1 is not None:
+                    history_admission = await run_in_threadpool(
+                        db.append_selected_history_input, chat_id,
+                        message_data.tldw_history_selection_v1.model_dump(mode="json"), data,
+                        owner_client_id=str(current_user.id), owner_key=owner)
+                    created_id = history_admission["input_message_id"]
+                else:
+                    created_id = await run_in_threadpool(
+                        db.settle_history_admission, chat_id,
+                        message_data.tldw_history_admission_v1.model_dump(mode="json"), data,
+                        owner_client_id=str(current_user.id), owner_key=owner)
+            except HistorySelectionError as exc:
+                raise HTTPException(409, detail={"status": "stale_selection", "code": exc.code}) from exc
+        elif sync_service is not None:
             created_id = server_origin_object_id("chat.message", idempotency_key) or str(uuid.uuid4())
             stable_key = server_origin_stable_key(
                 source="server_api",
@@ -488,6 +564,7 @@ async def send_message(
                 image_data=image_data,
                 image_mime_type=image_mime_type,
                 sender_override=sender_override,
+                owner_user_id=current_user.id,
             )
 
             if not created_id:
@@ -501,7 +578,9 @@ async def send_message(
 
         logger.info(f"Created message {created_id} in chat {chat_id} by user {current_user.id}")
 
-        return _convert_db_message_to_response(created_msg)
+        response = _convert_db_message_to_response(created_msg)
+        response.tldw_history_admission_v1 = history_admission
+        return response
 
     except HTTPException:
         raise
@@ -535,8 +614,16 @@ async def get_chat_messages(
     include_deleted: bool = Query(False, description="Include deleted messages"),
     include_character_context: bool = Query(False, description="Include character context for chat completions"),
     format_for_completions: bool = Query(False, description="Format messages for use with chat/completions endpoint"),
+    include_images: bool = Query(False, description="Include complete ordered image data URLs in standard responses"),
     include_tool_calls: bool = Query(False, description="Include tool_calls metadata per message when available (standard format only)"),
     include_metadata: bool = Query(False, description="Include stored message metadata.extra JSON where available"),
+    render_placeholders: bool = Query(
+        True,
+        description=(
+            "Expand character/user placeholders in standard message content. "
+            "Set false to read exact stored text; completion-formatted output remains rendered."
+        ),
+    ),
     include_message_ids: bool = Query(
         False,
         description="Include message_id fields when formatting for completions (no effect on standard format)",
@@ -557,6 +644,7 @@ async def get_chat_messages(
         include_character_context: Include character personality as system message
         format_for_completions: Return in format ready for /api/v1/chat/completions
         include_message_ids: Include message_id fields only in completions-formatted output
+        render_placeholders: Expand placeholders in standard message bodies (default true)
         db: Database instance
         current_user: Authenticated user
 
@@ -572,7 +660,39 @@ async def get_chat_messages(
         conversation = _verify_conversation_access(db, chat_id, current_user.id, scope)
 
         # Get messages (honor include_deleted and DB pagination)
-        messages = db.get_messages_for_conversation(chat_id, limit=limit, offset=offset, include_deleted=include_deleted)
+        expand_images = include_images is True and not format_for_completions
+        try:
+            messages = db.get_messages_for_conversation(
+                chat_id, limit=limit, offset=offset, include_deleted=include_deleted,
+                **({"strict_images": True, "image_byte_limit": MAX_CHAT_ATTACHMENT_READ_BYTES} if expand_images else {}),
+            )
+        except InputError as exc:
+            if not expand_images:
+                raise
+            raise HTTPException(status_code=413, detail="Chat attachments exceed the image read limit.") from exc
+        except CharactersRAGDBError as exc:
+            if not expand_images:
+                raise
+            raise HTTPException(status_code=503, detail="Saved chat attachments could not be read completely. Retry loading the conversation.") from exc
+        attachment_urls = {}
+        if expand_images:
+            decoded_total = 0
+            for message in messages:
+                images = message.get("images") or ([message] if message.get("image_data") is not None or message.get("image_mime_type") is not None else [])
+                for image in images:
+                    data = image.get("image_data")
+                    if not isinstance(data, (bytes, memoryview)) or not data:
+                        raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete or invalid.")
+                    decoded_total += len(data)
+                    if decoded_total > MAX_CHAT_ATTACHMENT_READ_BYTES:
+                        raise HTTPException(status_code=413, detail="Chat attachments exceed the image read limit.")
+            encoded_total = 0
+            for message in messages:
+                urls = _complete_message_images(message)
+                encoded_total += sum(len(url) for url in urls)
+                if encoded_total > (MAX_CHAT_ATTACHMENT_READ_BYTES * 4 // 3) + 1024 * len(messages):
+                    raise HTTPException(status_code=413, detail="Chat attachments exceed the image read limit.")
+                attachment_urls[message["id"]] = urls
 
         if not messages:
             messages = []
@@ -765,8 +885,11 @@ async def get_chat_messages(
             built_messages = []
             for m in paginated:
                 msg_copy = dict(m)
-                msg_copy["content"] = _replace_text(msg_copy.get("content"))
+                if render_placeholders:
+                    msg_copy["content"] = _replace_text(msg_copy.get("content"))
                 resp = _convert_db_message_to_response(msg_copy)
+                if expand_images:
+                    resp = resp.model_copy(update={"images": attachment_urls[resp.id]})
                 # Fetch metadata once if either flag is set (avoid duplicate queries)
                 if include_tool_calls or include_metadata:
                     try:
@@ -834,8 +957,11 @@ async def get_chat_messages(
 
         for m in paginated:
             msg_copy = dict(m)
-            msg_copy["content"] = _replace_text_std(msg_copy.get("content"))
+            if render_placeholders:
+                msg_copy["content"] = _replace_text_std(msg_copy.get("content"))
             resp = _convert_db_message_to_response(msg_copy)
+            if expand_images:
+                resp = resp.model_copy(update={"images": attachment_urls[resp.id]})
             # Fetch metadata once if either flag is set (avoid duplicate queries)
             if include_tool_calls or include_metadata:
                 try:
@@ -962,14 +1088,13 @@ async def edit_message(
         await rate_limiter.check_rate_limit(current_user.id, "message_edit")
 
         # Verify message access
-        message = _verify_message_access(db, message_id, current_user.id, scope)
-
-        # Check version
-        if message.get('version', 1) != expected_version:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Version mismatch. Expected {expected_version}, found {message.get('version', 1)}"
-            )
+        message = _verify_message_access(
+            db,
+            message_id,
+            current_user.id,
+            scope,
+            include_deleted=True,
+        )
         if _active_message_sync_service(current_user, scope) is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -979,37 +1104,105 @@ async def edit_message(
                 },
             )
 
-        content_updated = False
-        if update_data.content is not None and str(update_data.content).strip():
-            success = edit_message_content(
-                db,
+        content_updated = bool(
+            update_data.content is not None and str(update_data.content).strip()
+        )
+        metadata_updated = update_data.pinned is not None
+        conversation = db.get_conversation_by_id(message["conversation_id"])
+        if not isinstance(conversation, Mapping):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Chat session {message['conversation_id']} not found",
+            )
+        with db.transaction() as conn:
+            db.lock_message_for_edit(message_id, conn=conn)
+            if metadata_updated:
+                db.lock_message_metadata_for_edit(message_id, conn=conn)
+            resume_state = db.get_roleplay_resume_state(
+                message["conversation_id"],
+                conn=conn,
+                lock_for_update=True,
+                owner_client_id=str(current_user.id),
+            )
+            conversation = resume_state.get("conversation")
+            if not isinstance(conversation, Mapping):
+                raise InputError("Conversation resume state is incomplete")
+            update_payload = {
+                "content": (
+                    update_data.content
+                    if content_updated
+                    else str(message.get("content") or "")
+                )
+            }
+            if not db.update_message(
                 message_id,
-                update_data.content,
+                update_payload,
                 expected_version,
-            )
-            if not success:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to update message content",
-                )
-            content_updated = True
+                conn=conn,
+            ):
+                raise InputError("Failed to update message")
 
-        metadata_updated = False
-        if update_data.pinned is not None:
-            metadata_updated = db.set_message_metadata_extra(
-                message_id,
-                {"pinned": bool(update_data.pinned)},
-                merge=True,
-            )
-            if not metadata_updated:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to update message metadata",
+            if metadata_updated:
+                metadata_updated = db.set_message_metadata_extra(
+                    message_id,
+                    {"pinned": bool(update_data.pinned)},
+                    merge=True,
+                    conn=conn,
+                    _advance_history=False,
                 )
+                if not metadata_updated:
+                    raise InputError("Failed to update message metadata")
+                chat_settings = dict(resume_state.get("settings") or {})
+                pinned_ids = [
+                    str(item)
+                    for item in chat_settings.get("pinnedMessageIds") or []
+                    if item is not None
+                ]
+                if update_data.pinned and message_id not in pinned_ids:
+                    pinned_ids.append(message_id)
+                elif not update_data.pinned:
+                    pinned_ids = [item for item in pinned_ids if item != message_id]
+                chat_settings["pinnedMessageIds"] = pinned_ids
+                snapshot = resume_state.get("behavior_snapshot")
+                if isinstance(snapshot, Mapping) and snapshot.get("status") == "valid":
+                    materialized = materialize_roleplay_behavior_settings(
+                        conn,
+                        conversation=conversation,
+                        resume_state=resume_state,
+                        merged_settings=chat_settings,
+                        owner_user_id=str(current_user.id),
+                        changed_keys={"pinnedMessageIds"},
+                    )
+                    if materialized is not None:
+                        chat_settings["roleplayBehaviorV1"] = materialized
+                        chat_settings["roleplayResumeV1"] = {
+                            "resumeEligible": True,
+                            "resumeIneligibleReason": None,
+                            "effectiveCompletion": materialized["values"][
+                                "effective_completion"
+                            ],
+                        }
+                chat_settings = validate_chat_settings_storage(
+                    chat_settings,
+                    reject_credentials=(
+                        isinstance(resume_state.get("behavior_snapshot"), Mapping)
+                        and resume_state["behavior_snapshot"].get("status") == "valid"
+                    ),
+                    allow_internal=True,
+                    behavior_snapshot=resume_state.get("behavior_snapshot"),
+                    conversation=conversation,
+                )
+                if not db.upsert_conversation_settings(
+                    message["conversation_id"],
+                    chat_settings,
+                    conn=conn,
+                    expected_settings_version=resume_state["settings_version"] or 0,
+                ):
+                    raise InputError("Failed to update resumable chat settings")
 
         # Update conversation metadata (last_modified/version) via DB abstraction
         conv = db.get_conversation_by_id(message["conversation_id"])
-        if conv and (content_updated or metadata_updated):
+        if conv and content_updated:
             try:
                 db.update_conversation(
                     message["conversation_id"],
@@ -1057,7 +1250,9 @@ async def edit_message(
     except ConflictError as e:
         logger.warning(f"Conflict editing message {message_id}: {e}")
         raise map_db_error_to_http(e) from e
-    except CharactersRAGDBError as exc:
+    except InputError as exc:
+        raise map_db_error_to_http(exc) from exc
+    except (CharactersRAGDBError, NotFoundError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to edit message") from exc
     except _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS as e:
         logger.error(f"Error editing message {message_id}: {e}", exc_info=True)

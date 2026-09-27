@@ -16,6 +16,7 @@ import (
 const (
 	maxGuestOutputBytes = 256 * 1024 * 1024
 	outputLimitExitCode = 137
+	outputDrainGrace    = time.Second
 )
 
 type outputLimitReason string
@@ -98,7 +99,7 @@ func (s *Server) Exec(req ExecRequest) (*ExecResponse, *ErrorResponse) {
 		defer outputCancel()
 
 		cmd := buildExecCommand(execCtx, req, cwd)
-		return runExecWithOutputLimit(timeoutCtx, outputCancel, cmd, req, *req.MaxOutputBytes)
+		return runExecWithOutputLimit(timeoutCtx, execCtx, outputCancel, cmd, req, *req.MaxOutputBytes)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -154,6 +155,7 @@ func buildExecCommand(ctx context.Context, req ExecRequest, cwd string) *exec.Cm
 
 func runExecWithOutputLimit(
 	timeoutCtx context.Context,
+	execCtx context.Context,
 	outputCancel context.CancelFunc,
 	cmd *exec.Cmd,
 	req ExecRequest,
@@ -188,6 +190,20 @@ func runExecWithOutputLimit(
 		return nil, execFailedResponse(req.RequestID, err)
 	}
 
+	drained := make(chan struct{})
+	stopDrainAbort := context.AfterFunc(execCtx, func() {
+		// Escaped descendants can retain pipes after process-group cancellation.
+		timer := time.NewTimer(outputDrainGrace)
+		defer timer.Stop()
+		select {
+		case <-drained:
+		case <-timer.C:
+			_ = stdoutPipe.Close()
+			_ = stderrPipe.Close()
+		}
+	})
+	defer stopDrainAbort()
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -199,8 +215,10 @@ func runExecWithOutputLimit(
 		_, _ = io.Copy(boundedStreamWriter{output: limiter, stream: outputStreamStderr}, stderrPipe)
 	}()
 
-	waitErr := cmd.Wait()
+	// Wait closes the pipes, so drain both streams before reaping the command.
 	wg.Wait()
+	close(drained)
+	waitErr := cmd.Wait()
 
 	limiter.recordTimeoutIfDeadlineExceeded()
 	stdout, stderr, details, reason, killConfirmed := limiter.response()

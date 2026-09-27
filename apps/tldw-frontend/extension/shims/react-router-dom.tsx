@@ -44,6 +44,19 @@ type ShimBlocker = {
   reset: () => void
 }
 
+type PromptOptions = {
+  when: boolean
+  message: string
+}
+
+type CancelledNavigationError = Error & { cancelled: true }
+
+const createCancelledNavigationError = (): CancelledNavigationError =>
+  Object.assign(new Error("Navigation cancelled by route guard"), { cancelled: true as const })
+
+const isCancelledNavigationError = (error: unknown): error is CancelledNavigationError =>
+  error instanceof Error && (error as Partial<CancelledNavigationError>).cancelled === true
+
 const runNavigationTransition = (
   update: () => void,
   options?: { flushSync?: boolean }
@@ -85,9 +98,34 @@ const noop = () => {}
 export const UNSAFE_DataRouterContext = React.createContext<unknown | null>(null)
 
 export const Link = React.forwardRef<HTMLAnchorElement, LinkProps>(
-  function Link({ to, href, ...rest }, ref) {
+  function Link({ to, href, onClick, target, ...rest }, ref) {
+    const navigate = useNavigate()
     const resolvedHref = href ?? to ?? "#"
-    return <NextLink ref={ref} href={resolvedHref} {...rest} />
+    return (
+      <NextLink
+        ref={ref}
+        href={resolvedHref}
+        target={target}
+        onClick={(event) => {
+          onClick?.(event)
+          if (
+            event.defaultPrevented ||
+            event.button !== 0 ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.shiftKey ||
+            event.altKey ||
+            (target && target !== "_self") ||
+            typeof resolvedHref !== "string"
+          ) {
+            return
+          }
+          event.preventDefault()
+          navigate(resolvedHref)
+        }}
+        {...rest}
+      />
+    )
   }
 )
 Link.displayName = "Link"
@@ -105,8 +143,9 @@ export const NavLink = React.forwardRef<HTMLAnchorElement, NavLinkProps>(
       typeof className === "function" ? className({ isActive }) : className
 
     return (
-      <NextLink
+      <Link
         ref={ref}
+        to={typeof resolvedHref === "string" ? resolvedHref : undefined}
         href={resolvedHref}
         className={resolvedClassName}
         {...rest}
@@ -148,6 +187,7 @@ export const useNavigate = () => {
             ? router.replace(href)
             : router.push(href)
           void navigation.catch((err) => {
+            if (isCancelledNavigationError(err)) return
             console.error("[useNavigate shim] Navigation failed:", err)
             doFallback()
           })
@@ -155,11 +195,51 @@ export const useNavigate = () => {
         { flushSync: options?.flushSync }
       )
     } catch (err) {
+      if (isCancelledNavigationError(err)) return
       console.error("[useNavigate shim] Navigation failed:", err)
       doFallback()
     }
   }
 }
+
+const useUnstablePrompt = ({ when, message }: PromptOptions): void => {
+  const router = useRouter()
+  const whenRef = React.useRef(when)
+  const messageRef = React.useRef(message)
+  const popRouteBypassRef = React.useRef<string | null>(null)
+  whenRef.current = when
+  messageRef.current = message
+
+  React.useEffect(() => {
+    const handleRouteStart = (url: string, options?: unknown) => {
+      const bypassRoute = popRouteBypassRef.current
+      popRouteBypassRef.current = null
+      if (bypassRoute === url) return
+      if (!whenRef.current || window.confirm(messageRef.current)) return
+      const error = createCancelledNavigationError()
+      router.events.emit("routeChangeError", error, url, options)
+      throw error
+    }
+    const handleBeforePopState = (state: { url: string; as: string }) => {
+      if (!whenRef.current) return true
+      if (!window.confirm(messageRef.current)) return false
+      popRouteBypassRef.current = state.as || state.url
+      return true
+    }
+
+    router.events.on("routeChangeStart", handleRouteStart)
+    router.events.on("hashChangeStart", handleRouteStart)
+    router.beforePopState(handleBeforePopState)
+    return () => {
+      popRouteBypassRef.current = null
+      router.events.off("routeChangeStart", handleRouteStart)
+      router.events.off("hashChangeStart", handleRouteStart)
+      router.beforePopState(() => true)
+    }
+  }, [router])
+}
+
+export { useUnstablePrompt as unstable_usePrompt }
 
 export const useLocation = () => {
   const router = useRouter()
@@ -224,6 +304,7 @@ export const useSearchParams = (): [
             ? router.replace(nextPath)
             : router.push(nextPath)
           void navigation.catch((error) => {
+            if (isCancelledNavigationError(error)) return
             console.error("[useSearchParams shim] Navigation failed:", error)
           })
         },
@@ -279,6 +360,7 @@ export const Navigate: React.FC<NavigateProps> = ({ to, replace }) => {
     runNavigationTransition(() => {
       const navigation = replace ? router.replace(to) : router.push(to)
       void navigation.catch((error) => {
+        if (isCancelledNavigationError(error)) return
         console.error("[Navigate shim] Navigation failed:", error)
       })
     })

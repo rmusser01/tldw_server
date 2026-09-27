@@ -11,6 +11,9 @@ vi.mock("@/services/tldw", () => ({
   tldwClient: {
     syncAnnotations: vi.fn(),
   },
+  tldwModels: {
+    subscribeInvalidation: vi.fn(),
+  },
 }))
 
 const buildWrapper = () => {

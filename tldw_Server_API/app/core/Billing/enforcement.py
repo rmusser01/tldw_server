@@ -353,100 +353,15 @@ class BillingEnforcer:
         return summary
 
     async def _get_api_calls_today(self, org_id: int) -> int:
-        """Get API call count for today from usage_daily table."""
+        """Read today's canonical user-scoped API rollup for the organization."""
         try:
             from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+            from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 
             pool = await get_db_pool()
-            today = datetime.now(timezone.utc).date().isoformat()
-            is_postgres = self._is_postgres_pool(pool)
-
-            async with pool.acquire() as conn:
-                if is_postgres:
-                    query_variants: tuple[tuple[str, tuple[Any, ...]], ...] = (
-                        (
-                            """
-                            SELECT COALESCE(SUM(requests), 0)
-                            FROM usage_daily
-                            WHERE org_id = $1 AND day = $2
-                            """,
-                            (org_id, today),
-                        ),
-                        (
-                            """
-                            SELECT COALESCE(SUM(request_count), 0)
-                            FROM usage_daily
-                            WHERE org_id = $1 AND day = $2
-                            """,
-                            (org_id, today),
-                        ),
-                    )
-                    result = 0
-                    query_succeeded = False
-                    last_query_error: BaseException | None = None
-                    for query, params in query_variants:
-                        try:
-                            fetched = await conn.fetchval(query, *params)
-                            result = int(fetched or 0)
-                            query_succeeded = True
-                            break
-                        except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
-                            last_query_error = exc
-                            logger.debug(
-                                "usage_daily PG query variant failed ({})",
-                                _safe_exception_label(exc),
-                            )
-                            continue
-                    if (
-                        not query_succeeded
-                        and last_query_error is not None
-                        and self._fail_closed_on_data_error()
-                    ):
-                        raise last_query_error
-                else:
-                    query_variants = (
-                        (
-                            """
-                            SELECT COALESCE(SUM(requests), 0)
-                            FROM usage_daily
-                            WHERE org_id = ? AND day = ?
-                            """,
-                            (org_id, today),
-                        ),
-                        (
-                            """
-                            SELECT COALESCE(SUM(request_count), 0)
-                            FROM usage_daily
-                            WHERE org_id = ? AND day = ?
-                            """,
-                            (org_id, today),
-                        ),
-                    )
-                    result = 0
-                    query_succeeded = False
-                    last_query_error = None
-                    for query, params in query_variants:
-                        try:
-                            cur = await conn.execute(query, params)
-                            row = await cur.fetchone()
-                            result = int((row[0] if row else 0) or 0)
-                            query_succeeded = True
-                            break
-                        except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
-                            last_query_error = exc
-                            logger.debug(
-                                "usage_daily SQLite query variant failed ({})",
-                                _safe_exception_label(exc),
-                            )
-                            continue
-                    if (
-                        not query_succeeded
-                        and last_query_error is not None
-                        and self._fail_closed_on_data_error()
-                    ):
-                        raise last_query_error
-
-                return int(result or 0)
+            return await AuthnzUsageRepo(pool).sum_org_api_requests(
+                org_id=org_id, day=datetime.now(timezone.utc).date(),
+            )
         except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
             self._log_source_failure("debug", "Failed to get API calls", org_id, exc)
             if self._fail_closed_on_data_error():

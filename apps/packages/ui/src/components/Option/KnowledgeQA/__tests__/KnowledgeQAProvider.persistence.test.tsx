@@ -1,3 +1,4 @@
+import { TEST_HISTORY_STORAGE_KEY } from "./knowledgeQaAuthorityFixture"
 import React from "react"
 import { act, render, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -135,7 +136,8 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
     expect(searchCharactersMock).toHaveBeenCalled()
     expect(listCharactersMock).toHaveBeenCalled()
     expect(createChatMock).toHaveBeenCalledWith(
-      expect.not.objectContaining({ character_id: expect.anything() })
+      expect.not.objectContaining({ character_id: expect.anything() }),
+      expect.objectContaining({ requestScope: expect.objectContaining({ userId: "test-owner" }) })
     )
     expect(latestContext!.currentThreadId).toBe("thread-1")
     expect(latestContext!.isLocalOnlyThread).toBe(false)
@@ -564,7 +566,7 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
     expect(latestContext!.currentThreadId).toBe("remote-thread-2")
     expect(latestContext!.query).toBe("Selected thread question")
     expect(latestContext!.answer).toBe("Selected thread answer [1]")
-    expect(deleteChatMock).toHaveBeenCalledWith("fresh-topic-stale")
+    expect(deleteChatMock).toHaveBeenCalledWith("fresh-topic-stale", expect.objectContaining({ requestScope: expect.objectContaining({ userId: "test-owner" }) }))
   })
 
   it("clears the active session after deleting the currently open remote thread", async () => {
@@ -619,7 +621,7 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
 
     await waitFor(() => expect(latestContext).not.toBeNull())
     localStorage.setItem(
-      "knowledge_qa_history",
+      TEST_HISTORY_STORAGE_KEY,
       JSON.stringify([
         {
           id: "history-remote-thread",
@@ -665,7 +667,7 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
     })
 
     await waitFor(() => {
-      expect(deleteChatMock).toHaveBeenCalledWith("remote-thread")
+      expect(deleteChatMock).toHaveBeenCalledWith("remote-thread", expect.objectContaining({ requestScope: expect.objectContaining({ userId: "test-owner" }) }))
       expect(latestContext!.currentThreadId).toBeNull()
       expect(latestContext!.query).toBe("")
       expect(latestContext!.answer).toBeNull()

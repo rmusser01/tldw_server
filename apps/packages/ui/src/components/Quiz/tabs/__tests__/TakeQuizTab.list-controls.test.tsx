@@ -247,6 +247,63 @@ describe("TakeQuizTab list controls and default passing policy", () => {
     )
   })
 
+  it("does not expose ordinary quiz launch actions for OSCE activities", () => {
+    vi.mocked(useQuizzesQuery).mockReturnValue({
+      data: {
+        items: [{
+          id: 9,
+          name: "Clinical communication OSCE",
+          activity_type: "osce",
+          total_questions: 0,
+          total_stations: 1,
+          created_at: "2026-09-11T00:00:00Z"
+        }],
+        count: 1
+      },
+      isLoading: false
+    } as any)
+
+    render(
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
+    )
+
+    const card = screen.getByTestId("take-quiz-card-9")
+    expect(within(card).queryByRole("button", {
+      name: /Start Quiz|Start Practice|Open Review/i
+    })).not.toBeInTheDocument()
+  })
+
+  it("does not auto-start an OSCE through the question attempt flow", async () => {
+    vi.mocked(useQuizzesQuery).mockReturnValue({
+      data: {
+        items: [{ id: 9, name: "Clinical communication OSCE", activity_type: "osce" }],
+        count: 1
+      },
+      isLoading: false
+    } as any)
+    vi.mocked(useQuizQuery).mockReturnValue({
+      data: { id: 9, name: "Clinical communication OSCE", activity_type: "osce" }
+    } as any)
+
+    render(
+      <MemoryRouter>
+        <TakeQuizTab
+          startQuizId={9}
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => expect(useQuizQuery).toHaveBeenCalledWith(9, expect.any(Object)))
+    expect(useStartAttemptMutation().mutateAsync).not.toHaveBeenCalled()
+  })
+
   it("shows explicit default passing score policy when quiz has no passing score", async () => {
     render(
       <MemoryRouter>
@@ -359,6 +416,60 @@ describe("TakeQuizTab list controls and default passing policy", () => {
       expect.objectContaining({
         enabled: true
       })
+    )
+  })
+
+  it("resolves an off-page ordinary start intent while another quiz attempt is active", async () => {
+    vi.mocked(useQuizQuery).mockImplementation((quizId: any, options: any) => ({
+      data: options?.enabled === false
+        ? undefined
+        : quizId === 42
+          ? {
+              id: 42,
+              name: "Off-page retake",
+              total_questions: 2,
+              time_limit_seconds: 600,
+              passing_score: 80
+            }
+          : {
+              id: 7,
+              name: "Biology Basics",
+              total_questions: 1,
+              time_limit_seconds: 900,
+              passing_score: null
+            }
+    } as any))
+    const onStartHandled = vi.fn()
+    const view = render(
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+        />
+      </MemoryRouter>
+    )
+    fireEvent.click(screen.getByRole("button", { name: /Start Quiz/ }))
+    fireEvent.click(screen.getByRole("button", { name: "Begin Quiz" }))
+    expect(await screen.findByTestId("quiz-question-1")).toBeInTheDocument()
+
+    view.rerender(
+      <MemoryRouter>
+        <TakeQuizTab
+          onNavigateToGenerate={() => {}}
+          onNavigateToCreate={() => {}}
+          startQuizId={42}
+          onStartHandled={onStartHandled}
+        />
+      </MemoryRouter>
+    )
+
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText("Off-page retake")).toBeInTheDocument()
+    expect(screen.getByTestId("quiz-question-1")).toBeInTheDocument()
+    expect(onStartHandled).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(useQuizQuery)).toHaveBeenCalledWith(
+      42,
+      expect.objectContaining({ enabled: true })
     )
   })
 })

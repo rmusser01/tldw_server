@@ -1,0 +1,111 @@
+# Test reachability inventory for core/Chat — generated 2026-09-21
+# Method: IMPORT-GREP (not path search, not measured coverage).
+
+## Total test files importing core.Chat
+cmd: grep -rl 'core\.Chat' tldw_Server_API/tests | wc -l
+     288
+
+## Importing files per top-level tests/ directory
+55 Chat
+32 Chatbooks
+28 Chat_NEW
+27 LLM_Calls
+25 LLM_Adapters
+15 RAG_NEW
+9 Workflows
+9 Chat_Macros
+5 prompt_studio
+5 Evaluations
+5 DB_Management
+4 Writing
+4 Streaming
+4 Persona
+4 Embeddings
+4 Audio
+4 Admin
+3 Sharing
+3 integration
+3 Guardian
+3 Chat_Workflows
+3 AuthNZ_Unit
+2 Setup
+2 Resource_Governance
+2 RAG
+2 Metrics
+2 Flashcards
+2 Claims
+2 Chunking
+2 Character_Chat_NEW
+1 VN_Play
+1 UserProfile
+1 unit
+1 Skills
+1 Services
+1 RPG
+1 Prompt_Management_NEW
+1 Prompt_Management
+1 performance
+1 Notifications
+1 Notes
+1 Monitoring
+1 LLM_Local
+1 Jobs
+1 Explainer
+1 Config
+1 AuthNZ_SQLite
+1 _plugins
+
+## Per-module importer counts (union of both import forms)
+   0 chat_characters
+   0 command_authorization
+   0 knowledge_save
+   0 message_utils
+   1 chat_exceptions
+   1 chat_logging
+   1 chat_loop_approval
+   1 chat_loop_engine
+   1 completion_pipeline
+   1 moderation_pipeline
+   1 persistence_service
+   1 response_processor
+   1 run_first_presentation
+   1 streaming_pipeline
+   1 tool_execution_service
+   1 validate_dictionary
+   1 Workflows
+   2 chat_dictionary
+   2 chat_helpers
+   2 chat_history
+   2 chat_loop_store
+   2 chat_route_resolver
+   2 prompt_cost_envelope
+   2 provider_manager
+   3 conversation_enrichment
+   3 prompt_cost_guardrails
+   4 tool_auto_exec
+   6 request_queue
+   7 command_router
+   7 document_generator
+   7 prompt_template_manager
+   8 chat_target_resolution
+  10 chat_metrics
+  10 rate_limiter
+  13 streaming_utils
+  27 chat_orchestrator
+  34 bounded_daemon
+  96 chat_service
+
+## Chat vs Chat_NEW tree sizes
+tests/Chat files:      100
+tests/Chat LOC:    61960 total
+tests/Chat_NEW files:       58
+tests/Chat_NEW LOC:    11468 total
+
+## Shared basenames between the two trees
+test_chat_knowledge_save.py
+
+## Tree birth + recent activity
+Chat_NEW first commit:  2025-09-04 1e705f784d
+Chat first commit:      2025-04-24 941ce557bb
+Chat_NEW commits/6mo:         49
+Chat commits/6mo:            108

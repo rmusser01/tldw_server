@@ -326,6 +326,7 @@ async def get_auth_principal(request: Request) -> AuthPrincipal:
     # Fast-path: reuse existing AuthContext if present
     existing = getattr(request.state, "auth", None)
     if isinstance(existing, AuthContext):
+        User_DB_Handling.activate_authenticated_content_scope(existing.principal)
         return existing.principal
     # Prefer Bearer JWT, fall back to X-API-KEY
     has_authorization_header = request.headers.get("Authorization") is not None
@@ -372,6 +373,7 @@ async def get_auth_principal(request: Request) -> AuthPrincipal:
                 request.state.user_id = identity.user_id
                 request.state.auth = _build_context(principal, request)
                 request.state._auth_user = user
+                User_DB_Handling.activate_authenticated_content_scope(principal)
                 return principal
         # Align with existing 401 semantics when no credentials are provided
         raise HTTPException(
@@ -567,6 +569,7 @@ async def get_auth_principal(request: Request) -> AuthPrincipal:
                             "auth_principal_resolver: unable to attach single-user state context: {}",
                             state_exc,
                         )
+                    User_DB_Handling.activate_authenticated_content_scope(principal)
                     return principal
         except _SINGLE_USER_COMPAT_EXCEPTIONS as single_exc:
             logger.debug(

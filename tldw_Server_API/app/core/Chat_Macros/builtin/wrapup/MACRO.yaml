@@ -1,0 +1,81 @@
+schema_version: 1
+name: wrapup
+command: wrapup
+description: Close out the current conversation or workspace.
+enabled: true
+builtin_version: 1
+
+args:
+  preset:
+    type: string
+    default: general
+  keep_forks:
+    type: boolean
+    default: false
+    aliases: ["keep-forks"]
+  output_profile:
+    type: string
+    default: default
+    aliases: ["output-profile"]
+  include_branches:
+    type: boolean
+    default: false
+    aliases: ["include-branches"]
+  question:
+    type: string
+    repeated: true
+    default: []
+
+context:
+  surfaces: [chat, chat-workspace, research-workspace, acp]
+  include_chat_history: true
+  include_workspace_context: auto
+  retrieval: auto
+  snapshot_at_dispatch: true
+
+execution:
+  mode_default: background
+  branch_strategy: auto
+  max_branches: 6
+  max_concurrency: 3
+  timeout_seconds: 180
+  retries_per_branch: 1
+  merge_retries: 1
+  partial_failure: best_effort
+  retain_scratch_branches: false
+
+steps:
+  - id: summary
+    type: branch_prompt
+    label: Summary
+    output: summary
+    prompt: "Summarize the current conversation or workspace context."
+  - id: decisions
+    type: branch_prompt
+    label: Decisions
+    output: decisions
+    prompt: "Extract decisions and rationale from the current context."
+  - id: action_items
+    type: branch_prompt
+    label: Action items
+    output: action_items
+    prompt: "Extract action items, owners, due dates, and blockers if present."
+  - id: open_questions
+    type: branch_prompt
+    label: Open questions
+    output: open_questions
+    prompt: "Identify unresolved questions and suggested follow-up prompts."
+  - id: merge
+    type: merge
+    consumes: [summary, decisions, action_items, open_questions]
+    output: final
+    prompt: "Combine branch outputs using the selected output profile."
+  - id: post
+    type: post_result
+    consumes: [final]
+
+output_profile: default
+
+permissions:
+  tool_calls: []
+  skills: []

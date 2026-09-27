@@ -5,17 +5,23 @@ Starts a minimal FastAPI app with only the media router, sends a tiny gzipped
 MediaWiki dump via multipart/form-data, and asserts NDJSON lines shape.
 """
 
+import gzip
 import io
 import json
-import gzip
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
-from tldw_Server_API.app.api.v1.endpoints.media import router as media_router
+from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.media import process_mediawiki
+from tldw_Server_API.app.api.v1.endpoints.media import router as media_router
+from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
 
@@ -50,7 +56,13 @@ class _FailingAiofilesOpen:
         return False
 
 
-def _build_mediawiki_client(monkeypatch, tmp_path: Path) -> TestClient:
+def _build_mediawiki_client(
+    monkeypatch,
+    tmp_path: Path,
+    *,
+    user_id: int = 1,
+    media_db=None,
+) -> TestClient:
     # Force temp dirs outside CWD so allowed_dir enforcement is required
     monkeypatch.setenv("TMPDIR", str(tmp_path))
     monkeypatch.setenv("AUTH_MODE", "single_user")
@@ -60,9 +72,29 @@ def _build_mediawiki_client(monkeypatch, tmp_path: Path) -> TestClient:
     app.include_router(media_router, prefix="/api/v1/media")
 
     async def _override_user() -> User:
-        return User(id=1, username="tester", email=None, is_active=True, is_admin=True)
+        return User(
+            id=user_id,
+            username="tester",
+            email=None,
+            is_active=True,
+            is_admin=True,
+        )
+
+    async def _override_principal(request: Request) -> AuthPrincipal:
+        principal = AuthPrincipal(
+            kind="user",
+            user_id=user_id,
+            roles=["user"],
+            permissions=[MEDIA_CREATE],
+            is_admin=False,
+        )
+        request.state.auth = AuthContext(principal=principal)
+        return principal
 
     app.dependency_overrides[get_request_user] = _override_user
+    app.dependency_overrides[auth_deps.get_auth_principal] = _override_principal
+    if media_db is not None:
+        app.dependency_overrides[get_media_db_for_user] = lambda: media_db
     return TestClient(app, headers={"X-API-KEY": "test-api-key-12345"})
 
 
@@ -221,3 +253,60 @@ def test_mediawiki_process_dump_cleanup_failure_log_is_sanitized(monkeypatch, tm
     assert logger_stub.warnings == ["Failed to cleanup temporary directory"]
     assert logger_stub.warning_args == [()]
     assert logger_stub.warning_kwargs == [{}]
+
+
+@pytest.mark.integration
+def test_mediawiki_ingest_passes_request_writer_and_checkpoint_scope(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Pass the request writer, vector user, and tenant checkpoint scope."""
+    fake_media_db = SimpleNamespace(org_id=7, team_id=9)
+    fake_repo = object()
+    captured_kwargs = {}
+
+    def _fake_core_import(**kwargs):
+        captured_kwargs.update(kwargs)
+        return iter([{"type": "summary", "message": "Processed 1 page"}])
+
+    monkeypatch.setattr(
+        process_mediawiki,
+        "core_import_mediawiki_dump",
+        _fake_core_import,
+    )
+    monkeypatch.setattr(
+        process_mediawiki,
+        "get_media_repository",
+        lambda db: fake_repo if db is fake_media_db else None,
+        raising=False,
+    )
+    client = _build_mediawiki_client(
+        monkeypatch,
+        tmp_path,
+        user_id=42,
+        media_db=fake_media_db,
+    )
+
+    response = client.post(
+        "/api/v1/media/mediawiki/ingest-dump",
+        files={
+            "dump_file": (
+                "mini.xml.gz",
+                _gz_bytes(_mini_mediawiki_xml()),
+                "application/gzip",
+            )
+        },
+        data={
+            "wiki_name": "TestWiki",
+            "namespaces_str": "0",
+            "skip_redirects": "true",
+            "chunk_max_size": "500",
+            "api_name_vector_db": "",
+        },
+    )
+
+    assert response.status_code == 200
+    assert json.loads(response.text)["type"] == "summary"
+    assert captured_kwargs["media_writer"] is fake_repo
+    assert captured_kwargs["vector_user_id"] == "42"
+    assert captured_kwargs["checkpoint_identity_scope"] == '{"org_id":7,"team_id":9,"user_id":"42"}'

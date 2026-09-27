@@ -37,7 +37,8 @@ def test_aphrodite_strict_filter_drops_top_k_from_payload_non_streaming(monkeypa
 
     captured_payload = {}
 
-    def fake_post(url, headers=None, json=None, timeout=None):  # mirror httpx.Client.post signature
+    def fake_request(_method, _url, **kwargs):
+        json = kwargs.get("json")
         captured_payload.clear()
         if json:
             captured_payload.update(json)
@@ -51,7 +52,7 @@ def test_aphrodite_strict_filter_drops_top_k_from_payload_non_streaming(monkeypa
     ) as mock_client_cls:
 
         mock_client = MagicMock()
-        mock_client.post.side_effect = fake_post
+        mock_client.request.side_effect = fake_request
         mock_client.close.return_value = None
         mock_client_cls.return_value = mock_client
 

@@ -75,6 +75,7 @@ Use this page when you are deciding which API area to explore first. Use the lin
 | `persona` | Use the persona agent surface for voice, tools, and MCP-backed interactions. | Personal assistant flows, tool-using agents, persona runtime control. | [Personas user guide](../User_Guides/Server/Personas_User_Guide.md) |
 | `persona-archetypes` | Manage persona archetype definitions. | Reusable persona templates and guided profile creation. | Experimental surface |
 | `personalization` | Manage opt-in profiles, memories, and personalization signals. | User-specific RAG biasing, assistant memory, profile-aware experiences. | [Personas user guide](../User_Guides/Server/Personas_User_Guide.md) |
+| `personal-context` | Manage the canonical user profile shared with Chatbook. | Profile preferences, workspace context, agent proposal review, export, and global deletion. | [Personal Context API](Personal_Context_API.md) |
 | `companion` | Use companion-oriented agent endpoints. | Experimental companion experiences and profile-aware assistants. | Experimental surface |
 
 ## Search, RAG, Embeddings, And Evaluation

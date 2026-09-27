@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+
 
 pytestmark = pytest.mark.integration
 
@@ -16,21 +18,14 @@ async def test_authnz_usage_repo_insert_llm_and_rollup_postgres(test_db_pool):
     repo = AuthnzUsageRepo(pool)
 
     # Seed a user and API key to satisfy FKs.
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
+    user = await users.create_user(
+        username="pg-usage-rollup-user", email="pg-usage-rollup-user@example.com",
+        password_hash="hashed", role="user", is_active=True, is_verified=True,
+    )
+    user_id = int(user["id"])
     async with pool.acquire() as conn:
-        user_id = await conn.fetchval(
-            """
-            INSERT INTO users (
-                uuid, username, email, password_hash, role,
-                is_active, is_verified, storage_quota_mb, storage_used_mb
-            )
-            VALUES (gen_random_uuid(), $1, $2, $3, $4, TRUE, TRUE, 5120, 0.0)
-            RETURNING id
-            """,
-            "pg-usage-rollup-user",
-            "pg-usage-rollup-user@example.com",
-            "hashed",
-            "user",
-        )
         key_id = await conn.fetchval(
             """
             INSERT INTO api_keys (user_id, key_hash, key_prefix, scope, status)
@@ -115,21 +110,13 @@ async def test_authnz_usage_repo_rollup_usage_daily_postgres(test_db_pool):
     repo = AuthnzUsageRepo(pool)
 
     # Seed a user for FK.
-    async with pool.acquire() as conn:
-        user_id = await conn.fetchval(
-            """
-            INSERT INTO users (
-                uuid, username, email, password_hash, role,
-                is_active, is_verified, storage_quota_mb, storage_used_mb
-            )
-            VALUES (gen_random_uuid(), $1, $2, $3, $4, TRUE, TRUE, 5120, 0.0)
-            RETURNING id
-            """,
-            "pg-usage-daily-user",
-            "pg-usage-daily-user@example.com",
-            "hashed",
-            "user",
-        )
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
+    user = await users.create_user(
+        username="pg-usage-daily-user", email="pg-usage-daily-user@example.com",
+        password_hash="hashed", role="user", is_active=True, is_verified=True,
+    )
+    user_id = int(user["id"])
 
     await repo.insert_usage_log(
         user_id=int(user_id),
@@ -182,21 +169,14 @@ async def test_authnz_usage_repo_summarize_user_and_key_day_postgres(test_db_poo
     repo = AuthnzUsageRepo(pool)
 
     # Seed a user and API key to satisfy FKs.
+    users = UsersDB(pool)
+    await users.initialize(ensure_schema=False)
+    user = await users.create_user(
+        username="pg-usage-summarize-user", email="pg-usage-summarize-user@example.com",
+        password_hash="hashed", role="user", is_active=True, is_verified=True,
+    )
+    user_id = int(user["id"])
     async with pool.acquire() as conn:
-        user_id = await conn.fetchval(
-            """
-            INSERT INTO users (
-                uuid, username, email, password_hash, role,
-                is_active, is_verified, storage_quota_mb, storage_used_mb
-            )
-            VALUES (gen_random_uuid(), $1, $2, $3, $4, TRUE, TRUE, 5120, 0.0)
-            RETURNING id
-            """,
-            "pg-usage-summarize-user",
-            "pg-usage-summarize-user@example.com",
-            "hashed",
-            "user",
-        )
         key_id = await conn.fetchval(
             """
             INSERT INTO api_keys (user_id, key_hash, key_prefix, scope, status)

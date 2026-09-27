@@ -3,7 +3,8 @@ import {
   AIMessage,
   HumanMessage,
   SystemMessage,
-  ToolMessage
+  ToolMessage,
+  FunctionMessage
 } from "@/types/messages"
 import {
   tldwChat,
@@ -16,12 +17,21 @@ import { publishChatLoopEvent } from "@/services/chat-loop/bridge"
 import { extractChatLoopEvent } from "@/services/chat-loop/stream"
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
 import type { ChatRequestDebugMetadata } from "@/services/tldw/chat-request-debug"
+import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
+import type { ChatCompletionRequest } from "@/services/tldw/TldwApiClient"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { ImageSupportUnconfirmedError } from "@/utils/chat-error-message"
 
 export interface ChatTldwOptions {
   model: string
+  clientManagedHistory?: boolean
   routing?: {
     strategy?: "llm_router" | "rules_router"
-    objective?: "highest_quality" | "lowest_cost" | "lowest_latency" | "balanced"
+    objective?:
+      | "highest_quality"
+      | "lowest_cost"
+      | "lowest_latency"
+      | "balanced"
     mode?: "per_turn" | "sticky_session"
     cross_provider?: boolean
     failure_mode?: "fallback_then_error" | "error"
@@ -47,10 +57,15 @@ export interface ChatTldwOptions {
   extraBody?: Record<string, unknown>
   researchContext?: ChatResearchContext
   chatDebugMetadata?: ChatRequestDebugMetadata
+  requestScope?: ServicePromptRequestScope
+  retryFailedTurn?: boolean
+  clientMessageId?: string
+  regenerateFromMessageId?: string
 }
 
 export class ChatTldw {
   model: string
+  clientManagedHistory?: boolean
   routing?: ChatTldwOptions["routing"]
   temperature?: number
   maxTokens?: number
@@ -65,6 +80,8 @@ export class ChatTldw {
   supportsMultimodal: boolean
   saveToDb?: boolean
   conversationId?: string
+  serverMessageId?: string
+  userServerMessageId?: string
   historyMessageLimit?: number
   historyMessageOrder?: string
   slashCommandInjectionMode?: string
@@ -73,10 +90,14 @@ export class ChatTldw {
   extraBody?: Record<string, unknown>
   researchContext?: ChatResearchContext
   chatDebugMetadata?: ChatRequestDebugMetadata
+  requestScope?: ServicePromptRequestScope
+  retryFailedTurn?: boolean
+  clientMessageId?: string
+  regenerateFromMessageId?: string
 
   constructor(options: ChatTldwOptions) {
     // Normalize model id: drop internal prefix like "tldw:" so server receives provider/model
-    this.model = String(options.model || '').replace(/^tldw:/, '')
+    this.model = String(options.model || "").replace(/^tldw:/, "")
     this.routing = options.routing
     this.temperature = options.temperature ?? 0.7
     this.maxTokens = options.maxTokens
@@ -89,16 +110,27 @@ export class ChatTldw {
     this.toolChoice = options.toolChoice
     this.tools = options.tools
     this.supportsMultimodal = Boolean(options.supportsMultimodal)
-    this.saveToDb = options.saveToDb
-    this.conversationId = options.conversationId
-    this.historyMessageLimit = options.historyMessageLimit
-    this.historyMessageOrder = options.historyMessageOrder
+    this.clientManagedHistory = options.clientManagedHistory
+    this.saveToDb = options.clientManagedHistory ? false : options.saveToDb
+    this.conversationId = options.clientManagedHistory
+      ? undefined
+      : options.conversationId
+    this.historyMessageLimit = options.clientManagedHistory
+      ? undefined
+      : options.historyMessageLimit
+    this.historyMessageOrder = options.clientManagedHistory
+      ? undefined
+      : options.historyMessageOrder
     this.slashCommandInjectionMode = options.slashCommandInjectionMode
     this.apiProvider = options.apiProvider
     this.extraHeaders = options.extraHeaders
     this.extraBody = options.extraBody
     this.researchContext = options.researchContext
     this.chatDebugMetadata = options.chatDebugMetadata
+    this.requestScope = options.requestScope
+    this.retryFailedTurn = options.retryFailedTurn
+    this.clientMessageId = options.clientMessageId
+    this.regenerateFromMessageId = options.regenerateFromMessageId
   }
 
   /**
@@ -112,14 +144,19 @@ export class ChatTldw {
     messages: BaseMessage[],
     options?: {
       signal?: AbortSignal
+      preparedRequest?: ChatCompletionRequest
       // Matches the shape used in normalChatMode/search/rag, where
       // callbacks: [{ handleLLMEnd(output) { ... } }]
       callbacks?: Array<{ handleLLMEnd?: (output: any) => any }>
     }
   ): Promise<AsyncGenerator<any, void, unknown>> {
     const { signal, callbacks } = options || {}
+    this.serverMessageId = undefined
+    this.userServerMessageId = undefined
 
-    const tldwMessages = this.convertToTldwMessages(messages)
+    const tldwMessages = options?.preparedRequest
+      ? []
+      : this.convertToTldwMessages(messages)
     const toolCalls: ToolCall[] = []
     // Captures the background transport's `stream_transport_interrupted`
     // sentinel. TldwChat surfaces it via onChunk (not as a text token), so we
@@ -150,13 +187,15 @@ export class ChatTldw {
           }
           if (typeof delta.function.arguments === "string") {
             const prevArgs = toolCalls[index].function.arguments || ""
-            toolCalls[index].function.arguments = prevArgs + delta.function.arguments
+            toolCalls[index].function.arguments =
+              prevArgs + delta.function.arguments
           }
         }
       })
     }
 
     const handleChunk = (chunk: any) => {
+      if (signal?.aborted) return
       const streamedConversationId =
         typeof chunk?.tldw_conversation_id === "string" &&
         chunk.tldw_conversation_id.trim().length > 0
@@ -165,9 +204,20 @@ export class ChatTldw {
               chunk.conversation_id.trim().length > 0
             ? chunk.conversation_id.trim()
             : null
-      if (streamedConversationId) {
+      // Nonpersisted completions also carry a request-scoped conversation UUID.
+      // It must not turn local history into a link to a nonexistent server chat.
+      if (streamedConversationId && this.saveToDb !== false) {
         this.conversationId = streamedConversationId
         this.saveToDb = true
+      }
+      if (this.saveToDb !== false && typeof chunk?.tldw_message_id === "string") {
+        const savedMessageId = chunk.tldw_message_id.trim()
+        if (savedMessageId) this.serverMessageId = savedMessageId
+      }
+
+      if (this.saveToDb !== false && typeof chunk?.tldw_user_message_id === "string") {
+        const savedUserMessageId = chunk.tldw_user_message_id.trim()
+        if (savedUserMessageId) this.userServerMessageId = savedUserMessageId
       }
 
       const loopEvent = extractChatLoopEvent(chunk)
@@ -194,6 +244,7 @@ export class ChatTldw {
         // Thread the UI AbortSignal so Stop aborts the underlying request in
         // all modes (not just polling `signal.aborted` at the loop top).
         signal,
+        preparedRequest: options?.preparedRequest,
         model: this.model,
         temperature: this.temperature,
         maxTokens: this.maxTokens,
@@ -207,6 +258,9 @@ export class ChatTldw {
         toolChoice: this.toolChoice,
         tools: this.tools,
         saveToDb: this.saveToDb,
+        retryFailedTurn: this.retryFailedTurn,
+        clientMessageId: this.clientMessageId,
+        regenerateFromMessageId: this.regenerateFromMessageId,
         conversationId: this.conversationId,
         historyMessageLimit: this.historyMessageLimit,
         historyMessageOrder: this.historyMessageOrder,
@@ -215,7 +269,8 @@ export class ChatTldw {
         extraHeaders: this.extraHeaders,
         extraBody: this.extraBody,
         researchContext: this.researchContext,
-        chatDebugMetadata: this.chatDebugMetadata
+        chatDebugMetadata: this.chatDebugMetadata,
+        requestScope: this.requestScope
       },
       handleChunk
     )
@@ -263,10 +318,57 @@ export class ChatTldw {
     return generator()
   }
 
+  /** Freeze after the existing builder resolves tools/settings, before owner admission. */
+  prepareClientManagedRequest(messages: BaseMessage[]): ChatCompletionRequest {
+    if (!this.clientManagedHistory)
+      throw new Error("client_managed_history_required")
+    // Custom provider objects can contain credentials. No implicit redaction/projection.
+    if (this.extraBody && Object.keys(this.extraBody).length) {
+      throw new Error("unsupported_history_custom_provider_body")
+    }
+    if (
+      this.extraHeaders &&
+      Object.entries(this.extraHeaders).some(
+        ([key, value]) => key !== "X-TLDW-Loop-Compat" || value !== "1"
+      )
+    ) {
+      throw new Error("unsupported_history_custom_provider_headers")
+    }
+    if (
+      !this.supportsMultimodal &&
+      messages.some(
+        (message) =>
+          Array.isArray(message.content) &&
+          message.content.some((part) => part.type === "image_url")
+      )
+    ) {
+      throw new Error("unsupported_history_model_images")
+    }
+    return prepareChatCompletionRequest(this.convertToTldwMessages(messages), {
+      model: this.model,
+      routing: this.routing,
+      temperature: this.temperature,
+      maxTokens: this.maxTokens,
+      topP: this.topP,
+      frequencyPenalty: this.frequencyPenalty,
+      presencePenalty: this.presencePenalty,
+      systemPrompt: this.systemPrompt,
+      reasoningEffort: this.reasoningEffort,
+      toolChoice: this.toolChoice,
+      tools: this.tools,
+      apiProvider: this.apiProvider,
+      extraHeaders: this.extraHeaders,
+      saveToDb: false,
+      researchContext: this.researchContext,
+      slashCommandInjectionMode: this.slashCommandInjectionMode
+    })
+  }
+
   // Non-streaming helper mirroring the LangChain-style _generate,
   // used only internally if needed.
   async generateOnce(
-    messages: BaseMessage[]
+    messages: BaseMessage[],
+    options?: { signal?: AbortSignal }
   ): Promise<{ text: string; message: AIMessage }> {
     const tldwMessages = this.convertToTldwMessages(messages)
 
@@ -284,6 +386,9 @@ export class ChatTldw {
       toolChoice: this.toolChoice,
       tools: this.tools,
       saveToDb: this.saveToDb,
+      retryFailedTurn: this.retryFailedTurn,
+      clientMessageId: this.clientMessageId,
+      regenerateFromMessageId: this.regenerateFromMessageId,
       conversationId: this.conversationId,
       historyMessageLimit: this.historyMessageLimit,
       historyMessageOrder: this.historyMessageOrder,
@@ -292,7 +397,9 @@ export class ChatTldw {
       extraHeaders: this.extraHeaders,
       extraBody: this.extraBody,
       researchContext: this.researchContext,
-      chatDebugMetadata: this.chatDebugMetadata
+      chatDebugMetadata: this.chatDebugMetadata,
+      requestScope: this.requestScope,
+      signal: options?.signal
     })
 
     return {
@@ -309,8 +416,11 @@ export class ChatTldw {
    * Non-streaming invoke helper to match the simple `.invoke()` shape used
    * by title generation and other one-off calls.
    */
-  async invoke(messages: BaseMessage[]): Promise<{ content: string }> {
-    const { text } = await this.generateOnce(messages)
+  async invoke(
+    messages: BaseMessage[],
+    options?: { signal?: AbortSignal }
+  ): Promise<{ content: string }> {
+    const { text } = await this.generateOnce(messages, options)
     return { content: text }
   }
 
@@ -349,7 +459,11 @@ export class ChatTldw {
     if (!part || typeof part !== "object") {
       return null
     }
-    const candidate = part as { type?: unknown; text?: unknown; image_url?: unknown }
+    const candidate = part as {
+      type?: unknown
+      text?: unknown
+      image_url?: unknown
+    }
     if (candidate.type === "text" && typeof candidate.text === "string") {
       return { type: "text", text: candidate.text }
     }
@@ -383,7 +497,9 @@ export class ChatTldw {
       .join(" ")
   }
 
-  private normalizeUserContent(content: unknown): string | ChatCompletionContentPart[] {
+  private normalizeUserContent(
+    content: unknown
+  ): string | ChatCompletionContentPart[] {
     if (typeof content === "string") {
       return content
     }
@@ -405,7 +521,10 @@ export class ChatTldw {
 
   private convertToTldwMessages(messages: BaseMessage[]): ChatMessage[] {
     return messages.map((msg) => {
-      if (msg instanceof SystemMessage) {
+      if (
+        msg instanceof SystemMessage ||
+        (msg as unknown as { role?: string }).role === "system"
+      ) {
         return {
           role: "system",
           content: this.coerceTextContent(msg.content)
@@ -418,13 +537,29 @@ export class ChatTldw {
           tool_call_id: msg.tool_call_id
         }
       }
+      if (
+        msg instanceof FunctionMessage ||
+        msg.additional_kwargs?.function_call
+      ) {
+        throw new Error("unsupported_history_function_message")
+      }
       if (msg instanceof AIMessage) {
         return {
           role: "assistant",
-          content: this.coerceTextContent(msg.content)
+          content: this.coerceTextContent(msg.content),
+          ...(Array.isArray(msg.additional_kwargs?.tool_calls)
+            ? { tool_calls: msg.additional_kwargs.tool_calls as ToolCall[] }
+            : {})
         }
       }
       if (msg instanceof HumanMessage) {
+        if (
+          !this.supportsMultimodal &&
+          Array.isArray(msg.content) &&
+          msg.content.some((part) => part?.type === "image_url")
+        ) {
+          throw new ImageSupportUnconfirmedError(this.retryFailedTurn === true)
+        }
         return {
           role: "user",
           content: this.supportsMultimodal

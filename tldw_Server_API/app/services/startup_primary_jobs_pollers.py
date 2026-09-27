@@ -114,6 +114,13 @@ def provide_primary_jobs_worker_specs(
                 "writing",
             ),
         ),
+        stop_event_worker_spec(
+            name="shared_workspace_clone_jobs_task",
+            worker_service=_run_shared_workspace_clone_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=_shared_workspace_clone_jobs_worker_enabled,
+        ),
     )
 
 
@@ -129,6 +136,18 @@ def _core_jobs_worker_enabled(context: WorkerLifecycleContext) -> bool:
         in _TRUTHY_ENV_VALUES
     )
     return is_core and core_worker_enabled and not context.sidecar_mode
+
+
+def _shared_workspace_clone_jobs_worker_enabled(
+    context: WorkerLifecycleContext,
+) -> bool:
+    enabled = (
+        os.getenv("SHARED_WORKSPACE_CLONE_JOBS_WORKER_ENABLED", "true")
+        .strip()
+        .lower()
+        in _TRUTHY_ENV_VALUES
+    )
+    return enabled and not context.sidecar_mode and bool(context.route_enabled("sharing"))
 
 
 async def start_primary_jobs_pollers(
@@ -536,3 +555,11 @@ def _run_writing_annotation_review_jobs_worker_service(stop_event: Any) -> Any:
     )
 
     return _run_writing_annotation_review_jobs_worker(stop_event)
+
+
+def _run_shared_workspace_clone_jobs_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.core.Sharing.shared_workspace_clone_jobs_worker import (
+        run_shared_workspace_clone_jobs_worker,
+    )
+
+    return run_shared_workspace_clone_jobs_worker(stop_event)

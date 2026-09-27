@@ -11,34 +11,136 @@ permissions:
   contents: read
 
 concurrency:
-  group: backend-required-${{ github.event.pull_request.number || github.ref }}
+  group: backend-required-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
+  admission:
+    if: >-
+      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/license-first-admission.yml
+    with:
+      workflow_file: backend-required.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
+  # The pull_request path reports to the PR, so it is the one branch protection
+  # sees -- but it used to start every gate immediately, in parallel with the
+  # license audit it is supposed to follow. This makes it wait for the verdict.
+  await_license:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/license-first-await.yml
+    permissions:
+      contents: read
+      statuses: read
+
   changes:
     name: Detect Gate Changes
+    needs: [admission, await_license]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
+      )
     runs-on: ubuntu-latest
     outputs:
-      backend_changed: ${{ steps.detect.outputs.backend_changed }}
-      frontend_changed: ${{ steps.detect.outputs.frontend_changed }}
-      e2e_changed: ${{ steps.detect.outputs.e2e_changed }}
-      security_relevant_changed: ${{ steps.detect.outputs.security_relevant_changed }}
-      coverage_required: ${{ steps.detect.outputs.coverage_required }}
+      backend_changed: ${{ steps.detect.outputs.backend_changed || steps.detect_admitted.outputs.backend_changed }}
+      frontend_changed: ${{ steps.detect.outputs.frontend_changed || steps.detect_admitted.outputs.frontend_changed }}
+      e2e_changed: ${{ steps.detect.outputs.e2e_changed || steps.detect_admitted.outputs.e2e_changed }}
+      security_relevant_changed: ${{ steps.detect.outputs.security_relevant_changed || steps.detect_admitted.outputs.security_relevant_changed }}
+      coverage_required: ${{ steps.detect.outputs.coverage_required || steps.detect_admitted.outputs.coverage_required }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.sha }}
+          persist-credentials: false
       - id: detect
         name: Classify changed files
+        if: github.event_name != 'workflow_run'
         uses: ./.github/actions/detect-required-gate-changes
+      - id: detect_admitted
+        name: Classify admitted changed files
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.admission.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.admission.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          CHANGED_FILES_PATH="${RUNNER_TEMP}/required-gate-changed-files.txt"
+          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          fi
+          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            git fetch --no-tags --depth=1 origin "$HEAD_SHA"
+          fi
+          git cat-file -e "${BASE_SHA}^{commit}"
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
+          mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"
+          python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
 
   backend-required:
     name: backend-required
     runs-on: ubuntu-latest
-    needs: [changes]
+    needs: [changes, admission, await_license]
+    # This job's name is the required status check, so it must REPORT rather
+    # than skip. A skipped job leaves the check unreported, and a run whose
+    # jobs all skip concludes "success" -- so a failed licence audit used to
+    # show green while running nothing. The last arm exists purely so a
+    # negative verdict reaches the assertion step below and goes red.
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true' &&
+          needs.changes.result == 'success'
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          ) &&
+          needs.changes.result == 'success'
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
+        )
+      )
     timeout-minutes: 30
     steps:
+      - name: Require the license audit to have passed
+        if: >-
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
+        run: |
+          echo "::error::License audit did not pass for this PR head, so the gates were not run. Fix the licence policy failure and re-run."
+          exit 1
+
       - name: No-op pass (backend unchanged)
         if: needs.changes.outputs.backend_changed != 'true'
         run: echo "No backend paths changed; backend-required passed by policy."
@@ -46,6 +148,10 @@ jobs:
       - name: Checkout
         if: needs.changes.outputs.backend_changed == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
         if: needs.changes.outputs.backend_changed == 'true'
@@ -60,6 +166,7 @@ jobs:
         with:
           python-version: "3.12"
           use-uv: "true"
+          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -82,13 +189,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
+          BASE_SHA="${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha || github.event.before }}"
+          HEAD_SHA="${{ needs.admission.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}"
           if [[ -z "${BASE_SHA:-}" || "${BASE_SHA:-}" == "0000000000000000000000000000000000000000" ]]; then
             BASE_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
           fi
 
           if [[ -n "${BASE_SHA:-}" ]]; then
-            mapfile -t CHANGED_PY < <(git diff --name-only "$BASE_SHA" "${{ github.sha }}" | grep -E '^tldw_Server_API/.*\.py$' || true)
+            if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            fi
+            if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "$HEAD_SHA"
+            fi
+            git cat-file -e "${BASE_SHA}^{commit}"
+            git cat-file -e "${HEAD_SHA}^{commit}"
+            git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "${RUNNER_TEMP}/backend-required-changed-files.txt"
+            mapfile -t CHANGED_PY < <(grep -E '^tldw_Server_API/.*\.py$' "${RUNNER_TEMP}/backend-required-changed-files.txt" || true)
           else
             mapfile -t CHANGED_PY < <(git ls-files | grep -E '^tldw_Server_API/.*\.py$' || true)
           fi
@@ -113,6 +230,99 @@ jobs:
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -m "unit and not e2e and not jobs" \
             tldw_Server_API/tests/unit
+
+      # Timezone axis. Every other job and step runs on UTC, where a naive-vs-aware
+      # datetime bug has a delta of exactly zero and is therefore invisible. TASK-13299
+      # shipped a 7-hour error in OpenAI-compatible `created` timestamps for precisely
+      # that reason, on a product whose target deployment is a user's own machine.
+      #
+      # This lives in the required lane deliberately. It was first added as a standalone
+      # job in ci.yml, whose result is not part of protected-branch enforcement, so a
+      # timestamp regression could fail it without blocking the merge — the guard was
+      # decorative. `backend-required` is enforced gate 1 of 6 per
+      # Docs/Development/CI_REQUIRED_GATES.md.
+      - name: Confirm the runner is not on UTC
+        if: needs.changes.outputs.backend_changed == 'true'
+        env:
+          TZ: America/Los_Angeles
+        shell: bash
+        run: |
+          set -euo pipefail
+          OFFSET="$(python -c 'import time; print(time.strftime("%z"))')"
+          echo "TZ=$TZ offset=$OFFSET"
+          if [ "$OFFSET" = "+0000" ]; then
+            echo "The timezone guard below is pointless on a UTC offset -- TZ did not take effect." >&2
+            exit 1
+          fi
+
+      # Seeded from the test files that assert on utcnow / timezone.utc /
+      # fromtimestamp / .timestamp(). Verified green under BOTH UTC and
+      # America/Los_Angeles before being gated (678 passed), so this starts as a pure
+      # regression guard rather than a backlog to work off.
+      #
+      # Five files are deliberately excluded because they fail identically under both
+      # timezones, i.e. they are pre-existing and unrelated to this axis:
+      #   tests/http_client/test_http_client_retry_after.py
+      #   tests/http_client/test_http_client_stream_timeouts.py
+      #   tests/Sharing/test_shared_workspace_clone_endpoints.py
+      #   tests/Sharing/test_shared_workspace_recipient_endpoints.py
+      #   tests/test_authnz_backends_improved.py
+      # Grow this list as timestamp coverage grows; shrink the exclusions as those five
+      # get fixed.
+      - name: Timestamp-sensitive tests under a non-UTC timezone
+        if: needs.changes.outputs.backend_changed == 'true'
+        env:
+          TZ: America/Los_Angeles
+          PYTHONPATH: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Plugins are named explicitly because setup-python-deps writes
+          # PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 into $GITHUB_ENV ("Enforce pytest plugin
+          # isolation"), which applies to every later step in the job. Without this,
+          # --timeout is an unrecognised argument and the step dies with exit 4 before
+          # running a single test -- which is exactly how this guard first failed, and
+          # would have failed the same way in its original ci.yml home had it ever been
+          # allowed to run.
+          python -m pytest -q \
+            -p pytest_asyncio.plugin \
+            -p pytest_timeout \
+            --timeout=300 \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_admin_endpoints_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_api_keys_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_llm_provider_overrides_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_mfa_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_monitoring_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_org_provider_secrets_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_rate_limits_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_sessions_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_token_blacklist_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_usage_repo_rollups_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_usage_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_user_provider_secrets_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_byok_endpoints_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_byok_oauth_state_repo_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_byok_rotation_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_byok_runtime_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_llm_budget_402_sqlite.py \
+            tldw_Server_API/tests/AuthNZ_SQLite/test_scheduler_auth_failure_monitor_sqlite.py \
+            tldw_Server_API/tests/Discord/test_discord_oauth_lifecycle.py \
+            tldw_Server_API/tests/Embeddings/test_request_signing_nonce_cleanup.py \
+            tldw_Server_API/tests/Flashcards/test_flashcards_endpoint_integration.py \
+            tldw_Server_API/tests/Flashcards/test_flashcards_timestamp_contract.py \
+            tldw_Server_API/tests/Flashcards/test_review_response_timestamp_contract.py \
+            tldw_Server_API/tests/Flashcards/test_source_review_plans_api.py \
+            tldw_Server_API/tests/Flashcards/test_study_response_timestamp_contract.py \
+            tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py \
+            tldw_Server_API/tests/Personalization/test_companion_derivations.py \
+            tldw_Server_API/tests/Personalization/test_companion_proactive_policy.py \
+            tldw_Server_API/tests/Personalization/test_companion_reflection_jobs.py \
+            tldw_Server_API/tests/Personalization/test_personalization_endpoints.py \
+            tldw_Server_API/tests/Research/test_research_broker.py \
+            tldw_Server_API/tests/Research/test_research_discovery_legacy_execution_contract.py \
+            tldw_Server_API/tests/Sharing/test_shared_workspace_chat_endpoint.py \
+            tldw_Server_API/tests/Sharing/test_shared_workspace_clone_operations.py \
+            tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_security_matrix.py
 
       # Boots the app in a DEPLOYMENT-SHAPED (scrubbed) environment — no
       # TEST_MODE, no conftest env forcing — and probes /health. Catches the

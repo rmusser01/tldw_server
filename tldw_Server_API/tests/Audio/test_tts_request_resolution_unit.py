@@ -62,6 +62,18 @@ def test_resolve_tts_request_defaults_maps_openai_provider_to_valid_model() -> N
     assert resolved.voice == "alloy"
 
 
+def test_resolve_tts_request_defaults_infers_openai_gpt_4o_mini_tts() -> None:
+    resolved = tts_request_resolution.resolve_tts_request_defaults(
+        provider=None,
+        model="gpt-4o-mini-tts",
+        voice=None,
+    )
+
+    assert resolved.provider == "openai"
+    assert resolved.model == "gpt-4o-mini-tts"
+    assert resolved.voice == "alloy"
+
+
 def test_resolve_tts_request_defaults_infers_provider_from_model_alias() -> None:
     resolved = tts_request_resolution.resolve_tts_request_defaults(
         provider=None,

@@ -4,6 +4,7 @@ import {
   formatEntryContentStats,
   getPriorityBand,
   getPriorityTagColor,
+  normalizeWorldBookEntryIdentifier,
   normalizeKeywordList,
   validateRegexKeywords
 } from "../worldBookEntryUtils"
@@ -16,6 +17,44 @@ describe("worldBookEntryUtils", () => {
       "beta",
       "gamma"
     ])
+  })
+
+  it("maps a canonical positive API id to the manager entry_id while preserving legacy and invalid values", () => {
+    expect(normalizeWorldBookEntryIdentifier({ id: 41, content: "canonical" })).toEqual({
+      id: 41,
+      entry_id: 41,
+      content: "canonical"
+    })
+    expect(normalizeWorldBookEntryIdentifier({ id: 41, entry_id: 0 })).toEqual({
+      id: 41,
+      entry_id: 0
+    })
+    expect(normalizeWorldBookEntryIdentifier({ id: 0, content: "invalid" })).toEqual({
+      id: 0,
+      content: "invalid"
+    })
+    expect(normalizeWorldBookEntryIdentifier({ id: "41", content: "legacy-string" })).toEqual({
+      id: "41",
+      entry_id: 41,
+      content: "legacy-string"
+    })
+    expect(normalizeWorldBookEntryIdentifier({ id: "not-an-id", content: "invalid" })).toEqual({
+      id: "not-an-id",
+      content: "invalid"
+    })
+    expect(normalizeWorldBookEntryIdentifier({ id: true, content: "invalid" })).toEqual({
+      id: true,
+      content: "invalid"
+    })
+    expect(normalizeWorldBookEntryIdentifier({ id: [91], content: "invalid" })).toEqual({
+      id: [91],
+      content: "invalid"
+    })
+    expect(normalizeWorldBookEntryIdentifier({ content: "missing" })).toEqual({ content: "missing" })
+    expect(normalizeWorldBookEntryIdentifier({ id: null, content: "null" })).toEqual({
+      id: null,
+      content: "null"
+    })
   })
 
   it("estimates tokens and formats content stats", () => {

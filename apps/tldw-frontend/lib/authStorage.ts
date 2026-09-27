@@ -1,20 +1,21 @@
 import { isPlaceholderApiKey } from "@/utils/api-key";
+import type { TldwConfig } from "@/services/tldw/TldwApiClient";
+import {
+  applyRefreshRotation,
+  refreshSessionInvalidationKey,
+  REFRESH_ROTATION_KEY
+} from "@/services/tldw/single-user-credential";
 import {
   COOKIE_SESSION_CONFIG_KEY,
-  isCookieSessionBrowserTransport
+  isCookieSessionBrowserTransport,
+  isExactOriginCookieSessionConfig
 } from "@/services/tldw/browser-networking";
 
 let runtimeApiKey: string | null = null;
 let runtimeApiBearer: string | null = null;
 let suppressEnvApiKeyForSession = false;
 
-type StoredTldwConfig = {
-  serverUrl?: unknown;
-  authMode?: unknown;
-  authSource?: unknown;
-  apiKey?: unknown;
-  accessToken?: unknown;
-};
+type StoredTldwConfig = Partial<TldwConfig>;
 
 const normalizeValue = (value?: string | null): string | null => {
   const raw = (value ?? '').trim();
@@ -85,6 +86,37 @@ const readStoredLocalValue = (key: string): string | null => {
   }
 };
 
+/** Project the canonical rotation and rejection marker without rewriting storage. */
+export const getEffectiveStoredTldwConfig = (): StoredTldwConfig | null => {
+  const cookieConfig = readStoredTldwConfig(COOKIE_SESSION_CONFIG_KEY);
+  if (hasActiveCookieSessionAuth(cookieConfig) &&
+    isExactOriginCookieSessionConfig(cookieConfig, window.location.origin)) return cookieConfig;
+  const stored = readStoredTldwConfig();
+  if (!stored) return null;
+  let rotation: unknown = null;
+  try {
+    rotation = JSON.parse(window.localStorage.getItem(REFRESH_ROTATION_KEY) || "null");
+  } catch {
+    // Invalid rotation records are ignored by the canonical projection.
+  }
+  const effective = { ...applyRefreshRotation(stored as TldwConfig, rotation) };
+  const invalidationKey = typeof effective.accessToken === "string" &&
+    typeof effective.refreshToken === "string"
+    ? refreshSessionInvalidationKey(effective) : null;
+  if (invalidationKey && readStoredLocalValue(invalidationKey) === "true") {
+    delete effective.accessToken;
+    delete effective.refreshToken;
+  }
+  return effective;
+};
+
+/** Legacy sessions are eligible only when no canonical auth configuration owns them. */
+export const getSessionAccessToken = (): string | null => {
+  const config = getEffectiveStoredTldwConfig();
+  if (config?.authMode === "multi-user" || config?.authMode === "single-user") return null;
+  return normalizeBearerValue(readStoredLocalValue("access_token"));
+};
+
 const readRuntimeWindowApiKey = (): string | null => {
   if (typeof window === "undefined") return null;
   const runtimeValue = (window as Window & { __tldwRuntimeApiKey?: unknown })
@@ -97,7 +129,7 @@ const isQuickstartDeployment = (): boolean =>
   "quickstart";
 
 export const hasActiveCookieSessionAuth = (
-  config: StoredTldwConfig | null | undefined
+  config: { authMode?: unknown; authSource?: unknown } | null | undefined
 ): boolean =>
   isCookieSessionBrowserTransport({
     authMode: config?.authMode,
@@ -109,11 +141,12 @@ export const hasActiveCookieSessionAuth = (
   });
 
 export const getApiKey = (): string | null => {
+  const storedConfig = getEffectiveStoredTldwConfig();
+  if (storedConfig?.authMode === "multi-user") return null;
   if (runtimeApiKey) return runtimeApiKey;
   if (hasActiveCookieSessionAuth(readStoredTldwConfig(COOKIE_SESSION_CONFIG_KEY))) {
     return null;
   }
-  const storedConfig = readStoredTldwConfig();
   if (hasActiveCookieSessionAuth(storedConfig)) return null;
 
   const runtimeWindowKey = readRuntimeWindowApiKey();
@@ -133,21 +166,18 @@ export const getApiKey = (): string | null => {
 };
 
 export const getApiBearer = (): string | null => {
+  const storedConfig = getEffectiveStoredTldwConfig();
+  if (storedConfig?.authMode === "multi-user") {
+    return normalizeBearerValue(String(storedConfig.accessToken || ""));
+  }
   if (runtimeApiBearer) return runtimeApiBearer;
   if (hasActiveCookieSessionAuth(readStoredTldwConfig(COOKIE_SESSION_CONFIG_KEY))) {
     return null;
   }
-  const storedConfig = readStoredTldwConfig();
   if (hasActiveCookieSessionAuth(storedConfig)) return null;
 
   const configuredValue = normalizeBearerValue(process.env.NEXT_PUBLIC_API_BEARER || null);
   if (configuredValue) return configuredValue;
-
-  const storedMode = normalizeValue(String(storedConfig?.authMode || ""));
-  if (storedMode === "multi-user") {
-    const storedAccessToken = normalizeBearerValue(String(storedConfig?.accessToken || ""));
-    if (storedAccessToken) return storedAccessToken;
-  }
 
   return normalizeBearerValue(readStoredLocalValue("accessToken"));
 };

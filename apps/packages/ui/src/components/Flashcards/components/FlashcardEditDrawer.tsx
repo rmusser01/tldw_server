@@ -17,7 +17,7 @@ import { useTranslation } from "react-i18next"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useDebouncedFormField } from "../hooks"
 import { FLASHCARDS_DRAWER_WIDTH_PX } from "../constants"
-import { formatFlashcardTimestampWithRelative } from "../utils/date-display"
+import { formatFlashcardReviewGap, formatFlashcardTimestampWithRelative } from "../utils/date-display"
 import { normalizeFlashcardTemplateFields } from "../utils/template-helpers"
 import { normalizeOptionalFlashcardTags } from "../utils/tag-normalization"
 import {
@@ -441,7 +441,7 @@ export const FlashcardEditDrawer: React.FC<FlashcardEditDrawerProps> = ({
                 <Text type="secondary" className="block text-[11px]">
                   <Tooltip
                     title={t("option:flashcards.schedulingNextGapHelp", {
-                      defaultValue: "SM-2 interval (days until next review)."
+                      defaultValue: "Scheduled gap after the last review. Learning steps may use minutes or hours."
                     })}
                   >
                     <span>
@@ -452,10 +452,7 @@ export const FlashcardEditDrawer: React.FC<FlashcardEditDrawerProps> = ({
                   </Tooltip>
                 </Text>
                 <Text>
-                  {t("option:flashcards.intervalDaysShort", {
-                    defaultValue: "{{count}}d",
-                    count: Math.max(0, card.interval_days)
-                  })}
+                  {formatFlashcardReviewGap(card, t, { compact: true })}
                 </Text>
               </div>
               <div>
@@ -856,8 +853,8 @@ export const FlashcardEditDrawer: React.FC<FlashcardEditDrawerProps> = ({
             </Text>
             <Text className="block">
               {t("option:flashcards.resetSchedulingCurrentInterval", {
-                defaultValue: "Next review gap: {{count}} day(s)",
-                count: Math.max(0, card.interval_days)
+                defaultValue: "Next review gap: {{interval}}",
+                interval: formatFlashcardReviewGap(card, t)
               })}
             </Text>
             <Text className="block">

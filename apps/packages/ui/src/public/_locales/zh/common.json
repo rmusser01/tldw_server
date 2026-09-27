@@ -1261,5 +1261,17 @@
   },
   "modelSelect_sort_localFirst": {
     "message": "Local-first"
+  },
+  "help_loadFailed": {
+    "message": "无法加载帮助。请重新连接，保存修改，然后重新加载页面。"
+  },
+  "help_loading": {
+    "message": "正在加载帮助…"
+  },
+  "help_confirmReload": {
+    "message": "重新加载此页面？未保存的修改可能会丢失。"
+  },
+  "help_reload": {
+    "message": "重新加载页面"
   }
 }

@@ -1,11 +1,16 @@
 import React from "react"
 import { describe, expect, it, beforeEach, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import {
   createInitialQuickIngestLastRunSummary,
   useQuickIngestStore
 } from "@/store/quick-ingest"
+import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
+
+import { useMilestoneStore } from "@/store/milestones"
+const identity = vi.hoisted(() => ({ scope: "server-a:alice" as string | null }))
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => identity.scope }))
 
 const mocks = vi.hoisted(() => ({
   startQuickIngestSession: vi.fn(),
@@ -106,6 +111,7 @@ vi.mock("@/services/tldw", () => ({
 }))
 
 vi.mock("@/services/tldw/quick-ingest-batch", () => ({
+  getQuickIngestAnalysisProviderWarning: () => null,
   startQuickIngestSession: (...args: unknown[]) => mocks.startQuickIngestSession(...args),
   cancelQuickIngestSession: (...args: unknown[]) => mocks.cancelQuickIngestSession(...args),
   submitQuickIngestBatch: (...args: unknown[]) => mocks.submitQuickIngestBatch(...args)
@@ -194,9 +200,19 @@ const deferred = <T,>() => {
 
 describe("QuickIngestModal session cancel flow", () => {
   beforeEach(() => {
+    sessionStorage.clear()
+    useQuickIngestSessionStore.getState().setAuthority(null)
+    useQuickIngestSessionStore.setState({
+      session: null,
+      triggerSummary: { count: 0, label: null, hadFailure: false }
+    })
+    useQuickIngestSessionStore.getState().setAuthority("quick-ingest-test-owner")
+    useQuickIngestSessionStore.getState().createDraftSession()
     mocks.runtimeListeners.splice(0, mocks.runtimeListeners.length)
     mocks.startQuickIngestSession.mockReset()
     mocks.cancelQuickIngestSession.mockReset()
+    identity.scope = "server-a:alice"
+    useMilestoneStore.getState().resetMilestones()
     mocks.submitQuickIngestBatch.mockReset()
     mocks.confirmDanger.mockReset()
     mocks.tabsCreate.mockReset()
@@ -223,6 +239,28 @@ describe("QuickIngestModal session cancel flow", () => {
       hadRecentFailure: false,
       lastRunSummary: createInitialQuickIngestLastRunSummary()
     }))
+  })
+
+  it.each([
+    { status: "ok", mediaId: 42, credited: true, storeRemote: true },
+    { status: "ok", mediaId: 42, credited: false, storeRemote: false },
+    { status: "ok", mediaId: undefined, credited: false },
+    { status: "error", mediaId: 42, credited: false }
+  ])("records saved ingestion only for original owner: $status/$mediaId", async ({ status, mediaId, credited, storeRemote = true }) => {
+    mocks.storageValues.set("quickIngestPreset", "custom")
+    mocks.storageValues.set("quickIngestStoreRemote", storeRemote)
+    const user = userEvent.setup()
+    const view = render(<QuickIngestModal open onClose={vi.fn()} />)
+    await user.click(screen.getByTestId("quick-ingest-run"))
+    await waitFor(() => expect(mocks.startQuickIngestSession).toHaveBeenCalledTimes(1))
+    identity.scope = "server-a:bob"
+    view.rerender(<QuickIngestModal open onClose={vi.fn()} />)
+    await act(async () => { emitRuntimeMessage({
+      type: "tldw:quick-ingest/completed",
+      payload: { sessionId: "qi-test-session", results: [{ id: "saved", status, type: "document", url: "https://example.com/article", data: { media_id: mediaId } }] }
+    }) })
+    expect(useMilestoneStore.getState().scopedMilestones["server-a:alice"]?.first_ingest != null).toBe(credited)
+    expect(useMilestoneStore.getState().scopedMilestones["server-a:bob"]?.first_ingest).toBeUndefined()
   })
 
   it("starts with session ack and ignores events from other session ids", async () => {

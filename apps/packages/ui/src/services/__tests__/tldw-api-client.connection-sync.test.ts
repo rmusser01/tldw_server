@@ -10,8 +10,15 @@ const mocks = vi.hoisted(() => ({
   sessionStorage: new Map<string, unknown>(),
   failDeviceWrite: false,
   failSessionWrite: false,
-  failClearWrite: false
+  failClearWrite: false,
+  beforeLocalConfigWrite: null as null | (() => void),
+  beforeServerUrlWrite: null as null | (() => Promise<void>),
+  afterLocalRead: null as null | ((key: string) => Promise<void>),
+  afterInvalidationWrite: null as null | (() => void),
+  apiSend: vi.fn()
 }))
+
+vi.mock("@/services/api-send", () => ({ apiSend: (...args: unknown[]) => mocks.apiSend(...args) }))
 
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: (...args: unknown[]) => mocks.bgRequest(...args),
@@ -32,8 +39,15 @@ vi.mock("@/utils/safe-storage", () => ({
           ? mocks.storage
           : mocks.syncStorage
     return {
-      get: vi.fn(async (key: string) => values.get(key)),
+      get: vi.fn(async (key: string) => {
+        const value = values.get(key)
+        if (options?.area === "local") await mocks.afterLocalRead?.(key)
+        return value
+      }),
       set: vi.fn(async (key: string, value: unknown) => {
+        if (options?.area === "local" && key === "tldwServerUrl") {
+          await mocks.beforeServerUrlWrite?.()
+        }
         if (
           options?.area === "session" &&
           mocks.failSessionWrite &&
@@ -57,7 +71,15 @@ vi.mock("@/utils/safe-storage", () => ({
         ) {
           throw new Error("persistent clear unavailable")
         }
+        if (options?.area === "local" && key === "tldwConfig") {
+          const beforeWrite = mocks.beforeLocalConfigWrite
+          mocks.beforeLocalConfigWrite = null
+          beforeWrite?.()
+        }
         values.set(key, value)
+        if (options?.area === "local" && key.startsWith("tldwInvalidRefreshSession:")) {
+          mocks.afterInvalidationWrite?.()
+        }
       }),
       remove: vi.fn(async (key: string) => {
         values.delete(key)
@@ -70,7 +92,13 @@ vi.mock("@/utils/safe-storage", () => ({
   }
 }))
 
-import { TldwApiClient } from "@/services/tldw/TldwApiClient"
+import {
+  TldwApiClient,
+  tldwClient
+} from "@/services/tldw/TldwApiClient"
+import { TldwAuthService } from "@/services/tldw/TldwAuth"
+import { useConnectionStore } from "@/store/connection"
+import { ConnectionPhase } from "@/types/connection"
 
 describe("TldwApiClient connection storage sync", () => {
   beforeEach(() => {
@@ -84,7 +112,92 @@ describe("TldwApiClient connection storage sync", () => {
     mocks.failDeviceWrite = false
     mocks.failSessionWrite = false
     mocks.failClearWrite = false
+    mocks.beforeLocalConfigWrite = null
+    mocks.beforeServerUrlWrite = null
+    mocks.afterLocalRead = null
+    mocks.afterInvalidationWrite = null
+    mocks.apiSend.mockReset()
     window.localStorage.clear()
+  })
+
+  it("invalidates rejected refresh credentials across cached clients and gates private readiness queries", async () => {
+    const config = {
+      serverUrl: "https://api.example.test", authMode: "multi-user" as const,
+      accessToken: "expired-access", refreshToken: "expired-refresh"
+    }
+    await tldwClient.updateConfig(config)
+    const otherTabClient = new TldwApiClient()
+    expect(await otherTabClient.getConfig()).toMatchObject(config)
+    useConnectionStore.setState(({ state }) => ({ state: {
+      ...state, phase: ConnectionPhase.CONNECTED, isConnected: true, offlineBypass: false
+    } }))
+    mocks.bgRequest.mockRejectedValue(Object.assign(new Error("Invalid refresh"), { status: 401 }))
+
+    await expect(new TldwAuthService().refreshToken()).rejects.toMatchObject({ status: 401 })
+
+    expect(await tldwClient.getConfig()).not.toHaveProperty("accessToken")
+    expect(await otherTabClient.getConfig()).not.toHaveProperty("refreshToken")
+    expect(useConnectionStore.getState().state.isConnected).toBe(false)
+    mocks.apiSend.mockClear()
+    await useConnectionStore.getState().checkOnce({ force: true })
+    expect(mocks.apiSend.mock.calls.map(([request]) => request.path)).not.toContain("/api/v1/auth/sessions")
+
+    await tldwClient.updateConfig({ accessToken: "new-login-access", refreshToken: "new-login-refresh" })
+    expect(await tldwClient.getConfig()).toMatchObject({ accessToken: "new-login-access", refreshToken: "new-login-refresh" })
+  })
+
+  it("keeps credentials and connection authority when refresh is temporarily unavailable", async () => {
+    await tldwClient.updateConfig({
+      serverUrl: "https://api.example.test", authMode: "multi-user",
+      accessToken: "current-access", refreshToken: "valid-refresh"
+    })
+    useConnectionStore.setState(({ state }) => ({ state: {
+      ...state, phase: ConnectionPhase.CONNECTED, isConnected: true
+    } }))
+    mocks.bgRequest.mockRejectedValue(Object.assign(new Error("Busy"), { status: 503 }))
+    await expect(new TldwAuthService().refreshToken()).rejects.toMatchObject({ status: 503 })
+    expect(await tldwClient.getConfig()).toMatchObject({ accessToken: "current-access", refreshToken: "valid-refresh" })
+    expect(useConnectionStore.getState().state.isConnected).toBe(true)
+  })
+
+  it("preserves a newer login and its refresh timer when the old invalidation read finishes late", async () => {
+    await tldwClient.updateConfig({
+      serverUrl: "https://api.example.test", authMode: "multi-user",
+      accessToken: "old-access", refreshToken: "old-refresh", orgId: 1
+    })
+    let finishRead: () => void = () => {}
+    let readStarted = false
+    mocks.afterInvalidationWrite = () => {
+      mocks.afterInvalidationWrite = null
+      mocks.afterLocalRead = key => {
+        if (key !== "tldwConfig") return Promise.resolve()
+        mocks.afterLocalRead = null
+        readStarted = true
+        return new Promise(resolve => { finishRead = resolve })
+      }
+    }
+    mocks.bgRequest.mockImplementation(async ({ path }) => {
+      if (path === "/api/v1/auth/refresh") throw Object.assign(new Error("Invalid refresh"), { status: 401 })
+      if (path === "/api/v1/auth/login") return { access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600 }
+      return { items: [{ id: 1 }] }
+    })
+    const auth = new TldwAuthService()
+    const pending = auth.refreshToken().catch(error => error)
+    await vi.waitFor(() => expect(readStarted).toBe(true))
+    await auth.login({ username: "new-user", password: "synthetic-test-password" })
+    useConnectionStore.setState(({ state }) => ({ state: { ...state, isConnected: true, phase: ConnectionPhase.CONNECTED } }))
+    const clearTimer = vi.spyOn(globalThis, "clearTimeout")
+    try {
+      finishRead()
+      await pending
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(await tldwClient.getConfig()).toMatchObject({ accessToken: "new-access", refreshToken: "new-refresh" })
+      expect(useConnectionStore.getState().state.isConnected).toBe(true)
+      expect(clearTimer).not.toHaveBeenCalled()
+    } finally {
+      clearTimer.mockRestore()
+      await auth.logout()
+    }
   })
 
   it("mirrors saved server URLs into the WebUI bootstrap host key", async () => {
@@ -108,6 +221,75 @@ describe("TldwApiClient connection storage sync", () => {
     expect(mocks.syncStorage.has("tldwConfig")).toBe(false)
   })
 
+  it("publishes only an authority-change flag and keeps same-principal refresh benign", async () => {
+    const client = new TldwApiClient()
+    const details: unknown[] = []
+    const capture = (event: Event) => details.push((event as CustomEvent).detail)
+    window.addEventListener("tldw:config-updated", capture)
+    try {
+      await client.updateConfig({ serverUrl: "https://server.test", authMode: "multi-user", accessToken: "e30.eyJzdWIiOiJhbGljZSJ9.sig" })
+      await client.updateConfig({ accessToken: "e30.eyJzdWIiOiJhbGljZSIsImlhdCI6Mn0.sig" })
+      await client.updateConfig({ accessToken: "e30.eyJzdWIiOiJib2IifQ.sig" })
+      await client.updateConfig({ accessToken: undefined, refreshToken: undefined })
+    } finally {
+      window.removeEventListener("tldw:config-updated", capture)
+    }
+    expect(details).toEqual([
+      { authorityChanged: true }, { authorityChanged: false },
+      { authorityChanged: false },
+      { authorityChanged: true }, { authorityChanged: false },
+      { authorityChanged: true }, { authorityChanged: false }
+    ])
+  })
+
+  it("preserves authority when saving the same manual key with different persistence", async () => {
+    const client = new TldwApiClient()
+    await client.saveManualSingleUserCredential({ serverUrl: "https://server.test", apiKey: "same-key", persistence: "device" })
+    const capture = vi.fn()
+    window.addEventListener("tldw:config-updated", capture)
+    try {
+      await client.saveManualSingleUserCredential({ serverUrl: "https://server.test", apiKey: "same-key", persistence: "session" })
+      expect(capture.mock.calls.at(-1)?.[0].detail).toEqual({ authorityChanged: false })
+    } finally {
+      window.removeEventListener("tldw:config-updated", capture)
+    }
+  })
+
+  it.each(["single-user", "multi-user"] as const)("invalidates %s authority at activation before URL synchronization completes", async (authMode) => {
+    const before = {
+      serverUrl: "https://server-a.test", authMode,
+      ...(authMode === "single-user" ? { apiKey: "key-a" } : { accessToken: "e30.eyJzdWIiOiJhbGljZSJ9.sig" })
+    }
+    await tldwClient.updateConfig(before)
+    useConnectionStore.setState(({ state }) => ({ state: {
+      ...state, phase: ConnectionPhase.CONNECTED, isConnected: true, isChecking: false,
+      mode: "normal", offlineBypass: false, lastCheckedAt: 0,
+      knowledgeStatus: "ready", knowledgeLastCheckedAt: Date.now()
+    } }))
+    let finishOldProbe: (value: unknown) => void = () => {}
+    mocks.apiSend.mockImplementationOnce(() => new Promise((resolve) => { finishOldProbe = resolve }))
+    const oldCheck = useConnectionStore.getState().checkOnce({ force: true })
+    await vi.waitFor(() => expect(mocks.apiSend).toHaveBeenCalledTimes(1))
+    let finishSync: () => void = () => {}
+    let syncStarted = false
+    mocks.beforeServerUrlWrite = () => new Promise<void>((resolve) => { syncStarted = true; finishSync = resolve })
+    const update = tldwClient.updateConfig({
+      serverUrl: "https://server-b.test", authMode,
+      ...(authMode === "single-user" ? { apiKey: "key-b" } : { accessToken: "e30.eyJzdWIiOiJib2IifQ.sig" })
+    })
+    await vi.waitFor(() => expect(syncStarted).toBe(true))
+    const activatedServer = (await tldwClient.getConfig())?.serverUrl
+    const connectedDuringSync = useConnectionStore.getState().state.isConnected
+    finishOldProbe({ ok: true, status: 200, data: {} })
+    await oldCheck
+    const connectedAfterOldProbe = useConnectionStore.getState().state.isConnected
+    finishSync()
+    await update
+    expect(activatedServer).toBe("https://server-b.test")
+    expect(connectedDuringSync).toBe(false)
+    expect(connectedAfterOldProbe).toBe(false)
+  })
+
   it("clears mirrored server URLs when the saved URL is removed", async () => {
     const client = new TldwApiClient()
 
@@ -120,6 +302,175 @@ describe("TldwApiClient connection storage sync", () => {
 
     expect(mocks.storage.has("tldwServerUrl")).toBe(false)
     expect(window.localStorage.getItem("tldw-api-host")).toBeNull()
+  })
+
+  it("makes a scoped rotation inert when logout clears tokens", async () => {
+    mocks.storage.set("tldwConfig", {
+      serverUrl: "https://api.example.test",
+      authMode: "multi-user",
+      authSource: "manual",
+      accessToken: "raw-access",
+      refreshToken: "raw-refresh"
+    })
+    mocks.storage.set("tldwRefreshRotation", {
+      version: 1,
+      serverUrl: "https://api.example.test",
+      authMode: "multi-user",
+      authSource: "manual",
+      sourceAccessToken: "raw-access",
+      sourceRefreshToken: "raw-refresh",
+      rotatedFromRefreshToken: "raw-refresh",
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh"
+    })
+    const client = new TldwApiClient()
+    await client.initialize()
+
+    await client.updateConfig({
+      accessToken: undefined,
+      refreshToken: undefined
+    })
+
+    expect(mocks.storage.has("tldwRefreshRotation")).toBe(true)
+    expect(mocks.storage.get("tldwConfig")).toMatchObject({
+      accessToken: undefined,
+      refreshToken: undefined
+    })
+    await expect(client.getConfig()).resolves.toMatchObject({
+      accessToken: undefined,
+      refreshToken: undefined
+    })
+  })
+
+  it("consumes a scoped rotation before persisting an unrelated config update", async () => {
+    const rawConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "multi-user" as const,
+      authSource: "manual" as const,
+      accessToken: "raw-access",
+      refreshToken: "raw-refresh"
+    }
+    mocks.storage.set("tldwConfig", rawConfig)
+    const client = new TldwApiClient()
+    await client.initialize()
+    mocks.storage.set("tldwRefreshRotation", {
+      version: 1,
+      serverUrl: rawConfig.serverUrl,
+      authMode: rawConfig.authMode,
+      authSource: rawConfig.authSource,
+      sourceAccessToken: rawConfig.accessToken,
+      sourceRefreshToken: rawConfig.refreshToken,
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh"
+    })
+
+    await client.updateConfig({ orgId: 9 })
+
+    expect(mocks.storage.get("tldwConfig")).toMatchObject({
+      orgId: 9,
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh"
+    })
+    expect(mocks.storage.has("tldwRefreshRotation")).toBe(true)
+  })
+
+  it("preserves a concurrent rotation racing an unrelated config write", async () => {
+    const rawConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "multi-user" as const,
+      authSource: "manual" as const,
+      orgId: 9,
+      accessToken: "raw-access",
+      refreshToken: "raw-refresh"
+    }
+    mocks.storage.set("tldwConfig", rawConfig)
+    const client = new TldwApiClient()
+    await client.initialize()
+    mocks.beforeLocalConfigWrite = () => {
+      mocks.storage.set("tldwRefreshRotation", {
+        version: 1,
+        serverUrl: rawConfig.serverUrl,
+        authMode: rawConfig.authMode,
+        authSource: rawConfig.authSource,
+        orgId: rawConfig.orgId,
+        sourceAccessToken: rawConfig.accessToken,
+        sourceRefreshToken: rawConfig.refreshToken,
+        accessToken: "rotated-access",
+        refreshToken: "rotated-refresh"
+      })
+    }
+
+    await client.updateConfig({
+      serverUrl: rawConfig.serverUrl,
+      authMode: rawConfig.authMode,
+      orgId: rawConfig.orgId,
+      requestTimeoutMs: 12_000
+    } as Partial<Parameters<TldwApiClient["updateConfig"]>[0]>)
+
+    expect(mocks.storage.has("tldwRefreshRotation")).toBe(true)
+    await expect(client.getConfig()).resolves.toMatchObject({
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh",
+      requestTimeoutMs: 12_000
+    })
+  })
+
+  it("reloads a scoped rotation before returning current config", async () => {
+    const rawConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "multi-user" as const,
+      authSource: "manual" as const,
+      accessToken: "raw-access",
+      refreshToken: "raw-refresh"
+    }
+    mocks.storage.set("tldwConfig", rawConfig)
+    const client = new TldwApiClient()
+    await client.initialize()
+    mocks.storage.set("tldwRefreshRotation", {
+      version: 1,
+      serverUrl: rawConfig.serverUrl,
+      authMode: rawConfig.authMode,
+      authSource: rawConfig.authSource,
+      sourceAccessToken: rawConfig.accessToken,
+      sourceRefreshToken: rawConfig.refreshToken,
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh"
+    })
+    await expect(client.getConfig()).resolves.toMatchObject({
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh"
+    })
+  })
+
+  it("reloads a scoped rotation for cached auth-header consumers", async () => {
+    const rawConfig = {
+      serverUrl: "https://api.example.test",
+      authMode: "multi-user" as const,
+      authSource: "manual" as const,
+      accessToken: "raw-access",
+      refreshToken: "raw-refresh"
+    }
+    mocks.storage.set("tldwConfig", rawConfig)
+    await tldwClient.initialize()
+    await expect(tldwClient.getConfig()).resolves.toMatchObject({
+      accessToken: "raw-access"
+    })
+    mocks.storage.set("tldwRefreshRotation", {
+      version: 1,
+      serverUrl: rawConfig.serverUrl,
+      authMode: rawConfig.authMode,
+      authSource: rawConfig.authSource,
+      sourceAccessToken: rawConfig.accessToken,
+      sourceRefreshToken: rawConfig.refreshToken,
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh"
+    })
+
+    const headers = new Headers(await new TldwAuthService().getAuthHeaders())
+    expect(headers.get("Authorization")).toBe("Bearer rotated-access")
+    await expect(tldwClient.getConfig()).resolves.toMatchObject({
+      refreshToken: "rotated-refresh"
+    })
   })
 
   it("migrates legacy sync config into device-local storage", async () => {
@@ -225,36 +576,32 @@ describe("TldwApiClient connection storage sync", () => {
     })
   })
 
-  it("uses the in-memory WebUI config for chat creation", async () => {
+  it("routes chat creation through the scoped request proxy", async () => {
     const client = new TldwApiClient()
     await client.updateConfig({
       serverUrl: "http://127.0.0.1:8000",
       authMode: "single-user",
       apiKey: "test-api-key"
     })
-    mocks.tldwRequest.mockResolvedValue({
-      ok: true,
-      status: 201,
-      data: { id: "thread-1", title: "Knowledge thread" }
+    mocks.bgRequest.mockResolvedValue({
+      id: "thread-1",
+      title: "Knowledge thread"
     })
 
     await expect(
       client.createChat({ title: "Knowledge thread", source: "knowledge_qa" })
     ).resolves.toMatchObject({ id: "thread-1", title: "Knowledge thread" })
 
-    expect(mocks.bgRequest).not.toHaveBeenCalled()
-    expect(mocks.tldwRequest).toHaveBeenCalledTimes(1)
-    const [request, runtime] = mocks.tldwRequest.mock.calls[0]
-    expect(request).toMatchObject({
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
       path: "/api/v1/chats/",
       method: "POST",
-      body: { title: "Knowledge thread", source: "knowledge_qa" }
-    })
-    await expect(runtime.getConfig()).resolves.toMatchObject({
-      serverUrl: "http://127.0.0.1:8000",
-      authMode: "single-user",
-      apiKey: "test-api-key"
-    })
+      body: expect.objectContaining({
+        title: "Knowledge thread",
+        source: "knowledge_qa"
+      })
+    }))
+    expect(mocks.tldwRequest).not.toHaveBeenCalled()
   })
 
   it("uses the in-memory WebUI config for RAG search", async () => {

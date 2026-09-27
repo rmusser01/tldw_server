@@ -28,25 +28,57 @@ from .credential_grants import (
     GatewayCredentialGrantManager,
 )
 from .lifecycle import GatewayExternalRuntimeLifecycleConfig
-from .profile_runtime import ProfileAwareGatewayRuntime
-from .profile_governance import (
-    AllowPermissionChangeGovernor,
-    PermissionChangeDecision,
-    PermissionChangeGovernor,
-    PermissionChangeRequest,
-)
 from .policy_explain import (
     GatewayPolicyExplainError,
     GatewayPolicyExplainService,
     PolicyExplainRequest,
     ProfileToolPreviewRequest,
 )
+from .profile_governance import (
+    AllowPermissionChangeGovernor,
+    PermissionChangeDecision,
+    PermissionChangeGovernor,
+    PermissionChangeRequest,
+)
+from .profile_runtime import ProfileAwareGatewayRuntime
 from .profiles import (
     GatewayProfileManagementError,
     GatewayProfileManager,
     GatewayProfileStoreMetadata,
 )
-from .runtime import GatewayPolicyDenied, GatewayRequestContext, GatewayRuntime
+from .protocol_cancellation import GatewayCancellationToken
+from .protocol_connection import GatewayProtocolConnection
+from .protocol_errors import (
+    GatewayApplicationError,
+    GatewayInvalidApplicationResult,
+    GatewayResourceNotFound,
+    GatewayResultTooLarge,
+    GatewayToolExecutionError,
+)
+from .protocol_limits import GatewayLimits
+from .protocol_profiles import (
+    CURRENT_PROTOCOL_VERSION,
+    PREFERRED_LEGACY_PROTOCOL_VERSION,
+    PROTOCOL_PROFILES,
+    SUPPORTED_LEGACY_PROTOCOL_VERSIONS,
+    SUPPORTED_MODERN_PROTOCOL_VERSIONS,
+    SUPPORTED_PROTOCOL_VERSIONS,
+    GatewayProtocolProfile,
+)
+from .protocol_stdio import (
+    GatewayAsyncByteReader,
+    GatewayAsyncByteWriter,
+    GatewayProtocolStdioServer,
+    serve_stdio,
+)
+from .runtime import (
+    GatewayCoreRuntime,
+    GatewayJSONValue,
+    GatewayPolicyDenied,
+    GatewayRequestContext,
+    GatewayResourceTemplateRuntime,
+    GatewayRuntime,
+)
 from .stdio import GatewayStdioServer, handle_stdio_line
 from .tool_use_reporting import ToolUseReportingGatewayRuntime
 
@@ -60,7 +92,27 @@ if TYPE_CHECKING:
     from .fastapi import create_gateway_app, create_gateway_router
 
 __all__ = [
+    "CURRENT_PROTOCOL_VERSION",
+    "PREFERRED_LEGACY_PROTOCOL_VERSION",
+    "PROTOCOL_PROFILES",
+    "SUPPORTED_LEGACY_PROTOCOL_VERSIONS",
+    "SUPPORTED_MODERN_PROTOCOL_VERSIONS",
+    "SUPPORTED_PROTOCOL_VERSIONS",
+    "GatewayApplicationError",
+    "GatewayAsyncByteReader",
+    "GatewayAsyncByteWriter",
+    "GatewayCancellationToken",
+    "GatewayCoreRuntime",
+    "GatewayInvalidApplicationResult",
+    "GatewayJSONValue",
+    "GatewayLimits",
     "GatewayPolicyDenied",
+    "GatewayProtocolConnection",
+    "GatewayProtocolProfile",
+    "GatewayProtocolStdioServer",
+    "GatewayResourceNotFound",
+    "GatewayResourceTemplateRuntime",
+    "GatewayResultTooLarge",
     "GatewayAdminAuthBootstrapConfig",
     "GatewayAdminAuthConfig",
     "GatewayAdminAuthError",
@@ -83,6 +135,7 @@ __all__ = [
     "GatewayRequestContext",
     "GatewayRuntime",
     "GatewayStdioServer",
+    "GatewayToolExecutionError",
     "GatewayProfileStoreConfig",
     "GatewayProfileStoreKind",
     "GatewayToolUseReportingConfig",
@@ -105,6 +158,7 @@ __all__ = [
     "credential_grant_manager_from_storage",
     "handle_stdio_line",
     "load_gateway_profile_bootstrap_config",
+    "serve_stdio",
 ]
 
 

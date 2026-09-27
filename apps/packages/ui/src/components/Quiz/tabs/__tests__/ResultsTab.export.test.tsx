@@ -5,6 +5,8 @@ import { ResultsTab } from "../ResultsTab"
 import {
   useAllAttemptsQuery,
   useAttemptQuery,
+  useAttemptRemediationConversionsQuery,
+  useConvertAttemptRemediationQuestionsMutation,
   useGenerateRemediationQuizMutation,
   useQuizAttemptQuestionAssistantQuery,
   useQuizAttemptQuestionAssistantRespondMutation,
@@ -56,6 +58,8 @@ vi.mock("../../hooks", () => ({
   useAllAttemptsQuery: vi.fn(),
   useQuizzesQuery: vi.fn(),
   useAttemptQuery: vi.fn(),
+  useAttemptRemediationConversionsQuery: vi.fn(),
+  useConvertAttemptRemediationQuestionsMutation: vi.fn(),
   useGenerateRemediationQuizMutation: vi.fn(),
   useQuizAttemptQuestionAssistantQuery: vi.fn(),
   useQuizAttemptQuestionAssistantRespondMutation: vi.fn()
@@ -132,6 +136,20 @@ describe("ResultsTab CSV export", () => {
       isLoading: false,
       isFetching: false
     } as any)
+    vi.mocked(useAttemptRemediationConversionsQuery).mockReturnValue({
+      data: {
+        attempt_id: 0,
+        items: [],
+        count: 0,
+        superseded_count: 0
+      },
+      isLoading: false,
+      isFetching: false
+    } as ReturnType<typeof useAttemptRemediationConversionsQuery>)
+    vi.mocked(useConvertAttemptRemediationQuestionsMutation).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false
+    } as ReturnType<typeof useConvertAttemptRemediationQuestionsMutation>)
     vi.mocked(useGenerateRemediationQuizMutation).mockReturnValue({
       mutateAsync: vi.fn(),
       isPending: false

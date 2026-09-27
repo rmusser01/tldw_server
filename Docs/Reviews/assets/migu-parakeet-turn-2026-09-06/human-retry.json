@@ -1,0 +1,25 @@
+{
+  "revision": "cdf099fff7e08fde1596ec73b98b2af4cfc8db62",
+  "source_hashes": {
+    "tldw_Server_API/app/core/Persona/turn_transcriber.py": "4a5e95fb199166617ff6b95be4b5d5f6b1099d952b66cd5d4dc447b1526ee5d3",
+    "tldw_Server_API/app/core/Persona/parakeet_transcriber.py": "c1fe60b844a623cae3ef07a92bc6262d2e20cc61037017efcb15a8c976fe10bb",
+    "tldw_Server_API/app/core/Persona/live_stt.py": "a113fadcb10237675691bea9c132f984ed0a1af3dcef4a050ddc1c9934fbba11"
+  },
+  "session_id": "13b398f1-febc-4199-8453-5145f6e26211",
+  "stt": "parakeet-onnx",
+  "requested_phrase": "Say the blue notebook is ready",
+  "observed_heard_and_sent": "See the blue notebook is ready.",
+  "observed_reply": "I see the blue notebook is ready.",
+  "tts_chunks": 4,
+  "final_ui_state": "idle",
+  "human_spoken_word_confirmation": "Say the blue notebook is ready",
+  "human_audible_confirmation": "Yes, clearly; it stopped afterward",
+  "floating_intermediate_states_observed": false,
+  "exact_transcription_acceptance": false,
+  "repeated_fragments_observed": false,
+  "remaining_substitution": {
+    "spoken": "Say",
+    "recognized": "See",
+    "cause": "unqualified; no retained human audio"
+  }
+}

@@ -275,6 +275,30 @@ export const TtsClipsDrawer: React.FC<TtsClipsDrawerProps> = ({ open, onClose })
                       {clip.provider}
                     </Tag>
                   )}
+                  {clip.requestedBackend && (
+                    <Tag className="!text-[10px]">
+                      {t("playground:ttsClips.requestedBackend", {
+                        backend: clip.requestedBackend,
+                        defaultValue: "Requested {{backend}}"
+                      })}
+                    </Tag>
+                  )}
+                  {clip.actualBackends?.length ? (
+                    <Tag color="cyan" className="!text-[10px]">
+                      {t("playground:ttsClips.actualBackend", {
+                        backend: clip.actualBackends.join(", "),
+                        defaultValue: "Actual {{backend}}"
+                      })}
+                    </Tag>
+                  ) : null}
+                  {clip.fallbackUsed ? (
+                    <Tag color="orange" className="!text-[10px]">
+                      {t(
+                        "playground:ttsClips.fallbackUsed",
+                        "Fallback used"
+                      )}
+                    </Tag>
+                  ) : null}
                   {clip.voice && (
                     <Tag color="purple" className="!text-[10px]">
                       {clip.voice}

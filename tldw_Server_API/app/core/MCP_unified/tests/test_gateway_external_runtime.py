@@ -1987,3 +1987,17 @@ async def test_external_runtime_installer_operation_failures_are_wrapped(
             expected_function,
         ]
     assert "do-not-leak" not in json.dumps(fake_logger.error_calls, sort_keys=True)
+
+
+def test_runtime_signature_detects_header_changes() -> None:
+    """A headers-only change must alter the reconcile signature so patched tokens restart transports."""
+    base = ExternalServerDefinition(
+        id="linear",
+        name="Linear",
+        transport="streamable_http",
+        url="https://mcp.linear.example.test/mcp",
+        headers={"Authorization": "Bearer old"},
+    )
+    rotated = base.model_copy(update={"headers": {"Authorization": "Bearer new"}})
+    assert GatewayExternalRuntimeManager._definition_changed(base, rotated)
+    assert not GatewayExternalRuntimeManager._definition_changed(base, base.model_copy(deep=True))

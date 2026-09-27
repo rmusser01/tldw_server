@@ -1,0 +1,35 @@
+{
+  "revision": "f69612169876aec39e4bbffdadf01bc5deba90de",
+  "selection": "parakeet-onnx",
+  "persona_id": "e19c631e-e2ac-452d-9935-293af03cee4e",
+  "session_id": "6ff78e9f-4892-42be-9271-d8f6ca2471f6",
+  "attempts": [
+    {
+      "observed_input": "unrelated narration",
+      "action": "Stop voice before provider submission",
+      "floating_states": [
+        "listening",
+        "idle"
+      ],
+      "image_complete": true,
+      "natural_width": 96,
+      "silence_status_markers_after_stop": 7
+    },
+    {
+      "observed_input": "silence",
+      "user_confirmation": "No, I missed that window",
+      "action": "Stop voice before provider submission",
+      "floating_states": [
+        "listening",
+        "idle"
+      ],
+      "image_complete": true,
+      "natural_width": 96,
+      "silence_status_markers_after_stop": 40
+    }
+  ],
+  "provider_submitted": false,
+  "audio_playback_tested": false,
+  "microphone_stopped": true,
+  "remaining_acceptance": "intentional spoken phrase, real provider reply, audible Kokoro, floating thinking/speaking/idle"
+}

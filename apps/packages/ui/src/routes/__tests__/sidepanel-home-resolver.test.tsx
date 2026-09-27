@@ -45,7 +45,13 @@ describe("SidepanelHomeResolver", () => {
       </MemoryRouter>
     )
 
-    expect(await screen.findByTestId("sidepanel-chat-root")).toBeInTheDocument()
+    // First use of the lazy chat chunk: the dynamic import can exceed the 1s
+    // default wait when the machine is under load, so give it headroom.
+    expect(
+      await screen.findByTestId("sidepanel-chat-root", undefined, {
+        timeout: 15_000
+      })
+    ).toBeInTheDocument()
   })
 
   it("renders Companion Home from sidepanel / when no resumable chat exists", async () => {
@@ -57,7 +63,12 @@ describe("SidepanelHomeResolver", () => {
       </MemoryRouter>
     )
 
-    expect(await screen.findByTestId("sidepanel-companion-root")).toBeInTheDocument()
+    // First use of the lazy companion chunk (see note above).
+    expect(
+      await screen.findByTestId("sidepanel-companion-root", undefined, {
+        timeout: 15_000
+      })
+    ).toBeInTheDocument()
   })
 
   it("renders chat immediately when the route forces chat view", async () => {

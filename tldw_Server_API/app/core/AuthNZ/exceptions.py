@@ -127,7 +127,14 @@ class RegistrationDisabledError(RegistrationError):
 
 class WeakPasswordError(RegistrationError):
     """Password does not meet requirements"""
-    def __init__(self, requirements: Optional[str] = None):
+    def __init__(
+        self,
+        requirements: Optional[str] = None,
+        *,
+        public_requirements: tuple[str, ...] = (),
+    ):
+        """Keep validator-authored, input-free guidance separate from raw details."""
+        self.public_requirements = public_requirements
         message = "Password does not meet security requirements"
         if requirements:
             message = f"{message}: {requirements}"
@@ -199,6 +206,17 @@ class DirectoryCreationError(StorageError):
 class DatabaseError(UserRegistrationException):
     """Base database exception"""
     pass
+
+
+class RollbackSignal(Exception):
+    """Trusted control-flow signal that requires transaction rollback."""
+
+
+class DatabaseConcurrencyConflict(DatabaseError):
+    """Sanitized deadlock or serialization conflict."""
+
+    def __init__(self):
+        super().__init__("Database transaction conflicted. Please retry.")
 
 
 class ConnectionPoolExhaustedError(DatabaseError):

@@ -367,6 +367,7 @@ export function useWritingSessionManagement(deps: UseWritingSessionManagementDep
         if (!pendingPayload || pendingPayload === payload.payload) {
           editorPromptRichRef.current = getPromptRichFromPayload(session.payload)
         }
+        // eslint-disable-next-line react-hooks/purity -- TASK-12116: TanStack invokes this only after the save mutation succeeds; the completion-clock test verifies that boundary.
         setLastSavedAt(Date.now())
         if (!pendingSaveMapRef.current[session.id]) {
           setIsDirty(false)

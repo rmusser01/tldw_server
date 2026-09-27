@@ -85,7 +85,7 @@ describe("AvailableModelsList", () => {
     renderWithQueryClient()
 
     expect(
-      await screen.findByText("No providers available.")
+      await screen.findByText("No models in the catalog.")
     ).toBeInTheDocument()
     expect(
       screen.queryByText("Unable to load models from server")

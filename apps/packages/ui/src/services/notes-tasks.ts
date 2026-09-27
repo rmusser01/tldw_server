@@ -1,6 +1,13 @@
 import { bgRequest } from "@/services/background-proxy"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import { appendPathQuery, toAllowedPath } from "@/services/tldw/path-utils"
+import type { ServicePromptTargetConfig } from "@/services/tldw/TldwApiClient"
+
+type NoteTaskRequestOptions = {
+  servicePromptConfig: ServicePromptTargetConfig
+  abortSignal: AbortSignal
+  headers: Record<string, string>
+}
 
 export type NoteTaskStatus = "open" | "done"
 export type NoteTaskProjectionStatus = "live" | "unlinked" | "ambiguous" | "deleted"
@@ -155,9 +162,11 @@ export const listTasks = async (params: {
 
 export const listNoteTasks = async (
   noteId: string | number,
-  params: { limit?: number } = {}
+  params: { limit?: number } = {},
+  options?: NoteTaskRequestOptions
 ): Promise<NoteTaskListResponse> =>
   bgRequest<NoteTaskListResponse, AllowedPath, "GET">({
+    ...options,
     path: pathWithQuery(`/api/v1/notes/${encodePathId(noteId)}/tasks`, params),
     method: "GET"
   })
@@ -217,8 +226,9 @@ export const reconcileNoteTasks = async (
 export const listTaskActivity = async (params: {
   note_id?: string | number | null
   limit?: number
-} = {}): Promise<NoteTaskActivityListResponse> =>
+} = {}, options?: NoteTaskRequestOptions): Promise<NoteTaskActivityListResponse> =>
   bgRequest<NoteTaskActivityListResponse, AllowedPath, "GET">({
+    ...options,
     path: pathWithQuery("/api/v1/notes/tasks/activity", params),
     method: "GET"
   })

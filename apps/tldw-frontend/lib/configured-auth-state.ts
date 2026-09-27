@@ -1,29 +1,17 @@
-type TldwClientLike = {
-  getConfig: () => Promise<
-    | {
-        authMode?: unknown
-        authSource?: unknown
-        serverUrl?: unknown
-        accessToken?: unknown
-        apiKey?: unknown
-      }
-    | null
-    | undefined
-  >
-}
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 
 type TldwAuthLike = {
   getCurrentUser: () => Promise<unknown>
   logout?: () => Promise<void>
 }
 
-export const loadTldwClient = async (): Promise<TldwClientLike> => {
-  const clientModule = await import("@/services/tldw/TldwApiClient")
-  const candidate = clientModule.tldwClient
-  if (!candidate || typeof candidate.getConfig !== "function") {
-    throw new TypeError("Configured tldw client does not expose getConfig")
-  }
-  return candidate
+/** The shell must observe another tab's login even when the client caches signed-out state. */
+export const loadConfiguredAuthConfig = async (): Promise<TldwConfig | null> => {
+  const [{ resolveDirectBrowserConfig }, { createSafeStorage }] = await Promise.all([
+    import("@/services/tldw/direct-browser-config"),
+    import("@/utils/safe-storage")
+  ])
+  return resolveDirectBrowserConfig(createSafeStorage({ area: "local" }))
 }
 
 export const loadTldwAuth = async (): Promise<TldwAuthLike> => {

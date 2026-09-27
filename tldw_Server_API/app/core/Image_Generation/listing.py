@@ -8,10 +8,10 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Image_Generation.adapter_registry import get_registry
 from tldw_Server_API.app.core.Image_Generation.capabilities import (
     resolve_backend_reference_image_capability,
 )
-from tldw_Server_API.app.core.Image_Generation.adapter_registry import get_registry
 from tldw_Server_API.app.core.Image_Generation.config import get_image_generation_config
 
 _IMAGE_LISTING_NONCRITICAL_EXCEPTIONS = (
@@ -39,7 +39,7 @@ def _is_sd_cpp_configured(cfg, enabled: bool) -> bool:
         return False
     if not _path_exists(cfg.sd_cpp_binary_path):
         return False
-    return bool(_path_exists(cfg.sd_cpp_diffusion_model_path) or _path_exists(cfg.sd_cpp_model_path))
+    return _path_exists(cfg.sd_cpp_diffusion_model_path or cfg.sd_cpp_model_path)
 
 
 def _is_swarmui_configured(cfg, enabled: bool) -> bool:
@@ -97,6 +97,7 @@ def _resolve_supported_formats(name: str) -> list[str] | None:
         return None
     cleaned = {str(v).strip() for v in formats if v and str(v).strip()}
     return sorted(cleaned) if cleaned else None
+
 
 def list_image_models_for_catalog() -> list[dict[str, Any]]:
     cfg = get_image_generation_config()

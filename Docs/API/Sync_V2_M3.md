@@ -25,11 +25,13 @@ M3 adds capability-gated surfaces for:
 The current M3 foundation implements device lifecycle, device authorization,
 device acknowledgments, background policy/leases/status, workspace dataset
 enrollment, workspace/source-cache/media metadata domains, key rotation,
-retention dry-run, guarded retention compaction, and redacted diagnostics.
+retention dry-run, guarded retention compaction, immutable attachment-binding
+release, fenced physical blob deletion, and redacted attachment lifecycle
+diagnostics.
 
 Deferred beyond this foundation: conflict summary and preview-resolution
-endpoints, physical blob byte deletion, destructive envelope audit-log deletion,
-workspace Notes/Chat materialization, broad collaborative content editing,
+endpoints, destructive envelope audit-log deletion, workspace Notes/Chat
+materialization, broad collaborative content editing,
 passphrase/device-key unlock UX, and full client-only encrypted editing.
 
 ## Capabilities
@@ -295,6 +297,7 @@ Records that a device has applied or verified durable state:
   "domain_acks": [
     {
       "domain": "notes.note",
+      "adapter_version": 1,
       "through_server_sequence": 512,
       "applied_at": "2026-05-23T18:45:00Z"
     }
@@ -306,12 +309,25 @@ Records that a device has applied or verified durable state:
       "verified_at": "2026-05-23T18:45:00Z"
     }
   ],
-  "idempotency_key": "ack-dev-phone-512"
+  "blob_id_acks": [
+    {
+      "blob_id": "blob_immutable_1",
+      "payload_hash": "sha256:...",
+      "verified_at": "2026-05-23T18:45:00Z",
+      "idempotency_key": "ack-blob-immutable-1"
+    }
+  ]
 }
 ```
 
 Acknowledgments are required before M3 retention/GC can safely compact or
-delete data for datasets with offline devices.
+delete data for datasets with offline devices. Domain acknowledgments are
+adapter-version scoped and cannot exceed the exact delivered watermark. A
+version-2 attachment requires both a version-2 `attachment.ref` domain
+acknowledgment through its binding cursor and immutable blob-ID/digest evidence;
+legacy attachment-ID evidence does not satisfy this requirement. The batch is
+atomic: any invalid or unauthorized item rolls back every acknowledgment in the
+request. `blob_id_acks` is capped at 800 entries.
 
 ## Workspace Datasets
 
@@ -436,9 +452,13 @@ Candidate types:
   into a future snapshot after all blockers clear.
 - `tombstone_prune`: tombstone envelope that could be pruned after retention
   and audit policy allow it.
+- `binding_release`: historical immutable attachment revision whose audit
+  identity remains but whose monotonic release marker may stop protecting blob
+  bytes once every current-ref, device-ack, restore-window, and hold check clears.
 - `blob_gc`: server blob metadata that could be garbage-collected only after
-  active attachment refs, device verification, restore windows, and audit
-  policy allow it.
+  every unreleased binding for that deduplicated blob is tombstoned or otherwise
+  safe, exact version-2 device evidence exists, restore/audit windows expire,
+  and repair/quarantine holds clear.
 
 Initial blocker codes:
 
@@ -449,6 +469,9 @@ Initial blocker codes:
 - `retention_restore_window_active`
 - `retention_active_blob_reference`
 - `retention_blob_unverified_by_device`
+- `retention_blob_binding_invalid`
+- `retention_blob_delete_retry`
+- `retention_blob_storage_key_not_namespaced`
 
 The dry-run endpoint always reports `mutation_performed=false`.
 
@@ -471,6 +494,7 @@ Request:
   "confirm": true,
   "apply_envelope_compaction": true,
   "apply_tombstone_prune": true,
+  "apply_binding_release": true,
   "apply_blob_gc": true,
   "minimum_envelope_age_seconds": 0,
   "minimum_tombstone_age_seconds": 0,
@@ -505,12 +529,23 @@ Response:
       "candidate_count": 1
     }
   ],
+  "binding_releases": [],
   "blob_gc": []
 }
 ```
 
 Responses are redacted and must not include payloads, ciphertext, wrapped keys,
 blob storage keys, or blob bytes.
+
+Blob GC is physical. Apply re-acquires the dataset materialization fence, locks
+the exact blob row, and rereads current refs, every unreleased binding, device
+negotiation/ack evidence, restore windows, and holds in the same transaction.
+Only then may it atomically fence `available -> deleting`. The storage backend
+deletes the verified namespaced bytes; a second guarded transaction finalizes
+`deleted`. A crash or unlink error leaves `deleting`, returns the stable
+`retention_blob_delete_retry` blocker, and is safely retryable. Upload completion,
+binding creation/resolution/release, and retention share the same dataset fence,
+so stale dry-run candidates cannot delete newly protected bytes.
 
 ### `GET /api/v1/sync/diagnostics`
 
@@ -523,7 +558,8 @@ Returns redacted sync health for users or admins:
 - blob store health;
 - active upload pressure;
 - key recovery and rotation blockers;
-- retention dry-run summary.
+- retention dry-run summary; and
+- bounded Notes attachment lifecycle counts, samples, and recovery descriptors.
 
 Diagnostics must not include private payloads, ciphertext blobs, wrapped keys,
 KDF salts, passphrase metadata beyond algorithm identifiers, or recovery
@@ -535,6 +571,8 @@ Initial query parameters:
 - `device_id` (optional requesting-device context; diagnostics still report
   profile-level device lag)
 - `retention_limit` (optional dry-run scan limit)
+- `attachment_sample_limit` (default `0`, maximum `100` per category)
+- `attachment_total_sample_limit` (default and maximum `500`)
 
 Initial response shape:
 
@@ -590,13 +628,38 @@ Initial response shape:
     "blocker_counts": {
       "retention_audit_mode": 2
     }
+  },
+  "attachment_lifecycle": {
+    "counts": {
+      "registry_live": 1,
+      "binding_total": 2,
+      "available": 1,
+      "deleting": 0,
+      "deleted": 0,
+      "retention_blockers": 1
+    },
+    "samples": [],
+    "recovery_actions": [
+      {
+        "action": "wait_for_retention",
+        "reason_code": "retention_restore_window_active",
+        "target_type": "dataset",
+        "target_id": null,
+        "retryable": true,
+        "requires_confirmation": false
+      }
+    ]
   }
 }
 ```
 
-This first diagnostics endpoint is dataset-scoped and user-visible. Global
-admin/operator aggregation, audit-event search, and destructive retention/GC
-execution remain separate later M3 work.
+Diagnostics are dataset-scoped, owner-authorized, read-only, and bounded. They
+never perform a recovery action; descriptors such as `resume_upload`,
+`repair_projection`, `restore_attachment`, `release_quarantine`, `gc_retry`, or
+`wait_for_retention` are explicit operator/client hints only. Samples expose
+stable IDs and safe codes, never filenames, storage paths/keys, payloads,
+ciphertext, wrapped keys, or secret metadata. Global admin/operator aggregation
+and audit-event search remain separate work.
 
 ## Compatibility Requirements
 

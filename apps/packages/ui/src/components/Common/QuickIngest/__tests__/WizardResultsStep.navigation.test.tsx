@@ -61,6 +61,34 @@ vi.mock("@/hooks/useServerCapabilities", () => ({
 import { WizardResultsStep } from "../WizardResultsStep"
 
 describe("WizardResultsStep navigation buttons", () => {
+  it("shows saved warnings separately from clean success while keeping source navigation", () => {
+    setSinglePdfResult({ warning: "Analysis failed for chunk 1" })
+    const onOpenMedia = vi.fn()
+    const onOpenWorkspace = vi.fn()
+    render(<WizardResultsStep onClose={vi.fn()} onOpenMedia={onOpenMedia} onOpenWorkspace={onOpenWorkspace} onSearchKnowledge={vi.fn()} />)
+    const warnings = screen.getByRole("region", { name: "Items saved with warnings" })
+    expect(within(warnings).getByText("Analysis failed for chunk 1")).toBeVisible()
+    expect(screen.queryByRole("region", { name: "Completed items" })).toBeNull()
+    expect(screen.getByText(/Total: 0 succeeded, 1 saved with warnings.*0 failed/)).toBeVisible()
+    expect(screen.queryByRole("button", { name: /retry/i })).toBeNull()
+    fireEvent.click(within(warnings).getByRole("button", { name: /open .* media/i }))
+    expect(onOpenMedia).toHaveBeenCalledWith(expect.objectContaining({ mediaId: 42 }))
+    fireEvent.click(screen.getByRole("button", { name: "Open document in Document Workspace" }))
+    expect(onOpenWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mediaId: 42 }))
+    expect(screen.getByRole("button", { name: /search your ingested content/i })).toBeVisible()
+  })
+
+  it("keeps saved warnings, unknown failures, and cancelled items separate in a mixed batch", () => {
+    setSinglePdfResult({ warning: "Analysis failed" })
+    wizardHarness.results.push(
+      { id: "failed", status: "error", outcome: "failed", error: "Unrecognized failure", type: "pdf" },
+      { id: "cancelled", status: "error", outcome: "cancelled", error: "Cancelled by user", type: "pdf" },
+    )
+    render(<WizardResultsStep onClose={vi.fn()} onRetryItems={vi.fn()} />)
+    expect(screen.getByText(/Total: 0 succeeded, 1 saved with warnings.*1 failed, 1 cancelled/)).toBeVisible()
+    expect(screen.queryByRole("button", { name: /retry/i })).toBeNull()
+  })
+
   const setSinglePdfResult = (overrides: Partial<WizardResultItem> = {}) => {
     wizardHarness.results = [
       {
@@ -193,6 +221,28 @@ describe("WizardResultsStep navigation buttons", () => {
     render(<WizardResultsStep onClose={vi.fn()} />)
 
     expect(screen.queryByRole("button", { name: /remove/i })).toBeNull()
+  })
+
+  it.each([
+    ["source_access_denied", "Access blocked", false],
+    ["empty_extraction", "No content", false],
+    ["extraction_timeout", "Timeout", true],
+    ["extraction_failed", "Error", false],
+  ] as const)("uses confirmed %s extraction status for guidance and Retry", (code, label, retryable) => {
+    const onRetryItems = vi.fn()
+    wizardHarness.results = [{
+      id: "article", type: "web", status: "error", outcome: "failed",
+      url: "https://example.com/article", error: "Failed to extract article",
+      data: { extraction_failures: [{ code }] },
+    }]
+    render(<WizardResultsStep onClose={vi.fn()} onRetryItems={onRetryItems} />)
+    expect(screen.getAllByText(new RegExp(label)).length).toBeGreaterThan(0)
+    const retryButtons = screen.queryAllByRole("button", { name: /retry/i })
+    expect(retryButtons.length > 0).toBe(retryable)
+    if (retryable) {
+      fireEvent.click(retryButtons[0])
+      expect(onRetryItems).toHaveBeenCalledWith(["article"])
+    }
   })
 
   it("describes local skipped duplicates as already queued", () => {

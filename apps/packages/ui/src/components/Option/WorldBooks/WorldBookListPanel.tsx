@@ -173,6 +173,16 @@ export const WorldBookListPanel: React.FC<WorldBookListPanelProps> = ({
     />
   )
 
+  const scrollableTable = (
+    <div
+      className="min-w-0 max-w-full overflow-x-auto pb-1"
+      role="region"
+      aria-label="World books table"
+    >
+      {tableJsx}
+    </div>
+  )
+
   if (collapsible && selectedWorldBookId != null) {
     const selectedName =
       worldBooks.find((b: any) => b.id === selectedWorldBookId)?.name ||
@@ -183,11 +193,11 @@ export const WorldBookListPanel: React.FC<WorldBookListPanelProps> = ({
           <summary className="cursor-pointer px-3 py-2 text-sm font-medium">
             World Books — {selectedName}
           </summary>
-          <div className="border-t border-border">{tableJsx}</div>
+          <div className="border-t border-border">{scrollableTable}</div>
         </details>
       </nav>
     )
   }
 
-  return <nav aria-label="World books list">{tableJsx}</nav>
+  return <nav aria-label="World books list">{scrollableTable}</nav>
 }

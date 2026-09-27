@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import Form, status
+from fastapi import Form, Request, status
 from loguru import logger
 from pydantic import ValidationError
 
@@ -180,6 +180,7 @@ async def get_process_documents_form(
 
 
 async def get_process_videos_form(
+    request: Request,
     urls: list[str] | None = Form(None),
     title: str | None = Form(None),
     titles: str | None = Form(None),
@@ -221,7 +222,8 @@ async def get_process_videos_form(
     """
     Dependency that parses multipart/form-data into a ProcessVideosForm.
 
-    Used by /media/process-videos (no DB persistence).
+    Used by /media/process-videos (no DB persistence). Explicit empty prompts
+    remain distinct from omission; the canonical provider wins over its alias.
     """
     transcription_model = _resolve_transcription_model_or_default(
         transcription_model,
@@ -231,6 +233,11 @@ async def get_process_videos_form(
     try:
         urls_norm = _coerce_urls(urls)
         title_val = title or titles
+        raw_form = await request.form()
+        if system_prompt is None and raw_form.get("system_prompt") == "":
+            system_prompt = ""
+        if custom_prompt is None and raw_form.get("custom_prompt") == "":
+            custom_prompt = ""
         return ProcessVideosForm(
             urls=urls_norm,
             title=title_val,
@@ -251,7 +258,7 @@ async def get_process_videos_form(
             end_time=end_time,
             api_provider=api_provider,
             model_name=model_name,
-            api_name=api_name,
+            api_name=api_provider or api_name,
             use_cookies=use_cookies,
             cookies=cookies,
             chunk_method=chunk_method,
@@ -272,6 +279,7 @@ async def get_process_videos_form(
 
 
 async def get_process_audios_form(
+    request: Request,
     urls: list[str] | None = Form(None),
     title: str | None = Form(None),
     titles: str | None = Form(None),
@@ -314,6 +322,10 @@ async def get_process_audios_form(
     Dependency that parses multipart/form-data into a ProcessAudiosForm.
 
     Used by /media/process-audios (no DB persistence).
+
+    Explicit empty system/custom prompts remain empty instead of selecting defaults.
+    Canonical api_provider takes precedence over the legacy api_name alias.
+    Returns validated audio options; invalid fields raise HTTP 422.
     """
     transcription_model = _resolve_transcription_model_or_default(
         transcription_model,
@@ -323,6 +335,11 @@ async def get_process_audios_form(
     try:
         urls_norm = _coerce_urls(urls)
         title_val = title or titles
+        raw_form = await request.form()
+        if system_prompt is None and raw_form.get("system_prompt") == "":
+            system_prompt = ""
+        if custom_prompt is None and raw_form.get("custom_prompt") == "":
+            custom_prompt = ""
         return ProcessAudiosForm(
             urls=urls_norm,
             title=title_val,
@@ -343,7 +360,7 @@ async def get_process_audios_form(
             end_time=end_time,
             api_provider=api_provider,
             model_name=model_name,
-            api_name=api_name,
+            api_name=api_provider or api_name,
             use_cookies=use_cookies,
             cookies=cookies,
             chunk_method=chunk_method,
@@ -370,6 +387,8 @@ async def get_process_pdfs_form(
     keywords: str = Form(""),
     custom_prompt: str | None = Form(None),
     system_prompt: str | None = Form(None),
+    api_provider: str | None = Form(None),
+    api_name: str | None = Form(None),
     perform_analysis: bool = Form(True),
     perform_chunking: bool = Form(True),
     summarize_recursively: bool = Form(False),
@@ -414,6 +433,8 @@ async def get_process_pdfs_form(
             keywords=keywords,
             custom_prompt=custom_prompt,
             system_prompt=system_prompt,
+            api_provider=api_provider,
+            api_name=api_provider or api_name,
             perform_analysis=perform_analysis,
             perform_chunking=perform_chunking,
             summarize_recursively=summarize_recursively,
@@ -451,6 +472,7 @@ async def get_process_pdfs_form(
 
 
 async def get_process_ebooks_form(
+    request: Request,
     urls: list[str] | None = Form(None),
     title: str | None = Form(None),
     author: str | None = Form(None),
@@ -474,6 +496,7 @@ async def get_process_ebooks_form(
     hierarchical_chunking: bool = Form(False),
     hierarchical_template: str | dict[str, Any] | None = Form(None),
     extraction_method: str = Form("filtered"),
+    api_provider: str | None = Form(None),
     api_name: str | None = Form(None),
     api_key: str | None = Form(None),
 ) -> ProcessEbooksForm:
@@ -483,6 +506,10 @@ async def get_process_ebooks_form(
     Used by /media/process-ebooks (no DB persistence).
     """
     try:
+        # FastAPI normalizes empty optional fields to None. Restore explicit
+        # empty text before validation so downstream code uses only the model.
+        if system_prompt is None and (await request.form()).get("system_prompt") == "":
+            system_prompt = ""
         urls_norm = _coerce_urls(urls)
         keywords_value = keywords if keywords is not None else (keywords_str if keywords_str is not None else "")
         return ProcessEbooksForm(
@@ -510,7 +537,8 @@ async def get_process_ebooks_form(
                 hierarchical_template=hierarchical_template,
             ),
             extraction_method=extraction_method,
-            api_name=api_name,
+            api_provider=api_provider,
+            api_name=api_provider or api_name,
             api_key=api_key,
         )
     except ValidationError as exc:
@@ -518,6 +546,7 @@ async def get_process_ebooks_form(
 
 
 async def get_process_emails_form(
+    request: Request,
     urls: list[str] | None = Form(None),
     title: str | None = Form(None),
     author: str | None = Form(None),
@@ -549,13 +578,40 @@ async def get_process_emails_form(
     accept_pst: bool = Form(False),
     ingest_attachments: bool = Form(False),
     max_depth: int = Form(2),
+    api_provider: str | None = Form(None),
+    api_name: str | None = Form(None),
+    summarize_recursively: bool = Form(False),
 ) -> ProcessEmailsForm:
     """
     Dependency that parses multipart/form-data into a ProcessEmailsForm.
 
     Used by /media/process-emails (no DB persistence).
+
+    Args:
+        request: HTTP request used to distinguish an omitted system prompt from
+            an explicitly empty multipart field before model validation.
+        system_prompt: Explicit system instructions; empty text is preserved and
+            omission permits the endpoint to resolve saved instructions/defaults.
+        api_provider: Canonical analysis provider, taking precedence over api_name
+            when nonempty. Credentials remain the shared analyzer's responsibility.
+        api_name: Legacy provider alias used when api_provider is absent or empty.
+        summarize_recursively: Enable the analyzer's recursive summary passes;
+            this does not enable analysis itself or analyze nested attachments.
+
+    Remaining multipart fields supply source metadata, analysis/chunking options,
+    container acceptance flags and attachment-depth limits to ProcessEmailsForm.
+
+    Returns:
+        ProcessEmailsForm with validated options, normalized provider fields and
+        preserved explicit-system-prompt presence.
+
+    Raises:
+        HTTPException: HTTP 422 when the supplied options fail model validation.
     """
     try:
+        # Preserve explicit empty text before validation, as in EPUB parsing.
+        if system_prompt is None and (await request.form()).get("system_prompt") == "":
+            system_prompt = ""
         urls_norm = _coerce_urls(urls)
         return ProcessEmailsForm(
             urls=urls_norm,
@@ -591,6 +647,9 @@ async def get_process_emails_form(
             accept_pst=accept_pst,
             ingest_attachments=ingest_attachments,
             max_depth=max_depth,
+            api_provider=api_provider,
+            api_name=api_provider or api_name,
+            summarize_recursively=summarize_recursively,
         )
     except ValidationError as exc:
         _raise_422(exc)

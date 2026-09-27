@@ -8,6 +8,7 @@
 
 import contextlib
 import os
+import threading
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import unquote, urlparse
@@ -35,19 +36,24 @@ class AuthDatabaseConfig:
     # Singleton instance
     _instance: Optional['AuthDatabaseConfig'] = None
     _user_db: Optional[UserDatabase] = None
+    _initialization_lock = threading.RLock()
 
     def __new__(cls):
         """Ensure singleton pattern."""
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
+            with cls._initialization_lock:
+                if cls._instance is None:
+                    cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self):
         """Initialize configuration from environment and settings."""
         if not hasattr(self, '_initialized'):
-            self.settings = get_settings()
-            self._initialized = True
-            self._detect_backend()
+            with self._initialization_lock:
+                if not hasattr(self, '_initialized'):
+                    self.settings = get_settings()
+                    self._detect_backend()
+                    self._initialized = True
 
     def _detect_backend(self):
         """Detect database backend from environment or settings."""
@@ -203,25 +209,32 @@ class AuthDatabaseConfig:
         Returns:
             UserDatabase: Configured database instance
         """
-        if self._user_db is None:
-            config = self.get_config()
-            self._user_db = UserDatabase(config=config, client_id=client_id)
-            logger.info(f"Created UserDatabase with {self.backend_type} backend")
-        return self._user_db
+        database = self._user_db
+        if database is not None:
+            return database
+        with self._initialization_lock:
+            if self._user_db is None:
+                # A lazy reset may follow the public getter's config lookup.
+                self.__init__()
+                config = self.get_config()
+                self._user_db = UserDatabase(config=config, client_id=client_id)
+                logger.info(f"Created UserDatabase with {self.backend_type} backend")
+            return self._user_db
 
     def reset(self) -> None:
         """Reset configuration and database instance (mainly for testing)."""
-        # Close any existing UserDatabase backend connections so tests do not
-        # reuse pools pointing at dropped per-test databases.
-        if self._user_db is not None:
-            self._release_user_db_backend(context="reset")
-        self._user_db = None
-        # Ensure backend detection reflects updated environment/settings.
-        # Note: This will instantiate AuthNZ Settings if it is currently unset.
-        # Tests that need a "lazy" reset (do not instantiate settings yet) should
-        # call `reset_lazy()` instead.
-        self.settings = get_settings()
-        self._detect_backend()
+        with self._initialization_lock:
+            # Close any existing UserDatabase backend connections so tests do not
+            # reuse pools pointing at dropped per-test databases.
+            if self._user_db is not None:
+                self._release_user_db_backend(context="reset")
+            self._user_db = None
+            # Ensure backend detection reflects updated environment/settings.
+            # Note: This will instantiate AuthNZ Settings if it is currently unset.
+            # Tests that need a "lazy" reset (do not instantiate settings yet) should
+            # call `reset_lazy()` instead.
+            self.settings = get_settings()
+            self._detect_backend()
 
     def reset_lazy(self) -> None:
         """Reset caches without instantiating AuthNZ Settings (test helper).
@@ -231,11 +244,12 @@ class AuthDatabaseConfig:
         cases, instantiating Settings too early can freeze the wrong defaults
         (e.g., AUTH_MODE=single_user) and make tests order-dependent.
         """
-        if self._user_db is not None:
-            self._release_user_db_backend(context="reset_lazy")
-        self._user_db = None
-        with contextlib.suppress(Exception):
-            delattr(self, "_initialized")
+        with self._initialization_lock:
+            if self._user_db is not None:
+                self._release_user_db_backend(context="reset_lazy")
+            self._user_db = None
+            with contextlib.suppress(Exception):
+                delattr(self, "_initialized")
 
     def _release_user_db_backend(self, *, context: str) -> None:
         """Close or evict the cached UserDatabase backend during test resets."""

@@ -517,15 +517,18 @@ def process_document_content( # Renamed from _process_single_document for clarit
                             temp=None,
                             recursive_summarization=False,
                         )
+                        if isinstance(analysis_text_for_chunk, str) and analysis_text_for_chunk.strip().lower().startswith("error:"):
+                            raise ValueError(analysis_text_for_chunk.strip().split(":", 1)[1].strip())
                         if analysis_text_for_chunk and isinstance(analysis_text_for_chunk, str) and analysis_text_for_chunk.strip():
                             chunk_summaries.append(analysis_text_for_chunk)
                             current_chunk_metadata['analysis'] = analysis_text_for_chunk # Store analysis in chunk metadata
                         else:
                             current_chunk_metadata['analysis'] = None
+                            result["warnings"].append(f"Analysis failed for chunk {i+1}: provider returned no analysis.")
                             logging.debug(f"Analysis yielded empty result for chunk {i+1}/{len(processed_chunks)} of {doc_path}.")
                     except _PLAINTEXT_NONCRITICAL_EXCEPTIONS as summ_err:
                         logging.warning(f"Analysis failed for chunk {i+1}/{len(processed_chunks)} of {doc_path}: {summ_err}", exc_info=False)
-                        current_chunk_metadata['analysis'] = f"[Analysis Error: {str(summ_err)}]"
+                        current_chunk_metadata['analysis'] = None
                         result["warnings"].append(f"Analysis failed for chunk {i+1}: {str(summ_err)}")
 
                 # Create a new chunk dict with updated metadata to avoid modifying list while iterating if not careful
@@ -548,6 +551,8 @@ def process_document_content( # Renamed from _process_single_document for clarit
                              temp=None,
                              recursive_summarization=False, # Final pass
                          )
+                         if isinstance(final_analysis_text, str) and final_analysis_text.strip().lower().startswith("error:"):
+                             raise ValueError(final_analysis_text.strip().split(":", 1)[1].strip())
                          if not final_analysis_text or not final_analysis_text.strip():
                             logging.warning(f"Recursive analysis for {doc_path} yielded empty result. Falling back to joined summaries.")
                             final_analysis_text = "\n\n---\n\n".join(chunk_summaries)
@@ -557,7 +562,7 @@ def process_document_content( # Renamed from _process_single_document for clarit
 
                     except _PLAINTEXT_NONCRITICAL_EXCEPTIONS as rec_summ_err:
                          logging.error(f"Recursive analysis failed for {doc_path}: {rec_summ_err}", exc_info=True)
-                         final_analysis_text = f"[Recursive Analysis Error: {str(rec_summ_err)}]\n\n" + "\n\n---\n\n".join(chunk_summaries)
+                         final_analysis_text = "\n\n---\n\n".join(chunk_summaries)
                          result["warnings"].append(f"Recursive analysis failed: {str(rec_summ_err)}")
                          log_counter("document_recursive_analysis_error", labels={"file_path": str(doc_path), "error": str(rec_summ_err)})
                 else:
@@ -576,8 +581,10 @@ def process_document_content( # Renamed from _process_single_document for clarit
             logging.info(f"Analysis disabled for {doc_path}.")
         elif not api_name:
             logging.warning(f"Analysis skipped for {doc_path}: API name missing.")
+            result["warnings"].append("Analysis was not run: choose an analysis provider.")
         elif not processed_chunks:
             logging.warning(f"Analysis skipped for {doc_path}: No processable chunks available.")
+            result["warnings"].append("Analysis was not run: no processable content is available.")
         else:
             logging.warning(f"Analysis skipped for {doc_path} due to unknown condition.")
 

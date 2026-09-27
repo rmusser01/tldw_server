@@ -274,15 +274,33 @@ async function setFirstSourceSessionState(
         errorMessage?: string | null
       }
 ): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const store = (
+        window as Window & {
+          __tldw_useQuickIngestSessionStore?: {
+            getState?: () => { authorityKey?: unknown }
+          }
+        }
+      ).__tldw_useQuickIngestSessionStore
+      const authorityKey = store?.getState?.().authorityKey
+      return typeof authorityKey === "string" && authorityKey.trim().length > 0
+    },
+    undefined,
+    { timeout: 10_000 }
+  )
   await page.evaluate((nextState) => {
     type QuickIngestSessionApi = {
+      authorityKey?: string | null
       session?: {
         id: string
         resultSummary: Record<string, unknown>
+        openDetail?: Record<string, unknown> | null
       } | null
       createDraftSession: (seed: Record<string, unknown>) => {
         id: string
         resultSummary: Record<string, unknown>
+        openDetail?: Record<string, unknown> | null
       }
       upsertSession: (patch: Record<string, unknown>) => void
     }
@@ -294,17 +312,24 @@ async function setFirstSourceSessionState(
       }
     ).__tldw_useQuickIngestSessionStore
     const api = store?.getState?.()
-    if (!api) return
+    if (!api) throw new Error("Quick Ingest session store is unavailable")
+    if (!api.authorityKey?.trim()) {
+      throw new Error("Quick Ingest session authority is not verified")
+    }
+    const session = api.session || api.createDraftSession({
+      firstSourceAddMode: "paste_text",
+    })
+    const existingOpenDetail =
+      session.openDetail && typeof session.openDetail === "object"
+        ? session.openDetail
+        : {}
     const openDetail = {
+      ...existingOpenDetail,
       source: "first_source_milestone",
       preferredPreset: "quick",
       firstSource: true,
       firstSourceKind: "paste_text",
     }
-    const session = api.session || api.createDraftSession({
-      openDetail,
-      firstSourceAddMode: "paste_text",
-    })
     api.upsertSession({
       id: session.id,
       openDetail,

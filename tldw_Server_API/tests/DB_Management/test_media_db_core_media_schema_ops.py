@@ -4,8 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError, SchemaError
-
+from tldw_Server_API.app.core.DB_Management.media_db.errors import (
+    DatabaseError,
+    SchemaError,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -39,6 +41,10 @@ EXPECTED_MEDIA_COLUMNS = {
     "deleted",
     "prev_version",
     "merge_parent_uuid",
+    "system_operation_id",
+    "system_operation_kind",
+    "system_source_identity",
+    "system_content_hash",
 }
 
 
@@ -197,7 +203,7 @@ def test_apply_sqlite_core_media_schema_fts_failure_is_warning_only() -> None:
     assert calls[1:] == [("email", conn), ("fts-attempt", conn)]
 
 
-def test_apply_postgres_core_media_schema_orders_base_tables_then_initializers_then_email_and_schema_updates() -> None:
+def test_apply_postgres_core_media_schema_orders_base_tables_then_initializers_then_email_and_schema_updates(monkeypatch) -> None:
     helper_module = _load_core_media_module()
 
     conn = object()
@@ -238,6 +244,11 @@ def test_apply_postgres_core_media_schema_orders_base_tables_then_initializers_t
         _ensure_postgres_email_schema=lambda value: calls.append(("email", value)),
     )
 
+    monkeypatch.setattr(
+        helper_module,
+        "ensure_postgres_sync_log_contract",
+        lambda value, connection: calls.append(("sync_contract", value, connection)),
+    )
     helper_module.apply_postgres_core_media_schema(db, conn)
 
     assert calls == [
@@ -248,6 +259,7 @@ def test_apply_postgres_core_media_schema_orders_base_tables_then_initializers_t
         ("execute", "CREATE TABLE audio_presets (...)", None),
         ("execute", "CREATE TABLE data_tables (...)", None),
         ("execute", "INSERT INTO schema_version VALUES (0)", None),
+        ("sync_contract", db, conn),
         ("execute", "CREATE INDEX idx_media_title ON media(title)", None),
         ("email", conn),
         ("execute", "DELETE FROM schema_version WHERE version <> %s", (0,)),
@@ -262,6 +274,7 @@ def test_apply_postgres_core_media_schema_orders_base_tables_then_initializers_t
         "media",
         "keywords",
         "mediakeywords",
+        "operationownedclonekeywords",
         "transcripts",
         "mediachunks",
         "unvectorizedmediachunks",

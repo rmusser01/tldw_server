@@ -1,0 +1,17 @@
+
+ RUN  v4.0.18 /private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui
+
+(node:31582) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+stderr | src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx > preserves an encoded error quoted in a user message verbatim
+react-i18next:: useTranslation: You will need to pass in an i18next instance by using initReactI18next { code: 'NO_I18NEXT_INSTANCE' }
+
+ ✓ src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx (7 tests) 544ms
+(node:32132) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+ ✓ src/utils/__tests__/chat-error-message.test.ts (2 tests) 2ms
+
+ Test Files  2 passed (2)
+      Tests  9 passed (9)
+   Start at  22:33:27
+   Duration  1.89s (transform 150ms, setup 135ms, import 572ms, tests 545ms, environment 454ms)

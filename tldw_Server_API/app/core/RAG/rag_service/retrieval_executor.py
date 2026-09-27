@@ -18,6 +18,7 @@ async def execute_retrieval_phase(
     retrieval_config: Any | None = None,
     allowed_media_ids: list[int] | None = None,
     allowed_note_ids: list[str] | None = None,
+    source_failures: set[DataSource] | None = None,
 ) -> RetrievedEvidence:
     """Execute a normalized retrieval phase and package canonical evidence."""
     query = resolved_request.query
@@ -55,6 +56,8 @@ async def execute_retrieval_phase(
     }
     retrieve_from_plan = getattr(retriever, "retrieve_from_plan", None)
     if callable(retrieve_from_plan) and inspect.iscoroutinefunction(retrieve_from_plan):
+        if "source_failures" in inspect.signature(retrieve_from_plan).parameters:
+            retrieval_kwargs["source_failures"] = source_failures
         documents = await retriever.retrieve_from_plan(
             retrieval_plan,
             **retrieval_kwargs,

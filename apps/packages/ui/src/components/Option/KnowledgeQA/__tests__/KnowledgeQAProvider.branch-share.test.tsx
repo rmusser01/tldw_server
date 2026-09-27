@@ -1,3 +1,4 @@
+import "./knowledgeQaAuthorityFixture"
 import React from "react"
 import { act, render, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -213,7 +214,7 @@ describe("KnowledgeQAProvider branch/share actions", () => {
     expect(latestContext!.messages).toEqual([])
     expect(latestContext!.answer).toBeNull()
     expect(addChatMessageMock).not.toHaveBeenCalled()
-    expect(deleteChatMock).toHaveBeenCalledWith("branch-thread-stale")
+    expect(deleteChatMock).toHaveBeenCalledWith("branch-thread-stale", expect.objectContaining({ requestScope: expect.objectContaining({ userId: "test-owner" }) }))
   })
 
   it("hydrates shared conversations through tokenized links", async () => {

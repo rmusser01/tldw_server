@@ -19,6 +19,10 @@ const normalizeHttpOrigin = (value: string): string => {
 
 const E2E_SERVER_URL = normalizeHttpOrigin(RAW_E2E_SERVER_URL);
 
+export const shouldInstallTitleSettingsStub = (
+  env: Record<string, string | undefined> = process.env
+): boolean => env.TLDW_LIVE_TIER_UAT !== '1';
+
 /**
  * Environment configuration for tests
  */
@@ -280,14 +284,17 @@ export async function seedAuth(
     } catch {}
   }, finalConfig);
 
-  // Stub backend endpoints that may return 500 and trigger blocking error modals
-  await page.route('**/api/v1/admin/notes/title-settings', route => {
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ llm_enabled: false, default_strategy: 'heuristic' }),
+  if (shouldInstallTitleSettingsStub()) {
+    // Keep legacy isolated UI suites deterministic. Strict live-tier runs must
+    // exercise the real backend endpoint and therefore install no fulfillment.
+    await page.route('**/api/v1/admin/notes/title-settings', route => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ llm_enabled: false, default_strategy: 'heuristic' }),
+      });
     });
-  });
+  }
 }
 
 /**

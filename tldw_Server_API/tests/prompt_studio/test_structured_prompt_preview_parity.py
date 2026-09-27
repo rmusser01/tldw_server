@@ -46,6 +46,42 @@ def _make_prompt_definition_payload() -> dict:
     }
 
 
+def _make_recipe_definition_payload() -> dict:
+    return {
+        "schema_version": 2,
+        "format": "structured",
+        "definition_kind": "single_text_recipe",
+        "variables": [
+            {
+                "name": "topic",
+                "label": "Topic",
+                "required": True,
+                "default_value": None,
+                "input_type": "text",
+            }
+        ],
+        "blocks": [
+            {
+                "id": "objective",
+                "name": "Objective",
+                "section_key": "objective",
+                "role": "system",
+                "kind": "objective",
+                "content": "Explain {{topic}}.",
+                "enabled": True,
+                "order": 10,
+                "is_template": True,
+            }
+        ],
+        "assembly_config": {
+            "assembly_mode": "single_text",
+            "target_role": "system",
+            "render_format": "xml",
+            "block_separator": "\n\n",
+        },
+    }
+
+
 @pytest.mark.asyncio
 async def test_structured_prompt_preview_matches_executor_assembly(isolated_db):
     project = isolated_db.create_project(
@@ -125,3 +161,32 @@ async def test_structured_prompt_preview_matches_executor_assembly(isolated_db):
     assert preview_data.assembled_messages[1]["content"] == "Module style_rules: tone=concise"
     assert "Evaluate SQLite FTS" in preview_data.legacy_user_prompt
     assert "Please format your response as JSON" in preview_data.legacy_user_prompt
+
+
+@pytest.mark.asyncio
+async def test_recipe_preview_returns_exact_single_text_without_messages(isolated_db):
+    project = isolated_db.create_project(name="Recipe Preview Project", user_id="test-user")
+
+    preview_response = await preview_prompt(
+        StructuredPromptPreviewRequest(
+            project_id=project["id"],
+            prompt_format="structured",
+            prompt_schema_version=2,
+            prompt_definition=_make_recipe_definition_payload(),
+            variables={"topic": "SQLite FTS"},
+        ),
+        db=isolated_db,
+        security_config=None,
+        user_context={
+            "user_id": "test-user",
+            "client_id": "test-client",
+            "is_admin": False,
+        },
+    )
+
+    preview_data = preview_response.data
+    assert preview_data is not None
+    assert preview_data.rendered_text == "<objective>Explain SQLite FTS.</objective>"
+    assert preview_data.assembled_messages == []
+    assert preview_data.legacy_system_prompt == preview_data.rendered_text
+    assert preview_data.legacy_user_prompt == ""

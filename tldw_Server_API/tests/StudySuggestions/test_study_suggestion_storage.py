@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import threading
 
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.StudySuggestions import snapshot_service
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
     InputError,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
-from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.StudySuggestions import snapshot_service
 
 
 @pytest.fixture
@@ -706,6 +706,11 @@ def test_study_pack_postgres_schema_dedupes_before_unique_index_recreation() -> 
     executed_statements: list[str] = []
 
     class RecordingBackend:
+        backend_type = BackendType.POSTGRESQL
+
+        def get_table_info(self, table, connection=None):  # noqa: ANN001
+            return {"sync_log": [{"name": "entity_id"}]}[table]
+
         def execute(self, statement, connection=None):  # noqa: ANN001
             executed_statements.append(" ".join(str(statement).split()))
             return None

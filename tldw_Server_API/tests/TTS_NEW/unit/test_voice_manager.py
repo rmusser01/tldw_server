@@ -5,6 +5,7 @@ These tests exercise VoiceManager without relying on external ffmpeg/ffprobe
 executables by patching the internal duration/processing helpers.
 """
 
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -569,6 +570,60 @@ async def test_background_task_lifecycle_idempotent():
 
     # Second stop should be a no-op
     await manager.stop_background_tasks()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_already_delivered", [False, True])
+async def test_stop_background_tasks_accepts_cancelled_worker(cancel_already_delivered: bool):
+    """ASGI shutdown may cancel the owned task before its manager stops it."""
+    manager = VoiceManager()
+    await manager.start_background_tasks()
+    cleanup = manager._cleanup_task
+    cleanup.cancel()
+    if cancel_already_delivered:
+        await asyncio.gather(cleanup, return_exceptions=True)
+
+    await manager.stop_background_tasks()
+
+    assert cleanup.cancelled()
+    assert manager._cleanup_task is None
+    assert manager._cleanup_stop_event is None
+
+
+@pytest.mark.asyncio
+async def test_stop_background_tasks_preserves_caller_cancellation():
+    """Cancelling shutdown itself must still propagate and cancel the owned worker."""
+    manager = VoiceManager()
+    started = asyncio.Event()
+
+    async def slow_worker() -> None:
+        started.set()
+        await asyncio.Event().wait()
+
+    cleanup = asyncio.create_task(slow_worker())
+    manager._cleanup_task = cleanup
+    await started.wait()
+    shutdown = asyncio.create_task(manager.stop_background_tasks())
+    await asyncio.sleep(0)
+    shutdown.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await shutdown
+    assert cleanup.cancelled()
+    assert manager._cleanup_task is None
+
+
+@pytest.mark.asyncio
+async def test_stop_background_tasks_preserves_worker_failure():
+    """An actual cleanup failure must not be swallowed as expected cancellation."""
+    manager = VoiceManager()
+
+    async def failing_worker() -> None:
+        raise RuntimeError("cleanup failed")
+
+    manager._cleanup_task = asyncio.create_task(failing_worker())
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        await manager.stop_background_tasks()
+    assert manager._cleanup_task is None
 
 
 @pytest.mark.asyncio

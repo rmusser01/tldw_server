@@ -1,5 +1,6 @@
 import React from "react"
 import { Modal } from "antd"
+import { useTranslation } from "react-i18next"
 
 import type { PersonaSetupStep } from "@/hooks/usePersonaSetupWizard"
 import type { ArchetypePreview } from "@/types/archetype"
@@ -33,7 +34,7 @@ export const AssistantSetupWizard: React.FC<AssistantSetupWizardProps> = ({
   catalog,
   selectedPersonaId,
   currentStep,
-  postSetupTargetTab,
+  postSetupTargetTab: _postSetupTargetTab,
   progressItems = [],
   onResetSetup,
   archetypeKey,
@@ -49,7 +50,17 @@ export const AssistantSetupWizard: React.FC<AssistantSetupWizardProps> = ({
   onUsePersona,
   onCreatePersona
 }) => {
+  const { t } = useTranslation("sidepanel")
   const [newPersonaName, setNewPersonaName] = React.useState("")
+  const nameInputId = React.useId()
+  const stepLabels: Record<PersonaSetupStep, string> = {
+    archetype: t("personaGarden.setup.steps.archetype", { defaultValue: "Choose an archetype" }),
+    persona: t("personaGarden.setup.steps.persona", { defaultValue: "Choose persona" }),
+    voice: t("personaGarden.setup.steps.voice", { defaultValue: "Configure voice" }),
+    commands: t("personaGarden.setup.steps.commands", { defaultValue: "Add commands" }),
+    safety: t("personaGarden.setup.steps.safety", { defaultValue: "Review safety" }),
+    test: t("personaGarden.setup.steps.test", { defaultValue: "Run a test" })
+  }
 
   const handleCreatePersona = React.useCallback(() => {
     const normalizedName = String(newPersonaName || "").trim()
@@ -91,9 +102,9 @@ export const AssistantSetupWizard: React.FC<AssistantSetupWizardProps> = ({
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-text-subtle">
+          <h2 className="text-base font-semibold text-text">
             Assistant Setup
-          </div>
+          </h2>
           <div className="mt-2 text-sm text-text">
             Finish setup before using this persona in Persona Garden.
           </div>
@@ -101,7 +112,7 @@ export const AssistantSetupWizard: React.FC<AssistantSetupWizardProps> = ({
         {onResetSetup && currentStep !== "persona" ? (
           <button
             type="button"
-            className="rounded-md border border-border px-3 py-2 text-xs font-medium text-text disabled:cursor-not-allowed disabled:opacity-60"
+            className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary rounded-md border border-border px-3 py-2 text-xs font-medium text-text disabled:cursor-not-allowed disabled:opacity-60"
             disabled={saving}
             onClick={onResetSetup}
           >
@@ -119,14 +130,18 @@ export const AssistantSetupWizard: React.FC<AssistantSetupWizardProps> = ({
               key={item.step}
               data-testid={`assistant-setup-progress-step-${item.step}`}
               data-status={item.status}
-              className="rounded-md border border-border bg-surface px-3 py-2"
+              className="px-1 py-2"
             >
               <div className="flex items-center justify-between gap-3 text-sm text-text">
                 <span className="font-medium">
                   {index + 1}. {item.label}
                 </span>
                 <span className="text-[11px] uppercase tracking-wide text-text-muted">
-                  {item.status}
+                  {item.status === "completed"
+                    ? t("personaGarden.setup.complete", { defaultValue: "Complete" })
+                    : item.status === "current"
+                      ? t("personaGarden.setup.inProgress", { defaultValue: "In progress" })
+                      : t("personaGarden.setup.notStarted", { defaultValue: "Not started" })}
                 </span>
               </div>
               {item.summary ? (
@@ -140,16 +155,10 @@ export const AssistantSetupWizard: React.FC<AssistantSetupWizardProps> = ({
         data-testid="assistant-setup-current-step"
         className="text-sm font-medium text-text"
       >
-        {currentStep}
-      </div>
-      <div
-        data-testid="assistant-setup-post-target"
-        className="text-xs text-text-muted"
-      >
-        {postSetupTargetTab}
+        {stepLabels[currentStep]}
       </div>
       {error ? (
-        <div className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
+        <div role="alert" className="rounded-md border border-border bg-surface2 px-3 py-2 text-sm text-text">
           {error}
         </div>
       ) : null}
@@ -182,7 +191,6 @@ export const AssistantSetupWizard: React.FC<AssistantSetupWizardProps> = ({
                 >
                   <div>
                     <div className="text-sm font-medium text-text">{persona.name}</div>
-                    <div className="text-xs text-text-muted">{persona.id}</div>
                   </div>
                   <button
                     type="button"
@@ -206,8 +214,9 @@ export const AssistantSetupWizard: React.FC<AssistantSetupWizardProps> = ({
             })}
           </div>
           <div className="space-y-2 rounded-lg border border-border bg-surface2 p-3">
-            <div className="text-sm font-medium text-text">Create new persona</div>
+            <label htmlFor={nameInputId} className="block text-sm font-medium text-text">{t("personaGarden.setup.newPersonaName", { defaultValue: "New persona name" })}</label>
             <input
+              id={nameInputId}
               type="text"
               value={newPersonaName}
               placeholder="New persona name"

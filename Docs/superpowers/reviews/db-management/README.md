@@ -11,6 +11,23 @@ Stage order:
 6. [`Docs/superpowers/reviews/db-management/2026-04-15-rebaseline.md`](./2026-04-15-rebaseline.md)
    - Current-tree rebaseline for Wave 1; identifies already-closed April findings and the remaining live cache-contract failure.
 
+Second pass, 2026-09-21 (extends the April pass; does not replace it):
+
+7. [`Docs/superpowers/reviews/db-management/2026-09-21-stage1-scope-reconciliation-and-inventory.md`](./2026-09-21-stage1-scope-reconciliation-and-inventory.md)
+   - Scope, current inventory and churn baseline, and the required reconciliation of every 2026-04-07 finding as still-live or already-addressed. Result: 8 of 8 addressed, including the cache-close item the 2026-04-15 rebaseline left open.
+   - Sidecars: [`2026-09-21-stage1-source-inventory.txt`](./2026-09-21-stage1-source-inventory.txt), [`2026-09-21-stage1-churn-baseline.txt`](./2026-09-21-stage1-churn-baseline.txt)
+8. [`Docs/superpowers/reviews/db-management/2026-09-21-stage2-dual-backend-divergence.md`](./2026-09-21-stage2-dual-backend-divergence.md)
+   - `PromptStudioDatabase.py` and `ChaChaNotes_DB.py` — the two files the April pass inventoried and skipped. Findings db-management-1 through db-management-9.
+   - Sidecars: [`2026-09-21-stage2-promptstudio-pair-inventory.txt`](./2026-09-21-stage2-promptstudio-pair-inventory.txt), [`2026-09-21-stage2-chachanotes-backend-pair-inventory.txt`](./2026-09-21-stage2-chachanotes-backend-pair-inventory.txt)
+9. [`Docs/superpowers/reviews/db-management/2026-09-21-stage3-shared-idioms-test-parity-and-synthesis.md`](./2026-09-21-stage3-shared-idioms-test-parity-and-synthesis.md)
+   - Pagination cursors, timestamp helpers, WAL truncation, SQLite connection policy, module-level test parity, and the synthesis across stages 1-3. Findings db-management-10 through db-management-14.
+
+Rules for using these reports (2026-09-21 pass):
+- Write findings before suggested actions in every stage file.
+- Label uncertain items as probable risks or assumptions instead of confirmed defects.
+- Keep later-stage summaries pointed back to the stage files; do not replace the per-stage record with a rolling summary.
+- Keep the stage files as the durable review ledger for this audit.
+
 Rules for using these reports:
 - Write findings before remediation ideas.
 - Label uncertain items as assumptions or probable risks instead of overstating them as confirmed defects.

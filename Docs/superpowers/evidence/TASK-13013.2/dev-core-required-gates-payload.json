@@ -1,0 +1,49 @@
+{
+  "name": "dev-core-required-gates",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "exclude": [],
+      "include": [
+        "refs/heads/dev"
+      ]
+    }
+  },
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          {
+            "context": "backend-required",
+            "integration_id": 15368
+          },
+          {
+            "context": "security-required",
+            "integration_id": 15368
+          },
+          {
+            "context": "coverage-required",
+            "integration_id": 15368
+          },
+          {
+            "context": "frontend-required",
+            "integration_id": 15368
+          },
+          {
+            "context": "e2e-required",
+            "integration_id": 15368
+          },
+          {
+            "context": "container-build-check",
+            "integration_id": 15368
+          }
+        ]
+      }
+    }
+  ]
+}

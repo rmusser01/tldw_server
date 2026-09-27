@@ -14,3 +14,5 @@ https://ii.inc/web/blog/post/ii-search
 https://ii.inc/web/blog/post/ii-researcher
 https://github.com/Intelligent-Internet/ii-researcher
 https://mburaksayici.com/blog/2025/10/12/information-retrieval-1.html
+https://huggingface.co/thomsonreuters/Thomson-1.0-Small
+https://turbopuffer.com/blog/large-scale-code-search?utm_source=substack&utm_medium=email

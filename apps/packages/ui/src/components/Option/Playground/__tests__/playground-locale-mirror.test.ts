@@ -57,4 +57,18 @@ describe("playground locale mirror parity", () => {
       expect(extensionMessages[key]).toBe(value);
     }
   });
+
+  it("keeps all shared workspace English copy mirrored exactly", () => {
+    const sharedWorkspace = playgroundLocale.sharedWorkspace;
+    expect(sharedWorkspace).toBeTruthy();
+
+    const flattenedSharedWorkspace = flattenNested(sharedWorkspace, [
+      "sharedWorkspace",
+    ]);
+    expect(Object.keys(flattenedSharedWorkspace).length).toBeGreaterThan(20);
+
+    for (const [key, value] of Object.entries(flattenedSharedWorkspace)) {
+      expect(extensionPlaygroundLocale[key]?.message).toBe(value);
+    }
+  });
 });

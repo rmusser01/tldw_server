@@ -258,7 +258,7 @@ export const PoliciesPanel: React.FC<PoliciesPanelProps> = ({
       <div className="mt-3 space-y-2">
         {loading ? (
           <Typography.Text type="secondary" className="text-xs">
-            {t("common:loading", { defaultValue: "Loading..." })}
+            {t("common:loading.title", { defaultValue: "Loading..." })}
           </Typography.Text>
         ) : null}
         {!loading && normalizedPersonaId && rules.length === 0 ? (

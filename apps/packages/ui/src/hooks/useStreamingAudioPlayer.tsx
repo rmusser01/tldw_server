@@ -170,9 +170,11 @@ export const useStreamingAudioPlayer = () => {
       const audio = new Audio()
       audio.autoplay = true
       audio.onended = () => {
+        if (audioRef.current !== audio) return
         setState((prev) => ({ ...prev, playing: false }))
       }
       audio.onerror = () => {
+        if (audioRef.current !== audio) return
         streamFailedRef.current = true
         setState((prev) => ({
           ...prev,
@@ -188,10 +190,12 @@ export const useStreamingAudioPlayer = () => {
         mediaSource.addEventListener(
           "sourceopen",
           () => {
+            if (audioRef.current !== audio || mediaSourceRef.current !== mediaSource) return
             try {
               const sourceBuffer = mediaSource.addSourceBuffer(mime)
               sourceBufferRef.current = sourceBuffer
               sourceBuffer.onupdateend = () => {
+                if (audioRef.current !== audio || sourceBufferRef.current !== sourceBuffer) return
                 flushPending()
               }
               flushPending()
@@ -207,9 +211,11 @@ export const useStreamingAudioPlayer = () => {
         const playPromise = audio.play()
         if (playPromise && typeof playPromise.catch === "function") {
           playPromise.catch(() => {
+            if (audioRef.current !== audio) return
             streamFailedRef.current = true
             setState((prev) => ({
               ...prev,
+              playing: false,
               error: "Audio playback blocked"
             }))
           })
@@ -257,9 +263,11 @@ export const useStreamingAudioPlayer = () => {
       const nextAudio = new Audio()
       nextAudio.autoplay = true
       nextAudio.onended = () => {
+        if (audioRef.current !== nextAudio) return
         setState((prev) => ({ ...prev, playing: false }))
       }
       nextAudio.onerror = () => {
+        if (audioRef.current !== nextAudio) return
         setState((prev) => ({
           ...prev,
           playing: false,
@@ -276,12 +284,15 @@ export const useStreamingAudioPlayer = () => {
     const blob = new Blob(allChunksRef.current, { type: mime })
     const url = URL.createObjectURL(blob)
     objectUrlRef.current = url
-    audioRef.current!.src = url
-    const playPromise = audioRef.current!.play()
+    const playbackAudio = audioRef.current!
+    playbackAudio.src = url
+    const playPromise = playbackAudio.play()
     if (playPromise && typeof playPromise.catch === "function") {
       playPromise.catch(() => {
+        if (audioRef.current !== playbackAudio) return
         setState((prev) => ({
           ...prev,
+          playing: false,
           error: "Audio playback blocked"
         }))
       })

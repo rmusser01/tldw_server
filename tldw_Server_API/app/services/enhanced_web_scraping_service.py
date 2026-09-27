@@ -6,8 +6,10 @@ with the existing tldw_server API structure.
 
 import asyncio
 import json
+import re
 import time
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,7 +31,8 @@ from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
-from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import ContentMetadataHandler, is_content_page
+from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import is_content_page
+from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
 
 # Import the enhanced scraper
 from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import (
@@ -44,6 +47,36 @@ from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import (
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
 
 _WEB_SCRAPE_CONFIG_PARSE_EXCEPTIONS = (TypeError, ValueError)
+_EXTRACTION_FAILURE_MESSAGES = {
+    "source_access_denied": "Source access was blocked by the website or outbound access policy.",
+    "empty_extraction": "No readable content was extracted from the source.",
+    "extraction_timeout": "Source extraction timed out.",
+    "extraction_failed": "Source extraction failed. Check the server logs for details.",
+}
+
+
+def _classify_extraction_failure(article: Mapping[str, Any]) -> str:
+    """Return a safe category without exposing upstream text or URL credentials."""
+    code = article.get("error_code")
+    if isinstance(code, str) and code in _EXTRACTION_FAILURE_MESSAGES:
+        return code
+    if article.get("policy_reason"):
+        return "source_access_denied"
+    error = str(article.get("error") or "")[:512].lower()
+    if (
+        "blocked by outbound policy" in error
+        or error.startswith("egress denied:")
+        or re.search(r"article retrieval failed: http (?:401|403)\b", error)
+        or re.search(r"curl fetch did not reach a terminal 2xx response \(status=(?:401|403)\)", error)
+    ):
+        return "source_access_denied"
+    if error in {"no content extracted", "no readable content extracted", "empty extraction"}:
+        return "empty_extraction"
+    if error in {"timeout", "request timeout", "timed out", "request timed out", "deadline exceeded"}:
+        return "extraction_timeout"
+    return "extraction_failed"
+
+
 _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
     ConnectionError,
@@ -158,6 +191,7 @@ class WebScrapingService:
         chunking_mode: Optional[str] = None,
         auto_chunking_goal: str = "balanced",
         auto_chunking_use_llm: bool = False,
+        summary_prompt_overrides: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """
         Process web scraping task with enhanced features.
@@ -267,6 +301,7 @@ class WebScrapingService:
                     user_agent,
                     custom_headers,
                     user_id=user_id,
+                    summary_prompt_overrides=summary_prompt_overrides,
                 )
 
             elif scrape_method == "Sitemap":
@@ -286,6 +321,7 @@ class WebScrapingService:
                     custom_headers,
                     user_id=user_id,
                     task_id=task_id,
+                    summary_prompt_overrides=summary_prompt_overrides,
                 )
 
             elif scrape_method == "URL Level":
@@ -311,6 +347,7 @@ class WebScrapingService:
                     score_threshold=eff_score_threshold,
                     crawl_strategy=eff_strategy,
                     task_id=task_id,
+                    summary_prompt_overrides=summary_prompt_overrides,
                 )
 
             elif scrape_method == "Recursive Scraping":
@@ -334,6 +371,7 @@ class WebScrapingService:
                     score_threshold=eff_score_threshold,
                     crawl_strategy=eff_strategy,
                     task_id=task_id,
+                    summary_prompt_overrides=summary_prompt_overrides,
                 )
 
             else:
@@ -398,6 +436,7 @@ class WebScrapingService:
         custom_headers: Optional[dict[str, str]],
         *,
         user_id: Optional[int] = None,
+        summary_prompt_overrides: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """Scrape individual URLs with enhanced features"""
         # Parse URLs and titles
@@ -423,6 +462,7 @@ class WebScrapingService:
             api_name=api_name,
             api_key=api_key,
             system_prompt=system_prompt,
+            summary_prompt_overrides=summary_prompt_overrides,
             temperature=temperature,
             custom_cookies=custom_cookies,
             user_agent=user_agent,
@@ -464,6 +504,7 @@ class WebScrapingService:
         *,
         user_id: Optional[int] = None,
         task_id: Optional[str] = None,
+        summary_prompt_overrides: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """Scrape from sitemap with filtering"""
         # Check if scraper is available
@@ -489,7 +530,8 @@ class WebScrapingService:
             for result in results:
                 if result.get("extraction_successful") and result.get("content"):
                     summary = await self._summarize_content(
-                        result["content"], custom_prompt, api_name, api_key, system_prompt, temperature
+                        result["content"], custom_prompt, api_name, api_key, system_prompt, temperature,
+                        summary_prompt_overrides=summary_prompt_overrides,
                     )
                     result["summary"] = summary
 
@@ -523,6 +565,7 @@ class WebScrapingService:
         score_threshold: Optional[float] = None,
         crawl_strategy: Optional[str] = None,
         task_id: Optional[str] = None,
+        summary_prompt_overrides: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """Scrape by URL level"""
 
@@ -555,7 +598,8 @@ class WebScrapingService:
             for result in results:
                 if result.get("extraction_successful") and result.get("content"):
                     summary = await self._summarize_content(
-                        result["content"], custom_prompt, api_name, api_key, system_prompt, temperature
+                        result["content"], custom_prompt, api_name, api_key, system_prompt, temperature,
+                        summary_prompt_overrides=summary_prompt_overrides,
                     )
                     result["summary"] = summary
 
@@ -589,6 +633,7 @@ class WebScrapingService:
         score_threshold: Optional[float] = None,
         crawl_strategy: Optional[str] = None,
         task_id: Optional[str] = None,
+        summary_prompt_overrides: Mapping[str, str] | None = None,
     ) -> dict[str, Any]:
         """Recursive scraping with progress tracking"""
         # Create progress file for resumability
@@ -618,7 +663,8 @@ class WebScrapingService:
                 for result in results:
                     if result.get("extraction_successful") and result.get("content"):
                         summary = await self._summarize_content(
-                            result["content"], custom_prompt, api_name, api_key, system_prompt, temperature
+                            result["content"], custom_prompt, api_name, api_key, system_prompt, temperature,
+                            summary_prompt_overrides=summary_prompt_overrides,
                         )
                         result["summary"] = summary
 
@@ -647,18 +693,19 @@ class WebScrapingService:
         api_key: Optional[str],
         system_prompt: Optional[str],
         temperature: float,
+        *,
+        summary_prompt_overrides: Mapping[str, str] | None = None,
     ) -> str:
         """Summarize content using LLM"""
         try:
             # Provide default prompts from Prompts/webscraping if not supplied
-            custom_prompt = (
-                custom_prompt
-                or load_prompt("webscraping", "article_summary_user")
+            overrides = summary_prompt_overrides or {}
+            custom_prompt = overrides["user"] if "user" in overrides else (
+                custom_prompt or load_prompt("webscraping", "article_summary_user")
                 or "Summarize this article concisely."
             )
-            system_prompt = (
-                system_prompt
-                or load_prompt("webscraping", "article_summary_system")
+            system_prompt = overrides["system"] if "system" in overrides else (
+                system_prompt or load_prompt("webscraping", "article_summary_system")
                 or "You are a professional summarizer."
             )
             summary = analyze(
@@ -714,6 +761,7 @@ class WebScrapingService:
         """Store results in database"""
         media_ids = []
         errors = []
+        extraction_failures = []
         skipped_articles = 0
         duplicate_articles = 0
 
@@ -764,11 +812,13 @@ class WebScrapingService:
                             f"{redact_url_for_log(article.get('url', 'Unknown URL'))}"
                         )
                         continue
-                    error_msg = f"Failed to extract: {article.get('url', 'Unknown URL')}"
+                    failure_code = _classify_extraction_failure(article)
+                    error_msg = _EXTRACTION_FAILURE_MESSAGES[failure_code]
                     logger.warning(
                         f"Failed to extract: {redact_url_for_log(article.get('url', 'Unknown URL'))}"
                     )
                     errors.append(error_msg)
+                    extraction_failures.append({"code": failure_code})
                     continue
 
                 content_text = article.get("content")
@@ -778,11 +828,12 @@ class WebScrapingService:
                     else content_text
                 )
                 if not isinstance(body_text, str) or not body_text.strip():
-                    error_msg = f"No extracted content: {article.get('url', 'Unknown URL')}"
+                    error_msg = _EXTRACTION_FAILURE_MESSAGES["empty_extraction"]
                     logger.warning(
                         f"No extracted content: {redact_url_for_log(article.get('url', 'Unknown URL'))}"
                     )
                     errors.append(error_msg)
+                    extraction_failures.append({"code": "empty_extraction"})
                     continue
 
                 try:
@@ -973,6 +1024,13 @@ class WebScrapingService:
                         continue
 
                     if media_id:
+                        if not perform_chunking:
+                            await asyncio.to_thread(
+                                db.update_media_reprocess_state,
+                                media_id,
+                                chunking_status="skipped",
+                                reset_vector_processing=False,
+                            )
                         media_ids.append(media_id)
                         logger.info(f"Stored article with media_id: {media_id}, uuid: {media_uuid}")
                         try:
@@ -1041,6 +1099,7 @@ class WebScrapingService:
             "duplicate_articles": duplicate_articles,
             "method": result.get("method"),
             "errors": errors if errors else None,
+            "extraction_failures": extraction_failures or None,
         }
 
     def _is_admin_user(self, user: Any) -> bool:

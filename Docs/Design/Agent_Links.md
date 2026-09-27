@@ -39,6 +39,8 @@ https://github.com/shareAI-lab/learn-claude-code
 https://itnext.io/llms-like-c4-diagrams-d80414c70ca7?gi=5dcf64dfc2b0
 https://googlecloudplatform.github.io/scion/overview/
 
+https://github.com/smartcomputer-ai/lightspeed
+https://github.com/byronjones-elsevier/uictl-mac-mcp
 
 
 https://github.com/rcarmo/piclaw
@@ -147,7 +149,9 @@ https://github.com/antithesishq/bombadil
 
 https://github.com/SeifBenayed/claude-code-sdk/blob/main/test-loop.js
 	https://github.com/SeifBenayed/claude-code-sdk/blob/main/claude-native.py
+	https://github.com/SeifBenayed/claude-code-sdk/blob/main/claude-native.py
 	https://github.com/SeifBenayed/claude-code-sdk/blob/main/test-mcp.js
+	https://github.com/SeifBenayed/claude-code-sdk/blob/main/test-loop.js
 
 
 Hermes webui

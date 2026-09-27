@@ -17,10 +17,28 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable, Optional, cast
 
 from loguru import logger
+
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAPIError,
+    ChatAuthenticationError,
+    ChatConfigurationError,
+)
+from tldw_Server_API.app.core.Claims_Extraction.output_parser import (
+    ClaimsOutputParseError,
+    coerce_llm_response_text,
+    extract_claim_texts,
+    parse_claims_llm_output,
+)
+from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+    SummaryProviderError,
+)
 from tldw_Server_API.app.core.testing import is_truthy
 
 if TYPE_CHECKING:
@@ -29,6 +47,7 @@ if TYPE_CHECKING:
     from .generation import AnswerGenerator as AnswerGeneratorType
     from .types import DataSource, Document
     GenerateHypoFn = Callable[[str, Optional[str], Optional[str]], str]
+    GenerateHypoAsyncFn = Callable[..., Any]
     HydeEmbedFn = Callable[[str], Any]
     MultiStrategyExpansionFn = Callable[..., Any]
 else:
@@ -48,6 +67,7 @@ else:
     MultiDatabaseRetrieverType = Any
     AnswerGeneratorType = Any
     GenerateHypoFn = Any
+    GenerateHypoAsyncFn = Any
     HydeEmbedFn = Any
     MultiStrategyExpansionFn = Any
 
@@ -55,6 +75,7 @@ ClaimsEngine: type[ClaimsEngineType] | None = None
 MultiDatabaseRetriever: type[MultiDatabaseRetrieverType] | None = None
 AnswerGenerator: type[AnswerGeneratorType] | None = None
 generate_hypothetical_answer: GenerateHypoFn | None = None
+generate_hypothetical_answer_async: GenerateHypoAsyncFn | None = None
 hyde_embed_text: HydeEmbedFn | None = None
 multi_strategy_expansion: MultiStrategyExpansionFn | None = None
 
@@ -63,6 +84,25 @@ try:
     ClaimsEngine = cast(Optional[type[ClaimsEngineType]], getattr(_claims_mod, "ClaimsEngine", None))
 except ImportError:
     ClaimsEngine = None
+
+
+def _resolve_claims_engine() -> type[ClaimsEngineType] | None:
+    """Recover the real claims engine after an import-order cycle completes."""
+    global ClaimsEngine
+    if ClaimsEngine is not None:
+        return ClaimsEngine
+    try:
+        from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+            ClaimsEngine as _RealClaimsEngine,
+        )
+
+        from .claims import ClaimsEngine as _CandidateClaimsEngine
+    except ImportError:
+        return None
+    if _CandidateClaimsEngine is _RealClaimsEngine:
+        ClaimsEngine = _RealClaimsEngine
+    return _CandidateClaimsEngine
+
 
 try:
     from . import database_retrievers as _db_mod
@@ -79,9 +119,14 @@ except ImportError:
 try:
     from . import hyde as _hyde_mod
     generate_hypothetical_answer = cast(Optional[GenerateHypoFn], getattr(_hyde_mod, "generate_hypothetical_answer", None))
+    generate_hypothetical_answer_async = cast(
+        Optional[GenerateHypoAsyncFn],
+        getattr(_hyde_mod, "generate_hypothetical_answer_async", None),
+    )
     hyde_embed_text = cast(Optional[HydeEmbedFn], getattr(_hyde_mod, "embed_text", None))
 except ImportError:
     generate_hypothetical_answer = None
+    generate_hypothetical_answer_async = None
     hyde_embed_text = None
 
 try:
@@ -113,6 +158,34 @@ class VerificationOutcome:
     new_answer: str | None = None
     claims: list[dict[str, Any]] | None = None
     summary: dict[str, Any] | None = None
+    verification_available: bool = True
+    failure_code: str | None = None
+    embedding_coverage: str | None = None
+    embedding_failure_code: str | None = None
+
+
+def _record_embedding_degradation(
+    outcome: VerificationOutcome,
+    exc: Exception,
+) -> None:
+    """Expose only bounded credential failure metadata for optional retrieval."""
+    if isinstance(exc, ByokResolutionError):
+        code = exc.code
+    elif isinstance(exc, ChatAuthenticationError):
+        code = "invalid_provider_credentials"
+    elif isinstance(exc, ChatConfigurationError):
+        code = str(getattr(exc, "error_code", "") or "")
+        if code not in {
+            "missing_provider_credentials",
+            "provider_configuration_invalid",
+        }:
+            code = "provider_unavailable"
+    elif isinstance(exc, ChatAPIError):
+        code = "provider_unavailable"
+    else:
+        return
+    outcome.embedding_coverage = "degraded"
+    outcome.embedding_failure_code = code
 
 
 class PostGenerationVerifier:
@@ -126,6 +199,7 @@ class PostGenerationVerifier:
         max_claims: int = 20,
         time_budget_sec: float | None = None,
         use_advanced_rewrites: bool | None = None,
+        credential_runtime: Any = None,
     ):
         self._claims_runner = claims_runner
         self._max_retries = max(0, int(max_retries or 0))
@@ -135,6 +209,7 @@ class PostGenerationVerifier:
             self._threshold = 0.15
         self._max_claims = max(1, int(max_claims or 1))
         self._time_budget = float(time_budget_sec) if time_budget_sec is not None else None
+        self._credential_runtime = credential_runtime
         # Toggle for advanced rewrites (HyDE + multi-strategy + diversity). Default enabled.
         if use_advanced_rewrites is None:
             try:
@@ -144,6 +219,152 @@ class PostGenerationVerifier:
                 self._adv = True
         else:
             self._adv = bool(use_advanced_rewrites)
+
+    async def _build_claims_engine(self) -> tuple[Any, Any, dict[str, bool]]:
+        """Bind the synchronous claims callback to request-scoped credentials."""
+        claims_engine_type = _resolve_claims_engine()
+        if claims_engine_type is None:
+            raise RuntimeError("Claims engine unavailable")
+
+        import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+        credential_handle = None
+        claims_provider = None
+        claims_parse_mode = "lenient"
+        if self._credential_runtime is not None:
+            from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
+                _resolve_claims_json_parse_mode,
+                _resolve_claims_llm_config,
+            )
+
+            claims_provider, claims_model, _ = _resolve_claims_llm_config()
+            claims_parse_mode = _resolve_claims_json_parse_mode()
+            credential_handle = await self._credential_runtime.resolve(
+                claims_provider,
+                model=claims_model,
+            )
+
+        state = {"used": False}
+
+        def _analyze(
+            api_name: str,
+            input_data: Any,
+            custom_prompt_arg: str | None = None,
+            api_key: str | None = None,
+            system_message: str | None = None,
+            temp: float | None = None,
+            **kwargs: Any,
+        ) -> Any:
+            if credential_handle is None:
+                return sgl.analyze(
+                    api_name,
+                    input_data,
+                    custom_prompt_arg,
+                    api_key,
+                    system_message,
+                    temp,
+                    **kwargs,
+                )
+
+            for key in (
+                "app_config",
+                "credentials_resolved",
+                "provider_credentials",
+                "_provider_call_credentials",
+                "raise_on_error",
+            ):
+                kwargs.pop(key, None)
+            response = sgl.analyze(
+                claims_provider or credential_handle.provider,
+                input_data,
+                custom_prompt_arg,
+                credential_handle.api_key,
+                system_message,
+                temp,
+                app_config=credential_handle.app_config,
+                credentials_resolved=True,
+                provider_credentials=credential_handle,
+                raise_on_error=True,
+                **kwargs,
+            )
+            if isinstance(response, Iterator):
+                from .generation import (
+                    _classify_stream_content,
+                    _extract_stream_text,
+                )
+
+                chunks = []
+                for chunk in response:
+                    chunks.append(str(chunk))
+                    _has_content, has_error = _classify_stream_content(
+                        _extract_stream_text(chunk)
+                    )
+                    if has_error:
+                        raise SummaryProviderError(
+                            code="provider_failure",
+                            provider=claims_provider or credential_handle.provider,
+                        )
+                response = "".join(chunks)
+            if isinstance(response, str) and response.startswith("Error:"):
+                raise SummaryProviderError(
+                    code="provider_failure",
+                    provider=claims_provider or credential_handle.provider,
+                )
+            try:
+                parsed = parse_claims_llm_output(
+                    coerce_llm_response_text(response),
+                    parse_mode=claims_parse_mode,
+                    strip_think_tags=True,
+                )
+                if "fact-checking judge" in str(system_message or "").lower():
+                    label = parsed.get("label") if isinstance(parsed, dict) else None
+                    completed_valid = (
+                        isinstance(label, str)
+                        and label.strip().lower() in {"supported", "refuted", "nei"}
+                    )
+                else:
+                    completed_valid = bool(
+                        extract_claim_texts(
+                            parsed,
+                            wrapper_key="claims",
+                            parse_mode=claims_parse_mode,
+                        )
+                    )
+            except (ClaimsOutputParseError, TypeError, ValueError):
+                completed_valid = False
+            if completed_valid:
+                state["used"] = True
+            return response
+
+        return claims_engine_type(_analyze), credential_handle, state
+
+    async def _mark_claims_used(
+        self,
+        credential_handle: Any,
+        state: dict[str, bool],
+    ) -> None:
+        if credential_handle is not None and state["used"]:
+            await self._credential_runtime.mark_used(credential_handle)
+
+    async def _run_claims_engine_owned(
+        self,
+        engine: Any,
+        credential_handle: Any,
+        state: dict[str, bool],
+        **run_kwargs: Any,
+    ) -> dict[str, Any]:
+        """Run claims and usage marking inside one credential-owned operation."""
+
+        async def _run_and_mark() -> dict[str, Any]:
+            try:
+                return await engine.run(**run_kwargs)
+            finally:
+                await self._mark_claims_used(credential_handle, state)
+
+        operation = _run_and_mark()
+        if credential_handle is not None:
+            return await await_owned_worker(operation)
+        return await operation
 
     async def verify_and_maybe_fix(
         self,
@@ -187,6 +408,7 @@ class PostGenerationVerifier:
         # Run or reuse claims verification
         claims_payload: list[dict[str, Any]] | None = existing_claims
         summary_payload: dict[str, Any] | None = existing_summary
+        retrieval_provider_failed = False
         try:
             if (claims_payload is None or summary_payload is None):
                 if self._claims_runner is not None:
@@ -199,18 +421,14 @@ class PostGenerationVerifier:
                     ))
                     claims_payload = (run or {}).get("claims")
                     summary_payload = (run or {}).get("summary")
-                elif ClaimsEngine is not None:
-                    # Use default analyze function
-                    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
-                    def _analyze(api_name: str, input_data: Any, custom_prompt_arg: str | None = None,
-                                 api_key: str | None = None, system_message: str | None = None,
-                                 temp: float | None = None, **kwargs):
-                        return sgl.analyze(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, **kwargs)
-
-                    engine = ClaimsEngine(_analyze)
+                elif _resolve_claims_engine() is not None:
+                    engine, claims_handle, claims_state = await self._build_claims_engine()
 
                     # Build a claim-level retrieval function
                     async def _retrieve_for_claim(c_text: str, top: int = 5):
+                        nonlocal retrieval_provider_failed
+                        if retrieval_provider_failed:
+                            return []
                         try:
                             if MultiDatabaseRetriever is None:
                                 return base_documents[:top]
@@ -224,6 +442,7 @@ class PostGenerationVerifier:
                             mdr = MultiDatabaseRetriever(
                                 db_paths,
                                 user_id=user_id or "0",
+                                credential_runtime=self._credential_runtime,
                             )
                             med = mdr.retrievers.get(DataSource.MEDIA_DB)
                             docs: list[Document] = []
@@ -236,10 +455,18 @@ class PostGenerationVerifier:
                             # Other sources could be added similarly
                             docs = sorted(docs, key=lambda d: getattr(d, 'score', 0.0), reverse=True)
                             return docs[:top]
-                        except Exception:  # noqa: BLE001 - retrieval fallback should be safe
+                        except (ByokResolutionError, ChatAPIError) as exc:
+                            retrieval_provider_failed = True
+                            _record_embedding_degradation(outcome, exc)
+                            return []
+                        except Exception as exc:  # noqa: BLE001 - retrieval fallback should be safe
+                            _record_embedding_degradation(outcome, exc)
                             return base_documents[:top]
 
-                    run = await engine.run(
+                    run = await self._run_claims_engine_owned(
+                        engine,
+                        claims_handle,
+                        claims_state,
                         answer=answer,
                         query=query,
                         documents=base_documents,
@@ -249,12 +476,27 @@ class PostGenerationVerifier:
                         claims_conf_threshold=0.7,
                         claims_max=self._max_claims,
                         retrieve_fn=_retrieve_for_claim,
-                        nli_model=os.getenv("RAG_NLI_MODEL") or os.getenv("RAG_NLI_MODEL_PATH"),
+                        nli_model=os.getenv("RAG_NLI_MODEL")
+                        or os.getenv("RAG_NLI_MODEL_PATH"),
                         claims_concurrency=8,
                     )
                     claims_payload = (run or {}).get("claims")
                     summary_payload = (run or {}).get("summary")
+        except (ByokResolutionError, SummaryProviderError) as exc:
+            logger.warning("Post-check claims provider unavailable")
+            outcome.verification_available = False
+            outcome.failure_code = (
+                exc.code if isinstance(exc, ByokResolutionError) else "provider_unavailable"
+            )
+            outcome.reason = "verification_unavailable"
+            return outcome
         except Exception as e:  # noqa: BLE001 - claims verification best-effort
+            if self._credential_runtime is not None:
+                logger.warning("Post-check claims provider unavailable")
+                outcome.verification_available = False
+                outcome.failure_code = "provider_unavailable"
+                outcome.reason = "verification_unavailable"
+                return outcome
             logger.warning(f"Post-check claims verification failed: {_safe_exception_label(e)}")
 
         # Compute unsupported ratio
@@ -295,6 +537,10 @@ class PostGenerationVerifier:
         fixed = False
         new_answer: str | None = None
         while retries < self._max_retries:
+            if retrieval_provider_failed:
+                outcome.reason = "retrieval_provider_unavailable"
+                break
+
             retries += 1
             increment_counter("rag_adaptive_retries_total", 1)
 
@@ -305,8 +551,12 @@ class PostGenerationVerifier:
             # Second-chance retrieval: use query rewrites (HyDE + multi-strategy) and apply diversity
             new_docs: list[Document] = base_documents[:]
             try:
-                if MultiDatabaseRetriever is not None and media_db_path:
-                    mdr = MultiDatabaseRetriever({"media_db": media_db_path}, user_id=user_id or "0")
+                if not retrieval_provider_failed and MultiDatabaseRetriever is not None and media_db_path:
+                    mdr = MultiDatabaseRetriever(
+                        {"media_db": media_db_path},
+                        user_id=user_id or "0",
+                        credential_runtime=self._credential_runtime,
+                    )
                     med = mdr.retrievers.get(DataSource.MEDIA_DB)
                     if med is not None:
                         rh = getattr(med, 'retrieve_hybrid', None)
@@ -334,8 +584,36 @@ class PostGenerationVerifier:
                             hyde_vector = None
                             try:
                                 if generate_hypothetical_answer is not None and hyde_embed_text is not None:
-                                    hypo = generate_hypothetical_answer(query, None, None)
-                                    vec = await hyde_embed_text(hypo)
+                                    hyde_metadata: dict[str, Any] = {}
+                                    if self._credential_runtime is None:
+                                        hypo = generate_hypothetical_answer(query, None, None)
+                                    elif generate_hypothetical_answer_async is not None:
+                                        hypo = await generate_hypothetical_answer_async(
+                                            query,
+                                            generation_provider,
+                                            generation_model,
+                                            credential_runtime=self._credential_runtime,
+                                            stage_metadata=hyde_metadata,
+                                        )
+                                    else:
+                                        raise RuntimeError("Runtime HyDE generation is unavailable")
+                                    vec = await hyde_embed_text(
+                                        hypo,
+                                        credential_runtime=self._credential_runtime,
+                                        stage_metadata=hyde_metadata,
+                                    )
+                                    if hyde_metadata.get("embedding_coverage") == "degraded":
+                                        outcome.embedding_coverage = "degraded"
+                                    failure_code = hyde_metadata.get("failure_code")
+                                    if failure_code in {
+                                        "invalid_provider_credentials",
+                                        "missing_provider_credentials",
+                                        "provider_configuration_invalid",
+                                        "credential_store_unavailable",
+                                        "credential_scope_revoked",
+                                        "provider_unavailable",
+                                    }:
+                                        outcome.embedding_failure_code = failure_code
                                     if vec:
                                         hyde_vector = vec
                             except Exception:  # noqa: BLE001 - HyDE best-effort
@@ -344,6 +622,8 @@ class PostGenerationVerifier:
                             # Aggregate retrieval across queries
                             docs_union: dict[str, Document] = {}
                             for cq in list(dict.fromkeys(candidate_queries))[:4]:  # bound rewrites
+                                if retrieval_provider_failed:
+                                    break
                                 try:
                                     cur_docs: list[Document]
                                     if search_mode == "hybrid" and rh_fn is not None:
@@ -357,16 +637,34 @@ class PostGenerationVerifier:
                                         prev = docs_union.get(getattr(d, "id", ""))
                                         if prev is None or float(getattr(d, "score", 0.0)) > float(getattr(prev, "score", 0.0)):
                                             docs_union[getattr(d, "id", "")] = d
-                                except Exception:  # noqa: BLE001 - per-query retrieval best-effort
+                                except (ByokResolutionError, ChatAPIError) as exc:
+                                    retrieval_provider_failed = True
+                                    _record_embedding_degradation(outcome, exc)
+                                    break
+                                except Exception as exc:  # noqa: BLE001 - per-query retrieval best-effort
+                                    _record_embedding_degradation(outcome, exc)
                                     logger.debug("Adaptive per-query retrieval failed; continuing")
 
-                            merged_docs = sorted(docs_union.values(), key=lambda x: getattr(x, "score", 0.0), reverse=True)
-                            merged_docs = merged_docs[: max(5, min(30, top_k * 2))]
-                            # Apply simple diversity filter to reduce near-duplicates
-                            new_docs = _select_diverse(merged_docs, k=max(5, min(15, top_k)))
+                            if retrieval_provider_failed:
+                                new_docs = base_documents[:]
+                            else:
+                                merged_docs = sorted(docs_union.values(), key=lambda x: getattr(x, "score", 0.0), reverse=True)
+                                merged_docs = merged_docs[: max(5, min(30, top_k * 2))]
+                                # Apply simple diversity filter to reduce near-duplicates
+                                new_docs = _select_diverse(merged_docs, k=max(5, min(15, top_k)))
+            except (ByokResolutionError, ChatAPIError) as e:
+                retrieval_provider_failed = True
+                _record_embedding_degradation(outcome, e)
+                logger.debug("Adaptive retrieval provider unavailable; using base docs")
+                new_docs = base_documents[:]
             except Exception as e:  # noqa: BLE001 - fallback to base docs
+                _record_embedding_degradation(outcome, e)
                 logger.debug(f"Adaptive retrieval failed; using base docs. Reason: {_safe_exception_label(e)}")
                 new_docs = base_documents[:]
+
+            if retrieval_provider_failed:
+                outcome.reason = "retrieval_provider_unavailable"
+                break
 
             # Regenerate if possible
             try:
@@ -375,6 +673,7 @@ class PostGenerationVerifier:
                     gen = gen_cls(
                         model=generation_model,
                         provider=generation_provider,
+                        credential_runtime=self._credential_runtime,
                     )
                     context = "\n\n".join([getattr(d, 'content', '') for d in new_docs[:5]])
                     maybe = await gen.generate(query=query, context=context, prompt_template=None, max_tokens=500)
@@ -401,14 +700,12 @@ class PostGenerationVerifier:
                         claims_max=max(5, min(10, self._max_claims)),
                     ))
                     sum2 = (run2 or {}).get("summary") or {}
-                elif ClaimsEngine is not None:
-                    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
-                    def _analyze2(api_name: str, input_data: Any, custom_prompt_arg: str | None = None,
-                                   api_key: str | None = None, system_message: str | None = None,
-                                   temp: float | None = None, **kwargs):
-                        return sgl.analyze(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, **kwargs)
-                    eng2 = ClaimsEngine(_analyze2)
-                    run2 = await eng2.run(
+                elif _resolve_claims_engine() is not None:
+                    eng2, claims_handle, claims_state = await self._build_claims_engine()
+                    run2 = await self._run_claims_engine_owned(
+                        eng2,
+                        claims_handle,
+                        claims_state,
                         answer=new_answer,
                         query=query,
                         documents=new_docs,
@@ -418,13 +715,28 @@ class PostGenerationVerifier:
                         claims_conf_threshold=0.7,
                         claims_max=max(5, min(10, self._max_claims)),
                         retrieve_fn=None,
-                        nli_model=os.getenv("RAG_NLI_MODEL") or os.getenv("RAG_NLI_MODEL_PATH"),
+                        nli_model=os.getenv("RAG_NLI_MODEL")
+                        or os.getenv("RAG_NLI_MODEL_PATH"),
                         claims_concurrency=4,
                     )
                     sum2 = (run2 or {}).get("summary") or {}
                 else:
                     sum2 = {}
+            except (ByokResolutionError, SummaryProviderError) as exc:
+                logger.warning("Adaptive recheck provider unavailable")
+                outcome.verification_available = False
+                outcome.failure_code = (
+                    exc.code if isinstance(exc, ByokResolutionError) else "provider_unavailable"
+                )
+                outcome.reason = "verification_unavailable"
+                break
             except Exception as e:  # noqa: BLE001 - recheck best-effort
+                if self._credential_runtime is not None:
+                    logger.warning("Adaptive recheck provider unavailable")
+                    outcome.verification_available = False
+                    outcome.failure_code = "provider_unavailable"
+                    outcome.reason = "verification_unavailable"
+                    break
                 logger.debug(f"Adaptive recheck failed: {_safe_exception_label(e)}")
                 sum2 = {}
 

@@ -489,7 +489,8 @@
     "collapseSidebar": "Skjul sidepanel",
     "titlePlaceholder": "Titel",
     "keywordsEditorPlaceholder": "Nøgleord (tags)",
-    "tagsHelp": "Nøgleord hjælper dig med at finde denne note via nøgleordsfilteret til venstre."
+    "tagsHelp": "Nøgleord hjælper dig med at finde denne note via nøgleordsfilteret til venstre.",
+    "offlineSaveUnavailable": "Offline-gemning er ikke tilgængelig, før din konto og lokale lagring er bekræftet. Dine ændringer er fortsat ikke gemt."
   },
   "tts": {
     "playground": "TTS-område"

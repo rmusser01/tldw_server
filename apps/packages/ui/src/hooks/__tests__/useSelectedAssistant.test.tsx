@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
   const characterLocal = new Map<string, unknown>()
   const characterSync = new Map<string, unknown>()
   const operations: string[] = []
+  const assistantSetBarriers: Promise<void>[] = []
 
   const createStorageMock = (name: string, map: Map<string, unknown>) => ({
     get: vi.fn(async (key: string) => (map.has(key) ? map.get(key) : null)),
@@ -31,6 +32,8 @@ const mocks = vi.hoisted(() => {
     characterLocal,
     characterSync,
     operations,
+    assistantSetBarriers,
+    isCurrentOwner: () => true,
     parseStoredValue: (value: unknown): Record<string, unknown> | null => {
       if (!value) return null
       if (typeof value === "string") {
@@ -54,6 +57,10 @@ const mocks = vi.hoisted(() => {
   }
 })
 
+vi.mock("@/hooks/useChatDraftOwner", () => ({
+  useChatDraftOwner: () => ({ ownerKey: "account-a", isCurrent: mocks.isCurrentOwner })
+}))
+
 vi.mock("@plasmohq/storage/hook", async () => {
   const ReactModule =
     await vi.importActual<typeof import("react")>("react")
@@ -76,8 +83,11 @@ vi.mock("@plasmohq/storage/hook", async () => {
                 ? mocks.characterSync
                 : mocks.assistantLocal
 
-      const getStoredValue = () =>
-        (store.has(key) ? store.get(key) : initialValue) ?? null
+      // These existing controls use flat fixtures; the real-adapter privacy suite
+      // separately verifies the account-stamped persistence format.
+      const getStoredValue = () => store.has(key)
+        ? { ownerKey: "account-a", selection: store.get(key) ?? null }
+        : initialValue ?? null
 
       const [value, setRenderValue] = ReactModule.useState(getStoredValue)
 
@@ -90,21 +100,26 @@ vi.mock("@plasmohq/storage/hook", async () => {
           typeof next === "function"
             ? (next as (prev: unknown) => unknown)(getStoredValue())
             : next
+        const selection = (resolved as { selection?: unknown } | null)?.selection ?? null
         mocks.operations.push(
-          `useStorage.${key}.set:${resolved == null ? "null" : "value"}`
+          `useStorage.${key}.set:${selection == null ? "null" : "value"}`
         )
-        if (resolved == null) {
+        if (key.startsWith("selectedAssistant:owner:")) {
+          const barrier = mocks.assistantSetBarriers.shift()
+          if (barrier) await barrier
+        }
+        if (selection == null) {
           store.delete(key)
-          setRenderValue(null)
+          setRenderValue(resolved)
           return
         }
-        store.set(key, resolved)
+        store.set(key, selection)
         setRenderValue(resolved)
       }
 
       const setRenderValueWithLog = (next: unknown) => {
         mocks.operations.push(
-          `useStorage.${key}.render:${next == null ? "null" : "value"}`
+          `useStorage.${key}.render:${(next as { selection?: unknown } | null)?.selection == null ? "null" : "value"}`
         )
         setRenderValue(next)
       }
@@ -135,11 +150,14 @@ vi.mock("@/utils/selected-character-storage", () => ({
 import { useSelectedAssistant } from "../useSelectedAssistant"
 import { useSelectedCharacter } from "../useSelectedCharacter"
 import {
-  SELECTED_ASSISTANT_STORAGE_KEY
+  SELECTED_ASSISTANT_STORAGE_KEY as ASSISTANT_KEY
 } from "@/utils/selected-assistant-storage"
 import {
-  SELECTED_CHARACTER_STORAGE_KEY
+  SELECTED_CHARACTER_STORAGE_KEY as CHARACTER_KEY
 } from "@/utils/selected-character-storage"
+
+const SELECTED_ASSISTANT_STORAGE_KEY = `${ASSISTANT_KEY}:owner:account-a`
+const SELECTED_CHARACTER_STORAGE_KEY = `${CHARACTER_KEY}:owner:account-a`
 
 describe("useSelectedAssistant", () => {
   beforeEach(() => {
@@ -148,6 +166,7 @@ describe("useSelectedAssistant", () => {
     mocks.characterLocal.clear()
     mocks.characterSync.clear()
     mocks.operations.length = 0
+    mocks.assistantSetBarriers.length = 0
     mocks.assistantStorage.get.mockClear()
     mocks.assistantStorage.set.mockClear()
     mocks.assistantStorage.remove.mockClear()
@@ -162,40 +181,11 @@ describe("useSelectedAssistant", () => {
     mocks.characterSyncStorage.remove.mockClear()
   })
 
-  it("migrates a stored selectedCharacter record into a character assistant selection", async () => {
-    mocks.characterLocal.set(SELECTED_CHARACTER_STORAGE_KEY, {
-      id: 7,
-      name: "Archivist",
-      avatar_url: "https://example.com/avatar.png",
-      greeting: "Hello there",
-      alternateGreetings: ["Welcome back"]
-    })
-
+  it("does not adopt an unowned legacy character as the verified account's selection", async () => {
+    mocks.characterLocal.set("selectedCharacter", { id: 7, name: "Private Archivist" })
     const { result } = renderHook(() => useSelectedAssistant())
-
-    await waitFor(() => {
-      expect(result.current[0]).toMatchObject({
-        kind: "character",
-        id: "7",
-        name: "Archivist",
-        avatar_url: "https://example.com/avatar.png",
-        greeting: "Hello there",
-        alternateGreetings: ["Welcome back"]
-      })
-    })
-
-    expect(mocks.assistantLocal.get(SELECTED_ASSISTANT_STORAGE_KEY)).toMatchObject({
-      kind: "character",
-      id: "7",
-      name: "Archivist"
-    })
-    expect(mocks.characterLocal.get(SELECTED_CHARACTER_STORAGE_KEY)).toMatchObject(
-      {
-        id: "7",
-        name: "Archivist",
-        alternateGreetings: ["Welcome back"]
-      }
-    )
+    await waitFor(() => expect(mocks.characterLocal.has("selectedCharacter")).toBe(false))
+    expect(result.current[0]).toBeNull()
   })
 
   it("broadcasts persona assistant selections to subscribers", async () => {
@@ -223,43 +213,121 @@ describe("useSelectedAssistant", () => {
     expect(mocks.characterLocal.has(SELECTED_CHARACTER_STORAGE_KEY)).toBe(false)
   })
 
-  it("updates the legacy character mirror before broadcasting character selections", async () => {
-    const first = renderHook(() => useSelectedAssistant())
-    const second = renderHook(() => useSelectedAssistant())
+  it("keeps the latest assistant selection when an older persistence write finishes last", async () => {
+    let releaseFirstWrite = () => undefined
+    mocks.assistantSetBarriers.push(
+      new Promise<void>((resolve) => {
+        releaseFirstWrite = resolve
+      })
+    )
+    const { result } = renderHook(() => useSelectedAssistant())
+
+    let firstWrite: Promise<void> | undefined
+    let secondWrite: Promise<void> | undefined
+    act(() => {
+      firstWrite = result.current[1]({
+        kind: "persona",
+        id: "persisted-restore",
+        name: "Persisted Restore"
+      })
+      secondWrite = result.current[1]({
+        kind: "character",
+        id: "explicit-selection",
+        name: "Explicit Selection"
+      })
+    })
 
     await act(async () => {
-      await first.result.current[1]({
-        kind: "character",
-        id: "char-next",
-        name: "Next Character",
-        metadata: {
-          selectionMode: "tracked"
-        }
-      })
+      releaseFirstWrite()
+      await Promise.all([firstWrite, secondWrite])
     })
 
+    expect(mocks.assistantLocal.get(SELECTED_ASSISTANT_STORAGE_KEY)).toMatchObject({
+      kind: "character",
+      id: "explicit-selection",
+      name: "Explicit Selection"
+    })
     await waitFor(() => {
-      expect(second.result.current[0]).toMatchObject({
+      expect(result.current[0]).toMatchObject({
         kind: "character",
-        id: "char-next",
-        name: "Next Character"
+        id: "explicit-selection"
       })
     })
+  })
 
-    const mirrorUpdateIndex = mocks.operations.indexOf(
-      `characterLocal.set:${SELECTED_CHARACTER_STORAGE_KEY}`
-    )
-    const subscriberRenderIndex = mocks.operations.indexOf(
-      `useStorage.${SELECTED_ASSISTANT_STORAGE_KEY}.render:value`
-    )
-
-    expect(mirrorUpdateIndex).toBeGreaterThanOrEqual(0)
-    expect(subscriberRenderIndex).toBeGreaterThanOrEqual(0)
-    expect(mirrorUpdateIndex).toBeLessThan(subscriberRenderIndex)
-    expect(mocks.characterLocal.get(SELECTED_CHARACTER_STORAGE_KEY)).toMatchObject({
-      id: "char-next",
-      name: "Next Character"
+  it("rolls back a guarded assistant write cancelled during persistence", async () => {
+    const { result } = renderHook(() => useSelectedAssistant())
+    await act(async () => {
+      await result.current[1]({
+        kind: "character",
+        id: "current-selection",
+        name: "Current Selection"
+      })
     })
+    let releaseRestoreWrite = () => undefined
+    mocks.assistantSetBarriers.push(
+      new Promise<void>((resolve) => {
+        releaseRestoreWrite = resolve
+      })
+    )
+    let restoreIsCurrent = true
+    let restoreWrite: Promise<void> | undefined
+
+    act(() => {
+      restoreWrite = result.current[1](
+        {
+          kind: "persona",
+          id: "stale-restore",
+          name: "Stale Restore"
+        },
+        { isCurrent: () => restoreIsCurrent }
+      )
+    })
+    restoreIsCurrent = false
+    await act(async () => {
+      releaseRestoreWrite()
+      await restoreWrite
+    })
+
+    expect(mocks.assistantLocal.get(SELECTED_ASSISTANT_STORAGE_KEY)).toMatchObject({
+      kind: "character",
+      id: "current-selection"
+    })
+    await waitFor(() => {
+      expect(result.current[0]).toMatchObject({
+        kind: "character",
+        id: "current-selection"
+      })
+    })
+  })
+
+  it("does not let an already stale hydration cancel a queued explicit selection", async () => {
+    const { result } = renderHook(() => useSelectedAssistant())
+    await act(async () => {
+      await result.current[1]({ kind: "character", id: "4", name: "Cedar" })
+    })
+    await act(async () => {
+      const selection = result.current[1]({ kind: "character", id: "5", name: "Robot" })
+      const staleHydration = result.current[1](
+        { kind: "character", id: "4", name: "Cedar" },
+        { isCurrent: () => false }
+      )
+      await Promise.all([selection, staleHydration])
+    })
+    expect(result.current[0]).toMatchObject({ id: "5", name: "Robot" })
+    expect(mocks.assistantLocal.get(SELECTED_ASSISTANT_STORAGE_KEY)).toMatchObject({ id: "5" })
+  })
+
+  it("persists character selections and broadcasts to useSelectedCharacter consumers", async () => {
+    const first = renderHook(() => useSelectedAssistant())
+    const second = renderHook(() => useSelectedCharacter())
+    await act(async () => {
+      await first.result.current[1]({ kind: "character", id: "char-next", name: "Next Character", metadata: { selectionMode: "tracked" } })
+    })
+    expect(second.result.current[0]).toMatchObject({ id: "char-next", name: "Next Character" })
+    first.unmount()
+    const reloaded = renderHook(() => useSelectedAssistant())
+    expect(reloaded.result.current[0]).toMatchObject({ kind: "character", id: "char-next", name: "Next Character" })
   })
 
   it("does not mirror overlay character selections into legacy character storage", async () => {
@@ -326,61 +394,17 @@ describe("useSelectedAssistant", () => {
     })
   })
 
-  it("clears legacy character mirrors before broadcasting a null assistant", async () => {
-    mocks.assistantLocal.set(SELECTED_ASSISTANT_STORAGE_KEY, {
-      kind: "character",
-      id: "char-legacy",
-      name: "Legacy Guide"
-    })
-    mocks.characterLocal.set(SELECTED_CHARACTER_STORAGE_KEY, {
-      id: "char-legacy",
-      name: "Legacy Guide"
-    })
-    mocks.characterSync.set(SELECTED_CHARACTER_STORAGE_KEY, {
-      id: "char-legacy",
-      name: "Legacy Guide"
-    })
-    mocks.assistantSync.set(SELECTED_ASSISTANT_STORAGE_KEY, {
-      kind: "character",
-      id: "char-legacy",
-      name: "Legacy Guide"
-    })
-
+  it("clears both assistant and Character consumers and stays clear on reload", async () => {
+    mocks.assistantLocal.set(SELECTED_ASSISTANT_STORAGE_KEY, { kind: "character", id: "char-existing", name: "Existing Guide" })
     const first = renderHook(() => useSelectedAssistant())
-    const second = renderHook(() => useSelectedAssistant())
-
-    await waitFor(() => {
-      expect(first.result.current[0]).toMatchObject({
-        kind: "character",
-        id: "char-legacy",
-        name: "Legacy Guide"
-      })
-    })
-
-    mocks.operations.length = 0
-
-    await act(async () => {
-      await first.result.current[1](null)
-    })
-
-    await waitFor(() => {
-      expect(first.result.current[0]).toBeNull()
-      expect(second.result.current[0]).toBeNull()
-    })
-
-    const localMirrorClearIndex = mocks.operations.indexOf(
-      `characterLocal.remove:${SELECTED_CHARACTER_STORAGE_KEY}`
-    )
-    const nullAssistantBroadcastIndex = mocks.operations.indexOf(
-      `useStorage.${SELECTED_ASSISTANT_STORAGE_KEY}.set:null`
-    )
-
-    expect(localMirrorClearIndex).toBeGreaterThanOrEqual(0)
-    expect(nullAssistantBroadcastIndex).toBeGreaterThanOrEqual(0)
-    expect(localMirrorClearIndex).toBeLessThan(nullAssistantBroadcastIndex)
-    expect(mocks.characterLocal.has(SELECTED_CHARACTER_STORAGE_KEY)).toBe(false)
-    expect(mocks.characterSync.has(SELECTED_CHARACTER_STORAGE_KEY)).toBe(false)
-    expect(mocks.assistantSync.has(SELECTED_ASSISTANT_STORAGE_KEY)).toBe(false)
+    const second = renderHook(() => useSelectedCharacter())
+    expect(second.result.current[0]).toMatchObject({ id: "char-existing" })
+    await act(async () => { await first.result.current[1](null) })
+    expect(first.result.current[0]).toBeNull()
+    expect(second.result.current[0]).toBeNull()
+    first.unmount()
+    const reloaded = renderHook(() => useSelectedAssistant())
+    expect(reloaded.result.current[0]).toBeNull()
   })
 
   it("keeps selected assistant identity stable across unchanged rerenders", async () => {

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 
@@ -12,7 +12,10 @@ async def test_user_timestamp_repair_allows_aware_setup_self_verify(test_db_pool
     from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
         ensure_user_timestamp_timezones_pg,
     )
-    from tldw_Server_API.app.services.auth_service import mark_user_verified
+    from tldw_Server_API.app.services.auth_service import (
+        mark_user_verified,
+        update_user_last_login,
+    )
 
     username = f"pg-setup-{uuid.uuid4().hex[:8]}"
     await test_db_pool.execute(
@@ -55,10 +58,16 @@ async def test_user_timestamp_repair_allows_aware_setup_self_verify(test_db_pool
         user_id=int(user_id),
         now_utc=datetime(2026, 7, 5, 5, 25, 52, tzinfo=timezone.utc),
     )
+    await update_user_last_login(
+        test_db_pool,
+        user_id=int(user_id),
+        now=datetime(2026, 7, 5, 6, 25, 52),
+    )
 
     row = await test_db_pool.fetchrow(
-        "SELECT is_verified, updated_at FROM users WHERE id = $1",
+        "SELECT is_verified, updated_at, last_login FROM users WHERE id = $1",
         user_id,
     )
     assert row["is_verified"] is True
     assert row["updated_at"].tzinfo is not None
+    assert row["last_login"].tzinfo is not None

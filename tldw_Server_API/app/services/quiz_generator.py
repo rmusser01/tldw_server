@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
+from tldw_Server_API.app.api.v1.schemas.osce import OsceStationAuthoringResponse
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import resolve_provider_api_key
@@ -20,11 +21,17 @@ from tldw_Server_API.app.core.Claims_Extraction.artifact_verification import (
 )
 from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.exceptions import BadRequestError
+from tldw_Server_API.app.core.exceptions import BadRequestError, OsceVerificationError, QuizMalformedOutputError
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.services.osce_generator import (
+    build_osce_verification_units,
+    generate_osce_stations_from_sources,
+)
+from tldw_Server_API.app.services.osce_practice import utc_now
+from tldw_Server_API.app.services.quiz_generation_metrics import QuizGenerationMetrics
 from tldw_Server_API.app.services.quiz_source_resolver import resolve_quiz_sources
 
 if TYPE_CHECKING:
@@ -60,6 +67,8 @@ _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
         "label": "Standard Recall",
         "description": "Balanced source-grounded recall and application questions.",
         "status": "available",
+        "output_kind": "questions",
+        "default_num_stations": None,
         "default_num_questions": 10,
         "default_difficulty": "mixed",
         "default_question_types": DEFAULT_QUESTION_TYPES,
@@ -71,6 +80,8 @@ _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
         "label": "Mixed Assessment",
         "description": "A broader mix of recall, interpretation, and applied understanding.",
         "status": "available",
+        "output_kind": "questions",
+        "default_num_stations": None,
         "default_num_questions": 10,
         "default_difficulty": "mixed",
         "default_question_types": DEFAULT_QUESTION_TYPES,
@@ -82,6 +93,8 @@ _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
         "label": "Best of Five",
         "description": "Single-best-answer questions with five plausible options.",
         "status": "available",
+        "output_kind": "questions",
+        "default_num_stations": None,
         "default_num_questions": 5,
         "default_difficulty": "mixed",
         "default_question_types": ["multiple_choice"],
@@ -96,6 +109,8 @@ _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
         "label": "EMQ",
         "description": "Extended matching questions with shared option banks.",
         "status": "available",
+        "output_kind": "questions",
+        "default_num_stations": None,
         "default_num_questions": 5,
         "default_difficulty": "mixed",
         "default_question_types": ["multiple_choice"],
@@ -110,6 +125,8 @@ _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
         "label": "Assertion / Reasoning",
         "description": "Assertion and reason pairs with concise evidence-backed rationales.",
         "status": "available",
+        "output_kind": "questions",
+        "default_num_stations": None,
         "default_num_questions": 5,
         "default_difficulty": "mixed",
         "default_question_types": ["multiple_choice"],
@@ -127,8 +144,10 @@ _QUIZ_GENERATION_PROFILES: list[dict[str, Any]] = [
         "id": "osce_scenario",
         "label": "OSCE Scenario",
         "description": "Scenario practice with checklist and rubric feedback.",
-        "status": "planned",
-        "default_num_questions": 3,
+        "status": "available",
+        "output_kind": "osce_stations",
+        "default_num_stations": 1,
+        "default_num_questions": 1,
         "default_difficulty": "mixed",
         "default_question_types": ["fill_blank"],
         "allowed_question_types": ["fill_blank"],
@@ -148,6 +167,14 @@ class QuizClaimVerificationError(ValueError):
     def __init__(self, claim_verification: dict[str, Any]):
         super().__init__("Quiz claim verification failed")
         self.claim_verification = claim_verification
+
+
+class QuizGenerationRequestError(BadRequestError):
+    """Raised for stable quiz-generation request failures."""
+
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
 
 
 QUIZ_GENERATION_PROMPT = """You are a quiz generator. Based on the following content, generate {num_questions} quiz questions.
@@ -240,7 +267,7 @@ def _normalize_question_type(value: Any) -> str | None:
     return aliases.get(text, text)
 
 
-def _normalize_generation_profile(value: Any) -> str:
+def _normalize_generation_profile_id(value: Any) -> str:
     raw = getattr(value, "value", value)
     text = str(raw or DEFAULT_GENERATION_PROFILE).strip().lower().replace("-", "_")
     aliases = {
@@ -258,8 +285,18 @@ def _normalize_generation_profile(value: Any) -> str:
     profile = _PROFILE_BY_ID.get(profile_id)
     if profile is None:
         raise BadRequestError(f"Unknown quiz generation profile: {raw}")
-    if profile["status"] != "available":
-        raise BadRequestError(f"Quiz generation profile '{profile_id}' is not available yet")
+    return profile_id
+
+
+def ensure_generation_profile_available(profile: Any) -> None:
+    profile_id = _normalize_generation_profile_id(profile)
+    if _PROFILE_BY_ID[profile_id]["status"] != "available":
+        raise QuizGenerationRequestError("generation_profile_unavailable")
+
+
+def _normalize_generation_profile(value: Any) -> str:
+    profile_id = _normalize_generation_profile_id(value)
+    ensure_generation_profile_available(profile_id)
     return profile_id
 
 
@@ -417,6 +454,42 @@ def _normalize_emq_mc_answer(raw: Any, options: list[str]) -> int:
     if candidates:
         raise ValueError("EMQ correct_answer is ambiguous")
     raise ValueError("EMQ correct_answer must be a valid option index, letter, or exact label")
+
+
+def _normalize_best_of_five_answer(raw: Any, options: list[str]) -> int:
+    """Return a strict zero-based answer index for a Best-of-Five question."""
+    if isinstance(raw, bool):
+        raise QuizMalformedOutputError(
+            "Best-of-Five correct_answer must be an integer, A-E letter, or exact option label"
+        )
+    if isinstance(raw, int):
+        if 0 <= raw < len(options):
+            return raw
+        raise QuizMalformedOutputError("Best-of-Five correct_answer index is out of range")
+    if not isinstance(raw, str):
+        raise QuizMalformedOutputError(
+            "Best-of-Five correct_answer must be an integer, A-E letter, or exact option label"
+        )
+
+    text = raw.strip()
+    candidates: set[int] = set()
+    if text.isdigit():
+        index = int(text)
+        if 0 <= index < len(options):
+            candidates.add(index)
+    if len(text) == 1 and "A" <= text.upper() <= "E":
+        candidates.add(ord(text.upper()) - ord("A"))
+    candidates.update(
+        index for index, option in enumerate(options) if option.casefold() == text.casefold()
+    )
+
+    if len(candidates) == 1:
+        return candidates.pop()
+    if candidates:
+        raise QuizMalformedOutputError("Best-of-Five correct_answer is ambiguous")
+    raise QuizMalformedOutputError(
+        "Best-of-Five correct_answer must be an integer, A-E letter, or exact option label"
+    )
 
 
 def _normalize_assertion_reasoning_answer(raw: Any) -> int:
@@ -954,6 +1027,7 @@ def _normalize_questions(
     profile_id = _normalize_generation_profile(generation_profile)
     is_emq = profile_id == "emq"
     is_assertion_reasoning = profile_id == ASSERTION_REASONING_TAG
+    is_best_of_five = profile_id == "best_of_five"
     mc_option_count = None if is_emq else 5 if profile_id == "best_of_five" else 4
     normalized: list[dict[str, Any]] = []
     for raw in raw_questions:
@@ -964,6 +1038,8 @@ def _normalize_questions(
         q_type = _normalize_question_type(raw.get("question_type"))
         if is_assertion_reasoning and q_type != "multiple_choice":
             raise ValueError("Assertion / Reasoning questions must use the multiple_choice question type")
+        if is_best_of_five and q_type != "multiple_choice":
+            raise QuizMalformedOutputError("Best-of-Five questions must use the multiple_choice question type")
         if q_type not in DEFAULT_QUESTION_TYPES and not is_emq:
             continue
         if is_assertion_reasoning:
@@ -1006,14 +1082,28 @@ def _normalize_questions(
                 options = list(ASSERTION_REASONING_OPTIONS)
                 correct_answer = _normalize_assertion_reasoning_answer(raw.get("correct_answer"))
             else:
-                options = _coerce_options(raw.get("options"), max_options=mc_option_count)
-                if profile_id == "best_of_five" and len(options) != 5:
-                    raise ValueError("Best-of-Five questions must include exactly 5 options")
-                correct_answer = (
-                    raw.get("correct_answer")
-                    if is_emq
-                    else _normalize_mc_answer(raw.get("correct_answer"), options)
+                options = _coerce_options(
+                    raw.get("options"),
+                    max_options=None if profile_id == "best_of_five" else mc_option_count,
                 )
+                if profile_id == "best_of_five" and len(options) != 5:
+                    raise QuizMalformedOutputError("Best-of-Five questions must include exactly 5 options")
+                if profile_id == "best_of_five" and len(
+                    {option.casefold() for option in options}
+                ) != len(options):
+                    raise QuizMalformedOutputError("Best-of-Five questions must not include duplicate option labels")
+                if is_emq:
+                    correct_answer = raw.get("correct_answer")
+                elif profile_id == "best_of_five":
+                    correct_answer = _normalize_best_of_five_answer(
+                        raw.get("correct_answer"), options
+                    )
+                    if not isinstance(raw.get("explanation"), str) or not explanation:
+                        raise QuizMalformedOutputError("Best-of-Five questions must include a nonempty explanation")
+                else:
+                    correct_answer = _normalize_mc_answer(
+                        raw.get("correct_answer"), options
+                    )
         elif q_type == "true_false":
             correct_answer = _normalize_tf_answer(raw.get("correct_answer"))
         elif q_type == "fill_blank":
@@ -1687,6 +1777,7 @@ async def generate_quiz_from_sources(
     media_db: MediaDatabase,
     sources: Sequence[Any],
     num_questions: int = 10,
+    num_stations: int = 1,
     question_types: list[Any] | None = None,
     generation_profile: Any = DEFAULT_GENERATION_PROFILE,
     difficulty: str = "mixed",
@@ -1700,54 +1791,220 @@ async def generate_quiz_from_sources(
     workspace_tag: str | None = None,
 ) -> dict[str, Any]:
     """Generate a quiz from mixed sources (media, notes, flashcard decks/cards)."""
-    normalized_profile = _normalize_generation_profile(generation_profile)
-    normalized_sources = _normalize_sources(sources)
-    evidence = await asyncio.to_thread(
-        resolve_quiz_sources,
-        normalized_sources,
-        db=db,
-        media_db=media_db,
-    )
+    with QuizGenerationMetrics() as metrics:
+        normalized_profile = _normalize_generation_profile(generation_profile)
+        metrics.profile = normalized_profile
+        normalized_sources = _normalize_sources(sources)
+        metrics.start(normalized_sources)
+        evidence = await asyncio.to_thread(
+            resolve_quiz_sources,
+            normalized_sources,
+            db=db,
+            media_db=media_db,
+        )
 
-    plan = _coerce_generation_plan(
-        num_questions=num_questions,
-        question_types=question_types,
-        question_plan=question_plan,
-        generation_profile=normalized_profile,
-    )
-    normalized_types = [item["question_type"] for item in plan]
-    focus_instructions = [_build_generation_profile_instruction(normalized_profile)]
-    if focus_topics:
-        focus_instructions.append(f"- Focus on these topics: {', '.join(t for t in focus_topics if t)}")
-    focus_instruction = "\n".join(focus_instructions)
-    source_contract = _build_source_contract(normalized_sources)
-    primary_media_id = _resolve_primary_media_id(normalized_sources)
-    quiz_title, quiz_description = await asyncio.to_thread(
-        _resolve_generated_quiz_metadata,
-        media_db=media_db,
-        normalized_sources=normalized_sources,
-        primary_media_id=primary_media_id,
-    )
-
-    if _should_use_deterministic_test_mode():
-        questions = _build_test_mode_questions(
-            evidence=evidence,
-            normalized_sources=normalized_sources,
+        metrics.phase = "validation"
+        plan = _coerce_generation_plan(
             num_questions=num_questions,
+            question_types=question_types,
+            question_plan=question_plan,
+            generation_profile=normalized_profile,
+        )
+        normalized_types = [item["question_type"] for item in plan]
+        focus_instructions = [_build_generation_profile_instruction(normalized_profile)]
+        if focus_topics:
+            focus_instructions.append(f"- Focus on these topics: {', '.join(t for t in focus_topics if t)}")
+        focus_instruction = "\n".join(focus_instructions)
+        source_contract = _build_source_contract(normalized_sources)
+        primary_media_id = _resolve_primary_media_id(normalized_sources)
+        metrics.phase = "runtime"
+        quiz_title, quiz_description = await asyncio.to_thread(
+            _resolve_generated_quiz_metadata,
+            media_db=media_db,
+            normalized_sources=normalized_sources,
+            primary_media_id=primary_media_id,
+        )
+
+        if normalized_profile == "osce_scenario":
+            metrics.phase = "osce"
+            bundle = await generate_osce_stations_from_sources(
+                evidence=evidence,
+                normalized_sources=normalized_sources,
+                num_stations=num_stations,
+                difficulty=difficulty,
+                focus_topics=focus_topics or [],
+                model=model,
+                api_provider=api_provider,
+                verification_provider=claims_verification_provider,
+                verification_model=claims_verification_model,
+            )
+            metrics.phase = "runtime"
+            verification_timestamp = utc_now()
+            verification_units = build_osce_verification_units(bundle.stations)
+            station_rows = [
+                {
+                    "content": station.model_dump(mode="json"),
+                    "order_index": index,
+                    "origin": "generated",
+                    "provenance": bundle.provenance,
+                    "source_bundle": normalized_sources,
+                    "verification_state": "source_verified",
+                    "verification_timestamp": verification_timestamp,
+                    "verification_summary": (
+                        f"Verified {len(verification_units)} evidence units against "
+                        f"{len(normalized_sources)} canonical sources."
+                    ),
+                }
+                for index, station in enumerate(bundle.stations)
+            ]
+            try:
+                quiz, persisted_stations = await asyncio.to_thread(
+                    db.create_quiz_with_osce_stations_atomic,
+                    {
+                        "name": f"OSCE: {quiz_title}" if quiz_title else "OSCE: Mixed Sources",
+                        "description": "Auto-generated source-backed OSCE practice stations",
+                        "workspace_id": workspace_id,
+                        "workspace_tag": workspace_tag,
+                        "media_id": primary_media_id,
+                        "source_bundle_json": normalized_sources,
+                        "activity_type": "osce",
+                        "generation_profile": normalized_profile,
+                    },
+                    station_rows,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "OSCE atomic persistence failed client={} exception={}",
+                    str(db.client_id)[:128],
+                    type(exc).__name__,
+                )
+                raise OsceVerificationError() from exc
+            projected_stations = [
+                OsceStationAuthoringResponse.model_validate(
+                    {
+                        field_name: station[field_name]
+                        for field_name in OsceStationAuthoringResponse.model_fields
+                    }
+                ).model_dump(mode="json")
+                for station in persisted_stations
+            ]
+            return {
+                "output_kind": "osce_stations",
+                "quiz": quiz,
+                "questions": [],
+                "osce_stations": projected_stations,
+                "claim_verification": bundle.verification_result.to_dict(),
+            }
+
+        metrics.phase = "validation"
+        if _should_use_deterministic_test_mode():
+            questions = _build_test_mode_questions(
+                evidence=evidence,
+                normalized_sources=normalized_sources,
+                num_questions=num_questions,
+                question_types=normalized_types,
+                question_plan=plan if question_plan else None,
+                generation_profile=normalized_profile,
+            )
+            questions = _limit_questions_by_profile(
+                questions,
+                num_questions=num_questions,
+                generation_profile=normalized_profile,
+            )
+            if normalized_profile == "emq":
+                _validate_emq_groups(questions)
+            _validate_strict_provenance(questions, normalized_sources)
+            if normalized_profile == ASSERTION_REASONING_TAG:
+                _validate_assertion_reasoning_questions(questions)
+            metrics.phase = "provider"
+            claim_verification = await _verify_quiz_questions_against_sources(
+                questions=questions,
+                evidence=evidence,
+                generation_provider=api_provider or DEFAULT_LLM_PROVIDER,
+                generation_model=model,
+                verification_provider=claims_verification_provider,
+                verification_model=claims_verification_model,
+            )
+            metrics.phase = "validation"
+            claim_verification_payload = claim_verification.to_dict()
+            if claim_verification.verdict != "grounded":
+                raise QuizClaimVerificationError(claim_verification_payload)
+            metrics.phase = "runtime"
+            result = await asyncio.to_thread(
+                _persist_generated_quiz,
+                db=db,
+                normalized_sources=normalized_sources,
+                questions=questions,
+                quiz_title=quiz_title,
+                quiz_description=quiz_description,
+                primary_media_id=primary_media_id,
+                workspace_id=workspace_id,
+                workspace_tag=workspace_tag,
+            )
+            result["claim_verification"] = claim_verification_payload
+            result["output_kind"] = "questions"
+            result["osce_stations"] = []
+            return result
+
+        content = _build_content_from_evidence(evidence)
+
+        prompt_question_count = max(2, num_questions) if normalized_profile == "emq" else num_questions
+        prompt = _format_quiz_generation_prompt(
+            num_questions=prompt_question_count,
+            content=content,
+            difficulty=difficulty,
             question_types=normalized_types,
+            focus_instruction=focus_instruction,
+            source_contract=source_contract,
             question_plan=plan if question_plan else None,
             generation_profile=normalized_profile,
         )
-        questions = _limit_questions_by_profile(
-            questions,
-            num_questions=num_questions,
-            generation_profile=normalized_profile,
-        )
+
+        llm_kwargs: dict[str, Any] = {
+            "prompt": prompt,
+            "model": model,
+            "max_tokens": min(8000, max(2000, num_questions * 220)),
+        }
+        if api_provider:
+            llm_kwargs["api_provider"] = api_provider
+        metrics.phase = "provider"
+        raw_response = await _call_quiz_generation_llm(**llm_kwargs)
+        metrics.phase = "validation"
+        content_text = extract_response_content(raw_response)
+        payload = _extract_json_payload(content_text if content_text is not None else raw_response)
+        raw_questions = payload.get("questions") if isinstance(payload, dict) else payload
+        if not isinstance(raw_questions, list):
+            raise ValueError("LLM response did not include a questions list")
+
+        default_source = normalized_sources[0]
+        if question_plan and normalized_profile in {"standard_recall", "mixed_assessment"}:
+            questions = _normalize_planned_questions(
+                raw_questions,
+                plan,
+                default_source_type=default_source["source_type"],
+                default_source_id=default_source["source_id"],
+            )
+        else:
+            questions = _normalize_questions(
+                raw_questions,
+                default_source_type=default_source["source_type"],
+                default_source_id=default_source["source_id"],
+                generation_profile=normalized_profile,
+            )
+            questions = _limit_questions_by_profile(
+                questions,
+                num_questions=num_questions,
+                generation_profile=normalized_profile,
+            )
+        if not questions:
+            raise ValueError("No valid questions generated")
         if normalized_profile == "emq":
             _validate_emq_groups(questions)
         _validate_strict_provenance(questions, normalized_sources)
         if normalized_profile == ASSERTION_REASONING_TAG:
             _validate_assertion_reasoning_questions(questions)
+
+        metrics.phase = "provider"
         claim_verification = await _verify_quiz_questions_against_sources(
             questions=questions,
             evidence=evidence,
@@ -1756,9 +2013,12 @@ async def generate_quiz_from_sources(
             verification_provider=claims_verification_provider,
             verification_model=claims_verification_model,
         )
+        metrics.phase = "validation"
         claim_verification_payload = claim_verification.to_dict()
         if claim_verification.verdict != "grounded":
             raise QuizClaimVerificationError(claim_verification_payload)
+
+        metrics.phase = "runtime"
         result = await asyncio.to_thread(
             _persist_generated_quiz,
             db=db,
@@ -1771,89 +2031,9 @@ async def generate_quiz_from_sources(
             workspace_tag=workspace_tag,
         )
         result["claim_verification"] = claim_verification_payload
+        result["output_kind"] = "questions"
+        result["osce_stations"] = []
         return result
-
-    content = _build_content_from_evidence(evidence)
-
-    prompt_question_count = max(2, num_questions) if normalized_profile == "emq" else num_questions
-    prompt = _format_quiz_generation_prompt(
-        num_questions=prompt_question_count,
-        content=content,
-        difficulty=difficulty,
-        question_types=normalized_types,
-        focus_instruction=focus_instruction,
-        source_contract=source_contract,
-        question_plan=plan if question_plan else None,
-        generation_profile=normalized_profile,
-    )
-
-    llm_kwargs: dict[str, Any] = {
-        "prompt": prompt,
-        "model": model,
-        "max_tokens": min(8000, max(2000, num_questions * 220)),
-    }
-    if api_provider:
-        llm_kwargs["api_provider"] = api_provider
-    raw_response = await _call_quiz_generation_llm(**llm_kwargs)
-    content_text = extract_response_content(raw_response)
-    payload = _extract_json_payload(content_text if content_text is not None else raw_response)
-    raw_questions = payload.get("questions") if isinstance(payload, dict) else payload
-    if not isinstance(raw_questions, list):
-        raise ValueError("LLM response did not include a questions list")
-
-    default_source = normalized_sources[0]
-    if question_plan and normalized_profile in {"standard_recall", "mixed_assessment"}:
-        questions = _normalize_planned_questions(
-            raw_questions,
-            plan,
-            default_source_type=default_source["source_type"],
-            default_source_id=default_source["source_id"],
-        )
-    else:
-        questions = _normalize_questions(
-            raw_questions,
-            default_source_type=default_source["source_type"],
-            default_source_id=default_source["source_id"],
-            generation_profile=normalized_profile,
-        )
-        questions = _limit_questions_by_profile(
-            questions,
-            num_questions=num_questions,
-            generation_profile=normalized_profile,
-        )
-    if not questions:
-        raise ValueError("No valid questions generated")
-    if normalized_profile == "emq":
-        _validate_emq_groups(questions)
-    _validate_strict_provenance(questions, normalized_sources)
-    if normalized_profile == ASSERTION_REASONING_TAG:
-        _validate_assertion_reasoning_questions(questions)
-
-    claim_verification = await _verify_quiz_questions_against_sources(
-        questions=questions,
-        evidence=evidence,
-        generation_provider=api_provider or DEFAULT_LLM_PROVIDER,
-        generation_model=model,
-        verification_provider=claims_verification_provider,
-        verification_model=claims_verification_model,
-    )
-    claim_verification_payload = claim_verification.to_dict()
-    if claim_verification.verdict != "grounded":
-        raise QuizClaimVerificationError(claim_verification_payload)
-
-    result = await asyncio.to_thread(
-        _persist_generated_quiz,
-        db=db,
-        normalized_sources=normalized_sources,
-        questions=questions,
-        quiz_title=quiz_title,
-        quiz_description=quiz_description,
-        primary_media_id=primary_media_id,
-        workspace_id=workspace_id,
-        workspace_tag=workspace_tag,
-    )
-    result["claim_verification"] = claim_verification_payload
-    return result
 
 
 async def generate_quiz_from_media(

@@ -36,7 +36,7 @@ describe("TldwApiClient ingestion sources contract", () => {
     vi.clearAllMocks()
   })
 
-  it("lists ingestion sources from array responses and normalizes ids/counts", async () => {
+  it("lists ingestion sources from the canonical collection route and normalizes ids/counts", async () => {
     mocks.bgRequest.mockResolvedValueOnce([
       {
         id: 7,
@@ -63,7 +63,7 @@ describe("TldwApiClient ingestion sources contract", () => {
 
     expect(mocks.bgRequest).toHaveBeenCalledWith(
       expect.objectContaining({
-        path: "/api/v1/ingestion-sources",
+        path: "/api/v1/ingestion-sources/",
         method: "GET"
       })
     )
@@ -219,7 +219,7 @@ describe("TldwApiClient ingestion sources contract", () => {
     expect(mocks.bgRequest).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        path: "/api/v1/ingestion-sources",
+        path: "/api/v1/ingestion-sources/",
         method: "POST",
         body: createPayload
       })
@@ -232,6 +232,55 @@ describe("TldwApiClient ingestion sources contract", () => {
         body: updatePayload
       })
     )
+  })
+
+  it("dispatches authenticated collection reads and creates directly to the canonical route", async () => {
+    const client = new TldwApiClient()
+    const ensureConfigForRequest = vi.fn(async () => ({
+      serverUrl: "https://research-one.test",
+      authMode: "multi-user" as const,
+      accessToken: "test-access-token"
+    }))
+    ;(client as any).ensureConfigForRequest = ensureConfigForRequest
+
+    const createPayload = {
+      source_type: "archive_snapshot" as const,
+      sink_type: "notes" as const,
+      policy: "canonical" as const,
+      enabled: true,
+      schedule_enabled: false,
+      schedule: {},
+      config: { label: "Authenticated archive" }
+    }
+
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string; noAuth?: boolean; body?: unknown }) => {
+      if (request.path === "/api/v1/ingestion-sources") {
+        throw new Error("redirect would cross origins and drop authorization")
+      }
+      expect(request).toMatchObject({
+        path: "/api/v1/ingestion-sources/"
+      })
+      expect(request).not.toHaveProperty("noAuth")
+      if (request.method === "GET") return []
+      expect(request).toMatchObject({ method: "POST", body: createPayload })
+      return {
+        id: 17,
+        user_id: 3,
+        source_type: "archive_snapshot",
+        sink_type: "notes",
+        policy: "canonical",
+        enabled: true,
+        schedule_enabled: false,
+        schedule_config: {},
+        config: { label: "Authenticated archive" }
+      }
+    })
+
+    await expect(client.listIngestionSources()).resolves.toMatchObject({ total: 0 })
+    await expect(client.createIngestionSource(createPayload)).resolves.toMatchObject({ id: "17" })
+
+    expect(ensureConfigForRequest).toHaveBeenNthCalledWith(1, true)
+    expect(ensureConfigForRequest).toHaveBeenNthCalledWith(2, true)
   })
 
   it("syncs sources, uploads archives, and reattaches detached items", async () => {

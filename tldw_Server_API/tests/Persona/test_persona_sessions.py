@@ -607,3 +607,84 @@ def test_persona_sessions_return_404_when_disabled(monkeypatch, persona_db: Char
         assert r_detail.status_code == 404
 
     fastapi_app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def pending_plan_session(monkeypatch, persona_db, request):
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(persona_ep, "_get_persona_rbac_flags", lambda: (True, False))
+    try:
+        with _client_for_user(1, persona_db) as client:
+            created = client.post("/api/v1/persona/session", json={"persona_id": "research_assistant"})
+            assert created.status_code == 200
+            sid = created.json()["session_id"]
+        manager.put_plan(
+            session_id=sid,
+            user_id="1",
+            persona_id="research_assistant",
+            plan_id="pending",
+            steps=[{"idx": 0, "tool": "rag_search", "args": {"query": "review me"}}],
+            requires_persisted_session=True,
+        )
+        session_status = getattr(request, "param", "active")
+        if session_status != "active":
+            row = persona_db.get_persona_session(sid, user_id="1")
+            persona_db.update_persona_session(
+                session_id=sid, user_id="1", expected_version=row["version"], update_data={"status": session_status}
+            )
+        yield sid, manager
+    finally:
+        fastapi_app.dependency_overrides.clear()
+
+
+def test_session_detail_hydrates_owned_pending_plan(persona_db, pending_plan_session):
+    sid, _ = pending_plan_session
+    with _client_for_user(1, persona_db) as client:
+        detail = client.get(f"/api/v1/persona/sessions/{sid}")
+    assert detail.status_code == 200
+    assert detail.json()["pending_plan"]["plan_id"] == "pending"
+    assert detail.json()["pending_plan"]["steps"][0]["args"] == {"query": "review me"}
+
+
+@pytest.mark.parametrize("pending_plan_session", ["closed", "archived"], indirect=True)
+def test_session_detail_excludes_terminal_pending_plan(persona_db, pending_plan_session):
+    sid, _ = pending_plan_session
+    with _client_for_user(1, persona_db) as client:
+        detail = client.get(f"/api/v1/persona/sessions/{sid}")
+    assert detail.status_code == 200
+    assert detail.json()["pending_plan"] is None
+
+
+@pytest.mark.parametrize("pending_plan_session", ["active", "closed", "archived"], indirect=True)
+def test_session_list_excludes_pending_plans(persona_db, pending_plan_session):
+    sid, _ = pending_plan_session
+    with _client_for_user(1, persona_db) as client:
+        listed = client.get("/api/v1/persona/sessions")
+    assert listed.status_code == 200
+    assert any(item["session_id"] == sid for item in listed.json())
+    assert all("pending_plan" not in item for item in listed.json())
+
+
+def test_session_export_excludes_pending_plan(persona_db, pending_plan_session):
+    sid, _ = pending_plan_session
+    with _client_for_user(1, persona_db) as client:
+        exported = client.get(f"/api/v1/persona/sessions/{sid}/export")
+    assert exported.status_code == 200
+    assert "pending_plan" not in exported.json()
+
+
+@pytest.mark.parametrize("pending_plan_session", ["active", "closed", "archived"], indirect=True)
+def test_session_detail_does_not_consume_pending_plan(persona_db, pending_plan_session):
+    sid, manager = pending_plan_session
+    pending = manager.get_plan(session_id=sid, user_id="1", plan_id="pending")
+    with _client_for_user(1, persona_db) as client:
+        assert client.get(f"/api/v1/persona/sessions/{sid}").status_code == 200
+    assert manager.get_plan(session_id=sid, user_id="1", plan_id="pending") is pending
+
+
+@pytest.mark.parametrize("pending_plan_session", ["active", "closed", "archived"], indirect=True)
+def test_session_detail_with_pending_plan_rejects_other_owner(persona_db, pending_plan_session):
+    sid, _ = pending_plan_session
+    with _client_for_user(2, persona_db) as other:
+        assert other.get(f"/api/v1/persona/sessions/{sid}").status_code == 404

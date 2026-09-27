@@ -1,21 +1,34 @@
-from __future__ import annotations
-
 """Core-facing Sync v2 store facade."""
 
-from collections.abc import Sequence
+from __future__ import annotations
 
-from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from copy import copy
+from dataclasses import dataclass, field
+from time import monotonic_ns
+from typing import Any, Literal
 
+from tldw_Server_API.app.core.DB_Management.Sync_DB import (
+    PersonalContextHistoryShredReceipt,
+    SyncDatabase,
+)
+
+from .errors import SyncStoreError
 from .models import (
+    PERSONAL_CONTEXT_SYNC_DOMAINS,
+    SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION,
     ConflictStatus,
     SyncApplyStatus,
     SyncAttachment,
     SyncAttachmentCreate,
+    SyncAttachmentRevisionBinding,
     SyncBackgroundDomainStatus,
     SyncBackgroundLease,
     SyncBackgroundLeaseCreate,
     SyncBackgroundPolicy,
     SyncBackgroundPolicyUpsert,
+    SyncBlobAvailabilityStatus,
     SyncBlobChunk,
     SyncBlobChunkCreate,
     SyncBlobObject,
@@ -27,12 +40,15 @@ from .models import (
     SyncConflictCreate,
     SyncDataset,
     SyncDatasetCreate,
+    SyncDatasetStorageNamespace,
     SyncDevice,
     SyncDeviceAcknowledgmentSummary,
     SyncDeviceAuthorization,
     SyncDeviceAuthorizationCreate,
     SyncDeviceBlobAck,
     SyncDeviceBlobAckCreate,
+    SyncDeviceBlobIdAck,
+    SyncDeviceBlobIdAckCreate,
     SyncDeviceCursor,
     SyncDeviceDomainAck,
     SyncDeviceDomainAckCreate,
@@ -44,25 +60,287 @@ from .models import (
     SyncKeyRecord,
     SyncKeyRecordCreate,
     SyncKeyRotationEnvelopeRange,
+    SyncNotesAttachmentCleanupCandidate,
+    SyncNotesAttachmentSourceMap,
     SyncObjectState,
     SyncRestoreManifestStats,
 )
+from .personal_context_relay import PersonalContextRecoveryBudget
+
+
+@dataclass(frozen=True, slots=True)
+class PersonalContextAuthorityScan:
+    """Filtered egress with its independent raw scan checkpoint."""
+
+    raw_scan_watermark: int
+    visible_envelopes: list[SyncEnvelope]
+    has_visible_lookahead: bool
+    source_exhausted: bool = False
+    raw_rows_scanned: int = 0
+    raw_envelopes: list[SyncEnvelope] = field(default_factory=list)
+
+
+def _personal_context_row_is_structurally_shredded(
+    envelope: SyncEnvelope,
+) -> bool:
+    """Recognize cleanup output without trusting its mutable routing marker alone."""
+
+    routing = envelope.routing_metadata
+    return bool(
+        isinstance(routing, Mapping)
+        and routing.get("retention_state") == "shredded"
+        and envelope.stable_key is None
+        and envelope.mutation_group_id is None
+        and envelope.mutation_step is None
+        and envelope.mutation_step_count is None
+        and envelope.mutation_plan_hash is None
+        and envelope.base_object_hash is None
+        and envelope.base_version is None
+        and envelope.entity_version is None
+        and not envelope.dependencies
+        and envelope.payload_ciphertext is None
+        and envelope.payload == {}
+        and envelope.payload_clear == {}
+        and envelope.payload_hash is None
+        and envelope.payload_size_bytes == 0
+        and envelope.encryption_metadata == {}
+    )
 
 
 class SyncV2Store:
     """Core Sync v2 persistence interface backed by DB_Management."""
 
-    def __init__(self, db: SyncDatabase) -> None:
+    def __init__(self, db: SyncDatabase, *, connection: Any | None = None) -> None:
         self.db = db
+        self._connection = connection
+        self._trusted_notes_task_bootstrap_id: str | None = None
+        self._trusted_notes_task_coordinator = False
 
-    def upsert_device(self, device: SyncDeviceUpsert) -> SyncDevice:
-        return self.db.upsert_device(device)
+    @contextmanager
+    def materialization_guard(
+        self,
+        envelopes: Sequence[SyncEnvelope | SyncEnvelopeCreate],
+        *,
+        require_predecessors: bool = True,
+        trusted_notes_task_bootstrap_id: str | None = None,
+        trusted_notes_task_coordinator: bool = False,
+    ) -> Iterator[SyncV2Store]:
+        """Hold the durable dataset lock and one Sync transaction for projection."""
+
+        if self._connection is not None:
+            if require_predecessors:
+                self.db.require_materialization_predecessors_applied(
+                    envelopes,
+                    connection=self._connection,
+                )
+            yield self
+            return
+        keys = [
+            (envelope.dataset_id, envelope.domain, envelope.object_id)
+            for envelope in envelopes
+        ]
+        with self.db.materialization_transaction(
+            keys,
+            trusted_notes_task_bootstrap_id=trusted_notes_task_bootstrap_id,
+            trusted_notes_task_coordinator=trusted_notes_task_coordinator,
+        ) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
+            guarded._trusted_notes_task_bootstrap_id = (
+                trusted_notes_task_bootstrap_id
+            )
+            guarded._trusted_notes_task_coordinator = trusted_notes_task_coordinator
+            if require_predecessors:
+                self.db.require_materialization_predecessors_applied(
+                    envelopes,
+                    connection=connection,
+                )
+            yield guarded
+
+    @contextmanager
+    def conflict_resolution_guard(self, dataset_id: str) -> Iterator[SyncV2Store]:
+        """Hold one dataset snapshot and projection fence for a resolution batch."""
+
+        with self.db.conflict_resolution_transaction(dataset_id) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded
+
+    @contextmanager
+    def conflict_resolution_savepoint(self) -> Iterator[SyncV2Store]:
+        """Contain one resolution item inside an active batch transaction."""
+
+        if self._connection is None:
+            raise SyncStoreError("Sync conflict resolution guard is required")
+        with self.db.conflict_resolution_savepoint(connection=self._connection):
+            yield self
+
+    @contextmanager
+    def personal_context_authority_guard(
+        self,
+        dataset_id: str,
+        profile_id: str,
+    ) -> Iterator[SyncV2Store]:
+        """Hold the dataset transaction before entering an authority source guard."""
+
+        with self.db.materialization_transaction(
+            [(dataset_id, "personal_context.manifest", profile_id)]
+        ) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded
+
+    @contextmanager
+    def personal_context_bootstrap_guard(
+        self,
+        *,
+        user_id: str,
+        streams: Sequence[tuple[SyncDomain, int]],
+    ) -> Iterator[tuple[SyncV2Store, SyncDataset, dict[tuple[SyncDomain, int], int]]]:
+        """Resolve and bind bootstrap transport state in one Sync transaction."""
+
+        with self.db.personal_context_bootstrap_transaction(
+            user_id=user_id,
+            streams=streams,
+        ) as (dataset, watermarks, connection):
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded, dataset, watermarks
+
+    def commit_personal_context_authority(self) -> None:
+        """Commit the authority transaction while its external source guard is held."""
+
+        if self._connection is None:
+            raise SyncStoreError("Personal Context authority guard is required")
+        self.db.commit_personal_context_authority_transaction(
+            connection=self._connection
+        )
+
+    @contextmanager
+    def retention_guard(self, dataset_id: str, blob_id: str) -> Iterator[SyncV2Store]:
+        """Hold the dataset ordering fence and one transaction for blob GC."""
+
+        with self.db.materialization_transaction(
+            [(dataset_id, "attachment.ref", blob_id)]
+        ) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded
+
+    @contextmanager
+    def retention_domain_guard(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        object_ids: Sequence[str],
+    ) -> Iterator[SyncV2Store]:
+        """Hold one dataset fence while revalidating a domain checkpoint."""
+
+        keys = [(dataset_id, domain, object_id) for object_id in object_ids]
+        with self.db.materialization_transaction(keys) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded
+
+    @contextmanager
+    def blob_write_guard(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        object_id: str,
+    ) -> Iterator[SyncV2Store]:
+        """Hold the dataset ordering fence through blob publication and commit."""
+
+        with self.db.materialization_transaction(
+            [(dataset_id, domain, object_id)]
+        ) as connection:
+            guarded = copy(self)
+            guarded._connection = connection
+            yield guarded
+
+    def upsert_device(
+        self,
+        device: SyncDeviceUpsert,
+        *,
+        capabilities_resolver: Callable[
+            [SyncDevice | None], dict[str, object]
+        ]
+        | None = None,
+    ) -> SyncDevice:
+        return self.db.upsert_device(
+            device,
+            capabilities_resolver=capabilities_resolver,
+        )
 
     def get_device(self, user_id: str, device_id: str) -> SyncDevice | None:
-        return self.db.get_device(user_id, device_id)
+        return self.db.get_device(
+            user_id,
+            device_id,
+            connection=self._connection,
+        )
 
     def enroll_dataset(self, dataset: SyncDatasetCreate) -> SyncDataset:
         return self.db.enroll_dataset(dataset)
+
+    def bind_personal_context_dataset(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+        expected_binding: Mapping[str, object] | None,
+        profile_id: str,
+        authority_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
+        link_state: str,
+    ) -> SyncDataset:
+        """Merge the server-authoritative binding without rewriting other state."""
+
+        return self.db.bind_personal_context_dataset(
+            dataset_id=dataset_id,
+            user_id=user_id,
+            expected_binding=expected_binding,
+            profile_id=profile_id,
+            authority_id=authority_id,
+            integrity_key_id=integrity_key_id,
+            purge_generation=purge_generation,
+            link_state=link_state,
+            connection=self._connection,
+        )
+
+    def personal_context_authority_dataset_for_user(
+        self,
+        user_id: str,
+    ) -> SyncDataset | None:
+        """Return the user's sole active Personal Context authority dataset."""
+
+        return self.db.personal_context_authority_dataset(user_id=user_id)
+
+    def personal_context_dataset_for_profile(
+        self,
+        *,
+        user_id: str,
+        profile_id: str,
+    ) -> SyncDataset | None:
+        """Return one exact active profile binding or fail closed on ambiguity."""
+
+        return self.db.personal_context_authority_dataset(
+            user_id=user_id,
+            profile_id=profile_id,
+        )
+
+    def ensure_personal_context_transport_domains(
+        self,
+        *,
+        dataset_id: str,
+        user_id: str,
+    ) -> SyncDataset:
+        """Enroll content-free PC streams before snapshot fencing."""
+
+        return self.db.ensure_personal_context_transport_domains(
+            dataset_id=dataset_id,
+            user_id=user_id,
+        )
 
     def get_dataset(
         self,
@@ -70,10 +348,109 @@ class SyncV2Store:
         *,
         owner_user_id: str | None = None,
     ) -> SyncDataset | None:
-        return self.db.get_dataset(dataset_id, owner_user_id=owner_user_id)
+        return self.db.get_dataset(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            connection=self._connection,
+        )
 
-    def list_datasets_for_user(self, user_id: str) -> list[SyncDataset]:
-        return self.db.list_datasets_for_user(user_id)
+    @contextmanager
+    def personal_context_transport_snapshot(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        streams: Sequence[tuple[SyncDomain, int]],
+    ) -> Iterator[dict[tuple[SyncDomain, int], int]]:
+        """Hold the dataset insert fence while canonical bootstrap state is read."""
+
+        with self.db.personal_context_transport_snapshot(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            streams=streams,
+        ) as watermarks:
+            yield watermarks
+
+    def complete_personal_context_link_receipt(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        profile_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
+        bootstrap_cursor: str,
+    ) -> None:
+        """Atomically persist one device-bound Personal Context link receipt."""
+
+        self.db.complete_personal_context_link_receipt(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            device_id=device_id,
+            profile_id=profile_id,
+            integrity_key_id=integrity_key_id,
+            purge_generation=purge_generation,
+            bootstrap_cursor=bootstrap_cursor,
+        )
+
+    def mirror_personal_context_activation(self, **values: Any) -> None:
+        """Mirror a verified canonical pair without changing readiness."""
+
+        self.db.mirror_personal_context_activation(connection=self._connection, **values)
+
+    def install_personal_context_activation(self, **values: Any) -> dict[str, Any]:
+        """Persist immutable protected bootstrap envelopes under an active guard."""
+
+        return self.db.install_personal_context_activation(connection=self._connection, **values)
+
+    def get_personal_context_activation(self, activation_id: str) -> dict[str, Any] | None:
+        """Read the durable protected bootstrap installation."""
+
+        return self.db.get_personal_context_activation(activation_id, connection=self._connection)
+
+    def acknowledge_personal_context_activation(self, **values: Any) -> dict[str, Any]:
+        """Persist one device's exact local installation receipt."""
+
+        return self.db.acknowledge_personal_context_activation(connection=self._connection, **values)
+
+    def get_personal_context_activation_ack(self, activation_id: str, device_id: str) -> dict[str, Any] | None:
+        """Read one exact device acknowledgment."""
+
+        return self.db.get_personal_context_activation_ack(activation_id, device_id, connection=self._connection)
+
+    def has_personal_context_link_receipt(
+        self,
+        *,
+        user_id: str,
+        dataset_id: str,
+        device_id: str,
+        profile_id: str,
+        integrity_key_id: str,
+        purge_generation: int,
+    ) -> bool:
+        """Return whether this exact device has the current server-owned receipt."""
+
+        return self.db.has_personal_context_link_receipt(
+            user_id=user_id,
+            dataset_id=dataset_id,
+            device_id=device_id,
+            profile_id=profile_id,
+            integrity_key_id=integrity_key_id,
+            purge_generation=purge_generation,
+            connection=self._connection,
+        )
+
+    def list_datasets_for_user(
+        self,
+        user_id: str,
+        *,
+        include_archived: bool = False,
+    ) -> list[SyncDataset]:
+        return self.db.list_datasets_for_user(
+            user_id,
+            include_archived=include_archived,
+        )
 
     def list_devices_for_user(
         self,
@@ -81,7 +458,11 @@ class SyncV2Store:
         *,
         include_revoked: bool = False,
     ) -> list[SyncDevice]:
-        return self.db.list_devices_for_user(user_id, include_revoked=include_revoked)
+        return self.db.list_devices_for_user(
+            user_id,
+            include_revoked=include_revoked,
+            connection=self._connection,
+        )
 
     def create_device_authorization(
         self,
@@ -125,20 +506,72 @@ class SyncV2Store:
         self,
         acknowledgment: SyncDeviceDomainAckCreate,
     ) -> SyncDeviceDomainAck:
-        return self.db.upsert_device_domain_ack(acknowledgment)
+        return self.db.upsert_device_domain_ack(
+            acknowledgment,
+            connection=self._connection,
+        )
+
+    def get_device_domain_ack(
+        self,
+        dataset_id: str,
+        device_id: str,
+        domain: SyncDomain,
+        *,
+        adapter_version: int = 1,
+    ) -> SyncDeviceDomainAck | None:
+        return self.db.get_device_domain_ack(
+            dataset_id,
+            device_id,
+            domain,
+            adapter_version=adapter_version,
+            connection=self._connection,
+        )
 
     def upsert_device_blob_ack(
         self,
         acknowledgment: SyncDeviceBlobAckCreate,
     ) -> SyncDeviceBlobAck:
-        return self.db.upsert_device_blob_ack(acknowledgment)
+        return self.db.upsert_device_blob_ack(
+            acknowledgment,
+            connection=self._connection,
+        )
+
+    def upsert_device_blob_id_ack(
+        self,
+        acknowledgment: SyncDeviceBlobIdAckCreate,
+    ) -> SyncDeviceBlobIdAck:
+        return self.db.upsert_device_blob_id_ack(
+            acknowledgment,
+            connection=self._connection,
+        )
 
     def list_device_acknowledgments(
         self,
         dataset_id: str,
         device_id: str,
     ) -> SyncDeviceAcknowledgmentSummary:
-        return self.db.list_device_acknowledgments(dataset_id, device_id)
+        return self.db.list_device_acknowledgments(
+            dataset_id,
+            device_id,
+            connection=self._connection,
+        )
+
+    def acknowledge_device_state_atomic(
+        self,
+        dataset_id: str,
+        device_id: str,
+        *,
+        domain_acks: Sequence[SyncDeviceDomainAckCreate] = (),
+        blob_acks: Sequence[SyncDeviceBlobAckCreate] = (),
+        blob_id_acks: Sequence[SyncDeviceBlobIdAckCreate] = (),
+    ) -> SyncDeviceAcknowledgmentSummary:
+        return self.db.acknowledge_device_state_atomic(
+            dataset_id,
+            device_id,
+            domain_acks=domain_acks,
+            blob_acks=blob_acks,
+            blob_id_acks=blob_id_acks,
+        )
 
     def get_background_policy(
         self,
@@ -182,8 +615,434 @@ class SyncV2Store:
     def get_or_create_default_personal_dataset(self, user_id: str) -> SyncDataset:
         return self.db.get_or_create_default_personal_dataset(user_id)
 
+    def transition_notes_task_readiness(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        expected_state: str,
+        state: str,
+        source_dataset_id: str,
+        source_cursor: str | None,
+        source_count: int,
+        source_fingerprint: str | None,
+        reason_code: str | None = None,
+        task_activity_capture_enabled: bool | None = None,
+        captured_source_rebase: bool = False,
+    ) -> SyncDataset:
+        """Delegate one dormant notes.task readiness transition."""
+
+        return self.db.transition_notes_task_domain_readiness(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            readiness_key="notes_task_v1",
+            expected_state=expected_state,
+            state=state,
+            source_dataset_id=source_dataset_id,
+            source_cursor=source_cursor,
+            source_count=source_count,
+            source_fingerprint=source_fingerprint,
+            reason_code=reason_code,
+            task_activity_capture_enabled=task_activity_capture_enabled,
+            captured_source_rebase=captured_source_rebase,
+        )
+
+    def transition_notes_task_activity_readiness(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        expected_state: str,
+        state: str,
+        source_dataset_id: str,
+        source_cursor: str | None,
+        source_count: int,
+        source_fingerprint: str | None,
+        reason_code: str | None = None,
+        task_activity_capture_enabled: bool | None = None,
+        captured_source_rebase: bool = False,
+    ) -> SyncDataset:
+        """Delegate one dormant notes.task_activity readiness transition."""
+
+        return self.db.transition_notes_task_domain_readiness(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            readiness_key="notes_task_activity_v1",
+            expected_state=expected_state,
+            state=state,
+            source_dataset_id=source_dataset_id,
+            source_cursor=source_cursor,
+            source_count=source_count,
+            source_fingerprint=source_fingerprint,
+            reason_code=reason_code,
+            task_activity_capture_enabled=task_activity_capture_enabled,
+            captured_source_rebase=captured_source_rebase,
+        )
+
+    def transition_notes_moodboard_graph_readiness(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        expected_state: str,
+        state: str,
+        source_dataset_id: str,
+        moodboard_source_cursor: str | None,
+        moodboard_source_count: int,
+        moodboard_source_fingerprint: str | None,
+        placement_source_cursor: str | None,
+        placement_source_count: int,
+        placement_source_fingerprint: str | None,
+        moodboard_reason_code: str | None = None,
+        placement_reason_code: str | None = None,
+        moodboard_capture_enabled: bool | None = None,
+    ) -> SyncDataset:
+        """Delegate coupled dormant moodboard/placement readiness transition."""
+
+        return self.db.transition_notes_moodboard_graph_readiness(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            expected_state=expected_state,
+            state=state,
+            source_dataset_id=source_dataset_id,
+            moodboard_source_cursor=moodboard_source_cursor,
+            moodboard_source_count=moodboard_source_count,
+            moodboard_source_fingerprint=moodboard_source_fingerprint,
+            placement_source_cursor=placement_source_cursor,
+            placement_source_count=placement_source_count,
+            placement_source_fingerprint=placement_source_fingerprint,
+            moodboard_reason_code=moodboard_reason_code,
+            placement_reason_code=placement_reason_code,
+            moodboard_capture_enabled=moodboard_capture_enabled,
+        )
+
+    def transition_notes_studio_document_readiness(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        expected_state: str,
+        state: str,
+        source_dataset_id: str,
+        source_cursor: str | None,
+        source_count: int,
+        source_fingerprint: str | None,
+        reason_code: str | None = None,
+        studio_document_capture_enabled: bool | None = None,
+    ) -> SyncDataset:
+        """Delegate independent dormant Studio readiness transition."""
+
+        return self.db.transition_notes_studio_document_readiness(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            expected_state=expected_state,
+            state=state,
+            source_dataset_id=source_dataset_id,
+            source_cursor=source_cursor,
+            source_count=source_count,
+            source_fingerprint=source_fingerprint,
+            reason_code=reason_code,
+            studio_document_capture_enabled=studio_document_capture_enabled,
+        )
+
+    def begin_notes_task_activation(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncDataset:
+        """Enable coupled task/activity capture before bootstrap scans."""
+
+        return self.db.begin_notes_task_activation(
+            dataset_id,
+            owner_user_id=owner_user_id,
+        )
+
+    def activate_notes_task_domains(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncDataset:
+        """Publish both ready task domains atomically."""
+
+        return self.db.activate_notes_task_domains(
+            dataset_id,
+            owner_user_id=owner_user_id,
+        )
+
+    def begin_notes_organization_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+    ) -> SyncDataset:
+        return self.db.begin_notes_organization_bootstrap(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+        )
+
+    def transition_notes_organization_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        bootstrap_id: str,
+        expected_state: str,
+        state: str,
+        captured_count: int,
+        expected_count: int,
+        error_code: str | None = None,
+        ready_verifier: Callable[[], bool] | None = None,
+    ) -> SyncDataset:
+        return self.db.transition_notes_organization_bootstrap(
+            dataset_id,
+            bootstrap_id=bootstrap_id,
+            expected_state=expected_state,
+            state=state,
+            captured_count=captured_count,
+            expected_count=expected_count,
+            error_code=error_code,
+            ready_verifier=ready_verifier,
+        )
+
+    def begin_notes_link_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+    ) -> SyncDataset:
+        return self.db.begin_notes_link_bootstrap(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+        )
+
+    def transition_notes_link_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        bootstrap_id: str,
+        expected_state: str,
+        state: str,
+        captured_count: int,
+        expected_count: int,
+        source_hash: str | None,
+        error_code: str | None = None,
+        ready_verifier: Callable[[], bool] | None = None,
+    ) -> SyncDataset:
+        return self.db.transition_notes_link_bootstrap(
+            dataset_id,
+            bootstrap_id=bootstrap_id,
+            expected_state=expected_state,
+            state=state,
+            captured_count=captured_count,
+            expected_count=expected_count,
+            source_hash=source_hash,
+            error_code=error_code,
+            ready_verifier=ready_verifier,
+        )
+
+    def begin_notes_attachment_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+    ) -> SyncDataset:
+        return self.db.begin_notes_attachment_bootstrap(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+        )
+
+    def transition_notes_attachment_bootstrap(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        expected_state: str,
+        state: str,
+        captured_count: int,
+        expected_count: int,
+        source_hash: str | None,
+        source_cursor: str | None,
+        error_code: str | None = None,
+        ready_verifier: Callable[[], bool] | None = None,
+    ) -> SyncDataset:
+        return self.db.transition_notes_attachment_bootstrap(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+            expected_state=expected_state,
+            state=state,
+            captured_count=captured_count,
+            expected_count=expected_count,
+            source_hash=source_hash,
+            source_cursor=source_cursor,
+            error_code=error_code,
+            ready_verifier=ready_verifier,
+        )
+
+    def resolve_notes_attachment_source_map(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        note_id: str,
+        source_key: str,
+    ) -> SyncNotesAttachmentSourceMap:
+        return self.db.resolve_notes_attachment_source_map(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+            note_id=note_id,
+            source_key=source_key,
+        )
+
+    def record_notes_attachment_cleanup_candidate(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        source_key: str,
+        source_relative_path: str,
+        source_blob_hash: str,
+        source_size_bytes: int,
+        source_modified_ns: int,
+    ) -> SyncNotesAttachmentCleanupCandidate:
+        return self.db.record_notes_attachment_cleanup_candidate(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+            source_key=source_key,
+            source_relative_path=source_relative_path,
+            source_blob_hash=source_blob_hash,
+            source_size_bytes=source_size_bytes,
+            source_modified_ns=source_modified_ns,
+        )
+
+    def list_notes_attachment_cleanup_candidates(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        after_source_key_hash: str | None = None,
+        limit: int = 1_000,
+    ) -> tuple[SyncNotesAttachmentCleanupCandidate, ...]:
+        return self.db.list_notes_attachment_cleanup_candidates(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+            after_source_key_hash=after_source_key_hash,
+            limit=limit,
+        )
+
+    def get_notes_attachment_bootstrap_source_by_hash(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        bootstrap_id: str,
+        source_key_hash: str,
+    ) -> tuple[
+        SyncNotesAttachmentSourceMap,
+        SyncNotesAttachmentCleanupCandidate,
+    ] | None:
+        """Resolve one internal bootstrap source by its public-safe hash."""
+
+        return self.db.get_notes_attachment_bootstrap_source_by_hash(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            bootstrap_id=bootstrap_id,
+            source_key_hash=source_key_hash,
+        )
+
     def insert_envelope(self, envelope: SyncEnvelopeCreate) -> SyncEnvelope:
-        return self.db.insert_envelope(envelope)
+        return self.db.insert_envelope(envelope, connection=self._connection)
+
+    def insert_claimed_conflict_resolution_envelope(
+        self,
+        envelope: SyncEnvelopeCreate,
+        *,
+        conflict_id: str,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+    ) -> SyncEnvelope:
+        if self._connection is None:
+            raise SyncStoreError("Sync conflict resolution requires a dataset guard")
+        return self.db.insert_claimed_conflict_resolution_envelope(
+            envelope,
+            conflict_id=conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            connection=self._connection,
+        )
+
+    def get_latest_applied_predecessor(
+        self,
+        envelope: SyncEnvelope,
+    ) -> SyncEnvelope | None:
+        if self._connection is None:
+            raise SyncStoreError("Sync projected-base lookup requires a dataset guard")
+        return self.db.get_latest_applied_predecessor(
+            envelope,
+            connection=self._connection,
+        )
+
+    def list_latest_applied_heads(
+        self,
+        dataset_id: str,
+        *,
+        through_server_cursor: int | None = None,
+    ) -> list[SyncEnvelope]:
+        if self._connection is None:
+            raise SyncStoreError("Sync projected-head lookup requires a dataset guard")
+        return self.db.list_latest_applied_heads(
+            dataset_id,
+            through_server_cursor=through_server_cursor,
+            connection=self._connection,
+        )
+
+    def insert_envelopes_atomic(
+        self,
+        envelopes: Sequence[SyncEnvelopeCreate],
+        *,
+        trusted_notes_organization_bootstrap_id: str | None = None,
+        trusted_notes_task_bootstrap_id: str | None = None,
+        trusted_notes_task_coordinator: bool = False,
+    ) -> list[SyncEnvelope]:
+        """Insert one complete validated group or return its exact stored replay."""
+
+        return self.db.insert_envelopes_atomic(
+            envelopes,
+            trusted_notes_organization_bootstrap_id=trusted_notes_organization_bootstrap_id,
+            trusted_notes_task_bootstrap_id=trusted_notes_task_bootstrap_id,
+            trusted_notes_task_coordinator=trusted_notes_task_coordinator,
+        )
+
+    def list_mutation_group(
+        self,
+        dataset_id: str,
+        mutation_group_id: str,
+    ) -> list[SyncEnvelope]:
+        """Return a complete mutation group ordered by zero-based step."""
+
+        return self.db.list_mutation_group(
+            dataset_id,
+            mutation_group_id,
+            connection=self._connection,
+        )
 
     def get_existing_envelope_for_idempotency(
         self,
@@ -198,6 +1057,7 @@ class SyncV2Store:
         *,
         limit: int = 100,
         domains: Sequence[SyncDomain] | None = None,
+        adapter_versions: Sequence[int] | None = None,
         status: str | Sequence[str] | None = None,
         exclude_device_id: str | None = None,
     ) -> list[SyncEnvelope]:
@@ -206,8 +1066,254 @@ class SyncV2Store:
             since_sequence,
             limit=limit,
             domains=domains,
+            adapter_versions=adapter_versions,
             status=status,
             exclude_device_id=exclude_device_id,
+            connection=self._connection,
+        )
+
+    def scan_personal_context_authority(
+        self,
+        dataset_id: str,
+        *,
+        after_server_cursor: int,
+        limit: int,
+        row_budget: int = 100,
+        wall_time_ms: int = 100,
+        deadline_ns: int | None = None,
+        budget: PersonalContextRecoveryBudget | None = None,
+        domains: Sequence[SyncDomain] | None = None,
+        adapter_versions: Sequence[int] | None = None,
+        exclude_device_id: str | None = None,
+        profile_id: str | None = None,
+        integrity_key_id: str | None = None,
+        purge_generation: int | None = None,
+        authority_verifier: Callable[[SyncEnvelope], bool] | None = None,
+    ) -> PersonalContextAuthorityScan:
+        """Scan a mixed page without exposing or advancing past unsafe PC rows."""
+
+        if budget is None:
+            if row_budget < 1 or wall_time_ms < 1:
+                raise ValueError("Personal Context scan limits must be positive")
+            budget = PersonalContextRecoveryBudget(
+                deadline_ns=deadline_ns
+                or monotonic_ns() + wall_time_ms * 1_000_000,
+                remaining_rows=row_budget,
+                clock_ns=monotonic_ns,
+            )
+        raw_cursor = after_server_cursor
+        starting_rows = budget.remaining_rows
+        visible: list[SyncEnvelope] = []
+        safe_raw: list[SyncEnvelope] = []
+        source_exhausted = False
+        selected_domains = tuple(domains or PERSONAL_CONTEXT_SYNC_DOMAINS)
+        conflict = self.get_unresolved_materialization_conflict(dataset_id)
+        conflict_cursor = (
+            conflict.server_sequence
+            if conflict is not None
+            and conflict.conflict_type
+            != SYNC_REBASE_REQUIRED_AFTER_CONFLICT_RESOLUTION
+            else None
+        )
+        while budget.can_inspect() and len(visible) <= limit:
+            chunk_limit = min(budget.remaining_rows, max(1, limit + 1))
+            raw = self.list_envelopes_after(
+                dataset_id,
+                raw_cursor,
+                limit=chunk_limit,
+                domains=selected_domains,
+                adapter_versions=adapter_versions,
+                status="accepted",
+                exclude_device_id=None,
+            )
+            if not raw:
+                source_exhausted = True
+                break
+            barrier = False
+            bounded = False
+            for envelope in raw:
+                if not budget.consume():
+                    bounded = True
+                    break
+                if (
+                    conflict_cursor is not None
+                    and envelope.server_sequence >= conflict_cursor
+                ):
+                    barrier = True
+                    break
+                if envelope.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                    if not budget.deadline_open():
+                        bounded = True
+                        break
+                    classification = self.classify_personal_context_recovery_row(
+                        envelope,
+                        profile_id=profile_id,
+                        integrity_key_id=integrity_key_id,
+                        purge_generation=purge_generation,
+                        authority_verifier=authority_verifier,
+                        budget=budget,
+                    )
+                    if not budget.deadline_open():
+                        bounded = True
+                        break
+                    if classification == "barrier":
+                        barrier = True
+                        break
+                raw_cursor = envelope.server_cursor or raw_cursor
+                safe_raw.append(envelope)
+                if envelope.domain not in PERSONAL_CONTEXT_SYNC_DOMAINS:
+                    if (
+                        (
+                            exclude_device_id is None
+                            or envelope.device_id != exclude_device_id
+                        )
+                        and envelope.apply_status not in {"conflict", "superseded"}
+                    ):
+                        visible.append(envelope)
+                elif classification == "authority":
+                    visible.append(envelope)
+            if barrier or bounded:
+                break
+            if len(raw) < chunk_limit:
+                source_exhausted = True
+                break
+        return PersonalContextAuthorityScan(
+            raw_scan_watermark=raw_cursor,
+            visible_envelopes=visible[:limit],
+            has_visible_lookahead=len(visible) > limit,
+            source_exhausted=source_exhausted,
+            raw_rows_scanned=starting_rows - budget.remaining_rows,
+            raw_envelopes=safe_raw,
+        )
+
+    def classify_personal_context_recovery_row(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        profile_id: str | None,
+        integrity_key_id: str | None,
+        purge_generation: int | None,
+        authority_verifier: Callable[[SyncEnvelope], bool] | None = None,
+        budget: PersonalContextRecoveryBudget | None = None,
+    ) -> Literal["hidden", "authority", "barrier"]:
+        """Classify a raw Personal Context row using durable provenance facts."""
+
+        if _personal_context_row_is_structurally_shredded(envelope):
+            return "hidden"
+        if self._personal_context_ingress_is_attested(envelope, budget=budget):
+            return "hidden"
+
+        routing = envelope.routing_metadata
+        routed_generation = (
+            routing.get("purge_generation")
+            if isinstance(routing, Mapping)
+            else None
+        )
+        current_route = bool(
+            isinstance(routing, Mapping)
+            and isinstance(profile_id, str)
+            and bool(profile_id)
+            and routing.get("profile_id") == profile_id
+            and isinstance(integrity_key_id, str)
+            and bool(integrity_key_id)
+            and routing.get("integrity_key_id") == integrity_key_id
+            and isinstance(routed_generation, int)
+            and not isinstance(routed_generation, bool)
+            and isinstance(purge_generation, int)
+            and not isinstance(purge_generation, bool)
+            and routed_generation == purge_generation
+        )
+        authority = envelope.authority
+        if (
+            current_route
+            and authority is not None
+            and authority.role == "home_authority"
+            and envelope.apply_status == "applied"
+            and authority_verifier is not None
+            and authority_verifier(envelope)
+        ):
+            return "authority"
+        return "barrier"
+
+    def _personal_context_ingress_is_attested(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        budget: PersonalContextRecoveryBudget | None = None,
+    ) -> bool:
+        cursor = envelope.server_cursor
+        if cursor is None:
+            return False
+        if budget is not None and not budget.can_inspect():
+            return False
+        receipt = self.get_personal_context_ingress_receipt(cursor)
+        if budget is not None:
+            if receipt is not None and not budget.consume_returned():
+                return False
+            if not budget.deadline_open():
+                return False
+        authority = envelope.authority
+        return bool(
+            isinstance(receipt, Mapping)
+            and envelope.status == "accepted"
+            and envelope.apply_status == "applied"
+            and authority is not None
+            and authority.role == "client_ingress"
+            and receipt.get("server_sequence") == cursor
+            and receipt.get("dataset_id") == envelope.dataset_id
+            and receipt.get("device_id") == envelope.device_id
+            and receipt.get("device_id") != "server-origin"
+            and receipt.get("client_envelope_id") == envelope.client_envelope_id
+            and receipt.get("wire_entity_version")
+            == str(envelope.entity_version)
+        )
+
+    def mark_personal_context_ingress_applied(
+        self,
+        *,
+        server_cursor: int,
+        receipt: Any,
+    ) -> SyncEnvelope:
+        """Terminalize only the exact ingress whose canonical receipt was verified."""
+
+        envelope = self.get_envelope_by_server_cursor(server_cursor)
+        if (
+            envelope is None
+            or envelope.client_envelope_id != receipt.client_envelope_id
+            or not receipt.receipt_id.strip()
+            or envelope.authority is None
+            or envelope.authority.role != "client_ingress"
+        ):
+            raise SyncStoreError("personal_context_ingress_receipt_mismatch")
+        return self.db.mark_personal_context_ingress_applied(
+            server_cursor=server_cursor,
+            receipt={
+                "dataset_id": receipt.dataset_id,
+                "device_id": receipt.device_id,
+                "client_envelope_id": receipt.client_envelope_id,
+                "canonical_payload_digest": receipt.canonical_payload_digest,
+                "purge_generation": receipt.purge_generation,
+                "resulting_object_id": receipt.resulting_object_id,
+                "resulting_version_id": receipt.resulting_version_id,
+                "manifest_revision": receipt.manifest_revision,
+                "manifest_version_id": receipt.manifest_version_id,
+                "publication_batch_id": receipt.publication_batch_id,
+                "profile_publication_sequence": receipt.profile_publication_sequence,
+                "receipt_id": receipt.receipt_id,
+                "wire_entity_version": receipt.wire_entity_version,
+            },
+            connection=self._connection,
+        )
+
+    def get_personal_context_ingress_receipt(
+        self,
+        server_cursor: int,
+    ) -> Mapping[str, Any] | None:
+        """Read the canonical apply receipt bound to one exact ingress cursor."""
+
+        return self.db.get_personal_context_ingress_receipt(
+            server_cursor,
+            connection=self._connection,
         )
 
     def summarize_domain_envelopes(
@@ -232,6 +1338,89 @@ class SyncV2Store:
             entity_id=entity_id,
             stable_key=stable_key,
             limit=limit,
+            connection=self._connection,
+        )
+
+    def get_historical_task_envelope(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        task_id: str,
+        object_revision: int,
+        object_hash: str,
+        envelope_id: str | None = None,
+    ) -> SyncEnvelope | None:
+        """Resolve one exact applied historical Notes task envelope."""
+        return self.db.get_historical_task_envelope(
+            owner_user_id=owner_user_id,
+            dataset_id=dataset_id,
+            task_id=task_id,
+            envelope_id=envelope_id,
+            object_revision=object_revision,
+            object_hash=object_hash,
+            connection=self._connection,
+        )
+
+    def get_projection_note_envelope(
+        self,
+        *,
+        owner_user_id: str,
+        dataset_id: str,
+        note_id: str,
+        envelope_id: str,
+        object_hash: str,
+    ) -> SyncEnvelope | None:
+        """Resolve one exact applied note envelope for projection proof."""
+        return self.db.get_projection_note_envelope(
+            owner_user_id=owner_user_id,
+            dataset_id=dataset_id,
+            note_id=note_id,
+            envelope_id=envelope_id,
+            object_hash=object_hash,
+            connection=self._connection,
+        )
+
+    def get_envelope_for_entity_at_or_before(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        entity_id: str,
+        server_sequence: int,
+    ) -> SyncEnvelope | None:
+        """Return one accepted entity envelope at a durable sequence boundary."""
+
+        return self.db.get_envelope_for_entity_at_or_before(
+            dataset_id,
+            domain,
+            entity_id=entity_id,
+            server_sequence=server_sequence,
+        )
+
+    def list_conflict_pinned_envelopes(self, dataset_id: str, *, limit: int = 1000) -> list[SyncEnvelope]:
+        return self.db.list_conflict_pinned_envelopes(dataset_id, limit=limit, connection=self._connection)
+
+    def envelope_is_conflict_pinned(self, dataset_id: str, envelope_id: str) -> bool:
+        return self.db.envelope_is_conflict_pinned(dataset_id, envelope_id, connection=self._connection)
+
+    def get_envelope_by_server_cursor(self, server_cursor: int) -> SyncEnvelope | None:
+        return self.db.get_envelope_by_server_cursor(
+            server_cursor,
+            connection=self._connection,
+        )
+
+    def get_envelope_by_client_id(
+        self,
+        dataset_id: str,
+        client_envelope_id: str,
+    ) -> SyncEnvelope | None:
+        """Resolve a deterministic envelope ID before reconstructing its original CAS base."""
+
+        return self.db.get_envelope_by_client_id(
+            dataset_id,
+            client_envelope_id,
+            connection=self._connection,
         )
 
     def get_object_state(
@@ -240,10 +1429,55 @@ class SyncV2Store:
         domain: SyncDomain,
         object_id: str,
     ) -> SyncObjectState | None:
-        return self.db.get_object_state(dataset_id, domain, object_id)
+        return self.db.get_object_state(
+            dataset_id,
+            domain,
+            object_id,
+            connection=self._connection,
+        )
+
+    def get_current_head(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        object_id: str,
+    ) -> SyncEnvelope | None:
+        """Return the canonical current head for one dataset-scoped object."""
+
+        return self.db.get_current_head(
+            dataset_id,
+            domain,
+            object_id,
+            connection=self._connection,
+        )
+
+    def list_current_heads(
+        self,
+        dataset_id: str,
+        domain: SyncDomain,
+        *,
+        limit: int,
+        offset: int,
+    ) -> list[SyncEnvelope]:
+        """Return a bounded page of canonical heads for one dataset domain."""
+
+        return self.db.list_current_heads(
+            dataset_id,
+            domain,
+            limit=limit,
+            offset=offset,
+            connection=self._connection,
+        )
 
     def upsert_object_state(self, state: SyncObjectState) -> SyncObjectState:
-        return self.db.upsert_object_state(state)
+        return self.db.upsert_object_state(
+            state,
+            connection=self._connection,
+            trusted_notes_task_bootstrap_id=(
+                self._trusted_notes_task_bootstrap_id
+            ),
+            trusted_notes_task_coordinator=self._trusted_notes_task_coordinator,
+        )
 
     def mark_envelope_apply_status(
         self,
@@ -258,6 +1492,87 @@ class SyncV2Store:
             apply_status=apply_status,
             apply_error_code=apply_error_code,
             apply_error_message=apply_error_message,
+            connection=self._connection,
+        )
+
+    def discard_pending_personal_context_authority(
+        self,
+        **identity: Any,
+    ) -> Literal["removed", "absent", "applied", "mismatch"]:
+        """Classify or remove one exact invisible authority row."""
+
+        return self.db.discard_pending_personal_context_authority(
+            **identity,
+            connection=self._connection,
+        )
+
+    def _shred_authorized_personal_context_history(
+        self,
+        claim: object,
+    ) -> PersonalContextHistoryShredReceipt:
+        """Scrub history only through one target-bound verified claim."""
+
+        from tldw_Server_API.app.core.DB_Management.Personal_Context_Repository import (
+            _validate_direct_purge_cleanup_claim,
+        )
+
+        if self._connection is not None:
+            raise SyncStoreError("Personal Context cleanup owns its Sync transaction")
+        try:
+            _validate_direct_purge_cleanup_claim(
+                claim,
+                expected_store=self,
+                expected_database=self.db,
+            )
+        except PermissionError as exc:
+            raise SyncStoreError("Personal Context cleanup intent is unauthorized") from exc
+        return self.db._shred_authorized_personal_context_profile_history(claim)
+
+    def mark_personal_context_authority_applied(
+        self,
+        server_cursor: int,
+        **identity: Any,
+    ) -> SyncEnvelope:
+        """Apply one verified authority row inside its existing Sync guard."""
+
+        if self._connection is None:
+            raise SyncStoreError("Personal Context authority finalize requires a guard")
+        return self.db.mark_personal_context_authority_applied(
+            server_cursor,
+            **identity,
+            connection=self._connection,
+        )
+
+    def mark_bootstrap_envelope_verified(
+        self,
+        server_cursor: int,
+        *,
+        bootstrap_id: str,
+        notes_task_bootstrap: bool = False,
+    ) -> SyncEnvelope:
+        """Record a verified bootstrap step as applied without product replay."""
+
+        return self.db.mark_bootstrap_envelope_verified(
+            server_cursor,
+            bootstrap_id=bootstrap_id,
+            notes_task_bootstrap=notes_task_bootstrap,
+            connection=self._connection,
+        )
+
+    def reconcile_bootstrap_envelope_superseded(
+        self,
+        server_cursor: int,
+        *,
+        bootstrap_id: str,
+        superseded_by_cursor: int,
+    ) -> SyncEnvelope:
+        """Mark stale bootstrap history applied without regressing object state."""
+
+        return self.db.reconcile_bootstrap_envelope_superseded(
+            server_cursor,
+            bootstrap_id=bootstrap_id,
+            superseded_by_cursor=superseded_by_cursor,
+            connection=self._connection,
         )
 
     def list_failed_applies(
@@ -289,22 +1604,49 @@ class SyncV2Store:
         dataset_id: str,
         device_id: str,
         domain: SyncDomain,
+        *,
+        adapter_version: int = 1,
     ) -> SyncDeviceCursor | None:
-        return self.db.get_device_cursor(dataset_id, device_id, domain)
+        return self.db.get_device_cursor(
+            dataset_id,
+            device_id,
+            domain,
+            adapter_version=adapter_version,
+        )
 
     def insert_conflict(self, conflict: SyncConflictCreate) -> SyncConflict:
-        return self.db.insert_conflict(conflict)
+        return self.db.insert_conflict(conflict, connection=self._connection)
 
     def list_conflicts(
         self,
         dataset_id: str,
         *,
         status: ConflictStatus | None = None,
+        domain: SyncDomain | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[SyncConflict]:
-        return self.db.list_conflicts(dataset_id, status=status)
+        return self.db.list_conflicts(
+            dataset_id,
+            status=status,
+            domain=domain,
+            limit=limit,
+            offset=offset,
+        )
 
-    def get_conflict(self, conflict_id: str) -> SyncConflict | None:
-        return self.db.get_conflict(conflict_id)
+    def get_conflict(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str | None = None,
+        for_update: bool = False,
+    ) -> SyncConflict | None:
+        return self.db.get_conflict(
+            conflict_id,
+            dataset_id=dataset_id,
+            connection=self._connection,
+            for_update=for_update,
+        )
 
     def get_unresolved_conflict_for_envelope(
         self,
@@ -317,6 +1659,16 @@ class SyncV2Store:
             dataset_id,
             local_envelope_id=local_envelope_id,
             server_sequence=server_sequence,
+            connection=self._connection,
+        )
+
+    def get_unresolved_materialization_conflict(
+        self,
+        dataset_id: str,
+    ) -> SyncConflict | None:
+        return self.db.get_unresolved_materialization_conflict(
+            dataset_id,
+            connection=self._connection,
         )
 
     def claim_conflict_resolution(
@@ -334,6 +1686,7 @@ class SyncV2Store:
             resolved_by_device_id=resolved_by_device_id,
             resolution_action=resolution_action,
             resolution_notes=resolution_notes,
+            connection=self._connection,
         )
 
     def release_conflict_resolution_claim(
@@ -351,6 +1704,93 @@ class SyncV2Store:
             resolved_by_device_id=resolved_by_device_id,
             resolution_action=resolution_action,
             resolution_notes=resolution_notes,
+            connection=self._connection,
+        )
+
+    def require_conflict_resolution_predecessors_applied(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+    ) -> SyncEnvelope:
+        if self._connection is None:
+            raise SyncStoreError("Sync conflict resolution requires a dataset guard")
+        return self.db.require_conflict_resolution_predecessors_applied(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            connection=self._connection,
+        )
+
+    def terminalize_claimed_conflict_envelope(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        apply_error_code: str,
+    ) -> SyncEnvelope:
+        if self._connection is None:
+            raise SyncStoreError("Sync conflict terminalization requires a dataset guard")
+        return self.db.terminalize_claimed_conflict_envelope(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            apply_error_code=apply_error_code,
+            connection=self._connection,
+        )
+
+    def rebase_later_claimed_conflict_envelopes(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+        expected_server_cursors: Sequence[int] | None = None,
+    ) -> list[SyncConflict]:
+        if self._connection is None:
+            raise SyncStoreError("Sync conflict rebasing requires a dataset guard")
+        return self.db.rebase_later_claimed_conflict_envelopes(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            expected_server_cursors=expected_server_cursors,
+            connection=self._connection,
+        )
+
+    def stage_later_claimed_conflict_rebase_plan(
+        self,
+        conflict_id: str,
+        *,
+        dataset_id: str,
+        resolved_by_device_id: str | None,
+        resolution_action: str,
+        resolution_notes: str | None,
+    ) -> tuple[int, ...]:
+        """Validate and freeze later-row rebase work before product projection."""
+
+        if self._connection is None:
+            raise SyncStoreError("Sync conflict rebasing requires a dataset guard")
+        return self.db.stage_later_claimed_conflict_rebase_plan(
+            conflict_id,
+            dataset_id=dataset_id,
+            resolved_by_device_id=resolved_by_device_id,
+            resolution_action=resolution_action,
+            resolution_notes=resolution_notes,
+            connection=self._connection,
         )
 
     def resolve_conflict(
@@ -374,6 +1814,7 @@ class SyncV2Store:
             resolved_by_device_id=resolved_by_device_id,
             resolution_action=resolution_action,
             resolution_notes=resolution_notes,
+            connection=self._connection,
         )
 
     def store_key_record(self, record: SyncKeyRecordCreate) -> SyncKeyRecord:
@@ -393,6 +1834,11 @@ class SyncV2Store:
             device_id=device_id,
             key_purpose=key_purpose,
         )
+
+    def revoke_key_record(self, *, user_id: str, key_record_id: str) -> SyncKeyRecord:
+        """Revoke one key record after a registered wrapping-key rotation."""
+
+        return self.db.revoke_key_record(user_id=user_id, key_record_id=key_record_id)
 
     def get_dataset_envelope_range(self, dataset_id: str) -> SyncKeyRotationEnvelopeRange:
         return self.db.get_dataset_envelope_range(dataset_id)
@@ -414,6 +1860,190 @@ class SyncV2Store:
         """Store or deduplicate an encrypted attachment through the DB layer."""
 
         return self.db.store_attachment(attachment)
+
+    def get_attachment_revision_binding(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        attachment_revision: int,
+        *,
+        owner_user_id: str,
+    ) -> SyncAttachmentRevisionBinding | None:
+        return self.db.get_attachment_revision_binding(
+            dataset_id,
+            attachment_id,
+            attachment_revision,
+            owner_user_id=owner_user_id,
+            connection=self._connection,
+        )
+
+    def get_attachment_revision_binding_for_blob(
+        self,
+        dataset_id: str,
+        blob_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncAttachmentRevisionBinding | None:
+        """Return the latest revision binding resolved to a blob for its owner."""
+
+        return self.db.get_attachment_revision_binding_for_blob(
+            dataset_id,
+            blob_id,
+            owner_user_id=owner_user_id,
+            connection=self._connection,
+        )
+
+    def list_attachment_revision_bindings_for_blob(
+        self,
+        dataset_id: str,
+        blob_id: str,
+        *,
+        owner_user_id: str,
+        after_establishing_server_cursor: int = 0,
+        after_attachment_id: str = "",
+        after_attachment_revision: int = 0,
+        limit: int = 1000,
+    ) -> list[SyncAttachmentRevisionBinding]:
+        """List one bounded compound-keyset page of unreleased blob bindings."""
+
+        return self.db.list_attachment_revision_bindings_for_blob(
+            dataset_id,
+            blob_id,
+            owner_user_id=owner_user_id,
+            after_establishing_server_cursor=after_establishing_server_cursor,
+            after_attachment_id=after_attachment_id,
+            after_attachment_revision=after_attachment_revision,
+            limit=limit,
+            connection=self._connection,
+        )
+
+    def has_attachment_ref_v2_history(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        *,
+        owner_user_id: str,
+    ) -> bool:
+        """Return whether an owned attachment has accepted adapter-v2 history."""
+
+        return self.db.has_attachment_ref_v2_history(
+            dataset_id,
+            attachment_id,
+            owner_user_id=owner_user_id,
+            connection=self._connection,
+        )
+
+    def list_unreleased_attachment_revision_bindings(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        after_establishing_server_cursor: int = 0,
+        after_attachment_id: str = "",
+        after_attachment_revision: int = 0,
+        limit: int = 1000,
+    ) -> list[SyncAttachmentRevisionBinding]:
+        """List one bounded compound-keyset page of unreleased bindings."""
+
+        return self.db.list_unreleased_attachment_revision_bindings(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            after_establishing_server_cursor=after_establishing_server_cursor,
+            after_attachment_id=after_attachment_id,
+            after_attachment_revision=after_attachment_revision,
+            limit=limit,
+            connection=self._connection,
+        )
+
+    def list_unresolved_attachment_revision_bindings(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+        after_establishing_server_cursor: int = 0,
+        limit: int = 1000,
+    ) -> list[SyncAttachmentRevisionBinding]:
+        """List one bounded cursor page of unresolved attachment bindings."""
+
+        return self.db.list_unresolved_attachment_revision_bindings(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            after_establishing_server_cursor=after_establishing_server_cursor,
+            limit=limit,
+        )
+
+    def resolve_attachment_revision_binding(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        attachment_revision: int,
+        *,
+        blob_id: str,
+        owner_user_id: str,
+    ) -> SyncAttachmentRevisionBinding:
+        return self.db.resolve_attachment_revision_binding(
+            dataset_id,
+            attachment_id,
+            attachment_revision,
+            blob_id=blob_id,
+            owner_user_id=owner_user_id,
+        )
+
+    def release_attachment_revision_binding(
+        self,
+        dataset_id: str,
+        attachment_id: str,
+        attachment_revision: int,
+        *,
+        released_at: str,
+        owner_user_id: str,
+    ) -> SyncAttachmentRevisionBinding:
+        return self.db.release_attachment_revision_binding(
+            dataset_id,
+            attachment_id,
+            attachment_revision,
+            released_at=released_at,
+            owner_user_id=owner_user_id,
+            connection=self._connection,
+        )
+
+    def get_or_create_storage_namespace(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncDatasetStorageNamespace:
+        return self.db.get_or_create_storage_namespace(
+            dataset_id,
+            owner_user_id=owner_user_id,
+        )
+
+    def get_storage_namespace(
+        self,
+        dataset_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncDatasetStorageNamespace | None:
+        return self.db.get_storage_namespace(
+            dataset_id,
+            owner_user_id=owner_user_id,
+            connection=self._connection,
+        )
+
+    def relocate_legacy_blob(
+        self,
+        blob_store: Any,
+        *,
+        dataset_id: str,
+        owner_user_id: str,
+        blob_id: str,
+    ) -> SyncBlobObject:
+        return self.db.relocate_legacy_blob(
+            blob_store,
+            dataset_id=dataset_id,
+            owner_user_id=owner_user_id,
+            blob_id=blob_id,
+        )
 
     def create_blob_upload_session(
         self,
@@ -454,7 +2084,18 @@ class SyncV2Store:
         )
 
     def complete_blob_upload(self, blob: SyncBlobObjectCreate) -> SyncBlobObject:
-        return self.db.complete_blob_upload(blob)
+        return self.db.complete_blob_upload(blob, connection=self._connection)
+
+    def require_blob_upload_completion_allowed(
+        self,
+        blob: SyncBlobObjectCreate,
+    ) -> None:
+        if self._connection is None:
+            raise SyncStoreError("Sync blob completion requires a dataset guard")
+        self.db.require_blob_upload_completion_allowed(
+            blob,
+            connection=self._connection,
+        )
 
     def get_blob_object(
         self,
@@ -464,6 +2105,7 @@ class SyncV2Store:
         blob_id: str | None = None,
         payload_hash: str | None = None,
         owner_user_id: str | None = None,
+        include_unavailable: bool = False,
     ) -> SyncBlobObject | None:
         return self.db.get_blob_object(
             dataset_id,
@@ -471,6 +2113,42 @@ class SyncV2Store:
             blob_id=blob_id,
             payload_hash=payload_hash,
             owner_user_id=owner_user_id,
+            include_unavailable=include_unavailable,
+            connection=self._connection,
+        )
+
+    def list_blob_availability_by_hashes(
+        self,
+        dataset_id: str,
+        payload_hashes: Sequence[str],
+        *,
+        owner_user_id: str,
+    ) -> dict[str, SyncBlobAvailabilityStatus]:
+        """Return bounded owner-authorized blob states keyed by payload hash."""
+
+        return self.db.list_blob_availability_by_hashes(
+            dataset_id,
+            payload_hashes,
+            owner_user_id=owner_user_id,
+            connection=self._connection,
+        )
+
+    def lock_blob_object_for_retention(
+        self,
+        dataset_id: str,
+        blob_id: str,
+        *,
+        owner_user_id: str,
+    ) -> SyncBlobObject | None:
+        if self._connection is None:
+            raise SyncStoreError("Sync blob retention requires a dataset guard")
+        return self.db.get_blob_object(
+            dataset_id,
+            blob_id=blob_id,
+            owner_user_id=owner_user_id,
+            include_unavailable=True,
+            connection=self._connection,
+            for_update=True,
         )
 
     def list_blob_objects_for_dataset(
@@ -483,12 +2161,49 @@ class SyncV2Store:
 
         return self.db.list_blob_objects_for_dataset(dataset_id, status=status)
 
-    def mark_blob_object_deleted(
+    def list_blob_objects_for_dataset_page(
+        self,
+        dataset_id: str,
+        *,
+        status: str = "available",
+        after_updated_at: str | None = None,
+        after_blob_id: str | None = None,
+        limit: int = 1000,
+    ) -> list[SyncBlobObject]:
+        return self.db.list_blob_objects_for_dataset_page(
+            dataset_id,
+            status=status,
+            after_updated_at=after_updated_at,
+            after_blob_id=after_blob_id,
+            limit=limit,
+            connection=self._connection,
+        )
+
+    def fence_blob_object_deleting(
         self,
         dataset_id: str,
         blob_id: str,
     ) -> SyncBlobObject | None:
-        return self.db.mark_blob_object_deleted(dataset_id, blob_id)
+        if self._connection is None:
+            raise SyncStoreError("Sync blob deletion requires a dataset guard")
+        return self.db.fence_blob_object_deleting(
+            dataset_id,
+            blob_id,
+            connection=self._connection,
+        )
+
+    def finalize_blob_object_deleted(
+        self,
+        dataset_id: str,
+        blob_id: str,
+    ) -> SyncBlobObject | None:
+        if self._connection is None:
+            raise SyncStoreError("Sync blob deletion requires a dataset guard")
+        return self.db.finalize_blob_object_deleted(
+            dataset_id,
+            blob_id,
+            connection=self._connection,
+        )
 
     def get_domain_compaction_sequence(
         self,
@@ -510,6 +2225,7 @@ class SyncV2Store:
             domain,
             through_server_sequence=through_server_sequence,
             state=state,
+            connection=self._connection,
         )
 
     def summarize_blob_quota(

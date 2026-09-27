@@ -1,6 +1,12 @@
 export type AdminGuardState = "forbidden" | "notFound" | null
 
-const ADMIN_NOT_FOUND_CODES = new Set(["404", "405", "410", "501", "503"])
+// Codes that mean the admin endpoint itself does not exist on this server.
+// 5xx availability codes deliberately do NOT belong here: a 503 from e.g. the
+// llama.cpp service means "the backing runtime is down", not "this tldw server
+// lacks the /admin endpoints" — conflating them misdiagnoses the outage.
+const ADMIN_NOT_FOUND_CODES = new Set(["404", "405", "410", "501"])
+
+const SERVICE_UNAVAILABLE_CODES = new Set(["502", "503", "504"])
 
 const normalizeErrorMessage = (error: unknown): string => {
   if (typeof error === "string") return error
@@ -10,7 +16,7 @@ const normalizeErrorMessage = (error: unknown): string => {
   return ""
 }
 
-export const deriveAdminGuardFromError = (error: unknown): AdminGuardState => {
+const extractStatusCode = (error: unknown): string => {
   const rawMessage = normalizeErrorMessage(error)
   const statusFromField =
     error && typeof error === "object" && "status" in error
@@ -18,8 +24,12 @@ export const deriveAdminGuardFromError = (error: unknown): AdminGuardState => {
       : ""
   const statusMatch =
     rawMessage.match(/Request failed:\s*(\d{3})/i) ||
-    rawMessage.match(/\b(403|404|405|410|501|503)\b/)
-  const statusCode = statusFromField || statusMatch?.[1] || ""
+    rawMessage.match(/\b(403|404|405|410|501|502|503|504)\b/)
+  return statusFromField || statusMatch?.[1] || ""
+}
+
+export const deriveAdminGuardFromError = (error: unknown): AdminGuardState => {
+  const statusCode = extractStatusCode(error)
 
   if (statusCode === "403") {
     return "forbidden"
@@ -29,6 +39,15 @@ export const deriveAdminGuardFromError = (error: unknown): AdminGuardState => {
   }
   return null
 }
+
+/**
+ * True when the failure is a temporary upstream/service availability problem
+ * (502/503/504) rather than a missing or forbidden admin API. Pages should
+ * treat this as "the backing service is down — retry / start it", never as
+ * "this server has no admin endpoints".
+ */
+export const isServiceUnavailableError = (error: unknown): boolean =>
+  SERVICE_UNAVAILABLE_CODES.has(extractStatusCode(error))
 
 export const sanitizeAdminErrorMessage = (
   error: unknown,
@@ -60,6 +79,15 @@ export const sanitizeAdminErrorMessage = (
     /[A-Za-z]:\\(?:[^\\\s]+\\)+[^\\\s)]+/g,
     "[redacted-path]"
   )
+
+  // A parenthetical that only carried the (now redacted) endpoint adds no
+  // information for the reader — drop it instead of showing "[admin-endpoint]".
+  cleaned = cleaned
+    .replace(
+      /\s*\(\s*(?:(?:GET|POST|PUT|PATCH|DELETE)\s+)?\[admin-endpoint\]\s*\)/gi,
+      ""
+    )
+    .trim()
 
   if (cleaned.length > 220) {
     cleaned = `${cleaned.slice(0, 217)}...`

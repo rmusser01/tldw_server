@@ -9,6 +9,27 @@ import {
 } from "../PromptGalleryCard"
 import type { PromptRowVM } from "../prompt-workspace-types"
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (
+      key: string,
+      options?: { defaultValue?: string; [name: string]: unknown }
+    ) => {
+      if (!options?.defaultValue) return key
+      return Object.entries(options).reduce(
+        (value, [name, replacement]) =>
+          name === "defaultValue"
+            ? value
+            : value.replace(
+                new RegExp(`{{${name}}}`, "g"),
+                String(replacement)
+              ),
+        options.defaultValue
+      )
+    }
+  })
+}))
+
 const makePrompt = (overrides: Partial<PromptRowVM> = {}): PromptRowVM => ({
   id: "prompt-1",
   title: "My Prompt",
@@ -27,6 +48,35 @@ describe("PromptGalleryCard", () => {
       <PromptGalleryCard prompt={makePrompt()} onClick={vi.fn()} />
     )
     expect(screen.getByText("My Prompt")).toBeInTheDocument()
+  })
+
+  it("labels recipes separately from ordinary prompts", () => {
+    const { rerender } = render(
+      <PromptGalleryCard
+        prompt={makePrompt({ kind: "recipe", recipeTarget: "system" })}
+        onClick={vi.fn()}
+      />
+    )
+    expect(screen.getByText("Recipe")).toBeInTheDocument()
+    expect(screen.getByText("System")).toBeInTheDocument()
+
+    rerender(<PromptGalleryCard prompt={makePrompt()} onClick={vi.fn()} />)
+    expect(screen.queryByText("Recipe")).not.toBeInTheDocument()
+  })
+
+  it("names a recipe card action for opening the recipe editor", () => {
+    render(
+      <PromptGalleryCard
+        prompt={makePrompt({ kind: "recipe", recipeTarget: "system" })}
+        onClick={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByRole("button", {
+        name: "Open recipe editor for My Prompt"
+      })
+    ).toBeInTheDocument()
   })
 
   it("shows colored fallback avatar with initial letter", () => {

@@ -34,6 +34,33 @@ const makeContextWithoutExtensionTargets = () => {
 }
 
 describe("resolveExtensionId", () => {
+  it("cleans up a fallback probe page and CDP session after finding an extension target", async () => {
+    const probePage = { close: vi.fn().mockResolvedValue(undefined) }
+    const detach = vi.fn().mockResolvedValue(undefined)
+    const context = {
+      backgroundPages: vi.fn(() => []),
+      serviceWorkers: vi.fn(() => []),
+      pages: vi.fn(() => []),
+      newPage: vi.fn().mockResolvedValue(probePage),
+      newCDPSession: vi.fn().mockResolvedValue({
+        detach,
+        send: vi.fn().mockResolvedValue({
+          targetInfos: [
+            {
+              type: "service_worker",
+              url: `chrome-extension://${TEST_EXTENSION_ID}/background.js`,
+            },
+          ],
+        }),
+      }),
+    } as any
+
+    await expect(resolveExtensionId(context)).resolves.toBe(TEST_EXTENSION_ID)
+
+    expect(detach).toHaveBeenCalledTimes(1)
+    expect(probePage.close).toHaveBeenCalledTimes(1)
+  })
+
   it("falls back to a staged manifest key when no extension target is active", async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tldw-extension-id-"))
     tempRoots.push(tempRoot)

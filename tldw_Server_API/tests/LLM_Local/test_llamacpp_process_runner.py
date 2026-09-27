@@ -1,3 +1,5 @@
+"""Managed process lifecycle, launch configuration and snapshot ownership tests."""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,14 +9,16 @@ from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
-from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 from tldw_Server_API.app.core.Local_LLM.llamacpp_process_runner import LlamaCppProcessRunner
 from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import (
     LlamaCppPortPolicy,
     LlamaCppProfile,
     LlamaCppRuntimeState,
 )
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ServerError
+from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
+
+pytestmark = pytest.mark.unit
 
 
 class FakeProcess:
@@ -122,10 +126,306 @@ def test_runner_reports_defined_before_first_start(tmp_path: Path):
     assert runtime.warnings == []
 
 
+def test_full_cache_changes_snapshot_identity_but_false_matches_omitted(tmp_path):
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_compatibility import (
+        build_fingerprint,
+        compare_fingerprints,
+    )
+
+    config = make_config(tmp_path)
+    model = make_model(config, "arbitrary-text-model.gguf")
+    runner = LlamaCppProcessRunner(config, profile_id="cache-options")
+    identities = []
+    for args in ({}, {"swa_full": False}, {"swa_full": True}):
+        command = runner._build_command(config.executable_path, model, "127.0.0.1", 8181, args)
+        identities.append(
+            build_fingerprint(
+                model=model, executable=config.executable_path, effective_options=command[7:], adapters=[]
+            )
+        )
+    assert compare_fingerprints(identities[0], identities[1]) == []
+    assert compare_fingerprints(identities[0], identities[2]) == ["effective_options_sha256"]
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "127.0.0.2", "::1", "[::1]"])
+async def test_snapshot_launch_generations_and_private_working_path(tmp_path, monkeypatch, host):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
+
+    config = make_config(tmp_path)
+    model = make_model(config)
+    commands = []
+
+    async def spawn(*args, **kwargs):
+        commands.append(list(args))
+        return FakeProcess(5000 + len(commands))
+
+    async def ready(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(module, "wait_for_http_ready", ready)
+    runner = LlamaCppProcessRunner(config, "one")
+    monkeypatch.setattr(runner, "_is_port_free", lambda *args: True)
+    with SnapshotStore(tmp_path / "snapshots") as store:
+        runner.snapshot_store = store
+        enabled = profile("one", host=host).model_copy(update={"snapshots_enabled": True})
+        first = await runner.start(model, enabled)
+        assert first.launch_generation
+        first_path = runner.snapshot_working
+        assert commands[0][-3:] == ["--slots", "--slot-save-path", str(first_path)]
+        assert str(first_path) not in runner.status().resolved_args
+        await runner.stop()
+        second = await runner.start(model, enabled)
+        assert second.launch_generation != first.launch_generation
+        assert runner.snapshot_working != first_path
+        await runner.stop()
+
+
+@pytest.mark.parametrize("failure", ["fingerprint", "logs", "spawn"])
+async def test_failed_snapshot_restart_removes_only_unspawned_launch(tmp_path, monkeypatch, failure):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
+
+    config = make_config(tmp_path)
+    model = make_model(config)
+    runner = LlamaCppProcessRunner(config, "one")
+    monkeypatch.setattr(runner, "_is_port_free", lambda *args: True)
+
+    async def spawn(*args, **kwargs):
+        return FakeProcess(5000)
+
+    async def ready(*args, **kwargs):
+        return True
+
+    def fail(*args, **kwargs):
+        raise ServerError("injected startup failure")
+
+    async def fail_spawn(*args, **kwargs):
+        fail()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(module, "wait_for_http_ready", ready)
+    with SnapshotStore(tmp_path / "snapshots") as store:
+        runner.snapshot_store = store
+        enabled = profile("one").model_copy(update={"snapshots_enabled": True})
+        await runner.start(model, enabled)
+        prior_path = runner.snapshot_working
+        await runner.stop()
+        if failure == "fingerprint":
+            monkeypatch.setattr(module, "build_fingerprint", fail)
+        elif failure == "logs":
+            monkeypatch.setattr(runner, "_open_log_targets", fail)
+        else:
+            monkeypatch.setattr(asyncio, "create_subprocess_exec", fail_spawn)
+        with pytest.raises(ServerError, match="injected startup failure"):
+            await runner.start(model, enabled)
+        assert list(prior_path.parent.iterdir()) == [prior_path]
+
+
+async def test_failed_snapshot_cleanup_still_closes_startup_log(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import (
+        SnapshotStorageUnavailableError,
+        SnapshotStore,
+    )
+
+    config = make_config(tmp_path, log_output_file=tmp_path / "runtime.log")
+    model = make_model(config)
+    runner = LlamaCppProcessRunner(config, "one")
+    monkeypatch.setattr(runner, "_is_port_free", lambda *args: True)
+    root = tmp_path / "snapshots"
+    handles = []
+
+    async def fail_spawn(*args, **kwargs):
+        handles.append(kwargs["stdout"])
+        root.rename(tmp_path / "original-snapshots")
+        root.mkdir()
+        raise ServerError("injected spawn failure")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fail_spawn)
+    with SnapshotStore(root) as store:
+        runner.snapshot_store = store
+        enabled = profile("one").model_copy(update={"snapshots_enabled": True})
+        with pytest.raises(SnapshotStorageUnavailableError):
+            await runner.start(model, enabled)
+        assert handles[0].closed
+
+
+@pytest.mark.parametrize("phase", ["directory", "fingerprint", "spawn", "readiness"])
+async def test_snapshot_start_cancellation_keeps_only_child_owned_directory(tmp_path, monkeypatch, phase):
+    import threading
+
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
+
+    config = make_config(tmp_path)
+    model = make_model(config)
+    runner = LlamaCppProcessRunner(config, "one")
+    monkeypatch.setattr(runner, "_is_port_free", lambda *args: True)
+    entered = asyncio.Event()
+    release_thread = threading.Event()
+    release_spawn = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    child = FakeProcess(5000)
+
+    async def spawn(*args, **kwargs):
+        if phase == "spawn":
+            entered.set()
+            await release_spawn.wait()
+        return child
+
+    async def ready(*args, **kwargs):
+        if phase == "readiness":
+            entered.set()
+            await asyncio.Event().wait()
+        return True
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(module, "wait_for_http_ready", ready)
+    with SnapshotStore(tmp_path / "snapshots") as store:
+        runner.snapshot_store = store
+        original_directory = store.launch_directory
+        original_fingerprint = module.build_fingerprint
+        directories = []
+
+        def directory(*args, **kwargs):
+            result = original_directory(*args, **kwargs)
+            directories.append(result)
+            if phase == "directory" and len(directories) == 1:
+                loop.call_soon_threadsafe(entered.set)
+                assert release_thread.wait(5)
+            return result
+
+        def fingerprint(*args, **kwargs):
+            result = original_fingerprint(*args, **kwargs)
+            if phase == "fingerprint":
+                loop.call_soon_threadsafe(entered.set)
+                assert release_thread.wait(5)
+            return result
+
+        monkeypatch.setattr(store, "launch_directory", directory)
+        monkeypatch.setattr(module, "build_fingerprint", fingerprint)
+        enabled = profile("one").model_copy(update={"snapshots_enabled": True})
+        task = asyncio.create_task(runner.start(model, enabled))
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+            task.cancel()
+            release_thread.set()
+            release_spawn.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            if phase in {"spawn", "readiness"}:
+                assert directories[0].exists()
+                assert runner.status().pid == child.pid
+                await runner.stop()
+                assert child.returncode is not None
+            else:
+                assert not directories[0].exists()
+        finally:
+            release_thread.set()
+            release_spawn.set()
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize(
+    "host", ["0.0.0.0", "::", "[::]", "192.168.1.10", "8.8.8.8", "2001:db8::1", "localhost", "example.com"]
+)
+async def test_snapshot_launch_rejects_non_loopback_before_spawn(tmp_path, monkeypatch, host):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
+
+    config = make_config(tmp_path)
+    runner = LlamaCppProcessRunner(config, "one")
+    commands = []
+
+    async def spawn(*args, **kwargs):
+        commands.append(args)
+        return FakeProcess(5000)
+
+    async def ready(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(module, "wait_for_http_ready", ready)
+    monkeypatch.setattr(runner, "_is_port_free", lambda *args: True)
+    with SnapshotStore(tmp_path / "snapshots") as store:
+        runner.snapshot_store = store
+        with pytest.raises(ServerError, match="loopback"):
+            await runner.start(
+                make_model(config), profile("one", host=host).model_copy(update={"snapshots_enabled": True})
+            )
+        assert commands == []
+
+
+async def test_runner_and_api_import_without_fcntl(tmp_path):
+    # A fresh interpreter catches the transitive import regression even when
+    # this pytest process has already imported the POSIX snapshot store.
+    script = """
+import sys
+sys.modules['fcntl'] = None
+from pathlib import Path
+from tldw_Server_API.app.core.Local_LLM.llamacpp_process_runner import LlamaCppProcessRunner
+from tldw_Server_API.app.api.v1.endpoints.llamacpp import router
+from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore, SnapshotStorageUnavailableError
+try:
+    SnapshotStore(Path(sys.argv[1]))
+except SnapshotStorageUnavailableError:
+    assert not Path(sys.argv[1]).exists()
+else:
+    raise AssertionError('snapshot storage must reject missing platform confinement')
+"""
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        script,
+        str(tmp_path / "unsupported"),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await process.communicate()
+    assert process.returncode == 0, (stdout + stderr).decode()
+
+
+async def test_failed_readiness_keeps_owned_child_stoppable(tmp_path, monkeypatch):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module
+
+    config = make_config(tmp_path)
+    runner = LlamaCppProcessRunner(config, "one")
+    child = FakeProcess(77777)
+
+    async def spawn(*args, **kwargs):
+        return child
+
+    async def readiness(*args, **kwargs):
+        raise ConnectionError("readiness transport failed")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(module, "wait_for_http_ready", readiness)
+    monkeypatch.setattr(runner, "_is_port_free", lambda *args: True)
+    monkeypatch.setattr(runner, "_signal_managed_process_group", lambda *args: child.terminate())
+    with pytest.raises(ServerError):
+        await runner.start(make_model(config), profile("one"))
+    await runner.stop()
+    assert child.returncode is not None
+
+
+@pytest.mark.parametrize("key", ["slot_save_path", "slot-save-path", "--slot-save-path", "slots", "no_slots"])
+def test_snapshot_launch_rejects_user_control_of_owned_flags(tmp_path, key):
+    from tldw_Server_API.app.core.Local_LLM.llamacpp_process_runner import validate_profile_server_args
+
+    config = make_config(tmp_path).model_copy(update={"allow_unvalidated_args": True})
+    with pytest.raises(ServerError):
+        validate_profile_server_args(config, profile("one", server_args={key: "outside"}))
+
+
 @pytest.mark.asyncio
+@pytest.mark.parametrize("host", ["127.0.0.1", "0.0.0.0"])
 async def test_runner_starts_two_profiles_on_distinct_ports_without_stopping_each_other(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    host: str,
 ):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as runner_module
 
@@ -150,7 +450,7 @@ async def test_runner_starts_two_profiles_on_distinct_ports_without_stopping_eac
     monkeypatch.setattr(first, "_is_port_free", lambda _host, _port: True)
     monkeypatch.setattr(second, "_is_port_free", lambda _host, _port: True)
 
-    first_runtime = await first.start(model_path, profile=profile("one", port=8181))
+    first_runtime = await first.start(model_path, profile=profile("one", port=8181, host=host))
     second_runtime = await second.start(model_path, profile=profile("two", port=8182))
 
     assert first_runtime.state == LlamaCppRuntimeState.RUNNING
@@ -161,6 +461,7 @@ async def test_runner_starts_two_profiles_on_distinct_ports_without_stopping_eac
     assert first_runtime.resolved_args == first_runtime.command
     assert second_runtime.port == 8182
     assert commands[0][commands[0].index("--port") + 1] == "8181"
+    assert commands[0][commands[0].index("--host") + 1] == host
     assert commands[1][commands[1].index("--port") + 1] == "8182"
 
     stopped = await first.stop()
@@ -223,7 +524,9 @@ async def test_runner_autoselects_port_when_profile_policy_requests_it(
     runner = LlamaCppProcessRunner(config, profile_id="auto")
     monkeypatch.setattr(runner, "_is_port_free", lambda _host, port: port == 8183)
 
-    runtime = await runner.start(model_path, profile=profile("auto", port=8181, port_policy=LlamaCppPortPolicy.AUTOSELECT))
+    runtime = await runner.start(
+        model_path, profile=profile("auto", port=8181, port_policy=LlamaCppPortPolicy.AUTOSELECT)
+    )
 
     assert runtime.port == 8183
     assert commands[0][commands[0].index("--port") + 1] == "8183"
@@ -395,7 +698,7 @@ async def test_runner_accepts_existing_handler_server_arg_aliases(
         "no_cnv": True,
         "in_prefix_bos": True,
         "r": "User:",
-        "j": "{\"type\":\"object\"}",
+        "j": '{"type":"object"}',
     }
 
     await runner.start(make_model(config), profile=profile("aliases", server_args=existing_aliases))

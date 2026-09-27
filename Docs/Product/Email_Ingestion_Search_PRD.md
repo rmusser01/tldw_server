@@ -1,10 +1,42 @@
 # PRD: Email Ingestion and Search Modernization (MsgVault-Inspired)
 
 - Title: Email Ingestion and Search Modernization
-- Owner: Backend and Search Team
+- Owner: Project owner / maintainer (single owner)
 - Status: Draft
 - Target Version: v0.2.x
-- Last Updated: 2026-02-10
+- Last Updated: 2026-09-13
+
+## Release Scope and Evidence (2026-09-13)
+
+Core email functionality is file-based ingestion, persistence, operator/text search,
+and message retrieval. Gmail synchronization is an **optional connector** with a
+separate validation and enablement gate. Pending live Gmail validation does not
+block the core gate. One owner handles implementation, operations and release
+approval; no separate backend/SRE/product approvals are required.
+
+Development and validation use synthetic email only. Do not connect the owner's
+personal Gmail or send personal email to an LLM. Upload processing is not assumed
+to be model-free: `/media/add` defaults `perform_analysis` to true, embeddings and
+LLM-assisted chunking have separate switches, and claims extraction can inherit
+server settings. The tested offline options and intercepted call boundaries are
+recorded in `Docs/Operations/Email_Core_Validation_2026-09-13.md` (TASK-13250).
+
+The milestone checkmarks below are implementation records, not deployment
+certification. The 2026-09-13 follow-up fixes the identical-body identity collision
+(TASK-13251), preserves parsed email metadata, and adds opt-in cursor pagination
+(TASK-13253) while retaining offset clients. Synthetic EML, ZIP and MBOX regressions
+now require separate identities. See the follow-up section of the validation record
+for fresh results and remaining environment gates.
+
+TASK-13255 additionally validates real API-key authentication and per-user SQLite
+isolation, including main-app test-mode request middleware and route registration. See
+`Docs/Operations/Email_Authenticated_Validation_2026-09-13.md`; startup, authenticated
+upload quotas, JWT login and PostgreSQL isolation remain separate unverified paths.
+
+Current evidence does not certify a running deployment, PostgreSQL parity, enabled
+PST/OST parsing, full-scale performance, staging sync lag or live OAuth/provider
+behavior. See the separate core and optional Gmail checklists in
+`Docs/Operations/Email_Release_Checklist_and_Rollback.md`.
 
 ## Summary
 
@@ -41,7 +73,10 @@ These gaps make email archives difficult to use at scale and prevent parity with
 2. Knowledge workers connecting live inboxes and running repeated queries over new mail.
 3. Operators triaging ingestion errors or duplicates with source-level observability and sync checkpoints.
 
-## Current State (Baseline)
+## Original Baseline (Historical)
+
+This describes the original problem definition. For the current code audit and
+verification limits, use the dated release evidence above.
 
 1. Email parsing is already robust and includes core metadata extraction:
    - `tldw_Server_API/app/core/Ingestion_Media_Processing/Email/Email_Processing_Lib.py`
@@ -144,7 +179,7 @@ System must provide a dedicated endpoint:
 
 And a compatibility bridge:
 
-1. `GET /api/v1/media/search` with `media_type=email` and optional `email_query_mode=operators`
+1. `POST /api/v1/media/search` with `media_types=["email"]` and optional `email_query_mode=operators` (current compatibility surface).
 
 #### FR-SEARCH-004: Boolean Semantics and Pagination Contract
 
@@ -441,7 +476,7 @@ Exit Criteria:
 2. Status tracking uses markdown checkboxes:
    - `[ ]` not started
    - `[x]` complete
-3. Milestone closure requires all `Must` tickets complete and milestone exit criteria met.
+3. Milestone closure requires all `Must` tickets in the selected rollout scope complete and milestone exit criteria met. M2 and live Gmail portions of M4 apply only to optional Gmail enablement.
 
 ### Milestone M0: Quick-Win Hardening (Phase 0)
 
@@ -449,12 +484,12 @@ Milestone Goal: Eliminate highest-risk ingestion/search correctness gaps without
 
 Must Tickets:
 
-- [ ] `EMAIL-M0-001` Persist parsed email metadata fields in safe persistence path.
+- [x] `EMAIL-M0-001` Persist parsed email metadata fields in safe persistence path.
   Depends On: None.
   Deliverables: Update metadata allowlist and persistence tests so `from/to/cc/bcc/subject/date/message_id/headers_map/attachments` survive ingest.
   Acceptance: Existing email ingest tests pass; new assertions confirm persisted metadata completeness.
 
-- [ ] `EMAIL-M0-002` Implement dedupe precedence for message identity.
+- [x] `EMAIL-M0-002` Implement dedupe precedence for message identity.
   Depends On: `EMAIL-M0-001`.
   Deliverables: Dedupe order `(source_id, source_message_id)` -> `(source_id, message_id)` -> hash fallback.
   Acceptance: Regression tests demonstrate distinct messages with same body are no longer merged.
@@ -471,7 +506,7 @@ Must Tickets:
 
 Should Tickets:
 
-- [ ] `EMAIL-M0-005` Update `Docs/API-related/Email_Processing_API.md` with metadata persistence behavior.
+- [x] `EMAIL-M0-005` Update `Docs/API-related/Email_Processing_API.md` with metadata persistence behavior.
   Depends On: `EMAIL-M0-001`.
   Acceptance: Docs reflect actual persisted fields and fallback behavior.
 
@@ -481,7 +516,7 @@ Should Tickets:
 
 Milestone Exit Gate:
 
-- [ ] M0 Gate approved by backend owner and test suite passes for email ingestion modules.
+- [ ] M0 Gate approved by the owner with ingestion correctness, metrics and logging criteria validated for the selected rollout scope.
 
 ### Milestone M1: Email-Native Storage and Operator Search (Phase 1)
 
@@ -658,7 +693,7 @@ Must Tickets:
 - [x] `EMAIL-M4-001` Publish operator query user guide.
   Depends On: `EMAIL-M1-007`.
   Deliverables: New guide in `Docs/User_Guides/Server/Email_Operator_Search_Guide.md` (mirrored to `Docs/Published/User_Guides/Server/Email_Operator_Search_Guide.md`) with examples and troubleshooting.
-  Acceptance: Guide content published with operator syntax, endpoint usage, and error handling references; product/support review pending rollout sign-off.
+  Acceptance: Guide content published with operator syntax, endpoint usage, and error handling references; owner review pending the selected rollout scope's sign-off.
 
 - [x] `EMAIL-M4-002` Publish email search architecture and developer integration docs.
   Depends On: `EMAIL-M1-006`, `EMAIL-M2-003`.
@@ -667,21 +702,23 @@ Must Tickets:
 
 - [x] `EMAIL-M4-003` Create production runbook for sync operations and incident response.
   Depends On: `EMAIL-M2-006`, `EMAIL-M2-007`.
-  Deliverables: Ops runbook covering retries, cursor repair, and quota incidents (`Docs/Product/Email_Ingestion_Search_PRD.md`).
-  Acceptance: Runbook published with staging dry-run checklist and concrete incident playbooks; staging execution with live Gmail traffic remains required before final M4 gate closure.
+  Deliverables: Ops runbook covering core offline validation and optional Gmail retries, cursor repair, and quota incidents (`Docs/Operations/Email_Sync_Operations_Runbook.md`).
+  Acceptance: Runbook published with synthetic core validation and connector incident playbooks. Live Gmail execution is deferred and required only for the optional Gmail enablement gate.
   Validation (2026-02-10): Focused endpoint/worker regression slice passed (`10 passed`) covering source status/sync APIs, cursor recovery (bounded replay/full-backfill-required), label/message-state deltas, retry backoff, retry-budget exhaustion, and large Gmail fixture edge cases.
 
 - [x] `EMAIL-M4-004` Final release checklist and rollback plan.
   Depends On: `EMAIL-M3-004`.
-  Deliverables: Feature-flag rollout sequence and rollback triggers (`Docs/Product/Email_Ingestion_Search_PRD.md`).
-  Acceptance: Checklist and rollback plan published; backend/SRE/product sign-offs are tracked in the document and required for M4 gate closure.
+  Deliverables: Feature-flag rollout sequence and rollback triggers (`Docs/Operations/Email_Release_Checklist_and_Rollback.md`).
+  Acceptance: Separate core and optional Gmail checklists and rollback steps published; one owner records approval for each enabled scope.
   Validation (2026-02-10): Rollout phase checklist, objective rollback triggers, and ordered rollback execution steps documented with explicit ownership and sign-off gates.
 
 Milestone Exit Gate:
 
-- [ ] M4 Gate approved and feature enabled for target rollout scope.
-  Blocker (2026-02-23): Live Gmail source validation is pending because no connected Gmail account is currently available for staging/demo testing.
-  Unblock Criteria: Execute the staging live-source sync checklist (`EMAIL-M4-003`) with a real Gmail connection and complete backend/SRE/product sign-offs (`EMAIL-M4-004`).
+- [ ] M4 Core gate approved and file ingestion/search enabled for target rollout scope.
+  Current status (2026-09-13): Identity collision and cursor API fixes are covered by synthetic regressions. Target-environment performance/deployment validation and owner sign-off remain outstanding.
+  Closure criteria: Validate the chosen deployment and scale, satisfy its remaining release checks, and record owner approval in the core release checklist.
+- [ ] M4 Optional Gmail enablement gate approved (deferred; not a core dependency).
+  Live OAuth, provider behavior, backfill/incremental sync and staging lag remain unverified. Mocked tests and fixture metrics are separate evidence. Any future live work requires an explicitly authorized dedicated synthetic test mailbox and a downstream processing audit. The owner's personal Gmail is excluded.
 
 ### Critical Path Summary
 

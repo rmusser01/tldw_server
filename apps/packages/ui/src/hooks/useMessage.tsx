@@ -1,24 +1,27 @@
+import { createEditMessage, historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers";
+import {
+  captureLocalMutationOwner,
+  createSelectedForkAction
+} from "@/hooks/chat/chat-action-utils";
+import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { promptForRag, systemPromptForNonRag } from "~/services/tldw-server";
+import { systemPromptForNonRag } from "~/services/tldw-server";
 import { useStoreMessageOption, type Message } from "~/store/option";
 import { useStoreMessage } from "~/store";
 import { getContentFromCurrentTab } from "~/libs/get-html";
 // RAG now uses tldw_server endpoints instead of local embeddings
 import { ChatHistory, type MessageMetadataExtra } from "@/store/option";
 import {
-  deleteChatForEdit,
-  deleteChatAfterMessageId,
   generateID,
   getPromptById,
-  removeMessageByIndex,
   removeMessageById,
-  updateMessageByIndex,
   updateMessageById,
 } from "@/db/dexie/helpers";
+import { removeAcknowledgedServerMirrorMessage } from "@/db/dexie/server-chat-mirror";
 import { useTranslation } from "react-i18next";
 import { usePageAssist } from "@/context";
-import { formatDocs } from "@/utils/format-docs";
 import { buildAssistantErrorContent } from "@/utils/chat-error-message";
 import { buildCharacterChatAssistantErrorContent } from "@/hooks/chat/useCharacterChatMode";
 import { createCharacterEmoteStream } from "@/hooks/chat/character-emote-stream";
@@ -34,6 +37,7 @@ import {
   tldwClient,
   type ConversationState,
 } from "@/services/tldw/TldwApiClient";
+import { resolveWebsiteChatContext } from "@/hooks/useMessage.website-context";
 import { getScreenshotFromCurrentTab } from "@/libs/get-screenshot";
 import {
   isReasoningEnded,
@@ -84,6 +88,7 @@ import { normalizeChatModelId } from "@/utils/chat-model-availability";
 import { validateSelectedChatModelAvailability } from "@/utils/chat-model-validation";
 import { discardAbortedTurnIfRequested } from "@/hooks/chat/abort-turn-cleanup";
 import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome";
+import { hydrateTrackedCharacterForSend } from "@/hooks/chat/tracked-character-hydration";
 import {
   collectGreetings,
   isGreetingMessageType,
@@ -105,6 +110,12 @@ import { subscribeChatLoopEvents } from "@/services/chat-loop/bridge";
 import { extractChatLoopEvent } from "@/services/chat-loop/stream";
 import { resolveUseMessageSendMode } from "@/hooks/useMessage.routing";
 import { syncChatSettingsForServerChat } from "@/services/chat-settings";
+import {
+  loadServicePromptSnapshot,
+  renderServicePromptPart,
+  type ServicePromptSnapshot,
+} from "@/services/service-prompts";
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error";
 
 const extractToolCalls = (generationInfo: unknown): ToolCall[] | undefined => {
   if (!generationInfo || typeof generationInfo !== "object") return undefined;
@@ -119,6 +130,7 @@ type ServerBackedMessage = Message & {
 };
 
 export const useMessage = () => {
+  const historySelection = useHistorySelectionContext();
   // Controllers come from Context (for aborting streaming requests)
   const {
     controller: abortController,
@@ -127,6 +139,7 @@ export const useMessage = () => {
     setEmbeddingController,
   } = usePageAssist();
   const discardCurrentTurnOnAbortRef = React.useRef(false);
+  const activeNormalControllerRef = React.useRef<AbortController | null>(null);
 
   // Messages now come from Zustand store (single source of truth)
   const messages = useStoreMessageOption((state) => state.messages);
@@ -486,8 +499,21 @@ export const useMessage = () => {
     history: ChatHistory,
     signal: AbortSignal,
     embeddingSignal: AbortSignal,
+    servicePromptSnapshot: ServicePromptSnapshot,
     regenerateFromMessage?: Message,
   ) => {
+    const executionSignal = servicePromptSnapshot.scopeSignal;
+    const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal;
+    const shouldAbortForScopeChange = () =>
+      scopeInvalidatedSignal.aborted;
+    const answerPrompt =
+      servicePromptSnapshot.definitions["chat.rag.answer"];
+    const rewritePrompt =
+      servicePromptSnapshot.definitions["chat.rag.question_rewrite"];
+    if (!answerPrompt || !rewritePrompt) {
+      throw new Error("The Sidepanel RAG Service Prompt snapshot is incomplete.");
+    }
+
     if (!selectedModel || selectedModel.trim().length === 0) {
       notification.error({
         message: t("error"),
@@ -502,6 +528,7 @@ export const useMessage = () => {
 
     const ollama = await pageAssistModel({
       model,
+      requestScope: servicePromptSnapshot.requestScope,
     });
 
     let newMessage: Message[] = [];
@@ -609,8 +636,6 @@ export const useMessage = () => {
     setMessages(newMessage);
     try {
       let query = message;
-      const { ragPrompt: systemPrompt, ragQuestionPrompt: questionPrompt } =
-        await promptForRag();
       if (newMessage.length > 2) {
         const lastTenMessages = newMessage.slice(-10);
         lastTenMessages.pop();
@@ -619,13 +644,18 @@ export const useMessage = () => {
             return `${message.isBot ? "Assistant: " : "Human: "}${message.message}`;
           })
           .join("\n");
-        const promptForQuestion = questionPrompt
-          .replaceAll("{chat_history}", chat_history)
-          .replaceAll("{question}", message);
+        const promptForQuestion = renderServicePromptPart(
+          rewritePrompt.definition,
+          "template",
+          rewritePrompt.parts.template,
+          { chat_history, question: message },
+        );
         const questionOllama = await pageAssistModel({
           model,
           toolChoice: "none",
+          tools: [],
           saveToDb: false,
+          requestScope: servicePromptSnapshot.requestScope,
         });
         const questionMessage = await humanMessageFormatter({
           content: [
@@ -637,7 +667,9 @@ export const useMessage = () => {
           model,
           useOCR,
         });
-        const response = await questionOllama.invoke([questionMessage]);
+        const response = await questionOllama.invoke([questionMessage], {
+          signal: executionSignal,
+        });
         query = response.content.toString();
         query = removeReasoning(query);
       }
@@ -653,72 +685,30 @@ export const useMessage = () => {
       }[] = [];
 
       if (chatWithWebsiteEmbedding) {
-        try {
-          await tldwClient.initialize();
-          // Optionally ensure server has the page content in the media index
-          if (embedURL) {
-            try {
-              await tldwClient.addMedia(embedURL);
-            } catch {}
-          }
-          const ragRes = await tldwClient.ragSearch(query, {
-            top_k: 4,
-            filters: { url: embedURL },
-          });
-          const docs =
-            ragRes?.results || ragRes?.documents || ragRes?.docs || [];
-          context = formatDocs(
-            docs.map((d: any) => ({
-              pageContent: d.content || d.text || d.chunk || "",
-              metadata: d.metadata || {},
-            })),
-          );
-          source = docs.map((d: any) => ({
-            name: d.metadata?.source || d.metadata?.title || "untitled",
-            type: d.metadata?.type || "unknown",
-            mode: "chat",
-            url: d.metadata?.url || "",
-            pageContent: d.content || d.text || d.chunk || "",
-            metadata: d.metadata || {},
-          }));
-        } catch (e) {
-          console.error(
-            "tldw ragSearch failed, falling back to inline context",
-            e,
-          );
-        }
-      }
-      if (!context && chatWithWebsiteEmbedding) {
-        if (embedType === "html") {
-          context = embedHTML.slice(0, maxWebsiteContext);
-        } else {
-          context = embedPDF
-            .map((pdf) => pdf.content)
-            .join(" ")
-            .slice(0, maxWebsiteContext);
-        }
-
-        source = [
-          {
-            name: embedURL,
-            type: embedType,
-            mode: "chat",
-            url: embedURL,
-            pageContent: context,
-            metadata: {
-              source: embedURL,
-              url: embedURL,
-            },
-          },
-        ];
+        const websiteContext = await resolveWebsiteChatContext({
+          client: tldwClient,
+          embedURL,
+          embedType,
+          embedHTML,
+          embedPDF,
+          maxWebsiteContext,
+          query,
+          signal: executionSignal,
+          requestScope: servicePromptSnapshot.requestScope,
+        });
+        context = websiteContext.context;
+        source = websiteContext.source;
       }
 
       let humanMessage = await humanMessageFormatter({
         content: [
           {
-            text: systemPrompt
-              .replace("{context}", context)
-              .replace("{question}", query),
+            text: renderServicePromptPart(
+              answerPrompt.definition,
+              "template",
+              answerPrompt.parts.template,
+              { context, question: query },
+            ),
             type: "text",
           },
         ],
@@ -733,7 +723,7 @@ export const useMessage = () => {
       const chunks = await ollama.stream(
         [...applicationChatHistory, humanMessage],
         {
-          signal: signal,
+          signal: executionSignal,
           callbacks: [
             {
               handleLLMEnd(output: any): any {
@@ -791,6 +781,12 @@ export const useMessage = () => {
         count++;
       }
 
+      if (executionSignal.aborted) {
+        const abortError = new Error("Request cancelled");
+        abortError.name = "AbortError";
+        throw abortError;
+      }
+
       const toolCalls = extractToolCalls(generationInfo);
       applyMcpModuleDisclosureFromToolCalls(toolCalls);
       setMessages((prev) => {
@@ -836,11 +832,30 @@ export const useMessage = () => {
         userMessageId: resolvedUserMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+        scopeSignal: servicePromptSnapshot.scopeSignal,
+        scopeInvalidatedSignal:
+          servicePromptSnapshot.scopeInvalidatedSignal,
+        requestScope: servicePromptSnapshot.requestScope,
       });
+
+      if (scopeInvalidatedSignal.aborted) {
+        const abortError = new Error("Request scope changed");
+        abortError.name = "AbortError";
+        throw abortError;
+      }
 
       setIsProcessing(false);
       setStreaming(false);
     } catch (e) {
+      const scopeAborted = shouldAbortForScopeChange();
+      if (scopeAborted || isRequestConfigScopeChangedError(e)) {
+        setMessages(messages);
+        setHistory(history);
+        setIsProcessing(false);
+        setStreaming(false);
+        setIsEmbedding(false);
+        return;
+      }
       if (
         discardAbortedTurnIfRequested({
           discardRequested: discardCurrentTurnOnAbortRef.current,
@@ -866,22 +881,52 @@ export const useMessage = () => {
             : msg,
         ),
       );
-      const errorSave = await saveMessageOnError({
-        e,
-        botMessage: assistantContent,
-        history,
-        historyId,
-        image,
-        selectedModel: model,
-        setHistory,
-        setHistoryId,
-        userMessage: message,
-        isRegenerating: isRegenerate,
-        message_source: "copilot",
-        userMessageId: resolvedUserMessageId,
-        assistantMessageId: resolvedAssistantMessageId,
-        assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
-      });
+      let errorSave: string | null;
+      try {
+        errorSave = await saveMessageOnError({
+          e,
+          botMessage: assistantContent,
+          history,
+          historyId,
+          image,
+          selectedModel: model,
+          setHistory,
+          setHistoryId,
+          userMessage: message,
+          isRegenerating: isRegenerate,
+          message_source: "copilot",
+          userMessageId: resolvedUserMessageId,
+          assistantMessageId: resolvedAssistantMessageId,
+          assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+          scopeSignal: servicePromptSnapshot.scopeSignal,
+          scopeInvalidatedSignal:
+            servicePromptSnapshot.scopeInvalidatedSignal,
+          requestScope: servicePromptSnapshot.requestScope,
+          shouldAbortForScopeChange,
+        });
+      } catch (persistenceError) {
+        if (
+          shouldAbortForScopeChange() ||
+          isRequestConfigScopeChangedError(persistenceError)
+        ) {
+          setMessages(messages);
+          setHistory(history);
+          setIsProcessing(false);
+          setStreaming(false);
+          setIsEmbedding(false);
+          return;
+        }
+        throw persistenceError;
+      }
+
+      if (shouldAbortForScopeChange()) {
+        setMessages(messages);
+        setHistory(history);
+        setIsProcessing(false);
+        setStreaming(false);
+        setIsEmbedding(false);
+        return;
+      }
 
       if (!errorSave) {
         notification.error({
@@ -894,7 +939,6 @@ export const useMessage = () => {
       setIsEmbedding(false);
     } finally {
       discardCurrentTurnOnAbortRef.current = false;
-      setAbortController(null);
       setEmbeddingController(null);
     }
   };
@@ -1971,6 +2015,7 @@ export const useMessage = () => {
         userMessageId: resolvedUserMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+        conversationId: chatId,
       });
 
       setIsProcessing(false);
@@ -2420,7 +2465,7 @@ export const useMessage = () => {
     };
     serverChatIdOverride?: string | null;
   }) => {
-    resetChatLoopState();
+    const historyOriginIsCurrent = historySelection?.fence();
     const trimmedImageBackendOverride =
       typeof imageBackendOverride === "string"
         ? imageBackendOverride.trim()
@@ -2431,6 +2476,122 @@ export const useMessage = () => {
       requestOverrides.selectedModel.trim().length > 0
         ? requestOverrides.selectedModel.trim()
         : selectedModel || "";
+    const resolvedChatMode =
+      requestOverrides?.chatMode === "normal" ||
+      requestOverrides?.chatMode === "rag" ||
+      requestOverrides?.chatMode === "vision"
+        ? requestOverrides.chatMode
+        : chatMode;
+    const model =
+      (hasExplicitImageBackend
+        ? trimmedImageBackendOverride || resolvedSelectedModel
+        : resolvedSelectedModel
+      ).trim() || "image-generation";
+    const imageBackendCandidates = hasExplicitImageBackend
+      ? [trimmedImageBackendOverride]
+      : resolveImageBackendCandidates(
+          currentChatModelSettings?.apiProvider,
+          model,
+        );
+    const usesLegacySidepanelRag =
+      !hasExplicitImageBackend &&
+      imageBackendCandidates.length === 0 &&
+      (!uploadedFiles || uploadedFiles.length === 0) &&
+      (!docs || docs.length === 0) &&
+      !messageType &&
+      resolvedChatMode === "rag";
+    const currentHistorySelection = historySelection?.getCurrent();
+    const selectedHistoryTurn =
+      currentHistorySelection?.status === "idle" ||
+      (temporaryChat && !currentHistorySelection?.owner)
+        ? null
+        : historySelection;
+    const normalHistorySelection = selectedHistoryTurn ?? (
+      historySelection && !temporaryChat && !isRegenerate &&
+      !hasExplicitImageBackend && !imageBackendCandidates.length &&
+      !uploadedFiles?.length && !docs?.length && !messageType &&
+      resolvedChatMode === "normal"
+        ? historySelection
+        : null
+    );
+    if (
+      selectedHistoryTurn &&
+      (isRegenerate ||
+        hasExplicitImageBackend ||
+        imageBackendCandidates.length ||
+        uploadedFiles?.length ||
+        docs?.length ||
+        messageType ||
+        resolvedChatMode !== "normal")
+    ) {
+      throw new Error("unsupported_history_action_context");
+    }
+    const activeController = controller ?? new AbortController();
+    const signal = activeController.signal;
+    const releaseActiveController = () =>
+      setAbortController((current: AbortController | null) =>
+        current === activeController ? null : current,
+      );
+    let servicePromptSnapshot: ServicePromptSnapshot | undefined;
+    if (usesLegacySidepanelRag) {
+      setAbortController(activeController);
+      try {
+        servicePromptSnapshot = await loadServicePromptSnapshot(
+          ["chat.rag.answer", "chat.rag.question_rewrite"],
+          { signal },
+        );
+      } catch (error) {
+        releaseActiveController();
+        const errorName =
+          typeof error === "object" && error !== null && "name" in error
+            ? error.name
+            : undefined;
+        if (signal.aborted || errorName === "AbortError") {
+          return;
+        }
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "service_prompt_migration_required"
+        ) {
+          notification.warning({
+            message: t(
+              "workflowPromptsReviewRequired",
+              "Workflow prompts need review",
+            ),
+            description: (
+              <>
+                Browser-local prompt values must be imported or discarded.{" "}
+                <a
+                  href="/options.html#/settings/prompt"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Review workflow prompts
+                </a>
+              </>
+            ),
+          });
+          return;
+        }
+        notification.error({
+          message: t(
+            "workflowPromptsUnavailable",
+            "Workflow prompts unavailable",
+          ),
+          description: t(
+            "workflowPromptsUnavailableDescription",
+            "Unable to load workflow prompts from your tldw server. Check the connection and try again.",
+          ),
+        });
+        return;
+      }
+    }
+
+    let replyActive = false;
+    try {
+      resetChatLoopState();
     const resolvedSelectedSystemPrompt =
       requestOverrides &&
       Object.prototype.hasOwnProperty.call(
@@ -2453,12 +2614,6 @@ export const useMessage = () => {
       typeof requestOverrides?.webSearch === "boolean"
         ? requestOverrides.webSearch
         : webSearch;
-    const resolvedChatMode =
-      requestOverrides?.chatMode === "normal" ||
-      requestOverrides?.chatMode === "rag" ||
-      requestOverrides?.chatMode === "vision"
-        ? requestOverrides.chatMode
-        : chatMode;
     const conversationContextOverrides = {
       historyForModel: Array.isArray(requestOverrides?.historyForModel)
         ? requestOverrides.historyForModel
@@ -2472,7 +2627,8 @@ export const useMessage = () => {
       if (!validateBeforeSubmit(resolvedSelectedModel, t, notification)) {
         return;
       }
-      const modelAvailable = await ensureSelectedChatModelIsAvailable(
+      let modelAvailable: boolean;
+      modelAvailable = await ensureSelectedChatModelIsAvailable(
         resolvedSelectedModel,
       );
       if (!modelAvailable) {
@@ -2480,24 +2636,14 @@ export const useMessage = () => {
       }
     }
 
-    const model =
-      (hasExplicitImageBackend
-        ? trimmedImageBackendOverride || resolvedSelectedModel
-        : resolvedSelectedModel
-      ).trim() || "image-generation";
-    let signal: AbortSignal;
-    let activeController: AbortController;
-    if (!controller) {
-      const newController = new AbortController();
-      activeController = newController;
-      signal = newController.signal;
-      setAbortController(newController);
-    } else {
-      activeController = controller;
-      setAbortController(controller);
-      signal = controller.signal;
-    }
-    const replyActive =
+    if (!usesLegacySidepanelRag) setAbortController(activeController);
+    activeNormalControllerRef.current = activeController;
+    const releaseNormalControllerIfOwned = () => {
+      if (activeNormalControllerRef.current !== activeController) return false;
+      activeNormalControllerRef.current = null;
+      return true;
+    };
+    replyActive =
       Boolean(replyTarget) &&
       !isRegenerate &&
       !messageType &&
@@ -2516,13 +2662,6 @@ export const useMessage = () => {
         })()
       : {};
 
-    try {
-      const imageBackendCandidates = hasExplicitImageBackend
-        ? [trimmedImageBackendOverride]
-        : resolveImageBackendCandidates(
-            currentChatModelSettings?.apiProvider,
-            model,
-          );
       if (hasExplicitImageBackend || imageBackendCandidates.length > 0) {
         await normalChatMode(
           message,
@@ -2645,6 +2784,21 @@ export const useMessage = () => {
             draftAssistantKind: selectedAssistant?.kind ?? null,
             draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant),
           });
+          if (
+            selectedHistoryTurn &&
+            sendMode === "tracked_persona"
+          ) {
+            notification.error({
+              message: t("error"),
+              description: "native_history_persona_unsupported"
+            });
+            if (releaseNormalControllerIfOwned()) {
+              setAbortController(null);
+              setIsProcessing(false);
+              setStreaming(false);
+            }
+            return;
+          }
           const trackedCharacterForSend =
             sendMode === "tracked_character"
               ? (() => {
@@ -2661,6 +2815,62 @@ export const useMessage = () => {
               : null;
 
           if (sendMode === "tracked_character" && trackedCharacterForSend?.id) {
+            if (historySelection) {
+              try {
+                await sendNativeHistoryCharacter({
+                  controller: historySelection,
+                  originIsCurrent: historyOriginIsCurrent!,
+                  signal,
+                  temporary: temporaryChat,
+                  historyId,
+                  serverChatId: serverChatIdOverride || serverChatId,
+                  characterId: trackedCharacterForSend.id,
+                  model,
+                  currentModel: selectedModel,
+                  toolChoice: resolvedToolChoice,
+                  settings: currentChatModelSettings,
+                  message,
+                  image,
+                  setServerChatId,
+                  setMessages,
+                  unsupportedContext: Boolean(
+                    resolvedWebSearch || resolvedSelectedSystemPrompt || replyActive ||
+                    conversationContextOverrides.historyForModel ||
+                    conversationContextOverrides.messageForModel
+                  ),
+                  onCreated: (characterId) => {
+                    setServerChatCharacterId(characterId);
+                    setServerChatAssistantKind("character");
+                    setServerChatAssistantId(null);
+                    setServerChatPersonaMemoryMode(null);
+                    setServerChatMetaLoaded(true);
+                  },
+                  releaseActivity: () => {
+                    if (releaseNormalControllerIfOwned()) {
+                      setAbortController(null);
+                      setIsProcessing(false);
+                      setStreaming(false);
+                    }
+                  }
+                });
+              } catch (error) {
+                notification.error({
+                  message: t("error"),
+                  description: error instanceof Error ? error.message : "Native history completion failed"
+                });
+                if (releaseNormalControllerIfOwned()) {
+                  setAbortController(null);
+                  setIsProcessing(false);
+                  setStreaming(false);
+                }
+              }
+              return;
+            }
+            const hydratedTrackedCharacter =
+              await hydrateTrackedCharacterForSend(
+                trackedCharacterForSend,
+                (characterId) => tldwClient.getCharacter(characterId),
+              );
             await characterChatMode(
               message,
               image,
@@ -2669,7 +2879,7 @@ export const useMessage = () => {
               memory || history,
               signal,
               model,
-              trackedCharacterForSend,
+              hydratedTrackedCharacter,
               regenerateFromMessage,
               serverChatIdOverride,
               activeController,
@@ -2760,6 +2970,18 @@ export const useMessage = () => {
               memory || history,
               signal,
               {
+                ownsAbortController: () =>
+                  activeNormalControllerRef.current === activeController,
+                releaseAbortControllerIfOwned: releaseNormalControllerIfOwned,
+                historySelection: normalHistorySelection
+                  ? {
+                      controller: normalHistorySelection,
+                      originIsCurrent: historyOriginIsCurrent!,
+                      temporary: temporaryChat
+                    }
+                  : undefined,
+                serverChatId,
+                toolChoice: resolvedToolChoice,
                 selectedModel: model,
                 useOCR: resolvedUseOCR,
                 selectedSystemPrompt: resolvedSelectedSystemPrompt,
@@ -2774,14 +2996,14 @@ export const useMessage = () => {
                 historyId,
                 setHistoryId: setHistoryId as (
                   id: string,
-                  options?: { preserveServerChatId?: boolean },
+                  options?: { preserveServerChatId?: boolean }
                 ) => void,
                 assistantIdentity: {
                   name: effectiveSelectedAssistant.name,
                   avatarUrl:
                     typeof effectiveSelectedAssistant.avatar_url === "string"
                       ? effectiveSelectedAssistant.avatar_url
-                      : undefined,
+                      : undefined
                 },
                 overlaySystemPrompt:
                   effectiveAssistantState.systemPromptSnapshot ?? undefined,
@@ -2789,8 +3011,8 @@ export const useMessage = () => {
                 setIsSearchingInternet,
                 regenerateFromMessage,
                 ...conversationContextOverrides,
-                ...replyOverrides,
-              },
+                ...replyOverrides
+              }
             );
           } else {
             await normalChatMode(
@@ -2801,6 +3023,18 @@ export const useMessage = () => {
               memory || history,
               signal,
               {
+                ownsAbortController: () =>
+                  activeNormalControllerRef.current === activeController,
+                releaseAbortControllerIfOwned: releaseNormalControllerIfOwned,
+                historySelection: normalHistorySelection
+                  ? {
+                      controller: normalHistorySelection,
+                      originIsCurrent: historyOriginIsCurrent!,
+                      temporary: temporaryChat
+                    }
+                  : undefined,
+                serverChatId,
+                toolChoice: resolvedToolChoice,
                 selectedModel: model,
                 useOCR: resolvedUseOCR,
                 selectedSystemPrompt: resolvedSelectedSystemPrompt,
@@ -2815,14 +3049,14 @@ export const useMessage = () => {
                 historyId,
                 setHistoryId: setHistoryId as (
                   id: string,
-                  options?: { preserveServerChatId?: boolean },
+                  options?: { preserveServerChatId?: boolean }
                 ) => void,
                 webSearch: resolvedWebSearch,
                 setIsSearchingInternet,
                 regenerateFromMessage,
                 ...conversationContextOverrides,
-                ...replyOverrides,
-              },
+                ...replyOverrides
+              }
             );
           }
         } else if (resolvedChatMode === "vision") {
@@ -2847,11 +3081,16 @@ export const useMessage = () => {
             memory || history,
             signal,
             embeddingSignal,
+            servicePromptSnapshot!,
             regenerateFromMessage,
           );
         }
       }
     } finally {
+      if (usesLegacySidepanelRag) {
+        servicePromptSnapshot!.release();
+        releaseActiveController();
+      }
       if (replyActive) {
         clearReplyTarget();
       }
@@ -2882,218 +3121,124 @@ export const useMessage = () => {
     }
   };
 
-  const editMessage = async (
-    index: number,
-    message: string,
-    isHuman: boolean,
-    isSend = true,
-  ) => {
-    const newHistory = history;
-
-    if (isHuman) {
-      const currentHumanMessage = (messages as ServerBackedMessage[])[index];
-      const updatedMessages = messages.map((msg, idx) =>
-        idx === index ? { ...msg, message } : msg,
+  const ordinaryLocalMutation =
+    !serverChatId && historySelection?.getCurrent().status === "idle";
+  const editMessage = createEditMessage({
+    notification,
+    messages,
+    history,
+    historyId,
+    setMessages,
+    setHistory,
+    onSubmit,
+    validateBeforeSubmitFn: () => true,
+    captureViewFence: ordinaryLocalMutation ? undefined : historySelection?.fence,
+    mutate: ordinaryLocalMutation ? undefined : async (target, content) => {
+      const owner = captureLocalMutationOwner(
+        historySelection,
+        historyId,
+        serverChatId
       );
-      if (!isSend) {
-        setMessages(updatedMessages);
-        const updatedHistory = newHistory.map((item, idx) =>
-          idx === index ? { ...item, content: message } : item,
-        );
-        setHistory(updatedHistory);
-        // TASK-12104: address the Dexie row by stable id (not UI array index),
-        // which is offset by any non-persisted greeting seed at UI index 0.
-        if (currentHumanMessage?.id) {
-          await updateMessageById(historyId, currentHumanMessage.id, message);
-        } else {
-          await updateMessageByIndex(historyId, index, message);
-        }
-        if (
-          serverChatId &&
-          (selectedCharacter?.id || serverChatAssistantKind === "persona") &&
-          currentHumanMessage?.serverMessageId
-        ) {
-          try {
-            const srv = await tldwClient.getMessage(
-              currentHumanMessage.serverMessageId,
-            );
-            const ver = srv?.version;
-            if (ver != null) {
-              await tldwClient.editMessage(
-                currentHumanMessage.serverMessageId,
-                message,
-                Number(ver),
-                serverChatId ?? undefined,
-              );
-            }
-          } catch {}
-        }
-        return;
-      }
-      const previousMessages = updatedMessages.slice(0, index + 1);
-      setMessages(previousMessages);
-      const previousHistory = newHistory.slice(0, index);
-      setHistory(previousHistory);
-      // TASK-12104: id-address the edited row (and delete what follows it) so a
-      // greeting-offset UI index cannot overwrite/keep the wrong Dexie rows.
-      if (currentHumanMessage?.id) {
-        await updateMessageById(historyId, currentHumanMessage.id, message);
-        await deleteChatAfterMessageId(historyId, currentHumanMessage.id);
-      } else {
-        await updateMessageByIndex(historyId, index, message);
-        await deleteChatForEdit(historyId, index);
-      }
-      // Server-backed edit and cleanup
-      if (
-        serverChatId &&
-        (selectedCharacter?.id || serverChatAssistantKind === "persona")
-      ) {
-        if (currentHumanMessage?.serverMessageId) {
-          try {
-            const srv = await tldwClient.getMessage(
-              currentHumanMessage.serverMessageId,
-            );
-            const ver = srv?.version;
-            if (ver != null) {
-              await tldwClient.editMessage(
-                currentHumanMessage.serverMessageId,
-                message,
-                Number(ver),
-                serverChatId ?? undefined,
-              );
-            }
-          } catch {}
-        }
-        try {
-          const res: any = await tldwClient.listChatMessages(serverChatId, {
-            include_deleted: "false",
-          });
-          const list: any[] = Array.isArray(res) ? res : res?.messages || [];
-          const serverIds = list.map((m: any) => m.id);
-          const targetSrvId = currentHumanMessage?.serverMessageId;
-          const startIdx = targetSrvId ? serverIds.indexOf(targetSrvId) : -1;
-          if (startIdx >= 0) {
-            for (let i = startIdx + 1; i < list.length; i++) {
-              const m = list[i];
-              try {
-                await tldwClient.deleteMessage(
-                  m.id,
-                  Number(m.version),
-                  serverChatId ?? undefined,
-                );
-              } catch {}
-            }
-          }
-        } catch {}
-      }
-      const abortController = new AbortController();
-      await onSubmit({
-        message: message,
-        image: currentHumanMessage.images[0] || "",
-        isRegenerate: true,
-        messages: previousMessages,
-        memory: previousHistory,
-        controller: abortController,
-      });
-    } else {
-      // Assistant message edited
-      const currentAssistant = (messages as ServerBackedMessage[])[index];
-      const updatedMessages = messages.map((msg, idx) =>
-        idx === index ? { ...msg, message } : msg,
-      );
-      setMessages(updatedMessages);
-      const updatedHistory = newHistory.map((item, idx) =>
-        idx === index ? { ...item, content: message } : item,
-      );
-      setHistory(updatedHistory);
-      // TASK-12104: address the assistant Dexie row by stable id.
-      if (currentAssistant?.id) {
-        await updateMessageById(historyId, currentAssistant.id, message);
-      } else {
-        await updateMessageByIndex(historyId, index, message);
-      }
-      // Server-backed: update assistant server message too
-      if (
-        serverChatId &&
-        (selectedCharacter?.id || serverChatAssistantKind === "persona") &&
-        currentAssistant?.serverMessageId
-      ) {
-        try {
-          const srv = await tldwClient.getMessage(
-            currentAssistant.serverMessageId,
-          );
-          const ver = srv?.version;
-          if (ver != null) {
-            await tldwClient.editMessage(
-              currentAssistant.serverMessageId,
-              message,
-              Number(ver),
-              serverChatId ?? undefined,
-            );
-          }
-        } catch {}
-      }
-    }
-  };
+      await updateMessageById(owner.conversation_id, target.id, content, owner);
+    },
+  });
 
   const deleteMessage = React.useCallback(
     async (index: number) => {
       const target = messages[index];
-      if (!target) return;
-
-      const targetId = target.serverMessageId ?? target.id;
-      if (replyTarget?.id && targetId && replyTarget.id === targetId) {
-        clearReplyTarget();
-      }
-
-      if (target.serverMessageId) {
-        await tldwClient.initialize().catch(() => null);
-        let expectedVersion = target.serverMessageVersion;
-        if (expectedVersion == null) {
-          const serverMessage = await tldwClient.getMessage(
-            target.serverMessageId,
-          );
-          expectedVersion = serverMessage?.version;
+      if (!target?.id) throw new Error("missing_message");
+      const origin = historySelection?.getCurrent();
+      const current = historySelection?.fence() ?? (() => true);
+      try {
+        if (serverChatId && origin?.capture?.status !== "captured") {
+          if (!target.serverMessageId) throw new Error("Missing server message ID");
+          await tldwClient.initialize().catch(() => null);
+          const serverMessage = target.serverMessageVersion === null || target.serverMessageVersion === undefined
+            ? await tldwClient.getMessage(target.serverMessageId)
+            : null;
+          const version = target.serverMessageVersion ?? serverMessage?.version;
+          if (version === null || version === undefined) throw new Error("Missing server message version");
+          await tldwClient.deleteMessage(target.serverMessageId, Number(version), serverChatId);
+          if (historyId) await removeAcknowledgedServerMirrorMessage({
+            historyId, chatId: serverChatId,
+            localMessageId: target.id, serverMessageId: target.serverMessageId,
+          });
+          if (!current()) return;
+          if (replyTarget?.id === target.id || replyTarget?.id === target.serverMessageId) clearReplyTarget();
+          const remaining = messages.filter((row) => row.id !== target.id);
+          setMessages(remaining);
+          setHistory(historyFromVisibleMessages(remaining));
+          invalidateServerChatHistory();
+          return;
         }
-        if (expectedVersion == null) {
-          throw new Error("Missing server message version");
+        if (ordinaryLocalMutation) {
+          if (historyId && historyId !== "temp")
+            await removeMessageById(historyId, target.id);
+          else if (!temporaryChat)
+            throw new Error("history_selection_unavailable");
+          if (!current()) return;
+          if (replyTarget?.id === target.id) clearReplyTarget();
+          const remaining = messages.filter((row) => row.id !== target.id);
+          setMessages(remaining);
+          setHistory(historyFromVisibleMessages(remaining));
+          return;
         }
-        await tldwClient.deleteMessage(
-          target.serverMessageId,
-          Number(expectedVersion),
-          serverChatId ?? undefined,
+        const owner = captureLocalMutationOwner(
+          historySelection,
+          historyId,
+          serverChatId
         );
-        invalidateServerChatHistory();
-      }
-
-      if (historyId) {
-        // TASK-12104: remove the Dexie row by stable id so a non-persisted
-        // greeting at UI index 0 does not shift us onto the wrong row. An
-        // unsaved greeting's id is absent from Dexie, so this is a safe no-op.
-        if (target.id) {
-          await removeMessageById(historyId, target.id);
-        } else {
-          await removeMessageByIndex(historyId, index);
+        const removed = await removeMessageById(
+          owner.conversation_id,
+          target.id,
+          owner
+        );
+        if (!current()) return;
+        if (replyTarget?.id === target.id) clearReplyTarget();
+        const remaining = messages.filter((row) => row.id !== target.id);
+        setMessages(remaining);
+        setHistory(historyFromVisibleMessages(remaining));
+        const view = origin?.view;
+        if (
+          removed &&
+          view?.interpretation.kind === "parent_graph_v1" &&
+          view.cursor.kind !== "empty" &&
+          view.cursor.message_id === target.id
+        ) {
+          await historySelection?.choose(
+            removed.parent_message_id
+              ? { kind: "after_message", message_id: removed.parent_message_id }
+              : { kind: "empty" },
+          );
         }
+      } catch (error) {
+        notification.error({
+          message: "Message deletion failed",
+          description:
+            error instanceof Error ? error.message : "message_delete_failed",
+        });
+        throw error;
       }
-
-      setMessages(messages.filter((_, idx) => idx !== index));
-      setHistory(history.filter((_, idx) => idx !== index));
     },
     [
-      clearReplyTarget,
-      history,
       historyId,
-      invalidateServerChatHistory,
-      messages,
-      replyTarget?.id,
       serverChatId,
-      setHistory,
+      messages,
+      historySelection,
+      ordinaryLocalMutation,
+      temporaryChat,
+      replyTarget?.id,
+      clearReplyTarget,
       setMessages,
+      setHistory,
+      notification,
+      invalidateServerChatHistory,
     ],
   );
 
-  const createChatBranch = createBranchMessage({
+  const branchHandler = createBranchMessage({
+    historySelection,
+    captureViewFence: historySelection?.fence,
     notification,
     historyId,
     setHistory,
@@ -3121,67 +3266,26 @@ export const useMessage = () => {
     characterId: selectedCharacter?.id ?? null,
     chatTitle: serverChatTitle ?? null,
     messages,
-    history,
+    history
   });
 
-  const createServerOnlyChatBranch = createBranchMessage({
-    notification,
+  const createChatBranch = createSelectedForkAction(
+    historySelection,
+    branchHandler,
     historyId,
-    setHistory,
-    setHistoryId,
-    setMessages,
-    setSelectedSystemPrompt,
-    setSystemPrompt: currentChatModelSettings.setSystemPrompt,
-    serverChatId,
-    setServerChatId,
-    setServerChatTitle,
-    setServerChatCharacterId,
-    setServerChatMetaLoaded,
-    serverChatState,
-    setServerChatState,
-    setServerChatVersion,
-    serverChatTopic,
-    setServerChatTopic,
-    serverChatClusterId,
-    setServerChatClusterId,
-    serverChatSource,
-    setServerChatSource,
-    serverChatExternalRef,
-    setServerChatExternalRef,
-    onServerChatMutated: invalidateServerChatHistory,
-    characterId: selectedCharacter?.id ?? null,
-    chatTitle: serverChatTitle ?? null,
-    messages,
-    history,
-    serverOnly: true,
-  });
+    notification,
+  );
 
   const regenerateLastMessage = createRegenerateLastMessage({
+    notification,
+    allowOrdinaryRetry: true,
+    historySelection,
     validateBeforeSubmitFn: () => true,
     history,
     messages,
     setHistory,
     setMessages,
     onSubmit,
-    beforeSubmit: async ({ nextMessages }) => {
-      if (!serverChatId) return;
-      if (selectedCharacter?.id == null && serverChatCharacterId == null)
-        return;
-
-      const branchIndex = nextMessages.length - 1;
-      if (branchIndex < 0) return;
-
-      const branchedChatId = await createServerOnlyChatBranch(branchIndex);
-      if (!branchedChatId) {
-        throw new Error("Failed to create branch for regeneration");
-      }
-
-      return {
-        submitExtras: {
-          serverChatIdOverride: branchedChatId,
-        },
-      };
-    },
   });
 
   return {

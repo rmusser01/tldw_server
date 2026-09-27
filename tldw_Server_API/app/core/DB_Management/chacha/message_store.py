@@ -1,24 +1,42 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import sqlite3
 import threading
+from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from tldw_Server_API.app.core.Chat.history_selection import (
+    HistoryFencesV1,
+    HistorySelectionError,
+    HistorySelectionSnapshotV1,
+    resolve_legacy_projection,
+    resolve_parent_path,
+    snapshot_to_wire,
+)
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    _CHACHA_NONCRITICAL_EXCEPTIONS,
     BackendType,
     CharactersRAGDBError,
     ConflictError,
     FTSQueryTranslator,
     InputError,
-    _CHACHA_NONCRITICAL_EXCEPTIONS,
     logger,
 )
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
+
+MAX_CHAT_ATTACHMENT_READ_BYTES = 32 * 1024 * 1024
 
 class MessageStore:
     """Focused persistence seam for message CRUD operations."""
@@ -27,6 +45,952 @@ class MessageStore:
         self._db = db
         self._last_message_order_timestamp: str | None = None
         self._message_order_lock = threading.Lock()
+
+    @staticmethod
+    def _history_digest(value: Any) -> str:
+        """Hash finite canonical JSON for native storage provenance."""
+        encoded = json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode(
+            "utf-8"
+        )
+        return "sha256:" + hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _history_owner_key(owner_client_id: str, owner_key: str | None) -> str:
+        """Use an adapter namespace externally; the fallback is internal to this DB."""
+        if not isinstance(owner_client_id, str) or not owner_client_id.strip():
+            raise NotFoundError("Conversation not found.")
+        if owner_key is not None and (not isinstance(owner_key, str) or not owner_key.strip()):
+            raise HistorySelectionError("invalid_owner_key")
+        return owner_key if owner_key is not None else f"native-client:{owner_client_id}"
+
+    def _lock_history_owner(self, conn: Any, conversation_id: str, owner_client_id: str) -> None:
+        """Lock only the conversation fence, never existing messages or metadata."""
+        query = (
+            "SELECT id FROM conversations WHERE id = ? AND client_id = ? AND deleted = FALSE FOR UPDATE"
+            if self._db.backend_type == BackendType.POSTGRESQL
+            else "SELECT id FROM conversations WHERE id = ? AND client_id = ? AND deleted = FALSE"
+        )
+        row = conn.execute(
+            query,
+            (conversation_id, owner_client_id),
+        ).fetchone()
+        if row is None:
+            raise NotFoundError("Conversation not found.")
+
+    def _read_history_snapshot(
+        self,
+        conversation_id: str,
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        projection_id: str | None,
+        conn: Any,
+        selected_ids: tuple[str, ...] = (),
+        include_message_versions: bool = False,
+    ) -> tuple[HistorySelectionSnapshotV1, tuple[dict[str, Any], ...]]:
+        """One statement captures all fences, rows, metadata, assets and an optional base.
+
+        Hash binary values in the engine, returning bytes only for requested content.
+        Window gating enforces a 32 MiB selected image budget before bytes cross the
+        database boundary. No display loader, per-message query or row cap is used.
+        """
+        postgres = self._db.backend_type == BackendType.POSTGRESQL
+        image_data_sql = "CASE WHEN mi.message_id IS NOT NULL THEN mi.image_data ELSE m.image_data END"
+        if postgres:
+            requested_sql = "SELECT jsonb_array_elements_text(CAST(? AS JSONB)) AS id"
+
+            def text_hash(field: str) -> str:
+                return f"encode(sha256(convert_to(COALESCE({field}, ''), 'UTF8')), 'hex')"
+
+            binary_hash = f"encode(sha256({image_data_sql}), 'hex')"
+            byte_length = "octet_length"
+        else:
+
+            requested_sql = "SELECT value AS id FROM json_each(?)"
+
+            def text_hash(field: str) -> str:
+                return f"h1_sha256(COALESCE({field}, ''))"
+
+            binary_hash = f"h1_sha256({image_data_sql})"
+            byte_length = "length"
+        # Keep per-conversation payloads out of the per-message window sort. Even
+        # CASE around a joined payload can materialize it once per message first.
+        # Scalar reads in the first-row CASE preserve one-statement coherence.
+        # All interpolated expressions are fixed backend SQL, never caller identifiers.
+        query = f"""
+            WITH requested AS ({requested_sql})
+            SELECT c.version AS conversation_version, c.history_version,
+                   cs.settings_version, cs.conversation_id AS settings_row_id,
+                   bs.conversation_id AS behavior_row_id,
+                   bs.status AS behavior_status, bs.schema_version AS behavior_schema_version,
+                   bs.digest AS behavior_digest, bs.size_bytes AS behavior_size_bytes,
+                   CASE WHEN ROW_NUMBER() OVER (ORDER BY m.timestamp, m.last_modified, m.id, mi.position) = 1
+                        THEN {text_hash('(SELECT behavior.canonical_json FROM conversation_behavior_snapshots behavior WHERE behavior.conversation_id = c.id)')}
+                        END AS behavior_content_hash,
+                   CASE WHEN ROW_NUMBER() OVER (ORDER BY m.timestamp, m.last_modified, m.id, mi.position) = 1
+                        THEN (SELECT settings.settings_json FROM conversation_settings settings
+                              WHERE settings.conversation_id = c.id) END AS settings_json,
+                   CASE WHEN ROW_NUMBER() OVER (ORDER BY m.timestamp, m.last_modified, m.id, mi.position) = 1
+                        THEN (SELECT projection.confirmation_json FROM conversation_history_projections projection
+                              WHERE projection.conversation_id = c.id AND projection.client_id = c.client_id
+                                AND projection.owner_key = ? AND projection.projection_id = ?) END AS projection_json,
+                   c.character_id, c.assistant_kind, c.assistant_id, c.persona_memory_mode,
+                   c.scope_type, c.workspace_id,
+                   m.id, m.parent_message_id, m.sender, m.version AS message_version,
+                   m.history_admission_json, SUBSTR(COALESCE(m.content, ''), 1, 200) AS preview,
+                   {text_hash('m.content')} AS content_hash,
+                   mm.message_id AS metadata_id,
+                   {text_hash('mm.tool_calls_json')} AS tool_calls_hash,
+                   {text_hash('mm.extra_json')} AS extra_hash,
+                   CAST(mm.last_modified AS TEXT) AS metadata_modified,
+                   mi.message_id AS ordered_image_message_id, mi.position,
+                   CASE WHEN mi.message_id IS NOT NULL THEN mi.image_mime_type ELSE m.image_mime_type END AS image_mime,
+                   {binary_hash} AS image_hash,
+                   CASE WHEN requested.id IS NOT NULL THEN m.content END AS selected_text,
+                   CASE WHEN requested.id IS NOT NULL THEN mm.tool_calls_json END AS selected_tools,
+                   CASE WHEN requested.id IS NOT NULL THEN mm.extra_json END AS selected_extra,
+                   SUM(CASE WHEN requested.id IS NOT NULL
+                       THEN COALESCE({byte_length}({image_data_sql}), 0) ELSE 0 END)
+                       OVER () AS selected_image_bytes,
+                   CASE WHEN requested.id IS NOT NULL AND
+                       SUM(CASE WHEN requested.id IS NOT NULL
+                           THEN COALESCE({byte_length}({image_data_sql}), 0) ELSE 0 END)
+                           OVER () <= 33554432
+                       THEN {image_data_sql} END AS selected_image
+            FROM conversations c
+            LEFT JOIN conversation_settings cs ON cs.conversation_id = c.id
+            LEFT JOIN conversation_behavior_snapshots bs ON bs.conversation_id = c.id
+            LEFT JOIN messages m ON m.conversation_id = c.id AND m.deleted = FALSE
+            LEFT JOIN message_metadata mm ON mm.message_id = m.id
+            LEFT JOIN message_images mi ON mi.message_id = m.id
+            LEFT JOIN requested ON requested.id = m.id
+            WHERE c.id = ? AND c.client_id = ? AND c.deleted = FALSE
+            ORDER BY m.timestamp, m.last_modified, m.id, mi.position
+        """  # nosec B608 - fixed SQL fragments; all input values are bound
+        result = conn.execute(
+            query, (json.dumps(selected_ids), owner_key, projection_id, conversation_id, owner_client_id)
+        )
+        records = result.fetchall()
+        if not records:
+            raise NotFoundError("Conversation not found.")
+        header = dict(records[0])
+        if int(header["selected_image_bytes"] or 0) > 33554432:
+            raise HistorySelectionError("selected_content_too_large")
+        nodes: dict[str, dict[str, Any]] = {}
+        contents: dict[str, dict[str, Any]] = {}
+        provenance: dict[str, Any] = {}
+        selected_set = set(selected_ids)
+        for raw in records:
+            record = dict(raw)
+            mid = record["id"]
+            if mid is None:
+                continue
+            if mid not in nodes:
+                try:
+                    authority = json.loads(record["history_admission_json"] or "null")
+                except (TypeError, ValueError):
+                    authority = None
+                provenance[mid] = authority
+                node = {
+                    "id": mid,
+                    "conversation_id": conversation_id,
+                    "parent_id": record["parent_message_id"],
+                    "role": record["sender"],
+                    "preview": record["preview"],
+                    "settled": not isinstance(authority, dict) or authority.get("settled", True) is True,
+                    "metadata": [],
+                    "assets": [],
+                    "revision": str(record["message_version"]),
+                }
+                if isinstance(authority, dict) and authority.get("version") == 1:
+                    interpretation = authority.get("interpretation", {})
+                    if interpretation.get("kind") == "legacy_linear_v1":
+                        node["legacy_projection_id"] = interpretation.get("projection_id")
+                if record["metadata_id"] is not None:
+                    node["metadata"].append(
+                        {
+                            "id": mid,
+                            "kind": "message_metadata",
+                            "revision": self._history_digest(
+                                [record["tool_calls_hash"], record["extra_hash"], record["metadata_modified"]]
+                            ),
+                        }
+                    )
+                nodes[mid] = node
+                if mid in selected_set:
+                    contents[mid] = {
+                        "id": mid,
+                        "message": record["selected_text"] or "",
+                        "images": [],
+                        "tool_calls": json.loads(record["selected_tools"] or "null"),
+                        "extra_metadata": json.loads(record["selected_extra"] or "null"),
+                    }
+                    if include_message_versions:
+                        # Composition needs the physical version to distinguish an
+                        # unedited placeholder; never expose it in capture or hashes.
+                        contents[mid]["_message_version"] = record["message_version"]
+                node["_source"] = [record["message_version"], record["content_hash"], record["history_admission_json"]]
+            if (record["ordered_image_message_id"] is not None
+                    or record["image_hash"] is not None or record["image_mime"] is not None):
+                position = record["position"] if record["position"] is not None else "primary"
+                nodes[mid]["assets"].append(
+                    {
+                        "id": f"{mid}:{position}",
+                        "kind": "image",
+                        "revision": self._history_digest([record["image_hash"], record["image_mime"]]),
+                    }
+                )
+                if mid in selected_set:
+                    image_bytes = record["selected_image"]
+                    if record["ordered_image_message_id"] is not None and (
+                        not isinstance(record["position"], int)
+                        or record["position"] != len(contents[mid]["images"])
+                    ):
+                        raise HistorySelectionError("selected_attachment_unavailable")
+                    if (not isinstance(image_bytes, (bytes, bytearray, memoryview))
+                            or not image_bytes or not record["image_mime"]):
+                        raise HistorySelectionError("selected_attachment_unavailable")
+                    contents[mid]["images"].append(
+                        "data:"
+                        + record["image_mime"]
+                        + ";base64,"
+                        + base64.b64encode(bytes(image_bytes)).decode("ascii")
+                    )
+        for node in nodes.values():
+            source = node.pop("_source")
+            node["revision"] = self._history_digest([source, node])
+            if node["id"] in contents:
+                contents[node["id"]]["revision"] = node["revision"]
+                contents[node["id"]]["images"] = tuple(contents[node["id"]]["images"])
+        manifest = tuple(nodes.values())
+        status: dict[str, Any] = {"kind": "legacy_review_required"}
+        if projection_id is not None:
+            if header["projection_json"] is None:
+                raise HistorySelectionError("missing_projection")
+            accepted = json.loads(header["projection_json"])
+            reviewed = {row["id"]: row["revision"] for row in accepted["source_members"]}
+            path = accepted["ordered_path_ids"]
+            if any(mid not in nodes or nodes[mid]["revision"] != reviewed[mid] for mid in path):
+                raise HistorySelectionError("stale_projection")
+            status = {"kind": "legacy_linear_v1", "projection_id": projection_id, "ordered_path_ids": path}
+        else:
+            try:
+                resolve_parent_path(manifest, {"kind": "empty"})
+                unversioned = [
+                    node
+                    for node in manifest
+                    if not (
+                        isinstance(provenance[node["id"]], dict)
+                        and provenance[node["id"]].get("version") == 1
+                        and provenance[node["id"]].get("interpretation", {}).get("kind") == "parent_graph_v1"
+                    )
+                ]
+                unversioned_ids = {node["id"] for node in unversioned}
+                roots = [node for node in unversioned if node["parent_id"] is None]
+                parents = [node["parent_id"] for node in unversioned if node["parent_id"] is not None]
+                # Unprotected legacy data must itself be a unique complete chain.
+                legacy_chain = not unversioned or (
+                    len(roots) == 1
+                    and len(parents) == len(set(parents))
+                    and all(parent in unversioned_ids for parent in parents)
+                )
+                if legacy_chain and not any(node.get("legacy_projection_id") for node in manifest):
+                    status = {"kind": "parent_graph_v1"}
+            except HistorySelectionError:
+                status = {"kind": "legacy_review_required"}
+        fences = HistoryFencesV1(
+            str(header["conversation_version"]), str(header["history_version"]), str(header["settings_version"] or 0)
+        )
+        context = {
+            key: header[key]
+            for key in (
+                "settings_json",
+                "settings_row_id",
+                "behavior_row_id",
+                "behavior_status",
+                "behavior_schema_version",
+                "behavior_digest",
+                "behavior_size_bytes",
+                "behavior_content_hash",
+                "character_id",
+                "assistant_kind",
+                "assistant_id",
+                "persona_memory_mode",
+                "scope_type",
+                "workspace_id",
+            )
+        }
+        # Only the explicitly empty plain policy is representable by H1's legacy copier.
+        # Row presence is digest-bound: unreadable required state is never a default.
+        plain_settings = header["settings_row_id"] is None
+        if not plain_settings:
+            try:
+                plain_settings = json.loads(header["settings_json"]) == {}
+            except (TypeError, ValueError):
+                plain_settings = False
+        context_digest = self._history_digest(context)
+        native_fork_context = {
+            "policy": "plain_v1",
+            "storage_context_digest": context_digest,
+            "supported": plain_settings
+            and header["behavior_row_id"] is None
+            and all(header[key] is None for key in (
+                "character_id", "assistant_kind", "assistant_id", "persona_memory_mode"
+            )),
+        }
+        snapshot = HistorySelectionSnapshotV1(
+            version=1,
+            owner_key=owner_key,
+            conversation_id=conversation_id,
+            fences=fences,
+            nodes=manifest,
+            source_digest=self._history_digest(manifest),
+            interpretation_status=status,
+            storage_context_digest=context_digest,
+            native_fork_context=native_fork_context,
+        )
+        if any(mid not in contents for mid in selected_ids):
+            raise HistorySelectionError("selected_content_mismatch")
+        return snapshot, tuple(contents[mid] for mid in selected_ids)
+
+    def get_conversation_history_snapshot(
+        self,
+        conversation_id: str,
+        *,
+        owner_client_id: str,
+        owner_key: str | None = None,
+        projection_id: str | None = None,
+        conn: Any | None = None,
+        lock_for_update: bool = False,
+    ) -> HistorySelectionSnapshotV1:
+        """Capture a complete owned manifest, optionally using a caller's admission fence.
+
+        `owner_client_id` is authenticated identity, independently checked against the
+        conversation. Browser adapters must supply their verified server/account
+        `owner_key`; the default key is only suitable inside this database.
+        An explicit projection ID selects the view's immutable accepted legacy base.
+        """
+        namespace = self._history_owner_key(owner_client_id, owner_key)
+        transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+        with transaction as active:
+            if lock_for_update:
+                self._lock_history_owner(active, conversation_id, owner_client_id)
+            snapshot, _ = self._read_history_snapshot(
+                conversation_id,
+                owner_client_id=owner_client_id,
+                owner_key=namespace,
+                projection_id=projection_id,
+                conn=active,
+            )
+            return snapshot
+
+    def read_native_fork_source(
+        self,
+        view: Mapping[str, Any],
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        scope_type: str,
+        workspace_id: str | None,
+        conn: Any | None = None,
+    ) -> tuple[Mapping[str, Any], dict[str, Any], tuple[Mapping[str, Any], ...]]:
+        """Detach a fork-purpose read under the existing conversation owner fence.
+
+        Recheck the complete H1 statement snapshot after resume/content reads. A
+        concurrent row-first writer may commit after admission, but cannot mix
+        settings, accepted snapshot, metadata or image revisions in this result.
+        The caller may supply the later atomic fork transaction; no byte I/O or
+        live behavior resolution occurs here. H1 send admission is unchanged.
+        """
+        from tldw_Server_API.app.core.Chat.history_selection import (
+            _freeze_json,
+            resolve_history_selection,
+        )
+
+        namespace = self._history_owner_key(owner_client_id, owner_key)
+        if view.get("owner_key") not in {None, namespace}:
+            raise HistorySelectionError("owner_conversation_mismatch")
+        conversation_id = view["conversation_id"]
+        projection_id = view["interpretation"].get("projection_id")
+        transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+        with transaction as active:
+            self._lock_history_owner(active, conversation_id, owner_client_id)
+            snapshot, _ = self._read_history_snapshot(
+                conversation_id,
+                owner_client_id=owner_client_id,
+                owner_key=namespace,
+                projection_id=projection_id,
+                conn=active,
+            )
+            state = self._db.conversation_resume_store.get_roleplay_resume_state(
+                conversation_id,
+                conn=active,
+                owner_client_id=owner_client_id,
+            )
+            conversation = state["conversation"]
+            if (conversation["scope_type"] or "global", conversation["workspace_id"]) != (scope_type, workspace_id):
+                raise HistorySelectionError("scope_mismatch")
+            # Unlike the ordinary settings getter, row presence is retained even
+            # when required JSON was unreadable. settings_version is NOT NULL.
+            state["settings_present"] = state["settings_version"] is not None
+            resolved = resolve_history_selection(
+                snapshot_to_wire(snapshot),
+                {**view, "owner_key": namespace},
+                "fork",
+                "native-fork-capture-v1",
+            )
+            if resolved["status"] != "ready":
+                raise HistorySelectionError(resolved["code"])
+            ids = tuple(row["id"] for row in resolved["rows"])
+            fresh, content = self._read_history_snapshot(
+                conversation_id,
+                owner_client_id=owner_client_id,
+                owner_key=namespace,
+                projection_id=projection_id,
+                conn=active,
+                selected_ids=ids,
+                include_message_versions=True,
+            )
+            if (
+                snapshot.source_digest != fresh.source_digest
+                or snapshot.fences != fresh.fences
+                or snapshot.storage_context_digest != fresh.storage_context_digest
+            ):
+                raise HistorySelectionError("stale_source")
+            rows = tuple(_freeze_json({**node, **item}) for node, item in zip(resolved["rows"], content, strict=True))
+            return _freeze_json(state), resolved["selection"], rows
+
+    def get_conversation_history_selected_content(
+        self,
+        conversation_id: str,
+        message_ids: Sequence[str],
+        *,
+        snapshot: HistorySelectionSnapshotV1,
+        owner_client_id: str,
+        owner_key: str | None = None,
+        conn: Any | None = None,
+    ) -> tuple[dict[str, Any], ...]:
+        """Read all selected text/images/tools/extra metadata bound to a captured source.
+
+        Raises on any source or fence drift; callers must retry capture, never compose
+        mixed revisions. Returned dictionaries are detached from database state.
+        """
+        namespace = self._history_owner_key(owner_client_id, owner_key)
+        ids = tuple(message_ids)
+        if (
+            snapshot.owner_key != namespace
+            or snapshot.conversation_id != conversation_id
+            or len(set(ids)) != len(ids)
+            or any(not isinstance(mid, str) for mid in ids)
+        ):
+            raise HistorySelectionError("selected_content_mismatch")
+        projection_id = snapshot.interpretation_status.get("projection_id")
+        transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+        with transaction as active:
+            fresh, content = self._read_history_snapshot(
+                conversation_id,
+                owner_client_id=owner_client_id,
+                owner_key=namespace,
+                projection_id=projection_id,
+                conn=active,
+                selected_ids=ids,
+            )
+            if (
+                snapshot.source_digest != fresh.source_digest
+                or snapshot.fences != fresh.fences
+                or snapshot.storage_context_digest != fresh.storage_context_digest
+            ):
+                raise HistorySelectionError("stale_source")
+            return content
+
+    def confirm_legacy_history_projection(
+        self,
+        confirmation: Mapping[str, Any],
+        *,
+        owner_client_id: str,
+        owner_key: str | None = None,
+        conn: Any | None = None,
+    ) -> dict[str, Any]:
+        """Authorize, replay or CAS-insert an immutable LegacyHistoryProjectionV1 wire value.
+
+        A matching authorized replay precedes fresh source validation, including after
+        appends or source edits. Reusing its ID for different confirmation bytes fails.
+        Caller-owned transactions are never committed here.
+        """
+        namespace = self._history_owner_key(owner_client_id, owner_key)
+        body = dict(confirmation)
+        required = {
+            "version",
+            "projection_id",
+            "owner_key",
+            "conversation_id",
+            "source_digest",
+            "fences",
+            "source_members",
+            "ordered_path_ids",
+            "cursor",
+            "selection_revision",
+        }
+        if (
+            set(body) != required
+            or type(body["version"]) is not int
+            or body["version"] != 1
+            or body["owner_key"] != namespace
+            or not isinstance(body["projection_id"], str)
+            or not body["projection_id"]
+            or type(body["selection_revision"]) is not int
+            or body["selection_revision"] < 0
+        ):
+            raise HistorySelectionError("invalid_projection")
+        try:
+            canonical = json.dumps(body, sort_keys=True, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        except (TypeError, ValueError) as exc:
+            raise HistorySelectionError("invalid_projection") from exc
+        body = json.loads(canonical)
+        cursor = body["cursor"]
+        path = body["ordered_path_ids"]
+        if (
+            not isinstance(body["conversation_id"], str)
+            or not body["conversation_id"]
+            or not isinstance(path, list)
+            or any(not isinstance(mid, str) or not mid for mid in path)
+            or not isinstance(cursor, dict)
+            or cursor.get("kind") not in {"empty", "before_message", "after_message"}
+            or set(cursor) != ({"kind"} if cursor.get("kind") == "empty" else {"kind", "message_id"})
+            or (cursor.get("kind") != "empty" and not isinstance(cursor.get("message_id"), str))
+        ):
+            raise HistorySelectionError("invalid_projection")
+        cid = body["conversation_id"]
+        transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+        with transaction as active:
+            self._lock_history_owner(active, cid, owner_client_id)
+            existing = active.execute(
+                "SELECT confirmation_json, projection_digest, created_at FROM conversation_history_projections "
+                "WHERE client_id = ? AND owner_key = ? AND conversation_id = ? AND projection_id = ?",
+                (owner_client_id, namespace, cid, body["projection_id"]),
+            ).fetchone()
+            if existing is not None:
+                record = dict(existing)
+                if record["confirmation_json"] != canonical:
+                    raise HistorySelectionError("projection_id_conflict")
+                return {
+                    **json.loads(canonical),
+                    "projection_digest": record["projection_digest"],
+                    "created_at": record["created_at"],
+                }
+            fresh, _ = self._read_history_snapshot(
+                cid, owner_client_id=owner_client_id, owner_key=namespace, projection_id=None, conn=active
+            )
+            wire = snapshot_to_wire(fresh)
+            members = [{"id": row["id"], "revision": row["revision"]} for row in wire["nodes"]]
+            if (
+                body["source_digest"] != fresh.source_digest
+                or body["fences"] != wire["fences"]
+                or body["source_members"] != members
+            ):
+                raise HistorySelectionError("stale_source")
+            try:
+                resolve_legacy_projection(wire["nodes"], body["ordered_path_ids"], body["cursor"])
+            except (HistorySelectionError, KeyError, TypeError) as exc:
+                raise HistorySelectionError("invalid_projection") from exc
+            digest = self._history_digest(body)
+            created_at = self._db._get_current_utc_timestamp_iso()
+            active.execute(
+                "INSERT INTO conversation_history_projections (projection_id, conversation_id, client_id, owner_key, "
+                "interpretation_version, source_digest, history_fence, source_members_json, ordered_path_ids_json, "
+                "confirmation_json, projection_digest, created_at) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    body["projection_id"],
+                    cid,
+                    owner_client_id,
+                    namespace,
+                    body["source_digest"],
+                    fresh.fences.history,
+                    json.dumps(members),
+                    json.dumps(body["ordered_path_ids"]),
+                    canonical,
+                    digest,
+                    created_at,
+                ),
+            )
+            return {**json.loads(canonical), "projection_digest": digest, "created_at": created_at}
+
+    def validate_history_selection(
+        self, conversation_id: str, selection: Mapping[str, Any], *,
+        owner_client_id: str, owner_key: str, conn: Any,
+    ) -> tuple[HistorySelectionSnapshotV1, tuple[dict[str, Any], ...]]:
+        """Re-resolve retained membership and context under the caller's owner fence."""
+        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistorySelectionV1
+        from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
+
+        body = HistorySelectionV1.model_validate(selection).model_dump(mode="json")
+        if body["owner_key"] != owner_key or body["conversation_id"] != conversation_id:
+            raise HistorySelectionError("owner_conversation_mismatch")
+        fresh, content = self._read_history_snapshot(
+            conversation_id, owner_client_id=owner_client_id, owner_key=owner_key,
+            projection_id=body["interpretation"].get("projection_id"), conn=conn,
+            selected_ids=tuple(row["id"] for row in body["messages"]),
+            include_message_versions=True,
+        )
+        result = resolve_history_selection(snapshot_to_wire(fresh), body, body["purpose"], body["request_context_digest"])
+        if result["status"] != "ready":
+            raise HistorySelectionError(result["code"])
+        # Fence changes alone are not evidence of a changed retained path or context.
+        if result["selection"]["selection_digest"] != body["selection_digest"] or result["selection"]["messages"] != body["messages"]:
+            raise HistorySelectionError("stale_selection")
+        return fresh, content
+
+    def _write_history_authority(self, conn: Any, message_id: str, authority: Mapping[str, Any]) -> None:
+        """Write owner-only provenance; public CRUD and sync never call this seam."""
+        conn.execute(
+            "UPDATE messages SET history_admission_json = ? WHERE id = ?",
+            (json.dumps(authority, sort_keys=True, ensure_ascii=False, separators=(",", ":")), message_id),
+        )
+
+    def _history_message_state(
+        self,
+        conversation_id: str,
+        message_id: str,
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any,
+    ) -> str:
+        """Hash the accepted row's state without revalidating its old source projection.
+
+        The immutable interpretation tag is part of row state, but resolving its
+        historical base is admission-only. Later source edits are unrelated to
+        the accepted input's content, parent, role, metadata and assets.
+        """
+        fresh, content = self._read_history_snapshot(
+            conversation_id,
+            owner_client_id=owner_client_id,
+            owner_key=owner_key,
+            projection_id=None,
+            conn=conn,
+            selected_ids=(message_id,),
+        )
+        node = next((row for row in snapshot_to_wire(fresh)["nodes"] if row["id"] == message_id), None)
+        if node is None or not content:
+            raise HistorySelectionError("stale_parent")
+        node.pop("revision")
+        item = {key: value for key, value in content[0].items() if key != "revision"}
+        return self._history_digest([node, item])
+
+    @staticmethod
+    def _history_intent_digest(message: Mapping[str, Any]) -> str:
+        """Stable retry identity includes ordered image bytes and explicit parent presence."""
+
+        def encode(value: Any) -> Any:
+            if isinstance(value, (bytes, bytearray, memoryview)):
+                return {"bytes": base64.b64encode(bytes(value)).decode("ascii")}
+            if isinstance(value, Mapping):
+                return {key: encode(item) for key, item in value.items()}
+            if isinstance(value, (list, tuple)):
+                return [encode(item) for item in value]
+            return value
+
+        return MessageStore._history_digest(encode(message))
+
+    def append_selected_history_input(
+        self,
+        conversation_id: str,
+        selection: Mapping[str, Any],
+        message: Mapping[str, Any],
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any | None = None,
+    ) -> dict[str, Any]:
+        """Atomically validate selected history and append one accepted current input."""
+        body, data = dict(selection), dict(message)
+        if (
+            body.get("owner_key") != owner_key
+            or body.get("conversation_id") != conversation_id
+            or body.get("purpose") != "send"
+        ):
+            raise HistorySelectionError("owner_conversation_mismatch")
+        if not data.get("id") or data.get("sender") not in {"user", "tool", "system"}:
+            raise HistorySelectionError("invalid_input")
+        if data.get("conversation_id", conversation_id) != conversation_id:
+            raise HistorySelectionError("owner_conversation_mismatch")
+        intent = self._history_intent_digest(data)
+        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+            self._lock_history_owner(active, conversation_id, owner_client_id)
+            existing = active.execute("SELECT history_admission_json FROM messages WHERE id = ?", (data["id"],)).fetchone()
+            if existing is not None:
+                authority = json.loads(existing["history_admission_json"] or "null")
+                if (
+                    not isinstance(authority, dict)
+                    or authority.get("intent_digest") != intent
+                    or authority.get("selection") != body
+                ):
+                    raise HistorySelectionError("message_id_conflict")
+                self._validate_history_parent(
+                    conversation_id,
+                    authority["admission"],
+                    owner_client_id=owner_client_id,
+                    owner_key=owner_key,
+                    conn=active,
+                )
+                return authority["admission"]
+            fresh, _ = self.validate_history_selection(
+                conversation_id, body, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+            )
+            parent = body["messages"][-1]["id"] if body["messages"] else None
+            if "parent_message_id" in data and data["parent_message_id"] != parent:
+                raise HistorySelectionError("parent_mismatch")
+            data.update(conversation_id=conversation_id, parent_message_id=parent, client_id=owner_client_id)
+            mid = self.add_message(data, conn=active)
+            if data.get("tool_calls") is not None or data.get("extra_metadata") is not None:
+                self._add_message_metadata_with_conn(mid, data.get("tool_calls"), data.get("extra_metadata"), active)
+            scope = dict(
+                active.execute(
+                    "SELECT scope_type, workspace_id FROM conversations WHERE id = ?", (conversation_id,)
+                ).fetchone()
+            )
+            admission = {
+                "version": 1,
+                "owner_key": owner_key,
+                "conversation_id": conversation_id,
+                "input_message_id": mid,
+                "input_message_revision": "1",
+                "selection_digest": body["selection_digest"],
+                "messages": body["messages"],
+                "originating_selection_revision": body["selection_revision"],
+            }
+            authority = {
+                "version": 1,
+                "interpretation": body["interpretation"],
+                "settled": True,
+                "admission": admission,
+                "selection": body,
+                "intent_digest": intent,
+                "storage_context_digest": fresh.storage_context_digest,
+                "scope": scope,
+            }
+            self._write_history_authority(active, mid, authority)
+            authority["input_state_digest"] = self._history_message_state(
+                conversation_id, mid, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+            )
+            self._write_history_authority(active, mid, authority)
+            return admission
+
+    def append_selected_history_inputs(
+        self,
+        conversation_id: str,
+        selection: Mapping[str, Any],
+        messages: Sequence[Mapping[str, Any]],
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any | None = None,
+    ) -> dict[str, Any]:
+        """Accept a server-owned current-input chain once, under one owner transaction."""
+        body = dict(selection)
+        if not messages or any(message.get("sender") not in {"user", "tool"} for message in messages):
+            raise HistorySelectionError("invalid_input")
+        if (
+            body.get("owner_key") != owner_key
+            or body.get("conversation_id") != conversation_id
+            or body.get("purpose") != "send"
+        ):
+            raise HistorySelectionError("owner_conversation_mismatch")
+        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+            self._lock_history_owner(active, conversation_id, owner_client_id)
+            consumed = active.execute(
+                "SELECT history_admission_json FROM messages "
+                "WHERE conversation_id = ? AND history_admission_json IS NOT NULL",
+                (conversation_id,),
+            ).fetchall()
+            for row in consumed:
+                authority = json.loads(row["history_admission_json"])
+                if (
+                    authority.get("server_completion") is True
+                    and authority.get("admission", {}).get("owner_key") == owner_key
+                    and authority.get("admission", {}).get("selection_digest") == body.get("selection_digest")
+                ):
+                    raise HistorySelectionError("selection_already_consumed")
+            self.validate_history_selection(
+                conversation_id, body, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+            )
+            scope = dict(
+                active.execute(
+                    "SELECT scope_type, workspace_id FROM conversations WHERE id = ?", (conversation_id,)
+                ).fetchone()
+            )
+            parent = body["messages"][-1]["id"] if body["messages"] else None
+            chain = []
+            for message in messages:
+                data = dict(message)
+                if "parent_message_id" in data and data["parent_message_id"] != parent:
+                    raise HistorySelectionError("parent_mismatch")
+                data.update(
+                    id=self._db._generate_uuid(),
+                    conversation_id=conversation_id,
+                    parent_message_id=parent,
+                    client_id=owner_client_id,
+                )
+                mid = self.add_message(data, conn=active)
+                if data.get("tool_calls") is not None or data.get("extra_metadata") is not None:
+                    self._add_message_metadata_with_conn(mid, data.get("tool_calls"), data.get("extra_metadata"), active)
+                self._write_history_authority(
+                    active, mid, {"version": 1, "interpretation": body["interpretation"], "settled": True}
+                )
+                chain.append(
+                    {
+                        "id": mid,
+                        "version": "1",
+                        "state": self._history_message_state(
+                            conversation_id, mid, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+                        ),
+                    }
+                )
+                parent = mid
+            admission = {
+                "version": 1,
+                "owner_key": owner_key,
+                "conversation_id": conversation_id,
+                "input_message_id": parent,
+                "input_message_revision": "1",
+                "selection_digest": body["selection_digest"],
+                "messages": body["messages"],
+                "originating_selection_revision": body["selection_revision"],
+            }
+            authority = {
+                "version": 1,
+                "interpretation": body["interpretation"],
+                "settled": True,
+                "server_completion": True,
+                "admission": admission,
+                "selection": body,
+                "scope": scope,
+                "input_state_digest": chain[-1]["state"],
+                "input_chain": chain,
+            }
+            for item in chain:
+                self._write_history_authority(active, item["id"], authority)
+            return admission
+
+    def _validate_history_parent(
+        self,
+        conversation_id: str,
+        reference: Mapping[str, Any],
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any,
+    ) -> dict[str, Any]:
+        """Check owner-issued acceptance and live input state without checking current branch."""
+        if reference.get("owner_key") != owner_key or reference.get("conversation_id") != conversation_id:
+            raise HistorySelectionError("owner_conversation_mismatch")
+        row = conn.execute(
+            "SELECT version, history_admission_json FROM messages "
+            "WHERE id = ? AND conversation_id = ? AND deleted = FALSE",
+            (reference["input_message_id"], conversation_id),
+        ).fetchone()
+        if row is None or str(row["version"]) != reference["input_message_revision"]:
+            raise HistorySelectionError("stale_parent")
+        authority = json.loads(row["history_admission_json"] or "null")
+        if not isinstance(authority, dict) or any(
+            authority.get("admission", {}).get(key) != value for key, value in reference.items()
+        ):
+            raise HistorySelectionError("invalid_admission")
+        state = self._history_message_state(
+            conversation_id, reference["input_message_id"], owner_client_id=owner_client_id, owner_key=owner_key, conn=conn
+        )
+        if state != authority["input_state_digest"]:
+            raise HistorySelectionError("stale_parent")
+        for item in authority.get("input_chain", []):
+            version = conn.execute(
+                "SELECT version FROM messages WHERE id = ? AND conversation_id = ? AND deleted = FALSE",
+                (item["id"], conversation_id),
+            ).fetchone()
+            if version is None or str(version["version"]) != item["version"]:
+                raise HistorySelectionError("stale_parent")
+            state = self._history_message_state(
+                conversation_id, item["id"], owner_client_id=owner_client_id, owner_key=owner_key, conn=conn
+            )
+            if state != item["state"]:
+                raise HistorySelectionError("stale_parent")
+        scope = dict(
+            conn.execute("SELECT scope_type, workspace_id FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+        )
+        if scope != authority["scope"]:
+            raise HistorySelectionError("stale_scope")
+        return authority
+
+    def settle_history_admission(
+        self,
+        conversation_id: str,
+        reference: Mapping[str, Any],
+        message: Mapping[str, Any],
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any | None = None,
+    ) -> str:
+        """Settle an assistant/tool result against its immutable accepted input."""
+        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistoryAdmissionReferenceV1
+
+        binding = HistoryAdmissionReferenceV1.model_validate(reference).model_dump(mode="json")
+        data = dict(message)
+        if not data.get("id") or data.get("sender") not in {"assistant", "tool"}:
+            raise HistorySelectionError("invalid_settlement")
+        if data.get("conversation_id", conversation_id) != conversation_id:
+            raise HistorySelectionError("owner_conversation_mismatch")
+        if "parent_message_id" in data and data["parent_message_id"] != binding["input_message_id"]:
+            raise HistorySelectionError("parent_mismatch")
+        intent = self._history_intent_digest(data)
+        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+            self._lock_history_owner(active, conversation_id, owner_client_id)
+            authority = self._validate_history_parent(
+                conversation_id, binding, owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+            )
+            existing = active.execute(
+                "SELECT history_admission_json, deleted, version FROM messages WHERE id = ?", (data["id"],)
+            ).fetchone()
+            if existing is not None:
+                saved = json.loads(existing["history_admission_json"] or "null")
+                if (
+                    existing["deleted"]
+                    or existing["version"] != 1
+                    or not isinstance(saved, dict)
+                    or saved.get("settlement") != binding
+                    or saved.get("intent_digest") != intent
+                ):
+                    raise HistorySelectionError("message_id_conflict")
+                state = self._history_message_state(
+                    conversation_id, data["id"], owner_client_id=owner_client_id, owner_key=owner_key, conn=active
+                )
+                if state != saved.get("result_state_digest"):
+                    raise HistorySelectionError("message_id_conflict")
+                return data["id"]
+            data.update(
+                conversation_id=conversation_id, parent_message_id=binding["input_message_id"], client_id=owner_client_id
+            )
+            mid = self.add_message(data, conn=active)
+            if data.get("tool_calls") is not None or data.get("extra_metadata") is not None:
+                self._add_message_metadata_with_conn(mid, data.get("tool_calls"), data.get("extra_metadata"), active)
+            result_authority = {
+                "version": 1,
+                "interpretation": authority["interpretation"],
+                "settled": True,
+                "settlement": binding,
+                "intent_digest": intent,
+            }
+            # Install the stable interpretation before hashing the row. Legacy
+            # nodes derive their projection tag from this protected provenance.
+            self._write_history_authority(active, mid, result_authority)
+            result_authority["result_state_digest"] = self._history_message_state(
+                conversation_id,
+                mid,
+                owner_client_id=owner_client_id,
+                owner_key=owner_key,
+                conn=active,
+            )
+            self._write_history_authority(active, mid, result_authority)
+            return mid
 
     def _next_message_order_timestamp(self) -> str:
         """Return a millisecond ISO timestamp that is monotonic for message inserts."""
@@ -46,7 +1010,76 @@ class MessageStore:
     # Message creation
     # ------------------------------------------------------------------
 
-    def add_message(self, msg_data: dict[str, Any]) -> str | None:
+    @staticmethod
+    def _row_value(row: Any, key: str, index: int = 0) -> Any:
+        if isinstance(row, dict):
+            return row.get(key)
+        mapping = getattr(row, "_mapping", None)
+        if mapping is not None:
+            return mapping.get(key)
+        try:
+            return row[key]
+        except (IndexError, KeyError, TypeError):
+            return row[index]
+
+    def _advance_history_version(self, conn: Any, conversation_id: str) -> None:
+        """Advance the resume history fence within the message mutation transaction."""
+        cursor = conn.execute(
+            "UPDATE conversations "
+            "SET history_version = history_version + 1, last_modified = ? "
+            "WHERE id = ? AND deleted = FALSE",
+            (self._db._get_current_utc_timestamp_iso(), conversation_id),
+        )
+        if cursor.rowcount != 1:
+            raise InputError(  # noqa: TRY003
+                f"Cannot mutate message history: Conversation ID '{conversation_id}' not found or deleted."
+            )
+
+    def lock_message_for_edit(self, message_id: str, *, conn: Any) -> None:
+        """Lock a live PostgreSQL message before its conversation is locked."""
+        if self._db.backend_type != BackendType.POSTGRESQL:
+            return
+        row = conn.execute(
+            "SELECT id FROM messages "
+            "WHERE id = ? AND deleted = FALSE "
+            "FOR UPDATE",
+            (message_id,),
+        ).fetchone()
+        if row is None:
+            raise ConflictError(
+                f"Message ID {message_id} is no longer available for editing.",
+                entity="messages",
+                entity_id=message_id,
+            )
+
+    def lock_message_metadata_for_edit(self, message_id: str, *, conn: Any) -> None:
+        """Ensure and lock message metadata before the conversation row."""
+        if self._db.backend_type != BackendType.POSTGRESQL:
+            return
+        conn.execute(
+            "INSERT INTO message_metadata(message_id, last_modified) "
+            "VALUES (?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(message_id) DO NOTHING",
+            (message_id,),
+        )
+        row = conn.execute(
+            "SELECT message_id FROM message_metadata "
+            "WHERE message_id = ? FOR UPDATE",
+            (message_id,),
+        ).fetchone()
+        if row is None:
+            raise ConflictError(
+                f"Message metadata for {message_id} is no longer available.",
+                entity="message_metadata",
+                entity_id=message_id,
+            )
+
+    def add_message(
+        self,
+        msg_data: dict[str, Any],
+        *,
+        conn: Any | None = None,
+    ) -> str | None:
         """
         Adds a new message to a conversation, optionally with image data.
 
@@ -163,8 +1196,9 @@ class MessageStore:
                 timestamp, msg_data.get('ranking'), now, client_id, 1, 0
             )
         try:
-            with self._db.transaction():
-                conv_cursor = self._db.execute_query(
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
+                conv_cursor = transaction_conn.execute(
                     "SELECT 1 FROM conversations WHERE id = ? AND deleted = FALSE",
                     (msg_data['conversation_id'],),
                 )
@@ -172,9 +1206,10 @@ class MessageStore:
                     raise InputError(  # noqa: TRY003, TRY301
                         f"Cannot add message: Conversation ID '{msg_data['conversation_id']}' not found or deleted."
                     )
-                self._db.execute_query(query, params)
+                transaction_conn.execute(query, params)
                 if normalized_images:
-                    self._insert_message_images(msg_id, normalized_images)
+                    self._insert_message_images(msg_id, normalized_images, conn=transaction_conn)
+                self._advance_history_version(transaction_conn, msg_data['conversation_id'])
             logger.info(
                 'Added message ID: {} to conversation {} (Images stored: {}).',
                 msg_id,
@@ -190,6 +1225,15 @@ class MessageStore:
                     entity_id=msg_id,
                 ) from e
             raise CharactersRAGDBError(f"Database integrity error adding message: {e}") from e  # noqa: TRY003
+        except BackendDatabaseError as e:
+            error_text = str(e).lower()
+            if "duplicate key" in error_text or "unique constraint" in error_text:
+                raise ConflictError(  # noqa: TRY003
+                    f"Message with ID '{msg_id}' already exists.",
+                    entity="messages",
+                    entity_id=msg_id,
+                ) from e
+            raise CharactersRAGDBError(f"Database error adding message: {e}") from e  # noqa: TRY003
         except InputError:
             raise
         except CharactersRAGDBError as e:
@@ -200,7 +1244,13 @@ class MessageStore:
     # Image helpers
     # ------------------------------------------------------------------
 
-    def _insert_message_images(self, message_id: str, images: list[tuple[bytes, str]]) -> None:
+    def _insert_message_images(
+        self,
+        message_id: str,
+        images: list[tuple[bytes, str]],
+        *,
+        conn: Any | None = None,
+    ) -> None:
         """Insert or replace message images for the given message."""
         if not images:
             return
@@ -220,7 +1270,10 @@ class MessageStore:
             "image_data=excluded.image_data, image_mime_type=excluded.image_mime_type, "
             "created_at=CURRENT_TIMESTAMP"
         )
-        self._db.execute_many(query, params, commit=False)
+        if conn is not None:
+            conn.executemany(query, params)
+        else:
+            self._db.execute_many(query, params, commit=False)
 
     def append_message_image(
         self,
@@ -229,6 +1282,7 @@ class MessageStore:
         mime_type: str,
         *,
         commit: bool = True,
+        conn: Any | None = None,
     ) -> int:
         """Append one image to a message after the current maximum image position."""
         if isinstance(image_bytes, memoryview):
@@ -249,31 +1303,48 @@ class MessageStore:
                 f"Message image attachment exceeds maximum size of {max_image_bytes} bytes"
             )
 
-        def _append_once() -> int:
-            cursor = self._db.execute_query(
-                "SELECT COALESCE(MAX(position), -1) + 1 FROM message_images WHERE message_id = ?",
+        def _append_once(transaction_conn: Any, *, use_db_executor: bool = False) -> int:
+            def _execute(query: str, params: tuple[Any, ...]) -> Any:
+                if use_db_executor:
+                    return self._db.execute_query(query, params)
+                return transaction_conn.execute(query, params)
+
+            message_cursor = _execute(
+                "SELECT conversation_id FROM messages WHERE id = ? AND deleted = FALSE",
+                (message_id,),
+            )
+            message_row = message_cursor.fetchone()
+            if message_row is None:
+                raise InputError(  # noqa: TRY003
+                    f"Cannot append image: Message ID '{message_id}' not found or deleted."
+                )
+            conversation_id = str(self._row_value(message_row, "conversation_id"))
+
+            cursor = _execute(
+                "SELECT COALESCE(MAX(position), -1) + 1 AS next_position "
+                "FROM message_images WHERE message_id = ?",
                 (message_id,),
             )
             row = cursor.fetchone()
-            position = int(row[0] if row is not None else 0)
-            self._db.execute_query(
+            position = int(self._row_value(row, "next_position") if row is not None else 0)
+            _execute(
                 """
                 INSERT INTO message_images (message_id, position, image_data, image_mime_type)
                 VALUES (?, ?, ?, ?)
                 """,
                 (message_id, position, bytes(image_bytes), str(mime_type)),
-                commit=False,
             )
+            self._advance_history_version(transaction_conn, conversation_id)
             return position
 
-        def _append_with_retries(*, transactional: bool) -> int:
+        def _append_with_retries(existing_conn: Any | None = None) -> int:
             last_error: Exception | None = None
             for _ in range(5):
                 try:
-                    if transactional:
-                        with self._db.transaction():
-                            return _append_once()
-                    return _append_once()
+                    if existing_conn is not None:
+                        return _append_once(existing_conn, use_db_executor=True)
+                    with self._db.transaction() as owned_conn:
+                        return _append_once(owned_conn, use_db_executor=True)
                 except sqlite3.IntegrityError as exc:
                     last_error = exc
                     continue
@@ -281,12 +1352,14 @@ class MessageStore:
                 f"Concurrent append conflict for message image positions on message_id={message_id}",
             ) from last_error
 
+        if conn is not None:
+            return _append_once(conn)
         if not commit:
-            return _append_with_retries(transactional=False)
-        return _append_with_retries(transactional=True)
+            return _append_with_retries(self._db.get_connection())
+        return _append_with_retries()
 
-    def get_message_images(self, message_id: str) -> list[dict[str, Any]]:
-        """Fetch all images associated with a message, ordered by position."""
+    def get_message_images(self, message_id: str, *, strict: bool = False) -> list[dict[str, Any]]:
+        """Fetch ordered images; strict reads propagate errors and reject gaps."""
         try:
             cursor = self._db.execute_query(
                 "SELECT message_id, position, image_data, image_mime_type FROM message_images "
@@ -301,15 +1374,236 @@ class MessageStore:
                 img_bytes = record.get("image_data")
                 if isinstance(img_bytes, memoryview):
                     record["image_data"] = img_bytes.tobytes()
+                if strict and (record["position"] != len(images) or not record.get("image_data")):
+                    raise CharactersRAGDBError("Saved chat attachment positions or data are incomplete")
                 images.append(record)
             return images  # noqa: TRY300
         except CharactersRAGDBError as e:
+            if strict:
+                raise
             logger.error(f"Failed to fetch images for message {message_id}: {e}")
             return []
 
     # ------------------------------------------------------------------
     # Message retrieval
     # ------------------------------------------------------------------
+
+    def get_source_message_projection(
+        self,
+        conversation_id: str,
+        *,
+        max_chars: int,
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Return one bounded, statement-consistent source-message snapshot."""
+        if not isinstance(conversation_id, str) or not conversation_id.strip():
+            raise InputError("conversation_id cannot be empty.")  # noqa: TRY003
+        if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars < 1:
+            raise InputError("max_chars must be a positive integer.")  # noqa: TRY003
+        if owner_user_id is not None and (not isinstance(owner_user_id, str) or not owner_user_id.strip()):
+            raise InputError("owner_user_id must be a non-empty string.")  # noqa: TRY003
+
+        is_postgres = self._db.backend_type == BackendType.POSTGRESQL
+        if is_postgres and owner_user_id is None:
+            raise InputError("owner_user_id is required for PostgreSQL source projections.")  # noqa: TRY003
+        owner_clause = " AND c.client_id = ?" if is_postgres and owner_user_id else ""
+        owner_params = [owner_user_id.strip()] if owner_clause else []
+        false_literal = "FALSE" if is_postgres else "0"
+        true_literal = "TRUE" if is_postgres else "1"
+        invalid_expression = (
+            "FALSE"
+            if is_postgres
+            else "(INSTR(COALESCE(m.sender, ''), CHAR(0)) > 0 "
+            "OR INSTR(m.content, CHAR(0)) > 0)"
+        )
+        # Every eligible formatted message costs at least four characters, and
+        # every message after the first also costs a one-character separator.
+        # One row beyond the maximum possible fit is sufficient to prove overflow.
+        row_limit = (max_chars + 2) // 5 + 1
+        char_budget = max_chars + 1
+        failure_type = "UnknownDatabaseError"
+
+        try:
+            cursor = self._db.execute_query(
+                f"""
+                    WITH settings AS (
+                        SELECT CAST(? AS INTEGER) AS char_budget
+                    ),
+                    live_conversation AS (
+                        SELECT c.id
+                        FROM conversations c
+                        WHERE c.id = ?
+                          AND c.deleted = {false_literal}
+                          {owner_clause}
+                        LIMIT 1
+                    ),
+                    eligible AS (
+                        SELECT
+                            m.id,
+                            m.timestamp,
+                            m.last_modified,
+                            COALESCE(NULLIF(m.sender, ''), 'unknown') || ': ' || m.content
+                                AS formatted_text,
+                            {invalid_expression} AS source_invalid
+                        FROM messages m
+                        JOIN live_conversation c ON c.id = m.conversation_id
+                        WHERE m.deleted = {false_literal}
+                          AND m.content IS NOT NULL
+                          AND m.content != ''
+                        ORDER BY m.timestamp ASC, m.last_modified ASC, m.id ASC
+                        LIMIT ?
+                    ),
+                    numbered AS (
+                        SELECT
+                            id,
+                            formatted_text,
+                            source_invalid,
+                            ROW_NUMBER() OVER (
+                                ORDER BY timestamp ASC, last_modified ASC, id ASC
+                            ) AS ordinal,
+                            LENGTH(formatted_text) AS source_length
+                        FROM eligible
+                    ),
+                    costed AS (
+                        SELECT
+                            ordinal,
+                            formatted_text,
+                            source_invalid,
+                            source_length,
+                            CASE WHEN ordinal = 1 THEN 0 ELSE 1 END AS separator_chars,
+                            COALESCE(
+                                SUM(
+                                    source_length + CASE WHEN ordinal = 1 THEN 0 ELSE 1 END
+                                ) OVER (
+                                    ORDER BY ordinal ASC
+                                    ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                                ),
+                                0
+                            ) AS prior_chars
+                        FROM numbered
+                    ),
+                    allocated AS (
+                        SELECT
+                            costed.ordinal,
+                            costed.formatted_text,
+                            costed.source_invalid,
+                            costed.source_length,
+                            CASE
+                                WHEN settings.char_budget
+                                     - costed.prior_chars
+                                     - costed.separator_chars <= 0
+                                THEN NULL
+                                WHEN costed.source_length <= settings.char_budget
+                                     - costed.prior_chars
+                                     - costed.separator_chars
+                                THEN costed.source_length
+                                ELSE settings.char_budget
+                                     - costed.prior_chars
+                                     - costed.separator_chars
+                            END AS char_cap
+                        FROM costed
+                        CROSS JOIN settings
+                    ),
+                    stats AS (
+                        SELECT
+                            COALESCE(
+                                MAX(CASE WHEN source_invalid THEN 1 ELSE 0 END),
+                                0
+                            ) AS source_invalid,
+                            COALESCE(
+                                MAX(
+                                    CASE
+                                        WHEN char_cap IS NULL OR source_length > char_cap
+                                        THEN 1
+                                        ELSE 0
+                                    END
+                                ),
+                                0
+                            ) AS source_truncated
+                        FROM allocated
+                    ),
+                    projected AS (
+                        SELECT
+                            ordinal,
+                            SUBSTR(
+                                formatted_text,
+                                1,
+                                CAST(char_cap AS INTEGER)
+                            ) AS source_text
+                        FROM allocated
+                        WHERE char_cap IS NOT NULL AND char_cap > 0
+                    )
+                    SELECT
+                        projected.ordinal,
+                        projected.source_text,
+                        {true_literal} AS conversation_exists,
+                        stats.source_invalid,
+                        stats.source_truncated
+                    FROM projected
+                    CROSS JOIN stats
+                    UNION ALL
+                    SELECT
+                        NULL AS ordinal,
+                        NULL AS source_text,
+                        {true_literal} AS conversation_exists,
+                        stats.source_invalid,
+                        stats.source_truncated
+                    FROM live_conversation
+                    CROSS JOIN stats
+                    WHERE NOT EXISTS (SELECT 1 FROM projected)
+                    ORDER BY ordinal ASC
+                """,  # nosec B608 - interpolated fragments are fixed by backend type.
+                (
+                    char_budget,
+                    conversation_id,
+                    *owner_params,
+                    row_limit,
+                ),
+                log_params=False,
+                log_errors=False,
+            )
+            records = [dict(row) for row in cursor.fetchall()]
+            if not records:
+                return {
+                    "rows": [],
+                    "conversation_exists": False,
+                    "invalid": False,
+                    "truncated": False,
+                }
+
+            first = records[0]
+            invalid = first.get("source_invalid")
+            truncated = first.get("source_truncated")
+            if not isinstance(invalid, (bool, int)) or invalid not in (0, 1):
+                raise CharactersRAGDBError("Invalid source-message validation marker.")
+            if not isinstance(truncated, (bool, int)) or truncated not in (0, 1):
+                raise CharactersRAGDBError("Invalid source-message truncation marker.")
+
+            projected_rows: list[dict[str, str]] = []
+            for record in records:
+                if record.get("source_invalid") != invalid or record.get("source_truncated") != truncated:
+                    raise CharactersRAGDBError("Inconsistent source-message projection markers.")
+                source_text = record.get("source_text")
+                if source_text is None:
+                    continue
+                if not isinstance(source_text, str) or not source_text:
+                    raise CharactersRAGDBError("Invalid bounded source-message projection.")
+                projected_rows.append({"source_text": source_text})
+
+            return {
+                "rows": projected_rows,
+                "conversation_exists": True,
+                "invalid": bool(invalid),
+                "truncated": bool(truncated),
+            }
+        except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:
+            failure_type = type(exc).__name__
+
+        logger.error(
+            "Database error fetching bounded source messages ({})",
+            failure_type,
+        )
+        raise CharactersRAGDBError("Source-message projection failed.")
 
     def get_message_conversation_id(self, message_id: str) -> str | None:
         """Return the conversation_id for a message if it exists and is not deleted."""
@@ -326,7 +1620,7 @@ class MessageStore:
             logger.error(f"Database error fetching conversation_id for message {message_id}: {e}")
             raise
 
-    def get_message_by_id(self, message_id: str, include_deleted: bool = False) -> dict[str, Any] | None:
+    def get_message_by_id(self, message_id: str, include_deleted: bool = False, *, strict_images: bool = False) -> dict[str, Any] | None:
         """
         Retrieves a specific message by its UUID.
 
@@ -335,6 +1629,9 @@ class MessageStore:
 
         Args:
             message_id: The string UUID of the message.
+            include_deleted: Include soft-deleted messages and conversations.
+            strict_images: Propagate attachment read failures and reject missing
+                attachment positions or bytes instead of returning partial data.
 
         Returns:
             A dictionary with message data if found and not deleted, else None.
@@ -364,7 +1661,7 @@ class MessageStore:
             img_blob = record.get("image_data")
             if isinstance(img_blob, memoryview):
                 record["image_data"] = img_blob.tobytes()
-            record["images"] = self.get_message_images(message_id)
+            record["images"] = self.get_message_images(message_id, **({"strict": True} if strict_images else {}))
             return record  # noqa: TRY300
         except CharactersRAGDBError as e:
             logger.error(f"Database error fetching message ID {message_id}: {e}")
@@ -455,33 +1752,35 @@ class MessageStore:
                 existing_versions,
             )
 
-        message_id = self.add_message(
-            {
-                "id": projection_id,
-                "conversation_id": conversation_id,
-                "parent_message_id": parent_message_id,
-                "sender": sender,
-                "content": content or "",
-                "timestamp": timestamp,
-                "ranking": ranking,
-                "client_id": sync_client_id,
-            }
-        )
-        if message_id is None:
-            raise CharactersRAGDBError("Failed to append Sync v2 message projection.")  # noqa: TRY003
-        if object_revision != 1:
-            self._db.execute_query(
-                "UPDATE messages SET version = ?, client_id = ? WHERE id = ?",
-                (object_revision, sync_client_id, message_id),
-                commit=True,
+        with self._db.transaction() as conn:
+            message_id = self.add_message(
+                {
+                    "id": projection_id,
+                    "conversation_id": conversation_id,
+                    "parent_message_id": parent_message_id,
+                    "sender": sender,
+                    "content": content or "",
+                    "timestamp": timestamp,
+                    "ranking": ranking,
+                    "client_id": sync_client_id,
+                },
+                conn=conn,
             )
-        self._set_sync_v2_message_metadata_or_raise(
-            message_id=message_id,
-            stable_message_id=normalized_stable_id,
-            payload_hash=payload_hash,
-            object_revision=object_revision,
-            projection_conflict=is_conflict,
-        )
+            if message_id is None:
+                raise CharactersRAGDBError("Failed to append Sync v2 message projection.")  # noqa: TRY003
+            if object_revision != 1:
+                conn.execute(
+                    "UPDATE messages SET version = ?, client_id = ? WHERE id = ?",
+                    (object_revision, sync_client_id, message_id),
+                )
+            self._set_sync_v2_message_metadata_or_raise(
+                message_id=message_id,
+                stable_message_id=normalized_stable_id,
+                payload_hash=payload_hash,
+                object_revision=object_revision,
+                projection_conflict=is_conflict,
+                conn=conn,
+            )
         return {
             "message_id": message_id,
             "stable_message_id": normalized_stable_id,
@@ -530,12 +1829,17 @@ class MessageStore:
             )
 
         matched_ids = {str(version["id"]) for version in matched_versions}
-        target_ids = [str(version["id"]) for version in existing_versions]
         now = self._db._get_current_utc_timestamp_iso()
-        updated = 0
+        affected_conversation_ids = {
+            str(version["conversation_id"])
+            for version in existing_versions
+            if not bool(version["deleted"])
+        }
         with self._db.transaction() as conn:
-            for target_id in target_ids:
-                cursor = conn.execute(
+            for version in existing_versions:
+                if bool(version["deleted"]):
+                    continue
+                conn.execute(
                     """
                     UPDATE messages
                        SET deleted = ?,
@@ -544,30 +1848,31 @@ class MessageStore:
                            client_id = ?
                      WHERE id = ?
                     """,
-                    (True, now, object_revision, sync_client_id, target_id),
+                    (True, now, object_revision, sync_client_id, version["id"]),
                 )
-                updated += cursor.rowcount
-        if updated == 0:
-            raise ConflictError(  # noqa: TRY003
-                "Message not found for Sync v2 tombstone.",
-                entity="messages",
-                entity_id=normalized_stable_id,
-            )
-        for version in existing_versions:
-            sync_meta = dict(((version.get("metadata") or {}).get("extra") or {}).get("sync_v2") or {})
-            sync_meta.setdefault("stable_message_id", normalized_stable_id)
-            sync_meta.setdefault("payload_hash", object_hash if str(version["id"]) in matched_ids else "")
-            sync_meta.update(
-                {
-                    "object_revision": object_revision,
-                    "tombstoned": True,
-                }
-            )
-            persisted = self.set_message_metadata_extra(version["id"], {"sync_v2": sync_meta}, merge=True)
-            if not persisted:
-                raise CharactersRAGDBError(  # noqa: TRY003
-                    f"Failed to persist Sync v2 tombstone metadata for message {version['id']}."
+            for version in existing_versions:
+                sync_meta = dict(((version.get("metadata") or {}).get("extra") or {}).get("sync_v2") or {})
+                sync_meta.setdefault("stable_message_id", normalized_stable_id)
+                sync_meta.setdefault("payload_hash", object_hash if str(version["id"]) in matched_ids else "")
+                sync_meta.update(
+                    {
+                        "object_revision": object_revision,
+                        "tombstoned": True,
+                    }
                 )
+                persisted = self.set_message_metadata_extra(
+                    version["id"],
+                    {"sync_v2": sync_meta},
+                    merge=True,
+                    conn=conn,
+                    _advance_history=False,
+                )
+                if not persisted:
+                    raise CharactersRAGDBError(  # noqa: TRY003
+                        f"Failed to persist Sync v2 tombstone metadata for message {version['id']}."
+                    )
+            for affected_conversation_id in sorted(affected_conversation_ids):
+                self._advance_history_version(conn, affected_conversation_id)
         return True
 
     def get_messages_by_sync_stable_id(
@@ -626,6 +1931,7 @@ class MessageStore:
         payload_hash: str,
         object_revision: int,
         projection_conflict: bool,
+        conn: Any | None = None,
     ) -> None:
         persisted = self.set_message_metadata_extra(
             message_id,
@@ -638,6 +1944,8 @@ class MessageStore:
                 }
             },
             merge=True,
+            conn=conn,
+            _advance_history=False,
         )
         if not persisted:
             raise CharactersRAGDBError(  # noqa: TRY003
@@ -692,7 +2000,9 @@ class MessageStore:
     # ------------------------------------------------------------------
 
     def get_messages_for_conversation(self, conversation_id: str, limit: int = 100, offset: int = 0,
-                                      order_by_timestamp: str = "ASC", include_deleted: bool = False) -> list[dict[str, Any]]:
+                                      order_by_timestamp: str = "ASC", include_deleted: bool = False, *,
+                                      strict_images: bool = False,
+                                      image_byte_limit: int = MAX_CHAT_ATTACHMENT_READ_BYTES) -> list[dict[str, Any]]:
         """
         Lists messages for a specific conversation.
         Returns non-deleted messages, ordered by `timestamp` according to `order_by_timestamp`.
@@ -718,6 +2028,64 @@ class MessageStore:
             LIMIT ? OFFSET ?
         """.format_map(locals())  # nosec B608
         try:
+            if strict_images:
+                # A single statement gives SQLite and PostgreSQL one snapshot.
+                # Over-budget pages expose their size but no attachment blobs.
+                strict_query = """
+                    WITH page AS (
+                        SELECT m.id, m.conversation_id, m.parent_message_id, m.sender, m.content,
+                               m.timestamp, m.ranking, m.last_modified, m.version, m.client_id, m.deleted,
+                               LENGTH(m.image_data) AS primary_bytes
+                        FROM messages m JOIN conversations c ON m.conversation_id = c.id
+                        WHERE m.conversation_id = ? {delete_clause} AND c.deleted = FALSE
+                        ORDER BY m.timestamp {order_direction}, m.last_modified {order_direction}, m.id {order_direction}
+                        LIMIT ? OFFSET ?
+                    ), sizes AS (
+                        SELECT COALESCE(SUM(CASE WHEN EXISTS (
+                            SELECT 1 FROM message_images mi WHERE mi.message_id = page.id
+                        ) THEN (SELECT COALESCE(SUM(LENGTH(mi.image_data)), 0)
+                                FROM message_images mi WHERE mi.message_id = page.id)
+                        ELSE COALESCE(page.primary_bytes, 0) END), 0) AS image_bytes FROM page
+                    ), bounds AS (SELECT ? AS max_bytes)
+                    SELECT page.*,
+                           CASE WHEN sizes.image_bytes <= bounds.max_bytes AND mi.position IS NULL
+                                THEN m.image_data ELSE NULL END AS image_data,
+                           m.image_mime_type,
+                           sizes.image_bytes AS page_image_bytes,
+                           mi.position AS image_position,
+                           CASE WHEN sizes.image_bytes <= bounds.max_bytes
+                                THEN mi.image_data ELSE NULL END AS ordered_image_data,
+                           mi.image_mime_type AS ordered_image_mime_type
+                    FROM page JOIN messages m ON m.id = page.id CROSS JOIN sizes CROSS JOIN bounds
+                    LEFT JOIN message_images mi ON mi.message_id = page.id AND sizes.image_bytes <= bounds.max_bytes
+                    ORDER BY page.timestamp {order_direction}, page.last_modified {order_direction},
+                             page.id {order_direction}, mi.position ASC
+                """.format_map(locals())  # nosec B608
+                cursor = self._db.execute_query(strict_query, (conversation_id, limit, offset, image_byte_limit))
+                columns = [column[0] for column in cursor.description] if cursor.description else []
+                by_id: dict[str, dict[str, Any]] = {}
+                for row in cursor.fetchall():
+                    record = dict(row) if isinstance(row, dict) else dict(zip(columns, row))
+                    if record.pop("page_image_bytes") > image_byte_limit:
+                        raise InputError("Chat attachment page exceeds the image read limit")
+                    position = record.pop("image_position")
+                    image_data = record.pop("ordered_image_data")
+                    image_mime = record.pop("ordered_image_mime_type")
+                    record.pop("primary_bytes")
+                    if isinstance(record.get("image_data"), memoryview):
+                        record["image_data"] = record["image_data"].tobytes()
+                    message = by_id.setdefault(record["id"], {**record, "images": []})
+                    if position is not None:
+                        if position != len(message["images"]):
+                            raise CharactersRAGDBError("Saved chat attachment positions are incomplete or invalid")
+                        if isinstance(image_data, memoryview):
+                            image_data = image_data.tobytes()
+                        message["images"].append({"message_id": record["id"], "position": position,
+                                                  "image_data": image_data, "image_mime_type": image_mime})
+                        if position == 0:
+                            message["image_data"] = image_data
+                            message["image_mime_type"] = image_mime
+                return list(by_id.values())
             cursor = self._db.execute_query(query, (conversation_id, limit, offset))
             raw_rows = cursor.fetchall()
             columns = [col[0] for col in cursor.description] if cursor.description else []
@@ -877,7 +2245,14 @@ class MessageStore:
     # Message update
     # ------------------------------------------------------------------
 
-    def update_message(self, message_id: str, update_data: dict[str, Any], expected_version: int) -> bool | None:
+    def update_message(
+        self,
+        message_id: str,
+        update_data: dict[str, Any],
+        expected_version: int,
+        *,
+        conn: Any | None = None,
+    ) -> bool | None:
         """
         Updates an existing message using optimistic locking.
 
@@ -954,8 +2329,14 @@ class MessageStore:
         query = f"UPDATE messages SET {', '.join(current_fields_to_update_sql)} WHERE id = ? AND version = ? AND deleted = FALSE"  # nosec B608
 
         try:
-            with self._db.transaction() as conn:
-                current_db_version = self._db._get_current_db_version(conn, "messages", "id", message_id)
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
+                current_db_version = self._db._get_current_db_version(
+                    transaction_conn,
+                    "messages",
+                    "id",
+                    message_id,
+                )
 
                 if current_db_version != expected_version:
                     raise ConflictError(  # noqa: TRY003, TRY301
@@ -963,11 +2344,17 @@ class MessageStore:
                         entity="messages", entity_id=message_id
                     )
 
-                cursor = conn.execute(query, final_params_for_execute)
+                conversation_row = transaction_conn.execute(
+                    "SELECT conversation_id FROM messages WHERE id = ?",
+                    (message_id,),
+                ).fetchone()
+                cursor = transaction_conn.execute(query, final_params_for_execute)
 
                 if cursor.rowcount == 0:
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM messages WHERE id = ?",
-                                                      (message_id,))
+                    check_again_cursor = transaction_conn.execute(
+                        "SELECT version, deleted FROM messages WHERE id = ?",
+                        (message_id,),
+                    )
                     final_state = check_again_cursor.fetchone()
                     msg = f"Update for message ID {message_id} (expected v{expected_version}) affected 0 rows."
                     if not final_state:
@@ -978,6 +2365,10 @@ class MessageStore:
                         msg = f"Message ID {message_id} version changed to {final_state['version']} concurrently."
                     raise ConflictError(msg, entity="messages", entity_id=message_id)  # noqa: TRY301
 
+                self._advance_history_version(
+                    transaction_conn,
+                    str(self._row_value(conversation_row, "conversation_id")),
+                )
                 logger.info(
                     f"Updated message ID {message_id} from version {expected_version} to version {next_version_val}. Fields updated: {fields_to_update_sql if fields_to_update_sql else 'None'}")
                 return True
@@ -998,7 +2389,13 @@ class MessageStore:
     # Soft delete
     # ------------------------------------------------------------------
 
-    def soft_delete_message(self, message_id: str, expected_version: int) -> bool | None:
+    def soft_delete_message(
+        self,
+        message_id: str,
+        expected_version: int,
+        *,
+        conn: Any | None = None,
+    ) -> bool | None:
         """
         Soft-deletes a message using optimistic locking.
 
@@ -1026,12 +2423,20 @@ class MessageStore:
         params = (now, next_version_val, self._db.client_id, message_id, expected_version)
 
         try:
-            with self._db.transaction() as conn:
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
                 try:
-                    current_db_version = self._db._get_current_db_version(conn, "messages", "id", message_id)
+                    current_db_version = self._db._get_current_db_version(
+                        transaction_conn,
+                        "messages",
+                        "id",
+                        message_id,
+                    )
                 except ConflictError:
-                    check_status_cursor = conn.execute("SELECT deleted, version FROM messages WHERE id = ?",
-                                                       (message_id,))
+                    check_status_cursor = transaction_conn.execute(
+                        "SELECT deleted, version FROM messages WHERE id = ?",
+                        (message_id,),
+                    )
                     record_status = check_status_cursor.fetchone()
                     if record_status and record_status['deleted']:
                         logger.info(f"Message ID {message_id} already soft-deleted. Success (idempotent).")
@@ -1044,11 +2449,17 @@ class MessageStore:
                         entity="messages", entity_id=message_id
                     )
 
-                cursor = conn.execute(query, params)
+                conversation_row = transaction_conn.execute(
+                    "SELECT conversation_id FROM messages WHERE id = ?",
+                    (message_id,),
+                ).fetchone()
+                cursor = transaction_conn.execute(query, params)
 
                 if cursor.rowcount == 0:
-                    check_again_cursor = conn.execute("SELECT version, deleted FROM messages WHERE id = ?",
-                                                      (message_id,))
+                    check_again_cursor = transaction_conn.execute(
+                        "SELECT version, deleted FROM messages WHERE id = ?",
+                        (message_id,),
+                    )
                     final_state = check_again_cursor.fetchone()
                     msg = f"Soft delete for message ID {message_id} (expected v{expected_version}) affected 0 rows."
                     if not final_state:
@@ -1062,6 +2473,10 @@ class MessageStore:
                         msg = f"Soft delete for message ID {message_id} (expected v{expected_version}) affected 0 rows."
                     raise ConflictError(msg, entity="messages", entity_id=message_id)  # noqa: TRY301
 
+                self._advance_history_version(
+                    transaction_conn,
+                    str(self._row_value(conversation_row, "conversation_id")),
+                )
                 logger.info(
                     f"Soft-deleted message ID {message_id} (was v{expected_version}), new version {next_version_val}.")
                 return True
@@ -1109,12 +2524,14 @@ class MessageStore:
                 return []
 
             base_query = [
-                "SELECT m.*, ts_rank(m.messages_fts_tsv, to_tsquery('english', ?)) AS rank",
+                "SELECT m.*, c.title AS conversation_title, ts_rank(m.messages_fts_tsv, to_tsquery('english', ?)) AS rank",
                 "FROM messages m",
+                "JOIN conversations c ON c.id = m.conversation_id",
                 "WHERE m.deleted = FALSE",
+                "AND c.deleted = FALSE AND c.client_id = ?",
                 "AND m.messages_fts_tsv @@ to_tsquery('english', ?)",
             ]
-            params_list: list[Any] = [tsquery, tsquery]
+            params_list: list[Any] = [tsquery, self._db.client_id, tsquery]
 
             if conversation_id:
                 base_query.append("AND m.conversation_id = ?")
@@ -1133,12 +2550,16 @@ class MessageStore:
 
         safe_literal = content_query.replace('"', '""')
         safe_search_term = f'"{safe_literal}"' if '"' in content_query else safe_literal
+        if not safe_search_term.strip():
+            return []
         base_query = """
-                     SELECT m.*
+                     SELECT m.*, c.title AS conversation_title
                      FROM messages_fts, messages m
+                     JOIN conversations c ON c.id = m.conversation_id
                      WHERE messages_fts.rowid = m.rowid \
                        AND messages_fts MATCH ? \
                        AND m.deleted = FALSE \
+                       AND c.deleted = FALSE \
                      """
         params_list = [safe_search_term]
         if conversation_id:
@@ -1149,8 +2570,20 @@ class MessageStore:
         params_list.extend([limit, offset])
 
         try:
-            cursor = self._db.execute_query(base_query, tuple(params_list))
-            return [dict(row) for row in cursor.fetchall()]
+            try:
+                # Retain valid FTS syntax; normalize only prose parse failures.
+                rows = self._db.get_connection().execute(base_query, tuple(params_list)).fetchall()
+            except sqlite3.OperationalError as exc:
+                if not any(marker in str(exc).lower() for marker in ("fts5: syntax error", "no such column:")):
+                    raise
+                normalized = FTSQueryTranslator.normalize_query(content_query, "sqlite")
+                if normalized == safe_search_term:
+                    raise
+                params_list[0] = normalized
+                rows = self._db.get_connection().execute(base_query, tuple(params_list)).fetchall()
+            return [dict(row) for row in rows]
+        except sqlite3.Error as exc:
+            raise CharactersRAGDBError(f"Message search failed: {exc}") from exc  # noqa: TRY003
         except CharactersRAGDBError as e:
             logger.error("Error searching messages for content '{}': {}", safe_search_term, e)
             raise
@@ -1159,7 +2592,62 @@ class MessageStore:
     # Message metadata
     # ------------------------------------------------------------------
 
-    def add_message_metadata(self, message_id: str, tool_calls: Any | None = None, extra: Any | None = None) -> bool:
+    @staticmethod
+    def _metadata_json_value(value: Any) -> Any:
+        """Decode stored JSON text while accepting backend-decoded JSON values."""
+        return json.loads(value) if isinstance(value, str) else value
+
+    def _add_message_metadata_with_conn(
+        self,
+        message_id: str,
+        tool_calls: Any | None,
+        extra: Any | None,
+        conn: Any,
+        *,
+        advance_history: bool = True,
+    ) -> bool:
+        cursor = conn.execute(
+            "SELECT m.conversation_id, mm.message_id AS metadata_message_id, "
+            "mm.tool_calls_json, mm.extra_json "
+            "FROM messages m LEFT JOIN message_metadata mm ON mm.message_id = m.id "
+            "WHERE m.id = ?",
+            (message_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return False
+
+        metadata_message_id = self._row_value(row, "metadata_message_id", 1)
+        if metadata_message_id is not None:
+            stored_tool_calls = self._metadata_json_value(self._row_value(row, "tool_calls_json", 2))
+            stored_extra = self._metadata_json_value(self._row_value(row, "extra_json", 3))
+            if stored_tool_calls == tool_calls and stored_extra == extra:
+                return True
+
+        conn.execute(
+            "INSERT INTO message_metadata(message_id, tool_calls_json, extra_json, last_modified) "
+            "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(message_id) DO UPDATE SET tool_calls_json=excluded.tool_calls_json, "
+            "extra_json=excluded.extra_json, last_modified=CURRENT_TIMESTAMP",
+            (
+                message_id,
+                json.dumps(tool_calls) if tool_calls is not None else None,
+                json.dumps(extra) if extra is not None else None,
+            ),
+        )
+        if advance_history:
+            conversation_id = str(self._row_value(row, "conversation_id"))
+            self._advance_history_version(conn, conversation_id)
+        return True
+
+    def add_message_metadata(
+        self,
+        message_id: str,
+        tool_calls: Any | None = None,
+        extra: Any | None = None,
+        *,
+        conn: Any | None = None,
+    ) -> bool:
         """Upsert per-message metadata such as tool calls.
 
         Stores JSON-serialized metadata in an auxiliary table `message_metadata`.
@@ -1167,68 +2655,50 @@ class MessageStore:
         """
         try:
             self._db._ensure_message_metadata_table()
-            if self._db.backend_type == BackendType.SQLITE:
-                query = (
-                    "INSERT INTO message_metadata(message_id, tool_calls_json, extra_json, last_modified) "
-                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP) "
-                    "ON CONFLICT(message_id) DO UPDATE SET tool_calls_json=excluded.tool_calls_json, "
-                    "extra_json=excluded.extra_json, last_modified=CURRENT_TIMESTAMP"
-                )
-                self._db.execute_query(
-                    query,
-                    (
-                        message_id,
-                        json.dumps(tool_calls) if tool_calls is not None else None,
-                        json.dumps(extra) if extra is not None else None,
-                    ),
-                    commit=True,
-                )
-                return True
-
-            upsert = (
-                "INSERT INTO message_metadata(message_id, tool_calls_json, extra_json, last_modified) "
-                "VALUES (%s, %s, %s, NOW()) "
-                "ON CONFLICT (message_id) DO UPDATE SET tool_calls_json = EXCLUDED.tool_calls_json, "
-                "extra_json = EXCLUDED.extra_json, last_modified = NOW()"
-            )
-            self._db.backend.execute(
-                upsert,
-                (
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
+                return self._add_message_metadata_with_conn(
                     message_id,
-                    json.dumps(tool_calls) if tool_calls is not None else None,
-                    json.dumps(extra) if extra is not None else None,
-                ),
-            )
-            return True  # noqa: TRY300
+                    tool_calls,
+                    extra,
+                    transaction_conn,
+                )
         except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            if conn is not None:
+                raise
             logger.warning(f"add_message_metadata failed for message {message_id}: {e}")
             return False
 
-    def get_message_metadata(self, message_id: str) -> dict[str, Any] | None:
+    def get_message_metadata(
+        self,
+        message_id: str,
+        *,
+        conn: Any | None = None,
+    ) -> dict[str, Any] | None:
         """Fetch metadata for a message if present."""
         try:
             self._db._ensure_message_metadata_table()
-            if self._db.backend_type == BackendType.SQLITE:
-                cursor = self._db.execute_query(
-                    "SELECT tool_calls_json, extra_json, last_modified FROM message_metadata WHERE message_id = ?",
+            if conn is not None:
+                cursor = conn.execute(
+                    "SELECT tool_calls_json, extra_json, last_modified "
+                    "FROM message_metadata WHERE message_id = ?",
                     (message_id,),
                 )
-                row = cursor.fetchone()
-                if not row:
-                    return None
-                tc, ex, lm = row
             else:
-                result = self._db.backend.execute(
-                    "SELECT tool_calls_json, extra_json, last_modified FROM message_metadata WHERE message_id = %s",
-                    (message_id,)
+                cursor = self._db.execute_query(
+                    "SELECT tool_calls_json, extra_json, last_modified "
+                    "FROM message_metadata WHERE message_id = ?",
+                    (message_id,),
                 )
-                r = result.fetchone()
-                if not r:
-                    return None
-                tc, ex, lm = r
+            row = cursor.fetchone()
+            if not row:
+                return None
+            tc = self._row_value(row, "tool_calls_json")
+            ex = self._row_value(row, "extra_json", 1)
+            lm = self._row_value(row, "last_modified", 2)
             return {
-                "tool_calls": json.loads(tc) if tc else None,
-                "extra": json.loads(ex) if ex else None,
+                "tool_calls": self._metadata_json_value(tc) if tc is not None else None,
+                "extra": self._metadata_json_value(ex) if ex is not None else None,
                 "last_modified": lm,
             }
         except _CHACHA_NONCRITICAL_EXCEPTIONS:
@@ -1279,7 +2749,51 @@ class MessageStore:
         except _CHACHA_NONCRITICAL_EXCEPTIONS:
             return {}
 
-    def set_message_metadata_extra(self, message_id: str, extra: dict[str, Any], merge: bool = True) -> bool:
+    def _get_message_metadata_for_merge(
+        self,
+        message_id: str,
+        conn: Any,
+    ) -> dict[str, Any] | None:
+        """Read metadata under the row lock used by PostgreSQL merge writers."""
+        if self._db.backend_type == BackendType.POSTGRESQL:
+            conn.execute(
+                "INSERT INTO message_metadata(message_id, last_modified) "
+                "SELECT id, CURRENT_TIMESTAMP FROM messages WHERE id = ? "
+                "ON CONFLICT(message_id) DO NOTHING",
+                (message_id,),
+            )
+            query = (
+                "SELECT tool_calls_json, extra_json, last_modified "
+                "FROM message_metadata WHERE message_id = ? FOR UPDATE"
+            )
+        else:
+            query = (
+                "SELECT tool_calls_json, extra_json, last_modified "
+                "FROM message_metadata WHERE message_id = ?"
+            )
+
+        row = conn.execute(query, (message_id,)).fetchone()
+        if row is None:
+            # SQLite merge writers retain the existing create-on-first-write
+            # behavior; the downstream message join still rejects missing IDs.
+            return {} if self._db.backend_type == BackendType.SQLITE else None
+        tool_calls = self._row_value(row, "tool_calls_json")
+        extra = self._row_value(row, "extra_json", 1)
+        return {
+            "tool_calls": self._metadata_json_value(tool_calls) if tool_calls is not None else None,
+            "extra": self._metadata_json_value(extra) if extra is not None else None,
+            "last_modified": self._row_value(row, "last_modified", 2),
+        }
+
+    def set_message_metadata_extra(
+        self,
+        message_id: str,
+        extra: dict[str, Any],
+        merge: bool = True,
+        *,
+        conn: Any | None = None,
+        _advance_history: bool = True,
+    ) -> bool:
         """Set or merge structured extra metadata for a message.
 
         Expected shape for `extra`:
@@ -1293,25 +2807,38 @@ class MessageStore:
         tool_results are merged key-wise.
         """
         try:
-            current = self.get_message_metadata(message_id) or {}
-            current_extra = current.get('extra') or {}
-            if merge and isinstance(current_extra, dict) and isinstance(extra, dict):
-                merged = dict(current_extra)
-                # Merge tool_results specially
-                tr_existing = merged.get('tool_results') if isinstance(merged.get('tool_results'), dict) else {}
-                tr_incoming = extra.get('tool_results') if isinstance(extra.get('tool_results'), dict) else {}
-                if tr_existing or tr_incoming:
-                    merged['tool_results'] = {**tr_existing, **tr_incoming}
-                # Merge top-level keys (favor incoming)
-                for k, v in extra.items():
-                    if k == 'tool_results':
-                        continue
-                    merged[k] = v
-                new_extra = merged
-            else:
-                new_extra = extra
-            return self.add_message_metadata(message_id, tool_calls=current.get('tool_calls'), extra=new_extra)
+            self._db._ensure_message_metadata_table()
+            transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+            with transaction as transaction_conn:
+                current = self._get_message_metadata_for_merge(message_id, transaction_conn)
+                if current is None:
+                    return False
+                current_extra = current.get('extra') or {}
+                if merge and isinstance(current_extra, dict) and isinstance(extra, dict):
+                    merged = dict(current_extra)
+                    # Merge tool_results specially
+                    tr_existing = merged.get('tool_results') if isinstance(merged.get('tool_results'), dict) else {}
+                    tr_incoming = extra.get('tool_results') if isinstance(extra.get('tool_results'), dict) else {}
+                    if tr_existing or tr_incoming:
+                        merged['tool_results'] = {**tr_existing, **tr_incoming}
+                    # Merge top-level keys (favor incoming)
+                    for k, v in extra.items():
+                        if k == 'tool_results':
+                            continue
+                        merged[k] = v
+                    new_extra = merged
+                else:
+                    new_extra = extra
+                return self._add_message_metadata_with_conn(
+                    message_id,
+                    current.get('tool_calls'),
+                    new_extra,
+                    transaction_conn,
+                    advance_history=_advance_history,
+                )
         except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
+            if conn is not None:
+                raise
             logger.warning(f"set_message_metadata_extra failed for {message_id}: {e}")
             return False
 
@@ -1344,27 +2871,11 @@ class MessageStore:
         Returns:
             bool: True if successful, False otherwise
         """
-        try:
-            # Get current metadata to preserve other extra fields
-            current = self.get_message_metadata(message_id) or {}
-            current_extra = current.get('extra') or {}
-
-            if merge and isinstance(current_extra, dict):
-                # Merge: preserve existing extra fields, update rag_context
-                new_extra = dict(current_extra)
-                new_extra['rag_context'] = rag_context
-            else:
-                # Replace: only keep rag_context
-                new_extra = {'rag_context': rag_context}
-
-            return self.add_message_metadata(
-                message_id,
-                tool_calls=current.get('tool_calls'),
-                extra=new_extra
-            )
-        except _CHACHA_NONCRITICAL_EXCEPTIONS as e:
-            logger.warning(f"set_message_rag_context failed for {message_id}: {e}")
-            return False
+        return self.set_message_metadata_extra(
+            message_id,
+            {"rag_context": rag_context},
+            merge=merge,
+        )
 
     def get_message_rag_context(self, message_id: str) -> dict[str, Any] | None:
         """

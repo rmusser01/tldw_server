@@ -75,32 +75,34 @@ def test_authnz_backup_path_normalizes_windows_sqlite_url(monkeypatch):
 
 
 async def _seed_authnz_data() -> int:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, is_postgres_backend
+    """Seed one user and an audit row, and return the user id.
+
+    The user is created through UsersDB rather than a raw INSERT. username,
+    email and is_active are profile-visible columns, and
+    profile_user_write_guard rejects raw writes that touch them on a managed
+    AuthNZ connection -- so the direct INSERT this used to do now raises
+    ProfileUserWriteRejected.
+    """
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
     pool = await get_db_pool()
     username = "bundle_user"
     email = "bundle_user@example.com"
-    if await is_postgres_backend():
-        await pool.execute(
-            """
-            INSERT INTO users (uuid, username, email, password_hash, is_active)
-            VALUES (?,?,?,?,1)
-            ON CONFLICT (username) DO NOTHING
-            """,
-            str(uuid.uuid4()),
-            username,
-            email,
-            "x",
-        )
-    else:
-        await pool.execute(
-            "INSERT OR IGNORE INTO users (uuid, username, email, password_hash, is_active) VALUES (?,?,?,?,1)",
-            str(uuid.uuid4()),
-            username,
-            email,
-            "x",
-        )
+    users_db = UsersDB(pool)
+    await users_db.initialize()
     user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", username)
+    if user_id is None:
+        created = await users_db.create_user(
+            username=username,
+            email=email,
+            password_hash="x",
+            role="user",
+            is_active=True,
+            is_superuser=False,
+            uuid_value=uuid.uuid4(),
+        )
+        user_id = created["id"]
     await pool.execute(
         "INSERT INTO audit_logs (user_id, action, resource_type, resource_id, ip_address, details) VALUES (?,?,?,?,?,?)",
         int(user_id),

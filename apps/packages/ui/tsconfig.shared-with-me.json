@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "vitest.setup.ts",
+    "src/ambient.d.ts",
+    "src/wxt-augment.d.ts",
+    "src/components/Option/SharedWithMe.tsx",
+    "src/components/Option/__tests__/SharedWithMe.states.test.tsx",
+    "src/components/Option/__tests__/SharedWithMe.research-workspace-route.test.tsx"
+  ]
+}

@@ -125,14 +125,15 @@ def _route_with_query(base_route: str, params: Mapping[str, Any]) -> str:
 
 
 def _build_note_route(source_id: str, locator: dict[str, Any] | str | None) -> tuple[str, str]:
-    base_route = f"/notes/{source_id}"
+    base_route = "/notes"
+    source_query = {"source_ref_id": source_id}
     if locator is None:
-        return "workspace_route", base_route
+        return "workspace_route", _route_with_query(base_route, source_query)
     if isinstance(locator, Mapping):
         if locator:
-            return "exact_locator", _route_with_query(base_route, locator)
-        return "workspace_route", base_route
-    return "exact_locator", _route_with_query(base_route, {"locator": locator})
+            return "exact_locator", _route_with_query(base_route, {**locator, **source_query})
+        return "workspace_route", _route_with_query(base_route, source_query)
+    return "exact_locator", _route_with_query(base_route, {"locator": locator, **source_query})
 
 
 def _build_media_route(source_id: str, locator: dict[str, Any] | str | None) -> tuple[str, str]:

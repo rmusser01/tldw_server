@@ -4,6 +4,14 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
 
 
+def test_catalog_llama_alias_uses_the_same_adapter_and_credential_identity():
+    from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+
+    registry = get_registry()
+    assert canonical_provider_name("llama") == "llama.cpp"
+    assert registry.resolve_provider_name("llama") == "llama.cpp"
+
+
 def test_registry_default_adapters_initialize():
 
 

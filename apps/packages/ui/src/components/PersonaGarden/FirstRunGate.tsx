@@ -6,6 +6,7 @@ type FirstRunGateProps = {
   children: React.ReactNode
   onStartSetup: () => void
   bypass?: boolean
+  allowCompletedSetup?: boolean
 }
 
 const DISMISSED_KEY = "assistant_setup_dismissed"
@@ -22,9 +23,10 @@ const DISMISSED_KEY = "assistant_setup_dismissed"
 export const FirstRunGate: React.FC<FirstRunGateProps> = ({
   children,
   onStartSetup,
-  bypass = false
+  bypass = false,
+  allowCompletedSetup = false
 }) => {
-  const { shouldShowSetup, loading } = useFirstRunCheck()
+  const { shouldShowSetup, loading } = useFirstRunCheck({ allowCompletedSetup, enabled: !bypass })
   const [dismissed, setDismissed] = React.useState(false)
 
   // While loading or if the user dismissed the overlay, render children

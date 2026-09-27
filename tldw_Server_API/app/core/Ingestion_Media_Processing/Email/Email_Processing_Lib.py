@@ -390,14 +390,15 @@ def process_email_task(
         elif content_text:
             result["chunks"] = [{"text": content_text, "metadata": {"chunk_num": 0}}]
 
-        # Analysis (optional; requires api_name/api_key)
-        if perform_analysis and api_name and api_key and result.get("chunks"):
+        # The shared analyzer resolves configured keys and supports keyless providers.
+        if perform_analysis and api_name and result.get("chunks"):
             try:
                 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
                 # Summarize entire content or first N chars
                 analysis_text = analyze(
                     api_name=api_name,
                     input_data=content_text,
+                    input_is_literal_text=True,
                     custom_prompt_arg=custom_prompt,
                     api_key=api_key,
                     recursive_summarization=summarize_recursively,

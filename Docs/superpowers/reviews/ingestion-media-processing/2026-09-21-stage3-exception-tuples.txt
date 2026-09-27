@@ -1,0 +1,150 @@
+# Per-file _*_NONCRITICAL_EXCEPTIONS tuples — core/Ingestion_Media_Processing (2026-09-21)
+# Column 1: as written.  Column 2: reduced to the minimal subclass-free set.
+# Reduction removes members already implied by another member (e.g. FileNotFoundError < OSError,
+# json.JSONDecodeError < ValueError, IndexError/KeyError < LookupError, UnicodeDecodeError < ValueError).
+
+Audio/Audio_Files.py:122  _AUDIO_FILES_NONCRITICAL_EXCEPTIONS
+    as written (17): OSError, ValueError, TypeError, KeyError, RuntimeError, AttributeError, ConnectionError, TimeoutError, json.JSONDecodeError, TranscriptionCancelled, TranscriptionConversionError, AudioDownloadError, AudioFileSizeError, AudioCookieError, AudioProcessingError, AudioTranscriptionError, AudioConversionError
+    reduced    (14): AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError, AudioConversionError, AudioCookieError, AudioDownloadError, AudioFileSizeError, AudioProcessingError, AudioTranscriptionError, TranscriptionCancelled, TranscriptionConversionError
+
+Audio/Audio_Streaming_Unified.py:79  _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS
+    as written (20): asyncio.CancelledError, asyncio.TimeoutError, AssertionError, AttributeError, ConnectionError, FileNotFoundError, ImportError, IndexError, KeyError, LookupError, NameError, OSError, PermissionError, RuntimeError, TimeoutError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, WebSocketDisconnect
+    reduced    (11): AssertionError, AttributeError, ImportError, LookupError, NameError, OSError, RuntimeError, TypeError, ValueError, asyncio.CancelledError, WebSocketDisconnect
+    !! BaseException-derived, NOT caught by `except Exception`: asyncio.CancelledError
+
+Audio/Audio_Transcription_Lib.py:92  _AUDIO_TRANSCRIPTION_NONCRITICAL_EXCEPTIONS
+    as written (22): asyncio.CancelledError, asyncio.TimeoutError, AssertionError, AttributeError, ConnectionError, FileNotFoundError, ImportError, IndexError, KeyError, LookupError, OSError, PermissionError, RuntimeError, TimeoutError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, subprocess.SubprocessError, DiarizationError, CancelCheckError, TranscriptionCancelled
+    reduced    (13): AssertionError, AttributeError, ImportError, LookupError, OSError, RuntimeError, TypeError, ValueError, asyncio.CancelledError, subprocess.SubprocessError, CancelCheckError, DiarizationError, TranscriptionCancelled
+    !! BaseException-derived, NOT caught by `except Exception`: asyncio.CancelledError
+
+Audio/Audio_Transcription_Nemo.py:97  _NEMO_NONCRITICAL_EXCEPTIONS
+    as written (9): AssertionError, AttributeError, ConnectionError, LookupError, OSError, RuntimeError, TimeoutError, TypeError, ValueError
+    reduced    (7): AssertionError, AttributeError, LookupError, OSError, RuntimeError, TypeError, ValueError
+
+Audio/Audio_Transcription_Qwen3ASR.py:56  _QWEN3_ASR_NONCRITICAL_EXCEPTIONS
+    as written (7): AttributeError, ImportError, LookupError, OSError, RuntimeError, TypeError, ValueError
+    reduced    (7): AttributeError, ImportError, LookupError, OSError, RuntimeError, TypeError, ValueError
+
+Audio/Diarization_Lib.py:33  _DIARIZATION_NONCRITICAL_EXCEPTIONS
+    as written (15): AssertionError, AttributeError, ConnectionError, FileNotFoundError, ImportError, IndexError, KeyError, LookupError, OSError, PermissionError, RuntimeError, TimeoutError, TypeError, UnicodeDecodeError, ValueError
+    reduced    (8): AssertionError, AttributeError, ImportError, LookupError, OSError, RuntimeError, TypeError, ValueError
+
+Audio/Parakeet_Core_Streaming/transcriber.py:33  _PARAKEET_TRANSCRIBER_NONCRITICAL_EXCEPTIONS
+    as written (12): AttributeError, ConnectionError, ImportError, LookupError, ModuleNotFoundError, OSError, RuntimeError, TimeoutError, TypeError, UnicodeError, ValueError, binascii.Error
+    reduced    (7): AttributeError, ImportError, LookupError, OSError, RuntimeError, TypeError, ValueError
+
+Audio/Parakeet_Core_Streaming/ws_server.py:41  _PARAKEET_WS_NONCRITICAL_EXCEPTIONS
+    as written (16): AssertionError, AttributeError, ConnectionError, FileNotFoundError, ImportError, IndexError, KeyError, LookupError, OSError, PermissionError, RuntimeError, TimeoutError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError
+    reduced    (8): AssertionError, AttributeError, ImportError, LookupError, OSError, RuntimeError, TypeError, ValueError
+
+Audio/stt_provider_adapter.py:174  _STT_PROVIDER_NONCRITICAL_EXCEPTIONS
+    as written (6): AttributeError, LookupError, OSError, RuntimeError, TypeError, ValueError
+    reduced    (6): AttributeError, LookupError, OSError, RuntimeError, TypeError, ValueError
+
+Books/Book_Processing_Lib.py:80  _BOOK_PROCESSING_NONCRITICAL_EXCEPTIONS
+    as written (21): AssertionError, AttributeError, ChunkingError, ConnectionError, EOFError, ET.ParseError, FileNotFoundError, ImportError, IndexError, InvalidChunkingMethodError, KeyError, LookupError, OSError, PermissionError, RuntimeError, TimeoutError, TypeError, UnicodeDecodeError, ValueError, zipfile.BadZipFile, zipfile.LargeZipFile
+    reduced    (14): AssertionError, AttributeError, EOFError, ImportError, LookupError, OSError, RuntimeError, TypeError, ValueError, zipfile.BadZipFile, zipfile.LargeZipFile, ChunkingError, ET.ParseError, InvalidChunkingMethodError
+
+Email/Email_Processing_Lib.py:37  _EMAIL_NONCRITICAL_EXCEPTIONS
+    as written (17): AssertionError, AttributeError, ConnectionError, FileNotFoundError, ImportError, IndexError, KeyError, LookupError, OSError, PermissionError, RuntimeError, TimeoutError, TypeError, ValueError, UnicodeDecodeError, mailbox.Error, zipfile.BadZipFile
+    reduced    (10): AssertionError, AttributeError, ImportError, LookupError, OSError, RuntimeError, TypeError, ValueError, mailbox.Error, zipfile.BadZipFile
+
+OCR/backends/chatllm_ocr.py:30  _CHATLLM_NONCRITICAL_EXCEPTIONS
+    as written (9): AttributeError, ConnectionError, FileNotFoundError, OSError, RuntimeError, TimeoutError, TypeError, ValueError, json.JSONDecodeError
+    reduced    (5): AttributeError, OSError, RuntimeError, TypeError, ValueError
+
+OCR/backends/deepseek_ocr.py:31  _DEEPSEEK_NONCRITICAL_EXCEPTIONS
+    as written (7): OSError, ValueError, TypeError, KeyError, RuntimeError, AttributeError, ImportError
+    reduced    (7): AttributeError, ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError
+
+OCR/backends/dolphin_ocr.py:26  _DOLPHIN_NONCRITICAL_EXCEPTIONS
+    as written (7): AttributeError, LookupError, OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError
+    reduced    (6): AttributeError, LookupError, OSError, RuntimeError, TypeError, ValueError
+
+OCR/backends/hunyuan_ocr.py:25  _HUNYUAN_NONCRITICAL_EXCEPTIONS
+    as written (7): AttributeError, LookupError, OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError
+    reduced    (6): AttributeError, LookupError, OSError, RuntimeError, TypeError, ValueError
+
+OCR/backends/llamacpp_ocr.py:38  _LLAMACPP_NONCRITICAL_EXCEPTIONS
+    as written (9): AttributeError, ConnectionError, FileNotFoundError, OSError, RuntimeError, TimeoutError, TypeError, ValueError, json.JSONDecodeError
+    reduced    (5): AttributeError, OSError, RuntimeError, TypeError, ValueError
+
+OCR/backends/nemotron_parse.py:35  _NEMOTRON_NONCRITICAL_EXCEPTIONS
+    as written (16): AssertionError, AttributeError, ConnectionError, FileNotFoundError, ImportError, IndexError, KeyError, LookupError, OSError, PermissionError, RuntimeError, TimeoutError, TypeError, UnicodeDecodeError, ValueError, json.JSONDecodeError
+    reduced    (8): AssertionError, AttributeError, ImportError, LookupError, OSError, RuntimeError, TypeError, ValueError
+
+PDF/PDF_Processing_Lib.py:40  _PDF_NONCRITICAL_EXCEPTIONS
+    as written (15): AssertionError, AttributeError, ConnectionError, FileNotFoundError, ImportError, IndexError, KeyError, LookupError, OSError, PermissionError, RuntimeError, TimeoutError, TypeError, UnicodeDecodeError, ValueError
+    reduced    (8): AssertionError, AttributeError, ImportError, LookupError, OSError, RuntimeError, TypeError, ValueError
+
+Plaintext/Plaintext_Files.py:49  _PLAINTEXT_NONCRITICAL_EXCEPTIONS
+    as written (8): AttributeError, LookupError, OSError, RuntimeError, TypeError, UnicodeError, ValueError, json.JSONDecodeError
+    reduced    (6): AttributeError, LookupError, OSError, RuntimeError, TypeError, ValueError
+
+Upload_Sink.py:40  _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS
+    as written (8): OSError, ValueError, TypeError, KeyError, RuntimeError, AttributeError, ConnectionError, TimeoutError
+    reduced    (6): AttributeError, KeyError, OSError, RuntimeError, TypeError, ValueError
+
+Upload_Sink.py:53  _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS
+    as written (2): *_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS, _puremagic_error
+    reduced    (2): *_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS, _puremagic_error
+
+VLM/registry.py:5  _BACKEND_NONCRITICAL_EXCEPTIONS
+    as written (6): AttributeError, ImportError, OSError, RuntimeError, TypeError, ValueError
+    reduced    (6): AttributeError, ImportError, OSError, RuntimeError, TypeError, ValueError
+
+Video/Video_DL_Ingestion_Lib.py:154  _VIDEO_NONCRITICAL_EXCEPTIONS
+    as written (16): AssertionError, AttributeError, ConnectionError, FileNotFoundError, ImportError, IndexError, json.JSONDecodeError, KeyError, LookupError, OSError, PermissionError, RuntimeError, TimeoutError, TypeError, UnicodeDecodeError, ValueError
+    reduced    (8): AssertionError, AttributeError, ImportError, LookupError, OSError, RuntimeError, TypeError, ValueError
+
+chunking_options.py:60  _CHUNKING_OPTIONS_NONCRITICAL_EXCEPTIONS
+    as written (12): AssertionError, AttributeError, ConnectionError, ImportError, KeyError, LookupError, OSError, RuntimeError, TimeoutError, TypeError, ValueError, json.JSONDecodeError
+    reduced    (8): AssertionError, AttributeError, ImportError, LookupError, OSError, RuntimeError, TypeError, ValueError
+
+download_utils.py:34  _DOWNLOAD_UTILS_NONCRITICAL_EXCEPTIONS
+    as written (12): AssertionError, AttributeError, ConnectionError, ImportError, KeyError, LookupError, OSError, RuntimeError, TimeoutError, TypeError, ValueError, UnicodeDecodeError
+    reduced    (8): AssertionError, AttributeError, ImportError, LookupError, OSError, RuntimeError, TypeError, ValueError
+
+persistence.py:83  _PERSISTENCE_NONCRITICAL_EXCEPTIONS
+    as written (21): asyncio.CancelledError, AssertionError, AttributeError, ConnectionError, FileNotFoundError, IndexError, KeyError, LookupError, OSError, PermissionError, RuntimeError, TimeoutError, TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError, sqlite3.Error, HTTPException, ConflictError, DatabaseError, InputError
+    reduced    (13): AssertionError, AttributeError, LookupError, OSError, RuntimeError, TypeError, ValueError, asyncio.CancelledError, sqlite3.Error, ConflictError, DatabaseError, HTTPException, InputError
+    !! BaseException-derived, NOT caught by `except Exception`: asyncio.CancelledError
+
+# total tuples: 26; distinct as-written sets: 21
+
+################################################################################
+# DEAD OPTIONAL-DEPENDENCY HANDLERS
+# `try:` blocks containing an `import`, guarded by a per-file tuple that does NOT
+# include ImportError. The graceful-degradation branch cannot execute; a genuinely
+# missing optional dependency propagates ModuleNotFoundError instead.
+# Generated by AST walk, 2026-09-21. 22 sites, 3 files.
+################################################################################
+Audio/Audio_Files.py:925   -> except _AUDIO_FILES_NONCRITICAL_EXCEPTIONS (935)
+Audio/Audio_Files.py:986   -> except _AUDIO_FILES_NONCRITICAL_EXCEPTIONS (1039)
+Audio/Audio_Files.py:1076  -> except _AUDIO_FILES_NONCRITICAL_EXCEPTIONS (1082)
+Audio/Audio_Files.py:1293  -> except _AUDIO_FILES_NONCRITICAL_EXCEPTIONS (1299)
+Upload_Sink.py:1098        -> except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS (1152)
+Upload_Sink.py:1100        -> except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS (1116)
+Upload_Sink.py:1135        -> except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS (1147)
+Upload_Sink.py:1167        -> except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS (1169)   [import-only body]
+persistence.py:1887        -> except _PERSISTENCE_NONCRITICAL_EXCEPTIONS (1891)   [import-only body]
+persistence.py:2453        -> except _PERSISTENCE_NONCRITICAL_EXCEPTIONS (2482)
+persistence.py:2508        -> except _PERSISTENCE_NONCRITICAL_EXCEPTIONS (2549)
+persistence.py:2699        -> except _PERSISTENCE_NONCRITICAL_EXCEPTIONS (2703)   [import-only body, # pragma: no cover]
+persistence.py:3057        -> except _PERSISTENCE_NONCRITICAL_EXCEPTIONS (3069)
+persistence.py:3125        -> except _PERSISTENCE_NONCRITICAL_EXCEPTIONS (3139)
+persistence.py:3282        -> except _PERSISTENCE_NONCRITICAL_EXCEPTIONS (3451)
+persistence.py:3332        -> except _PERSISTENCE_NONCRITICAL_EXCEPTIONS (3355)
+persistence.py:3849        -> except _PERSISTENCE_NONCRITICAL_EXCEPTIONS (3855)
+persistence.py:4157        -> except _PERSISTENCE_NONCRITICAL_EXCEPTIONS (4202)
+persistence.py:4879        -> except _PERSISTENCE_NONCRITICAL_EXCEPTIONS (4883)   [import-only body]
+persistence.py:4981        -> except _PERSISTENCE_NONCRITICAL_EXCEPTIONS (5027)
+persistence.py:5913        -> except _PERSISTENCE_NONCRITICAL_EXCEPTIONS (5920)
+persistence.py:6163        -> except _PERSISTENCE_NONCRITICAL_EXCEPTIONS (6170)
+
+# Tuples that DO include ImportError and are therefore correct here:
+#   _PDF_NONCRITICAL_EXCEPTIONS, _BOOK_PROCESSING_NONCRITICAL_EXCEPTIONS,
+#   _EMAIL_NONCRITICAL_EXCEPTIONS, _VIDEO_NONCRITICAL_EXCEPTIONS,
+#   _CHUNKING_OPTIONS_NONCRITICAL_EXCEPTIONS, _DOWNLOAD_UTILS_NONCRITICAL_EXCEPTIONS,
+#   _DEEPSEEK_NONCRITICAL_EXCEPTIONS, _NEMOTRON_NONCRITICAL_EXCEPTIONS,
+#   _BACKEND_NONCRITICAL_EXCEPTIONS (VLM), and the Audio streaming/diarization tuples.

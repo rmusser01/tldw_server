@@ -6,11 +6,11 @@ import os
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
-from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.cache_intents import (
     apply_billing_prompt_cache_intent,
     attach_cache_intent_metadata,
 )
+from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     finalize_stream,
@@ -58,8 +58,6 @@ else:
     )
 
 
-def _prefer_httpx_in_tests() -> bool:
-    return bool(os.getenv("PYTEST_CURRENT_TEST"))
 from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
 )
@@ -79,9 +77,6 @@ class AnthropicAdapter(ChatProvider):
         }
 
     def _use_native_http(self) -> bool:
-        import os
-        if os.getenv("PYTEST_CURRENT_TEST"):
-            return True
         v = (os.getenv("LLM_ADAPTERS_NATIVE_HTTP_ANTHROPIC") or "").strip().lower()
         if v in {"0", "false", "no", "off"}:
             return False
@@ -90,7 +85,6 @@ class AnthropicAdapter(ChatProvider):
         return True
 
     def _anthropic_base_url(self) -> str:
-        import os
         return os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1")
 
     def _resolve_base_url(self, request: dict[str, Any]) -> str:
@@ -106,6 +100,8 @@ class AnthropicAdapter(ChatProvider):
                 return base.strip()
         except _ANTHROPIC_NONCRITICAL_EXCEPTIONS:
             pass
+        if request.get("credentials_resolved") is True:
+            return "https://api.anthropic.com/v1"
         return self._anthropic_base_url()
 
     def _resolve_timeout(self, request: dict[str, Any], fallback: float | None) -> float:
@@ -385,8 +381,9 @@ class AnthropicAdapter(ChatProvider):
         return shaped
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
-        if _prefer_httpx_in_tests() or os.getenv("PYTEST_CURRENT_TEST") or self._use_native_http():
+        if self._use_native_http():
             api_key = request.get("api_key")
             url = f"{self._resolve_base_url(request).rstrip('/')}/messages"
             headers = self._headers(api_key)
@@ -401,12 +398,13 @@ class AnthropicAdapter(ChatProvider):
                     resp = client.post(url, headers=headers, json=payload)
                     resp.raise_for_status()
                     data = resp.json()
+                    self._raise_if_in_band_provider_error(data, phase="chat_response")
                     return attach_cache_intent_metadata(
                         self._normalize_to_openai_shape(data),
                         cache_intent_diagnostic,
                     )
             except _ANTHROPIC_NONCRITICAL_EXCEPTIONS as e:
-                raise self.normalize_error(e) from e
+                self._raise_sanitized_provider_failure(e, phase="chat")
         # If native HTTP is explicitly disabled, raise a clear error rather than
         # delegating to legacy paths to avoid recursion and mixed behaviors.
         raise RuntimeError("AnthropicAdapter native HTTP disabled by configuration")
@@ -437,8 +435,9 @@ class AnthropicAdapter(ChatProvider):
         return sse_data(payload)
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
-        if _prefer_httpx_in_tests() or os.getenv("PYTEST_CURRENT_TEST") or self._use_native_http():
+        if self._use_native_http():
             api_key = request.get("api_key")
             url = f"{self._resolve_base_url(request).rstrip('/')}/messages"
             headers = self._headers(api_key)
@@ -462,6 +461,10 @@ class AnthropicAdapter(ChatProvider):
                                 line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
                             except _ANTHROPIC_NONCRITICAL_EXCEPTIONS:
                                 line = str(raw)
+                            self._raise_if_in_band_provider_error(
+                                line,
+                                phase="stream_response",
+                            )
                             if is_done_line(line):
                                 if not done_sent:
                                     done_sent = True
@@ -554,7 +557,7 @@ class AnthropicAdapter(ChatProvider):
                         yield from finalize_stream(response=resp, done_already=done_sent)
                 return
             except _ANTHROPIC_NONCRITICAL_EXCEPTIONS as e:
-                raise self.normalize_error(e) from e
+                self._raise_sanitized_provider_failure(e, phase="stream")
         # If native HTTP is explicitly disabled, raise a clear error rather than
         # delegating to legacy paths to avoid recursion and mixed behaviors.
         raise RuntimeError("AnthropicAdapter native HTTP disabled by configuration")
@@ -567,44 +570,5 @@ class AnthropicAdapter(ChatProvider):
             yield item
 
     def normalize_error(self, exc: Exception):  # type: ignore[override]
-        from tldw_Server_API.app.core.LLM_Calls.error_utils import (
-            get_http_error_text,
-            get_http_status_from_exception,
-            is_http_status_error,
-            log_http_400_body,
-        )
-        if is_http_status_error(exc):
-            from tldw_Server_API.app.core.Chat.Chat_Deps import (
-                ChatAPIError,
-                ChatAuthenticationError,
-                ChatBadRequestError,
-                ChatProviderError,
-                ChatRateLimitError,
-            )
-            resp = getattr(exc, "response", None)
-            status = get_http_status_from_exception(exc)
-            body = None
-            try:
-                body = resp.json()
-            except _ANTHROPIC_NONCRITICAL_EXCEPTIONS:
-                body = None
-            log_http_400_body(self.name, exc, body)
-            detail = None
-            # Anthropic returns {"error": {"type": "...", "message": "..."}}
-            if isinstance(body, dict) and isinstance(body.get("error"), dict):
-                eobj = body["error"]
-                msg = (eobj.get("message") or "").strip()
-                typ = (eobj.get("type") or "").strip()
-                detail = (f"{typ} {msg}" if typ else msg) or str(exc)
-            else:
-                detail = get_http_error_text(exc)
-            if status in (400, 404, 422):
-                return ChatBadRequestError(provider=self.name, message=str(detail))
-            if status in (401, 403):
-                return ChatAuthenticationError(provider=self.name, message=str(detail))
-            if status == 429:
-                return ChatRateLimitError(provider=self.name, message=str(detail))
-            if status and 500 <= status < 600:
-                return ChatProviderError(provider=self.name, message=str(detail), status_code=status)
-            return ChatAPIError(provider=self.name, message=str(detail), status_code=status or 500)
+        """Delegate to the shared bounded error policy."""
         return super().normalize_error(exc)

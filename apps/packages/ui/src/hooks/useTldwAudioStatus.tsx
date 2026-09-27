@@ -80,6 +80,34 @@ const isReadyHealthStatus = (value?: string | null): boolean => {
   return normalized.length > 0 && READY_TTS_STATUSES.has(normalized)
 }
 
+const EXPLICITLY_UNAVAILABLE_TTS_STATUSES = new Set([
+  "disabled",
+  "failed",
+  "unavailable"
+])
+
+const getProviderHealthStatus = (
+  payload: AudioHealthResponse["data"],
+  provider: string | null
+): string => {
+  if (!payload || !provider) return ""
+  const details = payload.providers?.details
+  const detail = details
+    ? Object.entries(details).find(
+        ([key]) => toServerTtsProviderKey(key) === provider
+      )?.[1]
+    : undefined
+  const envelope = payload.capabilities_envelope?.find(
+    (entry) => toServerTtsProviderKey(entry.provider) === provider
+  )
+
+  return normalizeHealthStatus(
+    detail?.availability ??
+      envelope?.availability ??
+      detail?.status
+  )
+}
+
 const TTS_HEALTH_PROBE_INTERVAL_MS = 60_000
 const STT_HEALTH_PROBE_INTERVAL_MS = 45_000
 const HEALTH_PROBE_RETRY_ATTEMPTS = 1
@@ -203,16 +231,37 @@ export const useTldwAudioStatus = (options: Options = {}): AudioStatus => {
       }
       return fetchTldwVoices()
     },
-    enabled: shouldProbeVoices,
+    enabled:
+      shouldProbeVoices &&
+      !loading &&
+      !(
+        catalogProvider &&
+        hasTts &&
+        probeEnabled &&
+        ttsHealthQuery.isLoading
+      ) &&
+      !EXPLICITLY_UNAVAILABLE_TTS_STATUSES.has(
+        getProviderHealthStatus(ttsHealthQuery.data?.data, catalogProvider)
+      ),
     staleTime: 300_000,
     refetchOnWindowFocus: false
   })
 
   const voices = voicesQuery.data ?? []
+  const voicesWaitingForCapabilities = shouldProbeVoices && loading
+  const voicesWaitingForHealth = Boolean(
+    shouldProbeVoices &&
+      catalogProvider &&
+      hasTts &&
+      probeEnabled &&
+      ttsHealthQuery.isLoading
+  )
+  const voicesLoading =
+    voicesWaitingForCapabilities || voicesWaitingForHealth || voicesQuery.isLoading
   const voicesAvailable =
-    options.requireVoices && !voicesQuery.isLoading ? voices.length > 0 : null
+    options.requireVoices && !voicesLoading ? voices.length > 0 : null
   const voicesConfirmTts =
-    Boolean(options.requireVoices) && !voicesQuery.isLoading && voices.length > 0
+    Boolean(options.requireVoices) && !voicesLoading && voices.length > 0
 
   let ttsHealthState: AudioHealthState = "unknown"
   if (!hasTts) {
@@ -230,19 +279,9 @@ export const useTldwAudioStatus = (options: Options = {}): AudioStatus => {
     ttsHealthState = "unknown"
   } else if (ttsHealthQuery.data?.ok) {
     const healthPayload = ttsHealthQuery.data.data
-    const selectedProviderDetail =
-      selectedTtsProvider && healthPayload?.providers?.details
-        ? healthPayload.providers.details[selectedTtsProvider]
-        : undefined
-    const selectedProviderEnvelope = selectedTtsProvider
-      ? healthPayload?.capabilities_envelope?.find(
-          (entry) => toServerTtsProviderKey(entry.provider) === selectedTtsProvider
-        )
-      : undefined
-    const selectedProviderStatus = normalizeHealthStatus(
-      selectedProviderDetail?.availability ??
-        selectedProviderDetail?.status ??
-        selectedProviderEnvelope?.availability
+    const selectedProviderStatus = getProviderHealthStatus(
+      healthPayload,
+      selectedTtsProvider
     )
     const overallStatus = normalizeHealthStatus(healthPayload?.status)
     const overallReady = overallStatus ? isReadyHealthStatus(overallStatus) : true
@@ -273,7 +312,7 @@ export const useTldwAudioStatus = (options: Options = {}): AudioStatus => {
     ttsHealthState,
     ttsHealthLoading: probeEnabled ? ttsHealthQuery.isLoading : false,
     voices,
-    voicesLoading: probeEnabled ? voicesQuery.isLoading : false,
+    voicesLoading: probeEnabled ? voicesLoading : false,
     voicesAvailable
   }
 }

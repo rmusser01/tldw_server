@@ -11,12 +11,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install from pyproject (editable)
-COPY pyproject.toml /app/pyproject.toml
-COPY README.md /app/README.md
+# Install from pyproject with all declared local packages and legal inputs.
+COPY pyproject.toml README.md LICENSE /app/
+COPY LICENSES /app/LICENSES
 COPY tldw_Server_API /app/tldw_Server_API
-COPY Config_Files /app/Config_Files
+COPY apps/mcp-unified/src /app/apps/mcp-unified/src
+COPY packages/tldw_profile_core /app/packages/tldw_profile_core
+COPY tldw_Server_API/Config_Files /app/Config_Files
 RUN pip install --no-cache-dir -e .
+RUN python -c "import mcp_unified; import tldw_profile_core"
 
 ENV PYTHONUNBUFFERED=1
 ENV AUDIO_JOBS_WORKER_ENABLED=false

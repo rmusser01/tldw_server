@@ -5,22 +5,19 @@ import { describe, expect, it, vi } from "vitest"
 import { ComposerToolbar } from "../ComposerToolbar"
 
 const assistantSelectMock = vi.hoisted(() => vi.fn())
+const promptSelectMock = vi.hoisted(() => vi.fn())
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback || key
+    t: (key: string, fallback?: string | { defaultValue?: string }) =>
+      (typeof fallback === "string" ? fallback : fallback?.defaultValue) || key
   })
 }))
 
 vi.mock("antd", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  Modal: ({
-    open,
-    children
-  }: {
-    open?: boolean
-    children: React.ReactNode
-  }) => (open ? <div data-testid="toolbar-modal">{children}</div> : null)
+  Modal: ({ open, children }: { open?: boolean; children: React.ReactNode }) =>
+    open ? <div data-testid="toolbar-modal">{children}</div> : null
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -29,7 +26,10 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 vi.mock("@/components/Common/PromptSelect", () => ({
-  PromptSelect: () => <div data-testid="prompt-select" />
+  PromptSelect: (props: unknown) => {
+    promptSelectMock(props)
+    return <div data-testid="prompt-select" />
+  }
 }))
 
 vi.mock("@/components/Common/AssistantSelect", () => ({
@@ -61,7 +61,9 @@ vi.mock("@/components/Common/Button", () => ({
 
 vi.mock("../playground-features", () => ({
   ParameterPresets: () => <div data-testid="parameter-presets" />,
-  ParameterPresetsDropdown: () => <div data-testid="parameter-presets-dropdown" />,
+  ParameterPresetsDropdown: () => (
+    <div data-testid="parameter-presets-dropdown" />
+  ),
   SystemPromptTemplatesButton: () => <button type="button">Templates</button>,
   SystemPromptTemplatesModal: () => null,
   SessionCostEstimation: () => <div data-testid="session-cost" />
@@ -114,6 +116,7 @@ const createProps = (
   onDictationToggle: vi.fn(),
   onTemplateSelect: vi.fn(),
   selectedModel: null,
+  currentProvider: "openai",
   resolvedProviderKey: "openai",
   messages: [],
   selectedDocumentsCount: 0,
@@ -135,6 +138,82 @@ const createProps = (
 })
 
 describe("ComposerToolbar web search", () => {
+  it.each([
+    {
+      label: "legacy casual",
+      isProMode: false,
+      isMobile: false,
+      optionsExpanded: true
+    },
+    {
+      label: "desktop pro",
+      isProMode: true,
+      isMobile: false,
+      optionsExpanded: true
+    },
+    {
+      label: "mobile",
+      isProMode: false,
+      isMobile: true,
+      optionsExpanded: true
+    },
+    {
+      label: "collapsed mobile",
+      isProMode: false,
+      isMobile: true,
+      optionsExpanded: false
+    }
+  ])("does not render the external composer action for $label", (layout) => {
+    render(
+      <ComposerToolbar
+        {...createProps({
+          isProMode: layout.isProMode,
+          isMobile: layout.isMobile,
+          optionsExpanded: layout.optionsExpanded
+        })}
+      />
+    )
+
+    expect(
+      screen.queryByRole("button", { name: "Improve prompt" })
+    ).not.toBeInTheDocument()
+  })
+
+  it("passes the active chat route to system prompt assist", () => {
+    render(
+      <ComposerToolbar
+        {...createProps({
+          selectedModel: "gpt-5-mini",
+          currentProvider: "custom-openai",
+          serverChatId: null,
+          promptAssistContextKey: "local:history-42"
+        })}
+      />
+    )
+
+    expect(promptSelectMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selectedModel: "gpt-5-mini",
+        currentProvider: "custom-openai",
+        promptAssistContextKey: "local:history-42"
+      })
+    )
+  })
+
+  it("hands prompt model recovery to the existing Playground selector", () => {
+    const openListener = vi.fn()
+    window.addEventListener("tldw:open-model-selector", openListener)
+    render(<ComposerToolbar {...createProps()} />)
+
+    const promptProps = promptSelectMock.mock.calls.at(-1)?.[0] as {
+      onSelectModel?: () => void
+    }
+    promptProps.onSelectModel?.()
+
+    expect(openListener).toHaveBeenCalledTimes(1)
+    window.removeEventListener("tldw:open-model-selector", openListener)
+  })
+
   it("owns the dropdown assistant selector used by chat starter events", () => {
     render(<ComposerToolbar {...createProps()} />)
 
@@ -193,9 +272,7 @@ describe("ComposerToolbar web search", () => {
       />
     )
 
-    expect(
-      screen.getByRole("button", { name: "Attach image" })
-    ).toBeVisible()
+    expect(screen.getByRole("button", { name: "Attach image" })).toBeVisible()
     expect(screen.queryByText("Model selector")).toBeNull()
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull()
   })
@@ -457,7 +534,7 @@ describe("ComposerToolbar web search", () => {
     ).toBeNull()
   })
 
-  it("wraps casual controls below desktop while keeping the dense desktop row", () => {
+  it("wraps casual control groups to the available pane width at desktop sizes too", () => {
     render(<ComposerToolbar {...createProps()} />)
 
     const actionsRow = document.querySelector<HTMLElement>(
@@ -465,8 +542,13 @@ describe("ComposerToolbar web search", () => {
     )
     expect(actionsRow).not.toBeNull()
     expect(actionsRow?.className).toContain("flex-wrap")
-    expect(actionsRow?.className).toContain("lg:flex-nowrap")
-    expect(actionsRow?.className).toContain("lg:overflow-x-auto")
+    expect(actionsRow?.className).not.toContain("lg:flex-nowrap")
+    expect(actionsRow?.className).not.toContain("overflow-x-auto")
+    for (const name of ["Mode and context controls", "Run input controls"]) {
+      const group = screen.getByRole("group", { name })
+      expect(group).toHaveClass("flex-wrap", "[&>*]:shrink-0")
+      expect(group.className).not.toContain("lg:flex-nowrap")
+    }
   })
 
   it("keeps MCP in the casual actions row when advanced controls are expanded", () => {

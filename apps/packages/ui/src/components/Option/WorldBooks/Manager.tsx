@@ -57,6 +57,15 @@ import { WorldBookDetailPanel, type WorldBookDetailTabKey } from "./WorldBookDet
 
 export { WorldBookForm } from "./WorldBookForm"
 
+const isInaccessibleCharacterRelationship = (error: unknown): boolean => {
+  const candidate = error as
+    | { status?: unknown; response?: { status?: unknown } }
+    | null
+    | undefined
+  const status = candidate?.status ?? candidate?.response?.status
+  return status === 403 || status === 404
+}
+
 export const WorldBooksManager: React.FC = () => {
   const isOnline = useServerOnline()
   const { t } = useTranslation(["option"])
@@ -149,16 +158,24 @@ export const WorldBooksManager: React.FC = () => {
     enabled: isOnline
   })
 
-  const { data: characters } = useQuery({
+  const {
+    data: characters,
+    isLoading: charactersLoading,
+    isError: charactersError
+  } = useQuery({
     queryKey: ['tldw:listCharactersForWB'],
     queryFn: async () => {
       await tldwClient.initialize()
       return await tldwClient.listCharacters()
     },
-    enabled: isOnline
+    enabled: isOnline && attachmentsHydrationRequested
   })
 
-  const { data: attachmentsByBook, isLoading: attachmentsLoading } = useQuery({
+  const {
+    data: attachmentsByBook,
+    isLoading: attachmentRelationshipsLoading,
+    isError: attachmentRelationshipsError
+  } = useQuery({
     queryKey: ['tldw:worldBookAttachments', (characters || []).map((c: any) => c.id).join(',')],
     queryFn: async () => {
       if (!characters || characters.length === 0) return {}
@@ -166,10 +183,14 @@ export const WorldBooksManager: React.FC = () => {
       const results: Array<{ character: any; books: any[] }> = []
       for (const character of characters || []) {
         try {
-          const books = await tldwClient.listCharacterWorldBooks(character.id)
+          const books = await tldwClient.listCharacterWorldBooks(character.id, true)
           results.push({ character, books: books || [] })
-        } catch {
-          results.push({ character, books: [] })
+        } catch (error) {
+          if (isInaccessibleCharacterRelationship(error)) {
+            results.push({ character, books: [] })
+          } else {
+            throw error
+          }
         }
       }
       const map: Record<number, any[]> = {}
@@ -190,9 +211,18 @@ export const WorldBooksManager: React.FC = () => {
     enabled: isOnline && attachmentsHydrationRequested && !!characters && characters.length > 0
   })
 
+  const attachmentsLoading = charactersLoading || attachmentRelationshipsLoading
+  const attachmentsError = charactersError || attachmentRelationshipsError
+
   const requestAttachmentHydration = React.useCallback(() => {
     setAttachmentsHydrationRequested(true)
   }, [])
+
+  const retryAttachmentHydration = React.useCallback(() => {
+    requestAttachmentHydration()
+    void qc.invalidateQueries({ queryKey: ["tldw:listCharactersForWB"] })
+    void qc.invalidateQueries({ queryKey: ["tldw:worldBookAttachments"] })
+  }, [qc, requestAttachmentHydration])
 
   const maxRecursiveDepth =
     typeof worldBookRuntimeConfig?.max_recursive_depth === "number" &&
@@ -1292,6 +1322,9 @@ export const WorldBooksManager: React.FC = () => {
                     attachedCharacters={selectedWorldBookAttached}
                     allWorldBooks={(data || []) as any[]}
                     allCharacters={(characters || []) as any[]}
+                    attachmentsLoading={attachmentsLoading}
+                    attachmentsError={attachmentsError}
+                    onRetryAttachments={retryAttachmentHydration}
                     activeTab={detailActiveTab}
                     onActiveTabChange={setDetailActiveTab}
                     onUpdateWorldBook={updateWB}
@@ -1348,6 +1381,9 @@ export const WorldBooksManager: React.FC = () => {
                   attachedCharacters={selectedWorldBookAttached}
                   allWorldBooks={(data || []) as any[]}
                   allCharacters={(characters || []) as any[]}
+                  attachmentsLoading={attachmentsLoading}
+                  attachmentsError={attachmentsError}
+                  onRetryAttachments={retryAttachmentHydration}
                   activeTab={detailActiveTab}
                   onActiveTabChange={setDetailActiveTab}
                   onUpdateWorldBook={updateWB}
@@ -1404,6 +1440,9 @@ export const WorldBooksManager: React.FC = () => {
                     attachedCharacters={selectedWorldBookAttached}
                     allWorldBooks={(data || []) as any[]}
                     allCharacters={(characters || []) as any[]}
+                    attachmentsLoading={attachmentsLoading}
+                    attachmentsError={attachmentsError}
+                    onRetryAttachments={retryAttachmentHydration}
                     activeTab={detailActiveTab}
                     onActiveTabChange={setDetailActiveTab}
                     onUpdateWorldBook={updateWB}

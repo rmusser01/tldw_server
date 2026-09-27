@@ -54,10 +54,9 @@ class AuthnzRbacRepo:
         try:
             return db.get_user_permissions(user_id)
         except Exception as exc:  # pragma: no cover - surfaced via callers
-            logger.error(
-                'AuthnzRbacRepo.get_effective_permissions failed for user_id={}: {}',
+            logger.bind(error_type=type(exc).__name__).error(
+                'AuthnzRbacRepo.get_effective_permissions failed for user_id={}',
                 user_id,
-                exc,
             )
             raise
 
@@ -117,10 +116,9 @@ class AuthnzRbacRepo:
             )
             return [dict(row) for row in result.rows]
         except Exception as exc:  # pragma: no cover - surfaced via callers
-            logger.error(
-                'AuthnzRbacRepo.get_user_roles failed for user_id={}: {}',
+            logger.bind(error_type=type(exc).__name__).error(
+                'AuthnzRbacRepo.get_user_roles failed for user_id={}',
                 user_id,
-                exc,
             )
             raise
 

@@ -4,7 +4,7 @@
   "manifest_items_sha256": "cef8c83a2f6cf0640d88e6300f54205363654d800927263c2d918060e6a28339",
   "closure_policy_version": "credentialless-public-v2",
   "generated_at_utc": "2026-07-15T20:46:48Z",
-  "rows_sha256": "1d607d9b7e3a14aa47f773bf3248f5ecfcdf3dcbf9934ee36999fcfb555881c9",
+  "rows_sha256": "f4dcb1208974fae7c47c72c3fa8328e2296c5a50b1b083bae3186f585bdc9bb6",
   "rows": [
     {
       "inventory_id": "sourclip-2026-07-13-0001",
@@ -1794,24 +1794,24 @@
       "source_snapshot_sha256": "cbc4a8445252460ef4502924edf409c7fc8098eb6987745b83cc426bd2fc8e73",
       "resolution": "mapped",
       "resolution_code": "credentialless_route_identified",
-      "resolution_reason": "ClinicalTrials.gov's public API v2 supports study search, paging, and structured record retrieval without credentials.",
+      "resolution_reason": "ClinicalTrials.gov API v2 now has a fixture-proven bounded general-search adapter that returns a modified metadata projection without retaining provider links or markup; live and surface certification remain pending.",
       "review_status": "reviewed",
       "route_kinds": [
         "direct"
       ],
       "route_candidates": [
         {
-          "route_candidate_id": "clinicaltrials_gov_clinicaltrials_gov_api_v2_direct",
+          "route_candidate_id": "clinicaltrials_gov_studies_search_direct",
           "route_kind": "direct",
           "credential_requirement": "none",
           "planned_backend_id": "clinicaltrials_gov_api_v2",
           "query_modes": [
-            "structured_query"
+            "general_free_text"
           ],
           "source_constraint": "native_corpus",
           "source_constraint_predicate": null,
           "attribution_basis": "native_response",
-          "coverage_notes": "ClinicalTrials.gov's public API v2 supports study search, paging, and structured record retrieval without credentials.",
+          "coverage_notes": "Fixture-only execution proves two bounded ClinicalTrials.gov API v2 pages and a modified study-metadata projection; provider links, markup, cookies, credentials, and raw records are not retained.",
           "evidence_reference": "https://clinicaltrials.gov/data-api/api"
         }
       ],
@@ -1825,8 +1825,8 @@
         "standalone_search",
         "deep_research"
       ],
-      "implementation_state": "planned",
-      "fixture_state": "not_run",
+      "implementation_state": "implemented",
+      "fixture_state": "passed",
       "live_state": "not_run",
       "canonical_targets": [
         "clinicaltrials_gov"
@@ -1847,6 +1847,12 @@
           "reference_type": "https_url",
           "reference": "https://clinicaltrials.gov/data-api/api",
           "claim": "ClinicalTrials.gov's public API v2 supports study search, paging, and structured record retrieval without credentials."
+        },
+        {
+          "kind": "implementation",
+          "reference_type": "https_url",
+          "reference": "https://github.com/rmusser01/tldw_server/blob/2d0f968a7f45d2f6a7ed9b73fed4bfdadc204b29/tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
+          "claim": "Checked-in synthetic fixtures prove the bounded ClinicalTrials.gov adapter and modified metadata projection without live or product-surface certification."
         }
       ],
       "ownership": {
@@ -1854,7 +1860,7 @@
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
         "follow_up_task": "TASK-12968.6",
-        "revisit_trigger": "Implement and fixture/live-certify this candidate route before presenting it as ready."
+        "revisit_trigger": "Run live and product-surface certification before presenting this implemented shadow route as user-ready."
       }
     },
     {
@@ -1862,39 +1868,38 @@
       "source_snapshot_sha256": "34d7fc36d4b64b2dca99c0472ad3d804c7ed9ff5a96574a8146947133913b32b",
       "resolution": "mapped",
       "resolution_code": "credentialless_route_identified",
-      "resolution_reason": "NCBI E-utilities supports credentialless PMC database search plus summary and record retrieval at public baseline rates.",
+      "resolution_reason": "NCBI ESearch and ESummary now have a fixture-proven bounded PMC metadata adapter with no abstract, snippet, EFetch, full text, or retained provider markup; live and surface certification remain pending.",
       "review_status": "reviewed",
       "route_kinds": [
         "direct"
       ],
       "route_candidates": [
         {
-          "route_candidate_id": "pubmed_central_ncbi_eutils_pmc_direct",
+          "route_candidate_id": "pubmed_central_esearch_summary_direct",
           "route_kind": "direct",
           "credential_requirement": "none",
           "planned_backend_id": "ncbi_eutils_pmc",
           "query_modes": [
-            "structured_query"
+            "general_free_text"
           ],
           "source_constraint": "native_corpus",
           "source_constraint_predicate": null,
           "attribution_basis": "native_response",
-          "coverage_notes": "NCBI E-utilities supports credentialless PMC database search plus summary and record retrieval at public baseline rates.",
+          "coverage_notes": "Fixture-only ESearch and conditional ESummary execution proves bounded PMC citation metadata; the route performs no EFetch and returns no abstract, snippet, full text, or retained provider markup.",
           "evidence_reference": "https://www.ncbi.nlm.nih.gov/books/NBK25501/"
         }
       ],
       "capabilities": [
         "search",
         "detail",
-        "metadata",
-        "snippet"
+        "metadata"
       ],
       "declared_surfaces": [
         "standalone_search",
         "deep_research"
       ],
-      "implementation_state": "planned",
-      "fixture_state": "not_run",
+      "implementation_state": "implemented",
+      "fixture_state": "passed",
       "live_state": "not_run",
       "canonical_targets": [
         "pubmed_central"
@@ -1915,6 +1920,12 @@
           "reference_type": "https_url",
           "reference": "https://www.ncbi.nlm.nih.gov/books/NBK25501/",
           "claim": "NCBI E-utilities supports credentialless PMC database search plus summary and record retrieval at public baseline rates."
+        },
+        {
+          "kind": "implementation",
+          "reference_type": "https_url",
+          "reference": "https://github.com/rmusser01/tldw_server/blob/2d0f968a7f45d2f6a7ed9b73fed4bfdadc204b29/tldw_Server_API/tests/Research/test_research_discovery_clinicaltrials_pubmed_central.py",
+          "claim": "Checked-in synthetic fixtures prove bounded PMC ESearch and ESummary metadata execution without live, abstract, full-text, or product-surface certification."
         }
       ],
       "ownership": {
@@ -1922,7 +1933,7 @@
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
         "follow_up_task": "TASK-12968.6",
-        "revisit_trigger": "Implement and fixture/live-certify this candidate route before presenting it as ready."
+        "revisit_trigger": "Run live and product-surface certification before presenting this implemented shadow route as user-ready."
       }
     },
     {
@@ -2076,8 +2087,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -3518,8 +3529,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -5542,8 +5553,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -5628,8 +5639,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -5781,8 +5792,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -6149,8 +6160,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -6318,8 +6329,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -6404,8 +6415,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -6491,8 +6502,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -6890,8 +6901,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -6977,8 +6988,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -7315,8 +7326,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969, document an official authenticated API or browser contract, and approve an owner-scoped authenticated-discovery program before defining a route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100, document an official authenticated API or browser contract, and approve an owner-scoped authenticated-discovery program before defining a route."
       }
     },
     {
@@ -7941,8 +7952,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -9279,8 +9290,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -9366,8 +9377,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -11945,8 +11956,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -12005,8 +12016,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -12270,8 +12281,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -12330,8 +12341,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -12390,8 +12401,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -12450,8 +12461,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -12510,8 +12521,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -12794,8 +12805,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -13066,8 +13077,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -13126,8 +13137,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -13983,8 +13994,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -14043,8 +14054,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -14386,8 +14397,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -15661,8 +15672,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -15721,8 +15732,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -15781,8 +15792,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -15841,8 +15852,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -15901,8 +15912,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -15961,8 +15972,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     },
     {
@@ -16088,8 +16099,8 @@
         "reviewer": "codex-task-12968.1-source-triage",
         "review_date": "2026-07-13",
         "workstream": "TASK-12968.1",
-        "follow_up_task": "TASK-12969",
-        "revisit_trigger": "Complete TASK-12969 and approve an owner-scoped authenticated-discovery program before enabling this route."
+        "follow_up_task": "TASK-13100",
+        "revisit_trigger": "Complete TASK-13100 and approve an owner-scoped authenticated-discovery program before enabling this route."
       }
     }
   ],

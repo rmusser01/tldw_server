@@ -50,6 +50,8 @@ class RecurringSchedulerHandles:
     admin_backup_sched_task: Any | None = None
     companion_reflection_sched_task: Any | None = None
     reminders_sched_task: Any | None = None
+    automation_definitions_sched_task: Any | None = None
+    scheduled_tasks_recurring_question_sched_task: Any | None = None
     connectors_sync_sched_task: Any | None = None
 
 
@@ -105,6 +107,20 @@ def provide_recurring_scheduler_worker_specs(
             enabled=_env_enabled_predicate("REMINDERS_SCHEDULER_ENABLED"),
             starter=_start_reminders_scheduler_service,
             stopper=_stop_reminders_scheduler_service,
+        ),
+        _recurring_scheduler_spec(
+            name="automation_definitions_sched_task",
+            task_name="automation_scheduler",
+            enabled=_env_enabled_predicate("SCHEDULED_TASKS_AUTOMATION_SCHEDULER_ENABLED"),
+            starter=_start_automation_scheduler_service,
+            stopper=_stop_automation_scheduler_service,
+        ),
+        _recurring_scheduler_spec(
+            name="scheduled_tasks_recurring_question_sched_task",
+            task_name="scheduled_tasks_recurring_question_scheduler",
+            enabled=_env_enabled_predicate("SCHEDULED_TASKS_RECURRING_QUESTION_SCHEDULER_ENABLED"),
+            starter=_start_scheduled_tasks_recurring_question_scheduler_service,
+            stopper=_stop_scheduled_tasks_recurring_question_scheduler_service,
         ),
         _recurring_scheduler_spec(
             name="connectors_sync_sched_task",
@@ -196,6 +212,14 @@ async def start_recurring_schedulers(
         ),
         reminders_sched_task=await _start_with_optional_inventory(
             _start_reminders_scheduler,
+            worker_inventory,
+        ),
+        automation_definitions_sched_task=await _start_with_optional_inventory(
+            _start_automation_scheduler,
+            worker_inventory,
+        ),
+        scheduled_tasks_recurring_question_sched_task=await _start_with_optional_inventory(
+            _start_scheduled_tasks_recurring_question_scheduler,
             worker_inventory,
         ),
         connectors_sync_sched_task=await _start_with_optional_inventory(
@@ -402,6 +426,42 @@ async def _start_reminders_scheduler(
     )
 
 
+async def _start_automation_scheduler(
+    *,
+    worker_inventory: Any | None = None,
+) -> Any | None:
+    return await _start_optional_scheduler(
+        started_message="Automation definition scheduler started",
+        disabled_message=(
+            "Automation definition scheduler disabled "
+            "(SCHEDULED_TASKS_AUTOMATION_SCHEDULER_ENABLED != true)"
+        ),
+        failure_message="Failed to start Automation definition scheduler: {exc}",
+        starter=_start_automation_scheduler_service,
+        worker_inventory=worker_inventory,
+        worker_name="automation_definitions_sched_task",
+        stopper=_stop_automation_scheduler_service,
+    )
+
+
+async def _start_scheduled_tasks_recurring_question_scheduler(
+    *,
+    worker_inventory: Any | None = None,
+) -> Any | None:
+    return await _start_optional_scheduler(
+        started_message="Scheduled Tasks Recurring Question scheduler started",
+        disabled_message=(
+            "Scheduled Tasks Recurring Question scheduler disabled "
+            "(SCHEDULED_TASKS_RECURRING_QUESTION_SCHEDULER_ENABLED != true)"
+        ),
+        failure_message="Failed to start Scheduled Tasks Recurring Question scheduler: {exc}",
+        starter=_start_scheduled_tasks_recurring_question_scheduler_service,
+        worker_inventory=worker_inventory,
+        worker_name="scheduled_tasks_recurring_question_sched_task",
+        stopper=_stop_scheduled_tasks_recurring_question_scheduler_service,
+    )
+
+
 async def _start_connectors_sync_scheduler(
     *,
     worker_inventory: Any | None = None,
@@ -582,6 +642,14 @@ async def _start_reminders_scheduler_service() -> Any | None:
     return await start_reminders_scheduler()
 
 
+async def _start_scheduled_tasks_recurring_question_scheduler_service() -> Any | None:
+    from tldw_Server_API.app.services.scheduled_task_recurring_question_scheduler import (
+        start_scheduled_task_recurring_question_scheduler,
+    )
+
+    return await start_scheduled_task_recurring_question_scheduler()
+
+
 async def _start_connectors_sync_scheduler_service() -> Any | None:
     from tldw_Server_API.app.services.connectors_sync_scheduler import (
         start_connectors_sync_scheduler,
@@ -620,6 +688,30 @@ async def _stop_reminders_scheduler_service(task: Any | None) -> None:
     from tldw_Server_API.app.services.reminders_scheduler import stop_reminders_scheduler
 
     await stop_reminders_scheduler(task)
+
+
+async def _start_automation_scheduler_service() -> Any | None:
+    from tldw_Server_API.app.services.scheduled_task_automation_scheduler import (
+        start_automation_scheduler,
+    )
+
+    return await start_automation_scheduler()
+
+
+async def _stop_automation_scheduler_service(task: Any | None) -> None:
+    from tldw_Server_API.app.services.scheduled_task_automation_scheduler import (
+        stop_automation_scheduler,
+    )
+
+    await stop_automation_scheduler(task)
+
+
+async def _stop_scheduled_tasks_recurring_question_scheduler_service(task: Any | None) -> None:
+    from tldw_Server_API.app.services.scheduled_task_recurring_question_scheduler import (
+        stop_scheduled_task_recurring_question_scheduler,
+    )
+
+    await stop_scheduled_task_recurring_question_scheduler(task)
 
 
 async def _stop_connectors_sync_scheduler_service(task: Any | None) -> None:

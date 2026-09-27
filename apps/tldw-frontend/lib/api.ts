@@ -1,8 +1,9 @@
 import { addRequestHistory, clearRequestHistory } from '@web/lib/history';
 import { dispatchAuthCredentialsChanged } from '@web/lib/auth-events';
-import { getApiBearer, getApiKey, hasEnvApiAuth } from '@web/lib/authStorage';
+import { getApiBearer, getApiKey, getSessionAccessToken, hasEnvApiAuth } from '@web/lib/authStorage';
 import { buildApiBaseUrl, resolvePublicApiOrigin } from '@web/lib/api-base';
 import { captureSessionIdFromHeaders, getOrCreateSessionId, SESSION_HEADER_NAME } from '@web/lib/session';
+import { isExplicitRequestCancellation } from '@/services/request-events';
 import type { ApiErrorResponse, ApiRequestConfig, ApiRequestConfigWithMetadata } from '@web/types/common';
 
 type ApiResponse<T = unknown> = {
@@ -26,9 +27,18 @@ export class ApiError extends Error {
   status?: number;
   statusCode?: number;
   detail?: string;
+  errorCode?: string;
   retryAfter?: number;
 
-  constructor(message: string, options?: { status?: number; detail?: string; retryAfter?: number }) {
+  constructor(
+    message: string,
+    options?: {
+      status?: number;
+      detail?: string;
+      errorCode?: string;
+      retryAfter?: number;
+    },
+  ) {
     super(message);
     this.name = 'ApiError';
     if (options?.status !== undefined) {
@@ -37,6 +47,9 @@ export class ApiError extends Error {
     }
     if (options?.detail !== undefined) {
       this.detail = options.detail;
+    }
+    if (options?.errorCode !== undefined) {
+      this.errorCode = options.errorCode;
     }
     if (options?.retryAfter !== undefined) {
       this.retryAfter = options.retryAfter;
@@ -51,12 +64,104 @@ const deploymentEnv = {
 const apiVersion = process.env.NEXT_PUBLIC_API_VERSION || 'v1';
 const DEFAULT_TIMEOUT_MS = 30000;
 
+const PUBLIC_PROVIDER_ERROR_MESSAGES = {
+  provider_request_invalid: 'The selected provider or model is invalid.',
+  provider_authentication_failed:
+    'The selected provider credentials could not be authenticated.',
+  invalid_provider_credentials: 'The selected provider credentials are invalid.',
+  missing_provider_credentials:
+    'The selected provider credentials are not configured.',
+  credential_store_unavailable:
+    'Provider credential storage is temporarily unavailable.',
+  credential_scope_revoked:
+    'The selected provider credential scope is no longer available.',
+  provider_disabled: 'The selected provider is disabled by administrator policy.',
+  model_not_allowed: 'The selected model is not allowed for this provider.',
+  provider_configuration_invalid:
+    'The selected provider configuration is invalid.',
+  provider_unavailable: 'The selected provider is currently unavailable.',
+} as const;
+
+type PublicProviderErrorCode = keyof typeof PUBLIC_PROVIDER_ERROR_MESSAGES;
+
+function asPublicProviderErrorCode(value: unknown): PublicProviderErrorCode | undefined {
+  if (
+    typeof value === 'string' &&
+    Object.prototype.hasOwnProperty.call(PUBLIC_PROVIDER_ERROR_MESSAGES, value)
+  ) {
+    return value as PublicProviderErrorCode;
+  }
+  return undefined;
+}
+
+function normalizeApiErrorBody(errorBody: ApiErrorResponse, statusCode: number): {
+  detail?: string;
+  errorCode?: PublicProviderErrorCode;
+} {
+  if (errorBody.detail && typeof errorBody.detail === 'object') {
+    const errorCode = asPublicProviderErrorCode(errorBody.detail.error_code);
+    if (errorCode) {
+      return {
+        detail: PUBLIC_PROVIDER_ERROR_MESSAGES[errorCode],
+        errorCode,
+      };
+    }
+  }
+  // Untyped 5xx bodies are not a public contract and may contain raw upstream
+  // or internal details. Typed, allowlisted provider envelopes above remain
+  // available with their canonical client-owned messages.
+  if (statusCode >= 500) {
+    return {};
+  }
+  if (typeof errorBody.detail === 'string') {
+    return { detail: errorBody.detail };
+  }
+  if (typeof errorBody.message === 'string') {
+    return { detail: errorBody.message };
+  }
+  return {};
+}
+
+function buildSafeErrorHistoryBody(
+  detail: string | undefined,
+  errorCode: PublicProviderErrorCode | undefined,
+): ApiErrorResponse | undefined {
+  if (errorCode) {
+    return {
+      detail: {
+        error_code: errorCode,
+        message: PUBLIC_PROVIDER_ERROR_MESSAGES[errorCode],
+      },
+    };
+  }
+  if (detail !== undefined) {
+    return { detail };
+  }
+  return undefined;
+}
+
+function isCompleteProviderAuthenticationError(
+  errorBody: ApiErrorResponse,
+  errorCode: PublicProviderErrorCode | undefined,
+): boolean {
+  if (errorCode !== 'provider_authentication_failed') {
+    return false;
+  }
+  const nestedDetail = errorBody.detail;
+  return (
+    nestedDetail !== null &&
+    typeof nestedDetail === 'object' &&
+    typeof nestedDetail.message === 'string' &&
+    nestedDetail.message.trim().length > 0
+  );
+}
+
 export function shouldIncludeBrowserCredentials(): boolean {
   if (typeof window === 'undefined') {
     return true;
   }
 
-  const hasJwtToken = !!localStorage.getItem('access_token');
+  const hasJwtToken = !!getSessionAccessToken();
   if (hasJwtToken) {
     return true;
   }
@@ -209,7 +314,7 @@ function applyBrowserHeaders(headers: Headers, method: RequestMethod): void {
   }
 
   // Bearer token (multi-user JWT auth)
-  const token = localStorage.getItem('access_token');
+  const token = getSessionAccessToken();
   if (token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`);
   }
@@ -434,6 +539,13 @@ function recordFailure(
   }
 }
 
+function createRequestCancellationError(): Error & { code: "REQUEST_ABORTED" } {
+  const error = new Error('Request aborted') as Error & { code: "REQUEST_ABORTED" };
+  error.name = 'AbortError';
+  error.code = 'REQUEST_ABORTED';
+  return error;
+}
+
 function handleUnauthorized(
   requestHeaders: Headers | undefined,
   sessionTokenAtStart: string | null
@@ -446,7 +558,7 @@ function handleUnauthorized(
   const requestToken = authorization.toLowerCase().startsWith('bearer ')
     ? authorization.slice(7).trim()
     : null;
-  const currentToken = localStorage.getItem('access_token');
+  const currentToken = getSessionAccessToken();
   if (
     !requestToken ||
     !sessionTokenAtStart ||
@@ -488,7 +600,7 @@ async function request<T = unknown>(
   const requestUrl = joinUrl(baseURL, url, config.params);
   const metadata = { start: Date.now() };
   const sessionTokenAtStart =
-    typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+    typeof window !== 'undefined' ? getSessionAccessToken() : null;
 
   applyBrowserHeaders(headers, method);
 
@@ -506,9 +618,16 @@ async function request<T = unknown>(
     });
   } catch (error) {
     abort.cleanup();
+    const timedOut = abort.didTimeout();
+    if (
+      !timedOut &&
+      (config.signal?.aborted || isExplicitRequestCancellation(error))
+    ) {
+      throw createRequestCancellationError();
+    }
     const message =
       error instanceof DOMException && error.name === 'AbortError'
-        ? abort.didTimeout()
+        ? timedOut
           ? 'Request timed out'
           : 'Request aborted'
         : error instanceof Error
@@ -522,12 +641,18 @@ async function request<T = unknown>(
   captureSessionIdFromHeaders(headersToRecord(response.headers));
 
   if (!response.ok) {
-    if (response.status === 401) {
+    const errorBody = await parseErrorBody(response);
+    const { detail, errorCode } = normalizeApiErrorBody(
+      errorBody,
+      response.status,
+    );
+    const safeErrorHistoryBody = buildSafeErrorHistoryBody(detail, errorCode);
+    if (
+      response.status === 401 &&
+      !isCompleteProviderAuthenticationError(errorBody, errorCode)
+    ) {
       handleUnauthorized(headers, sessionTokenAtStart);
     }
-
-    const errorBody = await parseErrorBody(response);
-    const detail = errorBody.detail || errorBody.message;
     if (
       response.status === 403 &&
       detail &&
@@ -537,22 +662,26 @@ async function request<T = unknown>(
       const message = 'CSRF validation failed. Refresh the page and try again.';
       recordFailure(requestConfig, {
         status: response.status,
-        responseBody: errorBody,
+        responseBody: { detail: message },
         errorMessage: message,
       });
-      throw new Error(message);
+      throw new ApiError(message, {
+        status: response.status,
+        detail: message,
+      });
     }
 
     const retryAfter = retryAfterFromHeaders(response.headers);
     const message = detail || response.statusText || 'An unexpected error occurred';
     recordFailure(requestConfig, {
       status: response.status,
-      responseBody: errorBody,
+      responseBody: safeErrorHistoryBody,
       errorMessage: message,
     });
     throw new ApiError(message, {
       status: response.status,
       detail,
+      errorCode,
       retryAfter,
     });
   }
@@ -629,7 +758,7 @@ export function buildAuthHeaders(method: string = 'GET', contentType?: string): 
     const sessionId = getOrCreateSessionId();
     if (sessionId) headers[SESSION_HEADER_NAME] = sessionId;
 
-    const token = localStorage.getItem('access_token');
+    const token = getSessionAccessToken();
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
     const apiBearer = getApiBearer();
@@ -661,7 +790,7 @@ export function hasExplicitAuthHeaders(): boolean {
     return false;
   }
 
-  const token = localStorage.getItem('access_token');
+  const token = getSessionAccessToken();
   if (token) {
     return true;
   }

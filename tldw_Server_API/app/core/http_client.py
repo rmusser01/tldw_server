@@ -14,8 +14,11 @@ Implements:
 """
 
 import asyncio  # noqa: E402
+import contextvars  # noqa: E402
 import hashlib  # noqa: E402
+import inspect  # noqa: E402
 import json  # noqa: E402
+import logging  # noqa: E402
 import os  # noqa: E402
 import random  # noqa: E402
 import re  # noqa: E402
@@ -23,14 +26,15 @@ import socket  # noqa: E402
 import ssl  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
-from collections.abc import AsyncIterator, Iterable, Iterator  # noqa: E402
-from contextlib import asynccontextmanager, contextmanager, suppress  # noqa: E402
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator, Mapping  # noqa: E402
+from contextlib import asynccontextmanager, contextmanager, nullcontext, suppress  # noqa: E402
 from dataclasses import dataclass  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
 from email.utils import parsedate_to_datetime  # noqa: E402
+from functools import wraps  # noqa: E402
 from pathlib import Path  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
-from typing import Any, Protocol, TypedDict  # noqa: E402
+from typing import Any, Protocol, TypedDict, TypeVar  # noqa: E402
 from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit  # noqa: E402
 
 from loguru import logger  # noqa: E402
@@ -45,12 +49,37 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     aiohttp = None  # type: ignore
 
+try:
+    from asyncio import timeout as _stream_timeout
+except ImportError:  # pragma: no cover - Python 3.10 compatibility
+    from async_timeout import timeout as _stream_timeout
+
 try:  # Optional OpenTelemetry traceparent injection
     from opentelemetry import trace as _otel_trace  # type: ignore
     _OTEL_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _OTEL_AVAILABLE = False
     _otel_trace = None  # type: ignore
+
+try:  # Optional OpenTelemetry HTTP auto-instrumentation suppression
+    from opentelemetry import context as _otel_context  # type: ignore
+except ImportError:  # pragma: no cover
+    _otel_context = None  # type: ignore
+
+_OTEL_HTTP_SUPPRESSION_KEY = getattr(
+    _otel_context,
+    "_SUPPRESS_HTTP_INSTRUMENTATION_KEY",
+    None,
+)
+
+_StreamItem = TypeVar("_StreamItem")
+
+try:  # Optional public OpenTelemetry suppression helper
+    from opentelemetry.instrumentation.utils import (  # type: ignore
+        suppress_http_instrumentation as _suppress_http_instrumentation,
+    )
+except ImportError:  # pragma: no cover - optional dependency
+    _suppress_http_instrumentation = nullcontext
 
 from tldw_Server_API.app.core.exceptions import (  # noqa: E402
     DownloadError,
@@ -59,6 +88,7 @@ from tldw_Server_API.app.core.exceptions import (  # noqa: E402
     NetworkError,
     RetryExhaustedError,
     StreamingProtocolError,
+    raise_detached_error,
 )
 from tldw_Server_API.app.core.Metrics import (  # noqa: E402
     MetricDefinition,
@@ -67,12 +97,35 @@ from tldw_Server_API.app.core.Metrics import (  # noqa: E402
 )
 from tldw_Server_API.app.core.Metrics.traces import get_tracing_manager  # noqa: E402
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope  # noqa: E402
+from tldw_Server_API.app.core.stt_observability_context import (
+    OPAQUE_STT_ENDPOINT_ID as _OPAQUE_STT_ENDPOINT_ID,
+)
+from tldw_Server_API.app.core.stt_observability_context import (
+    get_opaque_stt_endpoint_id,
+)
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled,
     is_explicit_pytest_runtime,
     is_test_mode,
     is_truthy,
 )
+
+
+class _TerminalHTTPStatusError(Exception):
+    """Carry an already-classified terminal HTTP status past transport retry logic."""
+
+    def __init__(self, status_code: int) -> None:
+        self.status_code = int(status_code)
+        super().__init__(f"HTTP {self.status_code}")
+
+
+def _terminal_status_network_error(error: _TerminalHTTPStatusError) -> NetworkError:
+    """Return a detached-safe error without propagating an invalid HTTP status."""
+    status_code = error.status_code if 100 <= error.status_code <= 599 else None
+    return NetworkError(str(error), status_code=status_code)
+
+
+ResponseHeadersCallback = Callable[[int, Mapping[str, str]], Awaitable[None] | None]
 
 _HTTPCLIENT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
@@ -102,7 +155,22 @@ if httpx is not None:
         )
         if isinstance(cls, type)
     )
-_HTTPCLIENT_REQUEST_EXCEPTIONS = _HTTPCLIENT_NONCRITICAL_EXCEPTIONS + _HTTPX_REQUEST_EXCEPTIONS
+_AIOHTTP_REQUEST_EXCEPTIONS: tuple[type[BaseException], ...] = ()
+if aiohttp is not None:
+    _AIOHTTP_REQUEST_EXCEPTIONS = tuple(
+        cls
+        for cls in (getattr(aiohttp, "ClientError", None),)
+        if isinstance(cls, type)
+    )
+_HTTPCLIENT_REQUEST_EXCEPTIONS = (
+    _HTTPCLIENT_NONCRITICAL_EXCEPTIONS
+    + _HTTPX_REQUEST_EXCEPTIONS
+    + _AIOHTTP_REQUEST_EXCEPTIONS
+)
+_STREAM_CLEANUP_TRANSPORT_EXCEPTIONS = (
+    NetworkError,
+    OSError,
+) + _HTTPX_REQUEST_EXCEPTIONS + _AIOHTTP_REQUEST_EXCEPTIONS
 
 try:
     # Python 3.8+/backport safe import
@@ -155,6 +223,330 @@ ENFORCE_TLS_MIN = (
 )
 ENFORCE_TLS_MIN = is_truthy(str(ENFORCE_TLS_MIN))
 TLS_MIN_VERSION = (os.getenv("HTTP_TLS_MIN_VERSION") or os.getenv("TLS_MIN_VERSION") or "1.2").strip()
+_SENSITIVE_OBSERVABILITY_URL = "https://sensitive-endpoint.invalid"
+_SENSITIVE_HTTP_LOG_CONTEXT = contextvars.ContextVar(
+    "tldw_sensitive_http_log_context",
+    default=False,
+)
+
+
+def _effective_sensitive_observability(explicit: bool = False) -> bool:
+    """Honor an active sensitive scope even when a call site omits the flag."""
+    return bool(explicit or _SENSITIVE_HTTP_LOG_CONTEXT.get())
+
+
+class _SensitiveHTTPLogFilter(logging.Filter):
+    """Suppress third-party URL logs only in a sensitive request context."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not _SENSITIVE_HTTP_LOG_CONTEXT.get():
+            return True
+        return not record.name.startswith(("httpx", "httpcore", "aiohttp"))
+
+
+_SENSITIVE_HTTP_LOG_FILTER = _SensitiveHTTPLogFilter()
+
+
+def _install_sensitive_http_log_filter() -> None:
+    """Install the context-aware filter on active stdlib logging handlers."""
+    loggers = [
+        logging.getLogger(),
+        logging.getLogger("httpx"),
+        logging.getLogger("httpcore"),
+        logging.getLogger("aiohttp"),
+    ]
+    for name, candidate in list(logging.Logger.manager.loggerDict.items()):
+        if isinstance(candidate, logging.Logger) and name.startswith(
+            ("httpx", "httpcore", "aiohttp")
+        ):
+            loggers.append(candidate)
+    for log in loggers:
+        if _SENSITIVE_HTTP_LOG_FILTER not in log.filters:
+            log.addFilter(_SENSITIVE_HTTP_LOG_FILTER)
+        for handler in log.handlers:
+            if _SENSITIVE_HTTP_LOG_FILTER not in handler.filters:
+                handler.addFilter(_SENSITIVE_HTTP_LOG_FILTER)
+
+
+@contextmanager
+def _suppress_otel_http_auto_instrumentation() -> Iterator[None]:
+    """Suppress standard OTel HTTP client spans in the current request context."""
+    if _otel_context is None or _OTEL_HTTP_SUPPRESSION_KEY is None:
+        yield
+        return
+    token = _otel_context.attach(
+        _otel_context.set_value(_OTEL_HTTP_SUPPRESSION_KEY, True)
+    )
+    try:
+        yield
+    finally:
+        _otel_context.detach(token)
+
+
+@contextmanager
+def sensitive_http_observability_context() -> Iterator[None]:
+    """Suppress transport URL logs and HTTP auto-instrumentation in this context."""
+    _install_sensitive_http_log_filter()
+    token = _SENSITIVE_HTTP_LOG_CONTEXT.set(True)
+    try:
+        with _suppress_otel_http_auto_instrumentation():
+            yield
+    finally:
+        _SENSITIVE_HTTP_LOG_CONTEXT.reset(token)
+
+
+def _with_sensitive_http_log_context(
+    function: Callable[..., httpx.Response],
+) -> Callable[..., httpx.Response]:
+    """Activate sensitive logging before any request validation runs."""
+    @wraps(function)
+    def wrapped(*args: Any, **kwargs: Any) -> httpx.Response:
+        if kwargs.get("sensitive_observability") is not True:
+            return function(*args, **kwargs)
+        with sensitive_http_observability_context():
+            return function(*args, **kwargs)
+
+    return wrapped
+
+
+def _with_sensitive_http_log_context_async(function: Callable[..., Any]) -> Callable[..., Any]:
+    """Keep sensitive third-party log filtering active across an awaited request."""
+    @wraps(function)
+    async def wrapped(*args: Any, **kwargs: Any) -> Any:
+        if kwargs.get("sensitive_observability") is not True:
+            return await function(*args, **kwargs)
+        with sensitive_http_observability_context():
+            return await function(*args, **kwargs)
+
+    return wrapped
+
+
+@asynccontextmanager
+async def _sensitive_http_stream_context(enabled: bool) -> AsyncIterator[None]:
+    """Toggle request-local stream protection without rescanning log handlers."""
+    if _SENSITIVE_HTTP_LOG_CONTEXT.get():
+        yield
+        return
+    enabled = _effective_sensitive_observability(enabled)
+    if not enabled:
+        yield
+        return
+    token = _SENSITIVE_HTTP_LOG_CONTEXT.set(True)
+    try:
+        with _suppress_otel_http_auto_instrumentation():
+            yield
+    finally:
+        _SENSITIVE_HTTP_LOG_CONTEXT.reset(token)
+
+
+@contextmanager
+def _http_client_observability_span(
+    tracing_manager: Any,
+    name: str,
+    *,
+    attributes: dict[str, Any],
+    sensitive_observability: bool,
+) -> Iterator[Any]:
+    """Keep raw sensitive exceptions outside the application-owned span."""
+    protected = (
+        _effective_sensitive_observability(sensitive_observability)
+        or _opaque_stt_endpoint_id() is not None
+    )
+    if not protected:
+        with tracing_manager.span(name, attributes=attributes) as span:
+            yield span
+        return
+
+    error: BaseException | None = None
+    with tracing_manager.span(name, attributes=attributes) as span:
+        try:
+            yield span
+        except BaseException as exc:  # noqa: BLE001
+            error = exc
+    if error is not None:
+        raise error.with_traceback(error.__traceback__)
+
+
+@asynccontextmanager
+async def _async_http_client_observability_span(
+    tracing_manager: Any,
+    name: str,
+    *,
+    attributes: dict[str, Any],
+    sensitive_observability: bool,
+) -> AsyncIterator[Any]:
+    """Async counterpart that re-raises sensitive failures after span exit."""
+    protected = (
+        _effective_sensitive_observability(sensitive_observability)
+        or _opaque_stt_endpoint_id() is not None
+    )
+    if not protected:
+        async with tracing_manager.async_span(name, attributes=attributes) as span:
+            yield span
+        return
+
+    error: BaseException | None = None
+    async with tracing_manager.async_span(name, attributes=attributes) as span:
+        try:
+            yield span
+        except BaseException as exc:  # noqa: BLE001
+            error = exc
+    if error is not None:
+        raise error.with_traceback(error.__traceback__)
+
+
+async def _iterate_sensitive_http_items(
+    stream: AsyncIterator[_StreamItem],
+    *,
+    enabled: bool,
+) -> AsyncIterator[_StreamItem]:
+    """Advance a sensitive stream inside request-local scopes, never across yield."""
+    iterator = stream.__aiter__()
+    enabled = _effective_sensitive_observability(enabled)
+    if enabled:
+        _install_sensitive_http_log_filter()
+    try:
+        while True:
+            try:
+                async with _sensitive_http_stream_context(enabled):
+                    chunk = await iterator.__anext__()
+            except StopAsyncIteration:
+                return
+            yield chunk
+    finally:
+        close = getattr(iterator, "aclose", None)
+        if close is not None:
+            async with _sensitive_http_stream_context(enabled):
+                await close()
+
+_OPAQUE_STT_ENDPOINT_ID_RE = re.compile(
+    r"^sha256:[0-9a-f]{64}$"
+)
+_OPAQUE_STT_LOG_FACTORY_LOCK = threading.Lock()
+
+
+def _install_opaque_stt_log_record_factory() -> None:
+    """Chain a factory that redacts HTTP client logs in STT context."""
+    current = logging.getLogRecordFactory()
+    if (
+        getattr(current, "_tldw_opaque_stt_context", None)
+        is _OPAQUE_STT_ENDPOINT_ID
+    ):
+        return
+    with _OPAQUE_STT_LOG_FACTORY_LOCK:
+        current = logging.getLogRecordFactory()
+        if (
+            getattr(current, "_tldw_opaque_stt_context", None)
+            is _OPAQUE_STT_ENDPOINT_ID
+        ):
+            return
+        previous_factory = current
+
+        def record_factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
+            record = previous_factory(*args, **kwargs)
+            endpoint_id = _OPAQUE_STT_ENDPOINT_ID.get()
+            if endpoint_id is None or not (
+                record.name in {"httpx", "httpcore", "aiohttp"}
+                or record.name.startswith(
+                    ("httpx.", "httpcore.", "aiohttp.")
+                )
+            ):
+                return record
+            status_code = next(
+                (
+                    value
+                    for value in (
+                        record.args
+                        if isinstance(record.args, tuple)
+                        else ()
+                    )
+                    if isinstance(value, int)
+                    and 100 <= value <= 599
+                ),
+                None,
+            )
+            if status_code is None:
+                record.msg = (
+                    "planned STT HTTP endpoint_id=%s"
+                )
+                record.args = (endpoint_id,)
+            else:
+                record.msg = (
+                    "planned STT HTTP endpoint_id=%s status_code=%s"
+                )
+                record.args = (endpoint_id, status_code)
+            record.exc_info = None
+            record.exc_text = None
+            record.stack_info = None
+            return record
+
+        record_factory._tldw_opaque_stt_context = (  # type: ignore[attr-defined]
+            _OPAQUE_STT_ENDPOINT_ID
+        )
+        logging.setLogRecordFactory(record_factory)
+
+
+@contextmanager
+def opaque_stt_http_observability(
+    endpoint_id: str,
+) -> Iterator[None]:
+    """Expose only an opaque endpoint identifier for a planned STT call."""
+    if (
+        not isinstance(endpoint_id, str)
+        or _OPAQUE_STT_ENDPOINT_ID_RE.fullmatch(endpoint_id) is None
+    ):
+        raise ValueError("Invalid opaque STT endpoint identifier")
+    _install_opaque_stt_log_record_factory()
+    token = _OPAQUE_STT_ENDPOINT_ID.set(endpoint_id)
+    try:
+        with _suppress_http_instrumentation():
+            yield
+    finally:
+        _OPAQUE_STT_ENDPOINT_ID.reset(token)
+
+
+def _opaque_stt_endpoint_id() -> str | None:
+    """Return the opaque endpoint identifier for the active planned STT call."""
+    return get_opaque_stt_endpoint_id()
+
+
+def _http_trace_attributes(
+    method: str,
+    url: str,
+) -> dict[str, Any]:
+    """Build privacy-aware trace attributes for an HTTP request."""
+    endpoint_id = _opaque_stt_endpoint_id()
+    if endpoint_id is not None:
+        return {"stt.endpoint_id": endpoint_id}
+    if _effective_sensitive_observability():
+        url = _SENSITIVE_OBSERVABILITY_URL
+    return {
+        "http.method": method.upper(),
+        "net.host.name": _parse_host_from_url(url),
+        "url.full": _sanitize_url_for_logs(url),
+    }
+
+
+def _http_metric_labels(
+    method: str,
+    url: str,
+    *,
+    status_code: int | None = None,
+) -> dict[str, str]:
+    """Build privacy-aware metric labels for an HTTP request."""
+    endpoint_id = _opaque_stt_endpoint_id()
+    if endpoint_id is not None:
+        labels = {"endpoint_id": endpoint_id}
+    else:
+        if _effective_sensitive_observability():
+            url = _SENSITIVE_OBSERVABILITY_URL
+        labels = {
+            "method": method.upper(),
+            "host": _parse_host_from_url(url),
+        }
+    if status_code is not None:
+        labels["status"] = str(status_code)
+    return labels
 
 
 def _httpx_timeout_from_defaults() -> httpx.Timeout:
@@ -227,9 +619,21 @@ def _get_project_version() -> str:
     return _CACHED_VERSION
 
 
+_BOUNDED_RESPONSE_EXTENSION = "tldw_bounded_response"
+
+
+def _is_bounded_httpx_response(response: httpx.Response) -> bool:
+    request = getattr(response, "request", None)
+    extensions = getattr(request, "extensions", {})
+    return bool(
+        extensions.get(_BOUNDED_RESPONSE_EXTENSION)
+        or extensions.get("tldw_stream_response")
+    )
+
+
 def _capture_error_body_hook(response: httpx.Response) -> None:
     try:
-        if response.status_code >= 400:
+        if response.status_code >= 400 and not _is_bounded_httpx_response(response):
             response.read()
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
         pass
@@ -237,7 +641,7 @@ def _capture_error_body_hook(response: httpx.Response) -> None:
 
 async def _capture_error_body_hook_async(response: httpx.Response) -> None:
     try:
-        if response.status_code >= 400:
+        if response.status_code >= 400 and not _is_bounded_httpx_response(response):
             try:
                 await response.aread()
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
@@ -439,6 +843,7 @@ class TransportAdapter(Protocol):
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
+        sensitive_observability: bool = False,
     ) -> SyncResponseLike: ...
 
     async def arequest(
@@ -460,6 +865,8 @@ class TransportAdapter(Protocol):
         cert_pinning: dict[str, set[str]] | None = None,
         verify: bool | str | ssl.SSLContext | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
+        sensitive_observability: bool = False,
+        max_response_bytes: int | None = None,
     ) -> AsyncResponseLike: ...
 
     async def stream_bytes(
@@ -469,6 +876,7 @@ class TransportAdapter(Protocol):
         url: str,
         client: Any | None = None,
         headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
         params: dict[str, Any] | None = None,
         json: Any | None = None,
         data: Any | None = None,
@@ -478,6 +886,10 @@ class TransportAdapter(Protocol):
         retry: RetryPolicy | None = None,
         chunk_size: int = 65536,
         cert_pinning: dict[str, set[str]] | None = None,
+        sensitive_observability: bool = False,
+        on_response: ResponseHeadersCallback | None = None,
+        raise_for_status: bool = True,
+        verify: bool | str | ssl.SSLContext | None = None,
     ) -> AsyncIterator[bytes]: ...
 
     async def stream_sse(
@@ -494,12 +906,14 @@ class TransportAdapter(Protocol):
         proxies: str | dict[str, str] | None = None,
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
+        sensitive_observability: bool = False,
     ) -> AsyncIterator[SSEEvent]: ...
 
 
 class HttpxAdapter:
     name = "httpx"
 
+    @_with_sensitive_http_log_context
     def request(
         self,
         *,
@@ -518,6 +932,7 @@ class HttpxAdapter:
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
+        sensitive_observability: bool = False,
     ) -> httpx.Response:
         return _fetch_httpx_response(
             method=method,
@@ -535,8 +950,10 @@ class HttpxAdapter:
             retry=retry,
             cert_pinning=cert_pinning,
             configured_endpoint=configured_endpoint,
+            sensitive_observability=sensitive_observability,
         )
 
+    @_with_sensitive_http_log_context_async
     async def arequest(
         self,
         *,
@@ -556,6 +973,8 @@ class HttpxAdapter:
         cert_pinning: dict[str, set[str]] | None = None,
         verify: bool | str | ssl.SSLContext | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
+        sensitive_observability: bool = False,
+        max_response_bytes: int | None = None,
     ) -> httpx.Response:
         return await _afetch_httpx(
             method=method,
@@ -574,6 +993,8 @@ class HttpxAdapter:
             cert_pinning=cert_pinning,
             verify=verify,
             configured_endpoint=configured_endpoint,
+            sensitive_observability=sensitive_observability,
+            max_response_bytes=max_response_bytes,
         )
 
     async def stream_bytes(
@@ -583,6 +1004,7 @@ class HttpxAdapter:
         url: str,
         client: httpx.AsyncClient | None = None,
         headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
         params: dict[str, Any] | None = None,
         json: Any | None = None,
         data: Any | None = None,
@@ -592,12 +1014,17 @@ class HttpxAdapter:
         retry: RetryPolicy | None = None,
         chunk_size: int = 65536,
         cert_pinning: dict[str, set[str]] | None = None,
+        sensitive_observability: bool = False,
+        on_response: ResponseHeadersCallback | None = None,
+        raise_for_status: bool = True,
+        verify: bool | str | ssl.SSLContext | None = None,
     ) -> AsyncIterator[bytes]:
-        async for chunk in _astream_bytes_httpx(
+        stream = _astream_bytes_httpx(
             method=method,
             url=url,
             client=client,
             headers=headers,
+            cookies=cookies,
             params=params,
             json=json,
             data=data,
@@ -607,8 +1034,20 @@ class HttpxAdapter:
             retry=retry,
             chunk_size=chunk_size,
             cert_pinning=cert_pinning,
-        ):
-            yield chunk
+            sensitive_observability=sensitive_observability,
+            on_response=on_response,
+            raise_for_status=raise_for_status,
+            verify=verify,
+        )
+        scoped_stream = _iterate_sensitive_http_items(
+            stream,
+            enabled=sensitive_observability,
+        )
+        try:
+            async for chunk in scoped_stream:
+                yield chunk
+        finally:
+            await scoped_stream.aclose()
 
     async def stream_sse(
         self,
@@ -624,8 +1063,9 @@ class HttpxAdapter:
         proxies: str | dict[str, str] | None = None,
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
+        sensitive_observability: bool = False,
     ) -> AsyncIterator[SSEEvent]:
-        async for event in _astream_sse_httpx(
+        stream = _astream_sse_httpx(
             url=url,
             method=method,
             client=client,
@@ -637,8 +1077,17 @@ class HttpxAdapter:
             proxies=proxies,
             retry=retry,
             cert_pinning=cert_pinning,
-        ):
-            yield event
+            sensitive_observability=sensitive_observability,
+        )
+        scoped_stream = _iterate_sensitive_http_items(
+            stream,
+            enabled=sensitive_observability,
+        )
+        try:
+            async for event in scoped_stream:
+                yield event
+        finally:
+            await scoped_stream.aclose()
 
 
 class AiohttpAdapter:
@@ -647,6 +1096,7 @@ class AiohttpAdapter:
     def request(self, **_: Any) -> SyncResponseLike:
         raise NotImplementedError("AiohttpAdapter does not support sync requests")
 
+    @_with_sensitive_http_log_context_async
     async def arequest(
         self,
         *,
@@ -666,6 +1116,8 @@ class AiohttpAdapter:
         cert_pinning: dict[str, set[str]] | None = None,
         verify: bool | str | ssl.SSLContext | None = None,
         configured_endpoint: ConfiguredEndpointScope | None = None,
+        sensitive_observability: bool = False,
+        max_response_bytes: int | None = None,
     ) -> AsyncResponseLike:
         return await _afetch_aiohttp(
             method=method,
@@ -684,6 +1136,8 @@ class AiohttpAdapter:
             cert_pinning=cert_pinning,
             verify=verify,
             configured_endpoint=configured_endpoint,
+            sensitive_observability=sensitive_observability,
+            max_response_bytes=max_response_bytes,
         )
 
     async def stream_bytes(
@@ -693,6 +1147,7 @@ class AiohttpAdapter:
         url: str,
         client: Any | None = None,
         headers: dict[str, str] | None = None,
+        cookies: dict[str, str] | None = None,
         params: dict[str, Any] | None = None,
         json: Any | None = None,
         data: Any | None = None,
@@ -702,12 +1157,17 @@ class AiohttpAdapter:
         retry: RetryPolicy | None = None,
         chunk_size: int = 65536,
         cert_pinning: dict[str, set[str]] | None = None,
+        sensitive_observability: bool = False,
+        on_response: ResponseHeadersCallback | None = None,
+        raise_for_status: bool = True,
+        verify: bool | str | ssl.SSLContext | None = None,
     ) -> AsyncIterator[bytes]:
-        async for chunk in _astream_bytes_aiohttp(
+        stream = _astream_bytes_aiohttp(
             method=method,
             url=url,
             client=client,
             headers=headers,
+            cookies=cookies,
             params=params,
             json=json,
             data=data,
@@ -717,8 +1177,20 @@ class AiohttpAdapter:
             retry=retry,
             chunk_size=chunk_size,
             cert_pinning=cert_pinning,
-        ):
-            yield chunk
+            sensitive_observability=sensitive_observability,
+            on_response=on_response,
+            raise_for_status=raise_for_status,
+            verify=verify,
+        )
+        scoped_stream = _iterate_sensitive_http_items(
+            stream,
+            enabled=sensitive_observability,
+        )
+        try:
+            async for chunk in scoped_stream:
+                yield chunk
+        finally:
+            await scoped_stream.aclose()
 
     async def stream_sse(
         self,
@@ -734,8 +1206,9 @@ class AiohttpAdapter:
         proxies: str | dict[str, str] | None = None,
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
+        sensitive_observability: bool = False,
     ) -> AsyncIterator[SSEEvent]:
-        async for event in _astream_sse_aiohttp(
+        stream = _astream_sse_aiohttp(
             url=url,
             method=method,
             client=client,
@@ -747,8 +1220,17 @@ class AiohttpAdapter:
             proxies=proxies,
             retry=retry,
             cert_pinning=cert_pinning,
-        ):
-            yield event
+            sensitive_observability=sensitive_observability,
+        )
+        scoped_stream = _iterate_sensitive_http_items(
+            stream,
+            enabled=sensitive_observability,
+        )
+        try:
+            async for event in scoped_stream:
+                yield event
+        finally:
+            await scoped_stream.aclose()
 
 
 _HTTPX_ADAPTER = HttpxAdapter()
@@ -846,6 +1328,85 @@ def _sanitize_accept_encoding_for_backend(headers: dict[str, str] | None, backen
     return hdrs
 
 
+def _force_identity_accept_encoding(
+    headers: dict[str, str] | None,
+) -> dict[str, str]:
+    """Return copied headers that request only an identity-encoded response."""
+    identity_headers = dict(headers or {})
+    for key in tuple(identity_headers):
+        if key.lower() == "accept-encoding":
+            identity_headers.pop(key)
+    identity_headers["Accept-Encoding"] = "identity"
+    return identity_headers
+
+
+def _uses_compressed_content_encoding(headers: Any) -> bool:
+    """Return whether headers declare any non-identity content encoding."""
+    try:
+        values = [
+            str(value)
+            for key, value in headers.items()
+            if str(key).lower() == "content-encoding"
+        ]
+    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+        return False
+    return any(
+        token.strip().lower() not in {"", "identity"}
+        for value in values
+        for token in value.split(",")
+    )
+
+
+def _read_bounded_chunks(chunks: Iterable[bytes], max_response_bytes: int) -> bytes:
+    """Read an iterator without retaining more than the configured byte limit."""
+    body = bytearray()
+    for chunk in chunks:
+        if len(body) + len(chunk) > max_response_bytes:
+            raise ValueError("Response exceeds max_response_bytes limit")
+        body.extend(chunk)
+    return bytes(body)
+
+
+class _BoundedBodyCollector:
+    """Collect callback-delivered bytes without retaining data past the limit."""
+
+    def __init__(self, max_response_bytes: int) -> None:
+        self._max_response_bytes = max_response_bytes
+        self._body = bytearray()
+        self.overflow = False
+
+    @property
+    def body(self) -> bytes:
+        return bytes(self._body)
+
+    def __call__(self, chunk: bytes) -> int:
+        remaining = self._max_response_bytes - len(self._body)
+        if len(chunk) > remaining:
+            if remaining > 0:
+                self._body.extend(chunk[:remaining])
+            self.overflow = True
+        else:
+            self._body.extend(chunk)
+        return len(chunk)
+
+
+def _decode_bounded_response_body(response: Any, body: bytes) -> str:
+    """Decode raw bounded response bytes using the response encoding when known."""
+    encoding = str(getattr(response, "encoding", "") or "utf-8")
+    try:
+        return body.decode(encoding, errors="replace")
+    except LookupError:
+        return body.decode("utf-8", errors="replace")
+
+
+def _close_simple_response(response: Any) -> None:
+    """Best-effort close for simple fetch streaming responses."""
+    close = getattr(response, "close", None)
+    if callable(close):
+        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+            close()
+
+
 def _redact_path_for_logging(host: str, path: str) -> str:
     if host == "api.telegram.org":
         match = _TELEGRAM_BOT_PATH_PATTERN.match(path or "/")
@@ -856,6 +1417,9 @@ def _redact_path_for_logging(host: str, path: str) -> str:
 
 
 def _sanitize_url_for_logs(u: str | Any) -> str:
+    endpoint_id = _opaque_stt_endpoint_id()
+    if endpoint_id is not None:
+        return endpoint_id
     try:
         s = str(u)
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
@@ -865,7 +1429,18 @@ def _sanitize_url_for_logs(u: str | Any) -> str:
         scheme = (parsed.scheme or "").lower()
         host = (parsed.hostname or "").lower()
         if not scheme or not host:
-            return s
+            return "" if _effective_sensitive_observability() else s
+        if _effective_sensitive_observability():
+            try:
+                host = host.encode("idna").decode("ascii")
+                port = parsed.port
+            except (UnicodeError, ValueError):
+                return ""
+            if ":" in host and not host.startswith("["):
+                host = f"[{host}]"
+            default_port = 443 if scheme == "https" else 80 if scheme == "http" else None
+            authority = host if port is None or port == default_port else f"{host}:{port}"
+            return f"{scheme}://{authority}"
         port = parsed.port
         path = _redact_path_for_logging(host, parsed.path or "/")
         authority = host
@@ -873,7 +1448,7 @@ def _sanitize_url_for_logs(u: str | Any) -> str:
             authority = f"{host}:{port}"
         return f"{scheme}://{authority}{path}"
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-        return s
+        return "" if _effective_sensitive_observability() else s
 
 
 def _raise_if_json_response_exceeds_limit(
@@ -901,6 +1476,9 @@ def _raise_if_json_response_exceeds_limit(
 
 def _url_parts(u: str | Any) -> tuple[str, str, str]:
     """Return (scheme, host, path) for logging; redacts query by omission."""
+    endpoint_id = _opaque_stt_endpoint_id()
+    if endpoint_id is not None:
+        return "", endpoint_id, ""
     try:
         s = str(u)
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
@@ -909,6 +1487,12 @@ def _url_parts(u: str | Any) -> tuple[str, str, str]:
         p = urlparse(s)
         scheme = (p.scheme or "").lower()
         host = (p.hostname or "").lower()
+        if _effective_sensitive_observability():
+            try:
+                host = host.encode("idna").decode("ascii")
+            except UnicodeError:
+                return "", "", ""
+            return scheme, host, ""
         path = _redact_path_for_logging(host, p.path or "/")
         return scheme, host, path  # noqa: TRY300
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
@@ -930,8 +1514,23 @@ def _log_outbound_request(
     Fields: request_id (from global log context), method, scheme, host, path,
     status_code, duration_ms, attempt, retry_delay_ms, exception_class.
     """
+    if _effective_sensitive_observability():
+        url = _SENSITIVE_OBSERVABILITY_URL
     try:
         duration_ms = int(max(0.0, time.time() - start_time) * 1000)
+        endpoint_id = _opaque_stt_endpoint_id()
+        if endpoint_id is not None:
+            lvl = (
+                "warning"
+                if status_code >= 400 or exception_class
+                else "info"
+            )
+            logger.bind(
+                endpoint_id=endpoint_id,
+                status_code=int(status_code),
+                duration_ms=duration_ms,
+            ).log(lvl, "planned STT HTTP outbound")
+            return
         retry_delay_ms = int(max(0.0, last_retry_delay_s) * 1000)
         scheme, host, path = _url_parts(url)
         lvl = "warning" if (status_code >= 400 or exception_class) else "info"
@@ -1084,10 +1683,15 @@ def _validate_egress_or_raise(
     *,
     dns_pin_cache: dict[str, tuple[str, ...]] | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    sensitive_observability: bool = False,
 ) -> None:
     from urllib.parse import urlparse as _urlparse
 
     from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
+
+    sensitive_observability = _effective_sensitive_observability(
+        sensitive_observability
+    )
 
     # In test environments, avoid DNS-based private IP checks for hostnames
     # (they can hang or be environment-dependent). For literal IPs we still
@@ -1122,6 +1726,8 @@ def _validate_egress_or_raise(
     policy_kwargs: dict[str, Any] = {"block_private_override": block_override}
     if configured_endpoint is not None:
         policy_kwargs["configured_endpoint"] = configured_endpoint
+    if sensitive_observability:
+        policy_kwargs["sensitive_observability"] = True
     if pinned_ips:
         policy_kwargs["pinned_resolved_ips"] = pinned_ips
     res = evaluate_url_policy(url, **policy_kwargs)
@@ -1140,8 +1746,19 @@ def _validate_egress_or_raise(
         # metrics
         with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             get_metrics_registry().increment(
-                "http_client_egress_denials_total", 1, labels={"reason": (reason or "denied")}
+                "http_client_egress_denials_total",
+                1,
+                labels={
+                    "reason": "sensitive_endpoint_denied"
+                    if sensitive_observability
+                    else (reason or "denied")
+                },
             )
+        if sensitive_observability:
+            raise EgressPolicyError(
+                "Sensitive endpoint denied by egress policy",
+                reason_code=getattr(res, "reason_code", None),
+            ) from None
         raise EgressPolicyError(reason, reason_code=getattr(res, "reason_code", None))
 
 
@@ -1150,12 +1767,14 @@ async def _avalidate_egress_or_raise(
     *,
     dns_pin_cache: dict[str, tuple[str, ...]] | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    sensitive_observability: bool = False,
 ) -> None:
     await asyncio.to_thread(
         _validate_egress_or_raise,
         url,
         dns_pin_cache=dns_pin_cache,
         configured_endpoint=configured_endpoint,
+        sensitive_observability=sensitive_observability,
     )
 
 
@@ -1166,7 +1785,12 @@ def _is_url_allowed(url: str) -> bool:
     """
     try:
         from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-        res = evaluate_url_policy(url)
+        policy_kwargs = (
+            {"sensitive_observability": True}
+            if _effective_sensitive_observability()
+            else {}
+        )
+        res = evaluate_url_policy(url, **policy_kwargs)
         return bool(getattr(res, "allowed", False))
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
         # Fail closed in strict paths; the simple path's callers expect explicit
@@ -1191,6 +1815,11 @@ def _validate_proxies_or_raise(proxies: str | dict[str, str] | None) -> None:
             continue
         if h not in PROXY_ALLOWLIST:
             raise EgressPolicyError(f"Proxy host not in allowlist: {h}")  # noqa: TRY003
+
+
+def validate_proxies_or_raise(proxies: str | dict[str, str] | None) -> None:
+    """Validate outbound proxies through the central egress policy."""
+    _validate_proxies_or_raise(proxies)
 
 
 def _resolve_proxy_for_url(url: str, proxies: str | dict[str, str] | None) -> str | None:
@@ -1289,7 +1918,12 @@ def _strip_sensitive_headers_for_cross_origin(
             kept[key] = value
     dropped.sort()
     if dropped:
-        logger.bind(target_host=_parse_host_from_url(target_url)).debug(
+        observed_target = (
+            _SENSITIVE_OBSERVABILITY_URL
+            if _effective_sensitive_observability()
+            else target_url
+        )
+        logger.bind(target_host=_parse_host_from_url(observed_target)).debug(
             "Stripped sensitive headers on cross-origin redirect: {}", ", ".join(dropped)
         )
     return kept
@@ -1392,6 +2026,23 @@ def _is_aiohttp_client(client: Any) -> bool:
         return isinstance(client, aiohttp.ClientSession)
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
         return False
+
+
+def _network_error_classification(exc: BaseException) -> str | None:
+    """Return stable transport-error metadata without parsing exception text."""
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+        return "timeout"
+    try:
+        if httpx is not None and isinstance(exc, httpx.TimeoutException):
+            return "timeout"
+    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+        pass
+    try:
+        if aiohttp is not None and isinstance(exc, aiohttp.ServerTimeoutError):
+            return "timeout"
+    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+        pass
+    return None
 
 
 def _aiohttp_timeout_from_defaults() -> aiohttp.ClientTimeout:
@@ -1690,6 +2341,8 @@ def _parse_retry_after_delay_seconds(
 def _should_retry(method: str, status: int | None, exc: Exception | None, policy: RetryPolicy) -> tuple[bool, str]:
     m = method.upper()
     if exc is not None:
+        if m not in policy.retry_on_methods and not policy.retry_on_unsafe:
+            return False, "method_not_retriable"
         # Treat DNS resolution / unknown-host failures as permanent.
         try:
             if _is_dns_resolution_error(exc):
@@ -1801,9 +2454,13 @@ def _check_cert_pinning(
     *,
     configured_endpoint: ConfiguredEndpointScope | None = None,
     accepted_resolved_ips: tuple[str, ...] = (),
+    sensitive_observability: bool = False,
 ) -> None:
     if not host or not pins:
         return
+    sensitive_observability = _effective_sensitive_observability(
+        sensitive_observability
+    )
     try:
         # Enforce egress policy for the pinning connection itself. This guards
         # against any future callers that might invoke pinning without having
@@ -1826,6 +2483,8 @@ def _check_cert_pinning(
                 validation_kwargs["dns_pin_cache"] = {
                     normalized_host: tuple(accepted_resolved_ips)
                 }
+            if sensitive_observability:
+                validation_kwargs["sensitive_observability"] = True
             _validate_egress_or_raise(url, **validation_kwargs)
         except EgressPolicyError:
             raise
@@ -1870,6 +2529,7 @@ def _check_cert_pins_for_url(
     *,
     configured_endpoint: ConfiguredEndpointScope | None,
     dns_pin_cache: dict[str, tuple[str, ...]],
+    sensitive_observability: bool = False,
 ) -> None:
     """Apply configured certificate pins to one already-validated request hop."""
     if not pins_map:
@@ -1888,6 +2548,7 @@ def _check_cert_pins_for_url(
         TLS_MIN_VERSION,
         configured_endpoint=configured_endpoint,
         accepted_resolved_ips=_accepted_ips_for_url(dns_pin_cache, url),
+        sensitive_observability=sensitive_observability,
     )
 
 
@@ -2171,6 +2832,7 @@ async def _httpx_arequest_io(
     follow_redirects: bool = False,
     verify: bool | str | ssl.SSLContext | None = None,
     accepted_resolved_ips: tuple[str, ...] = (),
+    max_response_bytes: int | None = None,
 ) -> httpx.Response:
     method_upper = str(method).upper()
     transport_url, headers, sni_hostname = _prepare_pinned_transport_target(
@@ -2178,6 +2840,55 @@ async def _httpx_arequest_io(
         headers,
         accepted_resolved_ips,
     )
+    if max_response_bytes is not None:
+        if type(max_response_bytes) is not int or max_response_bytes < 0:
+            raise ValueError("max_response_bytes must be a non-negative integer")
+        headers = _force_identity_accept_encoding(headers)
+        stream_kwargs: dict[str, Any] = {
+            "headers": headers,
+            "cookies": cookies,
+            "params": params,
+            "json": json,
+            "data": data,
+            "files": files,
+            "timeout": timeout,
+            "follow_redirects": follow_redirects,
+        }
+        stream_kwargs["extensions"] = {
+            _BOUNDED_RESPONSE_EXTENSION: True,
+        }
+        if accepted_resolved_ips:
+            stream_kwargs["extensions"]["sni_hostname"] = sni_hostname
+        async with client.stream(
+            method_upper,
+            transport_url,
+            **stream_kwargs,
+        ) as streamed:
+            body = bytearray()
+            if 200 <= int(streamed.status_code) < 300:
+                if _uses_compressed_content_encoding(streamed.headers):
+                    raise NetworkError(
+                        "Compressed responses are not allowed with "
+                        "max_response_bytes"
+                    )
+                async for chunk in streamed.aiter_raw():
+                    if len(body) + len(chunk) > max_response_bytes:
+                        raise NetworkError(
+                            "Response exceeds max_response_bytes limit"
+                        )
+                    body.extend(chunk)
+            copied_headers = httpx.Headers(streamed.headers)
+            response = httpx.Response(
+                status_code=streamed.status_code,
+                content=bytes(body),
+                request=streamed.request,
+                extensions=streamed.extensions,
+                history=streamed.history,
+            )
+            response.headers = copied_headers
+        if accepted_resolved_ips:
+            _restore_httpx_response_url(response, url)
+        return response
     if accepted_resolved_ips:
         response = await client.request(
             method_upper,
@@ -2249,7 +2960,136 @@ async def _aiohttp_request_io(
     proxies: str | dict[str, str] | None = None,
     ssl_override: Any | None = None,
     accepted_resolved_ips: tuple[str, ...] = (),
+    max_response_bytes: int | None = None,
 ) -> _AiohttpResponse:
+    original_url = url
+    url, headers, server_hostname = _prepare_pinned_transport_target(
+        url,
+        headers,
+        accepted_resolved_ips,
+    )
+    if max_response_bytes is not None:
+        if type(max_response_bytes) is not int or max_response_bytes < 0:
+            raise ValueError("max_response_bytes must be a non-negative integer")
+        headers = _force_identity_accept_encoding(headers)
+    req_timeout = _aiohttp_timeout_from_value(timeout)
+    proxy = _resolve_proxy_for_url(url, proxies)
+    req_kwargs: dict[str, Any] = {
+        "headers": headers,
+        "cookies": cookies,
+        "params": params,
+        "timeout": req_timeout,
+        "allow_redirects": False,
+    }
+    if max_response_bytes is not None:
+        req_kwargs["auto_decompress"] = False
+    if proxy:
+        req_kwargs["proxy"] = proxy
+    if ssl_override is not None:
+        req_kwargs["ssl"] = ssl_override
+    if server_hostname and urlsplit(original_url).scheme.lower() == "https":
+        req_kwargs["server_hostname"] = server_hostname
+    if files is not None:
+        _rewind_files(files)
+        req_kwargs["data"] = _build_aiohttp_form(data, files)
+    else:
+        if json is not None:
+            req_kwargs["json"] = json
+        if data is not None:
+            req_kwargs["data"] = data
+    async with session.request(str(method).upper(), url, **req_kwargs) as resp:
+        if max_response_bytes is None:
+            body = await resp.read()
+        else:
+            bounded_body = bytearray()
+            if 200 <= int(getattr(resp, "status", 0)) < 300:
+                if _uses_compressed_content_encoding(resp.headers):
+                    raise NetworkError(
+                        "Compressed responses are not allowed with "
+                        "max_response_bytes"
+                    )
+                while True:
+                    remaining = max_response_bytes - len(bounded_body)
+                    chunk = await resp.content.read(remaining + 1)
+                    if not chunk:
+                        break
+                    if len(bounded_body) + len(chunk) > max_response_bytes:
+                        raise NetworkError(
+                            "Response exceeds max_response_bytes limit"
+                        )
+                    bounded_body.extend(chunk)
+            body = bytes(bounded_body)
+        wrapped = _AiohttpResponse(resp, body)
+        if accepted_resolved_ips:
+            wrapped.url = original_url
+            wrapped.request.url = original_url
+        return wrapped
+
+
+@asynccontextmanager
+async def _httpx_stream_io(
+    *,
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
+    params: dict[str, Any] | None = None,
+    json: Any | None = None,
+    data: Any | None = None,
+    files: Any | None = None,
+    timeout: float | httpx.Timeout | None = None,
+    chunk_size: int | None = None,
+    accepted_resolved_ips: tuple[str, ...] = (),
+) -> AsyncIterator[tuple[httpx.Response, AsyncIterator[bytes]]]:
+    original_url = url
+    url, headers, sni_hostname = _prepare_pinned_transport_target(
+        url,
+        headers,
+        accepted_resolved_ips,
+    )
+    extensions: dict[str, Any] = {"tldw_stream_response": True}
+    if sni_hostname:
+        extensions["sni_hostname"] = sni_hostname
+    async with client.stream(
+        str(method).upper(),
+        url,
+        headers=headers,
+        cookies=cookies,
+        params=params,
+        json=json,
+        data=data,
+        files=files,
+        timeout=timeout,
+        follow_redirects=False,
+        extensions=extensions,
+    ) as resp:
+        if accepted_resolved_ips:
+            _restore_httpx_response_url(resp, original_url)
+        if chunk_size is None:
+            yield resp, resp.aiter_bytes()
+        else:
+            yield resp, resp.aiter_bytes(chunk_size)
+
+
+@asynccontextmanager
+async def _aiohttp_stream_io(
+    *,
+    session: aiohttp.ClientSession,
+    method: str,
+    url: str,
+    headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
+    params: dict[str, Any] | None = None,
+    json: Any | None = None,
+    data: Any | None = None,
+    files: Any | None = None,
+    timeout: Any | None = None,
+    proxies: str | dict[str, str] | None = None,
+    ssl_override: Any | None = None,
+    chunk_size: int | None = None,
+    accepted_resolved_ips: tuple[str, ...] = (),
+) -> AsyncIterator[tuple[Any, AsyncIterator[bytes]]]:
     original_url = url
     url, headers, server_hostname = _prepare_pinned_transport_target(
         url,
@@ -2280,130 +3120,68 @@ async def _aiohttp_request_io(
         if data is not None:
             req_kwargs["data"] = data
     async with session.request(str(method).upper(), url, **req_kwargs) as resp:
-        body = await resp.read()
-        wrapped = _AiohttpResponse(resp, body)
-        if accepted_resolved_ips:
-            wrapped.url = original_url
-            wrapped.request.url = original_url
-        return wrapped
-
-
-@asynccontextmanager
-async def _httpx_stream_io(
-    *,
-    client: httpx.AsyncClient,
-    method: str,
-    url: str,
-    headers: dict[str, str] | None = None,
-    params: dict[str, Any] | None = None,
-    json: Any | None = None,
-    data: Any | None = None,
-    files: Any | None = None,
-    timeout: float | httpx.Timeout | None = None,
-    chunk_size: int | None = None,
-    accepted_resolved_ips: tuple[str, ...] = (),
-) -> AsyncIterator[tuple[httpx.Response, AsyncIterator[bytes]]]:
-    original_url = url
-    url, headers, sni_hostname = _prepare_pinned_transport_target(
-        url,
-        headers,
-        accepted_resolved_ips,
-    )
-    extensions = (
-        {"sni_hostname": sni_hostname}
-        if sni_hostname
-        else None
-    )
-    async with client.stream(
-        str(method).upper(),
-        url,
-        headers=headers,
-        params=params,
-        json=json,
-        data=data,
-        files=files,
-        timeout=timeout,
-        follow_redirects=False,
-        extensions=extensions,
-    ) as resp:
-        if accepted_resolved_ips:
-            _restore_httpx_response_url(resp, original_url)
-        if chunk_size is None:
-            yield resp, resp.aiter_bytes()
-        else:
-            yield resp, resp.aiter_bytes(chunk_size)
-
-
-@asynccontextmanager
-async def _aiohttp_stream_io(
-    *,
-    session: aiohttp.ClientSession,
-    method: str,
-    url: str,
-    headers: dict[str, str] | None = None,
-    params: dict[str, Any] | None = None,
-    json: Any | None = None,
-    data: Any | None = None,
-    files: Any | None = None,
-    timeout: Any | None = None,
-    proxies: str | dict[str, str] | None = None,
-    ssl_override: Any | None = None,
-    chunk_size: int | None = None,
-    accepted_resolved_ips: tuple[str, ...] = (),
-) -> AsyncIterator[tuple[Any, AsyncIterator[bytes]]]:
-    original_url = url
-    url, headers, server_hostname = _prepare_pinned_transport_target(
-        url,
-        headers,
-        accepted_resolved_ips,
-    )
-    req_timeout = _aiohttp_timeout_from_value(timeout)
-    proxy = _resolve_proxy_for_url(url, proxies)
-    req_kwargs: dict[str, Any] = {
-        "headers": headers,
-        "params": params,
-        "timeout": req_timeout,
-        "allow_redirects": False,
-    }
-    if proxy:
-        req_kwargs["proxy"] = proxy
-    if ssl_override is not None:
-        req_kwargs["ssl"] = ssl_override
-    if server_hostname and urlsplit(original_url).scheme.lower() == "https":
-        req_kwargs["server_hostname"] = server_hostname
-    if files is not None:
-        _rewind_files(files)
-        req_kwargs["data"] = _build_aiohttp_form(data, files)
-    else:
-        if json is not None:
-            req_kwargs["json"] = json
-        if data is not None:
-            req_kwargs["data"] = data
-    async with session.request(str(method).upper(), url, **req_kwargs) as resp:
         if chunk_size is None:
             yield resp, resp.content.iter_any()
         else:
             yield resp, resp.content.iter_chunked(chunk_size)
 
 
-async def _iter_sse_events_from_bytes(byte_iter: AsyncIterator[bytes]) -> AsyncIterator[SSEEvent]:
+@asynccontextmanager
+async def _preserve_terminal_status_during_stream_cleanup(
+    stream_context: Any,
+) -> AsyncIterator[Any]:
+    """Keep an observed terminal HTTP status authoritative over cleanup errors."""
+    terminal_error: _TerminalHTTPStatusError | None = None
+    try:
+        async with stream_context as stream:
+            try:
+                yield stream
+            except _TerminalHTTPStatusError as exc:
+                terminal_error = exc
+    except asyncio.CancelledError:
+        raise
+    except _STREAM_CLEANUP_TRANSPORT_EXCEPTIONS:
+        if terminal_error is None:
+            raise
+    if terminal_error is not None:
+        raise terminal_error from None
+
+
+async def _iter_sse_events_from_bytes(
+    byte_iter: AsyncIterator[bytes],
+    *,
+    on_body_started: Callable[[], None] | None = None,
+) -> AsyncIterator[SSEEvent]:
+    """Parse SSE events and report the first non-empty response body chunk."""
     buffer = ""
-    async for chunk in byte_iter:
-        if not chunk:
-            continue
-        try:
-            text = chunk.decode("utf-8", errors="replace")
-        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
-            raise StreamingProtocolError(f"Failed to decode SSE chunk: {e}")  # noqa: B904, TRY003
-        buffer += text
-        while "\n\n" in buffer or "\r\n\r\n" in buffer:
-            if "\r\n\r\n" in buffer and ("\n\n" not in buffer or buffer.index("\r\n\r\n") < buffer.index("\n\n")):
-                raw, buffer = buffer.split("\r\n\r\n", 1)
-            else:
-                raw, buffer = buffer.split("\n\n", 1)
-            event = _parse_sse_event(raw)
-            if event is not None:
-                yield event
+    iterator = byte_iter.__aiter__()
+    try:
+        async for chunk in iterator:
+            if not chunk:
+                continue
+            if on_body_started is not None:
+                on_body_started()
+                on_body_started = None
+            try:
+                text = chunk.decode("utf-8", errors="replace")
+            except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
+                raise StreamingProtocolError(f"Failed to decode SSE chunk: {e}")  # noqa: B904, TRY003
+            buffer += text
+            while "\n\n" in buffer or "\r\n\r\n" in buffer:
+                if "\r\n\r\n" in buffer and (
+                    "\n\n" not in buffer
+                    or buffer.index("\r\n\r\n") < buffer.index("\n\n")
+                ):
+                    raw, buffer = buffer.split("\r\n\r\n", 1)
+                else:
+                    raw, buffer = buffer.split("\n\n", 1)
+                event = _parse_sse_event(raw)
+                if event is not None:
+                    yield event
+    finally:
+        close = getattr(iterator, "aclose", None)
+        if close is not None:
+            await close()
 
 
 def _stream_timeout_values(timeout: Any | None) -> tuple[float, float]:
@@ -2437,17 +3215,43 @@ async def _iter_bytes_with_timeouts(
     first_timeout = max(0.001, float(first_timeout))
     idle_timeout = max(0.001, float(idle_timeout))
     first = True
-    while True:
-        timeout_s = first_timeout if first else idle_timeout
-        try:
-            chunk = await asyncio.wait_for(byte_iter.__anext__(), timeout=timeout_s)
-        except StopAsyncIteration:
-            return
-        except asyncio.TimeoutError as exc:
-            phase = "first_byte" if first else "idle"
-            raise NetworkError(f"StreamTimeout:{phase}") from exc
-        first = False
-        yield chunk
+    iterator = byte_iter.__aiter__()
+    try:
+        while True:
+            timeout_s = first_timeout if first else idle_timeout
+            try:
+                async with _stream_timeout(timeout_s):
+                    chunk = await iterator.__anext__()
+            except StopAsyncIteration:
+                return
+            except asyncio.TimeoutError as exc:
+                phase = "first_byte" if first else "idle"
+                raise NetworkError(f"StreamTimeout:{phase}") from exc
+            first = False
+            yield chunk
+    finally:
+        close = getattr(iterator, "aclose", None)
+        if close is not None:
+            await close()
+
+
+_SAFE_SENSITIVE_SSE_ERRORS = frozenset(
+    {
+        "Invalid redirect Location header",
+        "Redirect without Location header",
+        "StreamTimeout:first_byte",
+        "StreamTimeout:idle",
+        "Too many redirects",
+    }
+)
+
+
+def _sse_network_error(exc: BaseException, *, sensitive_observability: bool) -> NetworkError:
+    """Normalize SSE failures without exposing endpoint-bearing transport details."""
+    message = str(exc)
+    if not sensitive_observability or message in _SAFE_SENSITIVE_SSE_ERRORS:
+        return NetworkError(message)
+    return NetworkError(exc.__class__.__name__)
 
 
 # --------------------------------------------------------------------------------------
@@ -2472,8 +3276,15 @@ async def _afetch_httpx(
     cert_pinning: dict[str, set[str]] | None = None,
     verify: bool | str | ssl.SSLContext | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    sensitive_observability: bool = False,
+    max_response_bytes: int | None = None,
 ) -> httpx.Response:
     """Async httpx request with retries and egress enforcement.
+
+    ``max_response_bytes`` requests identity encoding and bounds application
+    response-body accumulation while streaming successful responses. Encoded
+    successful responses are rejected; bounded non-2xx responses are returned
+    with an empty body.
 
     Raises ValueError when retries are enabled and a file-like object in `files`
     is not seekable: "File-like object must be seekable when retries are enabled.
@@ -2481,6 +3292,9 @@ async def _afetch_httpx(
     """
     if httpx is None:  # pragma: no cover
         raise RuntimeError("httpx is not available")  # noqa: TRY003
+    sensitive_observability = _effective_sensitive_observability(
+        sensitive_observability
+    )
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
@@ -2488,6 +3302,7 @@ async def _afetch_httpx(
         url,
         dns_pin_cache=dns_pin_cache,
         configured_endpoint=configured_endpoint,
+        sensitive_observability=sensitive_observability,
     )
     _validate_proxies_or_raise(proxies)
 
@@ -2496,12 +3311,12 @@ async def _afetch_httpx(
     t0 = time.time()
     last_exc: Exception | None = None
     tm = get_tracing_manager()
-    host_attr = _parse_host_from_url(url)
+    observability_url = _SENSITIVE_OBSERVABILITY_URL if sensitive_observability else url
     method_upper = str(method).upper()
     _head_disable_h2_tried = False
     _head_get_range_tried = False
 
-    async def _do_once(ac: httpx.AsyncClient, target_url: str) -> tuple[httpx.Response | None, str]:
+    async def _do_once(ac: httpx.AsyncClient, target_url: str) -> tuple[httpx.Response | None, str, str | None]:
         req_headers = _inject_trace_headers(headers)
         req_headers = _strip_sensitive_headers_for_cross_origin(
             req_headers, original_url=url, target_url=target_url
@@ -2511,7 +3326,8 @@ async def _afetch_httpx(
         try:
             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 logger.debug(
-                    f"afetch _do_once: method={method_upper} url={_sanitize_url_for_logs(target_url)}"
+                    f"afetch _do_once: method={method_upper} "
+                    f"url={_sanitize_url_for_logs(observability_url)}"
                 )
             req_headers = _sanitize_accept_encoding_for_backend(req_headers, "httpx")
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
@@ -2535,11 +3351,12 @@ async def _afetch_httpx(
                                 accepted_resolved_ips=_accepted_ips_for_url(
                                     dns_pin_cache, target_url
                                 ),
+                                sensitive_observability=sensitive_observability,
                             )
             except EgressPolicyError:
                 raise
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
-                return None, e.__class__.__name__
+                return None, e.__class__.__name__, _network_error_classification(e)
             r = await _httpx_arequest_io(
                 client=ac,
                 method=method_upper,
@@ -2557,8 +3374,9 @@ async def _afetch_httpx(
                     dns_pin_cache,
                     target_url,
                 ),
+                max_response_bytes=max_response_bytes,
             )
-            return r, "ok"  # noqa: TRY300
+            return r, "ok", None  # noqa: TRY300
         except EgressPolicyError:
             raise
         except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
@@ -2566,7 +3384,15 @@ async def _afetch_httpx(
             # can distinguish 4xx/5xx responses from transport failures. All
             # other exceptions are normalized into a NetworkError reason.
             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
-                logger.debug(f"afetch _do_once: caught exception {e!r}")
+                if _opaque_stt_endpoint_id() is not None:
+                    logger.debug(
+                        "planned STT HTTP transport exception"
+                    )
+                else:
+                    logger.debug(
+                        "afetch _do_once: caught exception {}",
+                        type(e).__name__,
+                    )
             try:
                 _hx = _resolve_httpx()
                 if _hx is not None and isinstance(e, getattr(_hx, "HTTPStatusError", Exception)):
@@ -2581,10 +3407,10 @@ async def _afetch_httpx(
                 if _is_dns_resolution_error(e):
                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         e._tldw_dns_resolution = True
-                    return None, "DNSResolutionError"
+                    return None, "DNSResolutionError", _network_error_classification(e)
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                 pass
-            return None, e.__class__.__name__
+            return None, e.__class__.__name__, _network_error_classification(e)
 
     # Create ephemeral client if none provided
     need_close = False
@@ -2594,13 +3420,11 @@ async def _afetch_httpx(
         need_close = False
 
     try:
-        async with tm.async_span(
+        async with _async_http_client_observability_span(
+            tm,
             "http.client",
-            attributes={
-                "http.method": method.upper(),
-                "net.host.name": host_attr,
-                "url.full": _sanitize_url_for_logs(url),
-            },
+            sensitive_observability=sensitive_observability,
+            attributes=_http_trace_attributes(method, url),
         ):
             for attempt in range(1, attempts + 1):
                 last_exc = None
@@ -2613,8 +3437,9 @@ async def _afetch_httpx(
                         cur_url,
                         dns_pin_cache=dns_pin_cache,
                         configured_endpoint=configured_endpoint,
+                        sensitive_observability=sensitive_observability,
                     )
-                    resp, reason = await _do_once(ac, cur_url)
+                    resp, reason, classification = await _do_once(ac, cur_url)
                     if resp is None:
                         # Special HEAD fallbacks: disable HTTP/2, then GET with Range 0-0
                         if method_upper == "HEAD":
@@ -2637,12 +3462,14 @@ async def _afetch_httpx(
                                         cur_url,
                                         dns_pin_cache=dns_pin_cache,
                                         configured_endpoint=configured_endpoint,
+                                        sensitive_observability=sensitive_observability,
                                     )
                                     _check_cert_pins_for_url(
                                         cur_url,
                                         cert_pinning or _get_client_cert_pins(ac),
                                         configured_endpoint=configured_endpoint,
                                         dns_pin_cache=dns_pin_cache,
+                                        sensitive_observability=sensitive_observability,
                                     )
                                     req_headers = _inject_trace_headers(headers)
                                     req_headers = _strip_sensitive_headers_for_cross_origin(
@@ -2673,12 +3500,13 @@ async def _afetch_httpx(
                                             dns_pin_cache,
                                             cur_url,
                                         ),
+                                        max_response_bytes=max_response_bytes,
                                     )
                                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                         tm.set_attributes({"http.status_code": int(r2.status_code)})
                                     _log_outbound_request(
                                         method="GET",
-                                        url=r2.request.url if hasattr(r2.request, "url") else cur_url,
+                                        url=observability_url,
                                         status_code=int(r2.status_code),
                                         start_time=t0,
                                         attempt=attempt,
@@ -2690,7 +3518,7 @@ async def _afetch_httpx(
                                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                                     pass
                         # network exception occurred (no HEAD fallback succeeded)
-                        last_exc = NetworkError(reason)
+                        last_exc = NetworkError(reason, classification=classification)
                         try:
                             if reason == "DNSResolutionError":
                                 last_exc._tldw_dns_resolution = True
@@ -2730,14 +3558,30 @@ async def _afetch_httpx(
                             if resp.status_code < 400:
                                 # metrics for success
                                 try:
-                                    host = _parse_host_from_url(str(resp.request.url))
+                                    response_url = str(resp.request.url)
+                                    response_observability_url = (
+                                        observability_url
+                                        if sensitive_observability
+                                        else response_url
+                                    )
                                     get_metrics_registry().increment(
-                                        "http_client_requests_total", 1, labels={"method": method.upper(), "host": host, "status": str(resp.status_code)}
+                                        "http_client_requests_total",
+                                        1,
+                                        labels=_http_metric_labels(
+                                            method,
+                                            response_url,
+                                            status_code=int(
+                                                resp.status_code
+                                            ),
+                                        ),
                                     )
                                     get_metrics_registry().observe(
                                         "http_client_request_duration_seconds",
                                         time.time() - t0,
-                                        labels={"method": method.upper(), "host": host},
+                                        labels=_http_metric_labels(
+                                            method,
+                                            response_url,
+                                        ),
                                     )
                                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                                     pass
@@ -2745,7 +3589,7 @@ async def _afetch_httpx(
                                     tm.set_attributes({"http.status_code": int(resp.status_code)})
                                 _log_outbound_request(
                                     method=method,
-                                    url=resp.request.url,
+                                    url=response_observability_url,
                                     status_code=int(resp.status_code),
                                     start_time=t0,
                                     attempt=attempt,
@@ -2757,7 +3601,7 @@ async def _afetch_httpx(
                             if not should or attempt == attempts:
                                 _log_outbound_request(
                                     method=method,
-                                    url=resp.request.url,
+                                    url=observability_url,
                                     status_code=int(resp.status_code),
                                     start_time=t0,
                                     attempt=attempt,
@@ -2766,7 +3610,6 @@ async def _afetch_httpx(
                                 return resp
                             reason = rsn
                             try:
-                                host = _parse_host_from_url(str(resp.request.url))
                                 get_metrics_registry().increment("http_client_retries_total", 1, labels={"reason": reason})
                             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                                 pass
@@ -2778,7 +3621,7 @@ async def _afetch_httpx(
                                 delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                             logger.debug(
                                 f"afetch retry attempt={attempt} reason={reason} delay={delay:.3f}s "
-                                f"url={_sanitize_url_for_logs(cur_url)}"
+                                f"url={_sanitize_url_for_logs(observability_url)}"
                             )
                             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                 tm.add_event("http.retry", {"attempt": attempt, "reason": reason})
@@ -2793,7 +3636,7 @@ async def _afetch_httpx(
                     if not should or attempt == attempts:
                         _log_outbound_request(
                             method=method,
-                            url=cur_url,
+                            url=observability_url,
                             status_code=0,
                             start_time=t0,
                             attempt=attempt,
@@ -2806,7 +3649,7 @@ async def _afetch_httpx(
                     delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                     logger.debug(
                         f"afetch network retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
-                        f"url={_sanitize_url_for_logs(cur_url)}"
+                        f"url={_sanitize_url_for_logs(observability_url)}"
                     )
                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         tm.add_event("http.retry", {"attempt": attempt, "reason": rsn})
@@ -2817,7 +3660,7 @@ async def _afetch_httpx(
         # If we exit loop without return, attempts exhausted
         _log_outbound_request(
             method=method,
-            url=url,
+            url=observability_url,
             status_code=0,
             start_time=t0,
             attempt=attempts,
@@ -2849,8 +3692,15 @@ async def _afetch_aiohttp(
     cert_pinning: dict[str, set[str]] | None = None,
     verify: Any | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    sensitive_observability: bool = False,
+    max_response_bytes: int | None = None,
 ) -> _AiohttpResponse:
     """Async aiohttp request with retries and egress enforcement.
+
+    ``max_response_bytes`` requests identity encoding and bounds application
+    response-body accumulation while streaming successful responses. Encoded
+    successful responses are rejected; bounded non-2xx responses are returned
+    with an empty body.
 
     Raises ValueError when retries are enabled and a file-like object in `files`
     is not seekable: "File-like object must be seekable when retries are enabled.
@@ -2858,6 +3708,9 @@ async def _afetch_aiohttp(
     """
     if aiohttp is None:  # pragma: no cover
         raise RuntimeError("aiohttp is not available")  # noqa: TRY003
+    sensitive_observability = _effective_sensitive_observability(
+        sensitive_observability
+    )
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
@@ -2865,6 +3718,7 @@ async def _afetch_aiohttp(
         url,
         dns_pin_cache=dns_pin_cache,
         configured_endpoint=configured_endpoint,
+        sensitive_observability=sensitive_observability,
     )
     _validate_proxies_or_raise(proxies)
 
@@ -2873,13 +3727,15 @@ async def _afetch_aiohttp(
     t0 = time.time()
     last_exc: Exception | None = None
     tm = get_tracing_manager()
-    host_attr = _parse_host_from_url(url)
+    observability_url = _SENSITIVE_OBSERVABILITY_URL if sensitive_observability else url
     method_upper = str(method).upper()
     _head_get_range_tried = False
 
     ssl_override = _aiohttp_ssl_from_verify(verify)
 
-    async def _do_once(session: aiohttp.ClientSession, target_url: str) -> tuple[_AiohttpResponse | None, str]:
+    async def _do_once(
+        session: aiohttp.ClientSession, target_url: str
+    ) -> tuple[_AiohttpResponse | None, str, str | None]:
         req_headers = _inject_trace_headers(headers)
         req_headers = _strip_sensitive_headers_for_cross_origin(
             req_headers, original_url=url, target_url=target_url
@@ -2913,11 +3769,12 @@ async def _afetch_aiohttp(
                             accepted_resolved_ips=_accepted_ips_for_url(
                                 dns_pin_cache, target_url
                             ),
+                            sensitive_observability=sensitive_observability,
                         )
             except EgressPolicyError:
                 raise
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
-                return None, e.__class__.__name__
+                return None, e.__class__.__name__, _network_error_classification(e)
             resp = await _aiohttp_request_io(
                 session=session,
                 method=method_upper,
@@ -2935,29 +3792,33 @@ async def _afetch_aiohttp(
                     dns_pin_cache,
                     target_url,
                 ),
+                max_response_bytes=max_response_bytes,
             )
-            return resp, "ok"  # noqa: TRY300
+            return resp, "ok", None  # noqa: TRY300
         except EgressPolicyError:
             raise
-        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
+        except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
+            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                logger.debug(
+                    "afetch _do_once: caught exception {}",
+                    type(e).__name__,
+                )
             try:
                 if _is_dns_resolution_error(e):
                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         e._tldw_dns_resolution = True
-                    return None, "DNSResolutionError"
+                    return None, "DNSResolutionError", _network_error_classification(e)
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                 pass
-            return None, e.__class__.__name__
+            return None, e.__class__.__name__, _network_error_classification(e)
 
     session = client or _get_aiohttp_session()
 
-    async with tm.async_span(
+    async with _async_http_client_observability_span(
+        tm,
         "http.client",
-        attributes={
-            "http.method": method.upper(),
-            "net.host.name": host_attr,
-            "url.full": _sanitize_url_for_logs(url),
-        },
+        sensitive_observability=sensitive_observability,
+        attributes=_http_trace_attributes(method, url),
     ):
         for attempt in range(1, attempts + 1):
             last_exc = None
@@ -2969,8 +3830,9 @@ async def _afetch_aiohttp(
                     cur_url,
                     dns_pin_cache=dns_pin_cache,
                     configured_endpoint=configured_endpoint,
+                    sensitive_observability=sensitive_observability,
                 )
-                resp, reason = await _do_once(session, cur_url)
+                resp, reason, classification = await _do_once(session, cur_url)
                 if resp is None:
                     if method_upper == "HEAD" and not _head_get_range_tried:
                         _head_get_range_tried = True
@@ -2979,12 +3841,14 @@ async def _afetch_aiohttp(
                                 cur_url,
                                 dns_pin_cache=dns_pin_cache,
                                 configured_endpoint=configured_endpoint,
+                                sensitive_observability=sensitive_observability,
                             )
                             _check_cert_pins_for_url(
                                 cur_url,
                                 cert_pinning or _get_client_cert_pins(session),
                                 configured_endpoint=configured_endpoint,
                                 dns_pin_cache=dns_pin_cache,
+                                sensitive_observability=sensitive_observability,
                             )
                             req_headers = _inject_trace_headers(headers)
                             req_headers = _strip_sensitive_headers_for_cross_origin(
@@ -3009,12 +3873,13 @@ async def _afetch_aiohttp(
                                     dns_pin_cache,
                                     cur_url,
                                 ),
+                                max_response_bytes=max_response_bytes,
                             )
                             with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                 tm.set_attributes({"http.status_code": int(r2_wrap.status_code)})
                             _log_outbound_request(
                                 method="GET",
-                                url=_get_response_url(r2_wrap, cur_url),
+                                url=observability_url,
                                 status_code=int(r2_wrap.status_code),
                                 start_time=t0,
                                 attempt=attempt,
@@ -3023,9 +3888,9 @@ async def _afetch_aiohttp(
                             return r2_wrap  # noqa: TRY300
                         except EgressPolicyError:
                             raise
-                        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+                        except _HTTPCLIENT_REQUEST_EXCEPTIONS:
                             pass
-                    last_exc = NetworkError(reason)
+                    last_exc = NetworkError(reason, classification=classification)
                     try:
                         if reason == "DNSResolutionError":
                             last_exc._tldw_dns_resolution = True
@@ -3055,16 +3920,30 @@ async def _afetch_aiohttp(
                 # final response
                 if resp.status_code < 400:
                     try:
-                        host = _parse_host_from_url(_get_response_url(resp, cur_url))
+                        response_url = _get_response_url(resp, cur_url)
+                        response_observability_url = (
+                            observability_url
+                            if sensitive_observability
+                            else response_url
+                        )
                         get_metrics_registry().increment(
                             "http_client_requests_total",
                             1,
-                            labels={"method": method.upper(), "host": host, "status": str(resp.status_code)},
+                            labels=_http_metric_labels(
+                                method,
+                                response_url,
+                                status_code=int(
+                                    resp.status_code
+                                ),
+                            ),
                         )
                         get_metrics_registry().observe(
                             "http_client_request_duration_seconds",
                             time.time() - t0,
-                            labels={"method": method.upper(), "host": host},
+                            labels=_http_metric_labels(
+                                method,
+                                response_url,
+                            ),
                         )
                     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                         pass
@@ -3072,7 +3951,7 @@ async def _afetch_aiohttp(
                         tm.set_attributes({"http.status_code": int(resp.status_code)})
                     _log_outbound_request(
                         method=method,
-                        url=_get_response_url(resp, cur_url),
+                        url=response_observability_url,
                         status_code=int(resp.status_code),
                         start_time=t0,
                         attempt=attempt,
@@ -3084,7 +3963,7 @@ async def _afetch_aiohttp(
                 if not should or attempt == attempts:
                     _log_outbound_request(
                         method=method,
-                        url=_get_response_url(resp, cur_url),
+                        url=observability_url,
                         status_code=int(resp.status_code),
                         start_time=t0,
                         attempt=attempt,
@@ -3093,7 +3972,6 @@ async def _afetch_aiohttp(
                     return resp
                 reason = rsn
                 try:
-                    host = _parse_host_from_url(_get_response_url(resp, cur_url))
                     get_metrics_registry().increment("http_client_retries_total", 1, labels={"reason": reason})
                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                     pass
@@ -3104,7 +3982,7 @@ async def _afetch_aiohttp(
                     delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                 logger.debug(
                     f"afetch retry attempt={attempt} reason={reason} delay={delay:.3f}s "
-                    f"url={_sanitize_url_for_logs(cur_url)}"
+                    f"url={_sanitize_url_for_logs(observability_url)}"
                 )
                 with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                     tm.add_event("http.retry", {"attempt": attempt, "reason": reason})
@@ -3117,7 +3995,7 @@ async def _afetch_aiohttp(
                 if not should or attempt == attempts:
                     _log_outbound_request(
                         method=method,
-                        url=cur_url,
+                        url=observability_url,
                         status_code=0,
                         start_time=t0,
                         attempt=attempt,
@@ -3130,7 +4008,7 @@ async def _afetch_aiohttp(
                 delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                 logger.debug(
                     f"afetch network retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
-                    f"url={_sanitize_url_for_logs(cur_url)}"
+                    f"url={_sanitize_url_for_logs(observability_url)}"
                 )
                 with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                     tm.add_event("http.retry", {"attempt": attempt, "reason": rsn})
@@ -3140,7 +4018,7 @@ async def _afetch_aiohttp(
 
     _log_outbound_request(
         method=method,
-        url=url,
+        url=observability_url,
         status_code=0,
         start_time=t0,
         attempt=attempts,
@@ -3150,6 +4028,28 @@ async def _afetch_aiohttp(
     raise RetryExhaustedError("All retry attempts exhausted")  # noqa: TRY003
 
 
+def resolve_afetch_transport(
+    transport: str | None = None,
+) -> str:
+    """Resolve and validate the async transport selected by ``afetch``."""
+    selected = (
+        transport
+        if transport is not None
+        else ("aiohttp" if aiohttp is not None else "httpx")
+    )
+    normalized = str(selected).strip().lower()
+    if normalized == "aiohttp":
+        if aiohttp is None:
+            raise RuntimeError("aiohttp is not available")  # noqa: TRY003
+        return normalized
+    if normalized == "httpx":
+        if _resolve_httpx() is None:
+            raise RuntimeError("httpx is not available")  # noqa: TRY003
+        return normalized
+    raise ValueError("Unsupported async HTTP transport")
+
+
+@_with_sensitive_http_log_context_async
 async def afetch(
     *,
     method: str,
@@ -3168,11 +4068,22 @@ async def afetch(
     cert_pinning: dict[str, set[str]] | None = None,
     verify: bool | str | ssl.SSLContext | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    sensitive_observability: bool = False,
+    transport: str | None = None,
+    max_response_bytes: int | None = None,
 ) -> Any:
+    """Issue one async request, optionally bounding the decoded success body."""
     if client is not None:
         adapter_name = "aiohttp" if _is_aiohttp_client(client) else "httpx"
+        if (
+            transport is not None
+            and resolve_afetch_transport(transport) != adapter_name
+        ):
+            raise ValueError(
+                "Explicit async HTTP transport does not match client"
+            )
     else:
-        adapter_name = "aiohttp" if aiohttp is not None else "httpx"
+        adapter_name = resolve_afetch_transport(transport)
     adapter = _get_transport_adapter(adapter_name)
     return await adapter.arequest(
         method=method,
@@ -3191,9 +4102,12 @@ async def afetch(
         cert_pinning=cert_pinning,
         verify=verify,
         configured_endpoint=configured_endpoint,
+        sensitive_observability=sensitive_observability,
+        max_response_bytes=max_response_bytes,
     )
 
 
+@_with_sensitive_http_log_context_async
 async def apost(
     *,
     url: str,
@@ -3205,6 +4119,7 @@ async def apost(
     files: Any | None = None,
     timeout: float | httpx.Timeout | None = None,
     proxies: str | dict[str, str] | None = None,
+    sensitive_observability: bool = False,
 ) -> httpx.Response:
     """
     Minimal async POST helper that enforces egress policy.
@@ -3216,7 +4131,11 @@ async def apost(
     if httpx is None:  # pragma: no cover
         raise RuntimeError("httpx is not available")  # noqa: TRY003
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    await _avalidate_egress_or_raise(
+        url,
+        dns_pin_cache=dns_pin_cache,
+        sensitive_observability=sensitive_observability,
+    )
     _validate_proxies_or_raise(proxies)
 
     need_close = False
@@ -3246,6 +4165,7 @@ async def apost(
                 await ac.aclose()
 
 
+@_with_sensitive_http_log_context
 def _fetch_httpx_response(
     *,
     method: str,
@@ -3263,6 +4183,7 @@ def _fetch_httpx_response(
     retry: RetryPolicy | None = None,
     cert_pinning: dict[str, set[str]] | None = None,
     configured_endpoint: ConfiguredEndpointScope | None = None,
+    sensitive_observability: bool = False,
 ) -> httpx.Response:
     """Sync httpx request with retries and egress enforcement.
 
@@ -3272,6 +4193,9 @@ def _fetch_httpx_response(
     """
     if httpx is None:  # pragma: no cover
         raise RuntimeError("httpx is not available")  # noqa: TRY003
+    sensitive_observability = _effective_sensitive_observability(
+        sensitive_observability
+    )
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
@@ -3279,6 +4203,7 @@ def _fetch_httpx_response(
         url,
         dns_pin_cache=dns_pin_cache,
         configured_endpoint=configured_endpoint,
+        sensitive_observability=sensitive_observability,
     )
     _validate_proxies_or_raise(proxies)
 
@@ -3286,7 +4211,7 @@ def _fetch_httpx_response(
     sleep_s = 0.0
     t0 = time.time()
     tm = get_tracing_manager()
-    host_attr = _parse_host_from_url(url)
+    observability_url = _SENSITIVE_OBSERVABILITY_URL if sensitive_observability else url
     method_upper = str(method).upper()
     _head_disable_h2_tried = False
     _head_get_range_tried = False
@@ -3319,6 +4244,7 @@ def _fetch_httpx_response(
                                 accepted_resolved_ips=_accepted_ips_for_url(
                                     dns_pin_cache, target_url
                                 ),
+                                sensitive_observability=sensitive_observability,
                             )
             except EgressPolicyError:
                 raise
@@ -3361,13 +4287,11 @@ def _fetch_httpx_response(
         need_close = False
 
     try:
-        with tm.span(
+        with _http_client_observability_span(
+            tm,
             "http.client",
-            attributes={
-                "http.method": method.upper(),
-                "net.host.name": host_attr,
-                "url.full": _sanitize_url_for_logs(url),
-            },
+            sensitive_observability=sensitive_observability,
+            attributes=_http_trace_attributes(method, url),
         ):
             for attempt in range(1, attempts + 1):
                 cur_url = url
@@ -3377,6 +4301,7 @@ def _fetch_httpx_response(
                         cur_url,
                         dns_pin_cache=dns_pin_cache,
                         configured_endpoint=configured_endpoint,
+                        sensitive_observability=sensitive_observability,
                     )
                     resp, reason = _do_once(sc, cur_url)
                     if resp is None:
@@ -3400,12 +4325,14 @@ def _fetch_httpx_response(
                                         cur_url,
                                         dns_pin_cache=dns_pin_cache,
                                         configured_endpoint=configured_endpoint,
+                                        sensitive_observability=sensitive_observability,
                                     )
                                     _check_cert_pins_for_url(
                                         cur_url,
                                         cert_pinning or _get_client_cert_pins(sc),
                                         configured_endpoint=configured_endpoint,
                                         dns_pin_cache=dns_pin_cache,
+                                        sensitive_observability=sensitive_observability,
                                     )
                                     req_headers = _inject_trace_headers(headers)
                                     req_headers = _strip_sensitive_headers_for_cross_origin(
@@ -3440,7 +4367,7 @@ def _fetch_httpx_response(
                                         tm.set_attributes({"http.status_code": int(r2.status_code)})
                                     _log_outbound_request(
                                         method="GET",
-                                        url=r2.request.url if hasattr(r2.request, "url") else cur_url,
+                                        url=observability_url,
                                         status_code=int(r2.status_code),
                                         start_time=t0,
                                         attempt=attempt,
@@ -3459,7 +4386,7 @@ def _fetch_httpx_response(
                         delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                         logger.debug(
                             f"fetch network retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
-                            f"url={_sanitize_url_for_logs(cur_url)}"
+                            f"url={_sanitize_url_for_logs(observability_url)}"
                         )
                         time.sleep(delay)
                         sleep_s = delay
@@ -3492,14 +4419,30 @@ def _fetch_httpx_response(
                         continue
                     if resp.status_code < 400:
                         try:
-                            host = _parse_host_from_url(str(resp.request.url))
+                            response_url = str(resp.request.url)
+                            response_observability_url = (
+                                observability_url
+                                if sensitive_observability
+                                else response_url
+                            )
                             get_metrics_registry().increment(
-                                "http_client_requests_total", 1, labels={"method": method.upper(), "host": host, "status": str(resp.status_code)}
+                                "http_client_requests_total",
+                                1,
+                                labels=_http_metric_labels(
+                                    method,
+                                    response_url,
+                                    status_code=int(
+                                        resp.status_code
+                                    ),
+                                ),
                             )
                             get_metrics_registry().observe(
                                 "http_client_request_duration_seconds",
                                 time.time() - t0,
-                                labels={"method": method.upper(), "host": host},
+                                labels=_http_metric_labels(
+                                    method,
+                                    response_url,
+                                ),
                             )
                         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                             pass
@@ -3507,7 +4450,7 @@ def _fetch_httpx_response(
                             tm.set_attributes({"http.status_code": int(resp.status_code)})
                         _log_outbound_request(
                             method=method,
-                            url=resp.request.url,
+                            url=response_observability_url,
                             status_code=int(resp.status_code),
                             start_time=t0,
                             attempt=attempt,
@@ -3518,7 +4461,7 @@ def _fetch_httpx_response(
                     if not should or attempt == attempts:
                         _log_outbound_request(
                             method=method,
-                            url=resp.request.url,
+                            url=observability_url,
                             status_code=int(resp.status_code),
                             start_time=t0,
                             attempt=attempt,
@@ -3534,7 +4477,7 @@ def _fetch_httpx_response(
                         delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                     logger.debug(
                         f"fetch retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
-                        f"url={_sanitize_url_for_logs(cur_url)}"
+                        f"url={_sanitize_url_for_logs(observability_url)}"
                     )
                     with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         tm.add_event("http.retry", {"attempt": attempt, "reason": rsn})
@@ -3543,7 +4486,7 @@ def _fetch_httpx_response(
                     break
         _log_outbound_request(
             method=method,
-            url=url,
+            url=observability_url,
             status_code=0,
             start_time=t0,
             attempt=attempts,
@@ -3686,6 +4629,8 @@ def fetch(*args, **kwargs):
 
     - If called with keyword 'method', delegates to the HTTPX response API and
       returns an httpx.Response (backward compatible with existing callers).
+      Set `sensitive_observability=True` when the URL is request-derived and
+      must be redacted from logs, metrics, and tracing attributes.
       When retries are enabled and `files` are provided, file-like objects must
       be seekable; otherwise a ValueError is raised with the message:
       "File-like object must be seekable when retries are enabled. Either disable
@@ -3712,6 +4657,11 @@ def fetch(*args, **kwargs):
     trust_env = kwargs.get("trust_env")
     proxies = kwargs.get("proxies")
     timeout = kwargs.get("timeout")
+    max_response_bytes = kwargs.get("max_response_bytes")
+
+    if max_response_bytes is not None:
+        if type(max_response_bytes) is not int or max_response_bytes <= 0:
+            raise ValueError("max_response_bytes must be a positive integer")
 
     # Enforce egress via stubbed policy helper (tests monkeypatch this).
     # This remains intentionally lightweight so tests can override without
@@ -3731,6 +4681,8 @@ def fetch(*args, **kwargs):
 
     # Sanitize Accept-Encoding as per backend expectations
     req_headers = _sanitize_accept_encoding_for_backend(headers, backend_norm)
+    if max_response_bytes is not None:
+        req_headers = _force_identity_accept_encoding(req_headers)
 
     # Determine redirect behavior, honoring env/Config_Files when caller did not
     # explicitly supply follow_redirects.
@@ -3860,15 +4812,56 @@ def fetch(*args, **kwargs):
                 if not _is_url_allowed(cur_url):
                     raise ValueError("Egress denied for URL")  # noqa: TRY003
 
-                resp = _fetch_curl_simple(
-                    url=cur_url,
-                    headers=hop_headers,
-                    cookies=hop_cookies,
-                    timeout=timeout,
-                    impersonate=impersonate,
-                    proxies=proxies,
-                    session=curl_session,
-                )
+                if max_response_bytes is None:
+                    resp = _fetch_curl_simple(
+                        url=cur_url,
+                        headers=hop_headers,
+                        cookies=hop_cookies,
+                        timeout=timeout,
+                        impersonate=impersonate,
+                        proxies=proxies,
+                        session=curl_session,
+                    )
+                else:
+                    request_stream = getattr(curl_session, "get", None)
+                    if not callable(request_stream):
+                        raise RuntimeError("Selected backend does not support bounded response streaming")
+                    body_collector = _BoundedBodyCollector(max_response_bytes)
+
+                    req_kwargs: dict[str, Any] = {
+                        "headers": hop_headers,
+                        "cookies": hop_cookies,
+                        "allow_redirects": False,
+                        "accept_encoding": None,
+                        "content_callback": body_collector,
+                    }
+                    if timeout is not None:
+                        req_kwargs["timeout"] = timeout
+                    if proxies:
+                        req_kwargs["proxies"] = proxies
+                    streamed = request_stream(cur_url, **req_kwargs)
+                    try:
+                        response_headers = dict(getattr(streamed, "headers", {}) or {})
+                        status_code = int(getattr(streamed, "status_code", 0))
+                        response_url = str(getattr(streamed, "url", cur_url))
+                        is_followed_redirect = follow_redirects and status_code in (301, 302, 303, 307, 308)
+                        if is_followed_redirect:
+                            body = b""
+                        else:
+                            if _uses_compressed_content_encoding(response_headers):
+                                raise ValueError("Compressed responses are not allowed with " "max_response_bytes")
+                            if body_collector.overflow:
+                                raise ValueError("Response exceeds max_response_bytes limit")
+                            body = body_collector.body
+                        resp = HttpResponse(
+                            status=status_code,
+                            headers=response_headers,
+                            text=_decode_bounded_response_body(streamed, body),
+                            url=response_url,
+                            backend="curl",
+                        )
+                    finally:
+                        _close_simple_response(streamed)
                 status = int(resp["status"])
 
                 if not follow_redirects or status not in (301, 302, 303, 307, 308):
@@ -3897,7 +4890,86 @@ def fetch(*args, **kwargs):
 
                 cur_url = next_url
 
-    # Minimal client lifecycle for simple fetch with explicit redirect handling
+    if max_response_bytes is not None:
+        client_cls = getattr(_hx, "Client", object) if _hx is not None else object
+        sc = _instantiate_client(client_cls, client_kwargs)
+        with sc as sc:
+            cur_url = url
+            hop_headers = req_headers
+            hop_cookies = cookies
+            redirects = 0
+
+            while True:
+                if not _is_url_allowed(cur_url):
+                    raise ValueError("Egress denied for URL")  # noqa: TRY003
+
+                request_stream = getattr(sc, "stream", None)
+                if not callable(request_stream):
+                    raise RuntimeError("Selected backend does not support bounded response streaming")
+                with request_stream(
+                    "GET",
+                    cur_url,
+                    headers=hop_headers,
+                    cookies=hop_cookies,
+                    follow_redirects=False,
+                ) as streamed:
+                    status = int(getattr(streamed, "status_code", 0))
+                    response_headers = dict(getattr(streamed, "headers", {}) or {})
+                    response_url = str(getattr(streamed, "url", cur_url))
+
+                    if not follow_redirects or status not in (301, 302, 303, 307, 308):
+                        if _uses_compressed_content_encoding(response_headers):
+                            raise ValueError("Compressed responses are not allowed with " "max_response_bytes")
+                        iter_raw = getattr(streamed, "iter_raw", None)
+                        if not callable(iter_raw):
+                            raise RuntimeError("Selected backend does not support bounded response streaming")
+                        body = _read_bounded_chunks(iter_raw(), max_response_bytes)
+                        return HttpResponse(
+                            status=status,
+                            headers=response_headers,
+                            text=_decode_bounded_response_body(streamed, body),
+                            url=response_url,
+                            backend="httpx",
+                        )
+
+                location = response_headers.get("location") or response_headers.get("Location")
+                if not location:
+                    return HttpResponse(
+                        status=status,
+                        headers=response_headers,
+                        text="",
+                        url=response_url,
+                        backend="httpx",
+                    )
+
+                next_url = _resolve_redirect_url(response_url, str(location))
+                if not next_url or not _redirect_allowed(cur_url, next_url):
+                    return HttpResponse(
+                        status=status,
+                        headers=response_headers,
+                        text="",
+                        url=response_url,
+                        backend="httpx",
+                    )
+
+                if _is_cross_host_redirect(cur_url, next_url) or _is_scheme_downgrade(cur_url, next_url):
+                    hop_headers = _redirect_boundary_headers(hop_headers)
+                    hop_cookies = None
+                    _clear_session_cookie_state(sc)
+
+                redirects += 1
+                if redirects > DEFAULT_MAX_REDIRECTS:
+                    return HttpResponse(
+                        status=status,
+                        headers=response_headers,
+                        text="",
+                        url=response_url,
+                        backend="httpx",
+                    )
+
+                cur_url = next_url
+
+    # Minimal client lifecycle for unbounded simple fetch with explicit redirect handling
     client_cls = getattr(_hx, "Client", object) if _hx is not None else object
     sc = _instantiate_client(client_cls, client_kwargs)
     with sc as sc:
@@ -3954,6 +5026,117 @@ def fetch(*args, **kwargs):
 # JSON helpers
 # --------------------------------------------------------------------------------------
 
+class _BoundedJSONRedirect(Exception):
+    def __init__(self, location: str) -> None:
+        self.location = location
+
+
+def _redirect_crosses_authority(previous_url: str, next_url: str) -> bool:
+    previous = urlparse(previous_url)
+    following = urlparse(next_url)
+
+    def _origin(parsed: Any) -> tuple[str, str, int | None]:
+        scheme = (parsed.scheme or "").lower()
+        port = parsed.port
+        if port is None:
+            port = 443 if scheme == "https" else 80 if scheme == "http" else None
+        return scheme, (parsed.hostname or "").lower(), port
+
+    previous_origin = _origin(previous)
+    following_origin = _origin(following)
+    return previous_origin != following_origin
+
+
+def _redirect_boundary_headers(headers: dict[str, str] | None) -> dict[str, str]:
+    """Retain only non-authority transport headers across redirect origins."""
+    safe_headers: dict[str, str] = {}
+    for key, value in (headers or {}).items():
+        normalized = str(key).casefold()
+        if normalized == "user-agent":
+            safe_headers["User-Agent"] = str(value)
+        elif normalized == "accept-encoding":
+            safe_headers["Accept-Encoding"] = str(value)
+    return safe_headers
+
+
+async def _afetch_json_bounded(
+    *,
+    method: str,
+    url: str,
+    client: Any | None,
+    require_json_ct: bool,
+    max_bytes: int,
+    on_response: ResponseHeadersCallback | None,
+    **kwargs: Any,
+) -> Any:
+    allow_redirects = bool(kwargs.pop("allow_redirects", True))
+    hop_headers = dict(kwargs.pop("headers", None) or {})
+    hop_cookies = kwargs.pop("cookies", None)
+    current_url = url
+    redirects = 0
+
+    while True:
+        async def _validate_response_headers(
+            response_status: int,
+            response_headers: Mapping[str, str],
+        ) -> None:
+            location = response_headers.get("location")
+            if allow_redirects and response_status in {301, 302, 303, 307, 308}:
+                if not location:
+                    raise NetworkError("Redirect without Location header")  # noqa: TRY003
+                raise _BoundedJSONRedirect(str(location))
+            await _invoke_response_callback(
+                on_response,
+                response_status,
+                response_headers,
+            )
+            content_type = response_headers.get("content-type", "").lower()
+            if require_json_ct and "application/json" not in content_type:
+                raise JSONDecodeError("Response is not application/json")  # noqa: TRY003
+            _raise_if_json_response_exceeds_limit(
+                headers=response_headers,
+                content=b"",
+                max_bytes=max_bytes,
+            )
+
+        body = bytearray()
+        stream = astream_bytes(
+            method=method,
+            url=current_url,
+            client=client,
+            headers=hop_headers,
+            cookies=hop_cookies,
+            chunk_size=max(1, min(65536, max_bytes + 1)),
+            on_response=_validate_response_headers,
+            raise_for_status=False,
+            **kwargs,
+        )
+        try:
+            async for chunk in stream:
+                if len(body) + len(chunk) > max_bytes:
+                    raise JSONDecodeError("Response exceeds max_bytes limit")  # noqa: TRY003
+                body.extend(chunk)
+        except _BoundedJSONRedirect as redirect:
+            next_url = _resolve_redirect_url(current_url, redirect.location)
+            if not next_url:
+                raise NetworkError("Invalid redirect Location header") from None  # noqa: TRY003
+            redirects += 1
+            if redirects > DEFAULT_MAX_REDIRECTS:
+                raise NetworkError("Too many redirects") from None  # noqa: TRY003
+            if _redirect_crosses_authority(current_url, next_url):
+                hop_headers = _redirect_boundary_headers(hop_headers)
+                hop_cookies = None
+            current_url = next_url
+            continue
+        finally:
+            await stream.aclose()
+
+        try:
+            return json.loads(body)
+        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as exc:
+            raise JSONDecodeError(str(exc)) from exc
+
+
 async def afetch_json(
     *,
     method: str,
@@ -3961,23 +5144,38 @@ async def afetch_json(
     client: httpx.AsyncClient | None = None,
     require_json_ct: bool = True,
     max_bytes: int | None = None,
+    on_response: ResponseHeadersCallback | None = None,
     **kwargs: Any,
 ) -> Any:
+    if max_bytes is not None:
+        return await _afetch_json_bounded(
+            method=method,
+            url=url,
+            client=client,
+            require_json_ct=require_json_ct,
+            max_bytes=max_bytes,
+            on_response=on_response,
+            **kwargs,
+        )
+
     r = await afetch(method=method, url=url, client=client, **kwargs)
+    if on_response is not None:
+        try:
+            await _invoke_response_callback(
+                on_response,
+                int(getattr(r, "status_code", getattr(r, "status", 0)) or 0),
+                getattr(r, "headers", {}) or {},
+            )
+        except asyncio.CancelledError:
+            await r.aclose()
+            raise
+        except Exception:
+            await r.aclose()
+            raise
     ctype = r.headers.get("content-type", "").lower()
     if require_json_ct and "application/json" not in ctype:
         await r.aclose()
         raise JSONDecodeError("Response is not application/json")  # noqa: TRY003
-    if max_bytes is not None:
-        try:
-            _raise_if_json_response_exceeds_limit(
-                headers=r.headers,
-                content=r.content,
-                max_bytes=max_bytes,
-            )
-        except JSONDecodeError:
-            await r.aclose()
-            raise
     try:
         data = r.json()
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
@@ -4022,12 +5220,72 @@ def fetch_json(
 # Streaming helpers
 # --------------------------------------------------------------------------------------
 
+class _CaseInsensitiveHeaders(Mapping[str, str]):
+    """Read-only response headers with case-insensitive lookup.
+
+    Repeated fields are comma-joined in wire order for transport parity and to
+    keep ambiguous singleton headers, such as Content-Type, visible to callers.
+    """
+
+    def __init__(self, headers: Mapping[str, Any]) -> None:
+        grouped: dict[str, list[str]] = {}
+        for key, value in _iter_response_header_items(headers):
+            grouped.setdefault(str(key).lower(), []).append(str(value))
+        self._headers = {key: ", ".join(values) for key, values in grouped.items()}
+
+    def __getitem__(self, key: str) -> str:
+        return self._headers[key.lower()]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._headers)
+
+    def __len__(self) -> int:
+        return len(self._headers)
+
+
+def _iter_response_header_items(headers: Mapping[str, Any]) -> Iterator[tuple[str, Any]]:
+    """Yield repeated header fields without transport-specific value loss."""
+    multi_items = getattr(headers, "multi_items", None)
+    if callable(multi_items):
+        yield from multi_items()
+        return
+
+    getall = getattr(headers, "getall", None)
+    get_list = getattr(headers, "get_list", None)
+    repeated_getter = getall if callable(getall) else get_list if callable(get_list) else None
+    if repeated_getter is not None:
+        seen: set[str] = set()
+        for key in headers:
+            normalized = str(key).lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            for value in repeated_getter(key):
+                yield str(key), value
+        return
+
+    yield from headers.items()
+
+
+async def _invoke_response_callback(
+    callback: ResponseHeadersCallback | None,
+    status: int,
+    headers: Mapping[str, Any],
+) -> None:
+    if callback is None:
+        return
+    result = callback(int(status), _CaseInsensitiveHeaders(headers))
+    if inspect.isawaitable(result):
+        await result
+
+
 async def _astream_bytes_httpx(
     *,
     method: str,
     url: str,
     client: httpx.AsyncClient | None = None,
     headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
     params: dict[str, Any] | None = None,
     json: Any | None = None,
     data: Any | None = None,
@@ -4037,19 +5295,34 @@ async def _astream_bytes_httpx(
     retry: RetryPolicy | None = None,
     chunk_size: int = 65536,
     cert_pinning: dict[str, set[str]] | None = None,
+    sensitive_observability: bool = False,
+    on_response: ResponseHeadersCallback | None = None,
+    raise_for_status: bool = True,
+    verify: bool | str | ssl.SSLContext | None = None,
 ) -> AsyncIterator[bytes]:
     if httpx is None:  # pragma: no cover
         raise RuntimeError("httpx is not available")  # noqa: TRY003
+    sensitive_observability = _effective_sensitive_observability(
+        sensitive_observability
+    )
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    await _avalidate_egress_or_raise(
+        url,
+        dns_pin_cache=dns_pin_cache,
+        sensitive_observability=sensitive_observability,
+    )
     _validate_proxies_or_raise(proxies)
+    observability_url = _SENSITIVE_OBSERVABILITY_URL if sensitive_observability else url
+
+    def _observed_url(candidate: Any) -> Any:
+        return _SENSITIVE_OBSERVABILITY_URL if sensitive_observability else candidate
 
     need_close = False
     ac = client
     if ac is None:
-        ac = _get_httpx_async_client(proxies=proxies)
+        ac = _get_httpx_async_client(proxies=proxies, verify=verify)
         need_close = False
 
     attempts = max(1, retry.attempts)
@@ -4057,8 +5330,14 @@ async def _astream_bytes_httpx(
     try:
         sleep_s = 0.0
         for attempt in range(1, attempts + 1):
-            await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+            await _avalidate_egress_or_raise(
+                url,
+                dns_pin_cache=dns_pin_cache,
+                sensitive_observability=sensitive_observability,
+            )
             yielded_any = False
+            callback_error: BaseException | None = None
+            response_committed = False
             req_headers = _inject_trace_headers(headers)
             resp = None
             try:
@@ -4078,25 +5357,29 @@ async def _astream_bytes_httpx(
                                         dns_pin_cache,
                                         url,
                                     ),
+                                    sensitive_observability=sensitive_observability,
                                 )
                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                     raise NetworkError(e.__class__.__name__) from e
 
-                async with _httpx_stream_io(
-                    client=ac,
-                    method=method.upper(),
-                    url=url,
-                    headers=req_headers,
-                    params=params,
-                    json=json,
-                    data=data,
-                    files=files,
-                    timeout=timeout,
-                    chunk_size=chunk_size,
-                    accepted_resolved_ips=_accepted_ips_for_url(
-                        dns_pin_cache,
-                        url,
-                    ),
+                async with _preserve_terminal_status_during_stream_cleanup(
+                    _httpx_stream_io(
+                        client=ac,
+                        method=method.upper(),
+                        url=url,
+                        headers=req_headers,
+                        cookies=cookies,
+                        params=params,
+                        json=json,
+                        data=data,
+                        files=files,
+                        timeout=timeout,
+                        chunk_size=chunk_size,
+                        accepted_resolved_ips=_accepted_ips_for_url(
+                            dns_pin_cache,
+                            url,
+                        ),
+                    )
                 ) as (resp, byte_iter):
                     try:
                         resp.raise_for_status()
@@ -4119,63 +5402,96 @@ async def _astream_bytes_httpx(
                                     retry.backoff_cap_s,
                                 )
                             logger.debug(
-                                f"astream_bytes retry attempt={attempt} reason={rsn} delay={delay:.3f}s url={url}"
+                                f"astream_bytes retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
+                                f"url={observability_url}"
                             )
                             await asyncio.sleep(delay)
                             sleep_s = delay
                             continue
-                        _log_outbound_request(
-                            method=method,
-                            url=resp.request.url,
-                            status_code=int(resp.status_code),
-                            start_time=t0,
-                            attempt=attempt,
-                            last_retry_delay_s=sleep_s,
-                        )
-                        raise
+                        if on_response is not None:
+                            try:
+                                await _invoke_response_callback(on_response, resp.status_code, resp.headers)
+                                response_committed = True
+                            except Exception as exc:
+                                callback_error = exc
+                                raise
+                        if raise_for_status:
+                            _log_outbound_request(
+                                method=method,
+                                url=_observed_url(resp.request.url),
+                                status_code=int(resp.status_code),
+                                start_time=t0,
+                                attempt=attempt,
+                                last_retry_delay_s=sleep_s,
+                            )
+                            raise _TerminalHTTPStatusError(resp.status_code) from None
 
+                    if on_response is not None and not response_committed:
+                        try:
+                            await _invoke_response_callback(on_response, resp.status_code, resp.headers)
+                            response_committed = True
+                        except Exception as exc:
+                            callback_error = exc
+                            raise
                     timed_iter = _iter_bytes_with_timeouts(byte_iter, timeout)
-                    async for chunk in timed_iter:
-                        if chunk:
-                            yielded_any = True
-                        yield chunk
+                    try:
+                        async for chunk in timed_iter:
+                            if chunk:
+                                yielded_any = True
+                            yield chunk
+                    finally:
+                        await timed_iter.aclose()
                     _log_outbound_request(
                         method=method,
-                        url=resp.request.url,
+                        url=_observed_url(resp.request.url),
                         status_code=int(resp.status_code),
                         start_time=t0,
                         attempt=attempt,
                         last_retry_delay_s=sleep_s,
                     )
                     return
+            except _TerminalHTTPStatusError as e:
+                raise_detached_error(
+                    _terminal_status_network_error(e)
+                )
             except asyncio.CancelledError:
                 raise
-            except httpx.HTTPStatusError:
+            except httpx.HTTPStatusError as e:
+                if e is callback_error:
+                    raise
                 raise
             except httpx.HTTPError as e:
+                if e is callback_error:
+                    raise
                 network_exc = NetworkError(e.__class__.__name__)
+                if response_committed:
+                    raise network_exc from e
                 if yielded_any:
                     _log_outbound_request(
                         method=method,
-                        url=url,
+                        url=_observed_url(url),
                         status_code=int(getattr(resp, "status_code", 0) or 0),
                         start_time=t0,
                         attempt=attempt,
                         last_retry_delay_s=sleep_s,
                         exception_class=network_exc.__class__.__name__,
                     )
+                    if sensitive_observability:
+                        raise network_exc from None
                     raise network_exc from e
-                should, rsn = _should_retry(method, None, network_exc, retry)
+                should, rsn = _should_retry(method, None, e, retry)
                 if not should or attempt == attempts:
                     _log_outbound_request(
                         method=method,
-                        url=url,
+                        url=_observed_url(url),
                         status_code=0,
                         start_time=t0,
                         attempt=attempt,
                         last_retry_delay_s=sleep_s,
                         exception_class=network_exc.__class__.__name__,
                     )
+                    if sensitive_observability:
+                        raise network_exc from None
                     raise network_exc from e
                 with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                     get_metrics_registry().increment(
@@ -4189,15 +5505,20 @@ async def _astream_bytes_httpx(
                     retry.backoff_cap_s,
                 )
                 logger.debug(
-                    f"astream_bytes network retry attempt={attempt} reason={rsn} delay={delay:.3f}s url={url}"
+                    f"astream_bytes network retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
+                    f"url={observability_url}"
                 )
                 await asyncio.sleep(delay)
                 sleep_s = delay
             except NetworkError as e:
+                if e is callback_error:
+                    raise
+                if response_committed:
+                    raise
                 if yielded_any:
                     _log_outbound_request(
                         method=method,
-                        url=url,
+                        url=_observed_url(url),
                         status_code=int(getattr(resp, "status_code", 0) or 0),
                         start_time=t0,
                         attempt=attempt,
@@ -4209,7 +5530,7 @@ async def _astream_bytes_httpx(
                 if not should or attempt == attempts:
                     _log_outbound_request(
                         method=method,
-                        url=url,
+                        url=_observed_url(url),
                         status_code=0,
                         start_time=t0,
                         attempt=attempt,
@@ -4229,7 +5550,8 @@ async def _astream_bytes_httpx(
                     retry.backoff_cap_s,
                 )
                 logger.debug(
-                    f"astream_bytes network retry attempt={attempt} reason={rsn} delay={delay:.3f}s url={url}"
+                    f"astream_bytes network retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
+                    f"url={observability_url}"
                 )
                 await asyncio.sleep(delay)
                 sleep_s = delay
@@ -4248,6 +5570,7 @@ async def _astream_bytes_aiohttp(
     url: str,
     client: Any | None = None,
     headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
     params: dict[str, Any] | None = None,
     json: Any | None = None,
     data: Any | None = None,
@@ -4257,14 +5580,29 @@ async def _astream_bytes_aiohttp(
     retry: RetryPolicy | None = None,
     chunk_size: int = 65536,
     cert_pinning: dict[str, set[str]] | None = None,
+    sensitive_observability: bool = False,
+    on_response: ResponseHeadersCallback | None = None,
+    raise_for_status: bool = True,
+    verify: bool | str | ssl.SSLContext | None = None,
 ) -> AsyncIterator[bytes]:
     if aiohttp is None:  # pragma: no cover
         raise RuntimeError("aiohttp is not available")  # noqa: TRY003
+    sensitive_observability = _effective_sensitive_observability(
+        sensitive_observability
+    )
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    await _avalidate_egress_or_raise(
+        url,
+        dns_pin_cache=dns_pin_cache,
+        sensitive_observability=sensitive_observability,
+    )
     _validate_proxies_or_raise(proxies)
+    observability_url = _SENSITIVE_OBSERVABILITY_URL if sensitive_observability else url
+
+    def _observed_url(candidate: Any) -> Any:
+        return _SENSITIVE_OBSERVABILITY_URL if sensitive_observability else candidate
 
     session = client or _get_aiohttp_session()
     attempts = max(1, retry.attempts)
@@ -4272,8 +5610,15 @@ async def _astream_bytes_aiohttp(
     try:
         sleep_s = 0.0
         for attempt in range(1, attempts + 1):
-            await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+            await _avalidate_egress_or_raise(
+                url,
+                dns_pin_cache=dns_pin_cache,
+                sensitive_observability=sensitive_observability,
+            )
             yielded_any = False
+            callback_error: BaseException | None = None
+            response_committed = False
+            terminal_status_error = False
             resp = None
             req_headers = _inject_trace_headers(headers)
             try:
@@ -4298,28 +5643,32 @@ async def _astream_bytes_aiohttp(
                                     dns_pin_cache,
                                     url,
                                 ),
+                                sensitive_observability=sensitive_observability,
                             )
                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                     raise NetworkError(e.__class__.__name__) from e
 
-                ssl_ctx = _build_ssl_context(ENFORCE_TLS_MIN, TLS_MIN_VERSION)
-                async with _aiohttp_stream_io(
-                    session=session,
-                    method=method.upper(),
-                    url=url,
-                    headers=req_headers,
-                    params=params,
-                    json=json,
-                    data=data,
-                    files=files,
-                    timeout=timeout,
-                    proxies=proxies,
-                    ssl_override=ssl_ctx,
-                    chunk_size=chunk_size,
-                    accepted_resolved_ips=_accepted_ips_for_url(
-                        dns_pin_cache,
-                        url,
-                    ),
+                ssl_ctx = _aiohttp_ssl_from_verify(verify)
+                async with _preserve_terminal_status_during_stream_cleanup(
+                    _aiohttp_stream_io(
+                        session=session,
+                        method=method.upper(),
+                        url=url,
+                        headers=req_headers,
+                        cookies=cookies,
+                        params=params,
+                        json=json,
+                        data=data,
+                        files=files,
+                        timeout=timeout,
+                        proxies=proxies,
+                        ssl_override=ssl_ctx,
+                        chunk_size=chunk_size,
+                        accepted_resolved_ips=_accepted_ips_for_url(
+                            dns_pin_cache,
+                            url,
+                        ),
+                    )
                 ) as (resp, byte_iter):
                     if resp.status >= 400:
                         should, rsn = _should_retry(method, resp.status, None, retry)
@@ -4340,44 +5689,69 @@ async def _astream_bytes_aiohttp(
                                     retry.backoff_cap_s,
                                 )
                             logger.debug(
-                                f"astream_bytes retry attempt={attempt} reason={rsn} delay={delay:.3f}s url={url}"
+                                f"astream_bytes retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
+                                f"url={observability_url}"
                             )
                             await asyncio.sleep(delay)
                             sleep_s = delay
                             continue
-                        await resp.read()
-                        _log_outbound_request(
-                            method=method,
-                            url=str(getattr(resp, "url", url)),
-                            status_code=int(resp.status),
-                            start_time=t0,
-                            attempt=attempt,
-                            last_retry_delay_s=sleep_s,
-                        )
-                        raise NetworkError(f"HTTP {resp.status}")  # noqa: TRY003
+                        if on_response is not None:
+                            try:
+                                await _invoke_response_callback(on_response, resp.status, resp.headers)
+                                response_committed = True
+                            except Exception as exc:
+                                callback_error = exc
+                                raise
+                        if raise_for_status:
+                            terminal_status_error = True
+                            _log_outbound_request(
+                                method=method,
+                                url=_observed_url(str(getattr(resp, "url", url))),
+                                status_code=int(resp.status),
+                                start_time=t0,
+                                attempt=attempt,
+                                last_retry_delay_s=sleep_s,
+                            )
+                            raise _TerminalHTTPStatusError(resp.status)
 
+                    if on_response is not None and not response_committed:
+                        try:
+                            await _invoke_response_callback(on_response, resp.status, resp.headers)
+                            response_committed = True
+                        except Exception as exc:
+                            callback_error = exc
+                            raise
                     timed_iter = _iter_bytes_with_timeouts(byte_iter, timeout)
-                    async for chunk in timed_iter:
-                        if not chunk:
-                            continue
-                        yielded_any = True
-                        yield chunk
+                    try:
+                        async for chunk in timed_iter:
+                            if not chunk:
+                                continue
+                            yielded_any = True
+                            yield chunk
+                    finally:
+                        await timed_iter.aclose()
                     _log_outbound_request(
                         method=method,
-                        url=str(getattr(resp, "url", url)),
+                        url=_observed_url(str(getattr(resp, "url", url))),
                         status_code=int(resp.status),
                         start_time=t0,
                         attempt=attempt,
                         last_retry_delay_s=sleep_s,
                     )
                     return
+            except _TerminalHTTPStatusError as e:
+                raise_detached_error(
+                    _terminal_status_network_error(e)
+                )
             except asyncio.CancelledError:
                 raise
             except NetworkError as e:
+                if e is callback_error or terminal_status_error or response_committed:
+                    raise
                 if yielded_any:
                     _log_outbound_request(
                         method=method,
-                        url=str(getattr(resp, "url", url)),
+                        url=_observed_url(str(getattr(resp, "url", url))),
                         status_code=int(getattr(resp, "status", 0) or 0),
                         start_time=t0,
                         attempt=attempt,
@@ -4389,7 +5763,7 @@ async def _astream_bytes_aiohttp(
                 if not should or attempt == attempts:
                     _log_outbound_request(
                         method=method,
-                        url=str(getattr(resp, "url", url)),
+                        url=_observed_url(str(getattr(resp, "url", url))),
                         status_code=0,
                         start_time=t0,
                         attempt=attempt,
@@ -4409,34 +5783,43 @@ async def _astream_bytes_aiohttp(
                     retry.backoff_cap_s,
                 )
                 logger.debug(
-                    f"astream_bytes network retry attempt={attempt} reason={rsn} delay={delay:.3f}s url={url}"
+                    f"astream_bytes network retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
+                    f"url={observability_url}"
                 )
                 await asyncio.sleep(delay)
                 sleep_s = delay
-            except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
+            except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
+                if e is callback_error:
+                    raise
                 network_exc = NetworkError(e.__class__.__name__)
+                if response_committed:
+                    raise network_exc from e
                 if yielded_any:
                     _log_outbound_request(
                         method=method,
-                        url=str(getattr(resp, "url", url)),
+                        url=_observed_url(str(getattr(resp, "url", url))),
                         status_code=int(getattr(resp, "status", 0) or 0),
                         start_time=t0,
                         attempt=attempt,
                         last_retry_delay_s=sleep_s,
                         exception_class=network_exc.__class__.__name__,
                     )
+                    if sensitive_observability:
+                        raise network_exc from None
                     raise network_exc from e
-                should, rsn = _should_retry(method, None, network_exc, retry)
+                should, rsn = _should_retry(method, None, e, retry)
                 if not should or attempt == attempts:
                     _log_outbound_request(
                         method=method,
-                        url=str(getattr(resp, "url", url)),
+                        url=_observed_url(str(getattr(resp, "url", url))),
                         status_code=0,
                         start_time=t0,
                         attempt=attempt,
                         last_retry_delay_s=sleep_s,
                         exception_class=network_exc.__class__.__name__,
                     )
+                    if sensitive_observability:
+                        raise network_exc from None
                     raise network_exc from e
                 with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                     get_metrics_registry().increment(
@@ -4450,7 +5833,8 @@ async def _astream_bytes_aiohttp(
                     retry.backoff_cap_s,
                 )
                 logger.debug(
-                    f"astream_bytes network retry attempt={attempt} reason={rsn} delay={delay:.3f}s url={url}"
+                    f"astream_bytes network retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
+                    f"url={observability_url}"
                 )
                 await asyncio.sleep(delay)
                 sleep_s = delay
@@ -4464,6 +5848,7 @@ async def astream_bytes(
     url: str,
     client: Any | None = None,
     headers: dict[str, str] | None = None,
+    cookies: dict[str, str] | None = None,
     params: dict[str, Any] | None = None,
     json: Any | None = None,
     data: Any | None = None,
@@ -4473,17 +5858,25 @@ async def astream_bytes(
     retry: RetryPolicy | None = None,
     chunk_size: int = 65536,
     cert_pinning: dict[str, set[str]] | None = None,
+    sensitive_observability: bool = False,
+    on_response: ResponseHeadersCallback | None = None,
+    raise_for_status: bool = True,
+    verify: bool | str | ssl.SSLContext | None = None,
 ) -> AsyncIterator[bytes]:
+    sensitive_observability = _effective_sensitive_observability(
+        sensitive_observability
+    )
     if client is not None:
         adapter_name = "aiohttp" if _is_aiohttp_client(client) else "httpx"
     else:
         adapter_name = "aiohttp" if aiohttp is not None else "httpx"
     adapter = _get_transport_adapter(adapter_name)
-    async for chunk in adapter.stream_bytes(
+    stream = adapter.stream_bytes(
         method=method,
         url=url,
         client=client,
         headers=headers,
+        cookies=cookies,
         params=params,
         json=json,
         data=data,
@@ -4493,8 +5886,18 @@ async def astream_bytes(
         retry=retry,
         chunk_size=chunk_size,
         cert_pinning=cert_pinning,
-    ):
-        yield chunk
+        sensitive_observability=sensitive_observability,
+        on_response=on_response,
+        raise_for_status=raise_for_status,
+        verify=verify,
+    )
+    try:
+        async for chunk in stream:
+            yield chunk
+    finally:
+        close = getattr(stream, "aclose", None)
+        if close is not None:
+            await close()
 
 
 async def _astream_sse_httpx(
@@ -4510,13 +5913,21 @@ async def _astream_sse_httpx(
     proxies: str | dict[str, str] | None = None,
     retry: RetryPolicy | None = None,
     cert_pinning: dict[str, set[str]] | None = None,
+    sensitive_observability: bool = False,
 ) -> AsyncIterator[SSEEvent]:
+    sensitive_observability = _effective_sensitive_observability(
+        sensitive_observability
+    )
     hdrs = {"Accept": "text/event-stream"}
     if headers:
         hdrs.update(headers)
     retry = retry or RetryPolicy()
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    await _avalidate_egress_or_raise(
+        url,
+        dns_pin_cache=dns_pin_cache,
+        sensitive_observability=sensitive_observability,
+    )
     _validate_proxies_or_raise(proxies)
 
     need_close = False
@@ -4533,9 +5944,19 @@ async def _astream_sse_httpx(
 
     try:
         for attempt in range(1, attempts + 1):
+            body_started = False
+
+            def mark_body_started() -> None:
+                nonlocal body_started
+                body_started = True
+
             # manual redirect handling before starting to read body
             while True:
-                await _avalidate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
+                await _avalidate_egress_or_raise(
+                    cur_url,
+                    dns_pin_cache=dns_pin_cache,
+                    sensitive_observability=sensitive_observability,
+                )
                 try:
                     # Optional cert pinning
                     try:
@@ -4554,26 +5975,29 @@ async def _astream_sse_httpx(
                                             dns_pin_cache,
                                             cur_url,
                                         ),
+                                        sensitive_observability=sensitive_observability,
                                     )
                     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                         raise NetworkError(e.__class__.__name__) from e
 
-                    async with _httpx_stream_io(
-                        client=ac,
-                        method=method.upper(),
-                        url=cur_url,
-                        headers=_strip_sensitive_headers_for_cross_origin(
-                            _inject_trace_headers(hdrs), original_url=url, target_url=cur_url
-                        ),
-                        params=params,
-                        json=json,
-                        data=data,
-                        timeout=timeout,
-                        chunk_size=None,
-                        accepted_resolved_ips=_accepted_ips_for_url(
-                            dns_pin_cache,
-                            cur_url,
-                        ),
+                    async with _preserve_terminal_status_during_stream_cleanup(
+                        _httpx_stream_io(
+                            client=ac,
+                            method=method.upper(),
+                            url=cur_url,
+                            headers=_strip_sensitive_headers_for_cross_origin(
+                                _inject_trace_headers(hdrs), original_url=url, target_url=cur_url
+                            ),
+                            params=params,
+                            json=json,
+                            data=data,
+                            timeout=timeout,
+                            chunk_size=None,
+                            accepted_resolved_ips=_accepted_ips_for_url(
+                                dns_pin_cache,
+                                cur_url,
+                            ),
+                        )
                     ) as (resp, byte_iter):
                         # Handle redirect response codes before reading any bytes
                         if resp.status_code in (301, 302, 303, 307, 308):
@@ -4599,33 +6023,67 @@ async def _astream_sse_httpx(
                             should, rsn = _should_retry(method, resp.status_code, None, retry)
                             if not should or attempt == attempts:
                                 # escalate as NetworkError; caller handles as appropriate
-                                raise NetworkError(f"HTTP {resp.status_code}")  # noqa: TRY003
-                            # retry with backoff
-                            delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
+                                raise _TerminalHTTPStatusError(resp.status_code)
+                            delay = 0.0
+                            if retry.respect_retry_after:
+                                delay = _parse_retry_after_delay_seconds(
+                                    resp.headers.get("retry-after")
+                                ) or 0.0
+                            if delay <= 0:
+                                delay = _decorrelated_jitter_sleep(
+                                    sleep_s,
+                                    retry.backoff_base_ms,
+                                    retry.backoff_cap_s,
+                                )
                             await asyncio.sleep(delay)
                             sleep_s = delay
                             break  # exit redirect loop to outer attempt
 
                         # Successful response; iterate SSE bytes and yield events
                         timed_iter = _iter_bytes_with_timeouts(byte_iter, timeout)
-                        async for event in _iter_sse_events_from_bytes(timed_iter):
-                            yield event
+                        event_stream = _iter_sse_events_from_bytes(
+                            timed_iter,
+                            on_body_started=mark_body_started,
+                        )
+                        try:
+                            async for event in event_stream:
+                                yield event
+                        finally:
+                            await event_stream.aclose()
                         # per-request structured log on successful end of stream
                         _log_outbound_request(
                             method=method,
-                            url=resp.request.url,
+                            url=(
+                                _SENSITIVE_OBSERVABILITY_URL
+                                if sensitive_observability
+                                else resp.request.url
+                            ),
                             status_code=int(resp.status_code),
                             start_time=t0,
                             attempt=attempt,
                             last_retry_delay_s=sleep_s,
                         )
                         return  # finished streaming without error
+                except _TerminalHTTPStatusError as e:
+                    raise_detached_error(
+                        _terminal_status_network_error(e)
+                    )
                 except asyncio.CancelledError:
                     raise
-                except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
+                except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
                     # network or early error before bytes consumed
-                    should, rsn = _should_retry(method, None, NetworkError(str(e)), retry)
+                    network_error = _sse_network_error(
+                        e,
+                        sensitive_observability=sensitive_observability,
+                    )
+                    if body_started:
+                        if sensitive_observability:
+                            raise network_error from None
+                        raise
+                    should, rsn = _should_retry(method, None, e, retry)
                     if not should or attempt == attempts:
+                        if sensitive_observability:
+                            raise network_error from None
                         raise
                     delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                     await asyncio.sleep(delay)
@@ -4634,7 +6092,11 @@ async def _astream_sse_httpx(
         # exhausted attempts
         _log_outbound_request(
             method=method,
-            url=cur_url,
+            url=(
+                _SENSITIVE_OBSERVABILITY_URL
+                if sensitive_observability
+                else cur_url
+            ),
             status_code=0,
             start_time=t0,
             attempt=attempts,
@@ -4662,15 +6124,23 @@ async def _astream_sse_aiohttp(
     proxies: str | dict[str, str] | None = None,
     retry: RetryPolicy | None = None,
     cert_pinning: dict[str, set[str]] | None = None,
+    sensitive_observability: bool = False,
 ) -> AsyncIterator[SSEEvent]:
     if aiohttp is None:  # pragma: no cover
         raise RuntimeError("aiohttp is not available")  # noqa: TRY003
+    sensitive_observability = _effective_sensitive_observability(
+        sensitive_observability
+    )
     hdrs = {"Accept": "text/event-stream"}
     if headers:
         hdrs.update(headers)
     retry = retry or RetryPolicy()
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
-    await _avalidate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
+    await _avalidate_egress_or_raise(
+        url,
+        dns_pin_cache=dns_pin_cache,
+        sensitive_observability=sensitive_observability,
+    )
     _validate_proxies_or_raise(proxies)
 
     session = client or _get_aiohttp_session()
@@ -4681,8 +6151,18 @@ async def _astream_sse_aiohttp(
     t0 = time.time()
 
     for attempt in range(1, attempts + 1):
+        body_started = False
+
+        def mark_body_started() -> None:
+            nonlocal body_started
+            body_started = True
+
         while True:
-            await _avalidate_egress_or_raise(cur_url, dns_pin_cache=dns_pin_cache)
+            await _avalidate_egress_or_raise(
+                cur_url,
+                dns_pin_cache=dns_pin_cache,
+                sensitive_observability=sensitive_observability,
+            )
             try:
                 # Optional cert pinning
                 try:
@@ -4706,30 +6186,33 @@ async def _astream_sse_aiohttp(
                                     dns_pin_cache,
                                     cur_url,
                                 ),
+                                sensitive_observability=sensitive_observability,
                             )
                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                     raise NetworkError(e.__class__.__name__) from e
 
                 ssl_ctx = _build_ssl_context(ENFORCE_TLS_MIN, TLS_MIN_VERSION)
-                async with _aiohttp_stream_io(
-                    session=session,
-                    method=method.upper(),
-                    url=cur_url,
-                    headers=_strip_sensitive_headers_for_cross_origin(
-                        _inject_trace_headers(hdrs), original_url=url, target_url=cur_url
-                    ),
-                    params=params,
-                    json=json,
-                    data=data,
-                    files=files,
-                    timeout=timeout,
-                    proxies=proxies,
-                    ssl_override=ssl_ctx,
-                    chunk_size=None,
-                    accepted_resolved_ips=_accepted_ips_for_url(
-                        dns_pin_cache,
-                        cur_url,
-                    ),
+                async with _preserve_terminal_status_during_stream_cleanup(
+                    _aiohttp_stream_io(
+                        session=session,
+                        method=method.upper(),
+                        url=cur_url,
+                        headers=_strip_sensitive_headers_for_cross_origin(
+                            _inject_trace_headers(hdrs), original_url=url, target_url=cur_url
+                        ),
+                        params=params,
+                        json=json,
+                        data=data,
+                        files=files,
+                        timeout=timeout,
+                        proxies=proxies,
+                        ssl_override=ssl_ctx,
+                        chunk_size=None,
+                        accepted_resolved_ips=_accepted_ips_for_url(
+                            dns_pin_cache,
+                            cur_url,
+                        ),
+                    )
                 ) as (resp, byte_iter):
                     if resp.status in (301, 302, 303, 307, 308):
                         if redirects >= DEFAULT_MAX_REDIRECTS:
@@ -4749,29 +6232,64 @@ async def _astream_sse_aiohttp(
                     if resp.status >= 400:
                         should, rsn = _should_retry(method, resp.status, None, retry)
                         if not should or attempt == attempts:
-                            raise NetworkError(f"HTTP {resp.status}")  # noqa: TRY003
-                        delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
+                            raise _TerminalHTTPStatusError(resp.status)
+                        delay = 0.0
+                        if retry.respect_retry_after:
+                            delay = _parse_retry_after_delay_seconds(
+                                resp.headers.get("retry-after")
+                            ) or 0.0
+                        if delay <= 0:
+                            delay = _decorrelated_jitter_sleep(
+                                sleep_s,
+                                retry.backoff_base_ms,
+                                retry.backoff_cap_s,
+                            )
                         await asyncio.sleep(delay)
                         sleep_s = delay
                         break
 
                     timed_iter = _iter_bytes_with_timeouts(byte_iter, timeout)
-                    async for event in _iter_sse_events_from_bytes(timed_iter):
-                        yield event
+                    event_stream = _iter_sse_events_from_bytes(
+                        timed_iter,
+                        on_body_started=mark_body_started,
+                    )
+                    try:
+                        async for event in event_stream:
+                            yield event
+                    finally:
+                        await event_stream.aclose()
                     _log_outbound_request(
                         method=method,
-                        url=str(getattr(resp, "url", cur_url)),
+                        url=(
+                            _SENSITIVE_OBSERVABILITY_URL
+                            if sensitive_observability
+                            else str(getattr(resp, "url", cur_url))
+                        ),
                         status_code=int(resp.status),
                         start_time=t0,
                         attempt=attempt,
                         last_retry_delay_s=sleep_s,
                     )
                     return
+            except _TerminalHTTPStatusError as e:
+                raise_detached_error(
+                    _terminal_status_network_error(e)
+                )
             except asyncio.CancelledError:
                 raise
-            except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
-                should, rsn = _should_retry(method, None, NetworkError(str(e)), retry)
+            except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
+                network_error = _sse_network_error(
+                    e,
+                    sensitive_observability=sensitive_observability,
+                )
+                if body_started:
+                    if sensitive_observability:
+                        raise network_error from None
+                    raise
+                should, rsn = _should_retry(method, None, e, retry)
                 if not should or attempt == attempts:
+                    if sensitive_observability:
+                        raise network_error from None
                     raise
                 delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                 await asyncio.sleep(delay)
@@ -4780,7 +6298,11 @@ async def _astream_sse_aiohttp(
 
     _log_outbound_request(
         method=method,
-        url=cur_url,
+        url=(
+            _SENSITIVE_OBSERVABILITY_URL
+            if sensitive_observability
+            else cur_url
+        ),
         status_code=0,
         start_time=t0,
         attempt=attempts,
@@ -4803,13 +6325,17 @@ async def astream_sse(
     proxies: str | dict[str, str] | None = None,
     retry: RetryPolicy | None = None,
     cert_pinning: dict[str, set[str]] | None = None,
+    sensitive_observability: bool = False,
 ) -> AsyncIterator[SSEEvent]:
+    sensitive_observability = _effective_sensitive_observability(
+        sensitive_observability
+    )
     if client is not None:
         adapter_name = "aiohttp" if _is_aiohttp_client(client) else "httpx"
     else:
         adapter_name = "aiohttp" if aiohttp is not None else "httpx"
     adapter = _get_transport_adapter(adapter_name)
-    async for event in adapter.stream_sse(
+    stream = adapter.stream_sse(
         url=url,
         method=method,
         client=client,
@@ -4821,8 +6347,15 @@ async def astream_sse(
         proxies=proxies,
         retry=retry,
         cert_pinning=cert_pinning,
-    ):
-        yield event
+        sensitive_observability=sensitive_observability,
+    )
+    try:
+        async for event in stream:
+            yield event
+    finally:
+        close = getattr(stream, "aclose", None)
+        if close is not None:
+            await close()
 
 
 def _parse_sse_event(raw: str) -> SSEEvent | None:
@@ -4887,6 +6420,11 @@ def download(
     _validate_egress_or_raise(url, dns_pin_cache=dns_pin_cache)
     _validate_proxies_or_raise(proxies)
     t0 = time.time()
+    observability_url = (
+        _SENSITIVE_OBSERVABILITY_URL
+        if _effective_sensitive_observability()
+        else url
+    )
     dest_path = Path(dest)
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = dest_path.with_suffix(dest_path.suffix + ".part")
@@ -5019,7 +6557,8 @@ def download(
                             get_metrics_registry().increment("http_client_retries_total", 1, labels={"reason": rsn})
                         delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                         logger.debug(
-                            f"download retry attempt={attempt} reason={rsn} delay={delay:.3f}s url={url}"
+                            f"download retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
+                            f"url={_sanitize_url_for_logs(observability_url)}"
                         )
                         time.sleep(delay)
                         sleep_s = delay
@@ -5058,7 +6597,8 @@ def download(
                     get_metrics_registry().increment("http_client_retries_total", 1, labels={"reason": rsn})
                 delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                 logger.debug(
-                    f"download network retry attempt={attempt} reason={rsn} delay={delay:.3f}s url={url}"
+                    f"download network retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
+                    f"url={_sanitize_url_for_logs(observability_url)}"
                 )
                 time.sleep(delay)
                 sleep_s = delay
@@ -5118,9 +6658,11 @@ async def adownload(
 
 __all__ = [
     "HttpResponse",
+    "ResponseHeadersCallback",
     "RetryPolicy",
     "SSEEvent",
     "build_limits",
+    "validate_proxies_or_raise",
     "create_async_client",
     "create_client",
     "afetch",

@@ -1,9 +1,10 @@
-import React from "react"
-import { useSimpleForm } from "@/hooks/useSimpleForm"
 import {
-  useDraftPersistence,
-  type DraftMetadataObject
+  type DraftMetadataObject,
+  useDraftPersistence
 } from "@/hooks/useDraftPersistence"
+import { useSimpleForm } from "@/hooks/useSimpleForm"
+import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
+import React from "react"
 
 /**
  * Shared composer text primitive consumed by both Playground and Sidepanel.
@@ -27,6 +28,8 @@ import {
 export interface UseComposerTextOptions {
   /** Persistence key for draft messages. Each surface uses its own key. */
   draftKey: string
+  /** Keep active browser tabs from replacing each other's unsent text. */
+  tabScopedDraft?: boolean
   /** Textarea ref owned by the caller (usually the composer component). */
   textareaRef: React.RefObject<HTMLTextAreaElement>
   /** Pro mode gets a taller textarea (160px) vs casual (120px). */
@@ -47,9 +50,27 @@ export interface UseComposerTextOptions {
   draftEnabled?: boolean
 }
 
+export type ComposerPromptAssistMutation =
+  | { revision: number; source: "owner" }
+  | {
+      revision: number
+      source: "optimistic_reset"
+      attemptId: number
+    }
+
 export interface UseComposerTextResult {
   /** The underlying `useSimpleForm` instance. Callers can use `getInputProps("message")`. */
   form: ReturnType<typeof useSimpleForm<{ message: string; image: string }>>
+  /** Monotonic signal that advances once for each committed message change. */
+  messageRevision: number
+  /** The committed message change and whether the owner explicitly reset it for an attempt. */
+  promptAssistMutation: ComposerPromptAssistMutation
+  /** Resets the owner and returns the exact optimistic attempt token. */
+  beginPromptAssistReset: () => number
+  /** Marks a specific owner attempt as definitively sent or enqueued. */
+  markPromptAssistAttemptSaved: (attemptId: number) => void
+  /** Most recently completed owner attempt, or null before the first completion. */
+  promptAssistSavedAttemptId: number | null
   /** Convenience setter for the message field. */
   setMessageValue: (value: string) => void
   /** Focuses the textarea (no-op on mobile to avoid unwanted keyboard pop-up). */
@@ -70,17 +91,65 @@ export function useComposerText(
 ): UseComposerTextResult {
   const {
     draftKey,
+    tabScopedDraft = false,
     textareaRef,
     isProMode = false,
     maxHeight: explicitMaxHeight,
     getDraftMetadata,
     restoreWithMetadata,
-    draftEnabled = true,
+    draftEnabled = true
   } = options
 
   const form = useSimpleForm<{ message: string; image: string }>({
-    initialValues: { message: "", image: "" },
+    initialValues: { message: "", image: "" }
   })
+  const [promptAssistMutation, setPromptAssistMutation] =
+    React.useState<ComposerPromptAssistMutation>({
+      revision: 0,
+      source: "owner"
+    })
+  const [promptAssistSavedAttemptId, setPromptAssistSavedAttemptId] =
+    React.useState<number | null>(null)
+  const previousMessageRef = React.useRef(form.values.message)
+  const nextPromptAssistAttemptIdRef = React.useRef(0)
+  const pendingPromptAssistResetRef = React.useRef<{
+    attemptId: number
+    fromValue: string
+  } | null>(null)
+
+  React.useLayoutEffect(() => {
+    if (Object.is(previousMessageRef.current, form.values.message)) return
+    const previousMessage = previousMessageRef.current
+    previousMessageRef.current = form.values.message
+    const pendingReset = pendingPromptAssistResetRef.current
+    pendingPromptAssistResetRef.current = null
+    setPromptAssistMutation((mutation) =>
+      pendingReset &&
+      Object.is(pendingReset.fromValue, previousMessage) &&
+      form.values.message === ""
+        ? {
+            revision: mutation.revision + 1,
+            source: "optimistic_reset",
+            attemptId: pendingReset.attemptId
+          }
+        : { revision: mutation.revision + 1, source: "owner" }
+    )
+  }, [form.values.message])
+
+  const beginPromptAssistReset = React.useCallback(() => {
+    const attemptId = ++nextPromptAssistAttemptIdRef.current
+    pendingPromptAssistResetRef.current = {
+      attemptId,
+      fromValue: form.values.message
+    }
+    form.reset()
+    return attemptId
+  }, [form])
+
+  const markPromptAssistAttemptSaved = React.useCallback(
+    (attemptId: number) => setPromptAssistSavedAttemptId(attemptId),
+    []
+  )
 
   const setMessageValue = React.useCallback(
     (value: string) => {
@@ -97,13 +166,23 @@ export function useComposerText(
     [form, restoreWithMetadata]
   )
 
+  const { ownerKey, isCurrent } = useChatDraftOwner(() => {
+    pendingPromptAssistResetRef.current = null
+    setPromptAssistSavedAttemptId(null)
+    form.reset()
+    restoreWithMetadata?.("", undefined)
+  })
+
   const { draftSaved, clearDraft } = useDraftPersistence({
-    storageKey: draftKey,
+    storageKey: `${draftKey}:owner:${ownerKey ?? "unresolved"}`,
+    tabScoped: tabScopedDraft,
+    legacyStorageKey: draftKey,
+    isCurrent,
     getValue: () => form.values.message,
     getMetadata: getDraftMetadata,
     setValue: (value) => setMessageValue(value),
     setValueWithMetadata: restoreMessage,
-    enabled: draftEnabled,
+    enabled: draftEnabled && ownerKey !== null
   })
 
   const textareaMaxHeight =
@@ -116,7 +195,9 @@ export function useComposerText(
     if (el.selectionStart === el.selectionEnd) {
       const ua = typeof navigator !== "undefined" ? navigator.userAgent : ""
       const isMobile =
-        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua)
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+          ua
+        )
       if (!isMobile) {
         el.focus()
       } else {
@@ -127,10 +208,15 @@ export function useComposerText(
 
   return {
     form,
+    messageRevision: promptAssistMutation.revision,
+    promptAssistMutation,
+    beginPromptAssistReset,
+    markPromptAssistAttemptSaved,
+    promptAssistSavedAttemptId,
     setMessageValue,
     textAreaFocus,
     draftSaved,
     clearDraft,
-    textareaMaxHeight,
+    textareaMaxHeight
   }
 }

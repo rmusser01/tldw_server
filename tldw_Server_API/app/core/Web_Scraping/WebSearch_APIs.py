@@ -37,7 +37,7 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     split_system_message,
 )
 from tldw_Server_API.app.core.Utils.Utils import logging
-from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article
+from tldw_Server_API.app.core.Web_Scraping.orchestration import scrape_article
 from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
     WebOutboundPolicyDecision,
     decide_web_outbound_policy_sync,
@@ -48,7 +48,6 @@ from tldw_Server_API.app.core.Web_Scraping.ua_profiles import (
 )
 
 _WEBSEARCH_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

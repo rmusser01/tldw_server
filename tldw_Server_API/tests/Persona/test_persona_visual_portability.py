@@ -4,12 +4,15 @@ import io
 import json
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 from PIL import Image
 
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.exception_types import PersonaArtworkValidationError
 from tldw_Server_API.app.core.Persona.visual_portability.archive import (
     DEFAULT_MAX_MEMBER_SIZE_BYTES,
     validate_archive_members,
@@ -23,8 +26,8 @@ from tldw_Server_API.app.core.Persona.visual_portability.constants import (
     REQUIRED_MEMBERS,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.exporter import (
-    PersonaVisualPackExportError,
     PersonaVisualPackExporter,
+    PersonaVisualPackExportError,
 )
 from tldw_Server_API.app.core.Persona.visual_portability.fingerprints import (
     sha256_bytes,
@@ -39,6 +42,14 @@ from tldw_Server_API.app.core.Persona.visual_portability.preview import (
 from tldw_Server_API.app.core.Persona.visual_service import PersonaVisualService
 
 pytestmark = pytest.mark.unit
+
+ARTWORK_CREDITS = {
+    "version": 1,
+    "creator": "tldw-project",
+    "license": "Apache-2.0",
+    "source_url": "https://github.com/rmusser01/tldw-stuff/tree/main/buddy-packs/trenchcoat",
+    "notices": "Artwork credit: tldw-project\nLicense notice — retain on redistribution.\n",
+}
 
 
 def _png_bytes(width: int = 2, height: int = 3) -> bytes:
@@ -518,7 +529,7 @@ def test_validate_archive_members_allows_zip_directory_entries(tmp_path: Path) -
 
     members = validate_archive_members(archive_path)
 
-    assert REQUIRED_MEMBERS <= set(members)  # nosec B101
+    assert set(members) >= REQUIRED_MEMBERS  # nosec B101
     assert "metadata/" not in members  # nosec B101
 
 
@@ -550,7 +561,7 @@ def test_export_pack_writes_manifest_metadata_checksums_and_asset_bytes(
 
     with zipfile.ZipFile(result.archive_path) as archive:
         names = set(archive.namelist())
-        assert REQUIRED_MEMBERS <= names  # nosec B101
+        assert names >= REQUIRED_MEMBERS  # nosec B101
 
         archive_manifest = json.loads(archive.read(MANIFEST_PATH))
         assert archive_manifest["schema_version"] == PERSONA_VISUAL_PACK_SCHEMA_VERSION  # nosec B101
@@ -1350,3 +1361,284 @@ def test_import_preview_rejects_unsupported_renderer_type_in_visual_manifest(
             owner_user_id="user-1",
             target_persona_id=persona_id,
         )
+
+
+def _credited_archive(
+    db: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    artwork: dict[str, Any],
+    *,
+    extension: dict[str, Any] | None = None,
+    carrier: str | None = None,
+    context: object = ...,
+) -> Path:
+    """Build a native archive with the same credit carrier as collection packs."""
+    persona_id, pack, _ = _create_pack_with_asset(
+        db,
+        visuals_root=tmp_path / "visuals",
+        monkeypatch=monkeypatch,
+    )
+    exported = PersonaVisualPackExporter(
+        db=db,
+        user_id="user-1",
+        staging_root=tmp_path / "exports",
+    ).export_pack(persona_id=persona_id, pack_id=pack["id"], options=PersonaVisualPackExportOptions())
+    with zipfile.ZipFile(exported.archive_path) as archive:
+        entries = {name: archive.read(name) for name in archive.namelist()}
+    payload = json.loads(entries["metadata/pack.json"])
+    payload["pack"]["source_context"] = {
+        "artwork": _json_bytes(artwork).decode() if carrier is None else carrier,
+        "unrelated_private_context": "must not be copied",
+    }
+    if extension is not None:
+        payload["pack"]["visual_manifest"]["tldw/artwork"] = extension
+    if context is not Ellipsis:
+        payload["pack"]["source_context"] = context
+    entries["metadata/pack.json"] = _json_bytes(payload)
+    entries[CHECKSUMS_PATH] = _json_bytes(
+        {name: sha256_bytes(content) for name, content in entries.items() if name != CHECKSUMS_PATH}
+    )
+    path = tmp_path / "credited.tldw-persona-vpack"
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, content in entries.items():
+            archive.writestr(name, content)
+    return path
+
+
+def _commit_archive(db: CharactersRAGDB, archive_path: Path, persona_id: str) -> dict[str, Any]:
+    """Preview and commit a credited native archive into a new SQLite draft pack."""
+    from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import PersonaVisualPortabilityRepository
+    from tldw_Server_API.app.core.Persona.visual_portability.importer import PersonaVisualPackImporter
+
+    result = PersonaVisualPackImportPreviewer().create_preview(
+        archive_path=archive_path,
+        owner_user_id="user-1",
+        target_persona_id=persona_id,
+    )
+    repo = PersonaVisualPortabilityRepository.initialized(db)
+    preview = repo.create_import_preview(
+        owner_user_id="user-1",
+        job_id="credits-preview",
+        status="completed",
+        stage="completed",
+        archive_path=str(archive_path),
+        target_persona_id=persona_id,
+        **{
+            key: result[key]
+            for key in (
+                "archive_sha256",
+                "canonical_payload_fingerprint",
+                "schema_version",
+                "bundle_summary",
+                "proposed_plan",
+                "required_choices",
+            )
+        },
+    )
+    return PersonaVisualPackImporter(db=db, repo=repo, user_id="user-1").import_preview(
+        preview_id=preview["id"],
+        target_persona_id=persona_id,
+        trust_mode="untrusted_import",
+    )["pack"]
+
+
+def test_artwork_credits_survive_import_copy_source_deletion_and_export(
+    db_instance: CharactersRAGDB,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserve exact credits and bytes across import, owned copy and native export."""
+    from tldw_Server_API.app.api.v1.schemas.buddies import BuddyCreate
+    from tldw_Server_API.app.core.Buddy.service import BuddyService
+
+    db = db_instance
+    monkeypatch.setattr(DatabasePaths, "get_user_base_directory", staticmethod(lambda user_id: tmp_path))
+    archive = _credited_archive(db, tmp_path, monkeypatch, ARTWORK_CREDITS)
+    target = db.create_persona_profile({"user_id": "user-1", "name": "Imported credits"})
+    pack = _commit_archive(db, archive, target)
+    assert pack["manifest"].get("tldw/artwork") == ARTWORK_CREDITS
+    service = BuddyService(db, "user-1")
+    buddy = service.create(
+        BuddyCreate(
+            name="Independent credited art",
+            optional_persona_id=None,
+            source={"kind": "persona_pack", "persona_id": target, "pack_id": pack["id"]},
+        )
+    )
+    assert buddy["attribution"]["artwork"] == ARTWORK_CREDITS
+    exported = PersonaVisualPackExporter(
+        db=db,
+        user_id="user-1",
+        staging_root=tmp_path / "roundtrip",
+    ).export_pack(persona_id=target, pack_id=pack["id"], options=PersonaVisualPackExportOptions())
+    with zipfile.ZipFile(exported.archive_path) as archive:
+        payload = json.loads(archive.read("metadata/pack.json"))["pack"]
+        assert payload["source_context"] == {"artwork": _json_bytes(ARTWORK_CREDITS).decode()}
+        assert "tldw/artwork" not in payload["visual_manifest"]
+        assert b"must not be copied" not in archive.read("metadata/pack.json")
+    assert (
+        db.get_persona_visual_pack(pack_id=pack["id"], persona_id=target, user_id="user-1")["manifest"]["tldw/artwork"]
+        == ARTWORK_CREDITS
+    )
+    restored_target = db.create_persona_profile({"user_id": "user-1", "name": "Round trip"})
+    restored = _commit_archive(db, exported.archive_path, restored_target)
+    assert restored["manifest"]["tldw/artwork"] == ARTWORK_CREDITS
+    profile = db.get_persona_profile(target, user_id="user-1")
+    db.soft_delete_persona_profile(persona_id=target, user_id="user-1", expected_version=profile["version"])
+    assert service.get(buddy["id"])["attribution"]["artwork"] == ARTWORK_CREDITS
+    assert service.read_asset(buddy["id"], buddy["assets"][0]["id"])[0] == _png_bytes()
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"version": True},
+        {"version": 2},
+        {"policy": "execute this"},
+        {"notices": "x" * (64 * 1024 + 1)},
+        {"creator": "x" * 513},
+        {"creator": "bad\u0000credit"},
+        {"source_url": "https://user:password@example.com/art"},
+        {"source_url": "file:///private/art"},
+        {"source_url": "https://127.0.0.1/art"},
+    ],
+)
+def test_import_preview_rejects_invalid_artwork_credits(
+    db_instance: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changes: dict[str, Any]
+) -> None:
+    """Reject unsupported or unsafe records before a pack can be imported."""
+    archive = _credited_archive(db_instance, tmp_path, monkeypatch, {**ARTWORK_CREDITS, **changes})
+    with pytest.raises(PersonaArtworkValidationError, match="artwork"):
+        PersonaVisualPackImportPreviewer().create_preview(
+            archive_path=archive,
+            owner_user_id="user-1",
+            target_persona_id="target",
+        )
+
+
+@pytest.mark.parametrize(
+    "carrier", ["{}", "not JSON", "[]", " " + _json_bytes(ARTWORK_CREDITS).decode(), "x" * (512 * 1024 + 1)]
+)
+def test_import_preview_rejects_malformed_artwork_carrier(
+    db_instance: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, carrier: str
+) -> None:
+    """Reject malformed and oversized canonical credit carriers."""
+    archive = _credited_archive(db_instance, tmp_path, monkeypatch, ARTWORK_CREDITS, carrier=carrier)
+    with pytest.raises(PersonaArtworkValidationError, match="artwork"):
+        PersonaVisualPackImportPreviewer().create_preview(
+            archive_path=archive,
+            owner_user_id="user-1",
+            target_persona_id="target",
+        )
+
+
+def test_import_preview_rejects_conflicting_artwork_carriers(
+    db_instance: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reject contradictory credit claims in otherwise valid carriers."""
+    archive = _credited_archive(
+        db_instance,
+        tmp_path,
+        monkeypatch,
+        ARTWORK_CREDITS,
+        extension={**ARTWORK_CREDITS, "creator": "different creator"},
+    )
+    with pytest.raises(PersonaArtworkValidationError, match="artwork_attribution_conflict"):
+        PersonaVisualPackImportPreviewer().create_preview(
+            archive_path=archive,
+            owner_user_id="user-1",
+            target_persona_id="target",
+        )
+
+
+def test_manifest_edits_cannot_bypass_artwork_validation() -> None:
+    """Apply the artwork contract to direct visual-manifest edits as well as imports."""
+    from tldw_Server_API.app.core.Persona.visuals import PersonaVisualManifestError, validate_visual_manifest
+
+    manifest = {**_valid_manifest("asset"), "tldw/artwork": {**ARTWORK_CREDITS, "policy": "run"}}
+    with pytest.raises(PersonaVisualManifestError, match="artwork"):
+        validate_visual_manifest(manifest, available_asset_ids={"asset"}, require_activatable=True)
+
+
+@pytest.mark.parametrize("context", [None, [], "legacy context", {"unrelated": "context"}])
+def test_credit_free_legacy_source_context_remains_importable(
+    db_instance: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, context: object
+) -> None:
+    """Keep unrelated legacy source context from preventing credit-free imports."""
+    archive = _credited_archive(db_instance, tmp_path, monkeypatch, ARTWORK_CREDITS, context=context)
+    target = db_instance.create_persona_profile({"user_id": "user-1", "name": "Credit-free import"})
+    pack = _commit_archive(db_instance, archive, target)
+    assert "tldw/artwork" not in pack["manifest"]
+
+
+def test_export_fingerprint_includes_artwork_credits(
+    db_instance: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Change export identity when only the authored credits change."""
+    archive = _credited_archive(db_instance, tmp_path, monkeypatch, ARTWORK_CREDITS)
+    target = db_instance.create_persona_profile({"user_id": "user-1", "name": "Credited fingerprint"})
+    pack = _commit_archive(db_instance, archive, target)
+    exporter = PersonaVisualPackExporter(db=db_instance, user_id="user-1", staging_root=tmp_path / "exports")
+    first = exporter.export_pack(persona_id=target, pack_id=pack["id"], options=PersonaVisualPackExportOptions())
+    manifest = {**pack["manifest"], "tldw/artwork": {**ARTWORK_CREDITS, "creator": "Updated attribution"}}
+    db_instance.update_persona_visual_pack_manifest(
+        pack_id=pack["id"],
+        persona_id=target,
+        user_id="user-1",
+        manifest=manifest,
+    )
+    second = exporter.export_pack(persona_id=target, pack_id=pack["id"], options=PersonaVisualPackExportOptions())
+    assert first.canonical_payload_fingerprint != second.canonical_payload_fingerprint
+
+
+@pytest.mark.integration
+def test_postgres_artwork_snapshot_and_native_export(
+    pg_database_config: DatabaseConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retain PostgreSQL snapshot credits and export JSON-compatible timestamps."""
+    from tldw_Server_API.app.api.v1.schemas.buddies import BuddyCreate
+    from tldw_Server_API.app.core.Buddy.service import BuddyService
+    from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", "artwork-pg-test", backend=backend)
+    try:
+        monkeypatch.setattr(DatabasePaths, "get_user_base_directory", staticmethod(lambda user_id: tmp_path))
+        persona, pack, asset = _create_pack_with_asset(db, visuals_root=tmp_path / "visuals", monkeypatch=monkeypatch)
+        manifest = {**_valid_manifest(asset["id"]), "tldw/artwork": ARTWORK_CREDITS}
+        db.update_persona_visual_pack_manifest(
+            pack_id=pack["id"], persona_id=persona, user_id="user-1", manifest=manifest
+        )
+        buddy = BuddyService(db, "user-1").create(
+            BuddyCreate(
+                name="PostgreSQL credited art",
+                source={"kind": "persona_pack", "persona_id": persona, "pack_id": pack["id"]},
+            )
+        )
+        assert buddy["attribution"]["artwork"] == ARTWORK_CREDITS
+        exported = PersonaVisualPackExporter(db=db, user_id="user-1", staging_root=tmp_path / "exports").export_pack(
+            persona_id=persona,
+            pack_id=pack["id"],
+            options=PersonaVisualPackExportOptions(),
+        )
+        with zipfile.ZipFile(exported.archive_path) as archive:
+            payload = json.loads(archive.read("metadata/pack.json"))["pack"]
+            assets = json.loads(archive.read("metadata/assets.json"))["assets"]
+            assert payload["source_context"] == {"artwork": _json_bytes(ARTWORK_CREDITS).decode()}
+            assert "tldw/artwork" not in payload["visual_manifest"]
+            assert isinstance(payload["created_at"], str)
+            assert isinstance(assets[0]["created_at"], str)
+            assert archive.read(assets[0]["asset_path"]) == _png_bytes()
+        assert (
+            PersonaVisualPackImportPreviewer().create_preview(
+                archive_path=exported.archive_path,
+                owner_user_id="user-1",
+                target_persona_id="target",
+            )["validation_warnings"]
+            == []
+        )
+    finally:
+        db.close_connection()

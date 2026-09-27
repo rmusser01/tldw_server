@@ -1,6 +1,6 @@
 import pytest
-from fastapi import BackgroundTasks
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.endpoints.prompt_studio import (
     prompt_studio_evaluations as evaluations_endpoint,
@@ -12,10 +12,19 @@ from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_evaluation
     list_evaluations,
 )
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_schemas import EvaluationCreate
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import DatabaseError
 
-
 pytestmark = pytest.mark.unit
+
+
+def test_prompt_studio_maps_revoked_credential_scope_to_forbidden() -> None:
+    mapped = evaluations_endpoint._prompt_studio_credential_http_exception(
+        ByokResolutionError("credential_scope_revoked", "openai")
+    )
+
+    assert mapped.status_code == 403
+    assert mapped.detail["error_code"] == "credential_scope_revoked"
 
 
 class _FakePsLogger:
@@ -35,6 +44,7 @@ class _FakePsLogger:
 
 
 _SENSITIVE_MARKERS = (
+    "byok-secret-sentinel",
     "driver failed",
     "driver exploded",
     "/private/tmp/prompt-studio.db",
@@ -65,6 +75,11 @@ def _assert_sanitized_debug_log(
     rendered_calls = repr(logger_stub.debug_calls)
     for marker in _SENSITIVE_MARKERS:
         assert marker not in rendered_calls
+
+
+def _assert_detached_http_exception(exc: HTTPException) -> None:
+    assert exc.__cause__ is None
+    assert exc.__context__ is None
 
 
 def _patch_prompt_studio_request_logging(
@@ -110,7 +125,10 @@ class _BrokenCreateEvaluationManager:
         pass
 
     async def run_evaluation_async(self, *_args, **_kwargs):
-        raise DatabaseError("driver failed /private/tmp/prompt-studio.db")
+        try:
+            raise RuntimeError("driver failed /private/tmp/prompt-studio.db")
+        except RuntimeError as private_error:
+            raise DatabaseError("driver failed /private/tmp/prompt-studio.db") from private_error
 
 
 class _UnexpectedConnectionDb:
@@ -169,16 +187,109 @@ class _UnexpectedCreateEvaluationManager:
         pass
 
     async def run_evaluation_async(self, *_args, **_kwargs):
-        raise RuntimeError("driver exploded /private/tmp/prompt-studio.db")
+        try:
+            raise ValueError("driver exploded /private/tmp/prompt-studio.db")
+        except ValueError as private_error:
+            raise RuntimeError("driver exploded /private/tmp/prompt-studio.db") from private_error
 
 
-class _NoByokResolution:
+class _NoProviderCredentials:
     api_key = None
     app_config = None
-    uses_byok = False
+    credentials_resolved = True
 
-    async def touch_last_used(self):
+
+class _NoCredentialRuntime:
+    async def resolve(self, *_args, **_kwargs):
+        return _NoProviderCredentials()
+
+    async def mark_used(self, *_args, **_kwargs):
         return None
+
+    async def close(self):
+        return None
+
+
+def _patch_no_credentials_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        evaluations_endpoint,
+        "ProviderCredentialRuntime",
+        lambda **_kwargs: _NoCredentialRuntime(),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        evaluations_endpoint,
+        "derive_trusted_credential_scope",
+        lambda *_args: (None, [], [], False),
+        raising=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_evaluation_detaches_byok_error_graph(monkeypatch):
+    logs: list[str] = []
+
+    class _BoundEvaluationDb:
+        @staticmethod
+        def get_prompt_with_project(
+            prompt_id: int,
+            include_deleted: bool = False,
+        ) -> dict[str, int]:
+            return {"id": prompt_id, "project_id": 42}
+
+        @staticmethod
+        def get_project(project_id: int) -> dict[str, str | int]:
+            return {"id": project_id, "user_id": "1"}
+
+    class _ChainedByokRuntime:
+        async def resolve(self, *_args, **_kwargs):
+            try:
+                raise RuntimeError(
+                    "byok-secret-sentinel /private/tmp/prompt-studio.db"
+                )
+            except RuntimeError as private_error:
+                raise ByokResolutionError(
+                    "credential_store_unavailable",
+                    "openai",
+                ) from private_error
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(
+        evaluations_endpoint,
+        "ProviderCredentialRuntime",
+        lambda **_kwargs: _ChainedByokRuntime(),
+        raising=True,
+    )
+    monkeypatch.setattr(
+        evaluations_endpoint,
+        "derive_trusted_credential_scope",
+        lambda *_args: (1, [], [], False),
+        raising=True,
+    )
+
+    sink_id = logger.add(logs.append, format="{message}")
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await create_evaluation(
+                evaluation=EvaluationCreate(
+                    project_id=42,
+                    prompt_id=7,
+                    config={"provider": "openai", "model_name": "model-a"},
+                ),
+                background_tasks=BackgroundTasks(),
+                request=object(),
+                db=_BoundEvaluationDb(),
+                user_context={"user_id": "1", "is_admin": False},
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert exc_info.value.status_code == 503
+    assert "byok-secret-sentinel" not in repr(exc_info.value.detail)
+    assert "byok-secret-sentinel" not in "".join(logs)
+    _assert_detached_http_exception(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -197,33 +308,32 @@ async def test_create_evaluation_maps_database_error(monkeypatch):
         raising=True,
     )
 
-    async def _fake_resolve_byok_credentials(*_args, **_kwargs):
-        return _NoByokResolution()
+    _patch_no_credentials_runtime(monkeypatch)
 
-    monkeypatch.setattr(
-        evaluations_endpoint,
-        "resolve_byok_credentials",
-        _fake_resolve_byok_credentials,
-        raising=True,
-    )
-
-    with pytest.raises(HTTPException) as exc_info:
-        await create_evaluation(
-            evaluation=EvaluationCreate(
-                project_id=42,
-                prompt_id=7,
-                name="Broken Eval",
-                test_case_ids=[],
-            ),
-            background_tasks=BackgroundTasks(),
-            request=object(),
-            db=object(),
-            user_context={"user_id": "tester"},
-        )
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, format="{message}")
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await create_evaluation(
+                evaluation=EvaluationCreate(
+                    project_id=42,
+                    prompt_id=7,
+                    name="Broken Eval",
+                    test_case_ids=[],
+                ),
+                background_tasks=BackgroundTasks(),
+                request=object(),
+                db=object(),
+                user_context={"user_id": "tester"},
+            )
+    finally:
+        logger.remove(sink_id)
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to create evaluation"
+    _assert_detached_http_exception(exc_info.value)
     _assert_sanitized_endpoint_error_log(ps_logger, "Failed to create evaluation")
+    assert all(marker not in "".join(logs) for marker in _SENSITIVE_MARKERS)
 
 
 @pytest.mark.asyncio
@@ -249,6 +359,7 @@ async def test_list_evaluations_maps_database_error(monkeypatch):
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to list evaluations"
+    _assert_detached_http_exception(exc_info.value)
     _assert_sanitized_endpoint_error_log(ps_logger, "Failed to list evaluations")
 
 
@@ -266,6 +377,7 @@ async def test_get_evaluation_maps_database_error(monkeypatch):
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to get evaluation"
+    _assert_detached_http_exception(exc_info.value)
     _assert_sanitized_endpoint_error_log(ps_logger, "Failed to get evaluation")
 
 
@@ -283,6 +395,7 @@ async def test_delete_evaluation_maps_database_error(monkeypatch):
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to delete evaluation"
+    _assert_detached_http_exception(exc_info.value)
     _assert_sanitized_endpoint_error_log(ps_logger, "Failed to delete evaluation")
 
 
@@ -323,15 +436,7 @@ async def test_create_evaluation_sanitizes_unexpected_error(monkeypatch):
         raising=True,
     )
 
-    async def _fake_resolve_byok_credentials(*_args, **_kwargs):
-        return _NoByokResolution()
-
-    monkeypatch.setattr(
-        evaluations_endpoint,
-        "resolve_byok_credentials",
-        _fake_resolve_byok_credentials,
-        raising=True,
-    )
+    _patch_no_credentials_runtime(monkeypatch)
 
     with pytest.raises(HTTPException) as exc_info:
         await create_evaluation(
@@ -349,6 +454,7 @@ async def test_create_evaluation_sanitizes_unexpected_error(monkeypatch):
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to create evaluation"
+    _assert_detached_http_exception(exc_info.value)
     _assert_sanitized_endpoint_error_log(ps_logger, "Failed to create evaluation")
 
 
@@ -375,6 +481,7 @@ async def test_list_evaluations_sanitizes_unexpected_error(monkeypatch):
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to list evaluations"
+    _assert_detached_http_exception(exc_info.value)
     _assert_sanitized_endpoint_error_log(ps_logger, "Failed to list evaluations")
 
 
@@ -392,6 +499,7 @@ async def test_get_evaluation_sanitizes_unexpected_error(monkeypatch):
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to get evaluation"
+    _assert_detached_http_exception(exc_info.value)
     _assert_sanitized_endpoint_error_log(ps_logger, "Failed to get evaluation")
 
 
@@ -409,4 +517,5 @@ async def test_delete_evaluation_sanitizes_unexpected_error(monkeypatch):
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to delete evaluation"
+    _assert_detached_http_exception(exc_info.value)
     _assert_sanitized_endpoint_error_log(ps_logger, "Failed to delete evaluation")

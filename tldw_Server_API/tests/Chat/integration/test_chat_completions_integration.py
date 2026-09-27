@@ -846,19 +846,14 @@ def test_chat_integration_invalid_key_for_commercial_provider_standalone(
     print(f"CI DEBUG: Status Code: {response.status_code}")
     print(f"CI DEBUG: Response Headers: {response.headers}")
     print(f"CI DEBUG: Response Text: {response.text}")
-    assert response.status_code in [
-        status.HTTP_401_UNAUTHORIZED,
-        status.HTTP_400_BAD_REQUEST,
-    ], f"Expected 401/400 for invalid key with {provider_to_test_invalid_key}, got {response.status_code}. Response: {response.text}"
+    assert response.status_code == status.HTTP_502_BAD_GATEWAY, (
+        f"Expected sanitized upstream auth failure for {provider_to_test_invalid_key}, "
+        f"got {response.status_code}. Response: {response.text}"
+    )
 
-    detail = response.json().get("detail", "").lower()
-    assert (
-        "authentication" in detail
-        or "invalid" in detail
-        or "key" in detail
-        or "token" in detail
-        or "unauthorized" in detail
-    ), f"Error detail for invalid key with {provider_to_test_invalid_key} did not match expected. Got: {detail}"
+    detail = response.json()["detail"]
+    assert detail["error_code"] == "provider_authentication_failed"
+    assert "simulated" not in str(detail).lower()
     print(f"\nInvalid Key Response Detail ({provider_to_test_invalid_key}): {response.json().get('detail')}")
 
 

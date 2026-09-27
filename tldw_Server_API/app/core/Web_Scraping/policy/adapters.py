@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from tldw_Server_API.app.core.Web_Scraping.outbound_policy import decide_web_outbound_policy
-from tldw_Server_API.app.core.Web_Scraping.runtime import PolicyDecision, RuntimeRequestContext
+from tldw_Server_API.app.core.Web_Scraping.runtime import (
+    PolicyDecision,
+    RuntimeRequestContext,
+)
+
+from .probe import DefaultProbeEgressGuard as DefaultProbeEgressGuard
 
 
 class DefaultWebOutboundPolicyChecker:

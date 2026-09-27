@@ -1,0 +1,36 @@
+{
+  "microphone_used": false,
+  "external_provider_used": false,
+  "selection": "parakeet-onnx",
+  "device": "cpu",
+  "model": "istupakov/parakeet-tdt-0.6b-v3-onnx",
+  "snapshots": [
+    "Reply",
+    "Reply with the blue.",
+    "Reply with the blue notebook in",
+    "Reply with the blue notebook is ready.",
+    "Reply with the blue notebook is ready.",
+    "Reply with the blue notebook is ready.",
+    "Reply with the blue notebook is ready.",
+    "Reply with the blue notebook is ready.",
+    "Reply with the blue notebook is ready."
+  ],
+  "callback_duration_ms": [
+    0.063,
+    44.792,
+    0.089,
+    66.56,
+    0.058,
+    79.602,
+    0.067,
+    132.297,
+    145.773,
+    298.255,
+    227.084,
+    243.411,
+    232.0
+  ],
+  "silence_frame_count": 0,
+  "silence_history": "",
+  "source_sha256": "171f1c906cbdaf29cd708e6bf3af005d9a7991b040008ff7786a50389c996e07"
+}

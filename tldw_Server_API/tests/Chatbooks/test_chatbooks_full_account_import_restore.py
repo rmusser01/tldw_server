@@ -3,7 +3,8 @@ import base64
 import hashlib
 import json
 import zipfile
-from contextlib import contextmanager
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +16,9 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import ConflictResolutio
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.UserProfiles.response_mappers import (
+    LegacyProfileCommandResult,
+)
 from tldw_Server_API.app.services import core_jobs_worker
 
 pytestmark = pytest.mark.unit
@@ -642,6 +646,140 @@ async def test_finalize_account_restore_removes_private_payload_before_return(tm
     assert private_key not in result
     assert source_email not in json.dumps(result)
     assert source_email not in message
+
+
+@pytest.mark.asyncio
+async def test_account_restore_delegates_ordered_profile_updates_to_command_service(
+    monkeypatch,
+):
+    from tldw_Server_API.app.core.AuthNZ import database as database_module
+    from tldw_Server_API.app.core.AuthNZ.repos import users_repo as users_repo_module
+    from tldw_Server_API.app.core.UserProfiles import command_service as command_service_module
+
+    captured: dict[str, object] = {}
+
+    class _Pool:
+        @asynccontextmanager
+        async def transaction(self):
+            connection = object()
+            captured["connection"] = connection
+            yield connection
+
+    pool = _Pool()
+
+    async def _get_pool():
+        return pool
+
+    class _Repo:
+        def __init__(self, *, db_pool):
+            assert db_pool is pool
+
+        async def get_user_by_id(self, user_id):
+            return {"id": user_id}
+
+    class _CommandService:
+        def __init__(self, *, db_pool):
+            assert db_pool is pool
+
+        async def apply(self, command, *, db_conn, scope):
+            captured["command"] = command
+            captured["db_conn"] = db_conn
+            captured["scope"] = scope
+            return LegacyProfileCommandResult(
+                applied=(
+                    "identity.email",
+                    "preferences.audio.voice",
+                    "preferences.ui.theme",
+                )
+            )
+
+    monkeypatch.setattr(database_module, "get_db_pool", _get_pool)
+    monkeypatch.setattr(users_repo_module, "AuthnzUsersRepo", _Repo)
+    monkeypatch.setattr(command_service_module, "ProfileCommandService", _CommandService)
+
+    service = SimpleNamespace(user_id_int=7)
+    result = await ChatbookService._restore_account_state_payloads(
+        service,
+        {
+            "account_profile": {
+                "profile": {"identity.email": "restored@example.com"},
+            },
+            "account_settings": {
+                "overrides": {
+                    "preferences.ui.theme": "paper",
+                    "preferences.audio.voice": "alloy",
+                },
+            },
+        },
+    )
+
+    command = captured["command"]
+    assert command.updates == (
+        ("identity.email", "restored@example.com"),
+        ("preferences.audio.voice", "alloy"),
+        ("preferences.ui.theme", "paper"),
+    )
+    assert captured["db_conn"] is captured["connection"]
+    assert captured["scope"] is None
+    assert result == {"account_profile": 1, "account_settings": 1}
+
+
+@pytest.mark.asyncio
+async def test_account_restore_skips_unchanged_synthetic_single_user_email(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An idempotent restore must not revalidate the bootstrap-only .local email."""
+    from tldw_Server_API.app.core.AuthNZ import database as database_module
+    from tldw_Server_API.app.core.AuthNZ.repos import users_repo as users_repo_module
+    from tldw_Server_API.app.core.UserProfiles import command_service as command_service_module
+
+    class _Pool:
+        """Provide the transaction context used by account restoration."""
+
+        @asynccontextmanager
+        async def transaction(self) -> AsyncIterator[object]:
+            """Yield a stand-in database connection."""
+            yield object()
+
+    pool = _Pool()
+
+    async def _get_pool() -> _Pool:
+        """Return the stubbed AuthNZ database pool."""
+        return pool
+
+    class _Repo:
+        """Return the existing synthetic single-user identity."""
+
+        def __init__(self, *, db_pool: object) -> None:
+            """Validate that restoration uses the expected pool."""
+            assert db_pool is pool
+
+        async def get_user_by_id(self, user_id: int) -> dict[str, object]:
+            """Return the unchanged bootstrap account."""
+            return {"id": user_id, "email": "single_user@example.local"}
+
+    class _CommandService:
+        """Fail if unchanged values reach profile validation."""
+
+        def __init__(self, *, db_pool: object) -> None:
+            """Reject construction because no profile command is expected."""
+            raise AssertionError("unchanged profile values must not be sent for validation")
+
+    monkeypatch.setattr(database_module, "get_db_pool", _get_pool)
+    monkeypatch.setattr(users_repo_module, "AuthnzUsersRepo", _Repo)
+    monkeypatch.setattr(command_service_module, "ProfileCommandService", _CommandService)
+
+    service = SimpleNamespace(user_id_int=1)
+    result = await ChatbookService._restore_account_state_payloads(
+        service,
+        {
+            "account_profile": {
+                "profile": {"identity.email": "single_user@example.local"},
+            }
+        },
+    )
+
+    assert result == {"account_profile": 1, "account_settings": 0}
 
 
 @pytest.mark.asyncio

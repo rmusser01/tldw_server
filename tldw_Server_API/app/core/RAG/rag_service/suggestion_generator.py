@@ -19,6 +19,11 @@ from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     parse_structured_output,
 )
 
+from .runtime_provider_call import (
+    attach_runtime_provider_credentials,
+    await_runtime_bound_provider_call,
+)
+
 # ---------------------------------------------------------------------------
 # Prompt templates
 # ---------------------------------------------------------------------------
@@ -153,6 +158,8 @@ async def generate_suggestions(
     llm_model: str | None = None,
     num_suggestions: int = 5,
     llm_timeout_sec: float = 3.0,
+    credential_runtime: Any = None,
+    stage_metadata: dict[str, Any] | None = None,
 ) -> list[str]:
     """Generate follow-up question suggestions based on query and response.
 
@@ -165,6 +172,8 @@ async def generate_suggestions(
         num_suggestions: Number of suggestions to generate (default 5).
         llm_timeout_sec: Max time to wait for suggestion LLM before deterministic
             fallback suggestions are returned.
+        credential_runtime: Optional request-scoped provider credential runtime.
+        stage_metadata: Optional runtime-only trust metadata output.
 
     Returns:
         List of follow-up question strings. Falls back to heuristic
@@ -210,9 +219,22 @@ async def generate_suggestions(
         }
         if model:
             call_kwargs["model"] = model
+        credential_handle = None
+        if credential_runtime is not None:
+            credential_handle = await credential_runtime.resolve(provider, model=model)
+            call_kwargs.update(
+                api_key=credential_handle.api_key,
+                app_config=credential_handle.app_config,
+                credentials_resolved=True,
+            )
+            attach_runtime_provider_credentials(call_kwargs, credential_handle)
 
         raw_response = await asyncio.wait_for(
-            perform_chat_api_call_async(**call_kwargs),
+            await_runtime_bound_provider_call(
+                perform_chat_api_call_async(**call_kwargs),
+                credential_runtime=credential_runtime,
+                credential_handle=credential_handle,
+            ),
             timeout=max(0.1, float(llm_timeout_sec)),
         )
 
@@ -235,12 +257,20 @@ async def generate_suggestions(
         # Parse JSON array from response
         suggestions = _parse_suggestions(response_content, num_suggestions)
         if suggestions:
+            if credential_runtime is not None and stage_metadata is not None:
+                stage_metadata.pop("failure_code", None)
+                stage_metadata["verification_available"] = True
             return _finalize_suggestions(suggestions, query, num_suggestions)
 
     except Exception as exc:
         logger.debug(f"Suggestion generation LLM call failed: {_safe_exception_type(exc)}")
 
     # Fallback to heuristic suggestions
+    if credential_runtime is not None and stage_metadata is not None:
+        stage_metadata.update(
+            failure_code="provider_unavailable",
+            verification_available=False,
+        )
     return _finalize_suggestions([], query, num_suggestions)
 
 

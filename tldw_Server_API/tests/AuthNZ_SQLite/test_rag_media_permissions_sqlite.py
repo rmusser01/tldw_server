@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.tests.AuthNZ_SQLite._user_fixtures import create_authnz_test_user
+
 
 def _base_env(tmp_path: Path):
     os.environ["AUTH_MODE"] = "multi_user"
@@ -14,12 +16,9 @@ def _base_env(tmp_path: Path):
 
 
 async def _seed_user(pool, username: str):
-    async with pool.transaction() as conn:
-        await conn.execute(
-            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
-            (username, f"{username}@example.com", "x"),
-        )
-    return await pool.fetchval("SELECT id FROM users WHERE username = ?", username)
+    return await create_authnz_test_user(
+        pool, username=username, email=f"{username}@example.com"
+    )
 
 
 async def _ensure_permission(pool, code: str) -> int:

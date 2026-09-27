@@ -256,27 +256,12 @@ class SandboxModule(BaseModule):
             decoded.append((path, data))
         return decoded
 
-    def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
-        """
-        Relaxed sanitizer for sandbox payloads.
-
-        Allows CLI-style args and comment tokens while still stripping control chars
-        and guarding against overly deep payloads.
-        """
-        if _depth > 20:
-            raise ValueError("Input too deeply nested")
-
-        def _clean_str(s: str) -> str:
-            # Strip NULs and control chars only.
-            return "".join(ch for ch in s if ch >= " " or ch == "\n")
-
-        if isinstance(input_data, str):
-            return _clean_str(input_data)
-        if isinstance(input_data, dict):
-            return {k: self.sanitize_input(v, _depth + 1) for k, v in input_data.items()}
-        if isinstance(input_data, list):
-            return [self.sanitize_input(v, _depth + 1) for v in input_data]
-        return input_data
+    # No sanitize_input override. This module used to carry one purely to escape the
+    # base SQL-injection denylist, which rejected CLI-style args and comment tokens.
+    # That denylist is gone (TASK-13294), and the override that outlived it kept only
+    # "\n" -- so it silently stripped every tab and carriage return from a sandbox
+    # payload, corrupting any inline Makefile, TSV or CRLF file written through
+    # sandbox.exec, and it let DEL (\x7f) through. The base does the right thing.
 
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]):
         # Enforce PRD oneOf and types

@@ -154,6 +154,11 @@ const TLDW_TTS_MODEL_SETTING = defineSetting(
   DEFAULT_TLDW_TTS_MODEL,
   (value) => coerceString(value, DEFAULT_TLDW_TTS_MODEL)
 )
+const TLDW_TTS_BACKEND_SETTING = defineSetting(
+  "tldwTtsBackend",
+  "",
+  (value) => coerceOptionalString(value) || ""
+)
 const TLDW_TTS_VOICE_SETTING = defineSetting(
   "tldwTtsVoice",
   DEFAULT_TLDW_TTS_VOICE,
@@ -391,6 +396,13 @@ export const setTldwTTSModel = async (model: string) => {
   await setSetting(TLDW_TTS_MODEL_SETTING, model)
 }
 
+export const getTldwTTSBackend = async () =>
+  getSetting(TLDW_TTS_BACKEND_SETTING)
+
+export const setTldwTTSBackend = async (backend: string) => {
+  await setSetting(TLDW_TTS_BACKEND_SETTING, backend)
+}
+
 export const getTldwTTSVoice = async () => getSetting(TLDW_TTS_VOICE_SETTING)
 
 export const setTldwTTSVoice = async (voice: string) => {
@@ -483,14 +495,13 @@ export const setTldwTTSNormalizePlurals = async (value: boolean) => {
   await setSetting(TLDW_TTS_NORMALIZE_PLURALS_SETTING, value)
 }
 
-export const getTTSSettings = async () => {
+const getTTSPreferences = async () => {
   const [
     ttsEnabled,
     ttsProvider,
     browserTTSVoices,
     voice,
     ssmlEnabled,
-    elevenLabsApiKey,
     elevenLabsVoiceId,
     elevenLabsModel,
     elevenLabsKeyValid,
@@ -499,7 +510,6 @@ export const getTTSSettings = async () => {
     removeReasoningTagTTS,
     // OPENAI
     openAITTSBaseUrl,
-    openAITTSApiKey,
     openAITTSModel,
     openAITTSVoice,
     openAITTSKeyValid,
@@ -508,6 +518,7 @@ export const getTTSSettings = async () => {
     ttsAutoPlay,
     playbackSpeed,
     // tldw_server TTS
+    tldwTtsBackend,
     tldwTtsModel,
     tldwTtsVoice,
     tldwTtsResponseFormat,
@@ -528,7 +539,6 @@ export const getTTSSettings = async () => {
     getBrowserTTSVoices(),
     getVoice(),
     isSSMLEnabled(),
-    getElevenLabsApiKey(),
     getElevenLabsVoiceId(),
     getElevenLabsModel(),
     getElevenLabsKeyValid(),
@@ -537,7 +547,6 @@ export const getTTSSettings = async () => {
     getRemoveReasoningTagTTS(),
     // OPENAI
     getOpenAITTSBaseUrl(),
-    getOpenAITTSApiKey(),
     getOpenAITTSModel(),
     getOpenAITTSVoice(),
     getOpenAITTSKeyValid(),
@@ -546,6 +555,7 @@ export const getTTSSettings = async () => {
     isTTSAutoPlayEnabled(),
     getSpeechPlaybackSpeed(),
     // tldw_server TTS
+    getTldwTTSBackend(),
     getTldwTTSModel(),
     getTldwTTSVoice(),
     getTldwTTSResponseFormat(),
@@ -568,7 +578,6 @@ export const getTTSSettings = async () => {
     browserTTSVoices,
     voice,
     ssmlEnabled,
-    elevenLabsApiKey,
     elevenLabsVoiceId,
     elevenLabsModel,
     elevenLabsKeyValid,
@@ -577,13 +586,13 @@ export const getTTSSettings = async () => {
     removeReasoningTagTTS,
     // OPENAI
     openAITTSBaseUrl,
-    openAITTSApiKey,
     openAITTSModel,
     openAITTSVoice,
     openAITTSKeyValid,
     openAITTSKeyTestedAt,
     ttsAutoPlay,
     playbackSpeed,
+    tldwTtsBackend,
     tldwTtsModel,
     tldwTtsVoice,
     tldwTtsResponseFormat,
@@ -598,6 +607,23 @@ export const getTTSSettings = async () => {
     tldwTtsNormalizeEmails,
     tldwTtsNormalizePhones,
     tldwTtsNormalizePlurals
+  }
+}
+
+/** Read preferences and credentials concurrently without mixing their result tuples. */
+export const getTTSSettings = async () => {
+  const preferences = getTTSPreferences()
+  const elevenLabsApiKey = getElevenLabsApiKey()
+  const openAITTSApiKey = getOpenAITTSApiKey()
+
+  // Attach rejection handlers to every read immediately. Keep each result tied
+  // to its named promise so credential values cannot become preference fields.
+  await Promise.all([preferences, elevenLabsApiKey, openAITTSApiKey])
+
+  return {
+    ...(await preferences),
+    elevenLabsApiKey: await elevenLabsApiKey,
+    openAITTSApiKey: await openAITTSApiKey
   }
 }
 
@@ -621,6 +647,7 @@ export const setTTSSettings = async ({
   openAITTSKeyTestedAt,
   ttsAutoPlay,
   playbackSpeed,
+  tldwTtsBackend,
   tldwTtsModel,
   tldwTtsVoice,
   tldwTtsResponseFormat,
@@ -655,6 +682,7 @@ export const setTTSSettings = async ({
   openAITTSKeyTestedAt?: string
   ttsAutoPlay: boolean
   playbackSpeed: number
+  tldwTtsBackend?: string
   tldwTtsModel: string
   tldwTtsVoice: string
   tldwTtsResponseFormat: string
@@ -701,6 +729,9 @@ export const setTTSSettings = async ({
     setTldwTTSNormalizePhones(tldwTtsNormalizePhones),
     setTldwTTSNormalizePlurals(tldwTtsNormalizePlurals)
   ]
+  if (tldwTtsBackend !== undefined) {
+    updates.push(setTldwTTSBackend(tldwTtsBackend))
+  }
   if (elevenLabsKeyValid !== undefined) {
     updates.push(setElevenLabsKeyValid(elevenLabsKeyValid))
   }

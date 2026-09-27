@@ -12,7 +12,8 @@ import {
   Divider,
   Input,
   Popconfirm,
-  Form
+  Form,
+  Modal
 } from "antd"
 import { useTranslation } from "react-i18next"
 import {
@@ -36,6 +37,7 @@ import {
   StatePanel
 } from "@/components/ui/state"
 import { Alert } from "@/components/ui/primitives"
+import { useAntdMessage } from "@/hooks/useAntdMessage"
 
 const { Title, Text } = Typography
 const SYSTEM_STATS_TIMEOUT_MS = 10_000
@@ -93,6 +95,7 @@ const formatRetryAfterForAdmin = (value: number | null | undefined): string => {
 }
 
 export const ServerAdminPage: React.FC = () => {
+  const message = useAntdMessage()
   const { t } = useTranslation(["option", "settings"])
   const [config, setConfig] = React.useState<TldwConfig | null>(null)
   const [stats, setStats] = React.useState<any | null>(null)
@@ -115,9 +118,17 @@ export const ServerAdminPage: React.FC = () => {
   const [usersPage, setUsersPage] = React.useState(1)
   const [usersPageSize, setUsersPageSize] = React.useState(20)
   const [updatingUserId, setUpdatingUserId] = React.useState<number | null>(null)
+  const [resetPasswordResult, setResetPasswordResult] = React.useState<{
+    username: string
+    temporaryPassword: string
+  } | null>(null)
   const [creatingRole, setCreatingRole] = React.useState(false)
   const [deletingRoleId, setDeletingRoleId] = React.useState<number | null>(null)
   const [roleForm] = Form.useForm()
+  const [createUserForm] = Form.useForm()
+  const [createUserOpen, setCreateUserOpen] = React.useState(false)
+  const [creatingUser, setCreatingUser] = React.useState(false)
+  const [createUserError, setCreateUserError] = React.useState<string | null>(null)
   const initialLoadRef = React.useRef(false)
   const openAdminDocumentation = React.useCallback(() => {
     window.open(TLDW_SERVER_DOCUMENTATION_URL, "_blank", "noopener,noreferrer")
@@ -226,8 +237,6 @@ export const ServerAdminPage: React.FC = () => {
   }, [markAdminGuardFromError, t])
 
   React.useEffect(() => {
-    if (initialLoadRef.current) return
-    initialLoadRef.current = true
     let cancelled = false
     const load = async () => {
       try {
@@ -238,18 +247,19 @@ export const ServerAdminPage: React.FC = () => {
       } catch {
         // ignore; health checks will surface errors
       }
-      if (!cancelled) {
-        await loadSystemStats()
-      }
-
-      // Initial users + roles
-      void loadUsers(1, usersPageSize, userRoleFilter, userActiveFilter)
-      void loadRoles()
     }
     load()
     return () => {
       cancelled = true
     }
+  }, [])
+
+  React.useEffect(() => {
+    if (initialLoadRef.current) return
+    initialLoadRef.current = true
+    void loadSystemStats()
+    void loadUsers(1, usersPageSize, userRoleFilter, userActiveFilter)
+    void loadRoles()
   }, [
     loadRoles,
     loadSystemStats,
@@ -314,6 +324,43 @@ export const ServerAdminPage: React.FC = () => {
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error("Failed to update user active state", e)
+    } finally {
+      setUpdatingUserId(null)
+    }
+  }
+
+  // The reset endpoint requires the admin to supply the temporary password
+  // and an audit reason; generate a strong one and reveal it exactly once so
+  // the admin can hand it to the user.
+  const generateTemporaryPassword = (): string => {
+    const bytes = new Uint8Array(12)
+    crypto.getRandomValues(bytes)
+    const encoded = Array.from(bytes, (b) =>
+      "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789".charAt(b % 57)
+    ).join("")
+    return `T!${encoded}`
+  }
+
+  const handleResetUserPassword = async (user: AdminUserSummary) => {
+    const temporaryPassword = generateTemporaryPassword()
+    try {
+      setUpdatingUserId(user.id)
+      await tldwClient.resetAdminUserPassword(user.id, {
+        temporary_password: temporaryPassword,
+        reason: "Admin-initiated password reset from Server Admin",
+        force_password_change: true
+      })
+      setResetPasswordResult({
+        username: user.username,
+        temporaryPassword
+      })
+    } catch (e) {
+      message.error(
+        sanitizeAdminErrorMessage(
+          e,
+          t("settings:admin.users.resetPasswordFailed", "Failed to reset the password")
+        )
+      )
     } finally {
       setUpdatingUserId(null)
     }
@@ -436,6 +483,25 @@ export const ServerAdminPage: React.FC = () => {
           {formatMegabytesForAdmin(record.storage_quota_mb)}
         </span>
       )
+    },
+    {
+      title: t("settings:admin.users.actions", "Actions"),
+      key: "actions",
+      render: (_: any, record: AdminUserSummary) => (
+        <Popconfirm
+          title={t(
+            "settings:admin.users.resetPasswordConfirm",
+            "Reset {{username}}'s password? They must set a new one on next login.",
+            { username: record.username }
+          )}
+          okText={t("settings:admin.users.resetPasswordOk", "Reset password")}
+          onConfirm={() => handleResetUserPassword(record)}
+        >
+          <Button size="small" loading={updatingUserId === record.id}>
+            {t("settings:admin.users.resetPassword", "Reset password")}
+          </Button>
+        </Popconfirm>
+      )
     }
   ]
 
@@ -515,7 +581,7 @@ export const ServerAdminPage: React.FC = () => {
           </Text>
         )}
         <div>
-          <Title level={2}>{t("option:header.adminServer", "Server Admin")}</Title>
+          <Title level={1} style={{ fontSize: 30 }}>{t("option:header.adminServer", "Server Admin")}</Title>
           <Text type="secondary">
             {t(
               "settings:admin.serverIntro",
@@ -544,8 +610,6 @@ export const ServerAdminPage: React.FC = () => {
             )}
           </Card>
         )}
-
-        <AdminAudioInstallerCard />
 
         {!adminGuard && (
           <>
@@ -638,6 +702,15 @@ export const ServerAdminPage: React.FC = () => {
               title={t("settings:admin.usersAndRolesTitle", "Users & roles")}
               extra={
                 <Space size="small">
+                  {config?.authMode === "multi-user" && (
+                    <Button size="small" type="primary" onClick={() => {
+                      createUserForm.resetFields()
+                      setCreateUserError(null)
+                      setCreateUserOpen(true)
+                    }}>
+                      {t("settings:admin.users.create", "Create user")}
+                    </Button>
+                  )}
                   <Button
                     size="small"
                     onClick={() =>
@@ -653,11 +726,21 @@ export const ServerAdminPage: React.FC = () => {
               }>
               <Space orientation="vertical" size="middle" className="w-full">
                 {usersError && (
-                  <Alert
-                    variant="error"
-                    title={t("settings:admin.usersError", "Unable to load users")}>
-                    {usersError}
-                  </Alert>
+                  <StatePanel
+                    state="error"
+                    title={t("settings:admin.usersError", "Unable to load users")}
+                    message={usersError}
+                    primaryAction={{
+                      label: t("common:retry", "Retry"),
+                      onClick: () =>
+                        loadUsers(
+                          usersPage,
+                          usersPageSize,
+                          userRoleFilter,
+                          userActiveFilter
+                        )
+                    }}
+                  />
                 )}
                 <Space align="center" wrap>
                   <Text strong>
@@ -710,26 +793,39 @@ export const ServerAdminPage: React.FC = () => {
                   }}
                   onChange={handleUserTableChange}
                 />
-                {!usersLoading && (usersData?.users || []).length === 0 && (
-                  <StatePanel
-                    state="empty"
-                    title={t("settings:admin.users.emptyTitle", "No users found")}
-                    message={t(
-                      "settings:admin.users.empty",
-                      "No user diagnostics match the current filters."
-                    )}
-                    primaryAction={{
-                      label: t("common:refresh", "Refresh"),
-                      onClick: () =>
-                        loadUsers(
-                          usersPage,
-                          usersPageSize,
-                          userRoleFilter,
-                          userActiveFilter
-                        )
-                    }}
-                  />
-                )}
+                {/* Never blame the user's filters for a failed fetch: the
+                    empty panel only renders when the request succeeded, and
+                    only mentions filters when filters are actually set
+                    (2026-09 UX audit finding S4). */}
+                {!usersLoading &&
+                  !usersError &&
+                  (usersData?.users || []).length === 0 && (
+                    <StatePanel
+                      state="empty"
+                      title={t("settings:admin.users.emptyTitle", "No users found")}
+                      message={
+                        userRoleFilter || userActiveFilter
+                          ? t(
+                              "settings:admin.users.emptyFiltered",
+                              "No users match the current filters."
+                            )
+                          : t(
+                              "settings:admin.users.emptyNoFilters",
+                              "This server has no user accounts yet."
+                            )
+                      }
+                      primaryAction={{
+                        label: t("common:refresh", "Refresh"),
+                        onClick: () =>
+                          loadUsers(
+                            usersPage,
+                            usersPageSize,
+                            userRoleFilter,
+                            userActiveFilter
+                          )
+                      }}
+                    />
+                  )}
 
                 <Divider />
 
@@ -979,7 +1075,110 @@ export const ServerAdminPage: React.FC = () => {
             </Card>
           </>
         )}
+
+        {/* One-time setup task: placed after the recurring operational cards
+            (health, users, budgets) per the 2026-09 UX audit (#2878). */}
+        <AdminAudioInstallerCard />
       </Space>
+
+      <Modal
+        title={t("settings:admin.users.resetPasswordDoneTitle", "Temporary password created")}
+        open={Boolean(resetPasswordResult)}
+        onCancel={() => setResetPasswordResult(null)}
+        onOk={() => setResetPasswordResult(null)}
+        okText={t("common:done", "Done")}
+        cancelButtonProps={{ style: { display: "none" } }}
+      >
+        {resetPasswordResult ? (
+          <div data-testid="admin-reset-password-result">
+            <p>
+              {t(
+                "settings:admin.users.resetPasswordDoneBody",
+                "Share this temporary password with {{username}} - it will not be shown again. They must set a new password on next login.",
+                { username: resetPasswordResult.username }
+              )}
+            </p>
+            <code className="block break-all rounded border border-border bg-surface2 px-3 py-2 font-mono text-sm">
+              {resetPasswordResult.temporaryPassword}
+            </code>
+            <Button
+              size="small"
+              type="primary"
+              className="mt-2"
+              onClick={() => {
+                void navigator.clipboard
+                  ?.writeText(resetPasswordResult.temporaryPassword)
+                  .then(() =>
+                    message.success(
+                      t("settings:admin.users.resetPasswordCopied", "Copied")
+                    )
+                  )
+              }}
+            >
+              {t("settings:admin.users.resetPasswordCopy", "Copy password")}
+            </Button>
+          </div>
+        ) : null}
+      </Modal>
+      <Modal
+        title={t("settings:admin.users.create", "Create user")}
+        open={createUserOpen}
+        confirmLoading={creatingUser}
+        okText={t("settings:admin.users.create", "Create user")}
+        onCancel={() => {
+          if (creatingUser) return
+          setCreateUserOpen(false)
+          createUserForm.resetFields()
+        }}
+        onOk={() => createUserForm.submit()}
+      >
+        <Form
+          form={createUserForm}
+          layout="vertical"
+          initialValues={{ role: "user" }}
+          onFinish={async (values) => {
+            setCreatingUser(true)
+            setCreateUserError(null)
+            try {
+              await tldwClient.createAdminUser({
+                username: values.username.trim(),
+                email: values.email.trim(),
+                password: values.password,
+                role: values.role
+              })
+              setCreateUserOpen(false)
+              createUserForm.resetFields()
+              await loadUsers(usersPage, usersPageSize, userRoleFilter, userActiveFilter)
+              message.success(t("settings:admin.users.created", "User created"))
+            } catch (err) {
+              setCreateUserError(sanitizeAdminErrorMessage(err, t("settings:admin.users.createFailed", "Unable to create user")))
+            } finally {
+              setCreatingUser(false)
+            }
+          }}
+        >
+          {createUserError && <Alert variant="error" title={createUserError} />}
+          <Form.Item name="username" label={t("settings:admin.users.username", "Username")} rules={[
+            { required: true, min: 3, max: 50, pattern: /^[a-zA-Z0-9_-]+$/, message: t("settings:admin.users.usernameRule", "Use 3–50 letters, numbers, underscores, or hyphens.") }
+          ]}>
+            <Input autoComplete="off" />
+          </Form.Item>
+          <Form.Item name="email" label={t("settings:admin.users.email", "Email")} rules={[{ required: true, type: "email" }]}>
+            <Input autoComplete="off" />
+          </Form.Item>
+          <Form.Item
+            name="password"
+            label={t("settings:admin.users.password", "Password")}
+            extra={t("settings:admin.users.passwordGuidance", "Use a long, unique password with uppercase and lowercase letters, a number, and a symbol. Avoid your username and sequences or repeats of three characters.")}
+            rules={[{ required: true, min: 10, max: 128 }]}
+          >
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+          <Form.Item name="role" label={t("settings:admin.users.role", "Role")} rules={[{ required: true }]}>
+            <Select options={[{ value: "user", label: "User" }, { value: "admin", label: "Administrator" }]} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </PageShell>
   )
 }

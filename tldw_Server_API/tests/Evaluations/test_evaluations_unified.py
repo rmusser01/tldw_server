@@ -13,6 +13,7 @@ Tests include:
 import pytest
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
 from fastapi import FastAPI, status
@@ -28,6 +29,11 @@ test_config.setup_test_environment()
 test_config.reset_settings()
 
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_unified import router as evaluations_router
+from tldw_Server_API.app.api.v1.endpoints.evaluations import evaluations_unified as eval_endpoint
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    is_runtime_issued_provider_call_credentials,
+)
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     UnifiedEvaluationService, get_unified_evaluation_service
 )
@@ -39,6 +45,283 @@ from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
 # Use configuration from test_config
 DEFAULT_API_KEY = test_config.TEST_API_KEY
 TEST_SK_KEY = test_config.TEST_SK_KEY
+
+
+@pytest.mark.asyncio
+async def test_eval_required_credentials_are_not_bypassed_in_pytest_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pytest timing helpers must not disable the credential trust boundary."""
+    monkeypatch.setattr(eval_endpoint, "_is_eval_test_mode", lambda: True)
+    missing_credentials = SimpleNamespace(
+        api_key=None,
+        app_config={"openai_api": {"model": "model-a"}},
+        credentials_resolved=True,
+    )
+
+    with pytest.raises(eval_endpoint.HTTPException) as exc_info:
+        await eval_endpoint._validate_provider_credentials(
+            "geval",
+            "openai",
+            "openai",
+            missing_credentials,
+        )
+
+    assert exc_info.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert exc_info.value.detail["error_code"] == "missing_provider_credentials"
+
+
+@pytest.mark.asyncio
+async def test_eval_credential_resolution_uses_structured_static_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Evaluation dispatch must use one policy-enforced credential runtime snapshot."""
+    captured_key = "eval-key-a"
+    config_a = {"openai_api": {"model": "model-a", "api_url": "http://a.invalid"}}
+    observed: dict[str, object] = {"marks": 0, "closes": 0}
+    handle = SimpleNamespace(
+        provider="openai",
+        api_key=captured_key,
+        app_config=config_a,
+        credentials_resolved=True,
+    )
+
+    class FakeRuntime:
+        def __init__(self, **kwargs):
+            observed["runtime_kwargs"] = kwargs
+
+        async def resolve(self, provider: str, *, model: str | None = None):
+            observed["resolve"] = (provider, model)
+            return handle
+
+        async def mark_used(self, resolved_handle):
+            assert resolved_handle is handle
+            observed["marks"] = int(observed["marks"]) + 1
+
+        async def close(self):
+            observed["closes"] = int(observed["closes"]) + 1
+
+    async def forbidden_low_level_resolver(*_args, **_kwargs):
+        raise AssertionError("evaluation bypassed ProviderCredentialRuntime")
+
+    monkeypatch.setattr(eval_endpoint, "ProviderCredentialRuntime", FakeRuntime)
+    monkeypatch.setattr(
+        eval_endpoint,
+        "resolve_byok_credentials",
+        forbidden_low_level_resolver,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        eval_endpoint,
+        "derive_trusted_credential_scope",
+        lambda _request, _user: (1, [7], [9], True),
+    )
+
+    provider, model, resolved_handle, runtime = await eval_endpoint._resolve_and_validate_eval_provider(
+        eval_endpoint.GEvalRequest(
+            source_text="source text long enough",
+            summary="summary text long enough",
+            api_name="openai",
+        ),
+        "geval",
+        current_user=SimpleNamespace(id=1),
+        http_request=SimpleNamespace(),
+    )
+
+    assert provider == "openai"
+    assert model == "model-a"
+    assert resolved_handle is handle
+    assert runtime is not None
+    assert observed["resolve"] == ("openai", None)
+    assert observed["runtime_kwargs"] == {
+        "user_id": 1,
+        "team_ids": [7],
+        "org_ids": [9],
+        "trusted_base_url_override": True,
+        "override_snapshot_resolver": eval_endpoint.capture_provider_override_call_snapshot,
+    }
+
+    await runtime.mark_used(resolved_handle)
+    await runtime.close()
+    assert observed["marks"] == 1
+    assert observed["closes"] == 1
+
+
+@pytest.mark.asyncio
+async def test_eval_credential_scope_revocation_is_bounded_and_never_constructs_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stale request scope must fail as a bounded policy response."""
+
+    def revoked_scope(*_args, **_kwargs):
+        raise ByokResolutionError("credential_scope_revoked", "openai")
+
+    class ForbiddenRuntime:
+        def __init__(self, **_kwargs):
+            raise AssertionError("runtime constructed after scope revocation")
+
+    monkeypatch.setattr(eval_endpoint, "derive_trusted_credential_scope", revoked_scope)
+    monkeypatch.setattr(eval_endpoint, "ProviderCredentialRuntime", ForbiddenRuntime)
+
+    with pytest.raises(eval_endpoint.HTTPException) as exc_info:
+        await eval_endpoint._resolve_and_validate_eval_provider(
+            eval_endpoint.GEvalRequest(
+                source_text="source text long enough",
+                summary="summary text long enough",
+                api_name="openai",
+                model="model-a",
+            ),
+            "geval",
+            current_user=SimpleNamespace(id=1),
+            http_request=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+    assert exc_info.value.detail["error_code"] == "credential_scope_revoked"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("eval_type", "eval_request"),
+    [
+        (
+            "geval",
+            eval_endpoint.GEvalRequest(
+                source_text="source text long enough",
+                summary="summary text long enough",
+                api_name="bedrock",
+                model="model-a",
+            ),
+        ),
+        (
+            "rag",
+            eval_endpoint.RAGEvaluationRequest(
+                query="query",
+                retrieved_contexts=["context"],
+                generated_response="response",
+                api_name="bedrock",
+                model="model-a",
+            ),
+        ),
+        (
+            "response_quality",
+            eval_endpoint.ResponseQualityRequest(
+                prompt="prompt",
+                response="response",
+                api_name="bedrock",
+                model="model-a",
+            ),
+        ),
+    ],
+    ids=["geval", "rag", "response-quality"],
+)
+@pytest.mark.parametrize(
+    ("runtime_auth_source", "expected_status"),
+    [("aws_default_chain", None), (None, status.HTTP_503_SERVICE_UNAVAILABLE)],
+    ids=["default-chain", "explicit-absent"],
+)
+async def test_eval_bedrock_auth_contract_distinguishes_default_chain_from_absent(
+    monkeypatch: pytest.MonkeyPatch,
+    eval_type: str,
+    eval_request: object,
+    runtime_auth_source: str | None,
+    expected_status: int | None,
+) -> None:
+    """Every provider-backed evaluation surface accepts only resolved Bedrock auth."""
+    provider_config: dict[str, object] = {"model": "model-a"}
+    if runtime_auth_source is not None:
+        provider_config["_runtime_auth_source"] = runtime_auth_source
+    handle = SimpleNamespace(
+        provider="bedrock",
+        api_key=None,
+        app_config={"bedrock_api": provider_config},
+        credentials_resolved=True,
+    )
+
+    class FakeRuntime:
+        async def resolve(self, provider: str, *, model: str | None = None):
+            assert (provider, model) == ("bedrock", "model-a")
+            return handle
+
+    monkeypatch.setattr(eval_endpoint, "_is_eval_test_mode", lambda: False)
+    if expected_status is None:
+        provider, model, resolved, runtime = await eval_endpoint._resolve_and_validate_eval_provider(
+            eval_request,
+            eval_type,
+            current_user=SimpleNamespace(id=1),
+            http_request=SimpleNamespace(),
+            credential_runtime=FakeRuntime(),
+        )
+        assert (provider, model, resolved) == ("bedrock", "model-a", handle)
+        assert isinstance(runtime, FakeRuntime)
+    else:
+        with pytest.raises(eval_endpoint.HTTPException) as exc_info:
+            await eval_endpoint._resolve_and_validate_eval_provider(
+                eval_request,
+                eval_type,
+                current_user=SimpleNamespace(id=1),
+                http_request=SimpleNamespace(),
+                credential_runtime=FakeRuntime(),
+            )
+        assert exc_info.value.status_code == expected_status
+        assert exc_info.value.detail["error_code"] == "missing_provider_credentials"
+
+
+@pytest.mark.asyncio
+async def test_eval_real_runtime_enforces_allowed_model_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real runtime must reject a disallowed evaluation model."""
+    from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime as runtime_module
+    from tldw_Server_API.app.core.AuthNZ.byok_runtime import ResolvedByokCredentials
+    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        LLMProviderOverride,
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    async def resolve_credentials(provider: str, **_kwargs):
+        return ResolvedByokCredentials(
+            provider=provider,
+            api_key="server-key-a",
+            app_config={"openai_api": {"model": "blocked-model"}},
+            credential_fields={},
+            source="server",
+            allowlisted=True,
+        )
+
+    monkeypatch.setattr(runtime_module, "resolve_byok_credentials", resolve_credentials)
+    monkeypatch.setattr(
+        eval_endpoint,
+        "derive_trusted_credential_scope",
+        lambda _request, _user: (1, [], [], False),
+    )
+    set_llm_provider_overrides_cache_for_tests(
+        {
+            "openai": LLMProviderOverride(
+                provider="openai",
+                is_enabled=True,
+                allowed_models=["allowed-model"],
+            )
+        }
+    )
+    try:
+        with pytest.raises(eval_endpoint.HTTPException) as exc_info:
+            await eval_endpoint._resolve_and_validate_eval_provider(
+                eval_endpoint.GEvalRequest(
+                    source_text="source text long enough",
+                    summary="summary text long enough",
+                    api_name="openai",
+                    model="blocked-model",
+                ),
+                "geval",
+                current_user=SimpleNamespace(id=1),
+                http_request=SimpleNamespace(),
+            )
+    finally:
+        set_llm_provider_overrides_cache_for_tests({})
+
+    assert exc_info.value.status_code == status.HTTP_403_FORBIDDEN
+    assert exc_info.value.detail["error_code"] == "model_not_allowed"
 
 
 def test_cursor_list_responses_backfill_has_more_from_pagination() -> None:
@@ -365,20 +648,27 @@ class TestTldwSpecificEndpoints:
 
         """Missing provider credentials should return 503 with error code."""
         from tldw_Server_API.app.api.v1.endpoints.evaluations import evaluations_unified as eval_ep
-        from tldw_Server_API.app.core.AuthNZ.byok_runtime import ResolvedByokCredentials
 
-        async def _missing(provider, *args, **kwargs):
-            return ResolvedByokCredentials(
-                provider=provider,
-                api_key=None,
-                app_config=None,
-                credential_fields={},
-                source="server",
-                allowlisted=True,
-            )
+        class _MissingRuntime:
+            def __init__(self, **_kwargs):
+                self.handle = SimpleNamespace(
+                    api_key=None,
+                    app_config={"openai_api": {"model": "test-model"}},
+                    credentials_resolved=True,
+                )
+
+            async def resolve(self, _provider, *, model=None):
+                _ = model
+                return self.handle
+
+            async def mark_used(self, _handle):
+                raise AssertionError("missing credentials cannot be marked used")
+
+            async def close(self):
+                return None
 
         monkeypatch.setattr(eval_ep, "_is_eval_test_mode", lambda: False)
-        monkeypatch.setattr(eval_ep, "resolve_byok_credentials", _missing)
+        monkeypatch.setattr(eval_ep, "ProviderCredentialRuntime", _MissingRuntime)
 
         response = client.post(
             "/api/v1/evaluations/geval",
@@ -433,6 +723,10 @@ class TestTldwSpecificEndpoints:
             # G-Eval response uses 'average_score' or it might be in the response
             assert "average_score" in data or "overall_score" in data or "summary_assessment" in data
             assert "evaluation_time" in data or "metadata" in data
+            assert is_runtime_issued_provider_call_credentials(
+                mock_run_geval.call_args.kwargs["provider_credentials"],
+                provider="openai",
+            )
 
     async def test_rag_endpoint(self, client, auth_headers, sample_rag_request):
         """Test RAG evaluation endpoint"""
@@ -476,6 +770,10 @@ class TestTldwSpecificEndpoints:
             assert "retrieval_quality" in data
             assert data["metrics"]["relevance"]["score"] == pytest.approx(0.9)
             assert data["metrics"]["faithfulness"]["score"] == pytest.approx(0.85)
+            assert is_runtime_issued_provider_call_credentials(
+                mock_evaluate.await_args.kwargs["provider_credentials"],
+                provider="openai",
+            )
 
     async def test_response_quality_endpoint(self, client, auth_headers):
         """Test response quality evaluation endpoint"""
@@ -523,6 +821,10 @@ class TestTldwSpecificEndpoints:
             data = response.json()
             assert "overall_quality" in data
             assert "format_compliance" in data
+            assert is_runtime_issued_provider_call_credentials(
+                mock_evaluate.await_args.kwargs["provider_credentials"],
+                provider="openai",
+            )
 
 
 class TestRunManagement:

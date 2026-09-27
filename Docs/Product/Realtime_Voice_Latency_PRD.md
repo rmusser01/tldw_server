@@ -1,7 +1,7 @@
 # Realtime Voice Latency PRD
 
 Owner: Core Voice & API Team
-Status: In Progress (Partially Implemented; updated 2026-02-08)
+Status: In Progress (Partially Implemented; updated 2026-07-01)
 
 ## Overview
 
@@ -49,12 +49,15 @@ Elevate the realtime voice experience (STT → LLM → TTS) to deliver natural, 
 ### Phase 3: WebRTC Egress (Optional)
 - Add a minimal WebRTC transport for browser playback where ultra‑low latency is required.
 
-## Implementation Status (2026-02-08)
+## Implementation Status (2026-07-01)
 
 - [x] Phase 1 core implementation is present in code (VAD auto-commit, latency metrics, PCM support, phoneme mapping hooks).
 - [ ] Phase 1 performance targets are not yet validated on the reference benchmark setup.
 - [x] Phase 2 WS TTS endpoint is implemented (`/api/v1/audio/stream/tts` and realtime variant).
+- [x] OpenAI-compatible Stage 1 realtime speech routes are implemented (`/api/v1/audio/realtime` and `/v1/realtime`),
+  carrying `session_id`, `turn_id`, `response_id`, and `generation_id` for future cancellation and interruption work.
 - [ ] Phase 2 structured streaming (`spoke_response`/`code_blocks`/`links`) is deferred.
+- [ ] Realtime speech latency and interruption benchmarks remain Stage 2 validation work.
 - [ ] Phase 3 WebRTC egress is deferred.
 
 ## Reference Setup

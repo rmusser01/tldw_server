@@ -69,6 +69,20 @@ def _disable_limit_enforcement(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_provider_override_cache():
+    """Keep provider-override health state isolated across RAG tests."""
+    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    set_llm_provider_overrides_cache_for_tests({})
+    try:
+        yield
+    finally:
+        set_llm_provider_overrides_cache_for_tests({})
+
+
+@pytest.fixture(autouse=True)
 def _reset_main_app_lifecycle_between_rag_tests():
     """Keep lifespan-driven RAG tests from leaving the shared app draining."""
     def _reset_if_main_app_loaded() -> None:

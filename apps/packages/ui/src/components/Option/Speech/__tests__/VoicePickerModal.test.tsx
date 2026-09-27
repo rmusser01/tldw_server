@@ -1,6 +1,6 @@
 import React from "react"
 import { describe, expect, it, vi, beforeEach } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { VoicePickerModal, type VoiceSelection } from "../VoicePickerModal"
 
@@ -14,9 +14,13 @@ vi.mock("@/services/tldw/audio-providers", () => ({
   fetchTtsProviders: vi.fn().mockResolvedValue(null)
 }))
 
+const { synthesizeSpeechDetailedMock } = vi.hoisted(() => ({
+  synthesizeSpeechDetailedMock: vi.fn()
+}))
+
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    synthesizeSpeech: vi.fn().mockResolvedValue(new ArrayBuffer(100))
+    synthesizeSpeechDetailed: synthesizeSpeechDetailedMock
   }
 }))
 
@@ -48,9 +52,29 @@ const mockProvidersInfo = {
   }
 }
 
+const gatewayProvidersInfo = {
+  supports_explicit_backend: true,
+  providers: {
+    "gateway:Primary": {
+      provider_name: "openai-compatible",
+      display_name: "Primary gateway",
+      default_model: "SpeechModel",
+      models: ["SpeechModel"],
+      formats: ["mp3"]
+    }
+  },
+  voices: {
+    "gateway:Primary": [{ id: "narrator", name: "Narrator" }]
+  }
+}
+
 describe("VoicePickerModal", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    synthesizeSpeechDetailedMock.mockResolvedValue({
+      buffer: new ArrayBuffer(100),
+      fallbackUsed: false
+    })
     localStorage.clear()
   })
 
@@ -163,5 +187,40 @@ describe("VoicePickerModal", () => {
     )
     expect(screen.getByText("Recent")).toBeInTheDocument()
     expect(screen.getByText("kokoro/af_heart")).toBeInTheDocument()
+  })
+
+  it("keeps the exact named backend for selection and generated previews", async () => {
+    const onSelect = vi.fn()
+    render(
+      <VoicePickerModal
+        open
+        onClose={vi.fn()}
+        onSelect={onSelect}
+        providersInfo={gatewayProvidersInfo}
+      />,
+      { wrapper }
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview Narrator" }))
+    await waitFor(() => {
+      expect(synthesizeSpeechDetailedMock).toHaveBeenCalledWith(
+        "Hello, this is a voice preview.",
+        expect.objectContaining({
+          backend: "gateway:Primary",
+          model: "SpeechModel",
+          voice: "narrator"
+        })
+      )
+    })
+
+    fireEvent.click(screen.getByText("Narrator"))
+    expect(onSelect).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "tldw",
+        backend: "gateway:Primary",
+        model: "SpeechModel",
+        voice: "narrator"
+      })
+    )
   })
 })

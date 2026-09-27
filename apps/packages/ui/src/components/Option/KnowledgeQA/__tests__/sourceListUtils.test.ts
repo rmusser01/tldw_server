@@ -15,6 +15,8 @@ import {
   getResultChunkId,
   getResultSourceId,
   getRelevanceDescriptor,
+  getMeasuredRelevance,
+  hasLowMeasuredRelevance,
   getSourceTypeLabel,
   normalizeSourceType,
   splitTextByHighlights,
@@ -168,6 +170,31 @@ describe("sourceListUtils", () => {
         metadata: { source_id: "stale-id" },
       })
     ).toBe("note-9")
+  })
+
+  it.each([undefined, "ranking"] as const)("treats uncalibrated scores as unknown (%s)", (kind) => {
+    const result = { score: 0.004838709677419355, score_kind: kind }
+    expect(getMeasuredRelevance(result)).toBeUndefined()
+    expect(hasLowMeasuredRelevance([result])).toBe(false)
+  })
+
+  it.each([-1, 1.01, NaN, Infinity])("rejects invalid relevance probability %s", (score) => {
+    expect(getMeasuredRelevance({ score, score_kind: "relevance_probability" })).toBeUndefined()
+  })
+
+  it("retains explicit probabilities without mistaking unknown ranks for low relevance", () => {
+    const low = { score: 0.1, score_kind: "relevance_probability" as const }
+    expect(getMeasuredRelevance(low)).toBe(0.1)
+    expect(hasLowMeasuredRelevance([low])).toBe(true)
+    expect(hasLowMeasuredRelevance([low, { score: 0.004 }])).toBe(false)
+    expect(getMeasuredRelevance({ score: 0, score_kind: "relevance_probability" })).toBe(0)
+    expect(getMeasuredRelevance({ score: 1, score_kind: "relevance_probability" })).toBe(1)
+  })
+
+  it("preserves the server source order and raw RRF values", () => {
+    const items = [makeItem("lower", 0, { score: 0.004 }), makeItem("higher", 1, { score: 0.005 })]
+    expect(sortSourceItems(items, "relevance", new Set()).map((item) => item.result.id)).toEqual(["lower", "higher"])
+    expect(items.map((item) => item.result.score)).toEqual([0.004, 0.005])
   })
 
   it("produces relevance descriptor levels with color semantics", () => {

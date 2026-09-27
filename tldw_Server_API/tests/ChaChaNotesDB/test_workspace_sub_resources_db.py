@@ -106,7 +106,16 @@ class TestWorkspaceSources:
         with pytest.raises(ConflictError):
             db.update_workspace_source("ws-1", "src-1", {"title": "Z"}, expected_version=1)
 
-    def test_update_source_review_state_sets_and_clears_review_metadata(self, db):
+    def test_update_source_review_state_sets_and_clears_review_metadata(self, db, monkeypatch):
+        timestamps = iter(
+            [
+                "2026-07-18T18:18:10.000Z",
+                "2026-07-18T18:18:10.001Z",
+                "2026-07-18T18:18:10.002Z",
+                "2026-07-18T18:18:10.003Z",
+            ]
+        )
+        monkeypatch.setattr(db, "_get_current_utc_timestamp_iso", lambda: next(timestamps))
         created = db.add_workspace_source("ws-1", {
             "id": "src-1", "media_id": 1, "title": "X",
             "source_type": "video", "review_state": "needs_review",
@@ -461,6 +470,25 @@ class TestWorkspaceArtifacts:
         assert versions[0]["review_state"] == "accepted"
         assert versions[0]["source_lineage"]["sources"][0]["label"] == "Transcript"
 
+    def test_add_artifact_returns_inserted_row_without_post_commit_reload(
+        self,
+        db,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(
+            db,
+            "_get_workspace_artifact",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("late reload")),
+        )
+
+        artifact = db.add_workspace_artifact(
+            "ws-1",
+            {"id": "art-inline", "artifact_type": "summary", "title": "Inline"},
+        )
+
+        assert artifact["id"] == "art-inline"
+        assert artifact["artifact_version_id"] == "art-inline:v1"
+
     def test_artifact_version_ids_are_server_owned_on_create_and_update(self, db):
         created = db.add_workspace_artifact("ws-1", {
             "id": "brief-1",
@@ -600,6 +628,25 @@ class TestWorkspaceNotes:
         })
         assert note["title"] == "My Note"
         assert note["version"] == 1
+
+    def test_add_note_returns_inserted_row_without_post_commit_reload(
+        self,
+        db,
+        monkeypatch,
+    ):
+        monkeypatch.setattr(
+            db,
+            "_get_workspace_note",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("late reload")),
+        )
+
+        note = db.add_workspace_note(
+            "ws-1",
+            {"title": "Inline", "content": "Committed", "keywords": ["one"]},
+        )
+
+        assert note["title"] == "Inline"
+        assert note["keywords_json"] == '["one"]'
 
     def test_list_notes_excludes_deleted(self, db):
         db.add_workspace_note("ws-1", {"title": "N1", "content": ""})

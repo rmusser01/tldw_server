@@ -1,0 +1,33 @@
+{
+  "success": true,
+  "numTotalTestSuites": 2,
+  "numPassedTestSuites": 2,
+  "numFailedTestSuites": 0,
+  "numPendingTestSuites": 0,
+  "numTotalTests": 1,
+  "numPassedTests": 0,
+  "numFailedTests": 0,
+  "numPendingTests": 1,
+  "numTodoTests": 0,
+  "testResults": [
+    {
+      "assertionResults": [
+        {
+          "ancestorTitles": [
+            "writing utils (skipped: @/utils/writing not yet extracted)"
+          ],
+          "fullName": "writing utils (skipped: @/utils/writing not yet extracted) placeholder",
+          "status": "skipped",
+          "title": "placeholder",
+          "failureMessages": [],
+          "meta": {}
+        }
+      ],
+      "startTime": 1787786633108,
+      "endTime": 1787786633108,
+      "status": "passed",
+      "message": "",
+      "name": "__PACKAGE_ROOT__/extension/__tests__/writing-utils.test.ts"
+    }
+  ]
+}

@@ -1,7 +1,9 @@
+import dataclasses
 import json
 
-from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as ael
+from tldw_Server_API.app.core.Web_Scraping.extraction.dependencies import build_default_dependencies
+from tldw_Server_API.app.core.Web_Scraping.extraction.strategies import schema as schema_strategy
 
 
 def test_generate_regex_pattern_from_llm(monkeypatch):
@@ -21,7 +23,11 @@ def test_generate_regex_pattern_from_llm(monkeypatch):
             "model": "gpt-test",
         }
 
-    monkeypatch.setattr(chat_service, "perform_chat_api_call", _fake_call)
+    dependencies = dataclasses.replace(
+        build_default_dependencies(),
+        perform_chat_api_call=_fake_call,
+    )
+    monkeypatch.setattr(schema_strategy, "build_default_dependencies", lambda: dependencies)
 
     result = ael.generate_regex_pattern_from_llm(
         html,

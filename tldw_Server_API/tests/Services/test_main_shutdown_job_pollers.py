@@ -754,6 +754,10 @@ def test_lifespan_startup_publishes_owned_job_poller_inventory_for_enabled_worke
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from tldw_Server_API.app import main as main_module
+    from tldw_Server_API.app.services import (
+        startup_content_jobs_pollers,
+        startup_primary_jobs_pollers,
+    )
 
     app = main_module.app
     if hasattr(app.state, "_tldw_shutdown_job_poller_inventory"):
@@ -784,6 +788,7 @@ def test_lifespan_startup_publishes_owned_job_poller_inventory_for_enabled_worke
         "PRIVILEGE_SNAPSHOT_WORKER_ENABLED",
         "EVALUATIONS_ABTEST_JOBS_WORKER_ENABLED",
         "CONNECTORS_WORKER_ENABLED",
+        "SHARED_WORKSPACE_CLONE_JOBS_WORKER_ENABLED",
     ):
         monkeypatch.setenv(key, "1")
     for key in (
@@ -851,6 +856,27 @@ def test_lifespan_startup_publishes_owned_job_poller_inventory_for_enabled_worke
     )
     monkeypatch.setattr(connectors_worker, "run_connectors_worker", _wait_for_optional_stop_event)
 
+    stopped: set[str] = set()
+
+    async def _shared_workspace_loop(stop_event: asyncio.Event) -> None:
+        await stop_event.wait()
+        stopped.add("shared_workspace_clone_jobs_task")
+
+    async def _standalone_html_loop(_context: Any, stop_event: asyncio.Event) -> None:
+        await stop_event.wait()
+        stopped.add("standalone_html_generation_jobs_task")
+
+    monkeypatch.setattr(
+        startup_primary_jobs_pollers,
+        "_run_shared_workspace_clone_jobs_worker_service",
+        _shared_workspace_loop,
+    )
+    monkeypatch.setattr(
+        startup_content_jobs_pollers,
+        "_run_standalone_html_generation_jobs_service",
+        _standalone_html_loop,
+    )
+
     with TestClient(app) as client:
         assert client.get("/health").status_code == 200
         inventory = list(getattr(app.state, "_tldw_shutdown_job_poller_inventory", []))
@@ -871,6 +897,8 @@ def test_lifespan_startup_publishes_owned_job_poller_inventory_for_enabled_worke
         "admin_byok_validation_jobs_task",
         "evals_abtest_jobs_task",
         "connectors_jobs_task",
+        "shared_workspace_clone_jobs_task",
+        "standalone_html_generation_jobs_task",
     }
     assert all(
         {"name", "task_name", "has_stop_event", "timeout_sec"} <= set(entry)
@@ -878,7 +906,11 @@ def test_lifespan_startup_publishes_owned_job_poller_inventory_for_enabled_worke
     )
     assert all(isinstance(entry["task_name"], str) and entry["task_name"] for entry in inventory)
     assert all(entry["has_stop_event"] is True for entry in inventory)
-    assert all(entry["timeout_sec"] == 5.0 for entry in inventory)
+    assert all(
+        entry["timeout_sec"] == (15.0 if entry["name"] == "standalone_html_generation_jobs_task" else 5.0)
+        for entry in inventory
+    )
+    assert stopped == {"shared_workspace_clone_jobs_task", "standalone_html_generation_jobs_task"}
 
 
 @pytest.mark.integration

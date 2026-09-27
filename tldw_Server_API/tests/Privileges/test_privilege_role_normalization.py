@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from tldw_Server_API.app.core.AuthNZ.privilege_catalog import PrivilegeCatalog
+from tldw_Server_API.app.core.AuthNZ.privilege_catalog import PrivilegeCatalog, load_catalog
 from tldw_Server_API.app.core.PrivilegeMaps.service import PrivilegeMapService
 
 
@@ -124,3 +124,11 @@ def test_detail_role_filter_is_case_insensitive():
     assert items
     assert {item["user_id"] for item in items} == {"1"}
     assert {item["role"] for item in items} == {"Admin"}
+
+
+def test_real_catalog_grants_prompt_improvement_scope_to_ordinary_user():
+    service = PrivilegeMapService(route_registry={}, catalog=load_catalog())
+
+    scopes = service._resolve_scopes_for_user(["user"], [])
+
+    assert "prompts.improve" in scopes

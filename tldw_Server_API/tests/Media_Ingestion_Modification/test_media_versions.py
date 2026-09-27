@@ -2,6 +2,7 @@
 # Description: This file contains tests for the media versioning endpoints.
 #
 # Imports
+from collections.abc import Iterator
 import sys
 import time
 import uuid
@@ -29,10 +30,10 @@ from tldw_Server_API.tests.test_utils import temp_db
 #
 # --- Fixtures ---
 
-@pytest.fixture(scope="session")
-def db_instance_session():
+@pytest.fixture
+def db_instance() -> Iterator[MediaDatabase]:
     """
-    Uses the temp_db context manager from test_utils to get an initialized Database instance.
+    Use a fresh temporary database, including search indexes, for each test.
     """
     # temp_db now handles creation and setup (via Database.__init__)
     db = None # Initialize db to None
@@ -59,55 +60,31 @@ def db_instance_session():
             print("--- DB instance was not created, skipping close ---")
 
 
-@pytest.fixture(scope="function")
-def db_session(db_instance_session):
-    """
-     Provides access to the session-scoped DB instance for each test function.
-     Includes cleanup logic after each test.
-     """
-    yield db_instance_session
-    # Explicit cleanup after each test
-    # print("Cleaning up DB after test...") # Debugging
-    try:
-        # Delete data from tables in reverse order of dependency using the provided Database instance methods
-        with db_instance_session.transaction(): # Use transaction for cleanup
-            db_instance_session.execute_query("DELETE FROM MediaKeywords;")
-            db_instance_session.execute_query("DELETE FROM DocumentVersions;")
-            # Add delete statements for other relevant tables if needed
-            # e.g., db_instance_session.execute_query("DELETE FROM UnvectorizedMediaChunks;")
-            # e.g., db_instance_session.execute_query("DELETE FROM MediaChunks;")
-            # e.g., db_instance_session.execute_query("DELETE FROM Transcripts;")
-            db_instance_session.execute_query("DELETE FROM Media;")
-            db_instance_session.execute_query("DELETE FROM Keywords;")
-        # Reset autoincrement (optional, but good for consistency) - needs commit outside transaction usually
-        try:
-            # These need separate commits potentially, or run outside transaction
-            db_instance_session.execute_query("DELETE FROM sqlite_sequence WHERE name IN ('Media', 'Keywords', 'DocumentVersions', 'MediaKeywords', 'Transcripts', 'MediaChunks', 'UnvectorizedMediaChunks');", commit=True)
-        except Exception as seq_e:
-            print(f"Warning: Could not reset sequences - {seq_e}") # Non-fatal usually
+@pytest.fixture
+def db_session(db_instance: MediaDatabase) -> MediaDatabase:
+    """Share this test's database without raw deletion that leaves stale FTS rows."""
+    return db_instance
 
-    except Exception as e:
-        print(f"Error during DB cleanup: {e}") # Avoid masking test failures
 
 # Global reference for shutdown handler (consider if needed)
 test_db_instance_ref = None
 
 @pytest.fixture(scope="function")
-def client_module(db_instance_session):
+def client_module(db_instance: MediaDatabase) -> Iterator[TestClient]:
     """
-    Creates a TestClient for the module, overriding the DB dependency to use the session-scoped test DB.
+    Creates a TestClient for the module, overriding the DB dependency to use this test's temporary DB.
     """
-    async def _override_user():
+    async def _override_user() -> User:
         return User(id=1, username="tester", email=None, is_active=True)
 
-    def override_get_media_db_for_user():
+    def override_get_media_db_for_user() -> MediaDatabase:
 
         # Return a stable instance instead of yielding a generator
         # This avoids generator lifecycle/cleanup mismatches across requests
-        return db_instance_session
+        return db_instance
 
     global test_db_instance_ref
-    test_db_instance_ref = db_instance_session # Store the reference for shutdown
+    test_db_instance_ref = db_instance # Store the reference for shutdown
 
     # Store original overrides
     original_overrides = app.dependency_overrides.copy()
@@ -129,7 +106,7 @@ def client_module(db_instance_session):
 
 # --- Seeding Fixtures ---
 @pytest.fixture(scope="function") # Run for each test function
-def seeded_document_media(db_session):
+def seeded_document_media(db_session: MediaDatabase) -> int:
     """Creates a Media record (type=document) and an initial DocumentVersion."""
     try:
         media_id = None
@@ -162,11 +139,11 @@ def seeded_document_media(db_session):
             if media_id is None:
                 raise RuntimeError("Failed to retrieve media_id after insertion.")
 
-            db_session._update_fts_media(
+            db_session.sync_refresh_fts_for_entity(
                 db_session.get_connection(),
-                media_id,
-                "Test Document",
-                "Initial content v1",
+                entity="Media",
+                entity_uuid=media_uuid,
+                operation="create",
             )
 
             # Create an initial version using the imported function
@@ -185,7 +162,7 @@ def seeded_document_media(db_session):
 
 
 @pytest.fixture(scope="function")
-def seeded_multi_media(db_session):
+def seeded_multi_media(db_session: MediaDatabase) -> dict[str, int]:
     """Creates multiple media records (doc, video, audio) with keywords for list/detail tests."""
     media_ids = {}
     try:
@@ -268,6 +245,16 @@ def seeded_multi_media(db_session):
                 id_cursor = db_session.execute_query("SELECT last_insert_rowid();")
                 id_row = id_cursor.fetchone()
                 media_ids["audio"] = id_row[0] if id_row else None
+
+            # These legacy fixtures intentionally omit video/audio document versions.
+            # Refresh their index through the public sync API after inserting the rows.
+            for media_uuid in (doc_uuid, vid_uuid, aud_uuid):
+                db_session.sync_refresh_fts_for_entity(
+                    db_session.get_connection(),
+                    entity="Media",
+                    entity_uuid=media_uuid,
+                    operation="create",
+                )
 
             # Add keywords
             keywords = ["multi", "test", "seed"]
@@ -1009,10 +996,22 @@ class TestMediaListDetailEndpoints:
     # --------------------- UPDATE (PUT /media/{id}) TESTS - Basic Placeholder ---------------------
     # These need to be adapted based on the actual PUT endpoint implementation and Pydantic model
 
-    def test_update_media_item_title(self):
+    def test_update_media_item_title(self) -> None:
 
         """Test updating the title of a media item."""
         doc_id = self.media_ids["document"]
+        # Inspect FTS directly: public search can fall back to LIKE on index errors,
+        # hiding the stale/missing-index regression this test protects against.
+        for kind, title in (
+            ("document", "Multi Test Doc"),
+            ("video", "Multi Test Video"),
+            ("audio", "Multi Test Audio"),
+        ):
+            indexed = self.db.execute_query(
+                "SELECT rowid FROM media_fts WHERE media_fts MATCH ?",
+                (f'"{title}"',),
+            ).fetchall()
+            assert [row[0] for row in indexed] == [self.media_ids[kind]]  # nosec B101
         new_title = "Updated Document Title"
         payload = {"title": new_title} # Minimal update payload
 
@@ -1027,6 +1026,15 @@ class TestMediaListDetailEndpoints:
         response_get = self.client.get(f"/api/v1/media/{doc_id}")
         assert response_get.status_code == status.HTTP_200_OK
         assert response_get.json()["source"]["title"] == new_title
+
+        old_matches = self.db.execute_query(
+            "SELECT rowid FROM media_fts WHERE media_fts MATCH ?", ('"Multi Test Doc"',)
+        ).fetchall()
+        new_matches = self.db.execute_query(
+            "SELECT rowid FROM media_fts WHERE media_fts MATCH ?", (f'"{new_title}"',)
+        ).fetchall()
+        assert not old_matches  # nosec B101
+        assert [row[0] for row in new_matches] == [doc_id]  # nosec B101
 
     def test_update_media_item_nonexistent(self):
 

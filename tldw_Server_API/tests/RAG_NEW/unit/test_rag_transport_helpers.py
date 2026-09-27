@@ -50,6 +50,20 @@ def test_build_source_health_payload_uses_existing_paths_without_leaking_paths()
     assert "/secret" not in str(payload)  # nosec B101
 
 
+@pytest.mark.parametrize("non_file", [False, True])
+def test_source_health_recognizes_shared_postgres_content_without_sqlite_files(non_file):
+    payload = build_source_health_payload(
+        current_user=SimpleNamespace(id=1, id_int=1),
+        existing_source_db_paths_fn=lambda *_args: {},
+        media_db_uses_non_file_storage_fn=lambda: non_file,
+    )
+    entries = {entry.source_id: entry for entry in payload.sources}
+    for source in ("media_db", "notes", "characters", "chats", "world_books", "dictionaries"):
+        assert entries[source].index_status == ("ready" if non_file else "empty")
+    assert entries["notes"].item_count is None
+    assert entries["prompts"].index_status == "empty"
+
+
 async def test_resolve_org_id_for_rag_context_uses_request_state_without_membership() -> None:
     state_context = SimpleNamespace(state=SimpleNamespace(org_ids=[7]))
 

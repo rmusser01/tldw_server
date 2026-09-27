@@ -1,0 +1,29 @@
+{
+  "error_count": 80,
+  "diagnostic_files": [
+    {
+      "file": "apps/packages/ui/src/components/Option/PresentationStudio/PresentationStudioPage.tsx",
+      "unchanged_from_base": true
+    },
+    {
+      "file": "apps/tldw-frontend/e2e/workflows/presentation-studio-standalone-html.security.spec.ts",
+      "unchanged_from_base": true
+    },
+    {
+      "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-evidence.test.ts",
+      "unchanged_from_base": true
+    },
+    {
+      "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-lifecycle.test.ts",
+      "unchanged_from_base": true
+    },
+    {
+      "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-profile.test.ts",
+      "unchanged_from_base": true
+    },
+    {
+      "file": "apps/tldw-frontend/scripts/__tests__/skills-certification-runner.test.ts",
+      "unchanged_from_base": true
+    }
+  ]
+}

@@ -8,6 +8,8 @@ import { useQuickIngestSessionStore } from "../quick-ingest-session"
 describe("quick ingest store", () => {
   beforeEach(() => {
     sessionStorage.clear()
+    useQuickIngestSessionStore.getState().setAuthority(null)
+    useQuickIngestSessionStore.getState().setAuthority("verified-test-owner")
     useQuickIngestStore.setState((prev) => ({
       ...prev,
       queuedCount: 0,
@@ -18,6 +20,7 @@ describe("quick ingest store", () => {
       session: null,
       triggerSummary: { count: 0, label: null, hadFailure: false }
     })
+    useQuickIngestSessionStore.getState().createDraftSession()
   })
 
   it("records success run summary", () => {

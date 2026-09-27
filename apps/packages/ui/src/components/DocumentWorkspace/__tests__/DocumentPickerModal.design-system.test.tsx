@@ -1,6 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { DocumentPickerModal } from "../DocumentPickerModal"
 import { tldwClient } from "@/services/tldw"
 import { setSetting } from "@/services/settings/registry"
@@ -110,6 +110,18 @@ vi.mock("antd", () => {
   }
 })
 
+vi.mock("@plasmohq/storage", async () => import("../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
+vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: {
+  initialize: async () => {},
+  ensureConfigForRequest: async () => JSON.parse(localStorage.getItem("tldwConfig") || "null"),
+} }))
+vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: { getCurrentUser: async () => ({ id: 1 }) } }))
+vi.mock("@/services/tldw-server", () => ({ getWebSearchPrompt: vi.fn(), LEGACY_SERVICE_PROMPT_DEFAULTS: {}, promptForRag: vi.fn() }))
+vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () => false }))
+import { quickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
+import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
+let releaseAuthority: (() => void) | undefined
+
 describe("DocumentPickerModal design-system states", () => {
   const renderModal = (props?: Partial<React.ComponentProps<typeof DocumentPickerModal>>) =>
     render(
@@ -122,12 +134,37 @@ describe("DocumentPickerModal design-system states", () => {
       />
     )
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
+    localStorage.clear(); sessionStorage.clear()
+    localStorage.setItem("tldwConfig", JSON.stringify({ serverUrl: "https://a.test", authMode: "single-user", apiKey: "synthetic" }))
+    useQuickIngestSessionStore.getState().setAuthority(null)
+    releaseAuthority = quickIngestAuthority.retain()
+    await waitFor(() => expect(useQuickIngestSessionStore.getState().authorityKey).toBeTruthy())
     vi.mocked(useServerOnline).mockReturnValue(true)
     vi.mocked(tldwClient.listMedia).mockResolvedValue({ items: [] })
     vi.mocked(tldwClient.searchMedia).mockResolvedValue({ items: [] })
     vi.mocked(tldwClient.uploadMedia).mockResolvedValue({ result: { id: 17 } })
+  })
+
+  afterEach(() => releaseAuthority?.())
+
+  it("does not expose a legacy recent filename or act on its colliding ID", async () => {
+    localStorage.setItem("document-workspace-recent", JSON.stringify([{ id: 7, title: "Bob-private.pdf", type: "pdf" }]))
+    renderModal({ initialTab: "library" })
+    expect(screen.queryByText("Bob-private.pdf")).not.toBeInTheDocument()
+  })
+
+  it("does not open a delayed upload result after authority replacement", async () => {
+    let complete!: (value: unknown) => void
+    vi.mocked(tldwClient.uploadMedia).mockReturnValueOnce(new Promise(resolve => { complete = resolve }))
+    const onOpenDocument = vi.fn()
+    const { container } = renderModal({ onOpenDocument })
+    fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [new File(["private"], "Bob.pdf", { type: "application/pdf" })] } })
+    await waitFor(() => expect(tldwClient.uploadMedia).toHaveBeenCalled())
+    act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
+    await act(async () => complete({ result: { id: 7 } }))
+    expect(onOpenDocument).not.toHaveBeenCalled()
   })
 
   it("renders the offline server-required state through the design-system Alert", () => {
@@ -183,8 +220,8 @@ describe("DocumentPickerModal design-system states", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open in Media" }))
 
     await waitFor(() => {
-      expect(setSetting).toHaveBeenCalledWith("lastMediaId", "42")
-      expect(navigateMock).toHaveBeenCalledWith("/media-multi")
+      expect(setSetting).not.toHaveBeenCalled()
+      expect(navigateMock).toHaveBeenCalledWith("/media?id=42")
       expect(onClose).toHaveBeenCalled()
     })
   })

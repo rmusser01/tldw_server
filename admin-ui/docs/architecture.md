@@ -48,7 +48,7 @@ admin-ui/
     webhooks.ts           # Webhook-related types
     email-deliveries.ts   # Email delivery types
   middleware.ts           # Auth gate (runs on every non-public route)
-  next.config.js          # Build config, security headers, Sentry
+  next.config.mjs         # Build config, security headers, Sentry
   vitest.config.ts        # Unit test configuration
   playwright.config.ts    # E2E test configuration
 ```

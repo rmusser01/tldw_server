@@ -1,14 +1,16 @@
 import { test, expect } from "@playwright/test"
 import { launchWithExtensionOrSkip } from "./utils/real-server"
 import path from "path"
-import { launchWithExtension } from "./utils/extension"
 
 test.describe("Prompts workspace UX", () => {
   test("walks through prompts workflows end-to-end", async () => {
     test.setTimeout(120000)
     const baseName = `E2E Prompt ${Date.now()}`
     const extPath = path.resolve("build/chrome-mv3")
-    const { context, page, extensionId, optionsUrl } = (await launchWithExtensionOrSkip(test, extPath)) as any
+    const { context, page, optionsUrl } = await launchWithExtensionOrSkip(
+      test,
+      extPath
+    )
 
     await page.goto(`${optionsUrl}#/prompts`)
     await page.waitForLoadState("domcontentloaded")
@@ -18,18 +20,26 @@ test.describe("Prompts workspace UX", () => {
     await expect(customPanel).toBeVisible({ timeout: 15000 })
 
     await page.getByTestId("prompts-add").click()
-    await expect(page.getByTestId("prompt-create-title")).toBeVisible()
-    await page.getByTestId("prompt-create-title").fill(baseName)
-    await page.getByTestId("prompt-create-system").fill(`${baseName} System`)
-    await page.getByTestId("prompt-create-user").fill(`${baseName} User`)
+    const editor = page.getByTestId("prompt-full-page-editor")
+    await expect(editor).toBeVisible()
+    await page.getByTestId("full-editor-name").fill(baseName)
+    await page
+      .getByTestId("full-editor-system-prompt")
+      .fill(`${baseName} System`)
+    await page
+      .getByTestId("full-editor-user-prompt")
+      .fill(`${baseName} User`)
 
-    const keywordSelect = page.getByTestId("prompt-create-keywords")
+    const keywordSelect = page.getByTestId("full-editor-keywords")
     await keywordSelect.click()
     await keywordSelect.getByRole("combobox").fill("e2e")
     await keywordSelect.getByRole("combobox").press("Enter")
 
-    await page.getByTestId("prompt-create-save").click()
-    await expect(page.getByTestId("prompt-create-save")).toBeHidden()
+    await page.getByTestId("full-editor-save").click()
+    await expect(page.getByText(/Prompt Added/i).first()).toBeVisible()
+    await page.goto(`${optionsUrl}#/prompts`, { waitUntil: "domcontentloaded" })
+    await page.reload({ waitUntil: "domcontentloaded" })
+    await expect(editor).toBeHidden()
 
     const searchInput = page.getByTestId("prompts-search")
     await searchInput.fill(baseName)
@@ -41,13 +51,20 @@ test.describe("Prompts workspace UX", () => {
       .first()
     await expect(promptRow).toBeVisible()
 
-    await promptRow.getByRole("button", { name: /Duplicate Prompt/i }).click()
+    await promptRow.getByRole("button", { name: /More actions/i }).click()
+    await page.getByRole("menuitem", { name: /^Duplicate Prompt$/i }).click()
     await expect(page.getByText(`${baseName} (Copy)`)).toBeVisible()
 
-    await promptRow.getByRole("button", { name: /Edit Prompt/i }).click()
-    await expect(page.getByTestId("prompt-edit-details")).toBeVisible()
-    await page.getByTestId("prompt-edit-details").fill(`${baseName} details updated`)
-    await page.getByTestId("prompt-edit-save").click()
+    await promptRow.getByRole("button", { name: /^Edit Prompt$/i }).click()
+    await expect(page.getByTestId("full-editor-details")).toBeVisible()
+    await page
+      .getByTestId("full-editor-details")
+      .fill(`${baseName} details updated`)
+    await page.getByTestId("full-editor-save").click()
+    await expect(page.getByText(/Prompt Updated/i).first()).toBeVisible()
+    await page.goto(`${optionsUrl}#/prompts`, { waitUntil: "domcontentloaded" })
+    await page.reload({ waitUntil: "domcontentloaded" })
+    await page.getByTestId("prompts-search").fill(baseName)
     await expect(page.getByText(`${baseName} details updated`)).toBeVisible()
 
     const [download] = await Promise.all([

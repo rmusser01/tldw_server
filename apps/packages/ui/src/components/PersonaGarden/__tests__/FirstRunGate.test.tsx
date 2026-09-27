@@ -7,7 +7,7 @@ import { FirstRunGate } from "../FirstRunGate"
 // Mock useFirstRunCheck
 const mockUseFirstRunCheck = vi.fn()
 vi.mock("@/hooks/useFirstRunCheck", () => ({
-  useFirstRunCheck: () => mockUseFirstRunCheck()
+  useFirstRunCheck: (options: unknown) => mockUseFirstRunCheck(options)
 }))
 
 describe("FirstRunGate", () => {
@@ -50,6 +50,13 @@ describe("FirstRunGate", () => {
 
     expect(screen.getByTestId("child-content")).toBeInTheDocument()
     expect(screen.queryByTestId("first-run-gate-overlay")).not.toBeInTheDocument()
+  })
+
+  it("passes the source destination exception to the first-run check", () => {
+    mockUseFirstRunCheck.mockReturnValue({ shouldShowSetup: false, loading: false })
+    render(<FirstRunGate onStartSetup={onStartSetup} allowCompletedSetup><div>Source task</div></FirstRunGate>)
+    expect(screen.getByText("Source task")).toBeInTheDocument()
+    expect(mockUseFirstRunCheck).toHaveBeenCalledWith({ allowCompletedSetup: true, enabled: true })
   })
 
   it("renders the overlay when shouldShowSetup is true", () => {

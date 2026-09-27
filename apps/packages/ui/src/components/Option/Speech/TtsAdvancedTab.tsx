@@ -14,6 +14,8 @@ type Props = {
   onSsmlChange: (value: boolean) => void
   removeReasoning: boolean
   onRemoveReasoningChange: (value: boolean) => void
+  allowFallback: boolean
+  onAllowFallbackChange: (value: boolean) => void
   isTldw: boolean
   onOpenVoiceCloning?: () => void
   voiceCloningContent?: React.ReactNode
@@ -31,6 +33,13 @@ const TOGGLE_ITEMS = (props: Props) => [
     description: "Server-side job queue for long content. Progress tracked live.",
     checked: props.useTtsJob,
     onChange: props.onTtsJobChange,
+    hidden: !props.isTldw
+  },
+  {
+    label: "Allow configured fallback",
+    description: "Permit the server to try an administrator-configured backup backend.",
+    checked: props.allowFallback,
+    onChange: props.onAllowFallbackChange,
     hidden: !props.isTldw
   },
   {

@@ -171,7 +171,8 @@ def test_list_ocr_backends_records_llamacpp_discovery_errors(monkeypatch):
     payload = ocr_mod.list_ocr_backends()
 
     assert payload["llamacpp"]["available"] is True  # nosec B101
-    assert payload["llamacpp"]["error"] == "llama describe failed"  # nosec B101
+    assert payload["llamacpp"]["error"] == "llamacpp backend discovery failed"  # nosec B101
+    assert "llama describe failed" not in payload["llamacpp"]["error"]  # nosec B101
 
 
 def test_list_ocr_backends_records_chatllm_discovery_errors(monkeypatch):
@@ -194,7 +195,8 @@ def test_list_ocr_backends_records_chatllm_discovery_errors(monkeypatch):
     payload = ocr_mod.list_ocr_backends()
 
     assert payload["chatllm"]["available"] is False  # nosec B101
-    assert payload["chatllm"]["error"] == "chatllm describe failed"  # nosec B101
+    assert payload["chatllm"]["error"] == "chatllm backend discovery failed"  # nosec B101
+    assert "chatllm describe failed" not in payload["chatllm"]["error"]  # nosec B101
 
 
 def test_record_backend_discovery_error_log_is_sanitized(monkeypatch):
@@ -208,5 +210,7 @@ def test_record_backend_discovery_error_log_is_sanitized(monkeypatch):
 
     ocr_mod._record_backend_discovery_error(out, "llamacpp", exc)
 
-    assert out["llamacpp"]["error"] == "ocr backend failed /tmp/source token=secret"  # nosec B101
+    assert out["llamacpp"]["error"] == "llamacpp backend discovery failed"  # nosec B101
+    assert "/tmp/source" not in out["llamacpp"]["error"]  # nosec B101
+    assert "token=secret" not in out["llamacpp"]["error"]  # nosec B101
     _assert_error_logs_are_sanitized(logger)

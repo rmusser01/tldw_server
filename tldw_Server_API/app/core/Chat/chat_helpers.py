@@ -179,10 +179,10 @@ async def get_or_create_character_context(
         try:
             # Try as integer first
             char_id_int = int(character_id)
-            character_card = await loop.run_in_executor(None, db.get_character_card_by_id, char_id_int)
+            character_card = await asyncio.to_thread(db.get_character_card_by_id, char_id_int)
         except ValueError:
             # Not an integer, try by name
-            character_card = await loop.run_in_executor(None, db.get_character_card_by_name, character_id)
+            character_card = await asyncio.to_thread(db.get_character_card_by_name, character_id)
 
         if character_card:
             final_character_db_id = character_card['id']
@@ -190,7 +190,7 @@ async def get_or_create_character_context(
 
     # Fall back to default character if needed
     if not character_card:
-        character_card = await loop.run_in_executor(None, db.get_character_card_by_name, DEFAULT_CHARACTER_NAME)
+        character_card = await asyncio.to_thread(db.get_character_card_by_name, DEFAULT_CHARACTER_NAME)
         if character_card:
             final_character_db_id = character_card['id']
             logger.info(f"Using default character '{DEFAULT_CHARACTER_NAME}' (ID: {final_character_db_id})")
@@ -258,7 +258,7 @@ async def _ensure_default_character(
             logger.error("Unexpected error ensuring default character '{}': {}", DEFAULT_CHARACTER_NAME, exc)
             return None, None
 
-    return await loop.run_in_executor(None, _create_default)
+    return await asyncio.to_thread(_create_default)
 
 
 async def get_or_create_conversation(
@@ -287,7 +287,7 @@ async def get_or_create_conversation(
 
     if conversation_id:
         # Verify existing conversation
-        conv_details = await loop.run_in_executor(None, db.get_conversation_by_id, conversation_id)
+        conv_details = await asyncio.to_thread(db.get_conversation_by_id, conversation_id)
         if conv_details:
             # Validate ownership and character match
             if (conv_details.get('character_id') == character_id and
@@ -328,7 +328,7 @@ async def get_or_create_conversation(
                     with db.transaction():
                         return db.add_conversation(conv_data)
 
-                conversation_id = await loop.run_in_executor(None, _create_conversation_sync)
+                conversation_id = await asyncio.to_thread(_create_conversation_sync)
                 was_created = True
                 logger.info(f"Created new conversation '{conversation_id}' for character {character_id}")
                 break
@@ -379,9 +379,7 @@ async def load_conversation_history(
 
     try:
         # Load messages from database
-        raw_history = await loop.run_in_executor(
-            None,
-            db.get_messages_for_conversation,
+        raw_history = await asyncio.to_thread(db.get_messages_for_conversation,
             conversation_id,
             limit,
             0,

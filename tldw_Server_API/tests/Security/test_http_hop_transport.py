@@ -5,6 +5,7 @@ import ipaddress
 import logging
 import ssl
 from collections.abc import Iterable, Sequence
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,25 @@ from tldw_Server_API.app.core.Security import http_hop
 pytestmark = pytest.mark.unit
 
 _OK_RESPONSE = (b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",)
+
+
+class DeterministicClock:
+    """One clock source for deterministic latency and HTTP-date parsing."""
+
+    def __init__(
+        self,
+        *,
+        monotonic_values: Sequence[float] = (10.0, 10.125),
+        utc_now: datetime = datetime(2026, 8, 23, tzinfo=timezone.utc),
+    ) -> None:
+        self.monotonic_values = list(monotonic_values)
+        self.now = utc_now
+
+    def monotonic(self) -> float:
+        return self.monotonic_values.pop(0)
+
+    def utc_now(self) -> datetime:
+        return self.now
 
 
 class FakeSSLObject:
@@ -224,6 +244,24 @@ async def _execute(
     )
 
 
+async def _execute_status(
+    request: http_hop.NormalizedHTTPHopRequest,
+    resolved_ips: tuple[str, ...],
+    backend: RecordingBackend,
+    *,
+    clock: DeterministicClock | None = None,
+) -> http_hop.StatusOnlyHTTPHopResponse:
+    async def resolver(_host: str, _port: int, _timeout_seconds: float) -> Sequence[str]:
+        return resolved_ips
+
+    return await http_hop._request_http_hop_status(
+        request,
+        resolver=resolver,
+        network_backend=backend,
+        clock=clock or DeterministicClock(),
+    )
+
+
 async def test_dials_selected_validated_ip_and_keeps_original_origin() -> None:
     stream = RecordingStream(
         server_addr=("8.8.8.8", 8080),
@@ -244,6 +282,154 @@ async def test_dials_selected_validated_ip_and_keeps_original_origin() -> None:
     assert response.resolved_ips == ("8.8.8.8", "1.1.1.1")
     assert response.connected_ip == "8.8.8.8"
     assert stream.closed is True
+
+
+async def test_status_only_pins_dns_preserves_host_ignores_proxies_and_does_not_redirect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+        monkeypatch.setenv(name, "http://ambient-proxy-secret@127.0.0.1:1")
+    response_bytes = (
+        b"HTTP/1.1 302 Found\r\n"
+        b"Location: https://redirect.example/secret\r\n"
+        b"Content-Length: 999999\r\nConnection: close\r\n\r\n"
+    )
+    stream = RecordingStream(
+        server_addr=("8.8.8.8", 8080),
+        response=(response_bytes,),
+    )
+    backend = RecordingBackend(stream)
+    request = _request(port=8080, target="/status-only?opaque=1")
+
+    response = await _execute_status(
+        request,
+        ("8.8.8.8", "1.1.1.1"),
+        backend,
+    )
+
+    assert response == http_hop.StatusOnlyHTTPHopResponse(
+        status_code=302,
+        latency_ms=125,
+        retry_after_seconds=None,
+    )
+    assert len(backend.connect_calls) == 1
+    assert backend.connect_calls[0][:2] == ("8.8.8.8", 8080)
+    request_bytes = b"".join(stream.writes)
+    assert request_bytes.startswith(b"GET /status-only?opaque=1 HTTP/1.1\r\n")
+    assert _header_values(request_bytes, b"host") == [b"api.example.com:8080"]
+    assert b"ambient-proxy-secret" not in request_bytes
+    assert stream.closed is True
+
+
+async def test_status_only_https_keeps_hostname_tls_and_host_semantics() -> None:
+    response_bytes = (
+        b"HTTP/1.1 503 Service Unavailable\r\n"
+        b"Retry-After: 300\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    )
+    tls_stream = RecordingStream(
+        server_addr=("8.8.8.8", 8443),
+        response=(response_bytes,),
+    )
+    tcp_stream = RecordingStream(
+        server_addr=("8.8.8.8", 8443),
+        tls_stream=tls_stream,
+    )
+    backend = RecordingBackend(tcp_stream)
+
+    response = await _execute_status(
+        _request(scheme="https", port=8443),
+        ("8.8.8.8",),
+        backend,
+    )
+
+    assert response.status_code == 503
+    assert response.retry_after_seconds == 300
+    assert len(tcp_stream.tls_calls) == 1
+    context, server_hostname, _timeout = tcp_stream.tls_calls[0]
+    assert server_hostname == "api.example.com"
+    assert context.check_hostname is True
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert _header_values(b"".join(tls_stream.writes), b"host") == [b"api.example.com:8443"]
+    assert tls_stream.closed is True
+
+
+async def test_status_only_rejects_unverified_connected_peer_and_closes() -> None:
+    stream = RecordingStream(
+        server_addr=("1.1.1.1", 80),
+        response=_OK_RESPONSE,
+    )
+    backend = RecordingBackend(stream)
+
+    with pytest.raises(http_hop.HTTPHopError) as exc:
+        await _execute_status(_request(), ("8.8.8.8",), backend)
+
+    assert exc.value.code == "peer_verification_failed"
+    assert stream.writes == []
+    assert stream.closed is True
+
+
+async def test_status_only_cancellation_propagates_and_closes_stream() -> None:
+    stream = BlockingReadStream(server_addr=("8.8.8.8", 80))
+    backend = RecordingBackend(stream)
+    task = asyncio.create_task(_execute_status(_request(), ("8.8.8.8",), backend))
+
+    await asyncio.wait_for(stream.read_started.wait(), timeout=1.0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert stream.closed is True
+
+
+async def test_status_only_backward_monotonic_clock_fails_closed_after_cleanup() -> None:
+    stream = RecordingStream(server_addr=("8.8.8.8", 80), response=_OK_RESPONSE)
+    backend = RecordingBackend(stream)
+
+    with pytest.raises(http_hop.HTTPHopError) as exc:
+        await _execute_status(
+            _request(),
+            ("8.8.8.8",),
+            backend,
+            clock=DeterministicClock(monotonic_values=(10.0, 9.0)),
+        )
+
+    assert exc.value.code == "transport_error"
+    assert stream.closed is True
+
+
+async def test_public_status_only_wrapper_uses_production_dependencies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sentinel_backend = object()
+    captured: dict[str, object] = {}
+
+    async def private_seam(
+        request: http_hop.NormalizedHTTPHopRequest,
+        *,
+        resolver: object,
+        network_backend: object,
+        clock: object,
+    ) -> http_hop.StatusOnlyHTTPHopResponse:
+        captured.update(
+            request=request,
+            resolver=resolver,
+            network_backend=network_backend,
+            clock=clock,
+        )
+        return http_hop.StatusOnlyHTTPHopResponse(200, 1, None)
+
+    monkeypatch.setattr(http_hop.httpcore, "AnyIOBackend", lambda: sentinel_backend)
+    monkeypatch.setattr(http_hop, "_request_http_hop_status", private_seam)
+    request = _request()
+
+    response = await http_hop.request_http_hop_status(request)
+
+    assert response == http_hop.StatusOnlyHTTPHopResponse(200, 1, None)
+    assert captured["request"] is request
+    assert captured["resolver"] is http_hop._default_resolver
+    assert captured["network_backend"] is sentinel_backend
+    assert callable(captured["clock"].monotonic)
+    assert callable(captured["clock"].utc_now)
 
 
 async def test_plain_http_ignores_delegate_ssl_metadata() -> None:

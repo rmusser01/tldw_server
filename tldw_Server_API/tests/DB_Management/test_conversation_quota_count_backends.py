@@ -1,0 +1,155 @@
+"""Conversation quota counts and chat creation use real backend result rows."""
+
+from types import SimpleNamespace
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
+
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
+def quota_db(request, tmp_path):
+    """Use official per-test PostgreSQL provisioning or a temporary SQLite DB."""
+    backend = None
+    if request.param == "postgres":
+        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
+    db = CharactersRAGDB(str(tmp_path / "quota.db"), client_id="1", backend=backend)
+    try:
+        yield db
+    finally:
+        db.close_connection()
+        if backend is not None:
+            backend.get_pool().close_all()
+
+
+def _add_conversation(db, *, owner="1", character_id=None, workspace=None, deleted=False):
+    payload = {"title": "Quota fixture", "client_id": owner, "character_id": character_id}
+    if workspace is not None:
+        payload.update(scope_type="workspace", workspace_id=workspace)
+    conversation_id = db.add_conversation(payload)
+    if deleted:
+        assert db.soft_delete_conversation(conversation_id, expected_version=1)
+    return conversation_id
+
+
+@pytest.fixture
+def scoped_conversations(quota_db):
+    first = quota_db.add_character_card({"name": "Citrine"})
+    second = quota_db.add_character_card({"name": "Rowan"})
+    quota_db.upsert_workspace("ws-first", "First")
+    quota_db.upsert_workspace("ws-second", "Second")
+    _add_conversation(quota_db, character_id=first)
+    _add_conversation(quota_db, character_id=second)
+    _add_conversation(quota_db)
+    _add_conversation(quota_db, character_id=first, deleted=True)
+    _add_conversation(quota_db, character_id=first, workspace="ws-first")
+    _add_conversation(quota_db, workspace="ws-first", deleted=True)
+    _add_conversation(quota_db, character_id=first, workspace="ws-second")
+    _add_conversation(quota_db, owner="2", character_id=first)
+    _add_conversation(quota_db, owner="2", character_id=first)
+    return first, second
+
+
+def test_empty_quota_count_is_zero(quota_db):
+    assert quota_db.count_conversations_for_user("1") == 0
+
+
+def test_quota_count_preserves_owner_scope_and_deleted_filters(quota_db, scoped_conversations):
+    cases = [
+        ("1", {}, 3),
+        ("2", {}, 2),
+        ("absent", {}, 0),
+        ("1", {"scope_type": "global", "workspace_id": "ws-first"}, 3),
+        ("1", {"include_deleted": True}, 4),
+        ("1", {"deleted_only": True}, 1),
+        ("1", {"include_deleted": True, "deleted_only": True}, 1),
+        ("1", {"character_scope": "character"}, 2),
+        ("1", {"character_scope": "non_character"}, 1),
+        ("1", {"character_scope": "character", "include_deleted": True}, 3),
+        ("1", {"scope_type": "workspace", "workspace_id": "ws-first"}, 1),
+        ("1", {"scope_type": "workspace", "workspace_id": "ws-first", "include_deleted": True}, 2),
+        ("1", {"scope_type": "workspace", "workspace_id": "ws-first", "deleted_only": True}, 1),
+        ("1", {"scope_type": "workspace", "workspace_id": "ws-second"}, 1),
+        ("2", {"scope_type": "workspace", "workspace_id": "ws-first"}, 0),
+        ("1", {"scope_type": "workspace", "workspace_id": "ws-first", "character_scope": "non_character"}, 0),
+    ]
+    for owner, filters, expected in cases:
+        assert quota_db.count_conversations_for_user(owner, **filters) == expected, (owner, filters)
+
+
+def test_adjacent_per_character_count_supports_real_backend_rows(quota_db, scoped_conversations):
+    first, second = scoped_conversations
+    assert quota_db.count_conversations_for_user_by_character("1", first) == 1
+    assert quota_db.count_conversations_for_user_by_character("1", first, include_deleted=True) == 2
+    assert quota_db.count_conversations_for_user_by_character("1", first, deleted_only=True) == 1
+    assert quota_db.count_conversations_for_user_by_character("1", second) == 1
+    assert quota_db.count_conversations_for_user_by_character("2", first) == 2
+    assert (
+        quota_db.count_conversations_for_user_by_character("1", first, scope_type="workspace", workspace_id="ws-first")
+        == 1
+    )
+
+
+@pytest.fixture
+def quota_client(quota_db, monkeypatch):
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as endpoint
+
+    app = FastAPI()
+    app.include_router(endpoint.router, prefix="/api/v1/chats")
+    app.dependency_overrides[get_chacha_db_for_user] = lambda: quota_db
+    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    app.dependency_overrides[endpoint.require_expected_user] = lambda: None
+    # Frequency governance and sync transport are independent of the actual quota check.
+    limiter = CharacterRateLimiter(enabled=False, max_chats_per_user=2)
+    monkeypatch.setattr(endpoint, "get_character_rate_limiter", lambda: limiter)
+    monkeypatch.setattr(endpoint, "_active_chat_sync_service", lambda *_args: None)
+    with TestClient(app) as client:
+        yield client
+
+
+@pytest.mark.parametrize("workspace", [None, "ws-quota"], ids=["global", "workspace"])
+@pytest.mark.parametrize("with_character", [False, True], ids=["ordinary", "character"])
+def test_create_chat_uses_real_quota_and_rejects_at_limit(quota_db, quota_client, workspace, with_character):
+    character = quota_db.add_character_card({"name": "Quota character", "first_message": "Hello"})
+    quota_db.upsert_workspace("ws-quota", "Quota workspace")
+    _add_conversation(quota_db, character_id=character, workspace=workspace)
+    _add_conversation(quota_db, character_id=character, workspace=workspace, deleted=True)
+    # Neither another owner nor another scope may consume this quota.
+    for _ in range(2):
+        _add_conversation(quota_db, owner="2", character_id=character, workspace=workspace)
+        _add_conversation(quota_db, character_id=character, workspace="ws-quota" if workspace is None else None)
+    scope = {"scope_type": "workspace", "workspace_id": workspace} if workspace else {}
+    payload = {"title": "Accepted chat", **scope}
+    if with_character:
+        payload["character_id"] = character
+    created = quota_client.post("/api/v1/chats/", json=payload)
+    assert created.status_code == 201, created.text
+    stored = quota_db.get_conversation_by_id(created.json()["id"])
+    assert stored["client_id"] == "1"
+    assert stored["character_id"] == (character if with_character else None)
+    assert quota_db.count_conversations_for_user("1", **scope) == 2
+
+    denied = quota_client.post("/api/v1/chats/", json={**payload, "title": "Must not be written"})
+    assert denied.status_code == 403, denied.text
+    assert "Chat limit exceeded" in denied.json()["detail"]
+    assert quota_db.count_conversations_for_user("1", **scope) == 2
+    assert all(row["title"] != "Must not be written" for row in quota_db.get_conversations_for_user("1", **scope))
+
+
+def test_create_chat_fails_closed_when_quota_storage_fails(quota_db, quota_client, monkeypatch):
+    def unavailable_count(*_args, **_kwargs):
+        raise CharactersRAGDBError("Controlled quota storage failure")
+
+    monkeypatch.setattr(quota_db, "count_conversations_for_user", unavailable_count)
+    response = quota_client.post("/api/v1/chats/", json={"title": "Must not be written"})
+    assert response.status_code == 503
+    assert "Quota enforcement unavailable" in response.json()["detail"]
+    assert quota_db.get_conversations_for_user("1") == []

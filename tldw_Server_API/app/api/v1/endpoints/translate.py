@@ -6,28 +6,21 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.schemas.translate_schemas import (
     TranslateRequest,
     TranslateResponse,
 )
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.DB_Management.Prompts_DB import PromptsDatabase
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
+from tldw_Server_API.app.core.Prompt_Management.service_prompts import (
+    render_service_prompt_part,
+    resolve_service_prompt,
+)
 
 router = APIRouter(tags=["Translation"])
-
-# Translation prompt template
-TRANSLATION_PROMPT = """Translate the following text to {target_language}.
-Preserve the original formatting, meaning, and tone.
-Only output the translation, no explanations, notes, or additional text.
-
-Text to translate:
-{text}"""
-
-# System message for translation
-TRANSLATION_SYSTEM_MESSAGE = """You are an expert translator. Your task is to provide accurate,
-natural-sounding translations that preserve the original meaning, tone, and formatting.
-Do not add explanations or notes - only provide the translation."""
 
 
 def _get_default_provider() -> str:
@@ -61,6 +54,7 @@ def _get_default_provider() -> str:
 async def translate_text(
     request: TranslateRequest,
     current_user: User = Depends(get_request_user),
+    db: PromptsDatabase = Depends(get_prompts_db_for_user),
 ) -> TranslateResponse:
     """
     Translate text to a target language using an LLM.
@@ -89,15 +83,17 @@ async def translate_text(
         getattr(current_user, "id", "?"),
     )
 
-    # Build the translation prompt
-    prompt = TRANSLATION_PROMPT.format(
-        target_language=request.target_language,
-        text=request.text,
-    )
-
     # Determine provider
     provider = request.provider or _get_default_provider()
     model = request.model  # None means use provider default
+
+    resolved = resolve_service_prompt(db, "media.text.translation")
+    prompt = render_service_prompt_part(
+        resolved.definition,
+        "user_template",
+        resolved.parts["user_template"],
+        {"target_language": request.target_language, "text": request.text},
+    )
 
     try:
         # Use the existing analyze function for LLM call
@@ -106,10 +102,11 @@ async def translate_text(
             input_data=prompt,
             custom_prompt_arg=None,
             api_key=None,  # Uses configured key
-            system_message=TRANSLATION_SYSTEM_MESSAGE,
+            system_message=resolved.parts["system"],
             temp=0.3,  # Low temperature for consistent translation
             streaming=False,
             model_override=model,
+            input_is_literal_text=True,
         )
 
         # Check for error response

@@ -1,4 +1,3 @@
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -38,9 +37,9 @@ def test_local_llm_strict_filter_drops_top_k_from_payload_non_streaming():
 
     captured_payload = {}
 
-    def fake_post(url, headers=None, json=None, timeout=None):
-
-            # capture outgoing payload
+    def fake_request(_method, _url, **kwargs):
+        json = kwargs.get("json")
+        # capture outgoing payload
         captured_payload.clear()
         if json:
             captured_payload.update(json)
@@ -53,7 +52,7 @@ def test_local_llm_strict_filter_drops_top_k_from_payload_non_streaming():
         "tldw_Server_API.app.core.LLM_Calls.providers.local_adapters._hc_create_client"
     ) as mock_client_cls:
         mock_client = MagicMock()
-        mock_client.post.side_effect = fake_post
+        mock_client.request.side_effect = fake_request
         mock_client.close.return_value = None
         mock_client_cls.return_value = mock_client
 

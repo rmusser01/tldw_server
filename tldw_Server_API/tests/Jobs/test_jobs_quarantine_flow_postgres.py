@@ -49,7 +49,7 @@ def test_pg_quarantine_and_requeue_updates_counters(monkeypatch):
                 cur.execute(
                     (
                         "UPDATE jobs SET status='queued', failure_streak_count = 0, failure_streak_code = NULL, quarantined_at = NULL, "
-                        "available_at = NOW(), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE domain=%s AND queue=%s AND job_type=%s AND status='quarantined'"
+                        "available_at = NULL, leased_until = NULL, worker_id = NULL, lease_id = NULL, completion_token = NULL WHERE domain=%s AND queue=%s AND job_type=%s AND status='quarantined'"
                     ),
                     ("chatbooks", "default", "export"),
                 )

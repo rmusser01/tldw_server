@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 from contextlib import suppress
-from datetime import timezone
-from email.utils import getaddresses, parsedate_to_datetime
+from email.utils import getaddresses
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
@@ -14,7 +13,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
-
 
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 
@@ -87,7 +85,8 @@ def upsert_email_message_graph(
     resolved_cc = str(email_meta.get("cc") or "").strip() or None
     resolved_bcc = str(email_meta.get("bcc") or "").strip() or None
     resolved_internal_date = self._parse_email_internal_date(
-        email_meta.get("date") or metadata_map.get("date")
+        email_meta.get("internal_date") or metadata_map.get("internal_date")
+        or email_meta.get("date") or metadata_map.get("date")
     )
 
     attachments_raw = email_meta.get("attachments")
@@ -165,10 +164,20 @@ def upsert_email_message_graph(
         if existing_message is None:
             existing_message = self._fetchone_with_connection(
                 conn,
-                "SELECT id FROM email_messages WHERE media_id = ? LIMIT 1",
+                "SELECT id, tenant_id, source_id, source_message_id, message_id "
+                "FROM email_messages WHERE media_id = ? LIMIT 1",
                 (media_id_int,),
             )
             if existing_message:
+                old_provider_id = existing_message["source_message_id"]
+                old_message_id = existing_message["message_id"]
+                if (
+                    existing_message["tenant_id"] != resolved_tenant
+                    or int(existing_message["source_id"]) != source_id
+                    or (old_provider_id and resolved_source_message_id and old_provider_id != resolved_source_message_id)
+                    or (old_message_id and resolved_message_id and old_message_id != resolved_message_id)
+                ):
+                    raise InputError("Media row already belongs to a different email identity")  # noqa: TRY003
                 match_strategy = "media_id"
 
         if existing_message is not None:

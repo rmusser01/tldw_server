@@ -1,4 +1,7 @@
 {
+  "onboarding_loginSettingsError": {
+    "message": "Impossible d’ouvrir les paramètres de connexion. Réessayez."
+  },
   "navigation_serverAndAuth": {
     "message": "Serveur et Auth"
   },

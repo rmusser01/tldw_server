@@ -9,10 +9,11 @@ import userEvent from "@testing-library/user-event"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, defaultOrOpts?: unknown) =>
-      typeof defaultOrOpts === "string"
-        ? defaultOrOpts
-        : (defaultOrOpts as Record<string, string>)?.defaultValue ?? key,
+    t: (key: string, defaultOrOpts?: unknown) => {
+      if (typeof defaultOrOpts === "string") return defaultOrOpts
+      const options = defaultOrOpts as Record<string, string>
+      return (options?.defaultValue ?? key).replace(/\{\{(\w+)\}\}/g, (_match, token) => String(options[token] ?? ""))
+    },
   }),
 }))
 
@@ -42,7 +43,7 @@ let mockState = {
   selectedPreset: "standard" as string,
   processingState: {
     status: "idle" as string,
-    perItemProgress: [] as Array<{ progressPercent: number }>,
+    perItemProgress: [] as Array<{ progressPercent: number; status: string }>,
     elapsed: 0,
     estimatedRemaining: 0,
   },
@@ -77,6 +78,19 @@ describe("IngestWizardStepper", () => {
         estimatedRemaining: 0,
       },
     }
+  })
+
+  it("summarizes confirmed finished items while another item is still processing", () => {
+    mockState.currentStep = 4
+    mockState.highestStep = 4
+    mockState.processingState.status = "running"
+    mockState.processingState.perItemProgress = [
+      { status: "complete", progressPercent: 100 },
+      { status: "processing", progressPercent: 42 },
+    ]
+    render(<IngestWizardStepper />)
+    expect(screen.getByText("1/2 finished")).toBeInTheDocument()
+    expect(screen.queryByText(/\d+%/)).not.toBeInTheDocument()
   })
 
   it("renders 5 step labels", () => {

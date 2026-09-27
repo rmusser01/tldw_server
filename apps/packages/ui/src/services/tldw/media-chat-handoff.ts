@@ -1,6 +1,7 @@
 export type MediaChatHandoffMode = "normal" | "rag_media"
 
 export type MediaChatHandoffPayload = {
+  ownerScope?: string
   mediaId?: string
   url?: string
   title?: string
@@ -17,9 +18,12 @@ const toNonEmptyString = (value: unknown): string | undefined => {
 export const normalizeMediaChatHandoffPayload = (
   value: unknown
 ): MediaChatHandoffPayload | undefined => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined
   const payload = value as Record<string, unknown>
   const result: MediaChatHandoffPayload = {}
+  const ownerScope = toNonEmptyString(payload.ownerScope)
+  if (ownerScope) result.ownerScope = ownerScope
   const mediaId = toNonEmptyString(payload.mediaId)
   if (mediaId) result.mediaId = mediaId
   const url = toNonEmptyString(payload.url)
@@ -67,4 +71,3 @@ export const buildDiscussMediaHint = (
   }
   return ""
 }
-

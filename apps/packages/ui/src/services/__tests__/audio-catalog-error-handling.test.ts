@@ -60,4 +60,29 @@ describe("audio catalog service error handling", () => {
       fetchTldwVoiceCatalog("openai", { throwOnError: true })
     ).rejects.toThrow("timeout")
   })
+
+  it("keeps the legacy provider-only voice catalog request unchanged", async () => {
+    mocks.bgRequestClient.mockResolvedValueOnce([])
+
+    await fetchTldwVoiceCatalog("openai", { throwOnError: true })
+
+    expect(mocks.bgRequestClient).toHaveBeenCalledWith({
+      path: "/api/v1/audio/voices/catalog?provider=openai",
+      method: "GET"
+    })
+  })
+
+  it("encodes the exact-cased model in provider-scoped voice requests", async () => {
+    mocks.bgRequestClient.mockResolvedValueOnce([])
+
+    await fetchTldwVoiceCatalog("gateway:Company", {
+      model: "Vendor/Exact Case"
+    })
+
+    expect(mocks.bgRequestClient).toHaveBeenCalledWith({
+      path:
+        "/api/v1/audio/voices/catalog?provider=gateway%3ACompany&model=Vendor%2FExact%20Case",
+      method: "GET"
+    })
+  })
 })

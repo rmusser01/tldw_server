@@ -1261,5 +1261,17 @@
   },
   "modelSelect_sort_localFirst": {
     "message": "Local-first"
+  },
+  "help_loadFailed": {
+    "message": "Kunne ikke laste inn hjelpen. Koble til igjen, lagre endringene dine og last siden på nytt."
+  },
+  "help_loading": {
+    "message": "Laster inn hjelp…"
+  },
+  "help_confirmReload": {
+    "message": "Laste denne siden på nytt? Ulagrede endringer kan gå tapt."
+  },
+  "help_reload": {
+    "message": "Last siden på nytt"
   }
 }

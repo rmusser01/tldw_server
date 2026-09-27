@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from .audio import AudioConfig, load_audio_config
 from .auth import AuthConfig, load_auth_config
@@ -15,6 +14,7 @@ from .moderation import ModerationConfig, load_moderation_config
 from .providers import ProvidersConfig, load_providers_config
 from .rag import RAGConfig, load_rag_config
 from .server import ServerConfig, load_server_config
+from .slides import SlidesConfig, load_slides_config
 from .stt import STTConfig, load_stt_config
 from .types import ConfigParserLike
 
@@ -33,6 +33,7 @@ class ConfigSections:
     audio: AudioConfig
     providers: ProvidersConfig
     server: ServerConfig
+    slides: SlidesConfig
     stt: STTConfig
 
 
@@ -55,6 +56,7 @@ def load_config_sections(config_parser: ConfigParserLike | None = None) -> Confi
         audio=load_audio_config(config_parser),
         providers=load_providers_config(config_parser),
         server=load_server_config(config_parser),
+        slides=load_slides_config(config_parser),
         stt=load_stt_config(config_parser),
     )
 
@@ -74,6 +76,7 @@ __all__ = [
     "RAGConfig",
     "STTConfig",
     "ServerConfig",
+    "SlidesConfig",
     "load_audio_config",
     "load_auth_config",
     "load_chat_config",
@@ -87,5 +90,6 @@ __all__ = [
     "load_providers_config",
     "load_rag_config",
     "load_server_config",
+    "load_slides_config",
     "load_stt_config",
 ]

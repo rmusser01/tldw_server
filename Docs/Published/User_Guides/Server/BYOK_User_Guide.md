@@ -63,6 +63,35 @@ If the provider requires auth and no key resolves, the API returns:
 }
 ```
 
+### OpenRouter TTS and named speech gateways
+
+Explicit TTS gateways use the narrower `admin URL + optional user API key`
+contract documented in the
+[TTS Provider Setup Guide](../WebUI_Extension/TTS-SETUP-GUIDE.md). Their canonical
+provider IDs are `openrouter` and `gateway:<slug>`.
+
+An enabled gateway with `allow_user_api_key: true` is added dynamically to the
+BYOK allowlist. Runtime precedence for each gateway attempt is:
+
+1. the authenticated user's stored key, if a user record exists;
+2. the gateway's administrator-configured key.
+
+Team and org keys are not consulted for the first-release TTS gateway route. A
+present but unreadable/keyless user record is authoritative and fails closed;
+the admin key is not used as a silent substitute. Fallback targets resolve their
+credentials separately.
+
+Named gateway key writes/tests report `verified` when the configured discovery
+probe authenticates, `stored-unverified` when the probe is unavailable or
+inconclusive, and reject the operation with `401` when authentication is
+decisively rejected. OpenRouter keeps using its existing shared provider record
+and general OpenRouter validation metadata.
+
+Removing or disabling a named gateway makes an existing key inert and lists it
+as `source=disabled`. Replacement and testing return `403`, but the key owner
+may still delete the orphan with
+`DELETE /api/v1/users/keys/gateway:<slug>`.
+
 ## Credential Fields
 
 Credential fields are validated per provider. By default, unknown providers only

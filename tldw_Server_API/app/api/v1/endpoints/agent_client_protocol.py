@@ -5,8 +5,8 @@ import contextlib
 import inspect
 import json
 import os
-import threading
 import tempfile
+import threading
 import time
 from collections import OrderedDict, deque
 from datetime import datetime, timezone
@@ -17,17 +17,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket
 from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import ValidationError
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, TokenScopeGuard, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard, User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints._in_memory_limits import SlidingWindowLimiter
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACP_COMPATIBILITY_DOCS_URL,
     ACPAgentCompatibilityStatus,
-    ACPAgentInfo,
-    ACPAgentListResponse,
     ACPAgentHealthEntry,
     ACPAgentHealthResponse,
+    ACPAgentInfo,
+    ACPAgentListResponse,
     ACPAgentRegisterRequest,
     ACPAgentRegistrationResponse,
     ACPAgentUpdateRequest,
@@ -35,7 +35,6 @@ from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACPAsyncPromptResponse,
     ACPCheckpointListResponse,
     ACPHealthResponse,
-    ACPSetupGuideResponse,
     ACPRollbackRequest,
     ACPRollbackResponse,
     ACPSessionCancelRequest,
@@ -51,16 +50,18 @@ from tldw_Server_API.app.api.v1.schemas.agent_client_protocol import (
     ACPSessionPromptResponse,
     ACPSessionUpdatesResponse,
     ACPSessionUsageResponse,
+    ACPSetupGuideResponse,
     ACPTaskStatusResponse,
     ACPTokenUsage,
 )
+from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import classify_agent_entrypoint
+from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.checkpoint_consumer import CheckpointConsumer
+from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.sse_consumer import SSEConsumer
+from tldw_Server_API.app.core.Agent_Client_Protocol.event_bus import SessionEventBus
 from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
     ACPGovernanceDeniedError,
     get_runner_client,
 )
-from tldw_Server_API.app.core.Agent_Client_Protocol.agent_registry import classify_agent_entrypoint
-from tldw_Server_API.app.services.acp_runtime_policy_service import ACPRuntimePolicyService
-from tldw_Server_API.app.services.admin_acp_sessions_service import get_acp_session_store
 from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPResponseError
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError, TokenExpiredError
@@ -74,9 +75,8 @@ from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
 )
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
-from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.checkpoint_consumer import CheckpointConsumer
-from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.sse_consumer import SSEConsumer
-from tldw_Server_API.app.core.Agent_Client_Protocol.event_bus import SessionEventBus
+from tldw_Server_API.app.services.acp_runtime_policy_service import ACPRuntimePolicyService
+from tldw_Server_API.app.services.admin_acp_sessions_service import get_acp_session_store
 
 router = APIRouter(prefix="/acp", tags=["acp"])
 
@@ -809,7 +809,7 @@ def _acp_ws_try_acquire_quota(
     persona_key = str(persona_id).strip() if persona_id else None
 
     with _ACP_WS_QUOTA_LOCK:
-        if total_limit > 0 and _ACP_WS_ACTIVE_TOTAL >= total_limit:
+        if total_limit > 0 and total_limit <= _ACP_WS_ACTIVE_TOTAL:
             return None, "total_connections_quota_exceeded"
         if per_user_limit > 0 and int(_ACP_WS_ACTIVE_BY_USER.get(user_key, 0)) >= per_user_limit:
             return None, "user_connections_quota_exceeded"
@@ -1727,7 +1727,8 @@ def _check_runner_binary() -> dict[str, Any]:
     try:
         cfg = load_acp_runner_config()
     except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
-        return {"status": "error", "detail": f"Config load failed: {exc}"}
+        logger.warning("ACP runner configuration load failed: {}", type(exc).__name__)
+        return {"status": "error", "detail": "ACP runner configuration could not be loaded"}
 
     # Check binary_path shortcut first
     if cfg.binary_path:
@@ -2567,6 +2568,7 @@ async def acp_agents_health(
 ) -> ACPAgentHealthResponse:
     """Get health status for all monitored agents."""
     import asyncio as _asyncio
+
     from tldw_Server_API.app.core.Agent_Client_Protocol.health_monitor import get_health_monitor
 
     monitor = get_health_monitor()

@@ -58,6 +58,8 @@ def test_save_chat_knowledge_creates_note_and_flashcard(
             "snippet": "Important snippet",
             "tags": ["foo", "bar"],
             "make_flashcard": True,
+            "flashcard_front": "What should be remembered?",
+            "flashcard_back": "Important snippet",
             "export_to": "none",
         }
 
@@ -135,6 +137,8 @@ def test_save_chat_knowledge_rolls_back_on_flashcard_error(
             "snippet": "Snippet that should not persist on failure",
             "tags": ["foo"],
             "make_flashcard": True,
+            "flashcard_front": "What should be remembered?",
+            "flashcard_back": "Snippet that should not persist on failure",
             "export_to": "none",
         }
 

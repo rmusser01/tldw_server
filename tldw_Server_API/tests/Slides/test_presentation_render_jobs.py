@@ -6,16 +6,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.Slides_DB_Deps import get_slides_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.slides import router as slides_router
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Slides.presentation_rendering import PresentationRenderResult
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Slides.presentation_rendering import PresentationRenderResult
 from tldw_Server_API.app.core.Slides.slides_db import SlidesDatabase
 from tldw_Server_API.app.services import presentation_render_jobs_worker
 
@@ -132,9 +132,7 @@ def test_submit_render_job_snapshots_current_presentation_version(render_jobs_cl
     assert job["payload"]["format"] == "mp4"
 
 
-def test_render_job_endpoints_offload_blocking_calls_and_use_configured_queue(
-    render_jobs_client, monkeypatch
-):
+def test_render_job_endpoints_offload_blocking_calls_and_use_configured_queue(render_jobs_client, monkeypatch):
     client, jobs_db_path, fake_collections = render_jobs_client
     presentation_id, etag = _create_presentation(client)
     monkeypatch.setenv("PRESENTATION_RENDER_JOBS_QUEUE", "presentation-low")
@@ -180,9 +178,7 @@ def test_render_job_endpoints_offload_blocking_calls_and_use_configured_queue(
     status_response = client.get(f"/api/v1/slides/render-jobs/{job_id}")
     assert status_response.status_code == 200, status_response.text
 
-    artifacts_response = client.get(
-        f"/api/v1/slides/presentations/{presentation_id}/render-artifacts"
-    )
+    artifacts_response = client.get(f"/api/v1/slides/presentations/{presentation_id}/render-artifacts")
     assert artifacts_response.status_code == 200, artifacts_response.text
 
     assert "create_job" in offloaded_calls
@@ -408,3 +404,67 @@ async def test_render_worker_persists_output_artifact(monkeypatch, tmp_path):
     assert metadata["presentation_id"] == presentation.id
     assert metadata["presentation_version"] == 1
     assert render_kwargs["user_id"] == 1
+
+
+@pytest.mark.asyncio
+async def test_render_worker_rejects_forged_standalone_job_before_snapshot_or_render(
+    monkeypatch,
+):
+    events: list[str] = []
+
+    class _StandaloneSlidesDB:
+        def get_presentation_kind(self, presentation_id: str):
+            assert presentation_id == "html-deck"
+            events.append("kind")
+            return SimpleNamespace(content_kind="standalone_html")
+
+        def close_connection(self):
+            events.append("close")
+
+    def _snapshot_must_not_load(*_args, **_kwargs):
+        events.append("snapshot")
+        raise AssertionError("standalone payload must not reach snapshot loading")
+
+    def _render_must_not_start(*_args, **_kwargs):
+        events.append("render")
+        raise AssertionError("standalone payload must not reach Playwright or ffmpeg")
+
+    monkeypatch.setattr(
+        presentation_render_jobs_worker,
+        "_create_slides_db",
+        lambda _user_id: _StandaloneSlidesDB(),
+    )
+    monkeypatch.setattr(
+        presentation_render_jobs_worker,
+        "load_presentation_render_snapshot",
+        _snapshot_must_not_load,
+    )
+    monkeypatch.setattr(
+        presentation_render_jobs_worker,
+        "render_presentation_video",
+        _render_must_not_start,
+    )
+    job_manager = SimpleNamespace(update_job_progress=lambda *_args, **_kwargs: None)
+    forged_job = {
+        "id": 77,
+        "job_type": "presentation_render",
+        "owner_user_id": "1",
+        "payload": {
+            "user_id": 1,
+            "presentation_id": "html-deck",
+            "presentation_version": 9,
+            "format": "mp4",
+        },
+    }
+
+    with pytest.raises(
+        presentation_render_jobs_worker.PresentationRenderJobError,
+        match="operation_not_supported_for_content_kind",
+    ):
+        await presentation_render_jobs_worker.process_presentation_render_job(
+            forged_job,
+            job_manager=job_manager,
+            worker_id="forged-job-test",
+        )
+
+    assert events == ["kind", "close"]

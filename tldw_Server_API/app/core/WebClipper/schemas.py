@@ -180,13 +180,21 @@ class WebClipperSaveRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
+    @field_validator("clip_id", "clip_type")
+    @classmethod
+    def normalize_required_clip_identity(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("clip_id and clip_type must contain non-whitespace characters.")
+        return normalized
+
     @field_validator("capture_metadata")
     @classmethod
     def validate_capture_metadata_size(cls, value: dict[str, Any]) -> dict[str, Any]:
         return validate_capture_metadata_json_size(value)
 
     @model_validator(mode="after")
-    def validate_workspace_destination(self) -> "WebClipperSaveRequest":
+    def validate_workspace_destination(self) -> WebClipperSaveRequest:
         if self.destination_mode in {"workspace", "both"} and self.workspace is None:
             raise ValueError("workspace is required when destination_mode targets a workspace.")
         return self
@@ -212,6 +220,14 @@ class WebClipperEnrichmentPayload(BaseModel):
     error: str | None = Field(default=None, max_length=4096, description="Optional failure reason.")
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("clip_id")
+    @classmethod
+    def normalize_clip_id(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("clip_id must contain non-whitespace characters.")
+        return normalized
 
     @field_validator("structured_payload")
     @classmethod

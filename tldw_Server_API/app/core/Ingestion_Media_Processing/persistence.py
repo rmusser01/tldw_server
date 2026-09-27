@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import functools
 import hashlib
 import inspect
@@ -14,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path as FilePath
 from typing import Any, Callable, Mapping
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from fastapi import BackgroundTasks, HTTPException, Request, UploadFile, status
 from loguru import logger
@@ -38,6 +40,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_persisted_content import (
+    read_persisted_email_content,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_files_repository import MediaFilesRepository
 from tldw_Server_API.app.core.DB_Management.media_db.legacy_transcripts import (
     upsert_transcript,
 )
@@ -75,7 +81,6 @@ except AttributeError:  # Starlette < 0.27
     HTTP_413_TOO_LARGE = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
 
 _PERSISTENCE_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AssertionError,
     AttributeError,
     ConnectionError,
@@ -1042,7 +1047,7 @@ async def _fetch_unvectorized_chunk_count(
             return None
 
     try:
-        return await loop.run_in_executor(None, _count_worker)
+        return await loop.run_in_executor(None, contextvars.copy_context().run, _count_worker)
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
         return None
 
@@ -1278,6 +1283,11 @@ _SAFE_METADATA_ALLOWED_KEYS = frozenset(
         "source_hash",
         "chunking_plan",
         "provider_ids",
+        "email",
+        "filename",
+        "source_key",
+        "email_source_provider",
+        "labels",
     }
 )
 
@@ -2604,6 +2614,63 @@ def determine_add_media_final_status(results: list[dict[str, Any]]) -> int:
     return status.HTTP_207_MULTI_STATUS
 
 
+async def cleanup_superseded_original_files(
+    db: Any, storage: Any, media_id: int, *, user_id: str | None = None,
+) -> list[str]:
+    """Retire older originals after a replacement commits, preserving plaintext history.
+
+    Shared paths remain available to retained registrations, including recoverable
+    originals. Return warnings and retain failed cleanup rows for retry on the next
+    replacement. Cancellation propagates. Storage backends must honor the delete
+    contract that an absent file returns False.
+    """
+    files = await asyncio.to_thread(db.get_media_files, media_id, include_deleted=True)
+    active_originals = [row for row in files if row["file_type"] == "original" and not row["deleted"]]
+    if not active_originals:
+        return []
+
+    # Use the newest committed registration, even if this upload committed out of order.
+    current_id = max(row["id"] for row in active_originals)
+    obsolete: dict[str, list[dict[str, Any]]] = {}
+    retained_paths = set()
+    for row in files:
+        if row["file_type"] == "original" and row["id"] < current_id:
+            obsolete.setdefault(row["storage_path"], []).append(row)
+        else:
+            retained_paths.add(row["storage_path"])
+
+    warnings = []
+    repository = MediaFilesRepository.from_legacy_db(db)
+    for path, rows in obsolete.items():
+        try:
+            shared_path = path in retained_paths or await asyncio.to_thread(
+                repository.has_retained_references, path, {row["id"] for row in rows},
+            )
+            if path and not shared_path:
+                delete_storage = storage
+                if path.startswith("imported_media/"):
+                    # Chatbook originals are relative to this user's data directory.
+                    parts = FilePath(path).parts
+                    if user_id is None or len(parts) != 3 or parts[:2] != ("imported_media", f"media_{media_id}"):
+                        raise ValueError("Imported original path is outside this media's directory")
+                    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+                    from tldw_Server_API.app.core.Storage.filesystem_storage import FileSystemStorage
+
+                    delete_storage = FileSystemStorage(DatabasePaths.resolve_user_base_directory(user_id))
+                # False means already absent, including overlapping cleanup attempts.
+                await delete_storage.delete(path)
+            for row in rows:
+                await asyncio.to_thread(db.soft_delete_media_file, row["id"], hard_delete=True)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - retirement must not invalidate a committed replacement
+            logger.opt(exception=True).warning(
+                "Failed to clean up superseded original {} for media_id={}: {}", path, media_id, exc,
+            )
+            warnings.append("Original stored, but cleanup of an older original failed.")
+    return warnings
+
+
 async def add_media_orchestrate(
     background_tasks: BackgroundTasks,
     form_data: Any,
@@ -2763,7 +2830,8 @@ async def add_media_orchestrate(
 
     results: list[dict[str, Any]] = []
     temp_dir_manager = TempDirManagerCls(  # type: ignore[call-arg]
-        cleanup=not form_data.keep_original_file,
+        # Document originals are stored permanently; their staging copies are disposable.
+        cleanup=not form_data.keep_original_file or form_data.media_type in {"pdf", "document", "ebook"},
     )
     temp_dir_path: FilePath | None = None
     loop = asyncio.get_running_loop()
@@ -3309,7 +3377,8 @@ async def add_media_orchestrate(
                                 storage_path = await storage.store(
                                     user_id=user_id_str,
                                     media_id=media_id,
-                                    filename="original" + source_file.suffix,
+                                    # Each registration owns its blob, including concurrent reuploads.
+                                    filename=f"original-{uuid4().hex}{source_file.suffix}",
                                     data=handle,
                                     mime_type=mime_type,
                                 )
@@ -3320,25 +3389,64 @@ async def add_media_orchestrate(
                                     logger.debug("Failed to close original file handle for {}", source_file)
 
                             # Insert database record
-                            db.insert_media_file(
-                                media_id=media_id,
-                                file_type="original",
-                                storage_path=storage_path,
-                                original_filename=original_filename,
-                                file_size=file_size,
-                                mime_type=mime_type,
-                                checksum=checksum,
-                            )
+                            try:
+                                db.insert_media_file(
+                                    media_id=media_id,
+                                    file_type="original",
+                                    storage_path=storage_path,
+                                    original_filename=original_filename,
+                                    file_size=file_size,
+                                    mime_type=mime_type,
+                                    checksum=checksum,
+                                )
+                            except Exception:  # noqa: BLE001 - cleanup must run for any registration failure
+                                try:
+                                    deleted = await storage.delete(storage_path)
+                                    if not deleted:
+                                        logger.warning(
+                                            "Stored original file {} was not deleted after registration failure "
+                                            "for media_id={}",
+                                            storage_path,
+                                            media_id,
+                                        )
+                                except Exception as cleanup_err:  # noqa: BLE001 - cleanup failure must not mask registration error
+                                    logger.warning(
+                                        "Failed to delete stored original file {} after registration failure "
+                                        "for media_id={}: {}",
+                                        storage_path,
+                                        media_id,
+                                        cleanup_err,
+                                    )
+                                raise
 
                             logger.info(f"Stored original file for media_id={media_id}: {storage_path}")
                             result["original_file_stored"] = True
+                            try:
+                                cleanup_warnings = await cleanup_superseded_original_files(
+                                    db, storage, media_id, user_id=user_id_str,
+                                )
+                                if cleanup_warnings:
+                                    _ensure_warnings_list(result).extend(cleanup_warnings)
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as cleanup_err:  # noqa: BLE001 - preserve committed replacement on cleanup errors
+                                logger.opt(exception=True).warning(
+                                    "Failed to clean up superseded originals for media_id={}: {}", media_id, cleanup_err,
+                                )
+                                _ensure_warnings_list(result).append(
+                                    "Original stored, but cleanup of older originals failed."
+                                )
 
+                        except asyncio.CancelledError:
+                            raise
                         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as store_err:
                             logger.error(f"Failed to store original file for media_id={media_id}: {store_err}")
                             # Non-fatal - don't fail the entire ingestion
                             result["original_file_stored"] = False
                             _ensure_warnings_list(result).append(f"Failed to store original file: {store_err}")
 
+                except asyncio.CancelledError:
+                    raise
                 except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as storage_init_err:
                     logger.error(f"Failed to initialize storage backend: {storage_init_err}")
 
@@ -3419,6 +3527,8 @@ async def add_media_orchestrate(
             content={"results": results},
         )
 
+    except asyncio.CancelledError:
+        raise
     except HTTPException as exc:
         request_outcome = "error"
         logger.warning(
@@ -3781,6 +3891,7 @@ async def persist_primary_av_item(
 
         media_id_result, media_uuid_result, db_message_result = await loop.run_in_executor(
             None,
+            contextvars.copy_context().run,
             _db_worker,
         )
 
@@ -3855,7 +3966,7 @@ async def persist_primary_av_item(
                         ),
                     )
 
-                write_payload = await loop.run_in_executor(None, _upsert_worker)
+                write_payload = await loop.run_in_executor(None, contextvars.copy_context().run, _upsert_worker)
                 with contextlib.suppress(_PERSISTENCE_NONCRITICAL_EXCEPTIONS):
                     emit_stt_run_write_total(
                         provider=provider_name,
@@ -3891,7 +4002,7 @@ async def persist_primary_av_item(
                         analysis_details=process_result.get("analysis_details") or {},
                     )
 
-                created_visual_docs = await loop.run_in_executor(None, _visual_docs_worker)
+                created_visual_docs = await loop.run_in_executor(None, contextvars.copy_context().run, _visual_docs_worker)
                 if created_visual_docs:
                     logger.info(
                         "Persisted {} VisualDocuments for media_id={} (input_ref={})",
@@ -5356,9 +5467,12 @@ async def process_document_like_item(
                     proc_warnings = None
 
             if isinstance(proc_warnings, list):
-                if not isinstance(final_result.get("warnings"), list):
-                    final_result["warnings"] = []
-                final_result["warnings"].extend(proc_warnings)
+                if final_result.get("warnings") is proc_warnings:
+                    # update(process_result_dict) already copied this reference.
+                    # Own the list rather than extending (and mutating) it with itself.
+                    final_result["warnings"] = list(proc_warnings)
+                else:
+                    _ensure_warnings_list(final_result).extend(proc_warnings)
             elif proc_warnings:
                 if not isinstance(final_result.get("warnings"), list):
                     final_result["warnings"] = []
@@ -5685,18 +5799,16 @@ async def persist_doc_item_and_children(
                     if media_type == "email" and media_id_local:
                         if _is_email_native_persist_enabled():
                             try:
+                                saved_metadata, saved_body = read_persisted_email_content(
+                                    worker_db, int(media_id_local), tenant_id=str(client_id),
+                                )
                                 email_graph_local = worker_db.upsert_email_message_graph(
                                     media_id=int(media_id_local),
-                                    metadata=metadata_for_db if isinstance(metadata_for_db, dict) else {},
-                                    body_text=str(content_for_db or ""),
+                                    metadata=saved_metadata,
+                                    body_text=saved_body,
                                     tenant_id=str(client_id),
                                     provider="upload",
                                     source_key=str(processing_filename or item_input_ref or "upload"),
-                                    labels=(
-                                        (metadata_for_db or {}).get("labels")
-                                        if isinstance(metadata_for_db, dict)
-                                        else None
-                                    ),
                                 )
                                 _emit_email_native_persist_metric(
                                     path_kind="primary",
@@ -5736,6 +5848,7 @@ async def persist_doc_item_and_children(
 
             db_worker_result = await loop.run_in_executor(  # type: ignore[arg-type]
                 None,
+                contextvars.copy_context().run,
                 _db_worker,
             )
             if isinstance(db_worker_result, tuple) and len(db_worker_result) == 4:
@@ -5794,35 +5907,7 @@ async def persist_doc_item_and_children(
                                     child_meta = child.get("metadata") or {}
                                     if not child_content:
                                         continue
-                                    allowed_keys_child = {
-                                        "title",
-                                        "author",
-                                        "doi",
-                                        "pmid",
-                                        "pmcid",
-                                        "arxiv_id",
-                                        "s2_paper_id",
-                                        "url",
-                                        "pdf_url",
-                                        "pmc_url",
-                                        "date",
-                                        "year",
-                                        "venue",
-                                        "journal",
-                                        "license",
-                                        "license_url",
-                                        "publisher",
-                                        "source",
-                                        "creators",
-                                        "rights",
-                                        "parent_media_uuid",
-                                    }
-                                    safe_child_meta = {
-                                        key: value
-                                        for key, value in child_meta.items()
-                                        if key in allowed_keys_child
-                                        and isinstance(value, (str, int, float, bool, list))
-                                    }
+                                    safe_child_meta = build_safe_metadata_subset(child_meta)
                                     safe_child_meta["parent_media_uuid"] = media_uuid_result
                                     try:
                                         from tldw_Server_API.app.core.Utils.metadata_utils import (  # type: ignore
@@ -5928,10 +6013,13 @@ async def persist_doc_item_and_children(
                                             if media_type_local == "email" and child_id_local:
                                                 if _is_email_native_persist_enabled():
                                                     try:
+                                                        saved_metadata, saved_body = read_persisted_email_content(
+                                                            worker_db, int(child_id_local), tenant_id=str(client_id_local),
+                                                        )
                                                         child_email_graph_local = worker_db.upsert_email_message_graph(
                                                             media_id=int(child_id_local),
-                                                            metadata=child_metadata_local,
-                                                            body_text=str(child_content or ""),
+                                                            metadata=saved_metadata,
+                                                            body_text=saved_body,
                                                             tenant_id=str(client_id_local),
                                                             provider="upload",
                                                             source_key=str(child_url),
@@ -5973,6 +6061,7 @@ async def persist_doc_item_and_children(
                                         child_msg,
                                     ) = await loop.run_in_executor(  # type: ignore[arg-type]
                                         None,
+                                        contextvars.copy_context().run,
                                         _db_child_worker,
                                     )
                                     await _enforce_chunk_consistency_after_persist(
@@ -6068,33 +6157,7 @@ async def persist_doc_item_and_children(
                                 child_meta = child.get("metadata") or {}
                                 if not child_content:
                                     continue
-                                allowed_keys_child = {
-                                    "title",
-                                    "author",
-                                    "doi",
-                                    "pmid",
-                                    "pmcid",
-                                    "arxiv_id",
-                                    "s2_paper_id",
-                                    "url",
-                                    "pdf_url",
-                                    "pmc_url",
-                                    "date",
-                                    "year",
-                                    "venue",
-                                    "journal",
-                                    "license",
-                                    "license_url",
-                                    "publisher",
-                                    "source",
-                                    "creators",
-                                    "rights",
-                                }
-                                safe_child_meta = {
-                                    key: value
-                                    for key, value in child_meta.items()
-                                    if key in allowed_keys_child and isinstance(value, (str, int, float, bool, list))
-                                }
+                                safe_child_meta = build_safe_metadata_subset(child_meta)
                                 safe_child_meta_json: str | None = None
                                 try:
                                     from tldw_Server_API.app.core.Utils.metadata_utils import (  # type: ignore
@@ -6200,10 +6263,13 @@ async def persist_doc_item_and_children(
                                         if media_type_local == "email" and child_id_local:
                                             if _is_email_native_persist_enabled():
                                                 try:
+                                                    saved_metadata, saved_body = read_persisted_email_content(
+                                                        worker_db, int(child_id_local), tenant_id=str(client_id_local),
+                                                    )
                                                     child_email_graph_local = worker_db.upsert_email_message_graph(
                                                         media_id=int(child_id_local),
-                                                        metadata=child_metadata_local,
-                                                        body_text=str(child_content_local or ""),
+                                                        metadata=saved_metadata,
+                                                        body_text=saved_body,
                                                         tenant_id=str(client_id_local),
                                                         provider="upload",
                                                         source_key=str(child_url_local),
@@ -6245,6 +6311,7 @@ async def persist_doc_item_and_children(
                                     child_msg,
                                 ) = await loop.run_in_executor(  # type: ignore[arg-type]
                                     None,
+                                    contextvars.copy_context().run,
                                     _db_child_arch_worker,
                                 )
                                 await _enforce_chunk_consistency_after_persist(

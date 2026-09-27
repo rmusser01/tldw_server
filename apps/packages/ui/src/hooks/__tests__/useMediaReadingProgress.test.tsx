@@ -115,6 +115,78 @@ describe('useMediaReadingProgress', () => {
     })
   })
 
+  it('does not write zero when delayed detail hydration changes the page count before progress arrives', async () => {
+    const container = createScrollContainer(500, 500, 0)
+    let release!: (value: unknown) => void
+    mocks.getReadingProgress.mockReturnValue(new Promise(resolve => { release = resolve }))
+    const scrollRef = { current: container }
+    const { rerender, unmount } = renderHook(({ contentLength }) => useMediaReadingProgress({
+      mediaId: 1, mediaKind: 'media', contentLength, scrollContainerRef: scrollRef
+    }), { initialProps: { contentLength: 0 } })
+
+    rerender({ contentLength: 15000 })
+    unmount()
+    await act(async () => { release({ media_id: 1, percent_complete: 54.2 }); await Promise.resolve() })
+
+    expect(mocks.updateReadingProgress).not.toHaveBeenCalled()
+  })
+
+  it('restores after delayed content hydration and layout resize without overwriting saved progress', async () => {
+    const container = createScrollContainer(500, 500, 0)
+    const scrollRef = { current: container }
+    mocks.getReadingProgress.mockResolvedValue({ media_id: 1, percent_complete: 50 })
+    const { rerender } = renderHook(({ isContentReady }) => useMediaReadingProgress({
+      mediaId: 1, mediaKind: 'media', contentLength: 260, scrollContainerRef: scrollRef,
+      isContentReady
+    }), { initialProps: { isContentReady: false } })
+    await act(async () => { await Promise.resolve() })
+    Object.defineProperty(container, 'scrollHeight', { configurable: true, get: () => 1500 })
+    rerender({ isContentReady: true })
+    await act(async () => { await Promise.resolve() })
+
+    expect({ top: container.scrollTop, writes: mocks.updateReadingProgress.mock.calls }).toEqual({ top: 500, writes: [] })
+  })
+
+  it('does not let a late progress response replace a newer user scroll', async () => {
+    const container = createScrollContainer(2000, 1000, 0)
+    const scrollRef = { current: container }
+    let release!: (value: unknown) => void
+    mocks.getReadingProgress.mockReturnValue(new Promise(resolve => { release = resolve }))
+    renderHook(() => useMediaReadingProgress({
+      mediaId: 1, mediaKind: 'media', contentLength: 260, scrollContainerRef: scrollRef
+    }))
+    await act(async () => {
+      container.scrollTop = 400
+      container.dispatchEvent(new Event('scroll'))
+      release({ media_id: 1, percent_complete: 70 })
+      await Promise.resolve()
+    })
+    expect(container.scrollTop).toBe(400)
+  })
+
+  it.each(['loading', 'unmount'])('flushes the last actual scroll rather than resized loading geometry (%s)', async transition => {
+    const container = createScrollContainer(2000, 1000, 0)
+    const scrollRef: { current: HTMLDivElement | null } = { current: container }
+    mocks.getReadingProgress.mockResolvedValue({ media_id: 1, has_progress: false })
+    const { rerender, unmount } = renderHook(({ isContentReady }) => useMediaReadingProgress({
+      mediaId: 1, mediaKind: 'media', contentLength: 260, scrollContainerRef: scrollRef, isContentReady
+    }), { initialProps: { isContentReady: true } })
+    await act(async () => { await Promise.resolve() })
+    act(() => {
+      container.scrollTop = 400
+      container.dispatchEvent(new Event('scroll'))
+    })
+    Object.defineProperty(container, 'scrollHeight', { configurable: true, get: () => 1000 })
+    container.scrollTop = 0
+    if (transition === 'loading') rerender({ isContentReady: false })
+    else {
+      scrollRef.current = null
+      unmount()
+    }
+
+    expect(mocks.updateReadingProgress).toHaveBeenLastCalledWith('1', expect.objectContaining({ percentage: 40, cfi: 'scroll:40', zoom_level: 100 }))
+  })
+
   it('falls back to CFI-based scroll restore when percent_complete is absent', async () => {
     const container = createScrollContainer(2000, 1000, 0)
     const scrollRef = { current: container }
@@ -192,6 +264,7 @@ describe('useMediaReadingProgress', () => {
     expect(mocks.updateReadingProgress).toHaveBeenCalledWith(
       '21',
       expect.objectContaining({
+        zoom_level: 100,
         percentage: 40,
         cfi: 'scroll:40'
       })
@@ -238,7 +311,7 @@ describe('useMediaReadingProgress', () => {
       }
     })
 
-    const { rerender } = renderHook(
+    const { rerender, result } = renderHook(
       ({ mediaId }: { mediaId: number }) =>
         useMediaReadingProgress({
           mediaId,
@@ -268,6 +341,7 @@ describe('useMediaReadingProgress', () => {
       expect(mocks.updateReadingProgress).toHaveBeenCalledWith(
         '1',
         expect.objectContaining({
+          zoom_level: 100,
           percentage: 50,
           cfi: 'scroll:50'
         })
@@ -281,5 +355,18 @@ describe('useMediaReadingProgress', () => {
     await waitFor(() => {
       expect(container.scrollTop).toBe(500)
     })
+
+    await act(async () => {
+      container.scrollTop = 1500
+      await result.current.saveProgress()
+    })
+    expect(mocks.updateReadingProgress).toHaveBeenLastCalledWith(
+      '2',
+      expect.objectContaining({
+        zoom_level: 100,
+        percentage: 75,
+        cfi: 'scroll:75'
+      })
+    )
   })
 })

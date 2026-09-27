@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
     scopeKey: 'notifications:server-a:user-a',
     lifecycleEpoch: 1,
     state: 'active',
+    connectionVerified: true,
     unreadCount: 2,
     updatedAt: 1,
     latestEvent: null as { event: string; id?: number; payload?: unknown } | null,
@@ -57,6 +58,7 @@ vi.mock('@web/components/ui/ToastProvider', () => ({
 vi.mock('@web/components/notifications/NotificationLifecycleProvider', () => ({
   useNotificationLifecycle: () => ({
     ...mocks.lifecycle,
+    captureAuthority: () => () => true,
     reportMutationError: mocks.reportMutationError,
     reportRequestError: mocks.reportRequestError,
     tryAgain: mocks.tryAgain,
@@ -70,6 +72,7 @@ describe('NotificationsPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.lifecycle.state = 'active';
+    mocks.lifecycle.connectionVerified = true;
     mocks.lifecycle.scopeKey = 'notifications:server-a:user-a';
     mocks.lifecycle.lifecycleEpoch = 1;
     mocks.lifecycle.unreadCount = 2;
@@ -417,6 +420,78 @@ describe('NotificationsPage', () => {
     expect(mocks.subscribeNotificationsStream).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
     expect(screen.queryByText('Loading notifications...')).not.toBeInTheDocument();
+  });
+
+  it('disables cached inbox and preference actions while the connection is unverified', async () => {
+    const user = userEvent.setup();
+    const view = render(<NotificationsPage />);
+    await screen.findByRole('button', { name: 'Mark read' });
+    await user.click(screen.getByRole('button', { name: 'Preferences' }));
+    await screen.findAllByRole('checkbox');
+
+    mocks.lifecycle.state = 'degraded';
+    mocks.lifecycle.connectionVerified = false;
+    view.rerender(<NotificationsPage />);
+    const listCalls = mocks.listNotifications.mock.calls.length;
+    for (const name of ['Refresh', 'Hide Preferences', 'Mark read', 'Snooze 15m', 'Dismiss']) {
+      const button = screen.getByRole('button', { name });
+      expect(button).toBeDisabled();
+      await user.click(button);
+    }
+    for (const checkbox of screen.getAllByRole('checkbox')) {
+      expect(checkbox).toBeDisabled();
+      await user.click(checkbox);
+    }
+    expect(mocks.listNotifications).toHaveBeenCalledTimes(listCalls);
+    expect(mocks.getNotificationPreferences).toHaveBeenCalledTimes(1);
+    expect(mocks.updateNotificationPreferences).not.toHaveBeenCalled();
+    expect(mocks.markNotificationsRead).not.toHaveBeenCalled();
+    expect(mocks.snoozeNotification).not.toHaveBeenCalled();
+    expect(mocks.dismissNotification).not.toHaveBeenCalled();
+  });
+
+  it('ignores preferences that finish after verification is lost and permits a fresh read on recovery', async () => {
+    const user = userEvent.setup();
+    let resolvePreferences!: (value: Record<string, unknown>) => void;
+    mocks.getNotificationPreferences.mockImplementationOnce(() => new Promise((resolve) => {
+      resolvePreferences = resolve;
+    }));
+    const view = render(<NotificationsPage />);
+    await user.click(screen.getByRole('button', { name: 'Preferences' }));
+    mocks.lifecycle.state = 'degraded';
+    mocks.lifecycle.connectionVerified = false;
+    view.rerender(<NotificationsPage />);
+    await act(async () => resolvePreferences({ reminder_enabled: false }));
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+
+    mocks.lifecycle.state = 'active';
+    mocks.lifecycle.connectionVerified = true;
+    view.rerender(<NotificationsPage />);
+    await user.click(screen.getByRole('button', { name: 'Hide Preferences' }));
+    await user.click(screen.getByRole('button', { name: 'Preferences' }));
+    await screen.findAllByRole('checkbox');
+    expect(mocks.getNotificationPreferences).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores a late mutation result across outage and recovery without replaying it', async () => {
+    const user = userEvent.setup();
+    let resolveMarkRead!: (value: { updated: number }) => void;
+    mocks.markNotificationsRead.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveMarkRead = resolve;
+    }));
+    const view = render(<NotificationsPage />);
+    await user.click(await screen.findByRole('button', { name: 'Mark read' }));
+    mocks.lifecycle.state = 'degraded';
+    mocks.lifecycle.connectionVerified = false;
+    view.rerender(<NotificationsPage />);
+    mocks.lifecycle.state = 'active';
+    mocks.lifecycle.connectionVerified = true;
+    view.rerender(<NotificationsPage />);
+    await waitFor(() => expect(mocks.listNotifications).toHaveBeenCalledTimes(4));
+    await act(async () => resolveMarkRead({ updated: 1 }));
+    expect(screen.getByRole('button', { name: 'Mark read' })).toBeEnabled();
+    expect(screen.getByText('Unread: 2')).toBeInTheDocument();
+    expect(mocks.markNotificationsRead).toHaveBeenCalledTimes(1);
   });
 
   it.each([

@@ -149,6 +149,22 @@ def _list_backup_files(dataset: str, user_id: int | None) -> list[BackupFile]:
     return files
 
 
+def _list_all_users_backup_files(dataset: str) -> list[BackupFile]:
+    """Every user's backups for a per-user dataset (admin unfiltered view)."""
+    base_dir = _backup_base_dir()
+    if not os.path.isdir(base_dir):
+        return []
+    items: list[BackupFile] = []
+    for entry in os.scandir(base_dir):
+        if not entry.is_dir(follow_symlinks=False):
+            continue
+        match = re.fullmatch(r"user_(\d+)", entry.name)
+        if not match:
+            continue
+        items.extend(_list_backup_files(dataset, int(match.group(1))))
+    return items
+
+
 def list_backup_items(
     *,
     dataset: str | None,
@@ -159,8 +175,17 @@ def list_backup_items(
     datasets = [_validate_backup_dataset(dataset)] if dataset is not None else [*DATASET_DB_RESOLVERS.keys(), "authnz"]
     items: list[BackupFile] = []
     for key in datasets:
-        dataset_user_id = None if key == "authnz" else user_id
-        items.extend(_list_backup_files(key, dataset_user_id))
+        if key == "authnz":
+            items.extend(_list_backup_files(key, None))
+            continue
+        if user_id is not None:
+            items.extend(_list_backup_files(key, user_id))
+            continue
+        # Unfiltered admin view: per-user datasets live under user_<id>/
+        # subdirectories, which the userless scan never visited - so the
+        # most common backups were invisible without a filter (#2921).
+        items.extend(_list_backup_files(key, None))
+        items.extend(_list_all_users_backup_files(key))
     items.sort(key=lambda item: item.created_at, reverse=True)
     total = len(items)
     return items[offset: offset + limit], total

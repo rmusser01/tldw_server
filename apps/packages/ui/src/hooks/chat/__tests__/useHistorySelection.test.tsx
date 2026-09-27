@@ -1,0 +1,955 @@
+import React from "react"
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor
+} from "@testing-library/react"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import type {
+  HistoryViewSelectionV1,
+  HistorySelectionSnapshotV1
+} from "@/types/history-selection"
+import { resolveHistorySelection } from "@/utils/history-selection"
+
+const mocks = vi.hoisted(() => ({
+  bookmarks: new Map<string, any>(),
+  configChanged: null as null | (() => void),
+  forkCandidate: vi.fn(async (..._args: any[]) => null as any),
+  forkRecords: vi.fn(async (..._args: any[]) => [] as any[]),
+  forkSettings: vi.fn(async (..._args: any[]) => null as any),
+  updateForkSettings: vi.fn(async (..._args: any[]) => null as any),
+  capture: vi.fn(),
+  confirm: vi.fn(),
+  profile: vi.fn(),
+  details: vi.fn(),
+  localOwner: vi.fn(),
+  link: vi.fn(),
+  recoveries: vi.fn<(...args: any[]) => Promise<any[]>>(async () => []),
+  dismissRecovery: vi.fn<(...args: any[]) => Promise<void>>(async () => {})
+}))
+vi.mock("@/db/dexie/fork-operations", () => ({
+  findForkCandidate: (...args: any[]) => mocks.forkCandidate(...args),
+  loadForkOperations: (...args: any[]) => mocks.forkRecords(...args),
+  allowNewForkOperation: vi.fn()
+}))
+vi.mock("@/db/dexie/history-selection", () => ({
+  ensureLocalProfileId: () => mocks.profile(),
+  loadHistoryTurnRecoveries: (...args: any[]) => mocks.recoveries(...args),
+  dismissHistoryTurnRecovery: (...args: any[]) =>
+    mocks.dismissRecovery(...args),
+  loadHistoryBookmark: async (scope: any, owner: any) =>
+    mocks.bookmarks.get(
+      JSON.stringify([
+        {
+          profile_id: scope.profile_id,
+          client_session_id: scope.client_session_id
+        },
+        { owner_key: owner.owner_key, conversation_id: owner.conversation_id }
+      ])
+    ) ?? null,
+  saveHistoryBookmark: async (scope: any, view: any) =>
+    mocks.bookmarks.set(
+      JSON.stringify([
+        scope,
+        { owner_key: view.owner_key, conversation_id: view.conversation_id }
+      ]),
+      { ...scope, view }
+    ),
+  getLocalHistoryOwner: (id: string) => mocks.localOwner(id)
+}))
+vi.mock("@/services/chat-history-selection", () => ({
+  captureHistorySnapshot: (...args: any[]) => mocks.capture(...args),
+  readNativeForkSettings: (...args: any[]) => mocks.forkSettings(...args),
+  updateNativeForkSettings: (...args: any[]) => mocks.updateForkSettings(...args),
+  confirmLegacyHistoryProjection: (...args: any[]) => mocks.confirm(...args)
+}))
+vi.mock("@/db/dexie/chat", () => ({
+  PageAssistDatabase: class {
+    getHistoryInfo = mocks.details
+  }
+}))
+vi.mock("@/services/service-prompts", () => ({
+  resolveServicePromptScope: async () => ({ scopeKey: "scope" }),
+  subscribeToServicePromptConfigChanges: (changed: () => void) => { mocks.configChanged = changed; return () => {} }
+}))
+vi.mock("@/db/dexie/server-chat-mirror", () => ({
+  serverChatMirrorOwnerKey: () => "verified-scope",
+  linkServerChatMirror: (...args: any[]) => mocks.link(...args)
+}))
+import {
+  useHistorySelection,
+  type HistorySelectionController
+} from "../useHistorySelection"
+
+const owner = {
+  kind: "local" as const,
+  profile_id: "profile",
+  owner_key: "owner",
+  conversation_id: "chat"
+}
+const snapshot: HistorySelectionSnapshotV1 = {
+  version: 1,
+  owner_key: "owner",
+  conversation_id: "chat",
+  source_digest: "source",
+  storage_context_digest: "storage",
+  fences: { conversation: "1", history: "1", settings: "1" },
+  interpretation_status: { kind: "parent_graph_v1" },
+  nodes: [
+    {
+      id: "u",
+      revision: "u1",
+      parent_id: null,
+      role: "user",
+      settled: true,
+      preview: "Question"
+    },
+    {
+      id: "a",
+      revision: "a1",
+      parent_id: "u",
+      role: "assistant",
+      settled: true,
+      preview: "First answer"
+    },
+    {
+      id: "b",
+      revision: "b1",
+      parent_id: "u",
+      role: "assistant",
+      settled: true,
+      preview: "Other answer"
+    }
+  ]
+}
+let controllers: Record<string, HistorySelectionController>
+function View({ label, reference }: { label: string; reference?: any }) {
+  const controller = useHistorySelection()
+  controllers[label] = controller
+  React.useEffect(() => {
+    void controller.open(owner, reference)
+  }, [])
+  return (
+    <section aria-label={label}>
+      <output data-testid={label}>
+        {controller.capture?.status === "captured"
+          ? controller.capture.selected_content
+              .map((row) => row.message)
+              .join(" / ")
+          : controller.status}
+      </output>
+      <button
+        onClick={() =>
+          void controller.choose({ kind: "after_message", message_id: "a" })
+        }
+      >
+        {label} first
+      </button>
+      <button onClick={() => void controller.choose({ kind: "empty" })}>
+        {label} empty
+      </button>
+    </section>
+  )
+}
+beforeEach(() => {
+  mocks.forkCandidate.mockReset().mockResolvedValue(null)
+  mocks.forkRecords.mockReset().mockResolvedValue([])
+  mocks.forkSettings.mockReset().mockResolvedValue(null)
+  mocks.updateForkSettings.mockReset().mockResolvedValue(null)
+  mocks.confirm.mockClear()
+  mocks.recoveries.mockReset().mockResolvedValue([])
+  mocks.dismissRecovery.mockReset().mockResolvedValue(undefined)
+  mocks.configChanged = null
+  controllers = {}
+  mocks.bookmarks.clear()
+  mocks.profile.mockReset().mockResolvedValue("profile")
+  mocks.localOwner
+    .mockReset()
+    .mockImplementation(async (id) => ({ ...owner, conversation_id: id }))
+  mocks.details.mockReset().mockResolvedValue(null)
+  mocks.link.mockReset()
+  mocks.capture.mockImplementation(async (_owner, view) => {
+    const bound = { ...view, owner_key: "owner" }
+    const result = resolveHistorySelection(snapshot, bound, "send", "")
+    if (result.status !== "ready") return { ...result, snapshot, view: bound }
+    return {
+      status: "captured",
+      snapshot,
+      view: bound,
+      rows: result.rows,
+      selected_content: result.rows.map((row) => ({
+        id: row.id,
+        revision: row.revision,
+        message: row.preview,
+        images: []
+      })),
+      purpose: "send",
+      storage_context_digest: "storage"
+    }
+  })
+})
+describe("mounted history selection", () => {
+  it("keeps identical initialization independent and follows only the originating view revision", async () => {
+    render(
+      <>
+        <View label="A" />
+        <View label="B" />
+      </>
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("B").textContent).toBe(
+        "Question / Other answer"
+      )
+    )
+    const capturedB = controllers.B.view!
+    fireEvent.click(screen.getByText("A first"))
+    await waitFor(() =>
+      expect(screen.getByTestId("A").textContent).toBe(
+        "Question / First answer"
+      )
+    )
+    expect(controllers.A.view!.view_session_id).not.toBe(
+      controllers.B.view!.view_session_id
+    )
+    expect(controllers.A.bookmarkScope!.client_session_id).not.toBe(
+      controllers.B.bookmarkScope!.client_session_id
+    )
+    await act(async () => {
+      expect(await controllers.A.followResult(capturedB, "b")).toBe(false)
+    })
+    expect(screen.getByTestId("A").textContent).toBe("Question / First answer")
+    const reference = controllers.A.reference!
+    render(<View label="reopened" reference={reference} />)
+    await waitFor(() =>
+      expect(screen.getByTestId("reopened").textContent).toBe(
+        "Question / First answer"
+      )
+    )
+    expect(controllers.reopened.view!.view_session_id).not.toBe(
+      controllers.A.view!.view_session_id
+    )
+    expect(controllers.reopened.bookmarkScope!.client_session_id).not.toBe(
+      reference.client_session_id
+    )
+    fireEvent.click(screen.getByText("B empty"))
+    await waitFor(() => expect(screen.getByTestId("B").textContent).toBe(""))
+    await act(async () => {
+      expect(await controllers.B.followResult(capturedB, "a")).toBe(false)
+    })
+    expect(controllers.B.view!.cursor).toEqual({ kind: "empty" })
+  })
+  it("does not replace an explicit choice when an older capture finishes", async () => {
+    render(<View label="A" />)
+    await waitFor(() => expect(controllers.A.status).toBe("ready"))
+    const originalCapture = mocks.capture.getMockImplementation()!
+    let release!: () => void
+    mocks.capture.mockImplementationOnce(async (...args) => {
+      await new Promise<void>((resolve) => {
+        release = resolve
+      })
+      return originalCapture(...args)
+    })
+    let pending!: Promise<unknown>
+    act(() => {
+      pending = controllers.A.choose({ kind: "after_message", message_id: "a" })
+    })
+    fireEvent.click(screen.getByText("A empty"))
+    await waitFor(() => expect(controllers.A.status).toBe("ready"))
+    await act(async () => {
+      release()
+      await pending
+    })
+    expect(screen.getByTestId("A").textContent).toBe("")
+    expect(controllers.A.view!.selection_revision).toBe(2)
+  })
+})
+
+it("confirms complete source membership, retains failure for refresh, and fences a changed view", async () => {
+  const legacy = {
+    ...snapshot,
+    interpretation_status: { kind: "legacy_review_required" }
+  }
+  mocks.capture.mockImplementation(async (_owner, view) => ({
+    status: "legacy_review_required",
+    code: "legacy_review_required",
+    snapshot: legacy,
+    view
+  }))
+  render(<View label="A" />)
+  await waitFor(() =>
+    expect(controllers.A.status).toBe("legacy_review_required")
+  )
+  mocks.confirm.mockRejectedValueOnce(new Error("source_changed"))
+  await act(async () => {
+    await controllers.A.confirm(["u", "a"], {
+      kind: "before_message",
+      message_id: "u"
+    })
+  })
+  const confirmation = mocks.confirm.mock.calls.at(-1)![2]
+  expect(confirmation.source_members).toEqual([
+    { id: "u", revision: "u1" },
+    { id: "a", revision: "a1" },
+    { id: "b", revision: "b1" }
+  ])
+  expect(confirmation.ordered_path_ids).toEqual(["u", "a"])
+  expect(controllers.A.status).toBe("stale_selection")
+  let complete!: (value: any) => void
+  mocks.confirm.mockImplementationOnce(
+    async () =>
+      new Promise((resolve) => {
+        complete = resolve
+      })
+  )
+  let confirmationPromise!: Promise<unknown>
+  act(() => {
+    confirmationPromise = controllers.A.confirm(["u", "a"], {
+      kind: "after_message",
+      message_id: "a"
+    })
+  })
+  await act(async () => {
+    await controllers.A.choose({ kind: "empty" })
+  })
+  await act(async () => {
+    complete({
+      projection_id: "p",
+      cursor: { kind: "after_message", message_id: "a" }
+    })
+    await confirmationPromise
+  })
+  expect(controllers.A.view!.cursor).toEqual({ kind: "empty" })
+  expect(controllers.A.pending).toBeNull()
+})
+
+it("preserves before-first through copied references while allocating independent writers", async () => {
+  const origin = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await origin.result.current.open(owner)
+    await origin.result.current.choose({
+      kind: "before_message",
+      message_id: "u"
+    })
+  })
+  const reference = origin.result.current.getReference()!
+  render(
+    <>
+      <View label="copy-a" reference={reference} />
+      <View label="copy-b" reference={reference} />
+    </>
+  )
+  await waitFor(() => expect(controllers["copy-b"].status).toBe("ready"))
+  expect(controllers["copy-a"].view!.cursor).toEqual({
+    kind: "before_message",
+    message_id: "u"
+  })
+  expect(screen.getByTestId("copy-a").textContent).toBe("")
+  fireEvent.click(screen.getByText("copy-a first"))
+  await waitFor(() =>
+    expect(screen.getByTestId("copy-a").textContent).toBe(
+      "Question / First answer"
+    )
+  )
+  expect(screen.getByTestId("copy-b").textContent).toBe("")
+  expect(controllers["copy-a"].bookmarkScope).not.toEqual(
+    controllers["copy-b"].bookmarkScope
+  )
+})
+it("keeps an unbound mirror readable without initializing local ownership, and binds only on explicit capture", async () => {
+  mocks.details.mockResolvedValue({
+    id: "mirror",
+    server_chat_id: "chat",
+    title: "Old conversation"
+  })
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await result.current.loadConversation({ historyId: "mirror" })
+  })
+  expect(result.current.error).toBe("unbound_server_mirror")
+  expect(mocks.profile).not.toHaveBeenCalled()
+  expect(mocks.localOwner).not.toHaveBeenCalled()
+  expect(mocks.link).not.toHaveBeenCalled()
+  await act(async () => {
+    await result.current.loadConversation({
+      historyId: "mirror",
+      bindUnbound: true
+    })
+  })
+  expect(result.current.status).toBe("ready")
+  expect(mocks.link.mock.calls[0][0]).toMatchObject({
+    ownerKey: "verified-scope",
+    legacyHistoryId: "mirror",
+    chatId: "chat"
+  })
+  expect(mocks.localOwner).not.toHaveBeenCalled()
+})
+it("does not create a durable profile for temporary history", async () => {
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await result.current.loadConversation({ temporary: true })
+  })
+  expect(result.current.error).toBe("temporary_history_unavailable")
+  expect(mocks.profile).not.toHaveBeenCalled()
+  expect(result.current.reference).toBeNull()
+})
+it("keeps logical tab identities stable and refuses a result captured in another tab", async () => {
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    result.current.activate("A")
+    await result.current.open(owner)
+  })
+  const first = result.current.view!
+  await act(async () => {
+    result.current.activate("B")
+    await result.current.open(owner)
+    await result.current.choose({ kind: "empty" })
+  })
+  const second = result.current.view!
+  await act(async () => {
+    result.current.activate("A")
+  })
+  expect(result.current.view).toEqual(first)
+  await act(async () => {
+    expect(await result.current.followResult(second, "a")).toBe(false)
+  })
+  expect(result.current.view).toEqual(first)
+})
+
+import {
+  historySelectionExpansionPath,
+  parseHistorySelectionHandoff
+} from "../useHistorySelection"
+it("rejects malformed or authority-bearing handoff data", () => {
+  expect(() =>
+    parseHistorySelectionHandoff("?historySelection=broken")
+  ).toThrow("invalid_history_reference")
+  expect(() =>
+    parseHistorySelectionHandoff(
+      "?historySelection=" +
+        encodeURIComponent(
+          JSON.stringify({
+            profile_id: "p",
+            client_session_id: "s",
+            owner_key: "o",
+            conversation_id: "c",
+            owner_kind: "native",
+            accessToken: "not-permitted"
+          })
+        )
+    )
+  ).toThrow("invalid_history_reference")
+  expect(
+    historySelectionExpansionPath({
+      reference: null,
+      owner: { kind: "unavailable", code: "temporary" }
+    })
+  ).toBe("/chat")
+})
+
+it("never reuses an old view revision after rehydrating the same conversation", async () => {
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await result.current.open(owner)
+    await result.current.choose({ kind: "after_message", message_id: "a" })
+  })
+  const origin = result.current.view!
+  await act(async () => {
+    await result.current.open(owner)
+  })
+  expect(result.current.view!.selection_revision).toBeGreaterThan(
+    origin.selection_revision
+  )
+  await act(async () => {
+    expect(await result.current.followResult(origin, "b")).toBe(false)
+  })
+})
+
+it("exposes a missing bookmarked target instead of choosing the latest remaining row", async () => {
+  const original = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await original.result.current.open(owner)
+  })
+  const reference = original.result.current.getReference()!
+  const changed = {
+    ...snapshot,
+    nodes: snapshot.nodes.filter((row) => row.id !== "b")
+  }
+  mocks.capture.mockImplementation(async (_owner, view) => ({
+    ...resolveHistorySelection(changed, view, "send", ""),
+    snapshot: changed,
+    view
+  }))
+  render(<View label="missing" reference={reference} />)
+  await waitFor(() =>
+    expect(controllers.missing.status).toBe("stale_selection")
+  )
+  expect(controllers.missing.view!.cursor).toEqual({
+    kind: "after_message",
+    message_id: "b"
+  })
+  expect(
+    controllers.missing.capture!.snapshot.nodes.map((row) => row.id)
+  ).toEqual(["u", "a"])
+})
+
+it("retains the original uncertain confirmation through expansion and destination reload without automatic replay", async () => {
+  const origin = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await origin.result.current.open(owner)
+  })
+  const sourceReference = origin.result.current.getReference()!
+  const sourceView = origin.result.current.view!
+  const pending = {
+    version: 1,
+    projection_id: "uncertain-projection",
+    owner_key: "owner",
+    conversation_id: "chat",
+    source_digest: "source",
+    fences: snapshot.fences,
+    source_members: snapshot.nodes.map(({ id, revision }) => ({
+      id,
+      revision
+    })),
+    ordered_path_ids: ["u", "a"],
+    cursor: { kind: "before_message", message_id: "u" },
+    selection_revision: sourceView.selection_revision
+  }
+  const key = JSON.stringify([
+    {
+      profile_id: "profile",
+      client_session_id: sourceReference.client_session_id
+    },
+    { owner_key: "owner", conversation_id: "chat" }
+  ])
+  mocks.bookmarks.set(key, {
+    ...sourceReference,
+    view: sourceView,
+    pending_confirmation: pending,
+    pending_view_session_id: sourceView.view_session_id,
+    pending_dispatch_started: true
+  })
+  const expanded = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await expanded.result.current.open(owner, sourceReference)
+  })
+  let path!: string | null
+  await act(async () => {
+    path = await expanded.result.current.prepareExpansionPath()
+  })
+  const frozen = parseHistorySelectionHandoff(path!)!
+  const destination = renderHook(() =>
+    useHistorySelection({ storageKey: "h1-destination" })
+  )
+  await act(async () => {
+    await destination.result.current.open(owner, frozen)
+  })
+  destination.unmount()
+  const reopened = renderHook(() =>
+    useHistorySelection({ storageKey: "h1-destination" })
+  )
+  const callsBefore = mocks.confirm.mock.calls.length
+  await act(async () => {
+    await reopened.result.current.open(owner)
+  })
+  expect(reopened.result.current.status).toBe("pending_unknown")
+  expect(reopened.result.current.pending?.scope.client_session_id).toBe(
+    sourceReference.client_session_id
+  )
+  expect(reopened.result.current.pending?.intent).toEqual(pending)
+  expect(reopened.result.current.pending?.view.view_session_id).toBe(
+    sourceView.view_session_id
+  )
+  expect(mocks.bookmarks.get(key).pending_dispatch_started).toBe(true)
+  expect(mocks.confirm.mock.calls.length).toBe(callsBefore)
+})
+
+it("clears its reload reference when starting a new empty conversation", async () => {
+  const hook = renderHook(() => useHistorySelection({ storageKey: "h1-reset" }))
+  await act(async () => {
+    await hook.result.current.open(owner)
+  })
+  await waitFor(() =>
+    expect(hook.result.current.getStoredReference()).not.toBeNull()
+  )
+  act(() => hook.result.current.reset())
+  expect(hook.result.current.getStoredReference()).toBeNull()
+  expect(hook.result.current.view).toBeNull()
+})
+
+it("surfaces a failed explicit mirror binding after owner capture", async () => {
+  mocks.details.mockResolvedValue({
+    id: "mirror",
+    server_chat_id: "chat",
+    title: "Old conversation"
+  })
+  mocks.link.mockRejectedValue(new Error("mirror_binding_failed"))
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await result.current.loadConversation({
+      historyId: "mirror",
+      bindUnbound: true
+    })
+  })
+  expect(result.current.status).toBe("error")
+  expect(result.current.error).toBe("mirror_binding_failed")
+})
+
+it("restores scoped pending operations from older views without making them selected rows", async () => {
+  const entry: any = {
+    scope: { profile_id: "profile", client_session_id: "old-view" },
+    turn: {
+      operation_id: "op",
+      owner_key: "owner",
+      conversation_id: "chat",
+      state: "unknown",
+      input_text: "pending",
+      result_text: ""
+    }
+  }
+  mocks.recoveries.mockResolvedValue([entry])
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await result.current.open(owner, null)
+  })
+  await waitFor(() => expect(result.current.recoveries).toEqual([entry]))
+  expect(result.current.capture?.snapshot.nodes.map((row) => row.id)).toEqual([
+    "u",
+    "a",
+    "b"
+  ])
+  mocks.recoveries.mockResolvedValue([])
+  await act(async () => {
+    await result.current.dismissRecovery(entry)
+  })
+  expect(mocks.dismissRecovery).toHaveBeenCalledWith(
+    entry.scope,
+    expect.objectContaining({ owner_key: "owner", conversation_id: "chat" }),
+    "op"
+  )
+  expect(result.current.recoveries).toEqual([])
+})
+
+it("a historyId-only bound native mirror supplies its own successful load receipt", async () => {
+  mocks.details.mockResolvedValue({
+    id: "mirror",
+    server_chat_id: "chat",
+    server_scope_key: "verified-scope",
+    title: "Bound"
+  })
+  const receipt = vi.fn()
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    expect(
+      await result.current.loadConversation(
+        { historyId: "mirror" },
+        null,
+        receipt
+      )
+    ).toBe(true)
+  })
+  expect(receipt).toHaveBeenCalledOnce()
+  expect(receipt.mock.calls[0][0]).toEqual({
+    owner: result.current.owner,
+    view: result.current.view
+  })
+  expect(receipt.mock.calls[0][0].owner).toMatchObject({
+    kind: "native",
+    conversation_id: "chat"
+  })
+  expect(mocks.localOwner).not.toHaveBeenCalled()
+})
+
+it("a superseded deferred owner load emits no receipt for the destination", async () => {
+  let finish!: (value: any) => void, entered!: () => void
+  const started = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  mocks.details.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+        entered()
+      })
+  )
+  const receipt = vi.fn()
+  const { result } = renderHook(() => useHistorySelection())
+  await act(async () => {
+    const pending = result.current.loadConversation(
+      { historyId: "old" },
+      null,
+      receipt
+    )
+    await started
+    await result.current.open(owner)
+    finish({ id: "old" })
+    expect(await pending).toBe(false)
+  })
+  expect(receipt).not.toHaveBeenCalled()
+  expect(result.current.owner).toBe(owner)
+})
+
+it("a same-owner cursor change after open cannot become that load's receipt", async () => {
+  mocks.details.mockResolvedValue({
+    id: "mirror",
+    server_chat_id: "chat",
+    title: "Old"
+  })
+  const receipt = vi.fn()
+  const { result } = renderHook(() => useHistorySelection())
+  mocks.link.mockImplementationOnce(async () => {
+    await result.current.choose({ kind: "empty" })
+  })
+  await act(async () => {
+    expect(
+      await result.current.loadConversation(
+        { historyId: "mirror", bindUnbound: true },
+        null,
+        receipt
+      )
+    ).toBe(true)
+  })
+  expect(result.current.status).toBe("ready")
+  expect(result.current.view?.cursor).toEqual({ kind: "empty" })
+  expect(receipt).not.toHaveBeenCalled()
+})
+
+it("held fork candidate qualification exposes no ordinary settings fallback, then scoped settings edit/reopen works", async () => {
+  const {result} = renderHook(() => useHistorySelection())
+  const native: any = {kind: "native", owner_key: "owner", conversation_id: "chat", scope: {type: "workspace", workspaceId: "original"}, validate_lease: () => true}
+  let release!: (value: any) => void
+  mocks.forkCandidate.mockImplementationOnce(() => new Promise(done => {release = done}))
+  mocks.forkSettings.mockResolvedValue({authorNote: "server only"})
+  let opening!: Promise<boolean>
+  act(() => { opening = result.current.open(native) })
+  await waitFor(() => expect(mocks.forkCandidate).toHaveBeenCalled())
+  expect(result.current.settingsMode("chat", native.scope)).toBe("pending")
+  expect(mocks.forkSettings).not.toHaveBeenCalled()
+  await act(async () => {release({owner_key: "owner", candidate_child_id: "chat"}); await opening})
+  expect(result.current.settingsMode("chat", native.scope)).toBe("fork")
+  expect(result.current.forkSettings).toEqual({authorNote: "server only"})
+  mocks.updateForkSettings.mockResolvedValue({authorNote: "explicit edit"})
+  await act(async () => {await result.current.updateForkSettings({authorNote: "explicit edit"})})
+  expect(result.current.forkSettings).toEqual({authorNote: "explicit edit"})
+  expect(result.current.settingsMode("chat", {type: "workspace", workspaceId: "elsewhere"})).toBe("pending")
+  mocks.forkCandidate.mockResolvedValue({owner_key: "owner", candidate_child_id: "chat"})
+  mocks.forkSettings.mockResolvedValue({authorNote: "legitimate later edit"})
+  await act(async () => {await result.current.open(native)})
+  expect(result.current.forkSettings).toEqual({authorNote: "legitimate later edit"})
+})
+it("fork operations refresh hides another owner/workspace and retains original source after selection changes", async () => {
+  const {result} = renderHook(() => useHistorySelection())
+  await act(async () => {await result.current.open(owner)})
+  mocks.forkRecords.mockResolvedValue([{owner_key: "owner", operation_id: "op", state: "partial", candidate_child_id: "child"}])
+  await act(async () => {await result.current.refreshForkOperations()})
+  expect(result.current.forkOperations).toHaveLength(1)
+  await act(async () => {result.current.reset()})
+  expect(result.current.forkOperations).toHaveLength(0)
+})
+it("an old workspace fork control cannot release another namespace's active intent", async () => {
+  const {result} = renderHook(() => useHistorySelection())
+  const native: any = {kind: "native", owner_key: "owner", conversation_id: "chat", scope: {type: "workspace", workspaceId: "current"}, validate_lease: () => true}
+  await act(async () => {await result.current.open(native)})
+  const store = await import("@/db/dexie/fork-operations")
+  vi.mocked(store.allowNewForkOperation).mockClear()
+  await act(async () => {await result.current.allowNewFork({owner_key: "owner", conversation_id: "chat", context: {kind: "native", scope: {type: "workspace", workspaceId: "old"}}} as any)})
+  expect(store.allowNewForkOperation).not.toHaveBeenCalled()
+})
+
+it.each(["published", "held-success", "held-error"])("config invalidation hides fork outcomes and fences %s reads without changing durable records", async mode => {
+  const retained = [{owner_key: "owner", conversation_id: "chat", operation_id: "private-operation", state: "partial", candidate_child_id: "private-child", result: {state: "partial", code: "private-error"}, context: {kind: "native", scope: {type: "global"}}}]
+  mocks.forkRecords.mockResolvedValue(retained)
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => {await hook.result.current.loadConversation({serverChatId: "chat"})})
+  await waitFor(() => expect(hook.result.current.forkOperations).toHaveLength(1))
+  await act(async () => {await hook.result.current.refresh()})
+  await waitFor(() => expect(hook.result.current.forkOperations).toHaveLength(1))
+  let finish!: () => void
+  let reading: Promise<void> | undefined
+  if (mode !== "published") {
+    mocks.forkRecords.mockImplementationOnce(() => new Promise((resolve, reject) => {
+      finish = () => mode === "held-success" ? resolve(retained) : reject(new Error("stale-record-error"))
+    }))
+    act(() => {reading = hook.result.current.refreshForkOperations()})
+  }
+  act(() => mocks.configChanged!())
+  expect(hook.result.current.status).toBe("unsupported_history_capability")
+  expect(hook.result.current.forkOperations).toEqual([])
+  expect(hook.result.current.forkOperationsError).toBeNull()
+  if (reading) await act(async () => {finish(); await reading})
+  const reads = mocks.forkRecords.mock.calls.length
+  await act(async () => {await hook.result.current.refreshForkOperations()})
+  expect(mocks.forkRecords).toHaveBeenCalledTimes(reads)
+  expect(hook.result.current.forkOperations).toEqual([])
+  expect(hook.result.current.forkOperationsError).toBeNull()
+  expect(hook.result.current.error).toBe("request_config_scope_changed")
+  expect(await hook.result.current.inspectForkOperation(retained[0] as any)).toBe(false)
+  expect(retained[0]).toMatchObject({operation_id: "private-operation", candidate_child_id: "private-child", state: "partial"})
+  await act(async () => {await hook.result.current.loadConversation({serverChatId: "chat"})})
+  await waitFor(() => expect(hook.result.current.forkOperations).toEqual(retained))
+  expect(mocks.forkRecords.mock.calls.at(-1)?.[0]).toMatchObject({owner_key: "owner", conversation_id: "chat", scope: {type: "global"}})
+})
+
+it.each(["ordinary", "fork", "lookup-failed", "settings-failed"])("owner/settings qualification is independent of legacy ancestry readiness: %s", async kind => {
+  mocks.capture.mockImplementation(async (_owner, view) => ({status: "legacy_review_required", code: "legacy_review_required", snapshot, view: {...view, owner_key: "owner"}}))
+  let finish!: (value: any) => void
+  mocks.forkCandidate.mockImplementationOnce(() => new Promise(resolve => {finish = resolve}))
+  if (kind === "settings-failed") mocks.forkSettings.mockRejectedValueOnce(new Error("settings unavailable"))
+  const hook = renderHook(() => useHistorySelection())
+  let opening!: Promise<boolean>
+  act(() => {opening = hook.result.current.loadConversation({serverChatId: "chat"})})
+  await waitFor(() => expect(mocks.forkCandidate).toHaveBeenCalled())
+  expect(hook.result.current.settingsMode("chat")).toBe("pending")
+  if (kind === "lookup-failed") {
+    // A failed fresh lookup after a prior ordinary qualification must close the old path too.
+    await act(async () => {finish(null); await opening})
+    mocks.forkCandidate.mockRejectedValueOnce(new Error("lookup unavailable"))
+    await act(async () => {await hook.result.current.refresh()})
+  } else await act(async () => {finish(kind === "ordinary" ? null : {candidate_child_id: "chat"}); await opening})
+  expect(hook.result.current.settingsMode("chat")).toBe(kind.endsWith("failed") ? "pending" : kind)
+  if (!kind.endsWith("failed")) expect(hook.result.current.status).toBe("legacy_review_required")
+  expect(mocks.confirm).not.toHaveBeenCalled()
+})
+
+it.each(["published", "held-success", "held-error"])(
+  "native recovery authority rejects invalidated %s presentation and actions",
+  async (mode) => {
+    const entry: Parameters<HistorySelectionController["dismissRecovery"]>[0] =
+      {
+        scope: { profile_id: "profile", client_session_id: "original-view" },
+        turn: {
+          origin_view: {
+            view_session_id: "original",
+            owner_key: "owner",
+            conversation_id: "chat",
+            interpretation: { kind: "parent_graph_v1" },
+            cursor: { kind: "empty" },
+            selection_revision: 0
+          },
+          selection_digest: "selection",
+          request_context_digest: "request",
+          created_at: 1,
+          input_images: [],
+          persistence: "server",
+          operation_id: "retained-turn",
+          owner_key: "owner",
+          conversation_id: "chat",
+          state: "generated_unsaved",
+          input_text: "private input",
+          result_text: "private result"
+        }
+      }
+    const durable = [entry]
+    mocks.recoveries.mockResolvedValue(durable)
+    const hook = renderHook(() => useHistorySelection())
+    await act(async () => {
+      await hook.result.current.loadConversation({ serverChatId: "chat" })
+    })
+    await waitFor(() => expect(hook.result.current.recoveries).toEqual(durable))
+    let settle!: () => void
+    let reading: Promise<void> | undefined
+    if (mode !== "published") {
+      mocks.recoveries.mockImplementationOnce(
+        () =>
+          new Promise((resolve, reject) => {
+            settle = () =>
+              mode === "held-success"
+                ? resolve(durable)
+                : reject(new Error("private retained read error"))
+          })
+      )
+      act(() => {
+        reading = hook.result.current.refreshRecovery()
+      })
+    }
+    const oldDismiss = hook.result.current.dismissRecovery
+    act(() => mocks.configChanged!())
+    const invalidOwner = hook.result.current.owner
+    expect(invalidOwner?.kind).toBe("native")
+    if (invalidOwner?.kind !== "native")
+      throw new Error("expected native owner")
+    expect(invalidOwner.validate_lease()).toBe(false)
+    if (reading)
+      await act(async () => {
+        settle()
+        await reading
+      })
+    expect(hook.result.current.recoveries).toEqual([])
+    const reads = mocks.recoveries.mock.calls.length
+    await act(async () => {
+      await hook.result.current.refreshRecovery()
+      await oldDismiss(entry)
+    })
+    expect(mocks.recoveries).toHaveBeenCalledTimes(reads)
+    expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+    expect(hook.result.current.recoveries).toEqual([])
+    expect(hook.result.current.recoveryError).toBeNull()
+    expect(durable).toEqual([entry])
+    await act(async () => {
+      await hook.result.current.loadConversation({ serverChatId: "chat" })
+    })
+    await waitFor(() => expect(hook.result.current.recoveries).toEqual(durable))
+    await act(async () => {
+      await hook.result.current.dismissRecovery(entry)
+    })
+    expect(mocks.dismissRecovery).toHaveBeenCalledExactlyOnceWith(
+      entry.scope,
+      expect.objectContaining({ owner_key: "owner", conversation_id: "chat" }),
+      "retained-turn"
+    )
+  }
+)
+
+it("local recovery remains available after remote account invalidation but refuses another profile's dismissal", async () => {
+  const entry: Parameters<HistorySelectionController["dismissRecovery"]>[0] = {
+    scope: { profile_id: "profile", client_session_id: "old-local-view" },
+    turn: {
+      origin_view: {
+        view_session_id: "original",
+        owner_key: "owner",
+        conversation_id: "chat",
+        interpretation: { kind: "parent_graph_v1" },
+        cursor: { kind: "empty" },
+        selection_revision: 0
+      },
+      selection_digest: "selection",
+      request_context_digest: "request",
+      created_at: 1,
+      input_images: [],
+      persistence: "server",
+      operation_id: "local-turn",
+      owner_key: "owner",
+      conversation_id: "chat",
+      state: "unknown",
+      input_text: "local input",
+      result_text: ""
+    }
+  }
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await hook.result.current.loadConversation({ serverChatId: "remote" })
+  })
+  const oldConfigChanged = mocks.configChanged!
+  await act(async () => {
+    await hook.result.current.open(owner)
+  })
+  mocks.recoveries.mockResolvedValue([entry])
+  act(() => oldConfigChanged())
+  await act(async () => {
+    await hook.result.current.refreshRecovery()
+  })
+  expect(hook.result.current.recoveries).toEqual([entry])
+  await act(async () => {
+    await hook.result.current.dismissRecovery({
+      ...entry,
+      scope: { ...entry.scope, profile_id: "foreign" }
+    })
+  })
+  expect(mocks.dismissRecovery).not.toHaveBeenCalled()
+  await act(async () => {
+    await hook.result.current.dismissRecovery(entry)
+  })
+  expect(mocks.dismissRecovery).toHaveBeenCalledOnce()
+})

@@ -1,7 +1,9 @@
 import pytest
 from fastapi import HTTPException
 
-from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_optimization as pso
+from tldw_Server_API.app.api.v1.endpoints.prompt_studio import (
+    prompt_studio_optimization as pso,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -15,14 +17,21 @@ pytestmark = pytest.mark.unit
         {"strategy_params": {"beam_width": 4, "max_candidates": 2}},
     ],
 )
-def test_beam_search_extra_knobs_invalid(cfg):
+def test_beam_search_with_legacy_knobs_is_rejected(cfg):
     with pytest.raises(HTTPException):
         pso._validate_strategy_config("beam_search", cfg)
 
 
-def test_beam_search_extra_knobs_ok():
-    cfg = {"strategy_params": {"beam_width": 3, "max_candidates": 5, "prune_threshold": 0.5}}
-    pso._validate_strategy_config("beam_search", cfg)
+def test_beam_search_with_formerly_valid_knobs_is_rejected():
+    cfg = {
+        "strategy_params": {
+            "beam_width": 3,
+            "max_candidates": 5,
+            "prune_threshold": 0.5,
+        }
+    }
+    with pytest.raises(HTTPException, match="Unsupported optimization strategy"):
+        pso._validate_strategy_config("beam_search", cfg)
 
 
 @pytest.mark.parametrize(
@@ -32,14 +41,21 @@ def test_beam_search_extra_knobs_ok():
         {"strategy_params": {"initial_temp": 1.0, "min_temp": 2.0}},
     ],
 )
-def test_anneal_extra_knobs_invalid(cfg):
+def test_anneal_with_legacy_knobs_is_rejected(cfg):
     with pytest.raises(HTTPException):
         pso._validate_strategy_config("anneal", cfg)
 
 
-def test_anneal_extra_knobs_ok():
-    cfg = {"strategy_params": {"schedule": "cosine", "initial_temp": 5.0, "min_temp": 1.0}}
-    pso._validate_strategy_config("anneal", cfg)
+def test_anneal_with_formerly_valid_knobs_is_rejected():
+    cfg = {
+        "strategy_params": {
+            "schedule": "cosine",
+            "initial_temp": 5.0,
+            "min_temp": 1.0,
+        }
+    }
+    with pytest.raises(HTTPException, match="Unsupported optimization strategy"):
+        pso._validate_strategy_config("anneal", cfg)
 
 
 @pytest.mark.parametrize(
@@ -50,14 +66,21 @@ def test_anneal_extra_knobs_ok():
         {"strategy_params": {"crossover_rate": 1.5}},
     ],
 )
-def test_genetic_extra_knobs_invalid(cfg):
+def test_genetic_with_legacy_knobs_is_rejected(cfg):
     with pytest.raises(HTTPException):
         pso._validate_strategy_config("genetic", cfg)
 
 
-def test_genetic_extra_knobs_ok():
-    cfg = {"strategy_params": {"selection": "tournament", "elitism": 1, "crossover_rate": 0.4}}
-    pso._validate_strategy_config("genetic", cfg)
+def test_genetic_with_formerly_valid_knobs_is_rejected():
+    cfg = {
+        "strategy_params": {
+            "selection": "tournament",
+            "elitism": 1,
+            "crossover_rate": 0.4,
+        }
+    }
+    with pytest.raises(HTTPException, match="Unsupported optimization strategy"):
+        pso._validate_strategy_config("genetic", cfg)
 
 
 @pytest.mark.parametrize(
@@ -75,13 +98,14 @@ def test_genetic_extra_knobs_ok():
         {"strategy_params": {"trace_top_k": 0}},
     ],
 )
-def test_mcts_knobs_invalid(cfg, monkeypatch):
+def test_mcts_knobs_reject_out_of_range_values(cfg, monkeypatch):
     monkeypatch.setenv("PROMPT_STUDIO_ENABLE_MCTS", "true")
+
     with pytest.raises(HTTPException):
         pso._validate_strategy_config("mcts", cfg)
 
 
-def test_mcts_knobs_ok(monkeypatch):
+def test_mcts_knobs_accept_supported_values(monkeypatch):
     monkeypatch.setenv("PROMPT_STUDIO_ENABLE_MCTS", "true")
     cfg = {
         "strategy_params": {
@@ -97,12 +121,13 @@ def test_mcts_knobs_ok(monkeypatch):
             "scorer_model": "gpt-4o-mini",
         }
     }
+
     pso._validate_strategy_config("mcts", cfg)
 
 
-def test_mcts_rollout_model_explicitly_rejected(monkeypatch):
+def test_mcts_rollout_model_is_explicitly_rejected(monkeypatch):
     monkeypatch.setenv("PROMPT_STUDIO_ENABLE_MCTS", "true")
     cfg = {"strategy_params": {"rollout_model": "gpt-4o-mini"}}
-    with pytest.raises(HTTPException) as exc:
+
+    with pytest.raises(HTTPException, match="unsupported"):
         pso._validate_strategy_config("mcts", cfg)
-    assert "unsupported" in str(exc.value.detail).lower()

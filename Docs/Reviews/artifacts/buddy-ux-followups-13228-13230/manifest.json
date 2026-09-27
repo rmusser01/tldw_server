@@ -1,0 +1,91 @@
+{
+  "base_commit": "4d360afa93ce0872a85754b5ce438af642bf7025",
+  "scope": "TASK-13228, TASK-13229, TASK-13230; source hashes identify final uncommitted inputs",
+  "files": {
+    "ui-tests.log": {
+      "raw_path": "/private/tmp/buddy-ux-ui-reviewed-final.log",
+      "raw_sha256": "2f1b804cd1e46e0930a0c3d84afb38aed6ad4781c4e4c35cfa6dda39a0a7a871",
+      "retained_sha256": "432d9725298be8cf21ca6045908d161994f2e6c7b5176dadf3a7ec9249fe871a"
+    },
+    "backend-tests.log": {
+      "raw_path": "/private/tmp/task-13230-backend-final-2.log",
+      "raw_sha256": "c59b41c985ecea00de05017c170769b3f68b47cf98da77b0c0c7dd0be3441487",
+      "retained_sha256": "c59b41c985ecea00de05017c170769b3f68b47cf98da77b0c0c7dd0be3441487"
+    },
+    "persona-compatibility.log": {
+      "raw_path": "/private/tmp/task-13230-persona-compatibility.log",
+      "raw_sha256": "3fe85edc5fe5141097efd6f3b85e13ae8d991c4975a8dba04d52425914b4a01a",
+      "retained_sha256": "3fe85edc5fe5141097efd6f3b85e13ae8d991c4975a8dba04d52425914b4a01a"
+    },
+    "bandit-production.json": {
+      "raw_path": "/private/tmp/task-13230-backend-final-bandit-production.json",
+      "raw_sha256": "60de1d6000c91087a55fb285ab5e50376e25f29240bf0406ef23dee8db821e8e",
+      "retained_sha256": "10ec0b4077806bf8a383f0b76d1d17c7a3daef9137a2b3f28313722900ac8386"
+    },
+    "eslint.log": {
+      "raw_path": "/private/tmp/buddy-ux-reviewed-eslint.log",
+      "raw_sha256": "c67268401d2a4e846faf5e7b89834c913a11534a6aae14a26bd4bba2a26401d3",
+      "retained_sha256": "dbaf9e8f2a8503e6c4a5aa128d247d6206a62615ad3795ecd00cab361d94d5cd"
+    },
+    "focused-typecheck.log": {
+      "raw_path": "/private/tmp/buddy-ux-typecheck-final.log",
+      "raw_sha256": "9985ca25a29e5adfa0abeb08802a0f2b2a438757aa5ab75e363acc6ebd5ff2dd",
+      "retained_sha256": "9985ca25a29e5adfa0abeb08802a0f2b2a438757aa5ab75e363acc6ebd5ff2dd"
+    },
+    "position-style-delta.log": {
+      "raw_path": "/private/tmp/tldw-task13228-position-style-delta.log",
+      "raw_sha256": "10c3afb3a2ecdf62e1363401d689d262d97323e53bb6850f12f6e4ad28968004",
+      "retained_sha256": "10c3afb3a2ecdf62e1363401d689d262d97323e53bb6850f12f6e4ad28968004"
+    },
+    "null-timestamp-red.log": {
+      "raw_path": "/private/tmp/buddy-label-null-red.log",
+      "raw_sha256": "d2b1108dc3f6773714709c2ff8c10286974b4ba29022ad8b27698df8b3e068f9",
+      "retained_sha256": "c4292cb940c1fd1e03c575115c23eec27877a855641790e9b3f5ea66cd20673a"
+    },
+    "connection-handoff-red.log": {
+      "raw_path": "/private/tmp/buddy-settings-transport-red.log",
+      "raw_sha256": "934f1ced169624cbcd50e2e3c9f97a1b8ea1d010de17a5b18b3f15c7c9e64e69",
+      "retained_sha256": "ad30481187ce0a5eb0c5279b0eb4ff4ef38d5a149952a580801d0699c7e4dbea"
+    },
+    "review-fixes-green.log": {
+      "raw_path": "/private/tmp/buddy-review-fixes-green.log",
+      "raw_sha256": "454608bb9e105bfe449bc51225eec384631fd56473844c731f87bf6c9bf5b400",
+      "retained_sha256": "87c131c2b533afd2a321c6dbe72661ca7e90a83725fa1f927fe4e4a6ff402eb5"
+    },
+    "live-recovery-receipt.json": {
+      "raw_path": "/private/tmp/buddy-ux-followups-20260909/live-recovery-receipt.json",
+      "raw_sha256": "e3daaf310904e6f53a452a4c2fe3162dc3432c7a386c0c3f601bbd0c9402687d",
+      "retained_sha256": "e3daaf310904e6f53a452a4c2fe3162dc3432c7a386c0c3f601bbd0c9402687d"
+    },
+    "chrome-build.json": {
+      "retained_sha256": "c554a9297b65daf88740c107907ee1dabe238cf41dc0d358237454f662259668"
+    },
+    "live-ui-observations.json": {
+      "retained_sha256": "8b74843ed2665b6f0dd340606b324db44d965a6977d36914e6387393e10f4ad4"
+    }
+  },
+  "sources": {
+    "apps/packages/ui/src/components/Common/PersonaBuddy/BuddyInteraction.tsx": "7bbcf6d5423570a6312de9b41ac4bfd238839d1fffd0458c06df787c664443da",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/BuddyManagementModal.tsx": "ed5d4e174664697cf26df12af37c3f443acdeddef05053f7967292ebe2a47fcc",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/IndependentBuddyHost.tsx": "44c07290779bd9b181272f07ab8553a1940b492371af81237f8a2ea0c8182b2f",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyInteraction.test.tsx": "fc9e717443917aecd4d5f3b81ba45cbaa7b69bb1495e0e429fa26315bd5b63ee",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx": "bf3056b44069b0e9424b6f87d43a28c6831c9dd88e350117c7a80ebc60551445",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/IndependentBuddyHost.test.tsx": "173627dea22817b1487767ecbfae96400195cbac9a0a7f65da23adf0e37ef8a9",
+    "apps/packages/ui/src/services/__tests__/buddies.test.ts": "163c58c24bc9064ab48a7f3de556cd70e33131c986831d13928d473603ca45cc",
+    "apps/packages/ui/src/services/buddies.ts": "0f25f787a62c4036970cfd024a9c5e78d2c40f678f9ccb62b34ceb6619326b83",
+    "apps/packages/ui/src/store/__tests__/persona-buddy-shell.test.ts": "ba77bae7138f6c35bf5036de6e4e7e08128d1e873b8b96b6ef69693b4eed2cd5",
+    "apps/packages/ui/src/store/persona-buddy-shell.ts": "7b705a88edfb6838ed40e62217c678322297dda169dc76b961365e6d4f76404a",
+    "tldw_Server_API/app/api/v1/endpoints/buddies.py": "84384307a205d08bde281a567a3d21af0ebad5e265438a2c274c6476dd8598ad",
+    "tldw_Server_API/app/api/v1/endpoints/chat.py": "517434937812c785f50fffc021bf7ca341def8069f85384a750dfec1eabf549b",
+    "tldw_Server_API/app/api/v1/schemas/buddies.py": "e385e9eb0ec616c5d6568249e01226e26ae376e05e3bcf0b507b90b04a3c27c7",
+    "tldw_Server_API/app/core/Buddy/service.py": "53482b4befef3f8696b075482cd227fda42ddd64107a1a08833ea1e675f1158d",
+    "tldw_Server_API/app/core/Buddy/turns.py": "1fe1ad2a4125d13c7b7043c9c45132ff0482d1faf443190fa33ed464d0e1c506",
+    "tldw_Server_API/app/core/Chat/persistence_service.py": "a1ec4ed022a6e1af4f87cb974815638d2faf18c1fe6835e2a73015b9e1cbe9c0",
+    "tldw_Server_API/tests/Persona/test_buddy_turns.py": "d6afa0eeb95d14b8af1886162bd02eb515d66a6075abba6680abbbcfdeee86f7",
+    "tldw_Server_API/tests/Persona/test_independent_buddies.py": "6106c9714cf4c784f89de3d3d01c570dbe10c66968daae02b5b008bb2fc55bdb",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/buddy-conversation-labels.test.ts": "35108b727c63648892105a461d0d4159d1b8605812ef378298c5e2961c929444",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/buddy-conversation-labels.ts": "c0832171726808b68b2c2da895154a29c1a9cb7e4634ddeac199181794695563",
+    "tldw_Server_API/tests/Persona/test_buddy_reply_settings.py": "345c3b0d4c37ed9402927cf80ed22e854d842c77a5697f4ba052c0ff3be96024",
+    "tldw_Server_API/tests/Persona/test_buddy_workspace_model_handoff.py": "efbd6629681c1eb70c9965c2f5cc5a2706b3a71035c4c8506fc08d016b96fb4a"
+  }
+}

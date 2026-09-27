@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Iterable, Mapping
 from typing import Any
+from urllib.parse import urlsplit
 
 from loguru import logger
 
+from tldw_Server_API.app.core.AuthNZ.byok_config import is_runtime_base_url_override
+from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
 )
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
-from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
+from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
+    encode_huggingface_model_path,
+    encode_provider_model_path,
+    merge_extra_body,
+    merge_extra_headers,
+)
 from tldw_Server_API.app.core.LLM_Calls.sse import (
     finalize_stream,
     is_done_line,
@@ -23,6 +31,65 @@ from .base import ChatProvider
 
 # Expose a patchable factory for tests; production uses the centralized client
 http_client_factory = _hc_create_client
+_DEFAULT_API_BASE = "https://api-inference.huggingface.co/v1"
+_DEFAULT_ROUTER_BASE = "https://router.huggingface.co/hf-inference"
+
+
+def _optional_config_text(value: Any) -> str | None:
+    """Normalize an optional config value without treating whitespace as configured."""
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _configuration_error() -> Exception:
+    """Build one bounded configuration error without reflecting endpoint data."""
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+
+    return ChatConfigurationError(
+        provider="huggingface",
+        message="Invalid Hugging Face endpoint configuration.",
+    )
+
+
+def _validated_base_url(value: Any) -> str:
+    """Return one normalized HTTP(S) base URL or fail closed."""
+    normalized = _optional_config_text(value)
+    if normalized is None:
+        raise _configuration_error()
+    try:
+        parsed = urlsplit(normalized)
+        _ = parsed.port
+    except (TypeError, ValueError):
+        raise _configuration_error() from None
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or "\\" in normalized
+        or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in normalized)
+    ):
+        raise _configuration_error()
+    return normalized.rstrip("/")
+
+
+def _configured_chat_path(cfg: Mapping[str, Any], selected_base: str) -> str:
+    """Resolve and validate the path after the final endpoint has been selected."""
+    explicit_path = _optional_config_text(cfg.get("api_chat_path"))
+    if explicit_path is None:
+        explicit_path = _optional_config_text(cfg.get("huggingface_api_chat_path"))
+    if explicit_path is not None:
+        try:
+            return encode_provider_model_path(explicit_path.strip("/"))
+        except ValueError:
+            raise _configuration_error() from None
+
+    path_segments = [segment for segment in urlsplit(selected_base).path.split("/") if segment]
+    return "chat/completions" if path_segments and path_segments[-1] == "v1" else "v1/chat/completions"
 
 
 class HuggingFaceAdapter(ChatProvider):
@@ -68,39 +135,63 @@ class HuggingFaceAdapter(ChatProvider):
 
     @staticmethod
     def _mask_headers(headers: dict[str, str]) -> dict[str, str]:
-        masked = {}
-        for k, v in headers.items():
-            masked[k] = "***" if k.lower() == "authorization" else v
-        return masked
+        return dict.fromkeys(headers, "***")
 
     def _resolve_url_and_headers(self, request: dict[str, Any]) -> dict[str, Any]:
-        cfg = (request.get("app_config") or {}).get("huggingface_api", {})
-        override_base = request.get("base_url")
-        api_base = cfg.get("api_base_url")  # may be None
-        use_router = str(
-            cfg.get("use_router_url_format", cfg.get("huggingface_use_router_url_format", "false"))
-        ).lower() == "true"
-        chat_path = cfg.get("api_chat_path") or cfg.get("huggingface_api_chat_path")
-        if not chat_path:
-            base = (api_base or "").rstrip("/")
-            if base.endswith("/v1") or "api-inference.huggingface.co/v1" in base:
-                chat_path = "chat/completions"
-            else:
-                chat_path = "v1/chat/completions"
+        """Resolve a Hugging Face endpoint from trusted server-built request state.
+
+        ``app_config`` is an internal adapter contract. Public request handlers
+        must reject it and remove undeclared fields before adapter dispatch.
+        """
+        app_config = request.get("app_config") or {}
+        cfg_value = app_config.get("huggingface_api", {}) if isinstance(app_config, Mapping) else {}
+        cfg = cfg_value if isinstance(cfg_value, Mapping) else {}
+        override_base = _optional_config_text(request.get("base_url"))
+        api_base = _optional_config_text(cfg.get("api_base_url"))
+        runtime_base_override = is_runtime_base_url_override(
+            cfg.get("_runtime_base_url_override")
+        )
+        if runtime_base_override and api_base is None:
+            raise _configuration_error()
+        if runtime_base_override:
+            _validated_base_url(api_base)
+
+        use_router_value = _optional_config_text(cfg.get("use_router_url_format"))
+        if use_router_value is None:
+            use_router_value = _optional_config_text(
+                cfg.get("huggingface_use_router_url_format")
+            )
+        use_router = (use_router_value or "false").casefold() == "true"
+
         model = request.get("model") or cfg.get("model_id") or cfg.get("model")
         if not model:
             model = "unspecified"
         if use_router:
-            base = override_base or (
-                cfg.get("router_base_url")
-                or cfg.get("huggingface_router_base_url")
-                or "https://router.huggingface.co/hf-inference"
+            router_base = _optional_config_text(cfg.get("router_base_url"))
+            if router_base is None:
+                router_base = _optional_config_text(cfg.get("huggingface_router_base_url"))
+            selected_base = (
+                override_base
+                or (api_base if runtime_base_override else None)
+                or router_base
+                or _DEFAULT_ROUTER_BASE
             )
-            base = str(base).rstrip("/")
-            url = f"{base}/models/{model.strip('/')}/{chat_path.lstrip('/')}"
+            base = _validated_base_url(selected_base)
+            chat_path = _configured_chat_path(cfg, base)
+            try:
+                model_path = encode_huggingface_model_path(model)
+            except ValueError:
+                from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+
+                raise ChatBadRequestError(
+                    provider=self.name,
+                    message="Invalid provider model identifier.",
+                ) from None
+            url = f"{base}/models/{model_path}/{chat_path}"
         else:
-            base = str(override_base or api_base or "https://api-inference.huggingface.co/v1").rstrip("/")
-            url = f"{base}/{chat_path.lstrip('/')}"
+            base = _validated_base_url(override_base or api_base or _DEFAULT_API_BASE)
+            chat_path = _configured_chat_path(cfg, base)
+            url = f"{base}/{chat_path}"
         headers = {"Content-Type": "application/json"}
         api_key = request.get("api_key") or cfg.get("api_key")
         if api_key:
@@ -115,9 +206,15 @@ class HuggingFaceAdapter(ChatProvider):
                 try:
                     return float(t)
                 except (TypeError, ValueError) as timeout_parse_error:
-                    logger.debug("HuggingFace adapter timeout value is not numeric", exc_info=timeout_parse_error)
+                    logger.debug(
+                        "HuggingFace adapter timeout value is not numeric error_type={}",
+                        type(timeout_parse_error).__name__,
+                    )
         except Exception as config_error:
-            logger.debug("HuggingFace adapter failed to read timeout config", exc_info=config_error)
+            logger.debug(
+                "HuggingFace adapter failed to read timeout config error_type={}",
+                type(config_error).__name__,
+            )
         if fallback is not None:
             return float(fallback)
         return float(self.capabilities().get("default_timeout_seconds", 120))
@@ -161,49 +258,11 @@ class HuggingFaceAdapter(ChatProvider):
         return payload
 
     def normalize_error(self, exc: Exception):  # type: ignore[override]
-        from tldw_Server_API.app.core.LLM_Calls.error_utils import (
-            get_http_error_text,
-            get_http_status_from_exception,
-            is_http_status_error,
-            log_http_400_body,
-        )
-        if is_http_status_error(exc):
-            from tldw_Server_API.app.core.Chat.Chat_Deps import (
-                ChatAPIError,
-                ChatAuthenticationError,
-                ChatBadRequestError,
-                ChatProviderError,
-                ChatRateLimitError,
-            )
-            resp = getattr(exc, "response", None)
-            status = get_http_status_from_exception(exc)
-            # Try parsing HF error wrapper {"error": {"message": "...", "type": "..."}}
-            detail = None
-            try:
-                body = resp.json() if resp is not None else None
-            except Exception:
-                body = None
-            log_http_400_body(self.name, exc, body)
-            if isinstance(body, dict):
-                err = body.get("error")
-                if isinstance(err, dict):
-                    msg = (err.get("message") or "").strip()
-                    typ = (err.get("type") or "").strip()
-                    detail = (f"{typ} {msg}" if typ else msg) or None
-            if not detail:
-                detail = get_http_error_text(exc)
-            if status in (400, 404, 422):
-                return ChatBadRequestError(provider=self.name, message=str(detail))
-            if status in (401, 403):
-                return ChatAuthenticationError(provider=self.name, message=str(detail))
-            if status == 429:
-                return ChatRateLimitError(provider=self.name, message=str(detail))
-            if status and 500 <= status < 600:
-                return ChatProviderError(provider=self.name, message=str(detail), status_code=status)
-            return ChatAPIError(provider=self.name, message=str(detail), status_code=status or 500)
+        """Delegate to the shared bounded error policy."""
         return super().normalize_error(exc)
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
         info = self._resolve_url_and_headers(request)
         url = info["url"]
@@ -226,6 +285,10 @@ class HuggingFaceAdapter(ChatProvider):
                             line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
                         except Exception:
                             line = str(raw)
+                        self._raise_if_in_band_provider_error(
+                            line,
+                            phase="stream_response",
+                        )
                         if is_done_line(line):
                             if not seen_done:
                                 seen_done = True
@@ -237,7 +300,7 @@ class HuggingFaceAdapter(ChatProvider):
                     yield from finalize_stream(response=resp, done_already=seen_done)
             return
         except Exception as e:
-            raise self.normalize_error(e) from e
+            raise_detached_error(self.normalize_error(e))
 
     async def achat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self.chat, request, timeout=timeout)
@@ -247,6 +310,7 @@ class HuggingFaceAdapter(ChatProvider):
             yield item
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
         info = self._resolve_url_and_headers(request)
         url = info["url"]
@@ -261,6 +325,8 @@ class HuggingFaceAdapter(ChatProvider):
             with http_client_factory(timeout=resolved_timeout) as client:
                 resp = client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
-                return resp.json()
+                data = resp.json()
+                self._raise_if_in_band_provider_error(data, phase="chat_response")
+                return data
         except Exception as e:
-            raise self.normalize_error(e) from e
+            raise_detached_error(self.normalize_error(e))

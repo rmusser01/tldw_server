@@ -1,0 +1,63 @@
+# Test reachability inventory for api/v1/endpoints modules cited in this ledger — 2026-09-21
+#
+# IMPORTANT: this is IMPORT-GREP REACHABILITY, not measured coverage. No suite was executed.
+# Tests in this repo are NOT findable by path; located with:
+#   grep -rl "endpoints\.<mod>\|endpoints import <mod>\|endpoints\.[a-z_]*\.<mod>" \
+#        tldw_Server_API/tests --include='*.py'
+#
+# module                       test files referencing it
+chat                           78
+persona                        27
+watchlists                     47
+character_chat_sessions        31
+workflows                      39
+notes                          24
+sync                           19
+workspaces                     16
+mcp_unified_endpoint           12
+discord                        8
+slack                          8
+jobs_admin                     7
+character_messages             6
+user_keys                      6
+files                          5
+reading                        5
+billing                        4
+discord_support                3
+slack_support                  3
+workspace_memberships          2
+audio_jobs                     2
+audio_history                  1
+discord_oauth_admin            0
+slack_oauth_admin              0
+admin_rbac                     0
+
+# NOTES ON THE ZEROES — neither is "untested":
+#   discord_oauth_admin / slack_oauth_admin : 0 direct importers, but reached through the
+#     discord.py / slack.py routes by tests/Discord/test_discord_oauth_lifecycle.py and
+#     tests/Slack/test_slack_oauth_lifecycle.py (84.9% clones of each other).
+#   admin_rbac : 0 by the module-name grep above, but 5 files match the bare string "admin_rbac":
+#     tests/Admin/test_admin_rate_limits_api.py, tests/Admin/test_admin_split_compat_shims.py,
+#     tests/Admin/test_admin_users_role_consistency.py, tests/Admin/test_admin_integration_smoke.py,
+#     tests/AuthNZ/unit/test_admin_rbac_error_mapping.py.
+#     None of them exercises the 69 hand-written RBAC SQL statements.
+#
+# SPECIFIC TESTS READ, AND WHAT THEY DO / DO NOT PROTECT:
+#   tests/Chat/unit/test_chat_share_links_api.py:234-241
+#     test_share_link_resolve_rejects_malformed_token sends "not-a-valid-token" (no "."), which is
+#     rejected by the arity check at chat.py:6498. It never reaches the base64 decode at :6507.
+#     -> does NOT downgrade finding api-endpoints-1.
+#   tests/Files/test_files_endpoint.py:146,173,221,728
+#     cover export_expires_at = None, past, and future, all produced by datetime.isoformat().
+#     -> does NOT downgrade finding api-endpoints-11 (the unparseable-value path).
+#   tests/Admin/test_admin_rate_limits_api.py:40,69,179-195,206-215,242-245
+#     monkeypatches _get_is_postgres_backend_fn and drives a stub DB whose _is_sqlite flag selects
+#     the branch; asserts which SQL STRING was passed. No Postgres executes it.
+#     -> does NOT downgrade finding api-endpoints-12.
+#   tests/Discord/test_discord_command_routing.py:71-79 and
+#   tests/Slack/test_slack_command_routing.py:60-68  (both MODIFIED, uncommitted)
+#     now assert GET /{discord|slack}/jobs/{job_id} returns 401/403. Both edits carry the same
+#     4-line rationale comment verbatim. -> evidence for finding api-endpoints-3.
+#   tests/lint/test_endpoint_auth_deps_import_boundary.py
+#     AST import ratchet with a ban list + required re-export set. The precedent for the
+#     raw-SQL ratchet proposed in stage 1. Covers auth-dep imports only today.

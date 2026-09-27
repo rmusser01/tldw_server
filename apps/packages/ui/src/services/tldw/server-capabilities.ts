@@ -1,6 +1,15 @@
-import { tldwClient } from "./TldwApiClient"
+import {
+  isActiveCookieSessionConfig,
+  tldwClient,
+  type TldwConfig
+} from "./TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
+import {
+  getRuntimeSingleUserApiKeyOverride
+} from "@/services/tldw/runtime-auth-override"
+import { isPlaceholderApiKey } from "@/utils/api-key"
 import { createSafeStorage } from "@/utils/safe-storage"
 
 export type ServerCapabilities = {
@@ -725,12 +734,47 @@ const isCapabilitiesCachePayload = (
   )
 }
 
-const getCapabilitiesCacheKey = async (): Promise<string> => {
-  try {
-    const cfg = await tldwClient.getConfig()
-    return buildChatSurfaceScopeKeyFromConfig(cfg)
-  } catch {
-    return buildChatSurfaceScopeKeyFromConfig(null)
+const hasUsableApiKey = (value: unknown): boolean => {
+  const key = String(value || "").trim()
+  return Boolean(key && !isPlaceholderApiKey(key))
+}
+
+const shouldProbeIngestionSourceCapabilities = (
+  config: TldwConfig | null
+): boolean => {
+  if (isHostedTldwDeployment()) return true
+  if (isActiveCookieSessionConfig(config)) return true
+  if (hasUsableApiKey(getRuntimeSingleUserApiKeyOverride())) {
+    return true
+  }
+  if (config?.authMode === "multi-user") {
+    return Boolean(String(config.accessToken || "").trim())
+  }
+  return hasUsableApiKey(config?.apiKey)
+}
+
+type CapabilitiesFetchContext = {
+  cacheKey: string
+  shouldProbeIngestionSourceCapabilities: boolean
+}
+
+const getCapabilitiesFetchContext = async (): Promise<CapabilitiesFetchContext> => {
+  const config = await tldwClient.getConfig().catch(() => null)
+  const runtimeApiKey = isHostedTldwDeployment()
+    ? null
+    : getRuntimeSingleUserApiKeyOverride()
+  const cacheConfig = runtimeApiKey
+    ? {
+        ...(config || {}),
+        authMode: "single-user" as const,
+        apiKey: runtimeApiKey
+      }
+    : config
+
+  return {
+    cacheKey: buildChatSurfaceScopeKeyFromConfig(cacheConfig),
+    shouldProbeIngestionSourceCapabilities:
+      shouldProbeIngestionSourceCapabilities(config)
   }
 }
 
@@ -770,7 +814,9 @@ const persistCapabilities = async (
   }
 }
 
-const fetchCapabilitiesFromServer = async (): Promise<ServerCapabilities> => {
+const fetchCapabilitiesFromServer = async (
+  shouldProbeSourceCapabilities: boolean
+): Promise<ServerCapabilities> => {
   const startedAt = Date.now()
   capabilitiesDiagnostics.networkFetches += 1
   let spec: any | null = null
@@ -813,7 +859,7 @@ const fetchCapabilitiesFromServer = async (): Promise<ServerCapabilities> => {
     docsInfo
   )
 
-  if (capabilities.hasIngestionSources) {
+  if (capabilities.hasIngestionSources && shouldProbeSourceCapabilities) {
     try {
       const sourceCapabilities =
         await bgRequest<IngestionSourceCapabilitiesResponse, any>({
@@ -835,7 +881,8 @@ const fetchCapabilitiesFromServer = async (): Promise<ServerCapabilities> => {
 export const getServerCapabilities = async (
   options?: { forceRefresh?: boolean }
 ): Promise<ServerCapabilities> => {
-  const cacheKey = await getCapabilitiesCacheKey()
+  const { cacheKey, shouldProbeIngestionSourceCapabilities } =
+    await getCapabilitiesFetchContext()
   const now = Date.now()
   const forceRefresh = options?.forceRefresh === true
   capabilitiesDiagnostics.calls += 1
@@ -877,7 +924,9 @@ export const getServerCapabilities = async (
   }
 
   const request = (async () => {
-    const capabilities = await fetchCapabilitiesFromServer()
+    const capabilities = await fetchCapabilitiesFromServer(
+      shouldProbeIngestionSourceCapabilities
+    )
     const payload: CapabilitiesCachePayload = {
       key: cacheKey,
       fetchedAt: Date.now(),

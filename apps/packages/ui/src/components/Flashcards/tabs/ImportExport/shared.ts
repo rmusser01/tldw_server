@@ -5,6 +5,7 @@ import type {
 } from "@/services/flashcards"
 import type { FlashcardsGenerateIntent } from "@/services/tldw/flashcards-generate-handoff"
 import type { SourceReviewFlashcardsIntent } from "@/services/tldw/source-review-handoff"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
 
 import { getUtf8ByteLength } from "../../utils/field-byte-limit"
 
@@ -50,6 +51,7 @@ export interface GenerateSourceContext {
 }
 
 export interface GeneratePanelProps {
+  generationScope?: ServicePromptSnapshot | null
   initialIntent?: FlashcardsGenerateIntent | null
   sourceReviewIntent?: SourceReviewFlashcardsIntent | null
 }

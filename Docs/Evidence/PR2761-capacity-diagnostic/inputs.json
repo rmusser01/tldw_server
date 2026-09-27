@@ -1,0 +1,18 @@
+{
+  "source_revision": "910c526513a03b305b2976fec6f1dee73bacc1e9",
+  "input_sha256": {
+    "preset.json": "34b2108b2356ac1be44c4e1f54982d765603fea1f6b21e1ce60864b9dda957fe",
+    "dataset.json": "f38e20c4d39fee286dfa6342002739ffddd2f25b0d99060ba5b9cd853add6561",
+    "source/Dockerfiles/Dockerfile.prod": "6b25c7ba0495d7195c6340733d326f33701d31dfc5125d4358c35a1730629c68",
+    "source/Helper_Scripts/load_tests/release_soak.py": "8fea5016457ace3a0817c50ff2a78da4f5b67e274a1ef9b14d364268bf5d0531"
+  },
+  "source_api_file_count": 8631,
+  "source_api_manifest_sha256": "e7df6d8bf6c2548a7cf40e063dfdc932882c0072ce4983000b05220e63492fb6",
+  "image_runtime_source_check": "not run; image export canceled",
+  "private_preparation_sha256": {
+    "controller.py": "f5d73c53832df849c63ff77ee5974bc747cae5ecebfa7aada784e68f70a7d793",
+    "bootstrap_actor.py": "10eef6ee2e149717af092be6e8be1dcb0d861b56565a59e2031fd00705d4796b",
+    "pg_holder.py": "ae1f4a70220e2591d36bdb1aa7f4e79340ba8c5ead754087d0ac0ffd1f021b16"
+  },
+  "source_manifest_scope": "all tracked API source files, including tests excluded from image by .dockerignore; input inventory only"
+}

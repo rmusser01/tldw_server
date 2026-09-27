@@ -5,19 +5,19 @@ Tests focus on the OpenAI-compatible schema validation, message formats,
 and request parameter validation without any external dependencies.
 """
 
+from typing import Any
+
 import pytest
-from typing import Dict, Any, List
 from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
-    ChatCompletionRequest,
-    ChatCompletionUserMessageParam,
-    ChatCompletionSystemMessageParam,
     ChatCompletionAssistantMessageParam,
-    ChatCompletionMessageParam,
+    ChatCompletionRequest,
+    ChatCompletionSystemMessageParam,
+    ChatCompletionUserMessageParam,
+    FunctionDefinition,
     ResponseFormat,
     ToolDefinition,
-    FunctionDefinition,
 )
 
 # ========================================================================
@@ -90,7 +90,7 @@ class TestChatCompletionRequest:
     """Test ChatCompletionRequest model validation."""
 
     @staticmethod
-    def _bounded_research_context_payload() -> Dict[str, Any]:
+    def _bounded_research_context_payload() -> dict[str, Any]:
         return {
             "run_id": "run_123",
             "query": "battery recycling supply chain",
@@ -115,6 +115,32 @@ class TestChatCompletionRequest:
         assert request.model == "gpt-3.5-turbo"
         assert len(request.messages) == 1
         assert request.messages[0].role == "user"
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "unsafe_value",
+        [
+            "allowed\r\nX-Injected: attacker",
+            "allowed\x00attacker",
+            "allowed\x7fattacker",
+        ],
+    )
+    def test_extra_header_values_reject_controls(
+        self,
+        unsafe_value: str,
+    ) -> None:
+        with pytest.raises(ValidationError) as exc_info:
+            ChatCompletionRequest(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": "Hello"}],
+                extra_headers={"X-Provider-Extension": unsafe_value},
+            )
+
+        assert exc_info.value.errors()[0]["loc"] == (
+            "extra_headers",
+            "X-Provider-Extension",
+        )
+        assert "attacker" not in str(exc_info.value)
 
     @pytest.mark.unit
     @pytest.mark.parametrize("api_provider", ["llama", "llama.cpp"])
@@ -538,14 +564,18 @@ class TestEdgeCasesAndErrors:
 
     @pytest.mark.unit
     def test_extra_fields_allowed(self):
-        """Test that extra fields are allowed (for provider-specific params)."""
+        """Test that undeclared fields remain accepted for parse compatibility."""
         request = ChatCompletionRequest(
             model="gpt-3.5-turbo",
             messages=[{"role": "user", "content": "test"}],
-            custom_param="custom_value",  # Extra field
-            another_param=123  # Another extra field
+            custom_param="custom_value",
+            another_param=123,
         )
-        # Should not raise an error due to ConfigDict(extra="allow")
+        # Dispatch only forwards declared fields and the explicit extra_body container.
+        assert request.model_extra == {
+            "custom_param": "custom_value",
+            "another_param": 123,
+        }
 
 
 class TestContinuationSchema:

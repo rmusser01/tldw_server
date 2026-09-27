@@ -141,7 +141,7 @@ def _chat_lane(fields: dict[tuple[str, str], dict[str, Any]]) -> dict[str, Any]:
         )
 
     status = "ready_with_warnings"
-    warnings: list[str] = []
+    warnings: list[str] = ["Chat provider settings have not been verified. Validate the provider and complete a first chat to check them."]
     if default_api == "openai" and _field_is_placeholder(fields, "API", "openai_api_key"):
         warnings.append("Hosted provider key is not configured yet.")
 
@@ -170,6 +170,7 @@ def _embeddings_lane(fields: dict[tuple[str, str], dict[str, Any]]) -> dict[str,
         LANE_EMBEDDINGS_RAG,
         status=status,
         selection={"provider": provider, "model": model},
+        warnings=["Embedding model availability has not been verified. Provision or verify the model before using vector search."] if status == "ready_with_warnings" else [],
     )
 
 

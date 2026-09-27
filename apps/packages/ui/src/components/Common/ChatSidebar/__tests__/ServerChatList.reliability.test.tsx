@@ -19,7 +19,7 @@ const historyState = vi.hoisted(() => ({
 
 const storeState = vi.hoisted(() => ({
   value: {
-    serverChatId: null,
+    serverChatId: null as string | null,
     setServerChatTitle: vi.fn(),
     setServerChatState: vi.fn(),
     setServerChatVersion: vi.fn(),
@@ -40,6 +40,7 @@ const mocks = vi.hoisted(() => ({
   clearChat: vi.fn(),
   selectServerChat: vi.fn(),
   setChatTypeFilter: vi.fn(),
+  chatTypeFilter: "all",
   setPinnedChatIds: vi.fn()
 }))
 
@@ -105,7 +106,7 @@ vi.mock("@/hooks/useServerChatHistory", () => ({
 }))
 
 vi.mock("@/hooks/useSetting", () => ({
-  useSetting: () => ["all", mocks.setChatTypeFilter]
+  useSetting: () => [mocks.chatTypeFilter, mocks.setChatTypeFilter]
 }))
 
 vi.mock("@/hooks/chat/useClearChat", () => ({
@@ -168,13 +169,16 @@ vi.mock("@/utils/data-tables-create-flow", () => ({
 vi.mock("../ServerChatRow", () => ({
   ServerChatRow: ({
     chat,
-    onDeleteChat
+    onDeleteChat,
+    onSelectChat
   }: {
     chat: { id: string; title: string }
     onDeleteChat: (chat: { id: string; title: string }) => void | Promise<void>
+    onSelectChat: (chat: { id: string; title: string }) => void
   }) => (
     <div>
       <span>{chat.title}</span>
+      <button onClick={() => onSelectChat(chat)}>Select {chat.title}</button>
       <button onClick={() => void onDeleteChat(chat)}>delete</button>
     </div>
   )
@@ -194,6 +198,8 @@ const createChat = (overrides: Partial<{ id: string; title: string; version: num
 describe("ServerChatList reliability states", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.chatTypeFilter = "all"
+    storeState.value.serverChatId = null
     historyState.value = {
       data: [],
       total: 0,
@@ -223,6 +229,34 @@ describe("ServerChatList reliability states", () => {
         "model-catalog": false
       }
     })
+  })
+
+  it.each([false, true])("reports an accepted row selection, including the current conversation: %s", (alreadySelected) => {
+    const chat = createChat()
+    historyState.value.data = [chat]
+    historyState.value.total = 1
+    historyState.value.hasUsableData = true
+    if (alreadySelected) storeState.value.serverChatId = chat.id
+    const onConversationSelected = vi.fn()
+    render(<ServerChatList searchQuery="" onConversationSelected={onConversationSelected} />)
+    fireEvent.click(screen.getByRole("button", { name: "Select Recovered chat" }))
+    expect(onConversationSelected).toHaveBeenCalledTimes(1)
+    expect(mocks.selectServerChat).toHaveBeenCalledTimes(alreadySelected ? 0 : 1)
+    if (!alreadySelected) {
+      expect(mocks.selectServerChat.mock.invocationCallOrder[0]).toBeLessThan(onConversationSelected.mock.invocationCallOrder[0])
+    }
+  })
+
+  it.each(["bulk", "trash"])("does not report conversation selection for %s actions", (mode) => {
+    historyState.value.data = [createChat()]
+    historyState.value.total = 1
+    historyState.value.hasUsableData = true
+    if (mode === "trash") mocks.chatTypeFilter = "trash"
+    const onConversationSelected = vi.fn()
+    render(<ServerChatList searchQuery="" selectionMode={mode === "bulk"} onConversationSelected={onConversationSelected} />)
+    fireEvent.click(screen.getByRole("button", { name: "Select Recovered chat" }))
+    expect(onConversationSelected).not.toHaveBeenCalled()
+    expect(mocks.selectServerChat).not.toHaveBeenCalled()
   })
 
   it("shows a recoverable refresh warning when old chat data is still usable", () => {

@@ -55,8 +55,29 @@ const saveManualConnection = async (
   }
   await page.getByRole("button", { name: "Save", exact: true }).click()
   await expect
-    .poll(() => page.evaluate(() => localStorage.getItem("tldwConfig")))
-    .not.toBeNull()
+    .poll(() =>
+      page.evaluate(({ remember }) => {
+        const stored = (remember ? localStorage : sessionStorage).getItem(
+          remember ? "tldwConfig" : "tldwManualSessionApiKey"
+        )
+        if (!stored) return null
+
+        try {
+          const record: unknown = JSON.parse(stored)
+          return record && typeof record === "object" && !Array.isArray(record)
+            ? record
+            : null
+        } catch {
+          return null
+        }
+      }, { remember })
+    )
+    .toMatchObject({
+      credentialSource: "manual",
+      apiKeyPersistence: remember ? "device" : "session",
+      apiKeyServerOrigin: serverUrl,
+      apiKey: MANUAL_API_KEY
+    })
 }
 
 const expectProductionRagRequest = async (

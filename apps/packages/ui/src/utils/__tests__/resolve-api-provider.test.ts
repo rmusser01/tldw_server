@@ -122,6 +122,14 @@ describe("resolveApiProviderForModel", () => {
 })
 
 describe("parseProviderQualifiedModelSelection", () => {
+  it.each(["llama", "llama.cpp", "llama-cpp", "llama_cpp", "llamacpp"])("preserves the full model suffix for known %s aliases", provider => {
+    const modelId = "../../../models/Gemma:Q4.gguf"
+    for (const prefix of ["", "tldw:"]) {
+      expect(parseProviderQualifiedModelSelection(`${prefix}${provider}:${modelId}`)).toEqual({
+        raw: `${prefix}${provider}:${modelId}`, modelId, provider: "llama.cpp", isProviderQualified: true
+      })
+    }
+  })
   it("splits known provider:model selections without changing model ids", () => {
     expect(parseProviderQualifiedModelSelection("OpenAI:gpt-4o")).toEqual({
       raw: "OpenAI:gpt-4o",

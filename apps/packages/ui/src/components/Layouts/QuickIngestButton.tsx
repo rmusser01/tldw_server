@@ -18,6 +18,8 @@ import {
   type QuickIngestPendingOpenOptions,
 } from "@/utils/quick-ingest-open"
 
+import { useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
+
 const QuickIngestModal = lazy(() =>
   import("../Common/QuickIngestWizardModal").then((m) => ({
     default: m.QuickIngestWizardModal
@@ -39,6 +41,7 @@ type QuickIngestEventsOptions = {
 }
 
 export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
+  const authorityKey = useQuickIngestAuthority()
   const focusTriggerRef = options?.focusTriggerRef
   const [storedPresetConfigs, , presetStorageMeta] = useStorage<PresetMap>(
     "quickIngestPresetConfigs",
@@ -73,7 +76,7 @@ export const useQuickIngestEvents = (options?: QuickIngestEventsOptions) => {
   const quickIngestOpen = session?.visibility === "visible"
   const hasQuickIngestSession = Boolean(session)
   const storageAndSessionReady =
-    quickIngestSessionHydrated && !presetStorageMeta.isLoading
+    Boolean(authorityKey) && quickIngestSessionHydrated && !presetStorageMeta.isLoading
   const quickIngestReady =
     storageAndSessionReady &&
     (!quickIngestOpen || preparedSessionId === session?.id)

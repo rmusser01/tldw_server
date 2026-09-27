@@ -43,6 +43,8 @@ type DocumentProcessingTurnReservation = {
 
 export type UsePlaygroundSubmitDeps = {
   form: any
+  beginPromptAssistReset: () => number
+  markPromptAssistAttemptSaved: (attemptId: number) => void
   isSending: boolean
   isConnectionReady: boolean
   webSearch: boolean
@@ -134,6 +136,8 @@ const toCancelledDocumentProcessingMetadata = (
 export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   const {
     form,
+    beginPromptAssistReset,
+    markPromptAssistAttemptSaved,
     isSending,
     isConnectionReady,
     webSearch,
@@ -376,7 +380,6 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           return
         }
       }
-
       if (!intent.isImageCommand && uploadedFiles.length > 0) {
         if (!documentPreparation) return
         const waitingMetadata = buildPendingDocumentProcessingMetadata(
@@ -504,6 +507,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           }
         }
       }
+      const promptAssistAttemptId = beginPromptAssistReset()
       form.reset()
       clearSelectedDocuments()
       clearUploadedFiles()
@@ -565,11 +569,11 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
 
       await dispatch(payload, {
         afterSend: (result) => {
-          if (
-            messageForModel &&
-            isChatSubmitSuccess(normalizeChatSubmitResult(result as any))
-          ) {
-            clearImportedSidepanelContext?.()
+          if (isChatSubmitSuccess(normalizeChatSubmitResult(result as any))) {
+            markPromptAssistAttemptSaved(promptAssistAttemptId)
+            if (messageForModel) {
+              clearImportedSidepanelContext?.()
+            }
           }
         }
       })

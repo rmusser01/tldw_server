@@ -349,6 +349,7 @@ def create_prompt_studio_database(
     client_id: str,
     *,
     db_path: Union[str, Path],
+    tenant_user_id: Optional[str] = None,
     backend: Optional[DatabaseBackend] = None,
     config: Optional[configparser.ConfigParser] = None,
 ) -> PromptStudioDatabase:
@@ -361,6 +362,7 @@ def create_prompt_studio_database(
     return PromptStudioDatabase(
         db_path=str(target_path),
         client_id=client_id,
+        tenant_user_id=tenant_user_id,
         backend=backend_to_use,
         config=cfg,
     )

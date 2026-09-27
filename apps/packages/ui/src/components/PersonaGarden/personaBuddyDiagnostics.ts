@@ -257,6 +257,26 @@ const LIVE_VOICE_WARNING_DIAGNOSTICS: Record<
     detail: string
   }
 > = {
+  voice_prepare_unavailable: {
+    value: "Voice setup unavailable",
+    state: "degraded",
+    detail: "Check speech models and conversation settings, then retry Start."
+  },
+  voice_prepare_timeout: {
+    value: "Voice setup timed out",
+    state: "degraded",
+    detail: "Check speech models and server availability, then retry Start."
+  },
+  voice_playback_error: {
+    value: "Audio playback failed",
+    state: "degraded",
+    detail: "Check browser audio permissions and your output device, then retry Start."
+  },
+  voice_turn_failed: {
+    value: "Voice turn failed",
+    state: "degraded",
+    detail: "Check server settings, then retry Start."
+  },
   barge_in_disabled: {
     value: "Barge-in off",
     state: "healthy",
@@ -381,7 +401,11 @@ const WAKE_WARNING_DIAGNOSTICS: Record<
 }
 
 const LIVE_VOICE_DYNAMIC_WARNING_CODES = new Set<PersonaLiveVoiceWarningReasonCode>([
-  "voice_capture_error"
+  "voice_capture_error",
+  "voice_prepare_unavailable",
+  "voice_prepare_timeout",
+  "voice_playback_error",
+  "voice_turn_failed"
 ])
 
 const WAKE_DYNAMIC_WARNING_CODES = new Set<PersonaWakeWarningReasonCode>([

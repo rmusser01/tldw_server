@@ -43,6 +43,7 @@ def test_endpoint_requeue_quarantined_postgres(monkeypatch, jobs_pg_dsn):
         assert r2.json()["affected"] >= 1
         row2 = jm.get_job(int(j["id"]))
         assert row2 and row2.get("status") == "queued"
+        assert row2.get("available_at") is None
         assert (row2.get("failure_streak_count") or 0) == 0
 
 

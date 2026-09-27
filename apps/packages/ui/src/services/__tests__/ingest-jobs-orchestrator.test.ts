@@ -8,6 +8,43 @@ import {
 } from "@/services/tldw/ingest-jobs-orchestrator"
 
 describe("ingest-jobs-orchestrator", () => {
+  it.each(["cancelled", "canceled", "unknown"])("fails closed when the completed wrapper contains a nested %s result", async (status) => {
+    const result = await pollSingleIngestJob({
+      jobId: 1, fetchJob: async () => ({ ok: true, data: { status: "completed", result: { status, media_id: 1, warnings: ["Analysis warning"] } } }),
+      timeoutMs: 1000, pollIntervalMs: 1, isCancelled: () => false, onCancel: async () => {},
+    })
+    expect(result.terminalStatus).toBe("failed")
+  })
+
+  it.each([undefined, "Success", "duplicate"])("preserves completed %s compatibility", async (status) => {
+    const result = await pollSingleIngestJob({
+      jobId: 1, fetchJob: async () => ({ ok: true, data: { status: "completed", result: { status, media_id: 1 } } }),
+      timeoutMs: 1000, pollIntervalMs: 1, isCancelled: () => false, onCancel: async () => {},
+    })
+    expect(result.terminalStatus).toBe("completed")
+  })
+
+  it("preserves saved warnings in the tracked-job path without promoting failed or cancelled jobs", async () => {
+    const tracker = createIngestJobsTracker<{ id: string }>()
+    tracker.trackSubmit({ batch_id: "mixed", jobs: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }] }, { id: "source" })
+    const savedWarning = { status: "Warning", media_id: 1, warnings: ["Analysis failed"] }
+    const payloads = [
+      { status: "completed", result: savedWarning },
+      { status: "completed", result: { ...savedWarning, error: "Failed to save" } },
+      { status: "completed", result: { status: "Warning", warnings: ["No source saved"] } },
+      { status: "cancelled", result: savedWarning },
+    ]
+    const results = await pollTrackedIngestJobs({
+      tracker, fetchJob: async (id) => ({ ok: true, data: payloads[id - 1] }),
+      timeoutMs: 1000, pollIntervalMs: 1, isCancelled: () => false, onCancel: async () => {},
+      mapCompleted: (_item, data) => ({ kind: "completed", data }),
+      mapFailure: (_item, details) => ({ kind: "failed", data: details.data }),
+      mapCancelled: () => ({ kind: "cancelled", data: undefined }),
+    })
+    expect(results.map((result) => result.kind)).toEqual(["completed", "failed", "failed", "cancelled"])
+    expect(results[0].data).toEqual(savedWarning)
+  })
+
   it("tracks submit payloads and cancels each batch once", async () => {
     const tracker = createIngestJobsTracker<{ label: string }>()
     tracker.trackSubmit(

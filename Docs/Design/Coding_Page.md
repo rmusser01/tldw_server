@@ -25,6 +25,7 @@ https://astral.sh/blog/ty
 https://corridor.dev/blog/introducing-acsm/
 https://github.com/neutree-ai/openapi-to-skills
 https://github.com/dadbodgeoff/drift
+https://github.com/DataDog/datadog-saist
 https://github.com/chunkhound/chunkhound
 
 ### Link Dump:
@@ -32,6 +33,8 @@ repo2txt integration/clone https://github.com/abinthomasonline/repo2txt
 https://www.anthropic.com/engineering/claude-code-best-practices
 https://github.com/ymichael/open-codex
 https://github.com/XiaomiMiMo/MiMo-Code
+https://www.nccgroup.com/media/jtepwx1t/nccgroup_codingagentswhitepaper.pdf
+https://astral.sh/blog/open-source-security-at-astral
 https://github.com/brandondocusen/CntxtPY
 https://github.com/cyclotruc/gitdigest
 https://github.com/simonw/files-to-prompt

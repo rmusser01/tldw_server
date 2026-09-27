@@ -314,6 +314,9 @@ describe("FlashcardCreateDrawer template flows", () => {
       expect(activeModal).toBeDefined()
       return activeModal as HTMLElement
     })
+    await waitFor(() => {
+      expect(within(modal).getByLabelText("Term")).toBeInTheDocument()
+    })
 
     return modal
   }
@@ -494,7 +497,7 @@ describe("FlashcardCreateDrawer template flows", () => {
     expect(modelField).not.toBeNull()
     expect(within(modelField as HTMLElement).getAllByText("Cloze (Fill in the blank)").length).toBeGreaterThan(0)
     expect(
-      screen.getByText("Cloze syntax: add at least one deletion like {{c1::answer}} in Front text.")
+      await screen.findByText("Cloze syntax: add at least one deletion like {{c1::answer}} in Front text.")
     ).toBeInTheDocument()
   })
 

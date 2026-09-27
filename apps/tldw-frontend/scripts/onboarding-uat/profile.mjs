@@ -33,6 +33,40 @@ function createRunId() {
   return new Date().toISOString().replace(/[:.]/g, "-")
 }
 
+function normalizedIniKey(key) {
+  return key
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+}
+
+export function scrubHostConfigurationValues(text, { mockBaseUrl }) {
+  return text
+    .split(/\r?\n/)
+    .map((line) => {
+      const match = line.match(/^(\s*(?:[#;]\s*)?)([^=]+?)(\s*=\s*)(.*)$/)
+      if (!match) return line
+
+      const key = normalizedIniKey(match[2])
+      const isCredential =
+        /(?:^|_)api_?key(?:_|$)|(?:^|_)(?:token|secret|password|encryption_key|hash_key)(?:_|$)/.test(key)
+      if (isCredential) {
+        return `${match[1]}${match[2]}${match[3]}`
+      }
+
+      const isProviderEndpoint =
+        /(?:^|_)(?:api_(?:ip|url)|base_url|server_url|endpoint)(?:_|$)/.test(key) &&
+        key !== "byok_allowed_base_url_providers"
+      if (isProviderEndpoint) {
+        return `${match[1]}${match[2]}${match[3]}${mockBaseUrl}`
+      }
+
+      return line
+    })
+    .join("\n")
+}
+
 function patchIniValue(text, sectionName, key, value, { addIfSectionExists = true } = {}) {
   const lines = text.split(/\r?\n/)
   let currentSection = null
@@ -86,6 +120,7 @@ function writeEnvFile(envPath, profileRoot, mockPort, fixtureRoot) {
     "DEFAULT_LLM_PROVIDER=openai",
     `OPENAI_API_KEY=${syntheticOpenAiKey}`,
     `OPENAI_API_BASE_URL=${mockBaseUrl}`,
+    `CUSTOM_OPENAI_API_KEY=${syntheticOpenAiKey}`,
     `DATABASE_URL=sqlite:///${usersDbPath}`,
     `USER_DB_BASE_DIR_ALLOWED_ROOTS=${databaseDir}`,
     `TLDW_USER_DB_BASE_DIR_ALLOWED_ROOTS=${databaseDir}`,
@@ -149,11 +184,19 @@ export function createRuntimeProfile({
 
   const mockBaseUrl = `http://127.0.0.1:${mockPort}/v1`
   const fixtureRoot = path.join(frontendRoot, "e2e/fixtures/media")
-  let configText = readFileSync(configPath, "utf8")
+  let configText = scrubHostConfigurationValues(readFileSync(configPath, "utf8"), {
+    mockBaseUrl,
+  })
   configText = patchIniValue(configText, "Setup", "enable_first_time_setup", "true")
   configText = patchIniValue(configText, "Setup", "setup_completed", "false")
   configText = patchIniValue(configText, "AuthNZ", "auth_mode", "single_user")
   configText = patchIniValue(configText, "AuthNZ", "single_user_api_key", syntheticApiKey)
+  configText = patchIniValue(
+    configText,
+    "AuthNZ",
+    "database_url",
+    `sqlite:///${usersDbPath}`
+  )
   configText = patchIniValue(configText, "API", "openai_model", "gpt-4.1-mini")
   configText = patchIniValue(configText, "API", "custom_openai_api_ip", mockBaseUrl)
   configText = patchIniValue(configText, "API", "custom_openai_api_model", "local-uat-chat")
@@ -225,6 +268,7 @@ export function buildBackendEnv({ profile, mockPort, baseEnv = process.env }) {
     DEFAULT_LLM_PROVIDER: "openai",
     OPENAI_API_KEY: syntheticOpenAiKey,
     OPENAI_API_BASE_URL: mockBaseUrl,
+    CUSTOM_OPENAI_API_KEY: syntheticOpenAiKey,
     USER_DB_BASE_DIR_ALLOWED_ROOTS: profile.databaseDir,
     TLDW_USER_DB_BASE_DIR_ALLOWED_ROOTS: profile.databaseDir,
     INGESTION_SOURCE_ALLOWED_ROOTS: fixtureRoot,

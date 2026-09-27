@@ -219,23 +219,28 @@ export const StudioTabContainer: React.FC = () => {
     }))
   ]
 
-  // Sync URL with active sub-tab
+  const lastSyncedSubTabRef = useRef<StudioSubTab | null>(null)
+
+  // Reconcile URL navigation and store-driven tab changes without letting the
+  // two sources overwrite each other from the same render.
   useEffect(() => {
     const subtabParam = searchParams.get("subtab")
-    if (isValidSubTab(subtabParam) && subtabParam !== activeSubTab) {
-      setActiveSubTab(subtabParam)
-    }
-  }, [searchParams, activeSubTab, setActiveSubTab])
+    const urlSubTab = isValidSubTab(subtabParam) ? subtabParam : null
 
-  // Update URL when sub-tab changes
-  useEffect(() => {
-    const currentSubtab = searchParams.get("subtab")
-    if (currentSubtab !== activeSubTab) {
-      const newParams = new URLSearchParams(searchParams)
-      newParams.set("subtab", activeSubTab)
-      setSearchParams(newParams, { replace: true })
+    if (urlSubTab === activeSubTab) {
+      lastSyncedSubTabRef.current = activeSubTab
+      return
     }
-  }, [activeSubTab, searchParams, setSearchParams])
+
+    if (urlSubTab && urlSubTab !== lastSyncedSubTabRef.current) {
+      setActiveSubTab(urlSubTab)
+      return
+    }
+
+    const newParams = new URLSearchParams(searchParams)
+    newParams.set("subtab", activeSubTab)
+    setSearchParams(newParams, { replace: true })
+  }, [activeSubTab, searchParams, setActiveSubTab, setSearchParams])
 
   // Auto-select default project when none is selected and defaults are loaded
   useEffect(() => {

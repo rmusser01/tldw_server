@@ -4,23 +4,35 @@ This guide is for users and operators working with the package-local MCP
 Unified standalone gateway boundary. It focuses on profiles, external servers,
 credential grants, configuration snapshots, and remote runtime commands.
 
-The package is currently internal/experimental and published on PyPI as the
-early standalone boundary extracted from the `tldw-server` source tree. The
-package CLI does not launch a supported end-user gateway server; remote runtime
-commands require an already running package-local gateway mounted by a host
-application.
+The package status is `public-alpha`, and its publishing status is `published`.
+Released versions are published on PyPI; repository versions remain release
+candidates until their protected publish succeeds. The former
+internal/experimental phase applies only to earlier
+releases. The package CLI does not launch a supported end-user gateway server;
+remote runtime commands require an already running package-local gateway
+mounted by a host application.
 
 ## Publishing Readiness
 
-The standalone package is published on PyPI, while the package status remains
-`internal-experimental`. New users can install the released package from PyPI;
-developers testing unpublished changes should install from the repository.
+The standalone package has publishing status `published` and package status
+`public-alpha`. New users can install released versions from PyPI; developers
+testing an unpublished repository version should install from the repository.
 
 Run the full internal release candidate gate from the repository root:
 
 ```bash
 make mcp-unified-rc
 ```
+
+The RC installs the exact official Tier 1 Python SDK pin `mcp==2.0.0`
+separately with the wheel and sdist, then verifies automatic `2026-07-28`
+stdio negotiation, tool discovery, and one tool call. The pin is the official
+Python SDK
+[`v2.0.0`](https://github.com/modelcontextprotocol/python-sdk/releases/tag/v2.0.0)
+release at tag commit `6f69a37`. These are the package's explicit official-SDK
+stdio scenarios. The URL-oriented official conformance server harness is not
+applicable to this stdio-only strict surface, so the evidence does not claim
+full transport or modern HTTP conformance.
 
 Generate a TestPyPI publish plan without uploading artifacts:
 
@@ -40,6 +52,12 @@ From PyPI:
 
 ```bash
 python -m pip install "mcp-unified[gateway]"
+```
+
+Downstream applications should use a compatible-minor pin:
+
+```bash
+python -m pip install "mcp-unified[gateway]~=0.3.0"
 ```
 
 From the repository root, when testing unpublished changes:
@@ -80,6 +98,82 @@ available and run the deterministic in-process fixture:
 mcp-unified-smoke --help
 mcp-unified-smoke inprocess --json-report -
 ```
+
+### Embed The Strict Stdio Server
+
+The public `mcp_unified.gateway` API supports these exact protocol profiles:
+
+| Revision | Lifecycle | Batch requests |
+| --- | --- | --- |
+| `2026-07-28` | Per-request `_meta`; no initialize session | Rejected |
+| `2025-11-25` | `initialize`, then operations | Rejected |
+| `2025-06-18` | `initialize`, then operations | Rejected |
+| `2025-03-26` | Standalone `initialize`, then operations | Accepted only after initialization |
+| `2024-11-05` | `initialize`, then operations | Rejected |
+
+Strict stdio owns negotiation, validation, profile projection, pagination,
+cancellation, limits, and newline-delimited binary framing. Existing
+HTTP/WebSocket routes retain their compatibility contracts; this package does
+not claim modern MCP conformance for HTTP.
+
+Pass a `GatewayCoreRuntime` implementation to the public entrypoint. Inject
+caller-owned asynchronous binary streams for an embedded transport, or omit
+them to use process stdin/stdout:
+
+```python
+import asyncio
+
+from mcp_unified.gateway import GatewayLimits, serve_stdio
+
+raise SystemExit(
+    asyncio.run(
+        serve_stdio(runtime, limits=GatewayLimits(max_in_flight=1))
+    )
+)
+```
+
+The runtime and host application own catalog contents, authorization, policy,
+audit, local files and databases, application errors, and privacy decisions.
+The protocol layer neither exposes nor duplicates application-local data, and
+self-reported client identity is never an authorization input.
+
+The exact `GatewayLimits` defaults are:
+
+| Limit | Default | Limit | Default |
+| --- | ---: | --- | ---: |
+| `max_input_line_bytes` | 1,048,576 | `max_output_line_bytes` | 1,048,576 |
+| `max_result_bytes` | 786,432 | `max_json_depth` | 64 |
+| `max_in_flight` | 16 | `default_catalog_page_size` | 50 |
+| `max_catalog_page_size` | 100 | `max_catalog_items` | 10,000 |
+| `max_batch_items` | 100 | `max_requests_per_minute` | 600 |
+| `request_burst` | 32 | `max_schema_bytes` | 262,144 |
+| `max_schema_depth` | 32 | `max_schema_subschemas` | 1,024 |
+| `max_schema_refs` | 256 | `max_schema_pattern_chars` | 4,096 |
+| `max_schema_validation_processes` | 4 | `schema_validation_timeout_seconds` | 5.0 |
+| `graceful_shutdown_timeout_seconds` | 5.0 | | |
+
+Schema compilation and instance validation run in disposable bounded child
+processes. On native Windows, the preflighted schema and complete validation
+instance are briefly stored in an owner-only file in the operating-system
+temporary directory so the nested stdio server can launch the child reliably.
+The file is never logged, is removed during the same bounded child cleanup,
+and is not retained after success, failure, timeout, cancellation, or shutdown.
+Applications handling data that must never touch temporary storage should
+account for this Windows behavior before enabling strict tool calls.
+
+The modern profile emits private, zero-TTL cache hints:
+`{"ttlMs": 0, "cacheScope": "private"}`. Legacy profiles omit those modern
+fields. Public errors are typed and bounded; they allowlist stable reason,
+kind, and safe limit metadata rather than leaking payloads, paths, credentials,
+schemas, exception strings, or private result sizes. The smallest generic
+overflow response is exactly 79 bytes including its newline: an output limit
+of 79 emits it, while 78 fails closed with no truncated line.
+
+Cancellation propagates to pending asynchronous runtime work. Shutdown uses
+the configured 5.0-second grace period and reports residual input, output, or
+cleanup work to stderr only. Python cannot forcibly stop a non-returning worker
+thread, so hosts must bound synchronous work; clients supervising a stuck child
+must escalate from closing streams to process termination and finally a kill.
 
 ## 2. Choose A Store
 
@@ -681,6 +775,38 @@ mcp-unified-gateway list-external-servers \
 
 The registry alone does not grant execution authority. A profile must also
 allow the server/tool path, and any required credentials must be granted.
+
+### Remote (URL-based) external servers
+
+Hosted MCP servers are registered the same way with a URL-based transport
+instead of a command. `streamable_http` targets a Streamable HTTP endpoint
+(one URL, JSON or SSE-framed responses, `mcp-session-id` session handling);
+`sse` targets the legacy HTTP+SSE pairing (persistent event stream plus a
+POST message endpoint).
+
+```json
+{
+  "id": "linear",
+  "name": "Linear MCP",
+  "transport": "streamable_http",
+  "url": "https://mcp.linear.app/mcp",
+  "headers": {"Authorization": "Bearer <token>"},
+  "enabled": true
+}
+```
+
+`headers` are static headers sent on every request (typically authorization).
+Per-call brokered credentials merge their `headers` into each tool call;
+brokered `env` values have no HTTP equivalent and are ignored. Connection
+failures map to distinct reason codes (`auth_required`, `tls_failed`,
+`connect_failed`, `request_timeout`, `connection_closed`) so downstream
+clients can surface honest readiness states.
+
+Notes: URL transports are currently registry-only — the YAML/JSON config-file
+registry (`ExternalServerRegistryConfig`) still declares only `stdio` and
+`websocket`. Management responses redact `headers` values (`"***"`); rotate a
+token by patching `headers` with the new value. Credential headers over plain
+`http://` are refused for non-loopback hosts.
 
 ## 5. Add Credential Grants
 

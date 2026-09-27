@@ -23,6 +23,7 @@ This section explains what the WebUI and browser extension let you do. Use it to
 | Find a page or feature | [Page and feature index](Page_Feature_Index.md) |
 | Connect to a server or configure auth | [Start, account, and settings](Start_Account_Settings.md) |
 | Chat with models, characters, personas, or assistants | [Chat, characters, and assistants](Chat_Characters_Assistants.md) |
+| Keep a Buddy attached while using other pages | [Buddy and Persona management](Buddy_And_Persona_Management.md) |
 | Add sources, search knowledge, or manage media | [Knowledge, media, and sources](Knowledge_Media_Sources.md) |
 | Use transcription, TTS, or audiobook workflows | [Audio, speech, and audiobooks](Audio_Speech_Audiobooks.md) |
 | Study, write, generate artifacts, or review content | [Study, writing, and artifacts](Study_Writing_Artifacts.md) |

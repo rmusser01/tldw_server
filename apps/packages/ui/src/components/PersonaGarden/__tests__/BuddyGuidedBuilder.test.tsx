@@ -7,6 +7,8 @@ import { asPersonaVisualCustomStateId } from "@/types/persona-visuals"
 import { BASIC_BUDDY_STARTER_IDS } from "../buddyBuilderState"
 import { BuddyGuidedBuilder } from "../BuddyGuidedBuilder"
 
+vi.mock("../BuddyStarterArtwork", () => ({ BuddyStarterArtwork: ({ title }: { title: string }) => <div>{title} preview</div> }))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (_key: string, options?: Record<string, unknown>) => {
@@ -90,28 +92,16 @@ const renderBuilder = (
 }
 
 describe("BuddyGuidedBuilder", () => {
-  it("renders accessible source and step navigation labels", () => {
+  it("shows ready-made artwork before secondary import and advanced creation", () => {
     renderBuilder()
-
-    expect(screen.getByRole("heading", { name: "Buddy builder" })).toBeVisible()
-    const stepper = screen.getByLabelText("Buddy builder steps")
-    expect(stepper).toHaveTextContent("Choose a source")
-    expect(stepper).toHaveTextContent("Create a draft")
-    expect(stepper).toHaveTextContent("Review readiness")
-    expect(stepper).toHaveTextContent("Configure states")
-    expect(stepper).toHaveTextContent("Activate")
-
-    expect(screen.getByRole("button", { name: "Bundled Buddy" })).toBeVisible()
-    expect(screen.getByRole("button", { name: "Bundled Buddy" })).toHaveAttribute(
-      "aria-pressed",
-      "true"
-    )
-    expect(
-      screen.getByRole("button", { name: "Import Codex/Petdex pet" })
-    ).toBeVisible()
-    expect(
-      screen.getByRole("button", { name: "Import Persona Visual pack" })
-    ).toBeVisible()
+    const gallery = screen.getByTestId("buddy-builder-starter-catalog")
+    const sources = screen.getByTestId("buddy-builder-source-picker")
+    expect(gallery.compareDocumentPosition(sources) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole("heading", { name: "Choose a ready-made Buddy" })).toBeVisible()
+    const disclosure = sources.closest("details")!
+    expect(disclosure).not.toHaveAttribute("open")
+    fireEvent.click(screen.getByText("Import or customize a Buddy"))
+    expect(screen.getByRole("button", { name: "Import Codex/Petdex pet" })).toBeVisible()
   })
 
   it("shows the six Basic defaults first in the expected order", () => {
@@ -130,7 +120,7 @@ describe("BuddyGuidedBuilder", () => {
       "Terminal Tile Basic",
       "Migu Marker Basic"
     ])
-    expect(within(basicList).getAllByText("Recommended")).toHaveLength(6)
+    expect(within(basicList).getAllByText("Artwork included")).toHaveLength(6)
   })
 
   it("keeps scaffold production packets visible but distinct from reviewed Basic defaults", () => {
@@ -142,9 +132,10 @@ describe("BuddyGuidedBuilder", () => {
     })
 
     const scaffold = screen.getByTestId("buddy-builder-starter-lofi-study-intermediate")
-    expect(scaffold).toHaveTextContent("Production packet")
+    expect(scaffold).toHaveTextContent("Template only. Add artwork before activation.")
+    fireEvent.click(screen.getByText("Custom artwork templates"))
     expect(
-      within(scaffold).getByRole("button", { name: "Copy production packet" })
+      within(scaffold).getByRole("button", { name: "Copy template as draft" })
     ).toBeVisible()
     expect(within(scaffold).queryByText("Recommended")).not.toBeInTheDocument()
   })
@@ -152,6 +143,7 @@ describe("BuddyGuidedBuilder", () => {
   it("separates Codex/Petdex and native Persona Visual import paths", () => {
     renderBuilder()
 
+    fireEvent.click(screen.getByText("Import or customize a Buddy"))
     fireEvent.click(screen.getByRole("button", { name: "Import Codex/Petdex pet" }))
     expect(
       screen.getByRole("button", { name: "Import Codex/Petdex pet" })
@@ -183,7 +175,7 @@ describe("BuddyGuidedBuilder", () => {
       "Active Lens"
     )
     expect(screen.getByTestId("buddy-guided-builder-active-pack")).toHaveTextContent(
-      "active"
+      "Active"
     )
   })
 

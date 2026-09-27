@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { FlashcardCreateDrawer } from "../FlashcardCreateDrawer"
@@ -206,6 +206,26 @@ describe("FlashcardCreateDrawer tags", () => {
       )
     })
   }, 15000)
+
+  it("keeps create action names stable through pending and completed loading icons", async () => {
+    const props = { open: true, onClose: vi.fn(), onSuccess: vi.fn() }
+    const { rerender } = render(<FlashcardCreateDrawer {...props} />)
+    for (const pending of [true, false]) {
+      vi.mocked(useCreateFlashcardMutation).mockReturnValue({
+        mutateAsync, isPending: pending,
+      } as ReturnType<typeof useCreateFlashcardMutation>)
+      rerender(<FlashcardCreateDrawer {...props} />)
+      for (const name of ["Create", "Create & Add Another"]) {
+        const button = await screen.findByRole("button", { name, exact: true })
+        expect(button).toHaveAttribute("aria-busy", String(pending))
+        if (pending) expect(button).toBeDisabled()
+        else {
+          expect(button).toBeEnabled()
+          expect(within(button).queryByRole("img", { name: "loading" })).not.toBeInTheDocument()
+        }
+      }
+    }
+  })
 
   it("typing a new tag still submits successfully", async () => {
     mutateAsync.mockResolvedValueOnce({ uuid: "card-1" })

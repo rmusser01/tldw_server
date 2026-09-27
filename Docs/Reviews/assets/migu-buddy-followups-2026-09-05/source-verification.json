@@ -1,0 +1,6 @@
+{
+  "checked_after_exit": true,
+  "diff_sha256": "0b552ae7b65786968c9429e01f4dc74006d9431e9fe200a0ef3a1a722cb414ab",
+  "matches_launch": true,
+  "scope": "Tracked git diff HEAD, including documentation and tests; untracked paths listed in launch identity but absent from hash."
+}

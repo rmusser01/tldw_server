@@ -1,7 +1,6 @@
 import React from "react"
 import type { IngestPreset, WizardQueueItem } from "./types"
 import { PRESET_META, DEFAULT_PRESET } from "./presets"
-import { estimateTotalSeconds, formatEstimate } from "./timeEstimation"
 
 type PresetSelectorProps = {
   /**
@@ -25,7 +24,7 @@ type PresetSelectorProps = {
    */
   disabled?: boolean
   /**
-   * Queue items for time estimation.
+   * Current queue (accepted for compatibility with existing wizard callers).
    */
   queueItems?: WizardQueueItem[]
 }
@@ -48,10 +47,9 @@ const PresetCard: React.FC<{
   preset: Exclude<IngestPreset, "custom">
   selected: boolean
   disabled: boolean
-  timeEstimate: string
   qi: PresetSelectorProps["qi"]
   onClick: () => void
-}> = ({ preset, selected, disabled, timeEstimate, qi, onClick }) => {
+}> = ({ preset, selected, disabled, qi, onClick }) => {
   const meta = PRESET_META[preset]
   const isRecommended = preset === DEFAULT_PRESET
 
@@ -105,11 +103,6 @@ const PresetCard: React.FC<{
 
       {/* Description */}
       <span className="text-xs leading-snug text-text-muted">{description}</span>
-
-      {/* Time estimate */}
-      <span className="mt-auto pt-1 text-xs font-medium text-text-subtle">
-        {timeEstimate}
-      </span>
     </button>
   )
 }
@@ -120,7 +113,6 @@ export const PresetSelector: React.FC<PresetSelectorProps> = ({
   onChange,
   onReset,
   disabled = false,
-  queueItems,
 }) => {
   const handleCardClick = React.useCallback(
     (preset: Exclude<IngestPreset, "custom">) => {
@@ -130,16 +122,6 @@ export const PresetSelector: React.FC<PresetSelectorProps> = ({
     },
     [onChange, disabled]
   )
-
-  const timeEstimates = React.useMemo(() => {
-    const items = queueItems ?? []
-    return Object.fromEntries(
-      CARD_PRESETS.map((preset) => {
-        const totalSeconds = estimateTotalSeconds(items, preset)
-        return [preset, items.length > 0 ? formatEstimate(totalSeconds) : qi("preset.noItems", "Add items")]
-      })
-    ) as Record<Exclude<IngestPreset, "custom">, string>
-  }, [queueItems, qi])
 
   return (
     <div className="flex flex-col gap-3">
@@ -151,7 +133,6 @@ export const PresetSelector: React.FC<PresetSelectorProps> = ({
             preset={preset}
             selected={value === preset}
             disabled={disabled}
-            timeEstimate={timeEstimates[preset]}
             qi={qi}
             onClick={() => handleCardClick(preset)}
           />

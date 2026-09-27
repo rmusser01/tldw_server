@@ -54,6 +54,49 @@ def test_content_metadata_handler_falls_back_for_deeply_nested_envelope():
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("nested_arrays", "expected_metadata"),
+    [
+        (63, True),
+        (64, False),
+    ],
+)
+def test_content_metadata_handler_enforces_fixed_nesting_limit_across_public_methods(
+    nested_arrays,
+    expected_metadata,
+):
+    nested_value = "[" * nested_arrays + "0" + "]" * nested_arrays
+    content = f'[METADATA]{{"value":{nested_value}}}[/METADATA]\nArticle body'
+
+    metadata, clean_content = ContentMetadataHandler.extract_metadata(content)
+
+    assert ContentMetadataHandler.has_metadata(content) is expected_metadata
+    if expected_metadata:
+        assert metadata
+        assert clean_content == "Article body"
+        assert ContentMetadataHandler.strip_metadata(content) == "Article body"
+    else:
+        assert metadata == {}
+        assert clean_content == content
+        assert ContentMetadataHandler.strip_metadata(content) == content
+
+
+@pytest.mark.unit
+def test_content_metadata_handler_ignores_json_delimiters_inside_escaped_strings():
+    metadata = {
+        "literal": 'brackets [{]} and an escaped quote " plus a backslash \\',
+    }
+    content = f"[METADATA]{json.dumps(metadata)}[/METADATA]\nArticle body"
+
+    extracted, clean_content = ContentMetadataHandler.extract_metadata(content)
+
+    assert ContentMetadataHandler.has_metadata(content) is True
+    assert extracted == metadata
+    assert clean_content == "Article body"
+    assert ContentMetadataHandler.strip_metadata(content) == "Article body"
+
+
+@pytest.mark.unit
 def test_content_metadata_handler_ignores_non_string_input():
     assert ContentMetadataHandler.has_metadata(None) is False
     assert ContentMetadataHandler.strip_metadata(None) is None

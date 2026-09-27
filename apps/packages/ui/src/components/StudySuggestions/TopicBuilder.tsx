@@ -53,7 +53,7 @@ export const TopicBuilder: React.FC<TopicBuilderProps> = ({
 }) => {
   return (
     <Card size="small" title="Topic Builder">
-      <Space direction="vertical" size={12} className="w-full">
+      <Space orientation="vertical" size={12} className="w-full">
         <div className="flex flex-wrap gap-2">
           <Button icon={<PlusOutlined />} onClick={onAddTopic}>
             Add topic
@@ -63,13 +63,13 @@ export const TopicBuilder: React.FC<TopicBuilderProps> = ({
           </Button>
         </div>
 
-        <Space direction="vertical" size={10} className="w-full">
+        <Space orientation="vertical" size={10} className="w-full">
           {topics.length === 0 ? (
             <Text type="secondary">No topics yet.</Text>
           ) : (
             topics.map((topic, index) => (
               <div key={topic.id} className="rounded border border-border bg-surface p-3">
-                <Space direction="vertical" size={8} className="w-full">
+                <Space orientation="vertical" size={8} className="w-full">
                   <div className="flex flex-wrap items-center gap-2">
                     <Tag color={topic.rankReason === "exploratory" ? "blue" : "gold"}>
                       {TITLE_CASE_LABELS[topic.rankReason]}

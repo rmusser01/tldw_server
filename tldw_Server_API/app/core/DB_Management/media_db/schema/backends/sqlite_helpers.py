@@ -4,24 +4,26 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 from typing import Any, Protocol
 
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseBackend
 from tldw_Server_API.app.core.DB_Management.db_migration import DatabaseMigrator, MigrationError
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     SchemaError,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.schema.features.fts import (
-    ensure_sqlite_fts_structures,
-)
-from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
-    apply_sqlite_core_media_schema,
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
+    MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.schema.document_workspace_schema import (
     ensure_sqlite_document_workspace_schema,
 )
-from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
-    MEDIA_NONCRITICAL_EXCEPTIONS,
+from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
+    apply_sqlite_core_media_schema,
+)
+from tldw_Server_API.app.core.DB_Management.media_db.schema.features.fts import (
+    ensure_sqlite_fts_structures,
 )
 
 try:
@@ -123,12 +125,15 @@ CREATE VIRTUAL TABLE IF NOT EXISTS content_items_fts USING fts5(
 );
 """
 
+MIN_SUPPORTED_SQLITE_MEDIA_DB_MIGRATION_VERSION = 22
+
 
 class _SupportsExecutescript(Protocol):
     def executescript(self, script: str) -> Any: ...
 
 
 class SupportsSqlitePostCoreStructures(Protocol):
+    backend: DatabaseBackend
     _CLAIMS_TABLE_SQL: str
     _MEDIA_FILES_TABLE_SQL: str
     _TTS_HISTORY_TABLE_SQL: str
@@ -163,6 +168,50 @@ def ensure_sqlite_post_core_structures(
     db._ensure_sqlite_email_schema(conn)
 
 
+# Databases whose structures have already been verified in this process.
+#
+# A request-scoped MediaDatabase is constructed per request, and its schema
+# bootstrap re-ran the full `CREATE ... IF NOT EXISTS` set every time -- 177
+# statements per request on a database that the version check had already
+# declared current. The version check below is still performed on every
+# construction; only the redundant re-creation of known-present structures is
+# skipped once it has succeeded for a given database.
+_VERIFIED_SCHEMAS: set[tuple[str, int, int, int]] = set()
+_VERIFIED_SCHEMAS_LOCK = threading.Lock()
+
+
+def _schema_verification_key(
+    db: SupportsSqlitePostCoreStructures, target_version: int
+) -> tuple[str, int, int, int] | None:
+    """Return a process-cache identity for an on-disk database, else ``None``.
+
+    The device/inode pair is part of the key so a database that is deleted and
+    recreated at the same path (test teardown, a restored backup) is verified
+    again rather than trusted. ``None`` disables caching entirely, which is the
+    required behaviour for in-memory databases: those are distinct per
+    connection despite sharing a path.
+    """
+    if getattr(db, "is_memory_db", False):
+        return None
+    path = getattr(db, "db_path_str", None)
+    if not path:
+        return None
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return (str(path), int(target_version), stat.st_dev, stat.st_ino)
+
+
+def reset_schema_verification_cache() -> None:
+    """Forget all memoized schema verifications.
+
+    Intended for tests and for callers that mutate schema out of band.
+    """
+    with _VERIFIED_SCHEMAS_LOCK:
+        _VERIFIED_SCHEMAS.clear()
+
+
 def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
     """Initialize or migrate the SQLite schema through package-owned coordination."""
 
@@ -178,6 +227,11 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
         )
 
         if current_db_version == target_version:
+            verification_key = _schema_verification_key(db, target_version)
+            if verification_key is not None and verification_key in _VERIFIED_SCHEMAS:
+                # Structures already verified for this database in this process.
+                return
+
             logging.debug("Database schema is up to date.")
             try:
                 conn.executescript(db._CLAIMS_TABLE_SQL)
@@ -190,6 +244,11 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
                     "Could not verify/create FTS tables on already correct schema version: {}",
                     bootstrap_err,
                 )
+            else:
+                # Only remember verifications that actually completed.
+                if verification_key is not None:
+                    with _VERIFIED_SCHEMAS_LOCK:
+                        _VERIFIED_SCHEMAS.add(verification_key)
             return
 
         if current_db_version > target_version:
@@ -212,6 +271,28 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
                     apply_sqlite_core_media_schema(db, conn)
                     ensure_sqlite_post_core_structures(db, conn)
                 else:
+                    if (
+                        current_db_version
+                        < MIN_SUPPORTED_SQLITE_MEDIA_DB_MIGRATION_VERSION
+                    ):
+                        # Cleanup must not mask the primary unsupported-schema error.
+                        try:
+                            db.backend.get_pool().invalidate_connection(conn)
+                        except Exception:
+                            logger.exception(
+                                "Failed to invalidate rejected legacy Media DB connection "
+                                f"(schema_version={current_db_version}, connection_id={id(conn)})"
+                            )
+                        raise SchemaError(
+                            "unsupported legacy Media DB schema version "
+                            f"{current_db_version}; minimum supported automatic "
+                            "upgrade version is "
+                            f"{MIN_SUPPORTED_SQLITE_MEDIA_DB_MIGRATION_VERSION}. "
+                            "Create a backup and follow the legacy SQLite Media DB "
+                            "recovery workflow in Docs/Database_Migrations.md "
+                            "before starting this server version."
+                        )
+
                     conn.close()
 
                     migrations_dir = None
@@ -289,4 +370,8 @@ def bootstrap_sqlite_schema(db: SupportsSqlitePostCoreStructures) -> None:
         raise DatabaseError(f"Unexpected error applying schema: {exc}") from exc
 
 
-__all__ = ["bootstrap_sqlite_schema", "ensure_sqlite_post_core_structures"]
+__all__ = [
+    "bootstrap_sqlite_schema",
+    "ensure_sqlite_post_core_structures",
+    "reset_schema_verification_cache",
+]

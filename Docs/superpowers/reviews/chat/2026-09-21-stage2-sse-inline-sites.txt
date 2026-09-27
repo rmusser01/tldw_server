@@ -1,0 +1,56 @@
+# Inline SSE frame construction inside core/Chat — generated 2026-09-21
+# canonical helper bypassed: tldw_Server_API/app/core/LLM_Calls/sse.py:41 sse_data / :46 sse_done
+# cmd: grep -rn 'f"data: |"data: \[DONE\]|f"event: ' tldw_Server_API/app/core/Chat/*.py
+# 34 raw hits; streaming_utils.py:1021 is a docstring, so 33 real frame constructions
+#   chat_service.py     6   (4 x _json.dumps, 2 x literal DONE)
+#   streaming_utils.py 27   (20 x json.dumps, 1 x pre-serialized payload_str, 3 x event:, 3 x literal DONE)
+
+tldw_Server_API/app/core/Chat/chat_service.py:4892:        yield f"data: {_json.dumps(payload)}\n\n"
+tldw_Server_API/app/core/Chat/chat_service.py:4893:        yield "data: [DONE]\n\n"
+tldw_Server_API/app/core/Chat/chat_service.py:5150:                            yield f"data: {_json.dumps(_public_stream_error_payload('provider_unavailable'))}\n\n"
+tldw_Server_API/app/core/Chat/chat_service.py:5157:                                f"data: {_json.dumps(_public_stream_error_payload(item.code))}\n\n"
+tldw_Server_API/app/core/Chat/chat_service.py:5159:                            yield "data: [DONE]\n\n"
+tldw_Server_API/app/core/Chat/chat_service.py:5908:                yield f"data: {_json.dumps(metadata_payload)}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:111:        f"data: {json.dumps({'error': {'code': code, 'type': code, 'message': message}})}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:1021:      - an SSE DONE line "data: [DONE]" (signals completion via is_done=True)
+tldw_Server_API/app/core/Chat/streaming_utils.py:1554:                yield f"data: {json.dumps(payload)}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:1590:            yield f"event: stream_start\ndata: {json.dumps(start_payload)}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:1624:                return f"data: {json.dumps(err_payload)}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:1701:                        outputs.append(f"data: {payload_str}\n\n")
+tldw_Server_API/app/core/Chat/streaming_utils.py:1784:                                                f"data: {json.dumps(err_payload)}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:1804:                                        outputs.append(f"data: {json.dumps(err_payload)}\n\n")
+tldw_Server_API/app/core/Chat/streaming_utils.py:1810:                                        outputs.append(f"data: {json.dumps(err_payload)}\n\n")
+tldw_Server_API/app/core/Chat/streaming_utils.py:1815:                            outputs.append(f"data: {json.dumps(data)}\n\n")
+tldw_Server_API/app/core/Chat/streaming_utils.py:1823:                    outputs.append(f"data: {json.dumps(data)}\n\n")
+tldw_Server_API/app/core/Chat/streaming_utils.py:1851:                            f"data: {json.dumps(err_payload)}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:1871:                    outputs.append(f"data: {json.dumps(err_payload)}\n\n")
+tldw_Server_API/app/core/Chat/streaming_utils.py:1877:                    outputs.append(f"data: {json.dumps(err_payload)}\n\n")
+tldw_Server_API/app/core/Chat/streaming_utils.py:1883:                    outputs.append(f"data: {json.dumps(content_payload)}\n\n")
+tldw_Server_API/app/core/Chat/streaming_utils.py:2044:                                yield f"data: {json.dumps(content_payload)}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:2050:                                yield f"data: {json.dumps(size_err)}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:2123:                                    yield f"data: {json.dumps(err_payload)}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:2128:                                    yield f"data: {json.dumps(content_payload)}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:2152:                                f"data: {json.dumps(err_payload)}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:2163:                            yield f"data: {json.dumps(err_payload)}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:2225:                            yield f"event: {event_name}\ndata: {payload_json}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:2244:                    yield f"data: {json.dumps(done_payload)}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:2269:                    yield f"event: stream_end\ndata: {json.dumps(end_payload)}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:2274:                        yield "data: [DONE]\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:2372:            return f"data: {json.dumps(payload)}\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:2480:                            yield "data: [DONE]\n\n"
+tldw_Server_API/app/core/Chat/streaming_utils.py:2493:                yield "data: [DONE]\n\n"
+
+## DONE-sentinel comparisons reimplementing sse.py:74 is_done_line
+tldw_Server_API/app/core/Chat/chat_service.py:3088:    if stripped.lower() in {"[done]", "data: [done]"}:
+tldw_Server_API/app/core/Chat/chat_service.py:6194:                    if ln.strip().lower() == "data: [done]":
+tldw_Server_API/app/core/Chat/streaming_utils.py:1056:            if payload_str == "[DONE]":   # case-SENSITIVE, diverges from sse.is_done_line
+tldw_Server_API/app/core/Chat/streaming_utils.py:1690:                    if payload_str == "[DONE]":   # case-SENSITIVE, diverges from sse.is_done_line
+
+## same-named control-prefix constant with different values
+tldw_Server_API/app/core/Chat/streaming_utils.py:57:_SSE_CONTROL_PREFIXES = (":", "event:")
+tldw_Server_API/app/core/Chat/streaming_utils.py:58:_SSE_FRAMED_CONTROL_PREFIXES = ("id:", "retry:")
+tldw_Server_API/app/core/LLM_Calls/sse.py:19:_SSE_CONTROL_PREFIXES = ("event:", "id:", "retry:")
+
+## core/Chat imports of the canonical module
+cmd: grep -rn 'LLM_Calls.sse|LLM_Calls import sse|sse_data|sse_done' tldw_Server_API/app/core/Chat/ | wc -l  ->         0
+cmd: grep -rln 'LLM_Calls.sse import|LLM_Calls import sse' --include='*.py' tldw_Server_API/app/ | wc -l  ->        19

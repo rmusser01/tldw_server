@@ -388,7 +388,13 @@ export const PromptStudioPlaygroundPage: React.FC = () => {
   const updatePromptMutation = useMutation({
     mutationFn: (values: PromptFormFields) => {
       if (!selectedPromptId) throw new Error("No prompt selected")
+      if (!promptDetail || promptDetail.id !== selectedPromptId) {
+        throw new Error("Prompt identity is unavailable")
+      }
       return updatePrompt(selectedPromptId, {
+        prompt_format: promptDetail.prompt_format ?? "legacy",
+        prompt_schema_version: promptDetail.prompt_schema_version ?? null,
+        prompt_definition: promptDetail.prompt_definition ?? null,
         name: values.name,
         system_prompt: values.system_prompt,
         user_prompt: values.user_prompt,

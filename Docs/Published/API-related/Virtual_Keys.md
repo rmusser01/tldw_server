@@ -2,6 +2,59 @@
 
 Virtual Keys are API keys with scoped access and LLM usage budgets. They can be associated with Organizations and Teams.
 
+## Virtual API Keys versus TTS provider keys
+
+A virtual API key authenticates a client *to tldw*. A provider BYOK key is an
+encrypted upstream credential that tldw uses when calling a commercial service.
+They are different records and can be used together: authenticate the speech
+request with `X-API-KEY: <VIRTUAL_KEY>`, while the server independently resolves
+the user's OpenRouter or named-gateway credential.
+
+OpenRouter and custom speech gateways use these provider-key endpoints:
+
+```text
+POST   /api/v1/users/keys
+GET    /api/v1/users/keys
+POST   /api/v1/users/keys/test
+DELETE /api/v1/users/keys/{provider}
+```
+
+Provider IDs must be canonical: `openrouter` or `gateway:<slug>`. An enabled TTS
+gateway with `allow_user_api_key: true` is dynamically added to the BYOK
+allowlist. Users may store only API-key material; gateway URL, path, headers,
+auth scheme, discovery behavior, and fallback policy remain administrator-owned
+and cannot be supplied through `credential_fields` or metadata.
+
+For explicit gateway synthesis, credential precedence is the user's stored key
+and then the gateway's admin-configured key. A present but corrupt/keyless user
+record fails closed rather than falling through. Each fallback backend resolves
+its own key, and a source backend's key is never reused for another endpoint.
+Org/team shared-provider key precedence does not apply to this first-release TTS
+gateway path.
+
+Named-gateway key creation and testing use a non-billable discovery probe when
+configured. The resulting verification state is tri-state:
+
+- `verified`: discovery authenticated and returned a valid model document;
+- `stored-unverified`: the key was stored, but discovery was disabled,
+  unavailable, or inconclusive;
+- `rejected`: the upstream returned an authentication rejection; the write/test
+  returns `401` and a rejected new key is not stored.
+
+The built-in `openrouter` backend reuses the existing general OpenRouter BYOK
+record and its validation semantics; TTS probing does not overwrite the general
+credential's verification metadata.
+
+If an administrator disables or removes a named gateway, an existing stored key
+is listed with `source: "disabled"` and cannot be used, replaced, or tested. The
+owner can still delete it with `DELETE /api/v1/users/keys/gateway:<slug>`, which
+prevents orphaned secrets from becoming undeletable.
+
+Provider BYOK requires `BYOK_ENABLED=true` and a configured
+`BYOK_ENCRYPTION_KEY`. See the
+[BYOK User Guide](../User_Guides/Server/BYOK_User_Guide.md) for deployment,
+rotation, and audit details.
+
 Base path: `/api/v1/admin`
 
 ## Create Virtual Key

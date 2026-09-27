@@ -1832,7 +1832,7 @@ class McpHubRepo:
                 WHERE name = ?
                   AND owner_scope_type = ?
                   AND (
-                    (owner_scope_id IS NULL AND ? IS NULL)
+                    (owner_scope_id IS NULL AND CAST(? AS INTEGER) IS NULL)
                     OR owner_scope_id = ?
                   )
                 ORDER BY id DESC
@@ -1850,7 +1850,7 @@ class McpHubRepo:
                 WHERE name = ?
                   AND owner_scope_type = ?
                   AND (
-                    (owner_scope_id IS NULL AND ? IS NULL)
+                    (owner_scope_id IS NULL AND CAST(? AS INTEGER) IS NULL)
                     OR owner_scope_id = ?
                   )
                 ORDER BY id DESC
@@ -1896,8 +1896,8 @@ class McpHubRepo:
                    policy_document_json, is_active, is_immutable,
                    created_by, updated_by, created_at, updated_at
             FROM mcp_permission_profiles
-            WHERE (? IS NULL OR owner_scope_type = ?)
-              AND (? IS NULL OR owner_scope_id = ?)
+            WHERE (CAST(? AS TEXT) IS NULL OR owner_scope_type = ?)
+              AND (CAST(? AS INTEGER) IS NULL OR owner_scope_id = ?)
             ORDER BY name, id
             """,
             (
@@ -2626,12 +2626,12 @@ class McpHubRepo:
                 FROM mcp_policy_assignments
                 WHERE target_type = ?
                   AND (
-                    (target_id IS NULL AND ? IS NULL)
+                    (target_id IS NULL AND CAST(? AS TEXT) IS NULL)
                     OR target_id = ?
                   )
                   AND owner_scope_type = ?
                   AND (
-                    (owner_scope_id IS NULL AND ? IS NULL)
+                    (owner_scope_id IS NULL AND CAST(? AS INTEGER) IS NULL)
                     OR owner_scope_id = ?
                   )
                 ORDER BY id DESC
@@ -2655,12 +2655,12 @@ class McpHubRepo:
                 FROM mcp_policy_assignments
                 WHERE target_type = ?
                   AND (
-                    (target_id IS NULL AND ? IS NULL)
+                    (target_id IS NULL AND CAST(? AS TEXT) IS NULL)
                     OR target_id = ?
                   )
                   AND owner_scope_type = ?
                   AND (
-                    (owner_scope_id IS NULL AND ? IS NULL)
+                    (owner_scope_id IS NULL AND CAST(? AS INTEGER) IS NULL)
                     OR owner_scope_id = ?
                   )
                 ORDER BY id DESC
@@ -2688,7 +2688,7 @@ class McpHubRepo:
                    a.created_by, a.updated_by, a.created_at, a.updated_at,
                    o.id AS override_id,
                    CASE WHEN o.id IS NULL THEN 0 ELSE 1 END AS has_override,
-                   COALESCE(o.is_active, 0) AS override_active,
+                   COALESCE(o.is_active, FALSE) AS override_active,
                    o.updated_at AS override_updated_at
             FROM mcp_policy_assignments AS a
             LEFT JOIN mcp_policy_overrides AS o ON o.assignment_id = a.id
@@ -2729,14 +2729,14 @@ class McpHubRepo:
                    a.created_by, a.updated_by, a.created_at, a.updated_at,
                    o.id AS override_id,
                    CASE WHEN o.id IS NULL THEN 0 ELSE 1 END AS has_override,
-                   COALESCE(o.is_active, 0) AS override_active,
+                   COALESCE(o.is_active, FALSE) AS override_active,
                    o.updated_at AS override_updated_at
             FROM mcp_policy_assignments AS a
             LEFT JOIN mcp_policy_overrides AS o ON o.assignment_id = a.id
-            WHERE (? IS NULL OR a.owner_scope_type = ?)
-              AND (? IS NULL OR a.owner_scope_id = ?)
-              AND (? IS NULL OR a.target_type = ?)
-              AND (? IS NULL OR a.target_id = ?)
+            WHERE (CAST(? AS TEXT) IS NULL OR a.owner_scope_type = ?)
+              AND (CAST(? AS INTEGER) IS NULL OR a.owner_scope_id = ?)
+              AND (CAST(? AS TEXT) IS NULL OR a.target_type = ?)
+              AND (CAST(? AS TEXT) IS NULL OR a.target_id = ?)
             ORDER BY a.target_type, a.target_id, a.id
             """,
             (

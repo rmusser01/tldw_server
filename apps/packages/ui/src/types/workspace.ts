@@ -599,6 +599,8 @@ export interface AudioGenerationSettings {
   voice: string // e.g., "af_heart", "alloy"
   speed: number // 0.5 - 2.0
   format: "mp3" | "wav" | "opus" | "aac" | "flac"
+  backend?: string
+  allowFallback?: boolean
 }
 
 export const DEFAULT_AUDIO_SETTINGS: AudioGenerationSettings = {
@@ -606,7 +608,9 @@ export const DEFAULT_AUDIO_SETTINGS: AudioGenerationSettings = {
   model: "kokoro",
   voice: "af_heart",
   speed: 1.0,
-  format: "mp3"
+  format: "mp3",
+  backend: "",
+  allowFallback: true
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

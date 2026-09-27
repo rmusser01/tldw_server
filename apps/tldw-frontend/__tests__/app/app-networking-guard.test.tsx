@@ -36,9 +36,7 @@ vi.mock("@web/components/AppProviders", () => ({
 }))
 
 vi.mock("@web/lib/configured-auth-state", () => ({
-  loadTldwClient: async () => ({
-    getConfig: async () => null
-  }),
+  loadConfiguredAuthConfig: async () => null,
   loadTldwAuth: async () => ({
     getCurrentUser: async () => ({ username: "test-user" })
   })

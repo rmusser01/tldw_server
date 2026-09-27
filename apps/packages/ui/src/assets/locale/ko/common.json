@@ -555,5 +555,11 @@
     "minutesAgoShort": "{{count}}분 전",
     "hoursAgoShort": "{{count}}시간 전",
     "daysAgoShort": "{{count}}일 전"
+  },
+  "help": {
+    "loadFailed": "도움말을 불러오지 못했습니다. 다시 연결하고 변경 사항을 저장한 다음 페이지를 새로고침하세요.",
+    "loading": "도움말 불러오는 중…",
+    "confirmReload": "이 페이지를 새로고침할까요? 저장하지 않은 변경 사항이 사라질 수 있습니다.",
+    "reload": "페이지 새로고침"
   }
 }

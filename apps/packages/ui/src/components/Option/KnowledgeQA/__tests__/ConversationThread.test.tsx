@@ -13,9 +13,13 @@ const state = {
 
 const fetchWithAuthMock = vi.fn()
 let branchingEnabled = true
+const isAuthorityCurrent = () => true
+const qaClient = { fetchWithAuth: (...args: unknown[]) => fetchWithAuthMock(...args) }
 
 vi.mock("../KnowledgeQAProvider", () => ({
   useKnowledgeQA: () => ({
+    isAuthorityCurrent,
+    client: qaClient,
     messages: state.messages,
     setQuery: state.setQuery,
     branchFromTurn: state.branchFromTurn,
@@ -103,6 +107,17 @@ describe("ConversationThread", () => {
     expect(screen.queryByText("How does that compare with Q2?")).not.toBeInTheDocument()
     expect(screen.getByText("2 sources")).toBeInTheDocument()
     expect(screen.getByText("2 citations")).toBeInTheDocument()
+  })
+
+  it("does not attach a successful retry answer to the preceding failed question", () => {
+    state.messages = [
+      { id: "failed", role: "user", content: "Failed question", timestamp: "2026-02-18T08:00:00Z" },
+      { id: "retry", role: "user", content: "Retry question", timestamp: "2026-02-18T08:01:00Z" },
+      { id: "answer", role: "assistant", content: "Retry answer", timestamp: "2026-02-18T08:02:00Z" },
+    ]
+    render(<ConversationThread />)
+    expect(screen.getByText("Failed question")).toBeInTheDocument()
+    expect(screen.queryByText("Retry answer")).not.toBeInTheDocument()
   })
 
   it("keeps lightweight compare affordances for a single prior turn", () => {

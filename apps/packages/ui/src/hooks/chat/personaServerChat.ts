@@ -1,6 +1,8 @@
 import type { AssistantSelection } from "@/types/assistant-selection"
 import type { ChatScope } from "@/types/chat-scope"
 import { normalizeConversationState } from "@/utils/conversation-state"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 export const DEFAULT_PERSONA_MEMORY_MODE = "read_only" as const
 
@@ -28,13 +30,21 @@ type EnsurePersonaServerChatArgs = {
   historyId: string | null
   temporaryChat: boolean
   scope?: ChatScope
+  requestScope?: ServicePromptRequestScope
+  signal?: AbortSignal
+  scopeInvalidatedSignal?: AbortSignal
   createChat: (
     payload: Record<string, unknown>,
-    options?: { scope?: ChatScope }
+    options?: {
+      scope?: ChatScope
+      requestScope?: ServicePromptRequestScope
+      signal?: AbortSignal
+    }
   ) => Promise<any>
   ensureServerChatHistoryId: (
     chatId: string,
-    title?: string
+    title?: string,
+    scopeInvalidatedSignal?: AbortSignal
   ) => Promise<string | null>
   invalidateServerChatHistory: () => void
   setServerChatId: (value: string | null) => void
@@ -117,6 +127,9 @@ export const ensurePersonaServerChat = async ({
   historyId,
   temporaryChat,
   scope,
+  requestScope,
+  signal,
+  scopeInvalidatedSignal,
   createChat,
   ensureServerChatHistoryId,
   invalidateServerChatHistory,
@@ -138,6 +151,12 @@ export const ensurePersonaServerChat = async ({
   historyId: string | null
   personaMemoryMode: "read_only" | "read_write"
 }> => {
+  const throwIfScopeInvalidated = () => {
+    if (scopeInvalidatedSignal?.aborted) {
+      throw createServicePromptScopeChangedError()
+    }
+  }
+  throwIfScopeInvalidated()
   const overrideChatId =
     typeof serverChatIdOverride === "string" &&
     serverChatIdOverride.trim().length > 0
@@ -167,6 +186,7 @@ export const ensurePersonaServerChat = async ({
     !isMatchingPersonaChat
 
   if (shouldResetServerChat) {
+    throwIfScopeInvalidated()
     resetAssistantServerChatState({
       setServerChatId,
       setServerChatTitle,
@@ -185,6 +205,7 @@ export const ensurePersonaServerChat = async ({
   }
 
   let chatId = shouldResetServerChat ? null : resolvedServerChatId
+  let publishServerChatState: (() => void) | null = null
   if (!chatId) {
     const created = await createChat({
       assistant_kind: "persona",
@@ -195,7 +216,11 @@ export const ensurePersonaServerChat = async ({
       cluster_id: undefined,
       source: undefined,
       external_ref: undefined
-    }, scope ? { scope } : undefined)
+    }, scope || requestScope || signal
+      ? { scope, requestScope, signal }
+      : undefined)
+
+    throwIfScopeInvalidated()
 
     let rawId: string | number | undefined
     const createdMeta =
@@ -213,7 +238,6 @@ export const ensurePersonaServerChat = async ({
       throw new Error("Failed to create persona-backed chat session")
     }
     chatId = normalizedId
-    setServerChatId(normalizedId)
     const createdState =
       typeof createdMeta?.state === "string"
         ? createdMeta.state
@@ -257,32 +281,44 @@ export const ensurePersonaServerChat = async ({
         ? createdMeta.persona_memory_mode
         : personaMemoryMode
 
-    setServerChatState(
-      normalizeConversationState(createdState)
-    )
-    setServerChatVersion(createdVersion)
-    setServerChatTopic(createdTopic)
-    setServerChatClusterId(createdClusterId)
-    setServerChatSource(createdSource)
-    setServerChatExternalRef(createdExternalRef)
-    setServerChatTitle(createdTitle)
-    setServerChatCharacterId(createdCharacterId)
-    setServerChatAssistantKind(createdAssistantKind)
-    setServerChatAssistantId(createdAssistantId)
-    setServerChatPersonaMemoryMode(createdPersonaMemoryMode)
-    setServerChatMetaLoaded(true)
-    invalidateServerChatHistory()
+    publishServerChatState = () => {
+      setServerChatId(normalizedId)
+      setServerChatState(normalizeConversationState(createdState))
+      setServerChatVersion(createdVersion)
+      setServerChatTopic(createdTopic)
+      setServerChatClusterId(createdClusterId)
+      setServerChatSource(createdSource)
+      setServerChatExternalRef(createdExternalRef)
+      setServerChatTitle(createdTitle)
+      setServerChatCharacterId(createdCharacterId)
+      setServerChatAssistantKind(createdAssistantKind)
+      setServerChatAssistantId(createdAssistantId)
+      setServerChatPersonaMemoryMode(createdPersonaMemoryMode)
+      setServerChatMetaLoaded(true)
+      invalidateServerChatHistory()
+    }
   } else {
-    setServerChatAssistantKind("persona")
-    setServerChatAssistantId(assistantId)
-    setServerChatPersonaMemoryMode(personaMemoryMode)
-    setServerChatCharacterId(null)
+    throwIfScopeInvalidated()
+    publishServerChatState = () => {
+      setServerChatAssistantKind("persona")
+      setServerChatAssistantId(assistantId)
+      setServerChatPersonaMemoryMode(personaMemoryMode)
+      setServerChatCharacterId(null)
+    }
   }
 
-  const resolvedHistoryId =
-    temporaryChat || !chatId
-      ? historyId
-      : await ensureServerChatHistoryId(chatId, serverChatTitle || undefined)
+  let resolvedHistoryId = historyId
+  if (!temporaryChat && chatId) {
+    throwIfScopeInvalidated()
+    resolvedHistoryId = await ensureServerChatHistoryId(
+      chatId,
+      serverChatTitle || undefined,
+      scopeInvalidatedSignal
+    )
+    throwIfScopeInvalidated()
+  }
+  throwIfScopeInvalidated()
+  publishServerChatState?.()
 
   return {
     chatId,

@@ -7,11 +7,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from loguru import logger
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep, get_request_user, RateLimiter, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RateLimiter, User, get_rate_limiter_dep, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
+from tldw_Server_API.app.api.v1.endpoints.notes_sync_errors import notes_sync_http_error
 from tldw_Server_API.app.api.v1.schemas.web_clipper_schemas import (
     WebClipperEnrichmentPayload,
     WebClipperEnrichmentResponse,
@@ -27,6 +28,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.WebClipper.service import WebClipperService
 from tldw_Server_API.app.core.Workspaces.source_jobs import enqueue_workspace_source_ingest_job
 
@@ -100,6 +102,8 @@ async def save_web_clip(
         if isinstance(exc, CharactersRAGDBError) and not isinstance(exc, ConflictError):
             logger.error("Web clipper save failed")
         raise map_db_error_to_http(exc, default_detail="Internal server error") from exc
+    except SyncStoreError as exc:
+        raise notes_sync_http_error(exc) from exc
     except _WEB_CLIPPER_ENDPOINT_EXCEPTIONS as exc:
         logger.error("Web clipper save failed")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error") from exc
@@ -127,6 +131,8 @@ async def get_web_clip_status(
         if isinstance(exc, CharactersRAGDBError):
             logger.error("Web clipper status failed")
         raise map_db_error_to_http(exc, default_detail="Internal server error") from exc
+    except SyncStoreError as exc:
+        raise notes_sync_http_error(exc) from exc
     except _WEB_CLIPPER_ENDPOINT_EXCEPTIONS as exc:
         logger.error("Web clipper status failed")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error") from exc
@@ -159,6 +165,8 @@ async def persist_web_clip_enrichment(
         if isinstance(exc, CharactersRAGDBError):
             logger.error("Web clipper enrichment failed")
         raise map_db_error_to_http(exc, default_detail="Internal server error") from exc
+    except SyncStoreError as exc:
+        raise notes_sync_http_error(exc) from exc
     except _WEB_CLIPPER_ENDPOINT_EXCEPTIONS as exc:
         logger.error("Web clipper enrichment failed")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Internal server error") from exc

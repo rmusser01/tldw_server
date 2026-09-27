@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import uuid
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,19 +17,12 @@ def _setup_env(tmp_path) -> None:
 
 async def _seed_assignable_user() -> int:
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
     pool = await get_db_pool()
     username = "monitoring_assignee"
     email = "monitoring_assignee@example.com"
-    await pool.execute(
-        "INSERT OR IGNORE INTO users (uuid, username, email, password_hash, is_active) VALUES (?,?,?,?,1)",
-        str(uuid.uuid4()),
-        username,
-        email,
-        "x",
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", username)
-    return int(user_id)
+    return await ensure_test_user(pool, username, email)
 
 
 def _seed_runtime_alert(alerts_db_path: str) -> int:

@@ -7,7 +7,7 @@ import json
 import os
 import subprocess  # nosec B404
 import sys
-from dataclasses import FrozenInstanceError, fields, is_dataclass, replace
+from dataclasses import FrozenInstanceError, asdict, fields, is_dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -38,6 +38,7 @@ from tldw_Server_API.app.core.Research.discovery.contracts import (
     ExecutionMode,
     JSONBodyPair,
     LiteralTermsQueryValuePolicy,
+    OpaqueCursorQueryValuePolicy,
     OperationKind,
     PathSlot,
     PathSlotKind,
@@ -112,6 +113,7 @@ def test_digest_bound_request_policy_contracts_are_public() -> None:
         "BoundedDecimalQueryValuePolicy",
         "LiteralTermsQueryValuePolicy",
         "BoundedTextQueryValuePolicy",
+        "OpaqueCursorQueryValuePolicy",
         "QueryValuePolicy",
     )
 
@@ -200,8 +202,9 @@ def test_query_value_policy_contracts_require_exact_types_and_frozen_bounds() ->
             64,
         ),
         BoundedTextQueryValuePolicy("category", 128),
+        OpaqueCursorQueryValuePolicy("pageToken", 1_024),
     )
-    assert tuple(policy.required for policy in policies) == (True, True, True, False)
+    assert tuple(policy.required for policy in policies) == (True, True, True, False, False)
     for policy in policies:
         assert is_dataclass(policy)
         assert policy.__dataclass_params__.frozen is True
@@ -213,7 +216,6 @@ def test_query_value_policy_contracts_require_exact_types_and_frozen_bounds() ->
         lambda: ExactQueryValuePolicy("format", ""),
         lambda: BoundedDecimalQueryValuePolicy("pageSize", True),
         lambda: BoundedDecimalQueryValuePolicy("pageSize", 0),
-        lambda: LiteralTermsQueryValuePolicy("query", "", 16, 64),
         lambda: LiteralTermsQueryValuePolicy("query", " suffix", 17, 64),
         lambda: LiteralTermsQueryValuePolicy("query", " suffix", 16, 65),
         lambda: BoundedTextQueryValuePolicy("category", 129),
@@ -223,6 +225,21 @@ def test_query_value_policy_contracts_require_exact_types_and_frozen_bounds() ->
     for policy in policies:
         with pytest.raises(TypeError, match="required"):
             replace(policy, required=1)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("max_chars", [0, 1_025, True, "1024"])
+def test_opaque_query_policy_rejects_noncanonical_bounds(max_chars: object) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        OpaqueCursorQueryValuePolicy("pageToken", max_chars)  # type: ignore[arg-type]
+
+
+def test_query_pair_repr_hides_value_without_changing_semantics() -> None:
+    pair = QueryPair("pageToken", "opaque-token-sentinel")
+
+    assert "opaque-token-sentinel" not in repr(pair)
+    assert pair == QueryPair("pageToken", "opaque-token-sentinel")
+    assert hash(pair) == hash(QueryPair("pageToken", "opaque-token-sentinel"))
+    assert asdict(pair) == {"name": "pageToken", "value": "opaque-token-sentinel"}
 
 
 def _template_policy(
@@ -340,9 +357,10 @@ def test_route_policy_query_value_rules_exactly_cover_allowed_keys() -> None:
         ExactQueryValuePolicy("format", "json"),
         BoundedDecimalQueryValuePolicy("pageSize", 100),
         BoundedTextQueryValuePolicy("category", 128),
+        OpaqueCursorQueryValuePolicy("pageToken", 1_024),
     )
     policy = _template_policy(
-        allowed_query_keys=("query", "format", "pageSize", "category"),
+        allowed_query_keys=("query", "format", "pageSize", "category", "pageToken"),
         query_value_policies=rules,
     )
 
@@ -354,7 +372,23 @@ def test_route_policy_query_value_rules_exactly_cover_allowed_keys() -> None:
     with pytest.raises(ValueError, match="query_value_policy"):
         replace(policy, query_value_policies=(*rules, rules[0]), policy_digest="")
     with pytest.raises(ValueError, match="query_value_policy"):
-        replace(policy, allowed_query_keys=("query", "format", "pageSize"), policy_digest="")
+        replace(policy, allowed_query_keys=("query", "format", "pageSize", "category"), policy_digest="")
+
+
+def test_empty_literal_suffix_is_contract_valid_and_digest_bound() -> None:
+    policy = LiteralTermsQueryValuePolicy("query.term", "", 8, 32)
+    assert policy.fixed_suffix == ""
+    nonempty = LiteralTermsQueryValuePolicy("query.term", " AND FIXED", 8, 32)
+    empty_route = _template_policy(
+        query_value_policies=(policy,),
+        allowed_query_keys=("query.term",),
+    )
+    nonempty_route = _template_policy(
+        query_value_policies=(nonempty,),
+        allowed_query_keys=("query.term",),
+    )
+
+    assert canonical_policy_digest(empty_route) != canonical_policy_digest(nonempty_route)
 
 
 def test_dynamic_path_and_query_rules_are_bound_into_policy_digest() -> None:

@@ -1,20 +1,42 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import MISSING, asdict, fields
 from typing import Literal, get_type_hints
 
 import pytest
 
+from tldw_Server_API.app.core.Embeddings.orchestrator import (
+    PreparedEmbeddingRequest as OrchestratorPreparedEmbeddingRequest,
+)
 from tldw_Server_API.app.core.Embeddings.request_types import (
     EmbeddingDomainError,
+    EmbeddingExecutionOutcome,
     EmbeddingExecutionPlan,
     EmbeddingExecutionResult,
     EmbeddingPolicyDecision,
     EmbeddingRequestContext,
     NormalizedEmbeddingInput,
+    PreparedEmbeddingRequest,
 )
 
 TelemetryScalar = str | int | float | bool | None
+
+
+def _valid_execution_outcome_values() -> dict[str, object]:
+    return {
+        "vectors": ((0.1, 0.2),),
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "prompt_tokens": 1,
+        "total_tokens": 1,
+        "cache_hits": 0,
+        "cache_misses": 1,
+        "requested_dimensions": None,
+        "effective_dimension_policy": "reduce",
+        "attempt_count": 1,
+        "fallback_attempt_count": 0,
+        "embeddings_from_adapter": False,
+    }
 
 
 @pytest.mark.unit
@@ -92,6 +114,284 @@ def test_request_contract_annotations_match_approved_plan_shapes():
 
     error_details_hint = get_type_hints(EmbeddingDomainError.__init__)["details"]
     assert error_details_hint == list[dict[str, TelemetryScalar]] | None
+
+
+@pytest.mark.unit
+def test_execution_outcome_is_deeply_immutable_and_has_no_http_headers():
+    hints = get_type_hints(EmbeddingExecutionOutcome)
+    outcome_fields = {field.name: field for field in fields(EmbeddingExecutionOutcome)}
+
+    assert "response_headers" not in hints
+    assert hints["vectors"] == tuple[tuple[float, ...], ...]
+    assert hints["attempt_count"] is int
+    assert hints["fallback_attempt_count"] is int
+    assert outcome_fields["attempt_count"].default is MISSING
+    assert outcome_fields["fallback_attempt_count"].default is MISSING
+    assert EmbeddingExecutionOutcome.__dataclass_params__.frozen is True
+    assert set(EmbeddingExecutionOutcome.__slots__) == set(hints)
+
+
+@pytest.mark.unit
+def test_execution_outcome_copies_mutable_vectors_into_nested_tuples():
+    source_vectors = [[0.1, 0.2], [0.3, 0.4]]
+    outcome = EmbeddingExecutionOutcome(
+        vectors=source_vectors,
+        provider="openai",
+        model="text-embedding-3-small",
+        prompt_tokens=2,
+        total_tokens=2,
+        cache_hits=0,
+        cache_misses=2,
+        requested_dimensions=None,
+        effective_dimension_policy="reduce",
+        attempt_count=1,
+        fallback_attempt_count=0,
+    )
+
+    source_vectors[0][0] = 9.0
+    source_vectors.append([0.5, 0.6])
+
+    assert outcome.vectors == ((0.1, 0.2), (0.3, 0.4))
+    assert type(outcome.vectors) is tuple
+    assert all(type(vector) is tuple for vector in outcome.vectors)
+
+
+@pytest.mark.unit
+def test_execution_outcome_canonicalizes_numeric_vector_leaves_to_floats():
+    values = _valid_execution_outcome_values()
+    values.update(
+        {
+            "vectors": [[1, 2], [3.5, 4]],
+            "cache_misses": 2,
+        }
+    )
+
+    outcome = EmbeddingExecutionOutcome(**values)
+
+    assert outcome.vectors == ((1.0, 2.0), (3.5, 4.0))
+    assert all(type(value) is float for vector in outcome.vectors for value in vector)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("vectors", "cache_misses"),
+    [
+        ([[[1.0], 2.0]], 1),
+        ([["not-a-number"]], 1),
+        ([[True]], 1),
+        ([[float("nan")]], 1),
+        ([[float("inf")]], 1),
+        ([[1.0], [2.0, 3.0]], 2),
+        ([[]], 1),
+        ([1.0], 1),
+    ],
+    ids=(
+        "nested-mutable-leaf",
+        "non-numeric-leaf",
+        "boolean-leaf",
+        "nan-leaf",
+        "infinite-leaf",
+        "non-rectangular",
+        "empty-vector",
+        "non-vector-item",
+    ),
+)
+def test_execution_outcome_rejects_malformed_vectors(
+    vectors: object,
+    cache_misses: int,
+):
+    values = _valid_execution_outcome_values()
+    values.update({"vectors": vectors, "cache_misses": cache_misses})
+
+    with pytest.raises(ValueError) as exc_info:
+        EmbeddingExecutionOutcome(**values)
+
+    assert str(exc_info.value) == ("vectors must contain equally sized, non-empty vectors of finite numbers")
+
+
+@pytest.mark.unit
+def test_execution_outcome_accepts_zero_total_with_positive_prompt_tokens():
+    outcome = EmbeddingExecutionOutcome(
+        vectors=((0.1, 0.2),),
+        provider="openai",
+        model="text-embedding-3-small",
+        prompt_tokens=2,
+        total_tokens=0,
+        cache_hits=0,
+        cache_misses=1,
+        requested_dimensions=None,
+        effective_dimension_policy="reduce",
+        attempt_count=1,
+        fallback_attempt_count=0,
+    )
+
+    assert outcome.prompt_tokens == 2
+    assert outcome.total_tokens == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("overrides", "expected_message"),
+    [
+        ({"prompt_tokens": -1}, "prompt_tokens must be nonnegative"),
+        ({"cache_hits": -1}, "cache_hits must be nonnegative"),
+        ({"cache_misses": -1}, "cache_misses must be nonnegative"),
+        ({"attempt_count": -1}, "attempt_count must be nonnegative"),
+        (
+            {"fallback_attempt_count": -1},
+            "fallback_attempt_count must be nonnegative",
+        ),
+        ({"total_tokens": -1}, "total_tokens must be nonnegative"),
+        (
+            {"attempt_count": 0},
+            "attempt_count must be at least 1 for a successful outcome",
+        ),
+        (
+            {"fallback_attempt_count": 2},
+            "fallback_attempt_count must be less than attempt_count",
+        ),
+        (
+            {"fallback_attempt_count": 1},
+            "fallback_attempt_count must be less than attempt_count",
+        ),
+        (
+            {"cache_hits": 1, "cache_misses": 1},
+            "cache_hits + cache_misses must equal the number of vectors",
+        ),
+    ],
+)
+def test_execution_outcome_rejects_invalid_success_invariants(
+    overrides: dict[str, int],
+    expected_message: str,
+):
+    values = _valid_execution_outcome_values()
+    values.update(overrides)
+
+    with pytest.raises(ValueError) as exc_info:
+        EmbeddingExecutionOutcome(**values)
+
+    assert str(exc_info.value) == expected_message
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("overrides", "expected_message"),
+    [
+        (
+            {"fallback_from": "openai"},
+            "fallback_from requires a positive fallback_attempt_count",
+        ),
+        (
+            {"attempt_count": 2, "fallback_attempt_count": 1},
+            "positive fallback_attempt_count requires fallback_from",
+        ),
+        (
+            {"attempt_count": 99},
+            "attempt_count - fallback_attempt_count must be 1 or 2",
+        ),
+        (
+            {
+                "attempt_count": 4,
+                "fallback_attempt_count": 1,
+                "fallback_from": "openai",
+            },
+            "attempt_count - fallback_attempt_count must be 1 or 2",
+        ),
+    ],
+)
+def test_execution_outcome_rejects_inconsistent_attempt_metadata(
+    overrides: dict[str, object],
+    expected_message: str,
+):
+    values = _valid_execution_outcome_values()
+    values.update(overrides)
+
+    with pytest.raises(ValueError) as exc_info:
+        EmbeddingExecutionOutcome(**values)
+
+    assert str(exc_info.value) == expected_message
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("attempt_count", "fallback_attempt_count", "fallback_from"),
+    [
+        (1, 0, None),
+        (2, 0, None),
+        (2, 1, "openai"),
+        (3, 1, "openai"),
+        (3, 2, "openai"),
+        (4, 2, "openai"),
+    ],
+)
+def test_execution_outcome_accepts_attempt_count_boundaries(
+    attempt_count: int,
+    fallback_attempt_count: int,
+    fallback_from: str | None,
+):
+    values = _valid_execution_outcome_values()
+    values.update(
+        {
+            "attempt_count": attempt_count,
+            "fallback_attempt_count": fallback_attempt_count,
+            "fallback_from": fallback_from,
+        }
+    )
+
+    outcome = EmbeddingExecutionOutcome(**values)
+
+    assert outcome.attempt_count - outcome.fallback_attempt_count in (1, 2)
+    assert outcome.fallback_from == fallback_from
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "prompt_tokens",
+        "total_tokens",
+        "cache_hits",
+        "cache_misses",
+        "attempt_count",
+        "fallback_attempt_count",
+    ),
+)
+@pytest.mark.parametrize("invalid_value", (True, 1.0), ids=("bool", "float"))
+def test_execution_outcome_requires_exact_builtin_integer_counters(
+    field_name: str,
+    invalid_value: bool | float,
+):
+    values = _valid_execution_outcome_values()
+    values[field_name] = invalid_value
+
+    with pytest.raises(ValueError) as exc_info:
+        EmbeddingExecutionOutcome(**values)
+
+    assert str(exc_info.value) == f"{field_name} must be an exact int"
+
+
+@pytest.mark.unit
+def test_execution_outcome_accepts_mixed_cache_counts_with_adapter_origin():
+    values = _valid_execution_outcome_values()
+    values.update(
+        {
+            "vectors": ((0.1, 0.2), (0.3, 0.4)),
+            "cache_hits": 1,
+            "cache_misses": 1,
+            "embeddings_from_adapter": True,
+        }
+    )
+
+    outcome = EmbeddingExecutionOutcome(**values)
+
+    assert outcome.embeddings_from_adapter is True
+    assert (outcome.cache_hits, outcome.cache_misses) == (1, 1)
+    assert len(outcome.vectors) == 2
+
+
+@pytest.mark.unit
+def test_orchestrator_reexports_prepared_request_contract():
+    assert OrchestratorPreparedEmbeddingRequest is PreparedEmbeddingRequest
 
 
 @pytest.mark.unit

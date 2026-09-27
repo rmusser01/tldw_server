@@ -1,0 +1,61 @@
+{
+  "source_revision": "910c526513a03b305b2976fec6f1dee73bacc1e9",
+  "profile_scope": "multi-user PostgreSQL AuthNZ and SQLite content with one disposable admin actor; one amd64 API worker, 2 CPU, 4 GiB; local prompt rendering workflow, no external model; diagnostic profile only",
+  "pool_scope": "AuthNZ asyncpg pool occupied connections; includes collector health query connection; does not measure every application database",
+  "queue_scope": "WorkflowScheduler in-process queue depth from authenticated healthz",
+  "storage_scope": "regular-file apparent bytes under API Databases and dedicated Redis volumes plus dedicated AuthNZ pg_database_size; excludes retained images and logs outside durable volumes",
+  "name": "pr2761-pg-auth-sqlite-content-single-worker",
+  "telemetry_path": "/release-fixtures/observations",
+  "timeout_seconds": 15,
+  "sample_interval_seconds": 1,
+  "max_sample_age_seconds": 5,
+  "max_storage_growth_bytes": 67108864,
+  "max_recovery_seconds": 30,
+  "phases": [
+    {
+      "name": "steady",
+      "duration_seconds": 180,
+      "concurrency": 2,
+      "pause_seconds": 2,
+      "min_successes": 30,
+      "max_error_ratio": 0,
+      "max_rejection_ratio": 0,
+      "p95_seconds": 2,
+      "metric_maxima": {
+        "queue_depth": 4,
+        "db_pool_in_use": 10,
+        "storage_bytes": 268435456
+      }
+    },
+    {
+      "name": "overload",
+      "duration_seconds": 60,
+      "concurrency": 32,
+      "pause_seconds": 0.02,
+      "min_successes": 1,
+      "max_error_ratio": 0,
+      "max_rejection_ratio": 0.9999,
+      "p95_seconds": 5,
+      "metric_maxima": {
+        "queue_depth": 64,
+        "db_pool_in_use": 10,
+        "storage_bytes": 268435456
+      }
+    },
+    {
+      "name": "recovery",
+      "duration_seconds": 120,
+      "concurrency": 1,
+      "pause_seconds": 2,
+      "min_successes": 15,
+      "max_error_ratio": 0,
+      "max_rejection_ratio": 0.05,
+      "p95_seconds": 2,
+      "metric_maxima": {
+        "queue_depth": 4,
+        "db_pool_in_use": 10,
+        "storage_bytes": 268435456
+      }
+    }
+  ]
+}

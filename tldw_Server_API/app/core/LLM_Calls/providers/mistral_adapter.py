@@ -111,6 +111,8 @@ class MistralAdapter(ChatProvider):
                 base = mcfg.get("api_base_url")
                 if isinstance(base, str) and base.strip():
                     return base.strip().rstrip("/")
+        if request.get("credentials_resolved") is True:
+            return "https://api.mistral.ai/v1"
         return self._base_url()
 
     def _resolve_timeout(self, request: dict[str, Any], fallback: float | None) -> float:
@@ -173,6 +175,9 @@ class MistralAdapter(ChatProvider):
         return data
 
     def normalize_error(self, exc: Exception):  # type: ignore[override]
+        """Delegate to the shared bounded error policy."""
+        return super().normalize_error(exc)
+
         from tldw_Server_API.app.core.LLM_Calls.error_utils import (
             get_http_error_text,
             get_http_status_from_exception,
@@ -215,6 +220,7 @@ class MistralAdapter(ChatProvider):
         return super().normalize_error(exc)
 
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
+        request = self._bind_request_credentials(request)
         request = self._apply_config_defaults(request or {})
         request = validate_payload(self.name, request or {})
         api_key = request.get("api_key")
@@ -233,11 +239,13 @@ class MistralAdapter(ChatProvider):
                 resp = client.post(url, headers=headers, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
+                self._raise_if_in_band_provider_error(data, phase="chat_response")
                 return self._normalize_to_openai_shape(data)
         except Exception as e:
-            raise self.normalize_error(e) from e
+            self._raise_sanitized_provider_failure(e, phase="chat")
 
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
+        request = self._bind_request_credentials(request)
         request = self._apply_config_defaults(request or {})
         request = validate_payload(self.name, request or {})
         api_key = request.get("api_key")
@@ -261,11 +269,15 @@ class MistralAdapter(ChatProvider):
                         if not raw:
                             continue
                         if debug_stream:
-                            logger.debug(f"{self.name} stream raw: {raw!r}")
+                            logger.debug("{} stream chunk received", self.name)
                         try:
                             line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
                         except Exception:
                             line = str(raw)
+                        self._raise_if_in_band_provider_error(
+                            line,
+                            phase="stream_response",
+                        )
                         if is_done_line(line):
                             if not seen_done:
                                 seen_done = True
@@ -277,7 +289,7 @@ class MistralAdapter(ChatProvider):
                     yield from finalize_stream(response=resp, done_already=seen_done)
             return
         except Exception as e:
-            raise self.normalize_error(e) from e
+            self._raise_sanitized_provider_failure(e, phase="stream")
 
     async def achat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         return await asyncio.to_thread(self.chat, request, timeout=timeout)

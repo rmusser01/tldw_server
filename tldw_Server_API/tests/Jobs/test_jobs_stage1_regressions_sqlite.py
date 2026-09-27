@@ -78,7 +78,11 @@ def test_finalize_cancelled_does_not_overwrite_terminal_states_sqlite(jobs_db, t
     assert before is not None
     assert before["status"] == terminal_status
 
-    changed = jm.finalize_cancelled(int(job["id"]), reason="forced")
+    changed = jm.finalize_cancelled(
+        int(job["id"]),
+        reason="forced",
+        expected_uuid=str(job["uuid"]),
+    )
     assert changed is False
 
     after = jm.get_job(int(job["id"]))
@@ -100,7 +104,13 @@ def test_finalize_cancelled_processing_updates_counters_sqlite(jobs_db, monkeypa
     assert acquired is not None
     assert int(acquired["id"]) == int(job["id"])
 
-    assert jm.finalize_cancelled(int(job["id"]), reason="cancel requested during processing")
+    assert jm.finalize_cancelled(
+        int(job["id"]),
+        reason="cancel requested during processing",
+        expected_uuid=str(acquired["uuid"]),
+        worker_id=str(acquired["worker_id"]),
+        lease_id=str(acquired["lease_id"]),
+    )
 
     conn = jm._connect()
     try:

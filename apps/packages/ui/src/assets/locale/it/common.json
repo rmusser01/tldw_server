@@ -555,5 +555,11 @@
     "minutesAgoShort": "{{count}}m fa",
     "hoursAgoShort": "{{count}}h fa",
     "daysAgoShort": "{{count}}g fa"
+  },
+  "help": {
+    "loadFailed": "Impossibile caricare la guida. Riconnettiti, salva le modifiche e ricarica la pagina.",
+    "loading": "Caricamento della guida…",
+    "confirmReload": "Ricaricare questa pagina? Le modifiche non salvate potrebbero andare perse.",
+    "reload": "Ricarica pagina"
   }
 }

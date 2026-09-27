@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import inspect
 import hashlib
+import inspect
 import json
 import os
 import uuid
@@ -22,6 +22,7 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
     VNAssetBulkReviewRequest,
     VNAssetCleanupRequest,
     VNAssetCleanupResponse,
+    VNAssetGenerationPreflightResponse,
     VNAssetGenerationRequest,
     VNAssetGenerationStatusResponse,
     VNAssetItemResponse,
@@ -49,19 +50,20 @@ from tldw_Server_API.app.api.v1.schemas.vn_asset_schemas import (
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Utils.path_utils import safe_join
+from tldw_Server_API.app.core.VN_Assets.cleanup_blockers import VNAssetCleanupBlockerProvider
+from tldw_Server_API.app.core.VN_Assets.constants import DEFAULT_VN_ASSET_UPLOAD_MAX_BYTES
 from tldw_Server_API.app.core.VN_Assets.jobs import (
     create_pack_export_job,
     create_pack_import_commit_job,
     create_pack_import_preview_job,
 )
-from tldw_Server_API.app.core.VN_Assets.constants import DEFAULT_VN_ASSET_UPLOAD_MAX_BYTES
 from tldw_Server_API.app.core.VN_Assets.matrix import expand_starter_matrix
 from tldw_Server_API.app.core.VN_Assets.portability.archive import DEFAULT_MAX_ARCHIVE_SIZE_BYTES
 from tldw_Server_API.app.core.VN_Assets.portability.constants import VNPACK_EXTENSION
+from tldw_Server_API.app.core.VN_Assets.preflight import generation_preflight
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
-from tldw_Server_API.app.core.VN_Assets.cleanup_blockers import VNAssetCleanupBlockerProvider
 from tldw_Server_API.app.core.VN_Assets.storage import (
     VN_ASSET_CONTENT_NOT_FOUND,
     generated_file_matches_vn_asset,
@@ -83,6 +85,15 @@ router = APIRouter(prefix="/vn-assets", tags=["vn-assets"])
 CONFLICT_ERROR_CODES = {
     "slot_already_exists",
     "slot_has_dependents",
+}
+GENERATION_RECIPE_CONFLICTS = {
+    "vn_asset_recipe_unavailable": "Original generation settings are unavailable. Start generation to use current settings.",
+    "vn_asset_recipe_invalid": "Original generation settings cannot be read. Start generation to use current settings.",
+    "vn_asset_recipe_slot_mismatch": "This slot was not in the selected batch. Refresh generation status and retry the failed slot.",
+    "vn_asset_retry_source_unavailable": "No failed generation batch is available for Retry. Refresh generation status or start generation.",
+    "vn_asset_retry_source_active": "Original generation work is still queued or running. Wait for it to finish, then refresh generation status before Retry.",
+    "vn_asset_retry_override_conflict": "Retry uses the original settings. Use Regenerate or Start generation for changed settings.",
+    "vn_asset_execution_recipe_invalid": "The original backend selection cannot be read. Start generation to use current settings.",
 }
 TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled", "quarantined"}
 UPLOAD_CHUNK_SIZE_BYTES = 1024 * 1024
@@ -130,6 +141,11 @@ def _cleanup_blocker_provider(
 
 def _handle_value_error(exc: ValueError) -> HTTPException:
     detail = str(exc) or "invalid_request"
+    if detail in GENERATION_RECIPE_CONFLICTS:
+        return HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=vn_error_detail(detail, GENERATION_RECIPE_CONFLICTS[detail]),
+        )
     if "not_found" in detail:
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
     if detail in CONFLICT_ERROR_CODES:
@@ -1792,6 +1808,24 @@ async def get_manifest(
         raise _handle_value_error(exc) from exc
 
 
+@router.get(
+    "/packs/{pack_id}/generation/preflight",
+    response_model=VNAssetGenerationPreflightResponse,
+    dependencies=[Depends(get_request_user), Depends(rbac_rate_limit("vn_assets.preflight", per_user=True))],
+)
+def get_generation_preflight(
+    pack_id: int,
+    service: VNAssetPackService = Depends(_service),
+) -> VNAssetGenerationPreflightResponse:
+    """Return owner-scoped configuration diagnostics without starting generation."""
+    try:
+        pack = service.get_pack(pack_id)
+        slots = service.list_slots(pack_id)
+        return generation_preflight(pack, slots)
+    except ValueError as exc:
+        raise _handle_value_error(exc) from exc
+
+
 @router.get("/packs/{pack_id}/readiness", response_model=VNAssetReadinessResponse)
 async def get_readiness(
     pack_id: int,
@@ -1821,7 +1855,7 @@ async def prompt_preview(
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(rbac_rate_limit("vn_assets.generate"))],
 )
-async def start_generation(
+def start_generation(
     pack_id: int,
     request: VNAssetGenerationRequest | None = None,
     service: VNAssetPackService = Depends(_service),
@@ -1913,7 +1947,7 @@ async def cancel_generation(
     status_code=status.HTTP_202_ACCEPTED,
     dependencies=[Depends(rbac_rate_limit("vn_assets.generate"))],
 )
-async def retry_slot_generation(
+def retry_slot_generation(
     pack_id: int,
     slot_id: int,
     request: VNAssetGenerationRequest | None = None,
@@ -1985,7 +2019,7 @@ async def retry_slot_generation(
     response_model=VNAssetGenerationStatusResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
-async def regenerate_item(
+def regenerate_item(
     pack_id: int,
     item_id: int,
     request: VNAssetGenerationRequest | None = None,

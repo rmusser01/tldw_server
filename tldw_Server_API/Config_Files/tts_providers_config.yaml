@@ -5,6 +5,7 @@
 provider_priority:
   - kitten_tts  # Local ONNX voices with first-use model download
   - pocket_tts_cpp # Local PocketTTS.cpp voice cloning
+  - audio_cpp   # External or managed audio.cpp server (disabled by default)
   - openai      # Reliable, high quality
   - kokoro      # Local, fast
   - pocket_tts  # Local ONNX voice cloning
@@ -33,6 +34,80 @@ providers:
     # call during adapter initialization. Disabled by default so that
     # startup does not depend on external network availability.
     verify_api_key_on_init: false
+
+  # OpenRouter TTS gateway (disabled until an operator selects a model/voice).
+  # The URL and paths are server-controlled. Users may supply only an API key
+  # when allow_user_api_key is true; they cannot override endpoint authority.
+  openrouter:
+    enabled: false
+    display_name: "OpenRouter"
+    base_url: "https://openrouter.ai/api/v1/"
+    speech_path: "audio/speech"
+    api_key: ${OPENROUTER_API_KEY}
+    allow_user_api_key: true
+    speech_timeout_seconds: 30
+    default_model: "openai/gpt-4o-mini-tts-2025-12-15"
+    default_voice: "nova"
+
+    # Discovery is advisory. The exact-cased allowed_models and overlays below
+    # remain authoritative even when OpenRouter advertises additional models.
+    discovery:
+      enabled: true
+      models_path: "models"
+      query:
+        output_modalities: "speech"
+      ttl_seconds: 600
+      stale_ttl_seconds: 3600
+      timeout_seconds: 5
+    allowed_models:
+      - "openai/gpt-4o-mini-tts-2025-12-15"
+    model_overrides:
+      "openai/gpt-4o-mini-tts-2025-12-15":
+        default_voice: "nova"
+        voices: ["alloy", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer"]
+        formats: ["mp3", "pcm"]
+        supports_speed: true
+
+    capability_defaults:
+      formats: ["mp3", "pcm"]
+      supports_speed: false
+      supports_language: false
+      supports_target_sample_rate: false
+      allow_octet_stream: false
+      max_input_characters: 12000
+      max_response_bytes: 26214400
+      pcm:
+        sample_rate: 24000
+        channels: 1
+        sample_width_bits: 16
+
+    # Only these exact extra_params leaves may reach OpenRouter's provider
+    # object. Add options deliberately; URL/auth/header fields are forbidden.
+    allowed_request_options:
+      - "/provider/order"
+      - "/provider/allow_fallbacks"
+
+    # This is tldw cross-backend fallback, distinct from OpenRouter's own
+    # provider routing. Each synthesis target can incur a separate charge.
+    # Enable/configure company-proxy too, or clear this policy before enabling
+    # OpenRouter by itself.
+    fallback:
+      "on": ["timeout", "network_error", "upstream_5xx", "rate_limited"]
+      max_attempts: 2
+      targets:
+        - backend: "gateway:company-proxy"
+          model: "Vendor/Expressive-TTS"
+          voice: "narrator"
+
+    # Conversion is opt-in and always full-buffer. Native mp3/pcm remain usable
+    # without ffmpeg; enable conversion only after setting bounded target formats.
+    conversion:
+      enabled: false
+      source_format: "mp3"
+      target_formats: ["wav"]
+      max_input_bytes: 26214400
+      max_output_bytes: 52428800
+      timeout_seconds: 30
 
   # Kokoro TTS Configuration
   kokoro:
@@ -92,6 +167,60 @@ providers:
     cache_ttl_hours: 24
     cache_max_bytes_per_user: 1073741824
     persist_direct_voice_references: false
+
+  # audio.cpp Configuration (external or managed audiocpp_server)
+  audio_cpp:
+    enabled: false  # Disabled by default; enable after installing/running audio.cpp
+    backend: "cuda"
+    base_url: "http://127.0.0.1:8080"
+    model: "audio-cpp/pocket-tts"
+    model_path: "models/audio_cpp/PocketTTS-GGUF/english"
+    binary_path: null
+    device: "cuda"
+    timeout: 300
+    sample_rate: 24000
+    max_concurrent_generations: 1
+    auto_download: false
+    extra_params:
+      managed: false
+      allow_remote_base_url: false
+      retain_request_artifacts: false
+      external_voice_reference_mode: "disabled"  # disabled | shared_path
+      request_option_allowlist:
+        - max_tokens
+        - seed
+      server:
+        host: "127.0.0.1"
+        port: 8080
+        autoselect_port: true
+        port_probe_max: 10
+        startup_timeout_seconds: 30
+        healthcheck_interval_seconds: 0.25
+        startup_backoff_seconds: 5
+        idle_shutdown_seconds: 900  # Native model idle unload; 0 disables (process stays warm)
+        terminate_timeout_seconds: 10
+        server_config_path: "models/audio_cpp/server.json"
+        models_root: "models/audio_cpp"
+        shared_scratch_dir: "models/audio_cpp/runtime/scratch"
+        lazy_load: true
+        device: 0
+        threads: 1
+        model:
+          id: "pocket-tts"
+          family: "pocket_tts"
+          default_voice_preset:
+            voice_id: "alba"
+          path: "models/audio_cpp/PocketTTS-GGUF/english"
+          task: "tts"
+          mode: "offline"
+          load_options:
+            language: "english"
+          session_options:
+            language: "english"
+      voices:
+        alba:
+          upstream_value: "alba"
+          request_field: "voice"
 
   # KittenTTS ONNX Configuration (local; English single-speaker voices)
   kitten_tts:
@@ -342,6 +471,64 @@ providers:
       default_normalize: true
       default_use_memory_cache: "off"
 
+# Administrator-defined OpenAI-compatible speech gateways. The mapping key is
+# normalized to the public backend ID gateway:<slug> (company-proxy below becomes
+# gateway:company-proxy). Multiple disabled examples may coexist safely.
+gateways:
+  company-proxy:
+    enabled: false
+    display_name: "Company Speech Proxy"
+    # Example-only reserved domain. Replace it with an operator-controlled URL.
+    base_url: "https://speech-gateway.example.invalid/v1/"
+    speech_path: "audio/speech"
+    api_key: ${COMPANY_TTS_API_KEY}
+    allow_user_api_key: true
+    speech_timeout_seconds: 30
+    default_model: "Vendor/Expressive-TTS"
+    default_voice: "narrator"
+
+    discovery:
+      enabled: true
+      models_path: "models"
+      query: {}
+      ttl_seconds: 600
+      stale_ttl_seconds: 3600
+      timeout_seconds: 5
+    allowed_models:
+      - "Vendor/Expressive-TTS"
+    model_overrides:
+      "Vendor/Expressive-TTS":
+        default_voice: "narrator"
+        voices: ["narrator", "guide"]
+        formats: ["mp3", "pcm"]
+
+    capability_defaults:
+      formats: ["mp3", "pcm"]
+      supports_speed: true
+      supports_language: false
+      supports_target_sample_rate: false
+      allow_octet_stream: false
+      max_input_characters: 12000
+      max_response_bytes: 26214400
+      pcm:
+        sample_rate: 24000
+        channels: 1
+        sample_width_bits: 16
+
+    allowed_request_options:
+      - "/provider/options/vendor/style"
+    fallback:
+      "on": []
+      max_attempts: 1
+      targets: []
+    conversion:
+      enabled: false
+      source_format: "mp3"
+      target_formats: ["wav"]
+      max_input_bytes: 26214400
+      max_output_bytes: 52428800
+      timeout_seconds: 30
+
 # Voice mappings for cross-provider compatibility
 # NOTE: Providers like index_tts rely on uploaded reference audio; the
 #       "clone_required" placeholder indicates the caller must supply
@@ -427,6 +614,7 @@ format_preferences:
   index_tts: ["mp3", "wav"]
   pocket_tts: ["wav", "mp3", "opus", "flac", "pcm", "aac"]
   pocket_tts_cpp: ["wav", "mp3", "opus", "flac", "pcm", "aac"]
+  audio_cpp: ["wav", "mp3", "opus", "flac", "aac", "pcm"]
   lux_tts: ["wav", "mp3", "opus", "flac", "pcm", "aac"]
   qwen3_tts: ["wav", "mp3", "opus", "flac", "pcm"]
 

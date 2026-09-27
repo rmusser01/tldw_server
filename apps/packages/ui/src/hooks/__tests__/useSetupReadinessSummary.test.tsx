@@ -53,6 +53,20 @@ describe("useSetupReadinessSummary", () => {
     cleanup();
   });
 
+  it("does not request single-user readiness when disabled for a multi-user connection", async () => {
+    const { useSetupReadinessSummary } = await import("../useSetupReadinessSummary");
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useSetupReadinessSummary({ enabled }),
+      { initialProps: { enabled: false } },
+    );
+    await act(async () => { await result.current.refresh(); });
+    expect(readinessMocks.getSetupReadinessStatus).not.toHaveBeenCalled();
+    expect(readinessMocks.getSetupReadinessProfiles).not.toHaveBeenCalled();
+    expect(result.current.loading).toBe(false);
+    rerender({ enabled: true });
+    await waitFor(() => expect(result.current.status).toEqual(statusPayload));
+  });
+
   it("loads first-run setup readiness status on mount", async () => {
     const { useSetupReadinessSummary } = await import(
       "../useSetupReadinessSummary"
@@ -184,7 +198,9 @@ describe("useSetupReadinessSummary", () => {
     });
 
     expect(result.current.status).toEqual(statusPayload);
-    expect(result.current.error).toBe("Setup readiness could not be loaded.");
+    expect(result.current.error).toBe(
+      "Setup readiness could not be loaded. The server may still be starting, or the connection details may be missing - retry once your tldw server is reachable.",
+    );
     expect(result.current.loading).toBe(false);
   });
 
@@ -200,7 +216,7 @@ describe("useSetupReadinessSummary", () => {
 
     await waitFor(() =>
       expect(result.current.error).toBe(
-        "Setup readiness could not be loaded.",
+        "Setup readiness could not be loaded. The server may still be starting, or the connection details may be missing - retry once your tldw server is reachable.",
       ),
     );
     expect(result.current.status).toBeNull();

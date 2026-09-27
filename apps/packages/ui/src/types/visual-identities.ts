@@ -15,6 +15,8 @@ export interface VisualIdentityCapabilitiesResponse {
   max_frame_count: number
   supported_mime_types: string[]
   avif_enabled: boolean
+  metadata_supported?: boolean
+  metadata_unavailable_reason?: string | null
 }
 
 export interface VisualIdentityExpressionSlotResponse {

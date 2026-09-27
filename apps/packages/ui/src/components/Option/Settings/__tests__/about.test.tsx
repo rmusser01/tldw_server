@@ -69,4 +69,29 @@ describe("AboutApp", () => {
       expect(mocks.fetcher).toHaveBeenCalledWith("http://127.0.0.1:8000/openapi.json")
     })
   })
+
+  it("links to the current repository and frontend license terms", async () => {
+    mocks.getOllamaURL.mockResolvedValue("http://127.0.0.1:8000/")
+    mocks.fetcher.mockResolvedValue({
+      ok: true,
+      json: async () => ({ info: { version: "1.2.3" } })
+    })
+
+    renderWithQueryClient(<AboutApp />)
+
+    const repositoryLink = await screen.findByRole("link", {
+      name: "tldw_server on GitHub"
+    })
+    expect(repositoryLink).toHaveAttribute(
+      "href",
+      "https://github.com/rmusser01/tldw_server"
+    )
+
+    expect(
+      screen.getByRole("link", { name: "Source-available frontend terms" })
+    ).toHaveAttribute(
+      "href",
+      "https://github.com/rmusser01/tldw_server/blob/dev/LICENSE"
+    )
+  })
 })

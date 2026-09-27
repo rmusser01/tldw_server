@@ -11,6 +11,14 @@ const buildOptions = () => ({
 })
 
 describe("flashcards error taxonomy", () => {
+  it("explains failed grounding without displaying the nested verification report", () => {
+    const mapped = mapFlashcardsUiError(new Error(JSON.stringify({
+      detail: { code: "claim_verification_failed", claimVerification: { report: { report_id: "private-report" } } }
+    })), { operation: "generating cards", fallback: "Generation failed" })
+    expect(mapped.message).toMatch(/source/i)
+    expect(mapped.message).not.toContain("private-report")
+    expect(mapped.message).not.toContain("{")
+  })
   it("maps version conflicts to explicit reload guidance", () => {
     const mapped = mapFlashcardsUiError(
       {

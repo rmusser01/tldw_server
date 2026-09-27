@@ -1,5 +1,6 @@
 import { bgRequest, bgUpload } from "@/services/background-proxy"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
+import { requestScopeFields, type ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import {
   buildQuery,
   createResourceClient
@@ -22,6 +23,10 @@ const flashcardTagsClient = createResourceClient({
 })
 
 export const FLASHCARD_GENERATION_TIMEOUT_MS = 180000
+export type FlashcardsRequestOptions = {
+  signal?: AbortSignal
+  requestScope?: ServicePromptRequestScope
+}
 
 export type DeckSchedulerSettings = {
   new_steps_minutes: number[]
@@ -493,6 +498,14 @@ export type FlashcardReviewRequest = {
   card_uuid: string
   rating: number // 0-5
   answer_time_ms?: number | null
+  review_context?: FlashcardReviewContext
+  review_session_id?: number
+}
+
+export type FlashcardReviewContext = {
+  review_mode: "due" | "cram"
+  deck_id: number | null
+  tag_filter?: string | null
 }
 
 export type FlashcardGeneratedDraft = {
@@ -669,7 +682,15 @@ export type FlashcardAnalyticsSummary = {
 }
 
 // Decks
-export async function listDecks(options?: DeckListParams): Promise<Deck[]> {
+export async function listDecks(options?: DeckListParams, requestOptions?: FlashcardsRequestOptions): Promise<Deck[]> {
+  if (requestOptions?.requestScope) {
+    return bgRequest<Deck[], AllowedPath, "GET">({
+      path: `/api/v1/flashcards/decks${buildQuery({ workspace_id: options?.workspace_id, include_workspace_items: options?.include_workspace_items ?? false })}` as AllowedPath,
+      method: "GET",
+      ...requestScopeFields(requestOptions.requestScope),
+      abortSignal: requestOptions.signal ?? options?.signal
+    })
+  }
   return await decksClient.list<Deck[]>({
     workspace_id: options?.workspace_id,
     include_workspace_items: options?.include_workspace_items ?? false
@@ -680,8 +701,17 @@ export async function listDecks(options?: DeckListParams): Promise<Deck[]> {
 
 export async function createDeck(
   input: DeckCreateInput,
-  options?: { signal?: AbortSignal }
+  options?: FlashcardsRequestOptions
 ): Promise<Deck> {
+  if (options?.requestScope) {
+    return bgRequest<Deck, AllowedPath, "POST">({
+      path: "/api/v1/flashcards/decks",
+      method: "POST",
+      ...requestScopeFields(options.requestScope),
+      body: input,
+      abortSignal: options.signal
+    })
+  }
   return await decksClient.create<Deck>(input, {
     abortSignal: options?.signal
   })
@@ -754,6 +784,7 @@ export async function listFlashcards(params: {
   q?: string | null
   workspace_id?: string | null
   include_workspace_items?: boolean | null
+  include_scheduler_preview?: boolean
   limit?: number
   offset?: number
   order_by?: "due_at" | "created_at" | null
@@ -765,6 +796,7 @@ export async function listFlashcards(params: {
     q: params.q,
     workspace_id: params.workspace_id,
     include_workspace_items: params.include_workspace_items ?? false,
+    include_scheduler_preview: params.include_scheduler_preview,
     limit: params.limit,
     offset: params.offset,
     order_by: params.order_by
@@ -788,8 +820,17 @@ export async function listFlashcardTagSuggestions(params?: {
 
 export async function createFlashcard(
   input: FlashcardCreate,
-  options?: { signal?: AbortSignal }
+  options?: FlashcardsRequestOptions
 ): Promise<Flashcard> {
+  if (options?.requestScope) {
+    return bgRequest<Flashcard, AllowedPath, "POST">({
+      path: "/api/v1/flashcards",
+      method: "POST",
+      ...requestScopeFields(options.requestScope),
+      body: input,
+      abortSignal: options.signal
+    })
+  }
   return await flashcardsClient.create<Flashcard>(input, {
     abortSignal: options?.signal
   })
@@ -797,12 +838,14 @@ export async function createFlashcard(
 
 export async function createFlashcardsBulk(
   input: FlashcardCreate[],
-  options?: { signal?: AbortSignal }
+  options?: FlashcardsRequestOptions
 ): Promise<FlashcardListResponse> {
+  const scope = requestScopeFields(options?.requestScope)
   return await bgRequest<FlashcardListResponse, AllowedPath, "POST">({
     path: "/api/v1/flashcards/bulk",
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    ...scope,
+    headers: { "Content-Type": "application/json", ...scope.headers },
     body: input,
     abortSignal: options?.signal
   })
@@ -819,8 +862,16 @@ export async function updateFlashcardsBulk(
   })
 }
 
-export async function getFlashcard(card_uuid: string): Promise<Flashcard> {
-  return await flashcardsClient.get<Flashcard>(card_uuid)
+export async function getFlashcard(card_uuid: string, options?: FlashcardsRequestOptions): Promise<Flashcard> {
+  if (options?.requestScope) {
+    return bgRequest<Flashcard, AllowedPath, "GET">({
+      path: `/api/v1/flashcards/${encodeURIComponent(card_uuid)}` as AllowedPath,
+      method: "GET",
+      ...requestScopeFields(options.requestScope),
+      abortSignal: options.signal
+    })
+  }
+  return await flashcardsClient.get<Flashcard>(card_uuid, undefined, { abortSignal: options?.signal })
 }
 
 export async function getFlashcardAssistant(
@@ -852,7 +903,15 @@ export async function updateFlashcard(card_uuid: string, input: FlashcardUpdate)
   await flashcardsClient.update<void>(card_uuid, input)
 }
 
-export async function deleteFlashcard(card_uuid: string, expected_version: number): Promise<void> {
+export async function deleteFlashcard(card_uuid: string, expected_version: number, options?: FlashcardsRequestOptions): Promise<void> {
+  if (options?.requestScope) {
+    return bgRequest<void, AllowedPath, "DELETE">({
+      path: `/api/v1/flashcards/${encodeURIComponent(card_uuid)}${buildQuery({ expected_version })}` as AllowedPath,
+      method: "DELETE",
+      ...requestScopeFields(options.requestScope),
+      abortSignal: options.signal
+    })
+  }
   await flashcardsClient.remove<void>(card_uuid, {
     expected_version
   })
@@ -871,12 +930,15 @@ export async function resetFlashcardScheduling(
 }
 
 // Review
-export async function reviewFlashcard(input: FlashcardReviewRequest): Promise<FlashcardReviewResponse> {
+export async function reviewFlashcard(input: FlashcardReviewRequest, options?: FlashcardsRequestOptions): Promise<FlashcardReviewResponse> {
+  const scope = requestScopeFields(options?.requestScope)
   return await bgRequest<FlashcardReviewResponse, AllowedPath, "POST">({
     path: "/api/v1/flashcards/review",
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: input
+    ...scope,
+    headers: { "Content-Type": "application/json", ...scope.headers },
+    body: input,
+    abortSignal: options?.signal
   })
 }
 
@@ -920,12 +982,14 @@ export async function listRecentFlashcardReviewSessions(params?: {
 
 export async function endFlashcardReviewSession(
   reviewSessionId: number,
-  options?: { signal?: AbortSignal }
+  options?: FlashcardsRequestOptions
 ): Promise<FlashcardReviewSessionSummary> {
+  const scope = requestScopeFields(options?.requestScope)
   return await bgRequest<FlashcardReviewSessionSummary, AllowedPath, "POST">({
     path: "/api/v1/flashcards/review-sessions/end" as any,
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    ...scope,
+    headers: { "Content-Type": "application/json", ...scope.headers },
     body: {
       review_session_id: reviewSessionId
     },
@@ -935,12 +999,14 @@ export async function endFlashcardReviewSession(
 
 export async function generateFlashcards(
   input: FlashcardsGenerateRequest,
-  options?: { signal?: AbortSignal }
+  options?: FlashcardsRequestOptions
 ): Promise<FlashcardsGenerateResponse> {
+  const scope = requestScopeFields(options?.requestScope)
   return await bgRequest<FlashcardsGenerateResponse, AllowedPath, "POST">({
     path: "/api/v1/flashcards/generate",
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    ...scope,
+    headers: { "Content-Type": "application/json", ...scope.headers },
     body: input,
     timeoutMs: FLASHCARD_GENERATION_TIMEOUT_MS,
     abortSignal: options?.signal

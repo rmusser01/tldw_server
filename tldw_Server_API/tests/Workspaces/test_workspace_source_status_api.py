@@ -9,12 +9,15 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
 from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import WORKSPACES_READ_RATE_LIMIT
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.Workspaces.job_status import (
+    list_recent_workspace_source_ingest_jobs,
+)
 
 
 class _MediaStatusDB:
@@ -843,7 +846,7 @@ def test_recent_media_ingest_jobs_filters_to_supported_media_ingest_jobs() -> No
             ]
 
     jm = _MediaIngestJobManager()
-    jobs = workspaces_endpoint._list_recent_media_ingest_jobs(jm, SimpleNamespace(id=1))
+    jobs = list_recent_workspace_source_ingest_jobs(jm, owner_user_id=1)
 
     assert [job["id"] for job in jobs] == [1, 2]
     assert jm.calls[0]["domain"] == "media_ingest"

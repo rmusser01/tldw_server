@@ -446,10 +446,17 @@ async def slack_commands(request: Request) -> JSONResponse:
     )
 
 
-@router.get("/jobs/{job_id}")
+@router.get(
+    "/jobs/{job_id}",
+    dependencies=[Depends(RequireRole("admin"))],
+)
 async def slack_job_status(
     job_id: int,
 ):
+    # Ops-only lookup. Jobs in this domain are owned by platform actor ids, not
+    # tldw user ids, so there is no app-user owner to scope by -- the
+    # user-facing path is the signed in-band "status" command, which already
+    # scopes by guild/workspace and actor.
     jm = _get_job_manager()
     job = jm.get_job(int(job_id))
     if not job:

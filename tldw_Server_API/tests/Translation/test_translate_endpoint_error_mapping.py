@@ -7,6 +7,11 @@ from tldw_Server_API.app.api.v1.endpoints import translate as translate_module
 from tldw_Server_API.app.api.v1.schemas.translate_schemas import TranslateRequest
 
 
+class _PackagedPromptDatabase:
+    def get_service_prompt_override(self, _definition_id: str):
+        return None
+
+
 class _LoggerStub:
     def __init__(self) -> None:
         self.errors: list[str] = []
@@ -51,6 +56,7 @@ async def test_translate_text_sanitizes_error_string_result(monkeypatch):
         await translate_module.translate_text(
             request,
             current_user=SimpleNamespace(id=1),
+            db=_PackagedPromptDatabase(),
         )
 
     assert exc_info.value.status_code == 500
@@ -78,6 +84,7 @@ async def test_translate_text_sanitizes_unexpected_exception(monkeypatch):
         await translate_module.translate_text(
             request,
             current_user=SimpleNamespace(id=1),
+            db=_PackagedPromptDatabase(),
         )
 
     assert exc_info.value.status_code == 500

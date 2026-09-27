@@ -172,10 +172,22 @@ class PGVectorAdapter(VectorStoreAdapter):
         sslmode = params.get('sslmode', 'prefer')
         return f"host={host} port={port} dbname={db} user={user} password={password} sslmode={sslmode}"
 
+    def _owner_prefix(self) -> str:
+        """Table-name prefix that scopes every collection to one account.
+
+        All accounts share one PostgreSQL database here, so unlike the ChromaDB
+        adapter there is no per-user directory doing the isolating. The owner
+        therefore has to be part of the table name: without it, a store id is
+        enough to read, write or drop another account's vectors, and
+        list_collections hands those ids out.
+        """
+        owner = re.sub(r"[^A-Za-z0-9_]+", "_", str(self.config.user_id or "0"))
+        return f"vs_u{owner}_"
+
     def _sanitize_collection(self, name: str) -> str:
         # Allow only alphanum and underscores; replace others with underscore
         safe = re.sub(r"[^A-Za-z0-9_]+", "_", name)
-        return f"vs_{safe}"
+        return f"{self._owner_prefix()}{safe}"
 
     def _metadata_order_expression(self, order_by: Optional[str]) -> tuple[str, list[Any]]:
         """Return a safe ORDER BY expression and any bound expression params."""
@@ -356,14 +368,18 @@ class PGVectorAdapter(VectorStoreAdapter):
         await self._exec(f"DROP TABLE IF EXISTS {tbl}")
 
     async def list_collections(self) -> list[str]:
+        """List this account's collections only.
+
+        This previously scanned pg_tables for every table named vs_%, which
+        returned every account's store ids to whoever asked.
+        """
+        prefix = self._owner_prefix()
         sql = "SELECT tablename FROM pg_tables WHERE tablename LIKE %s"
-        rows = await self._query(sql, ('vs_%',))
+        rows = await self._query(sql, (f"{prefix}%",))
         collections = []
         for (name,) in rows:
-            if isinstance(name, str) and name.startswith("vs_"):
-                collections.append(name[3:])
-            else:
-                collections.append(str(name))
+            if isinstance(name, str) and name.startswith(prefix):
+                collections.append(name[len(prefix):])
         return collections
 
     async def upsert_vectors(

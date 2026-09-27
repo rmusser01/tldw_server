@@ -1,0 +1,123 @@
+# Raw SQL in tldw_Server_API/app/api/v1/endpoints/ — 2026-09-21
+# Operative rule violated: Docs/Architecture.md:180 "Abstractions for SQLite/PostgreSQL; **no raw SQL
+# in endpoints**." Also :31 and :347.
+#
+# Discovery command:
+#   rg -c '\.execute\(|\.executemany\(|\.fetchall\(|\.fetchone\(' tldw_Server_API/app/api/v1/endpoints/
+# 25 files matched; each site was then classified by reading it.
+#
+# Legend:
+#   (a) genuine hand-written SQL against an application table  -> REPORTABLE
+#   (b) liveness / schema-existence probe (SELECT 1, sqlite_master) -> not reportable
+#   (d) false positive (ToolExecutor.execute, executor.execute)     -> not reportable
+
+FILE | (a) LINES | TABLES | EXISTING core/ OWNER
+-------------------------------------------------------------------------------------------------
+admin/admin_rbac.py | 246,259,262,266,337,349,383,392,401,406,409,413,439,444,447,476,480,489,494,
+  514,516,521,524,566,571,589,593,615,627,638,653,690,694,710,713,734,748,766,781,809,814,845,851,
+  880,886,891,915,921,936,940,985,991,1012,1014,1098,1100,1108,1121,1150,1154,1203 (all 69 sites)
+  | roles, permissions, role_permissions, user_roles, user_permissions
+  | core/AuthNZ/repos/rbac_repo.py (AuthnzRbacRepo) — READS only; every WRITE hand-rolled here
+
+jobs_admin.py | 613,631,688,694,723,741,1389,1395,1545,1561,1639,1651,1677,1704,1714,1718,1734,1746,
+  1834,1856,1897,1917,1927,1931,1945,1950,1978,2119,2131,2149,2186,2193,2197,2203,2216 (all 56 sites)
+  | jobs, job_counters, job_sla_policies, jobs_archive
+  | core/Jobs/manager.py + core/Jobs/operations/{sqlite,postgres}/ — endpoint reaches PAST the public
+    API via jm._connect() (:596,681,1384,1532,1623,...) and jm._pg_cursor() (:601,687,711,1388,...)
+
+sync.py | 2617,2647,2727,2794,2835,2837,2843,2848 (+2817 PRAGMA)
+  | Media, Keywords, MediaKeywords, allowlisted sync entity tables
+  | core/DB_Management/media_db/, core/DB_Management/Sync_DB.py
+
+prompt_studio/prompt_studio_evaluations.py | 368,673,806,815,930,942,1064,1089 (+799 PRAGMA)
+  | prompt_studio_evaluations | core/DB_Management/PromptStudioDatabase.py (bypassed via
+    db.get_connection().cursor())
+
+admin/admin_rate_limits.py | ~100-133 (query consts), 141,145,160,171,190,192,211,222
+  | rbac_role_rate_limits, rbac_user_rate_limits | NONE (schema only in AuthNZ/migrations.py)
+
+admin/admin_tenant_provisioning.py | 87,116,126,134,139 | users, organizations, org_members
+  | core/DB_Management/Users_DB.py, UserDatabase_v2.py (partially adopted — user insert goes through
+    VersionedUserWriteGateway, org/member inserts are hand-written)
+
+media/debug.py | 52 (34,39 are sqlite_master/PRAGMA introspection) | Media
+  | core/DB_Management/media_db/api.py
+
+users.py | 236,242 (documented compat shim), 727,738 | users, password_history
+  | core/DB_Management/Users_DB.py; password_history -> NONE
+
+admin/admin_ops.py | 1318,1324,1344,1352 | users, api_keys | core/DB_Management/Users_DB.py
+
+prompt_studio/prompt_studio_status.py | 60,62 + SQL built at 69,97,125-129,165,170,196,203,233,242
+  | jobs | core/Jobs/manager.py (same jm._connect()/jm._pg_cursor() reach-through)
+
+prompt_studio/prompt_studio_projects.py | 231 (db._execute, private), 675 (9 literal stat queries)
+  | prompt_studio_projects/_prompts/_signatures/_test_cases/_evaluations/_optimizations/_test_runs
+  | core/DB_Management/PromptStudioDatabase.py
+
+vector_stores_openai.py | 542 | vector_store_batches
+  | core/Embeddings/vector_store_batches_db.py (endpoint imports its private _connect)
+
+outputs_templates.py | 269-271, 280 | scrape_run_items/watchlist_run_items/runs_items/
+  scrape_runs_items (probed), Media | NONE for run-items tables; media_db for Media
+
+notes.py | 3487,3490,3980,3984 | collection_keywords, conversation_keywords
+  | core/DB_Management/ChaChaNotes_DB.py, chacha/keyword_store.py — the same file calls
+    db.get_keywords_for_conversation() a few lines above :3984
+
+media/navigation.py | 742-751, 1046-1054 | DocumentStructureIndex, UnvectorizedMediaChunks
+  | core/DB_Management/media_db/runtime/structure_index_ops.py, media_db/api.py
+
+media/listing.py | 676-681, 703-708 | Media | core/DB_Management/media_db/api.py
+
+chat_documents.py | 1131 | user_prompts | NONE (duplicates state service.get_user_prompt_config()
+  loaded 8 lines earlier)
+
+watchlists.py | 3762 | organizations | core/DB_Management/Users_DB.py
+
+media/versions.py | 446-454 | DocumentVersions JOIN Media | core/DB_Management/media_db/api.py
+
+audio/audio_studio.py | 860 | audio_studio_sections | core/DB_Management/Collections_DB.py
+  (reaches through collections_db.backend.execute and calls the owner's private _coerce_bool_flag)
+
+-- NOT REPORTABLE --
+tools.py, skills.py, prompt_studio/prompt_studio_prompts.py : (d) executor.execute()
+health.py : (b) SELECT 1 liveness probe
+admin/__init__.py : (b) sqlite_master existence probe gating core/AuthNZ/migrations.ensure_authnz_tables
+
+TOTAL: 20 of 25 candidate files contain genuine category-(a) raw SQL.
+       17 of those 20 have an existing core/ owner module -> adoption gap, not missing abstraction.
+       Only 3 tables have no owner: rbac_role_rate_limits / rbac_user_rate_limits, password_history,
+       user_prompts.
+
+DDL IN ENDPOINTS: none. Case-insensitive scan for CREATE TABLE / ALTER TABLE / CREATE INDEX /
+DROP TABLE across all of endpoints/ returns zero hits. Clean.
+
+STRING-INTERPOLATED SQL — all carry `# nosec B608`; NONE is injectable:
+  jobs_admin.py:614,632,724,742,1546,1560,1640,1705,1835,1918,1946,1951,2120,2186,2198
+    -> ' AND '.join(where) clause fragments from string literals; values bound. Structural only.
+  admin/admin_rbac.py:567,572,589,594,616,627,639,653,691,695,710,714,735,748,766,781,846,852
+    -> {where} fragments + ${n} placeholder indices; search/category/role_names bound.
+  sync.py:2618,2648,2727,2761,2781,2786 -> `entity` table name, allowlisted at sync.py:2506 against
+    ALLOWED_SYNC_SEND_ENTITIES; columns from PRAGMA table_info, not from the request.
+  sync.py:2817 -> table_name into PRAGMA table_info(); same allowlist + isalnum() guard at :2815.
+  prompt_studio/prompt_studio_status.py:97,129,165,170,196,203,233,242 -> placeholder tokens only.
+  prompt_studio/prompt_studio_status.py:236,245 -> warn_seconds into INTERVAL '{n} seconds'. Request-
+    derived (Query(30, ge=1, le=3600)) but int()-coerced and clamped at :230. The ONLY site where a
+    request value reaches the SQL string rather than a bind parameter. Not injectable; worth a note.
+  outputs_templates.py:268-269 -> tbl via .format_map(locals()) over a hardcoded 4-element list.
+  media/debug.py:39 -> name from sqlite_master, never the request.
+
+DUAL-BACKEND BRANCHING (SQLite vs PostgreSQL, hand-written, inside endpoints) — 10 files:
+  admin/admin_rbac.py (is_pg at nearly every site), admin/admin_rate_limits.py,
+  admin/admin_tenant_provisioning.py (public. vs main. schema prefixes), admin/admin_ops.py,
+  users.py, jobs_admin.py, prompt_studio/prompt_studio_status.py,
+  prompt_studio/prompt_studio_evaluations.py, media/navigation.py, audio/audio_studio.py
+  Notable: users.py:727,738 uses $1/$2 with NO backend branch, surviving only via
+  core/AuthNZ/database.py:1966 _normalize_sqlite_sql, whose own docstring calls itself "a safety net
+  to avoid aiosqlite warnings when a $-style query slips through". That safety net (and its inverse
+  _convert_question_mark_to_dollar) exists BECAUSE endpoints hand-roll dual-backend SQL.
+  Checked and DROPPED: admin/admin_rate_limits.py:176,193,227 calls `await db.commit()` on the SQLite
+  branch only. Not a bug — the dependency is get_db_transaction (core/AuthNZ/database.py:1908), which
+  wraps the request in `pool.transaction()` and commits on exit. The explicit commit is redundant,
+  not missing on Postgres.

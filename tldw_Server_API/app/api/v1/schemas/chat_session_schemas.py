@@ -6,9 +6,16 @@ Pydantic schemas for character chat sessions and messages.
 from datetime import datetime
 from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_serializer, model_validator
+
+from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
+    HistoryAdmissionReferenceV1,
+    HistoryAdmissionV1,
+    HistorySelectionV1,
+)
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
 from tldw_Server_API.app.core.Character_Chat.emote_directives import CharacterEmoteEvent
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, reject_assistant_startup_input
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
 
 ALLOWED_CONVERSATION_STATES = ("in-progress", "resolved", "backlog", "non-viable")
@@ -164,6 +171,19 @@ class ChatSessionCreate(BaseModel):
         description="Scope type: 'global' for /chat, 'workspace' for per-workspace chats. Defaults to 'global'.",
     )
     workspace_id: Optional[str] = Field(None, description="Workspace ID (required when scope_type='workspace')")
+    participant_character_ids: list[int] = Field(
+        default_factory=list,
+        max_length=32,
+        description="Additional character participants captured at creation time",
+    )
+    prompt_preset_id: str | None = Field(None, min_length=1, max_length=128)
+    memory_by_character_id: dict[str, str] = Field(default_factory=dict)
+    provider: str | None = Field(None, min_length=1, max_length=128)
+    model: str | None = Field(None, min_length=1, max_length=512)
+    temperature: float = Field(0.7, ge=0.0, le=2.0)
+    top_p: float = Field(1.0, ge=0.0, le=1.0)
+    repetition_penalty: float = Field(1.0, ge=0.0, le=3.0)
+    stop: list[str] = Field(default_factory=list, max_length=64)
 
     model_config = {"json_schema_extra": {
         "example": {
@@ -176,6 +196,12 @@ class ChatSessionCreate(BaseModel):
     @classmethod
     def _validate_state(cls, value: Optional[str]) -> Optional[str]:
         return _validate_conversation_state(value)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_startup_input(cls, value: Any) -> Any:
+        """Reject caller-authored origin independently of legacy extra fields."""
+        return reject_assistant_startup_input(value)
 
     @model_validator(mode="after")
     def _normalize_assistant_identity(self) -> "ChatSessionCreate":
@@ -251,9 +277,16 @@ class ChatSessionUpdate(BaseModel):
     def _validate_state(cls, value: Optional[str]) -> Optional[str]:
         return _validate_conversation_state(value)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_startup_input(cls, value: Any) -> Any:
+        """Keep local creation provenance out of caller metadata updates."""
+        return reject_assistant_startup_input(value)
 
-class ChatSessionResponse(BaseModel):
-    """Schema for chat session responses."""
+
+class ChatSessionListItem(BaseModel):
+    """Chat list item without authoritative resume-detail fields."""
+    assistant_startup: AssistantStartup = Field(default_factory=AssistantStartup, json_schema_extra={"readOnly": True})
     id: str = Field(..., description="UUID of the chat session")
     scope_type: Literal["global", "workspace"] = Field(
         "global",
@@ -297,9 +330,41 @@ class ChatSessionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ChatSessionResponse(ChatSessionListItem):
+    """Detailed chat session response with authoritative resume metadata."""
+
+    behavior_snapshot: "BehaviorSnapshotStatus" = Field(
+        default_factory=lambda: BehaviorSnapshotStatus(status="missing")
+    )
+    resume_eligible: bool = False
+    resume_ineligible_reason: str | None = "behavior_snapshot_missing"
+    settings_version: int | None = None
+    history_version: int | None = None
+    tail: "ConversationTailFence" = Field(
+        default_factory=lambda: ConversationTailFence(message_id=None, message_version=None)
+    )
+
+    model_config = {"from_attributes": True}
+
+
+class BehaviorSnapshotStatus(BaseModel):
+    """Bounded snapshot metadata safe for ordinary conversation reads."""
+
+    status: Literal["valid", "missing", "invalid"]
+    schema_version: int | None = None
+    digest: str | None = None
+
+
+class ConversationTailFence(BaseModel):
+    """The current immutable message-tail identity/version fence."""
+
+    message_id: str | None
+    message_version: int | None
+
+
 class ChatSessionListResponse(BaseModel):
     """Schema for listing chat sessions."""
-    chats: list[ChatSessionResponse] = Field(..., description="List of chat sessions")
+    chats: list[ChatSessionListItem] = Field(..., description="List of chat sessions")
     total: int = Field(..., description="Total number of chats")
     limit: int = Field(..., description="Number of items per page")
     offset: int = Field(..., description="Offset for pagination")
@@ -354,6 +419,19 @@ class ChatSettingsResponse(BaseModel):
 
 class MessageCreate(BaseModel):
     """Schema for creating a new message."""
+    id: str | None = Field(None, min_length=1, max_length=255)
+    tldw_history_selection_v1: HistorySelectionV1 | None = None
+    tldw_history_admission_v1: HistoryAdmissionReferenceV1 | None = None
+
+    @model_validator(mode="after")
+    def _validate_history_fields(self) -> "MessageCreate":
+        if self.tldw_history_selection_v1 is not None and self.role != "user":
+            raise ValueError("Selection requires user role")
+        if self.tldw_history_admission_v1 is not None and self.role != "assistant":
+            raise ValueError("Admission requires assistant role")
+        if (self.tldw_history_selection_v1 is not None or self.tldw_history_admission_v1 is not None) and not self.id:
+            raise ValueError("Versioned messages require a stable id")
+        return self
     role: Literal["user", "assistant", "system"] = Field(..., description="Message sender role")
     content: Optional[str] = Field(
         None,
@@ -412,6 +490,7 @@ class MessageUpdate(BaseModel):
 
 class MessageResponse(BaseModel):
     """Schema for message responses."""
+    tldw_history_admission_v1: HistoryAdmissionV1 | None = None
     id: str = Field(..., description="UUID of the message")
     conversation_id: str = Field(..., description="ID of the parent conversation")
     parent_message_id: Optional[str] = Field(None, description="ID of parent message")
@@ -420,9 +499,17 @@ class MessageResponse(BaseModel):
     timestamp: datetime = Field(..., description="Message timestamp")
     ranking: Optional[int] = Field(None, description="Message ranking/rating")
     has_image: bool = Field(False, description="Whether message has an attached image")
+    images: Optional[list[str]] = Field(None, description="Complete ordered image data URLs, only when explicitly requested")
     version: int = Field(1, description="Version number for optimistic locking")
     tool_calls: Optional[list[dict[str, Any]]] = Field(None, description="Tool calls associated with this message (if any)")
     metadata_extra: Optional[dict[str, Any]] = Field(None, description="Additional stored metadata for this message (if requested)")
+
+    @model_serializer(mode="wrap")
+    def omit_unrequested_images(self, handler):
+        result = handler(self)
+        if self.images is None:
+            result.pop("images", None)
+        return result
 
     model_config = {"from_attributes": True}
 
@@ -771,6 +858,14 @@ class CharacterChatStreamPersistRequest(BaseModel):
 
     Use after a streamed completion where the assistant content was not persisted.
     """
+    tldw_history_admission_v1: HistoryAdmissionReferenceV1 | None = None
+
+    @model_validator(mode="after")
+    def _require_history_assistant_id(self) -> "CharacterChatStreamPersistRequest":
+        if self.tldw_history_admission_v1 is not None and not self.assistant_message_id:
+            raise ValueError("Versioned persistence requires assistant_message_id")
+        return self
+
     assistant_content: str = Field(..., min_length=1, max_length=1_000_000, description="Assistant text to persist (max 1MB)")
     assistant_message_id: Optional[str] = Field(
         None,

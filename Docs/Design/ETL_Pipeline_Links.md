@@ -22,6 +22,7 @@ https://github.com/Ontos-AI/knowledge-graph-traversal-semantic-rag-research
 https://github.com/aiptimizer/TurboOCR
 https://github.com/OxRML/MADQA
 
+https://www.marktechpost.com/2026/07/24/datalab-marker-v2-vs-mineru-docling-and-liteparse-benchmark-breakdown/
 https://github.com/steipete/discrawl
 https://github.com/breezedeus/Pix2Text
 https://github.com/uxiew/epub2MD
@@ -113,6 +114,9 @@ On the size cap, a rolling index that streams in/out sections on demand is light
     - pypandoc
 - **RSS Feeds**:
 - **Videos**:
+    - f
+- **Videos**
+    - f
 - **Websites**:
     - playwright
     - bs4
@@ -122,6 +126,7 @@ On the size cap, a rolling index that streams in/out sections on demand is light
 - **3rd-Party Services**
     - Sharepoint
         * https://llamahub.ai/l/readers/llama-index-readers-microsoft-sharepoint
+        *
 
 ### Tools
 https://github.com/ucbepic/docetl

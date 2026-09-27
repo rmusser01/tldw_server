@@ -7,16 +7,21 @@ from collections.abc import Callable
 import pytest
 
 psycopg = pytest.importorskip("psycopg")
-pytestmark = pytest.mark.pg_jobs
+pytestmark = [pytest.mark.integration, pytest.mark.pg_jobs]
 
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.tests.Jobs.parity.scenarios import (
+    FUTURE_NOW_EPOCH,
     run_acquire_complete_lifecycle_scenario,
+    run_acquire_contention_scenario,
     run_cancel_terminal_noop_scenario,
     run_events_outbox_create_complete_scenario,
-    run_idempotent_create_replay_event_uses_current_request_ids_scenario,
+    run_expired_lease_reclaim_scenario,
     run_idempotent_create_preserves_original_request_ids_scenario,
+    run_idempotent_create_replay_event_uses_current_request_ids_scenario,
     run_idempotent_create_scope_scenario,
+    run_release_lease_ownership_scenario,
+    run_renew_lease_characterization_scenario,
     run_renew_stale_lease_noop_scenario,
 )
 
@@ -29,6 +34,18 @@ def postgres_manager_factory(jobs_pg_dsn: str, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("JOBS_DISABLE_LEASE_ENFORCEMENT", "true")
     monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
     return lambda: JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+
+
+def _expire_postgres_lease(manager: JobManager, job_id: int) -> None:
+    conn = manager._connect()
+    try:
+        with conn, manager._pg_cursor(conn) as cur:
+            cur.execute(
+                "UPDATE jobs SET leased_until = NOW() - interval '10 seconds' WHERE id = %s",
+                (job_id,),
+            )
+    finally:
+        conn.close()
 
 
 def test_postgres_idempotent_create_scope(postgres_manager_factory: Callable[[], JobManager]) -> None:
@@ -57,10 +74,42 @@ def test_postgres_acquire_complete_lifecycle(postgres_manager_factory: Callable[
     run_acquire_complete_lifecycle_scenario(postgres_manager_factory)
 
 
+def test_postgres_acquire_contention(postgres_manager_factory: Callable[[], JobManager]) -> None:
+    """Run the concurrent acquisition scenario against Postgres."""
+
+    run_acquire_contention_scenario(postgres_manager_factory)
+
+
+def test_postgres_expired_lease_reclaim(postgres_manager_factory: Callable[[], JobManager]) -> None:
+    """Run the expired lease reclaim scenario against Postgres."""
+
+    run_expired_lease_reclaim_scenario(postgres_manager_factory, _expire_postgres_lease)
+
+
 def test_postgres_renew_stale_lease_noop(postgres_manager_factory: Callable[[], JobManager]) -> None:
     """Run the stale lease renewal scenario against Postgres."""
 
     run_renew_stale_lease_noop_scenario(postgres_manager_factory)
+
+
+def test_postgres_renew_lease_characterization(
+    postgres_manager_factory: Callable[[], JobManager],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run future-clock renewal characterization against Postgres."""
+
+    monkeypatch.setenv("JOBS_TEST_NOW_EPOCH", FUTURE_NOW_EPOCH)
+    run_renew_lease_characterization_scenario(postgres_manager_factory)
+
+
+def test_postgres_release_lease_ownership(
+    postgres_manager_factory: Callable[[], JobManager],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run release ownership and compatibility characterization against Postgres."""
+
+    monkeypatch.setenv("JOBS_TEST_NOW_EPOCH", FUTURE_NOW_EPOCH)
+    run_release_lease_ownership_scenario(postgres_manager_factory)
 
 
 def test_postgres_cancel_terminal_noop(postgres_manager_factory: Callable[[], JobManager]) -> None:

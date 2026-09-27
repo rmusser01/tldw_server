@@ -43,6 +43,7 @@ describe("tts defaults service", () => {
     const settings = await getTTSSettings()
 
     expect(settings.ttsProvider).toBe(DEFAULT_TTS_PROVIDER)
+    expect(settings.tldwTtsBackend).toBe("")
     expect(settings.tldwTtsModel).toBe(DEFAULT_TLDW_TTS_MODEL)
     expect(settings.tldwTtsVoice).toBe(DEFAULT_TLDW_TTS_VOICE)
   })
@@ -57,6 +58,24 @@ describe("tts defaults service", () => {
     expect(settings.ttsProvider).toBe("browser")
     expect(settings.tldwTtsModel).toBe("kokoro")
     expect(settings.tldwTtsVoice).toBe("af_heart")
+  })
+
+  it("round-trips an explicit backend and preserves empty legacy inference", async () => {
+    const baseSettings = await getTTSSettings()
+
+    await setTTSSettings({
+      ...baseSettings,
+      tldwTtsBackend: "gateway:company-proxy"
+    })
+    expect((await getTTSSettings()).tldwTtsBackend).toBe(
+      "gateway:company-proxy"
+    )
+
+    await setTTSSettings({
+      ...(await getTTSSettings()),
+      tldwTtsBackend: ""
+    })
+    expect((await getTTSSettings()).tldwTtsBackend).toBe("")
   })
 
   it("round-trips provider validation status metadata", async () => {
@@ -76,5 +95,63 @@ describe("tts defaults service", () => {
     expect(settings.elevenLabsKeyTestedAt).toBe("2026-04-30T12:00:00.000Z")
     expect(settings.openAITTSKeyValid).toBe(true)
     expect(settings.openAITTSKeyTestedAt).toBe("2026-04-30T13:00:00.000Z")
+  })
+
+  it("keeps credentials separate from provider preferences", async () => {
+    storageState.values.set("elevenLabsApiKey", "elevenlabs-secret-sentinel")
+    storageState.values.set("openAITTSApiKey", "openai-secret-sentinel")
+    storageState.values.set("tldwTtsBackend", "gateway:company-proxy")
+    storageState.values.set("tldwTtsModel", "kokoro")
+
+    const { elevenLabsApiKey, openAITTSApiKey, ...preferences } = await getTTSSettings()
+
+    expect(elevenLabsApiKey).toBe("elevenlabs-secret-sentinel")
+    expect(openAITTSApiKey).toBe("openai-secret-sentinel")
+    expect(preferences.tldwTtsBackend).toBe("gateway:company-proxy")
+    expect(preferences.tldwTtsModel).toBe("kokoro")
+    expect(JSON.stringify(preferences)).not.toContain("secret-sentinel")
+  })
+
+  it("starts credential and preference reads before waiting for storage", async () => {
+    let releasePreferences!: (value: string) => void
+    let releaseElevenLabs!: (value: string) => void
+    let releaseOpenAI!: (value: string) => void
+    storageState.values.set("tldwTtsBackend", new Promise<string>((resolve) => {
+      releasePreferences = resolve
+    }))
+    storageState.values.set("elevenLabsApiKey", new Promise<string>((resolve) => {
+      releaseElevenLabs = resolve
+    }))
+    storageState.values.set("openAITTSApiKey", new Promise<string>((resolve) => {
+      releaseOpenAI = resolve
+    }))
+
+    const pendingSettings = getTTSSettings()
+    // Removing values after invocation detects a read deferred behind another
+    // storage promise: it would observe defaults instead of the captured values.
+    storageState.values.clear()
+    releaseOpenAI("openai-concurrent-sentinel")
+    releasePreferences("gateway:concurrent")
+    releaseElevenLabs("elevenlabs-concurrent-sentinel")
+
+    expect(await pendingSettings).toMatchObject({
+      tldwTtsBackend: "gateway:concurrent",
+      elevenLabsApiKey: "elevenlabs-concurrent-sentinel",
+      openAITTSApiKey: "openai-concurrent-sentinel"
+    })
+  })
+
+  it("propagates credential failures while preferences are still pending", async () => {
+    let releasePreferences!: (value: string) => void
+    storageState.values.set("tldwTtsBackend", new Promise<string>((resolve) => {
+      releasePreferences = resolve
+    }))
+    storageState.values.set("openAITTSApiKey", Promise.reject(new Error("storage unavailable")))
+
+    try {
+      await expect(getTTSSettings()).rejects.toThrow("storage unavailable")
+    } finally {
+      releasePreferences("")
+    }
   })
 })

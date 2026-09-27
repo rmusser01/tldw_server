@@ -1,4 +1,5 @@
 import React from "react"
+import { PersonaVisualAssetImage } from "@/components/Common/PersonaBuddy/usePersonaVisualAssetUrls"
 import { Button, Modal, Tag, Typography } from "antd"
 import {
   ArrowDown,
@@ -1808,12 +1809,16 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
     []
   )
 
+  const advancedSectionRef = React.useRef<HTMLDetailsElement>(null)
+
   const focusDraftTitleInput = React.useCallback(() => {
+    if (advancedSectionRef.current) advancedSectionRef.current.open = true
     draftTitleInputRef.current?.scrollIntoView?.({ block: "center" })
     draftTitleInputRef.current?.focus()
   }, [])
 
   const focusLibraryPanel = React.useCallback(() => {
+    if (advancedSectionRef.current) advancedSectionRef.current.open = true
     focusPersonaVisualSection(libraryPanelRef.current)
   }, [])
 
@@ -1833,11 +1838,13 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
   }, [focusImportPreviewInput])
 
   const focusDuplicateControls = React.useCallback(() => {
+    if (advancedSectionRef.current) advancedSectionRef.current.open = true
     duplicateTargetSelectRef.current?.scrollIntoView?.({ block: "center" })
     duplicateTargetSelectRef.current?.focus()
   }, [])
 
   const focusActivationControls = React.useCallback(() => {
+    if (advancedSectionRef.current) advancedSectionRef.current.open = true
     activationControlsRef.current?.scrollIntoView?.({ block: "center" })
     const activateButton = activationControlsRef.current?.querySelector<
       HTMLButtonElement
@@ -3536,6 +3543,7 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           starterPacks={starterPacks}
           starterCatalogLoading={starterCatalogLoading}
           starterCatalogError={starterCatalogError}
+          onRetryStarterCatalog={() => void loadStarterCatalog()}
           copyingStarterId={copyingStarterId}
           requestedSource={builderSourceRequest?.source ?? null}
           requestedSourceRequestId={builderSourceRequest?.requestId ?? 0}
@@ -3684,11 +3692,19 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
         </div>
       </Modal>
 
+      <details ref={advancedSectionRef} open={Boolean(selectedPack) || undefined} className="border-t border-border pt-3" data-testid="persona-visual-advanced-editor">
+        <summary className="cursor-pointer rounded text-sm font-medium text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+          {t("sidepanel:personaGarden.visuals.advancedCreation", { defaultValue: "Manage packs and advanced creation" })}
+        </summary>
+        <div className="mt-3 space-y-3">
+      <details>
+        <summary className="cursor-pointer text-sm font-medium text-text">{t("sidepanel:personaGarden.visuals.identityArtwork", { defaultValue: "Identity artwork" })}</summary>
       <VisualIdentityPackPanel
         actorKind="persona"
         actorId={selectedPersonaId}
         actorName={selectedPersonaName || selectedPersonaId}
       />
+      </details>
 
       <section
         ref={packBasicsSectionRef}
@@ -3784,11 +3800,10 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
               {"'s Persona Buddy does not have a visual pack yet."}
             </div>
             <div className="mt-1">
-              Create a draft visual pack first.
+              Choose a ready-made Buddy above, or create a custom draft here.
             </div>
             <div className="mt-1">
-              After a draft exists, upload frames, map states, import or export
-              packs, queue generation, review candidates, and activate a valid pack.
+              Custom drafts support uploaded artwork, state animations, and generation. Review and activate when ready.
             </div>
           </div>
         ) : null}
@@ -4781,8 +4796,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
                             key={asset.id}
                             className="flex items-center gap-2 rounded border border-border bg-surface px-2 py-1"
                           >
-                            <img
-                              src={asset.url}
+                            <PersonaVisualAssetImage
+                              asset={asset}
                               alt={asset.original_filename || asset.id}
                               className="h-10 w-10 rounded object-contain"
                             />
@@ -4807,6 +4822,8 @@ export const VisualPackEditor: React.FC<VisualPackEditorProps> = ({
           </section>
         </>
       ) : null}
+        </div>
+      </details>
     </div>
   )
 }

@@ -5,26 +5,25 @@ from tldw_Server_API.app.api.v1.endpoints.prompt_studio import (
     prompt_studio_optimization as optimization_endpoint,
 )
 from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_optimization import (
-    create_optimization,
     OptimizationIterationCreate,
     add_optimization_iteration,
     cancel_optimization,
     compare_strategies,
+    create_optimization,
     get_optimization,
     get_optimization_history,
     list_optimization_iterations,
     list_optimizations,
 )
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_optimization import (
-    OptimizationCreate,
     OptimizationConfig,
+    OptimizationCreate,
 )
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_optimization_requests import (
     CompareStrategiesRequest,
 )
-from tldw_Server_API.app.core.Logging import log_context as log_context_module
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import DatabaseError
-
+from tldw_Server_API.app.core.Logging import log_context as log_context_module
 
 pytestmark = pytest.mark.unit
 
@@ -57,6 +56,150 @@ class _BrokenCancelOptimizationUnexpectedDb:
         raise ValueError("boom")
 
 
+class _CancellationDb:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        prompt_status: str = "running",
+        project_owner_user_id: str = "tester",
+    ) -> None:
+        self.events = events
+        self.prompt_status = prompt_status
+        self.project_owner_user_id = project_owner_user_id
+        self.update_kwargs: dict[str, object] | None = None
+
+    def get_optimization(self, optimization_id):
+        return {
+            "id": optimization_id,
+            "project_id": 7,
+            "status": self.prompt_status,
+            "deleted": False,
+        }
+
+    def set_optimization_status(self, *_args, **_kwargs):
+        self.events.append("prompt_cancelled")
+        return {"id": 42, "status": "cancelled"}
+
+    def get_project(self, project_id):
+        return {"id": project_id, "user_id": self.project_owner_user_id}
+
+    def update_optimization(self, *_args, **kwargs):
+        self.update_kwargs = dict(kwargs)
+        self.events.append("prompt_cancelled")
+        return {"id": 42, "status": "cancelled"}
+
+
+class _CancellationCoreJobs:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        include_job: bool = True,
+        status_after_cancel: str | None = None,
+    ) -> None:
+        self.events = events
+        self.include_job = include_job
+        self.status_after_cancel = status_after_cancel
+        self.job = {
+            "id": 1,
+            "uuid": "job-1",
+            "domain": "prompt_studio",
+            "job_type": "optimization",
+            "owner_user_id": "tester",
+            "status": "processing",
+            "payload": {"optimization_id": 42},
+            "created_at": "2026-07-16T00:00:00+00:00",
+        }
+
+    def list_jobs(self, **_kwargs):
+        return [self.job] if self.include_job else []
+
+    def get_job_by_uuid(self, _job_id):
+        return self.job
+
+    def cancel_job(self, *_args, **_kwargs):
+        self.events.append("job_cancel_attempted")
+        if self.status_after_cancel:
+            self.job["status"] = self.status_after_cancel
+        return False
+
+
+class _HiddenCancellationCoreJobs(_CancellationCoreJobs):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__(events)
+        self.job["id"] = 1
+        self.job["uuid"] = "job-1"
+        self.jobs = [
+            {
+                **self.job,
+                "id": job_id,
+                "uuid": f"job-{job_id}",
+                "status": job_status,
+                "payload": {"optimization_id": 100 + job_id},
+                "created_at": f"2026-07-16T00:00:0{job_id}+00:00",
+            }
+            for job_id, job_status in (
+                (4, "completed"),
+                (3, "failed"),
+                (2, "cancelled"),
+            )
+        ]
+        self.jobs.append(self.job)
+
+    def list_jobs(self, **kwargs):
+        return self.jobs[: int(kwargs["limit"])]
+
+    def get_job_by_uuid(self, job_id):
+        return next((job for job in self.jobs if job["uuid"] == job_id), None)
+
+    def cancel_job(self, job_id, **_kwargs):
+        self.events.append("job_cancel_attempted")
+        assert job_id == 1
+        self.job["status"] = "cancelled"
+        return True
+
+
+class _SuccessfulCancellationCoreJobs(_CancellationCoreJobs):
+    def __init__(self, events: list[str], *, owner_user_id: str) -> None:
+        super().__init__(events)
+        self.job["owner_user_id"] = owner_user_id
+        self.lookup_owner_user_ids: list[str | None] = []
+
+    def list_jobs(self, **kwargs):
+        self.lookup_owner_user_ids.append(kwargs.get("owner_user_id"))
+        return [self.job]
+
+    def cancel_job(self, job_id, **_kwargs):
+        self.events.append("job_cancel_attempted")
+        assert job_id == self.job["id"]
+        self.job["status"] = "cancelled"
+        return True
+
+
+async def _allow_cancel_write_access(*_args, **_kwargs):
+    return True
+
+
+def _install_cancel_adapter(monkeypatch, core_jobs: _CancellationCoreJobs) -> None:
+    adapter_class = optimization_endpoint.PromptStudioJobsAdapter
+    adapter = object.__new__(adapter_class)
+    adapter._backend = "core"
+    adapter._jm = core_jobs
+    monkeypatch.setattr(
+        optimization_endpoint,
+        "require_project_write_access",
+        _allow_cancel_write_access,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        optimization_endpoint,
+        "PromptStudioJobsAdapter",
+        lambda: adapter,
+        raising=True,
+    )
+
+
 class _BrokenCompareStrategiesDb:
     client_id = "client-1"
 
@@ -75,7 +218,13 @@ class _BrokenCreateOptimizationDb:
     client_id = "client-1"
 
     def get_prompt_with_project(self, *_args, **_kwargs):
-        return {"id": 12, "project_id": 7}
+        return {"id": 12, "project_id": 7, "project_user_id": "tester"}
+
+    def get_test_cases_by_ids(self, test_case_ids):
+        return [
+            {"id": test_case_id, "project_id": 7, "deleted": False}
+            for test_case_id in test_case_ids
+        ]
 
     def create_optimization(self, *_args, **_kwargs):
         raise DatabaseError("driver failed")
@@ -169,6 +318,7 @@ def _build_optimization_create_payload() -> OptimizationCreate:
             optimizer_type="iterative",
             target_metric="accuracy",
         ),
+        test_case_ids=[1],
         name="Refine",
     )
 
@@ -489,6 +639,111 @@ async def test_cancel_optimization_maps_unexpected_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cancel_optimization_keeps_prompt_active_when_job_cancel_is_rejected(monkeypatch):
+    events: list[str] = []
+    _install_cancel_adapter(monkeypatch, _CancellationCoreJobs(events))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await cancel_optimization(
+            request=object(),
+            optimization_id=42,
+            reason="stop",
+            db=_CancellationDb(events),
+            user_context={"user_id": "tester", "client_id": "client-1"},
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "Optimization job could not be cancelled (status: processing)"
+    assert events == ["job_cancel_attempted"]
+
+
+@pytest.mark.asyncio
+async def test_cancel_optimization_accepts_job_cancelled_by_a_concurrent_request(monkeypatch):
+    events: list[str] = []
+    db = _CancellationDb(events)
+    _install_cancel_adapter(
+        monkeypatch,
+        _CancellationCoreJobs(events, status_after_cancel="cancelled"),
+    )
+
+    response = await cancel_optimization(
+        request=object(),
+        optimization_id=42,
+        reason="stop",
+        db=db,
+        user_context={"user_id": "tester", "client_id": "client-1"},
+    )
+
+    assert response.success is True
+    assert events == [
+        "job_cancel_attempted",
+        "prompt_cancelled",
+    ]
+    assert "completed" in (db.update_kwargs or {})["expected_statuses"]
+
+
+@pytest.mark.asyncio
+async def test_cancel_optimization_without_a_job_still_cancels_prompt(monkeypatch):
+    events: list[str] = []
+    _install_cancel_adapter(monkeypatch, _CancellationCoreJobs(events, include_job=False))
+
+    response = await cancel_optimization(
+        request=object(),
+        optimization_id=42,
+        reason=None,
+        db=_CancellationDb(events, prompt_status="pending"),
+        user_context={"user_id": "tester", "client_id": "client-1"},
+    )
+
+    assert response.success is True
+    assert events == ["prompt_cancelled"]
+
+
+@pytest.mark.asyncio
+async def test_cancel_optimization_finds_processing_job_behind_newer_owner_jobs(monkeypatch):
+    events: list[str] = []
+    core_jobs = _HiddenCancellationCoreJobs(events)
+    _install_cancel_adapter(monkeypatch, core_jobs)
+
+    response = await cancel_optimization(
+        request=object(),
+        optimization_id=42,
+        reason="stop",
+        db=_CancellationDb(events),
+        user_context={"user_id": "tester", "client_id": "client-1"},
+    )
+
+    assert response.success is True
+    assert core_jobs.job["status"] == "cancelled"
+    assert [job["status"] for job in core_jobs.jobs[:3]] == [
+        "completed",
+        "failed",
+        "cancelled",
+    ]
+    assert events == ["job_cancel_attempted", "prompt_cancelled"]
+
+
+@pytest.mark.asyncio
+async def test_admin_cancel_uses_authorized_project_owner_for_core_job(monkeypatch):
+    events: list[str] = []
+    core_jobs = _SuccessfulCancellationCoreJobs(events, owner_user_id="7")
+    _install_cancel_adapter(monkeypatch, core_jobs)
+
+    response = await cancel_optimization(
+        request=object(),
+        optimization_id=42,
+        reason="stop",
+        db=_CancellationDb(events, project_owner_user_id="7"),
+        user_context={"user_id": "99", "client_id": "client-1", "is_admin": True},
+    )
+
+    assert response.success is True
+    assert core_jobs.lookup_owner_user_ids == ["7"]
+    assert core_jobs.job["status"] == "cancelled"
+    assert events == ["job_cancel_attempted", "prompt_cancelled"]
+
+
+@pytest.mark.asyncio
 async def test_get_optimization_history_maps_database_error(monkeypatch):
     logger_stub = _EndpointLoggerStub()
     monkeypatch.setattr(optimization_endpoint, "logger", logger_stub)
@@ -633,8 +888,11 @@ async def test_compare_strategies_maps_database_error():
             request=CompareStrategiesRequest(
                 prompt_id=12,
                 test_case_ids=[1],
-                strategies=["iterative"],
-                model_configuration={"model_name": "gpt-4o-mini"},
+                strategies=["iterative", "mipro"],
+                model_configuration={
+                    "provider": "openai",
+                    "model_name": "gpt-4o-mini",
+                },
             ),
             http_request=object(),
             _=True,
@@ -656,8 +914,11 @@ async def test_compare_strategies_database_error_log_is_sanitized(monkeypatch):
             request=CompareStrategiesRequest(
                 prompt_id=12,
                 test_case_ids=[1],
-                strategies=["iterative"],
-                model_configuration={"model_name": "gpt-4o-mini"},
+                strategies=["iterative", "mipro"],
+                model_configuration={
+                    "provider": "openai",
+                    "model_name": "gpt-4o-mini",
+                },
             ),
             http_request=object(),
             _=True,
@@ -684,8 +945,11 @@ async def test_compare_strategies_unexpected_error_log_is_sanitized(monkeypatch)
             request=CompareStrategiesRequest(
                 prompt_id=12,
                 test_case_ids=[1],
-                strategies=["iterative"],
-                model_configuration={"model_name": "gpt-4o-mini"},
+                strategies=["iterative", "mipro"],
+                model_configuration={
+                    "provider": "openai",
+                    "model_name": "gpt-4o-mini",
+                },
             ),
             http_request=object(),
             _=True,

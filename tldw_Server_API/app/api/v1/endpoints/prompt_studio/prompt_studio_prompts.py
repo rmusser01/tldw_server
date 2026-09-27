@@ -20,7 +20,7 @@ Security
 import contextlib
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request, status
 from loguru import logger
 from pydantic import ValidationError
 
@@ -34,39 +34,69 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     require_project_write_access,
 )
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
-from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.api.v1.endpoints.prompt_studio.resource_binding import (
+    authoritative_prompt_project,
+)
 
 # Local imports
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import (
-    ListResponse,
     PageListResponse,
     StandardResponse,
 )
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_project import (
     PromptCreate,
+    PromptResponse,
+    PromptUpdate,
+    PromptVersion,
     StructuredPromptConvertRequest,
     StructuredPromptConvertResponse,
     StructuredPromptPreviewRequest,
     StructuredPromptPreviewResponse,
-    PromptResponse,
-    PromptUpdate,
-    PromptVersion,
 )
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_schemas import ExecutePromptSimpleRequest
+from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
+)
+from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
+    ProviderCredentialRuntime,
+    configured_provider_model_from_snapshot,
+    mark_provider_credential_used,
+)
+from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
+from tldw_Server_API.app.core.DB_Management.prompts_db_helpers import (
+    parse_stored_prompt_definition,
+    reject_recipe_runtime_values,
+)
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import (
     ConflictError,
     DatabaseError,
     InputError,
     _prepare_prompt_record_fields,
 )
+from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.LLM_Calls.adapter_registry import (
+    canonical_builtin_llm_provider_name,
+)
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
+from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.Prompt_Management.structured_prompts import (
     PromptDefinition,
+    SingleTextRecipeDefinitionV2,
     StructuredPromptAssemblyError,
     assemble_prompt_definition,
     convert_legacy_prompt_to_definition,
     extract_legacy_prompt_variables,
     render_legacy_snapshot,
-    validate_prompt_definition,
+)
+from tldw_Server_API.app.core.Prompt_Management.structured_prompts.single_text_renderer import (
+    SingleTextRecipeRenderResult,
+    render_single_text_recipe_template,
 )
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
@@ -87,7 +117,53 @@ router = APIRouter(
 # Prompt CRUD Endpoints
 
 
-def _render_definition_legacy_fields(definition: PromptDefinition) -> tuple[str, str]:
+async def _reject_persisted_recipe_runtime_values(request: Request) -> None:
+    """Inspect persistence-reserved fields before models discard unknown keys."""
+    payload = await request.json()
+    try:
+        if isinstance(payload, dict):
+            reserved = {
+                key: payload[key]
+                for key in (
+                    "runtime_values",
+                    "variable_values",
+                    "resolved_values",
+                    "prompt_definition",
+                )
+                if key in payload
+            }
+            reject_recipe_runtime_values(reserved)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from None
+
+
+def _credential_http_exception(exc: ByokResolutionError) -> HTTPException:
+    """Map credential policy/storage failures to the shared bounded envelope."""
+    code = str(getattr(exc, "policy_code", None) or exc.code)
+    return HTTPException(
+        status_code=(
+            status.HTTP_403_FORBIDDEN
+            if code
+            in {
+                "credential_scope_revoked",
+                "model_not_allowed",
+                "provider_disabled",
+            }
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        ),
+        detail={
+            "error_code": code,
+            "message": "Provider credentials are unavailable.",
+        },
+    )
+
+
+def _render_definition_legacy_fields(
+    definition: PromptDefinition | SingleTextRecipeDefinitionV2,
+) -> tuple[str, str]:
+    if isinstance(definition, SingleTextRecipeDefinitionV2):
+        legacy = render_single_text_recipe_template(definition).legacy
+        return legacy.system_prompt, legacy.user_prompt
     messages = [
         {"role": block.role, "content": block.content}
         for block in sorted(definition.blocks, key=lambda item: item.order)
@@ -107,15 +183,18 @@ def _coerce_structured_definition(
     *,
     prompt_schema_version: int | None,
     prompt_definition_payload: dict[str, Any] | None,
-) -> tuple[PromptDefinition, int]:
+) -> tuple[PromptDefinition | SingleTextRecipeDefinitionV2, int]:
     if prompt_schema_version is None:
         raise InputError("Structured prompts require prompt_schema_version.")
     if not isinstance(prompt_definition_payload, dict):
         raise InputError("Structured prompts require prompt_definition.")
-    definition = PromptDefinition.model_validate(prompt_definition_payload)
-    issues = validate_prompt_definition(definition)
-    if issues:
-        raise InputError(issues[0].message)
+    try:
+        definition = parse_stored_prompt_definition(
+            prompt_definition_payload,
+            schema_version=prompt_schema_version,
+        )
+    except ValueError as exc:
+        raise InputError(str(exc)) from exc
 
     definition_schema_version = int(definition.schema_version)
     if int(prompt_schema_version) != definition_schema_version:
@@ -187,7 +266,9 @@ def _validate_total_message_length(
     )
 
 
-def _validation_variables(definition: PromptDefinition) -> dict[str, Any]:
+def _validation_variables(
+    definition: PromptDefinition | SingleTextRecipeDefinitionV2,
+) -> dict[str, Any]:
     variables: dict[str, Any] = {}
     for variable in definition.variables:
         # Preserve stored defaults during save-time validation so oversized
@@ -224,12 +305,21 @@ def _get_signature_for_project(
 
 def _validate_prompt_content(
     *,
-    definition: PromptDefinition,
+    definition: PromptDefinition | SingleTextRecipeDefinitionV2,
     extras: dict[str, Any],
     security_config: SecurityConfig,
     signature: dict[str, Any] | None = None,
 ) -> None:
     from tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor import PromptExecutor
+
+    if isinstance(definition, SingleTextRecipeDefinitionV2):
+        rendered = render_single_text_recipe_template(definition)
+        _validate_prompt_lengths(
+            system_prompt=rendered.legacy.system_prompt,
+            user_prompt=rendered.legacy.user_prompt,
+            security_config=security_config,
+        )
+        return
 
     assembly = assemble_prompt_definition(
         definition,
@@ -260,7 +350,7 @@ def _coerce_preview_definition(
     prompt_definition_payload: dict[str, Any] | None,
     system_prompt: str | None,
     user_prompt: str | None,
-) -> tuple[PromptDefinition, str, int | None]:
+) -> tuple[PromptDefinition | SingleTextRecipeDefinitionV2, str, int | None]:
     if prompt_format == "structured":
         definition, definition_schema_version = _coerce_structured_definition(
             prompt_schema_version=prompt_schema_version,
@@ -275,7 +365,11 @@ def _coerce_preview_definition(
     return definition, "legacy", None
 
 # Compatibility: simple POST on base path returns prompt object directly
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_reject_persisted_recipe_runtime_values)],
+)
 async def create_prompt_simple(
     prompt_data: PromptCreate,
     db: PromptStudioDatabase = Depends(get_prompt_studio_db),
@@ -294,6 +388,7 @@ async def create_prompt_simple(
     "/create",
     response_model=StandardResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_reject_persisted_recipe_runtime_values)],
     openapi_extra={
         "requestBody": {
             "content": {
@@ -396,8 +491,9 @@ async def create_prompt(
             "modules_config": modules_payload or [],
         }
         if normalized_prompt_fields["prompt_format"] == "structured":
-            definition = PromptDefinition.model_validate(
-                normalized_prompt_fields["prompt_definition"]
+            definition = parse_stored_prompt_definition(
+                normalized_prompt_fields["prompt_definition"],
+                schema_version=normalized_prompt_fields["prompt_schema_version"],
             )
         else:
             definition = convert_legacy_prompt_to_definition(
@@ -450,9 +546,11 @@ async def create_prompt(
         if not prompt_record:
             raise DatabaseError("Prompt creation returned empty record")
 
-        logger.info(f"User {user_context['user_id']} created prompt: {prompt_data.name} (project_id={prompt_data.project_id})")
-        with contextlib.suppress(Exception):
-            logger.info("Created prompt record: {}", prompt_record)
+        logger.info(
+            "Prompt Studio prompt created (project_id={}, prompt_id={})",
+            prompt_data.project_id,
+            prompt_record.get("id"),
+        )
 
         # Record idempotency mapping if provided
         if idempotency_key and prompt_record.get("id"):
@@ -605,30 +703,174 @@ async def list_prompts_simple(
 @router.post("/execute")
 async def execute_prompt_simple(
     payload: ExecutePromptSimpleRequest,
-    db: PromptStudioDatabase = Depends(get_prompt_studio_db)
+    request: Request,
+    db: PromptStudioDatabase = Depends(get_prompt_studio_db),
+    user_context: dict = Depends(get_prompt_studio_user),
 ) -> dict[str, Any]:
     from tldw_Server_API.app.core.Prompt_Management.prompt_studio.prompt_executor import PromptExecutor
-    executor = PromptExecutor(db)
+
     prompt_id = int(payload.prompt_id)
-    inputs = payload.inputs or {}
-    provider = payload.provider or "openai"
-    model = payload.model or "gpt-3.5-turbo"
-    # Support both async executor (normal) and sync mocks in tests
-    maybe = executor.execute(prompt_id, inputs=inputs, provider=provider, model=model)
+    _, project_id = authoritative_prompt_project(db, prompt_id)
+    await require_project_access(project_id, user_context=user_context, db=db)
+
     try:
+        normalized_payload = ExecutePromptSimpleRequest.model_validate(
+            {
+                "prompt_id": prompt_id,
+                "inputs": payload.inputs,
+                "provider": payload.provider,
+                "model": payload.model,
+            }
+        )
+        provider = canonical_builtin_llm_provider_name(
+            normalized_payload.provider or "openai"
+        )
+    except (TypeError, ValueError, ValidationError):
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "provider_request_invalid",
+                    "message": "The selected provider or model is invalid.",
+                },
+            )
+        )
+
+    executor = PromptExecutor(db)
+    inputs = normalized_payload.inputs or {}
+    requested_model = normalized_payload.model
+
+    try:
+        runtime_user_id, team_ids, org_ids, trusted_base_url_override = (
+            derive_trusted_credential_scope(request, None)
+        )
+    except ByokResolutionError as exc:
+        raise_detached_error(_credential_http_exception(exc))
+    except (RuntimeError, TypeError, ValueError):
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error_code": "credential_store_unavailable",
+                    "message": "Provider credentials are unavailable.",
+                },
+            )
+        )
+    if runtime_user_id is None:
+        try:
+            runtime_user_id = int(user_context.get("user_id"))
+        except (AttributeError, TypeError, ValueError):
+            runtime_user_id = None
+
+    try:
+        credential_runtime = ProviderCredentialRuntime(
+            user_id=runtime_user_id,
+            team_ids=team_ids,
+            org_ids=org_ids,
+            trusted_base_url_override=trusted_base_url_override,
+            override_snapshot_resolver=capture_provider_override_call_snapshot,
+        )
+    except (RuntimeError, ValueError):
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "error_code": "credential_store_unavailable",
+                    "message": "Provider credentials are unavailable.",
+                },
+            )
+        )
+
+    try:
+        try:
+            credentials = await credential_runtime.resolve(
+                provider,
+                model=requested_model,
+            )
+        except ByokResolutionError as exc:
+            raise_detached_error(_credential_http_exception(exc))
+        except (RuntimeError, ValueError):
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={
+                        "error_code": "credential_store_unavailable",
+                        "message": "Provider credentials are unavailable.",
+                    },
+                )
+            )
+
+        app_config = credentials.app_config or {}
+        model = requested_model or configured_provider_model_from_snapshot(
+            provider,
+            app_config,
+        )
+        if not model:
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "error_code": "provider_configuration_invalid",
+                        "message": "The selected provider configuration is invalid.",
+                    },
+                )
+            )
+        if provider_requires_api_key(provider) and not provider_auth_is_resolved(
+            provider,
+            api_key=credentials.api_key,
+            app_config=app_config,
+            credentials_resolved=credentials.credentials_resolved,
+        ):
+            record_byok_missing_credentials(
+                provider,
+                operation="prompt_studio.prompts.execute",
+            )
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail={
+                        "error_code": "missing_provider_credentials",
+                        "message": "The selected provider credentials are not configured.",
+                    },
+                )
+            )
+
+        async def _mark_provider_success() -> None:
+            await mark_provider_credential_used(credential_runtime, credentials)
+
+        maybe = executor.execute(
+            prompt_id,
+            inputs=inputs,
+            provider=provider,
+            model=model,
+            api_key_override=credentials.api_key,
+            app_config=app_config,
+            credentials_resolved=True,
+            provider_credentials=credentials,
+            on_provider_success=_mark_provider_success,
+        )
         import inspect as _inspect
-        if _inspect.isawaitable(maybe):
-            result = await maybe
-        else:
-            result = maybe  # test mocks may return plain dict
-    except Exception:
-        # Fallback to awaiting; if it fails, raise for better visibility
-        result = await maybe  # type: ignore[func-returns-value]
-    return {
-        "output": result.get("raw_output") or result.get("parsed_output") or "",
-        "tokens_used": result.get("tokens_used", 0),
-        "execution_time": result.get("execution_time_ms", 0) / 1000.0
-    }
+
+        result = await maybe if _inspect.isawaitable(maybe) else maybe
+        if not isinstance(result, dict) or result.get("success") is False:
+            raise_detached_error(
+                HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Upstream provider request failed.",
+                )
+            )
+        return {
+            "output": (
+                result.get("output")
+                or result.get("raw_output")
+                or result.get("parsed_output")
+                or ""
+            ),
+            "tokens_used": result.get("tokens_used", 0),
+            "execution_time": result.get("execution_time_ms", 0) / 1000.0,
+        }
+    finally:
+        await await_owned_worker(credential_runtime.close())
 
 
 @router.post("/preview", response_model=StandardResponse)
@@ -655,17 +897,21 @@ async def preview_prompt(
             "modules_config": [model_dump_compat(module) for module in (payload.modules_config or [])],
         }
         assembly = assemble_prompt_definition(definition, payload.variables, extras=extras)
-        messages = assembly.messages
-
-        signature = _get_signature_for_project(
-            db=db,
-            project_id=payload.project_id,
-            signature_id=payload.signature_id,
-        )
-        if signature is not None:
-            messages = PromptExecutor(db)._apply_signature_to_messages(messages, signature)
-
-        legacy = render_legacy_snapshot(messages, definition)
+        if isinstance(assembly, SingleTextRecipeRenderResult):
+            messages: list[dict[str, str]] = []
+            legacy = assembly.legacy
+            rendered_text: str | None = assembly.rendered_text
+        else:
+            messages = assembly.messages
+            signature = _get_signature_for_project(
+                db=db,
+                project_id=payload.project_id,
+                signature_id=payload.signature_id,
+            )
+            if signature is not None:
+                messages = PromptExecutor(db)._apply_signature_to_messages(messages, signature)
+            legacy = render_legacy_snapshot(messages, definition)
+            rendered_text = None
         _validate_prompt_lengths(
             system_prompt=legacy.system_prompt,
             user_prompt=legacy.user_prompt,
@@ -675,10 +921,12 @@ async def preview_prompt(
             messages=messages,
             security_config=security_config,
         )
-        _validate_total_message_length(messages=messages)
+        if messages:
+            _validate_total_message_length(messages=messages)
         preview_data = StructuredPromptPreviewResponse(
             prompt_format=prompt_format,
             prompt_schema_version=prompt_schema_version,
+            rendered_text=rendered_text,
             assembled_messages=messages,
             legacy_system_prompt=legacy.system_prompt,
             legacy_user_prompt=legacy.user_prompt,
@@ -784,6 +1032,7 @@ async def get_prompt(
 @router.put(
     "/update/{prompt_id}",
     response_model=StandardResponse,
+    dependencies=[Depends(_reject_persisted_recipe_runtime_values)],
     openapi_extra={
         "requestBody": {
             "content": {
@@ -893,8 +1142,9 @@ async def update_prompt(
             "modules_config": modules_payload or [],
         }
         if normalized_prompt_fields["prompt_format"] == "structured":
-            definition = PromptDefinition.model_validate(
-                normalized_prompt_fields["prompt_definition"]
+            definition = parse_stored_prompt_definition(
+                normalized_prompt_fields["prompt_definition"],
+                schema_version=normalized_prompt_fields["prompt_schema_version"],
             )
         else:
             definition = convert_legacy_prompt_to_definition(

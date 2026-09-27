@@ -325,7 +325,7 @@ class ManagedSecretRefsRepo:
                         FROM managed_secret_refs
                         WHERE id = ANY($1::int[])
                         """
-                rows = await self.db_pool.fetchall(list_refs_sql, normalized_ids)
+                rows = await self.db_pool.fetchall(list_refs_sql, (normalized_ids,))
             else:
                 list_refs_sql = """
                     SELECT id, backend_name, owner_scope_type, owner_scope_id, provider_key, backend_ref,

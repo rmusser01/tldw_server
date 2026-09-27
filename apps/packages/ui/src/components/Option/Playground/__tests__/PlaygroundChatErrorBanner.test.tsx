@@ -2,6 +2,8 @@
 import { act, fireEvent, render, renderHook, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { MemoryRouter, useLocation } from "react-router-dom"
+import { buildFriendlyErrorMessage, decodeChatErrorPayload } from "@/utils/chat-error-message"
+import { openModelSelector } from "../playground-cockpit-actions"
 
 import {
   getChatErrorBannerScanSignature,
@@ -23,6 +25,22 @@ const encodeError = (
   })
 
 describe("PlaygroundChatErrorBanner", () => {
+  it.each([false, true])("renders real unavailable-model guidance and opens model selection with inline Retry=%s", inline => {
+    const listener = vi.fn()
+    const retry = vi.fn()
+    window.addEventListener("tldw:open-model-selector", listener)
+    try {
+      const payload = decodeChatErrorPayload(buildFriendlyErrorMessage(Object.assign(new Error("Selected model is unavailable"), { status: 400, details: { detail: { error_code: "model_not_available" } } })))!
+      render(<MemoryRouter><PlaygroundChatErrorBanner error={{ ...payload, key: "real-model-error" }} diagnosticsLabel="Health & diagnostics" dismissLabel="Dismiss error" retryLabel="Retry chat" onRetry={inline ? retry : undefined} onSwitchProvider={() => openModelSelector()} onDismiss={() => undefined} /></MemoryRouter>)
+      expect(screen.getByRole("alert")).toHaveTextContent("The selected model is not available.")
+      fireEvent.click(screen.getByRole("button", { name: inline ? "Switch provider" : "Choose another model" }))
+      expect(listener).toHaveBeenCalledTimes(1)
+      if (inline) {
+        fireEvent.click(screen.getByRole("button", { name: "Retry chat" }))
+        expect(retry).toHaveBeenCalledTimes(1)
+      }
+    } finally { window.removeEventListener("tldw:open-model-selector", listener) }
+  })
   it("renders chat errors through the shared RecoveryCallout primitive", () => {
     const error = {
       ...JSON.parse(
@@ -214,6 +232,65 @@ describe("PlaygroundChatErrorBanner", () => {
 
     expect(latest?.summary).toBe("Server-loaded error")
     expect(latest?.hint).toBe("Retry from composer")
+  })
+
+  it.each(["message", "content"])("does not restore composer recovery after a saved retry succeeds (%s)", (field) => {
+    const messages = Object.freeze([
+      Object.freeze({ id: "user-1", role: "user", [field]: "When does the garden open?" }),
+      Object.freeze({ id: "failed-2", role: "assistant", [field]: encodeError("Historical failure") }),
+      Object.freeze({ id: "success-3", role: "assistant", [field]: "The garden opens on 18 December 2026." })
+    ])
+    const ComposerRecovery = () => {
+      const { visibleError, dismissError } = usePlaygroundChatErrorBanner(messages)
+      return (
+        <PlaygroundChatErrorBanner
+          error={visibleError}
+          diagnosticsLabel="Health & diagnostics"
+          retryLabel="Retry chat"
+          dismissLabel="Dismiss error"
+          onRetry={() => undefined}
+          onDismiss={dismissError}
+        />
+      )
+    }
+
+    render(<MemoryRouter><ComposerRecovery /></MemoryRouter>)
+
+    expect(screen.queryByTestId("playground-chat-error-banner")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Retry chat" })).not.toBeInTheDocument()
+  })
+
+  it("clears the old failure while a retry streams and exposes the retry's own failure", () => {
+    const failedAttempt = {
+      id: "failed-2", role: "assistant", message: encodeError("Historical failure")
+    }
+    const { result, rerender } = renderHook(
+      ({ messages }) => usePlaygroundChatErrorBanner(messages),
+      { initialProps: { messages: [failedAttempt] } }
+    )
+    expect(result.current.visibleError?.summary).toBe("Historical failure")
+
+    rerender({ messages: [failedAttempt, { id: "retry-3", role: "assistant", message: "" }] })
+    expect(result.current.visibleError).toBeNull()
+
+    rerender({ messages: [failedAttempt, {
+      id: "retry-3", role: "assistant", message: encodeError("Current retry failure")
+    }] })
+    expect(result.current.visibleError?.summary).toBe("Current retry failure")
+  })
+
+  it("does not offer recovery for an older turn after a new user message", () => {
+    expect(getLatestChatErrorBannerEntry([
+      { id: "failed-2", isBot: true, message: encodeError("Historical failure") },
+      { id: "user-3", isBot: false, message: "Try another question." }
+    ])).toBeNull()
+  })
+
+  it("keeps the current failed attempt visible across non-conversational metadata", () => {
+    expect(getLatestChatErrorBannerEntry([
+      { id: "failed-2", role: "assistant", content: encodeError("Current failure") },
+      { id: "system-3", role: "system", isBot: false, content: "Updated context" }
+    ])?.summary).toBe("Current failure")
   })
 
   it("uses compact dismissal keys without embedding the encoded payload", () => {

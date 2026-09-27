@@ -2722,5 +2722,8 @@
   },
   "header_connectionCard_connectedCaption": {
     "message": "现在可以在选项和侧边栏使用聊天和工具。"
+  },
+  "notesSearch_offlineSaveUnavailable": {
+    "message": "在确认您的帐户和本地存储之前，离线保存不可用。您的更改仍未保存。"
   }
 }

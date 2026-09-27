@@ -1,6 +1,7 @@
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import messages as messages_endpoint
+from tldw_Server_API.app.core.AuthNZ import provider_credential_runtime as runtime_module
 
 
 def _build_openai_response(text: str) -> dict:
@@ -14,6 +15,19 @@ def _build_openai_response(text: str) -> dict:
             }
         ],
         "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+    }
+
+
+def _build_native_response(text: str = "ok") -> dict:
+    return {
+        "id": "msg-1",
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "text", "text": text}],
+        "model": "test-model",
+        "stop_reason": "end_turn",
+        "stop_sequence": None,
+        "usage": {"input_tokens": 1, "output_tokens": 1},
     }
 
 
@@ -134,20 +148,16 @@ def test_messages_count_tokens_unsupported_provider(client_user_only, monkeypatc
 def test_messages_llamacpp_base_url_normalized(client_user_only, monkeypatch):
     capture = {}
     monkeypatch.setattr(
-        messages_endpoint,
-        "loaded_config_data",
-        {"llama_api": {"api_ip": "http://localhost:8080/v1/chat/completions"}},
+        runtime_module,
+        "load_server_config_snapshot",
+        lambda: {"llama_api": {"api_ip": "http://localhost:8080/v1/chat/completions"}},
     )
-    monkeypatch.setattr(
-        messages_endpoint,
-        "http_client_factory",
-        lambda *a, **k: _FakeClient({"ok": True}, capture),
-    )
-    monkeypatch.setattr(
-        messages_endpoint,
-        "async_http_client_factory",
-        lambda *a, **k: _AsyncFakeClient({"ok": True}, capture),
-    )
+
+    async def native_post(url, headers, payload, **_kwargs):
+        capture.update(url=url, headers=headers, json=payload)
+        return _build_native_response()
+
+    monkeypatch.setattr(messages_endpoint, "_native_post_json", native_post)
 
     payload = {
         "model": "llama.cpp/test-model",
@@ -164,20 +174,16 @@ def test_messages_llamacpp_base_url_normalized(client_user_only, monkeypatch):
 def test_messages_llamacpp_base_url_normalized_completions(client_user_only, monkeypatch):
     capture = {}
     monkeypatch.setattr(
-        messages_endpoint,
-        "loaded_config_data",
-        {"llama_api": {"api_ip": "http://localhost:8080/v1/completions"}},
+        runtime_module,
+        "load_server_config_snapshot",
+        lambda: {"llama_api": {"api_ip": "http://localhost:8080/v1/completions"}},
     )
-    monkeypatch.setattr(
-        messages_endpoint,
-        "http_client_factory",
-        lambda *a, **k: _FakeClient({"ok": True}, capture),
-    )
-    monkeypatch.setattr(
-        messages_endpoint,
-        "async_http_client_factory",
-        lambda *a, **k: _AsyncFakeClient({"ok": True}, capture),
-    )
+
+    async def native_post(url, headers, payload, **_kwargs):
+        capture.update(url=url, headers=headers, json=payload)
+        return _build_native_response()
+
+    monkeypatch.setattr(messages_endpoint, "_native_post_json", native_post)
 
     payload = {
         "model": "llama.cpp/test-model",

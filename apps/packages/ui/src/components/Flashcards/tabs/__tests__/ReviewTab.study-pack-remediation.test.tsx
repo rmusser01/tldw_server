@@ -23,6 +23,11 @@ import {
   useUpdateFlashcardMutation
 } from "../../hooks"
 
+vi.mock("@/services/service-prompts", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+  ...await import("./review-scope-fixture")
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -91,7 +96,7 @@ vi.mock("../../hooks", () => ({
   useCramQueueQuery: vi.fn(),
   useReviewQuery: vi.fn(),
   useReviewFlashcardMutation: vi.fn(),
-  useEndFlashcardReviewSessionMutation: vi.fn(),
+  useEndFlashcardReviewSessionMutation: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({ id: 77 }), isPending: false })),
   useRecentFlashcardReviewSessionsQuery: vi.fn(() => ({
     data: [],
     isLoading: false,
@@ -339,11 +344,11 @@ describe("ReviewTab study-pack remediation", () => {
     fireEvent.click(goodButton)
 
     await waitFor(() => {
-      expect(reviewMutationMock).toHaveBeenCalledWith({
+      expect(reviewMutationMock).toHaveBeenCalledWith(expect.objectContaining({
         cardUuid: "card-1",
         rating: 3,
         answerTimeMs: expect.any(Number)
-      })
+      }))
     })
   })
 

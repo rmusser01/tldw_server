@@ -3,6 +3,7 @@ from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
     extract_article_with_pipeline,
     get_extraction_cache_stats,
 )
+from tldw_Server_API.app.core.Web_Scraping.extraction import throttles
 
 
 def test_schema_result_cache_and_selector_cache():
@@ -52,7 +53,7 @@ def test_schema_result_cache_and_selector_cache():
     assert stats.get("selector_xpath_cache_size", 0) == 0
 
 
-def test_extraction_cache_auto_clear(monkeypatch):
+def test_extraction_cache_clear_requires_explicit_operation(monkeypatch):
     html = """
     <html>
       <body>
@@ -83,6 +84,11 @@ def test_extraction_cache_auto_clear(monkeypatch):
     assert result["extraction_successful"] is True
 
     stats = get_extraction_cache_stats()
+    assert stats.get("schema_result_cache_size", 0) == 1
+    assert stats.get("selector_xpath_cache_size", 0) > 0
+
+    clear_extraction_caches()
+    stats = get_extraction_cache_stats()
     assert stats.get("schema_result_cache_size", 0) == 0
     assert stats.get("selector_xpath_cache_size", 0) == 0
 
@@ -108,5 +114,6 @@ def test_strategy_limit_cache_stats(monkeypatch):
     assert stats.get("strategy_limit_count", 0) == 2
 
     clear_extraction_caches()
+    throttles.clear_throttle_state()
     stats = get_extraction_cache_stats()
     assert stats.get("strategy_limit_count", 0) == 0

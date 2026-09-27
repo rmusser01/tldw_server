@@ -44,6 +44,10 @@ from tldw_Server_API.app.core.AuthNZ.crypto_utils import (
 )
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
+    DatabaseError,
+    DatabaseLockError,
     InvalidSessionError,
     SessionError,
     SessionRevokedException,
@@ -58,7 +62,6 @@ from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_his
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 
 _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -81,6 +84,7 @@ _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS = (
     RedisError,
     RedisConnectionError,
     InvalidSessionError,
+    DatabaseError,
     SessionError,
     SessionRevokedException,
 )
@@ -1282,8 +1286,9 @@ class SessionManager:
         self,
         session_id: int,
         revoked_by: Optional[int] = None,
-        reason: Optional[str] = None
-    ):
+        reason: Optional[str] = None,
+        expected_user_id: Optional[int] = None,
+    ) -> bool:
         """Revoke a specific session"""
         if not self._initialized:
             await self.initialize()
@@ -1294,22 +1299,26 @@ class SessionManager:
             repo = AuthnzSessionsRepo(db_pool)
             session_details = await repo.revoke_session_record(
                 session_id=session_id,
+                expected_user_id=expected_user_id,
                 revoked_by=revoked_by,
                 reason=reason,
             )
 
             # Clear from cache
-            if self.redis_client:
+            if self.redis_client and session_details:
                 await self._clear_session_cache(session_id)
 
-            if self.settings.PII_REDACT_LOGS:
-                logger.info("Revoked session [redacted]")
-            else:
-                logger.info(f"Revoked session {session_id}")
+            if session_details:
+                if self.settings.PII_REDACT_LOGS:
+                    logger.info("Revoked session [redacted]")
+                else:
+                    logger.info(f"Revoked session {session_id}")
 
         except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to revoke session: {e}")
-            raise SessionError(f"Failed to revoke session: {e}") from e
+            logger.bind(exception_type=type(e).__name__).error(
+                "Failed to revoke session"
+            )
+            raise SessionError("Failed to revoke session") from None
         else:
             if session_details:
                 await self._blacklist_session_tokens(
@@ -1317,12 +1326,14 @@ class SessionManager:
                     reason=reason,
                     revoked_by=revoked_by,
                 )
+            return session_details is not None
 
     async def revoke_all_user_sessions(
         self,
         user_id: int,
         except_session_id: Optional[int] = None,
         reason: str = "User requested logout from all devices",
+        revoked_by: Optional[int] = None,
     ) -> int:
         """Revoke all sessions for a user, optionally except one"""
         if not self._initialized:
@@ -1336,6 +1347,8 @@ class SessionManager:
                 await repo.revoke_all_sessions_for_user(
                     user_id=user_id,
                     except_session_id=except_session_id,
+                    revoked_by=revoked_by,
+                    reason=reason,
                 )
             )
 
@@ -1349,18 +1362,24 @@ class SessionManager:
                 logger.info(f"Revoked all sessions for user {user_id}")
 
         except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to revoke user sessions: {e}")
-            raise SessionError(f"Failed to revoke sessions: {e}") from e
+            logger.bind(exception_type=type(e).__name__).error(
+                "Failed to revoke user sessions"
+            )
+            raise SessionError("Failed to revoke sessions") from None
 
         # After sessions are marked revoked, ensure associated JTIs are blacklisted
         try:
             blacklist = get_token_blacklist()
-            await blacklist.revoke_all_user_tokens(user_id, reason=reason)
+            await blacklist.revoke_all_user_tokens(
+                user_id,
+                reason=reason,
+                revoked_by=revoked_by,
+                except_session_id=except_session_id,
+            )
         except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as bl_error:
-            if self.settings.PII_REDACT_LOGS:
-                logger.warning(f"Failed to blacklist tokens for authenticated user (details redacted): {bl_error}")
-            else:
-                logger.warning(f"Failed to blacklist tokens for user {user_id}: {bl_error}")
+            logger.bind(exception_type=type(bl_error).__name__).warning(
+                "Failed to blacklist tokens for authenticated user"
+            )
 
         return affected
 
@@ -1391,6 +1410,7 @@ class SessionManager:
                 datetime.now(timezone.utc) + timedelta(days=self.settings.REFRESH_TOKEN_EXPIRE_DAYS)
             )
 
+        tokens_updated = False
         try:
             db_pool = await self._ensure_db_pool()
             repo = AuthnzSessionsRepo(db_pool)
@@ -1409,10 +1429,18 @@ class SessionManager:
             # Validate token subject/session binding before updating session records.
             try:
                 access_claims = self._get_unverified_claims(new_access_token)
-                self._validate_token_binding(access_claims, session_data, token_label="access")
+                self._validate_token_binding(
+                    access_claims,
+                    session_data,
+                    token_label="access",  # nosec B106 - token category, not a secret
+                )
                 if new_refresh_token:
                     refresh_claims = self._get_unverified_claims(new_refresh_token)
-                    self._validate_token_binding(refresh_claims, session_data, token_label="refresh")
+                    self._validate_token_binding(
+                        refresh_claims,
+                        session_data,
+                        token_label="refresh",  # nosec B106 - token category, not a secret
+                    )
             except InvalidSessionError:
                 raise
             except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
@@ -1443,6 +1471,7 @@ class SessionManager:
             if not updated:
                 # Compare-and-swap failed: session was refreshed/revoked/expired concurrently.
                 raise InvalidSessionError()
+            tokens_updated = True
 
             # Update cache
             if self.redis_client:
@@ -1470,6 +1499,12 @@ class SessionManager:
         except InvalidSessionError:
             raise
         except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as e:
+            # Only known failures before the atomic update completed are safe to retry.
+            # Cache/acknowledgement failures must not imply that the old token is usable.
+            if not tokens_updated and isinstance(
+                e, (DatabaseLockError, ConnectionPoolExhaustedError, DatabaseConcurrencyConflict)
+            ):
+                raise
             logger.error(f"Failed to refresh session: {e}")
             raise SessionError(f"Failed to refresh session: {e}") from e
 
@@ -1537,13 +1572,16 @@ class SessionManager:
             logger.error(f"Failed to update session tokens: {e}")
             raise SessionError(f"Failed to update session tokens: {e}") from e
 
-    async def is_token_blacklisted(self, token: str, jti: Optional[str] = None) -> bool:
+    async def is_token_blacklisted(
+        self, token: str, jti: Optional[str] = None, *, strict: bool = False
+    ) -> bool:
         """
         Check if a token has been blacklisted/revoked
 
         Args:
             token: JWT token to check
             jti: Optional JWT ID (if already parsed by caller)
+            strict: Propagate storage failures so refresh can distinguish them from revocation.
 
         Returns:
             True if token is blacklisted, False otherwise
@@ -1575,9 +1613,11 @@ class SessionManager:
             # Consult shared token blacklist (fail-closed on error)
             try:
                 blacklist = get_token_blacklist()
-                if await blacklist.is_blacklisted(jti_value):
+                if await blacklist.is_blacklisted(jti_value, strict=strict):
                     return True
             except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
+                if strict:
+                    raise
                 logger.error(f"Token blacklist check failed; treating token as revoked: {exc}")
                 return True
 
@@ -1598,14 +1638,26 @@ class SessionManager:
             return bool(await repo.has_revoked_session_for_token_hash_candidates(token_hashes))
 
         except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as e:
+            if strict:
+                raise
             logger.error(f"Error checking token blacklist; treating token as revoked: {e}")
             return True
 
-    async def get_user_sessions(self, user_id: int) -> list[dict[str, Any]]:
+    async def get_user_sessions(
+        self,
+        user_id: int,
+        *,
+        strict: bool = False,
+    ) -> list[dict[str, Any]]:
         """Get all sessions for a user (alias for get_active_sessions)"""
-        return await self.get_active_sessions(user_id)
+        return await self.get_active_sessions(user_id, strict=strict)
 
-    async def get_active_sessions(self, user_id: int) -> list[dict[str, Any]]:
+    async def get_active_sessions(
+        self,
+        user_id: int,
+        *,
+        strict: bool = False,
+    ) -> list[dict[str, Any]]:
         """Get all active sessions for a user"""
         if not self._initialized:
             await self.initialize()
@@ -1614,8 +1666,12 @@ class SessionManager:
             db_pool = await self._ensure_db_pool()
             repo = AuthnzSessionsRepo(db_pool)
             return await repo.get_active_sessions_for_user(user_id)
-        except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to get active sessions: {e}")
+        except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.bind(exception_type=type(exc).__name__).error(
+                "Failed to get active sessions"
+            )
+            if strict:
+                raise SessionError("Failed to get active sessions") from None
             return []
 
     async def cleanup_expired_sessions(self):
@@ -1725,8 +1781,10 @@ class SessionManager:
                         await self.redis_client.delete(key)
                         break
 
-        except RedisError:
-            pass
+        except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.bind(exception_type=type(exc).__name__).warning(
+                "Failed to clear session cache"
+            )
 
     async def _clear_user_sessions_cache(self, user_id: int):
         """Clear all sessions for a user from cache"""
@@ -1745,8 +1803,10 @@ class SessionManager:
             # Clear user's session set
             await self.redis_client.delete(f"user:{user_id}:sessions")
 
-        except RedisError:
-            pass
+        except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.bind(exception_type=type(exc).__name__).warning(
+                "Failed to clear user session cache"
+            )
 
     async def _cleanup_redis_cache(self):
         """Clean up expired sessions from Redis"""
@@ -1911,7 +1971,9 @@ class SessionManager:
         try:
             blacklist = get_token_blacklist()
         except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"AuthNZ blacklist unavailable for session revocation: {exc}")
+            logger.bind(exception_type=type(exc).__name__).debug(
+                "AuthNZ blacklist unavailable for session revocation"
+            )
             return
 
         for entry in sessions:
@@ -1929,13 +1991,15 @@ class SessionManager:
                         jti=access_jti,
                         expires_at=access_exp,
                         user_id=user_id,
-                        token_type="access",
+                        token_type="access",  # nosec B106 - token category, not a secret
                         reason=reason,
                         revoked_by=revoked_by,
                         ip_address=None,
                     )
                 except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.debug(f"Failed to persist access-token blacklist entry {access_jti}: {exc}")
+                    logger.bind(exception_type=type(exc).__name__).debug(
+                        "Failed to persist access-token blacklist entry"
+                    )
 
             if refresh_jti and refresh_exp:
                 with suppress(_SESSION_MANAGER_NONCRITICAL_EXCEPTIONS):
@@ -1945,13 +2009,15 @@ class SessionManager:
                         jti=refresh_jti,
                         expires_at=refresh_exp,
                         user_id=user_id,
-                        token_type="refresh",
+                        token_type="refresh",  # nosec B106 - token category, not a secret
                         reason=reason,
                         revoked_by=revoked_by,
                         ip_address=None,
                     )
                 except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
-                    logger.debug(f"Failed to persist refresh-token blacklist entry {refresh_jti}: {exc}")
+                    logger.bind(exception_type=type(exc).__name__).debug(
+                        "Failed to persist refresh-token blacklist entry"
+                    )
 
     async def shutdown(self):
         """Shutdown session manager and cleanup"""

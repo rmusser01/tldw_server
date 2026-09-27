@@ -281,13 +281,10 @@ async def _init_rate_limiter(*, deferred: bool) -> None:
 
 async def _init_tts_service(*, deferred: bool) -> None:
     try:
-        from tldw_Server_API.app.core.config import load_comprehensive_config_with_tts
         from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
         from tldw_Server_API.app.core.TTS.voice_manager import init_voice_manager
 
-        cfg_obj = load_comprehensive_config_with_tts()
-        tts_cfg_dict = cfg_obj.get_tts_config() if hasattr(cfg_obj, "get_tts_config") else None
-        await get_tts_service_v2(config=tts_cfg_dict)
+        await get_tts_service_v2()
         await init_voice_manager()
         logger.info(
             ("Deferred startup: " if deferred else "App Startup: ")

@@ -89,6 +89,7 @@ class JobsSettings:
     OPERATION_TIME_KEYS = frozenset(
         {
             "JOBS_EVENTS_ENABLED",
+            "JOBS_EXPIRED_RECOVERY_BATCH_SIZE",
             "JOBS_EXPOSE_PROGRESS",
             "JOBS_REQUIRE_CONFIRM",
             "JOBS_REQUIRE_COMPLETION_TOKEN",
@@ -151,7 +152,7 @@ class JobsSettings:
     )
 
     @classmethod
-    def from_env(cls, env: Mapping[str, str] | None = None) -> "JobsSettings":
+    def from_env(cls, env: Mapping[str, str] | None = None) -> JobsSettings:
         """Create a settings snapshot from the supplied environment mapping."""
 
         source = os.environ if env is None else env
@@ -174,7 +175,7 @@ class JobsSettings:
             allowed_queue_extras_by_domain=tuple(domain_queues),
         )
 
-    def refresh(self, env: Mapping[str, str] | None = None) -> "JobsSettings":
+    def refresh(self, env: Mapping[str, str] | None = None) -> JobsSettings:
         """Refresh snapshot-scoped values while preserving construction-time DB settings."""
 
         refreshed = type(self).from_env(env)

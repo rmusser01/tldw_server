@@ -1,0 +1,57 @@
+[
+  {
+    "id": "mctn43aauy1s4sk96kbvna5w9",
+    "before": "ID:           mctn43aauy1s4sk96kbvna5w9\nParents:\n - n0tdx9jxhf5hllek94oo63z9m\nCreated at:   2026-09-10 20:09:19.426427379 +0000 UTC\nMutable:      false\nReclaimable:  true\nShared:       false\nSize:         66.21kB\nDescription:  mount / from exec /bin/sh -c mkdir -p /app/Databases &&     chown appuser:appuser /app/Databases &&     chmod +x /usr/local/bin/tldw-app-first-run\nUsage count:  1\nLast used:    2 minutes ago\nType:         regular\n\n",
+    "result": "ID\t\t\t\t\t\tRECLAIMABLE\tSIZE\t\tLAST ACCESSED\nmctn43aauy1s4sk96kbvna5w9               \ttrue \t\t66.21kB   \t2 minutes ago\nTotal:\t66.21kB\n"
+  },
+  {
+    "id": "n0tdx9jxhf5hllek94oo63z9m",
+    "before": "ID:           n0tdx9jxhf5hllek94oo63z9m\nParents:\n - di2y8cfbq9o03ksk1c67ds21p\nCreated at:   2026-09-10 20:09:19.066410587 +0000 UTC\nMutable:      false\nReclaimable:  true\nShared:       false\nSize:         49.79kB\nDescription:  [runtime 13/14] COPY Dockerfiles/entrypoints/tldw-app-first-run.sh /usr/local/bin/tldw-app-first-run\nUsage count:  1\nLast used:    2 minutes ago\nType:         regular\n\n",
+    "result": "ID\t\t\t\t\t\tRECLAIMABLE\tSIZE\t\tLAST ACCESSED\nn0tdx9jxhf5hllek94oo63z9m               \ttrue \t\t49.79kB   \t2 minutes ago\nTotal:\t49.79kB\n"
+  },
+  {
+    "id": "di2y8cfbq9o03ksk1c67ds21p",
+    "before": "ID:           di2y8cfbq9o03ksk1c67ds21p\nParents:\n - ndi86ee6q4mk7ar8uthasahq5\nCreated at:   2026-09-10 20:09:19.02716742 +0000 UTC\nMutable:      false\nReclaimable:  true\nShared:       false\nSize:         17.98kB\nDescription:  [runtime 12/14] COPY --chown=appuser:appuser THIRD_PARTY_NOTICES.txt /app/THIRD_PARTY_NOTICES.txt\nUsage count:  1\nLast used:    2 minutes ago\nType:         regular\n\n",
+    "result": "ID\t\t\t\t\t\tRECLAIMABLE\tSIZE\t\tLAST ACCESSED\ndi2y8cfbq9o03ksk1c67ds21p               \ttrue \t\t17.98kB   \t2 minutes ago\nTotal:\t17.98kB\n"
+  },
+  {
+    "id": "ndi86ee6q4mk7ar8uthasahq5",
+    "before": "ID:           ndi86ee6q4mk7ar8uthasahq5\nParents:\n - m5l4e2d6ddvmcbooy7qw4b4ep\nCreated at:   2026-09-10 20:09:18.93472342 +0000 UTC\nMutable:      false\nReclaimable:  true\nShared:       false\nSize:         1.503MB\nDescription:  [runtime 11/14] COPY --chown=appuser:appuser LICENSES /app/LICENSES\nUsage count:  1\nLast used:    2 minutes ago\nType:         regular\n\n",
+    "result": "ID\t\t\t\t\t\tRECLAIMABLE\tSIZE\t\tLAST ACCESSED\nndi86ee6q4mk7ar8uthasahq5               \ttrue \t\t1.503MB   \t2 minutes ago\nTotal:\t1.503MB\n"
+  },
+  {
+    "id": "m5l4e2d6ddvmcbooy7qw4b4ep",
+    "before": "ID:           m5l4e2d6ddvmcbooy7qw4b4ep\nParents:\n - hhj5oosfbxfsjsx7blptyprli\nCreated at:   2026-09-10 20:09:18.874097503 +0000 UTC\nMutable:      false\nReclaimable:  true\nShared:       false\nSize:         13.51kB\nDescription:  [runtime 10/14] COPY --chown=appuser:appuser LICENSE /app/LICENSE\nUsage count:  1\nLast used:    2 minutes ago\nType:         regular\n\n",
+    "result": "ID\t\t\t\t\t\tRECLAIMABLE\tSIZE\t\tLAST ACCESSED\nm5l4e2d6ddvmcbooy7qw4b4ep               \ttrue \t\t13.51kB   \t2 minutes ago\nTotal:\t13.51kB\n"
+  },
+  {
+    "id": "hhj5oosfbxfsjsx7blptyprli",
+    "before": "ID:           hhj5oosfbxfsjsx7blptyprli\nParents:\n - 4rmlmmexgq7jfqhaw7gttmm4g\nCreated at:   2026-09-10 20:09:18.81343942 +0000 UTC\nMutable:      false\nReclaimable:  true\nShared:       false\nSize:         10.15MB\nDescription:  [runtime  9/14] COPY --chown=appuser:appuser Helper_Scripts /app/Helper_Scripts\nUsage count:  1\nLast used:    2 minutes ago\nType:         regular\n\n",
+    "result": "ID\t\t\t\t\t\tRECLAIMABLE\tSIZE\t\tLAST ACCESSED\nhhj5oosfbxfsjsx7blptyprli               \ttrue \t\t10.15MB   \t2 minutes ago\nTotal:\t10.15MB\n"
+  },
+  {
+    "id": "4rmlmmexgq7jfqhaw7gttmm4g",
+    "before": "ID:           4rmlmmexgq7jfqhaw7gttmm4g\nParents:\n - 5xes2qyy77ihl71ul4ovtxzbl\nCreated at:   2026-09-10 20:09:18.596572837 +0000 UTC\nMutable:      false\nReclaimable:  true\nShared:       false\nSize:         227.1MB\nDescription:  [runtime  8/14] COPY --chown=appuser:appuser Docs /app/Docs\nUsage count:  1\nLast used:    2 minutes ago\nType:         regular\n\n",
+    "result": "ID\t\t\t\t\t\tRECLAIMABLE\tSIZE\t\tLAST ACCESSED\n4rmlmmexgq7jfqhaw7gttmm4g               \ttrue \t\t227.1MB   \t2 minutes ago\nTotal:\t227.1MB\n"
+  },
+  {
+    "id": "5xes2qyy77ihl71ul4ovtxzbl",
+    "before": "ID:           5xes2qyy77ihl71ul4ovtxzbl\nParents:\n - v0py46gwumi0ak6nl8m95gp6n\nCreated at:   2026-09-10 20:09:13.593713376 +0000 UTC\nMutable:      false\nReclaimable:  true\nShared:       false\nSize:         108.2MB\nDescription:  [runtime  7/14] COPY --chown=appuser:appuser tldw_Server_API /app/tldw_Server_API\nUsage count:  1\nLast used:    2 minutes ago\nType:         regular\n\n",
+    "result": "ID\t\t\t\t\t\tRECLAIMABLE\tSIZE\t\tLAST ACCESSED\n5xes2qyy77ihl71ul4ovtxzbl               \ttrue \t\t108.2MB   \t2 minutes ago\nTotal:\t108.2MB\n"
+  },
+  {
+    "id": "v0py46gwumi0ak6nl8m95gp6n",
+    "before": "ID:           v0py46gwumi0ak6nl8m95gp6n\nParents:\n - 6cgljztl75q33mrc3v4l311bo\nCreated at:   2026-09-10 20:09:11.47086725 +0000 UTC\nMutable:      false\nReclaimable:  true\nShared:       false\nSize:         77.05kB\nDescription:  mount / from exec /bin/sh -c useradd -m -u 10001 appuser\nUsage count:  1\nLast used:    2 minutes ago\nType:         regular\n\n",
+    "result": "ID\t\t\t\t\t\tRECLAIMABLE\tSIZE\t\tLAST ACCESSED\nv0py46gwumi0ak6nl8m95gp6n               \ttrue \t\t77.05kB   \t2 minutes ago\nTotal:\t77.05kB\n"
+  },
+  {
+    "id": "6cgljztl75q33mrc3v4l311bo",
+    "before": "ID:           6cgljztl75q33mrc3v4l311bo\nParents:\n - 4wta1ksoyhxwt5dbs70d9c1rq\nCreated at:   2026-09-10 20:09:10.018052639 +0000 UTC\nMutable:      false\nReclaimable:  true\nShared:       false\nSize:         8.224kB\nDescription:  mount / from exec /bin/sh -c python -c \"import mcp_unified; import tldw_profile_core\"\nUsage count:  1\nLast used:    2 minutes ago\nType:         regular\n\n",
+    "result": "ID\t\t\t\t\t\tRECLAIMABLE\tSIZE\t\tLAST ACCESSED\n6cgljztl75q33mrc3v4l311bo               \ttrue \t\t8.224kB   \t2 minutes ago\nTotal:\t8.224kB\n"
+  },
+  {
+    "id": "4wta1ksoyhxwt5dbs70d9c1rq",
+    "before": "ID:           4wta1ksoyhxwt5dbs70d9c1rq\nParents:\n - z17kquvlgx3ky05sjuc7130fk\nCreated at:   2026-09-10 20:09:06.11937747 +0000 UTC\nMutable:      false\nReclaimable:  true\nShared:       false\nSize:         8.216GB\nDescription:  [runtime  4/14] COPY --from=builder /install /usr/local\nUsage count:  1\nLast used:    2 minutes ago\nType:         regular\n\n",
+    "result": "ID\t\t\t\t\t\tRECLAIMABLE\tSIZE\t\tLAST ACCESSED\n4wta1ksoyhxwt5dbs70d9c1rq               \ttrue \t\t8.216GB   \t2 minutes ago\nTotal:\t8.216GB\n"
+  }
+]

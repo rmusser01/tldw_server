@@ -28,6 +28,8 @@ const state = {
 
 vi.mock("../KnowledgeQAProvider", () => ({
   useKnowledgeQA: () => ({
+    storageScopeKey: "test-owner",
+    isAuthorityCurrent: () => true,
     results: state.results,
     citations: state.citations,
     focusedSourceIndex: state.focusedSourceIndex,
@@ -43,6 +45,41 @@ describe("SourceList full-source viewer", () => {
     state.citations = [{ index: 1 }]
     state.focusedSourceIndex = null
     vi.stubGlobal("open", vi.fn())
+  })
+
+  it.each([
+    { sourceType: undefined, metadataType: undefined, label: "Document" },
+    { sourceType: "notes", metadataType: undefined, label: "Note" },
+    { sourceType: undefined, metadataType: "web", label: "Web" },
+    { sourceType: "notes", metadataType: "web", label: "Note" }
+  ] as const)(
+    "keeps the source card and preview type consistent for $sourceType / $metadataType",
+    async ({ sourceType, metadataType, label }) => {
+      state.results = [{
+        id: "source-1",
+        content: "Synthetic source text.",
+        score: 1,
+        sourceType,
+        metadata: { title: "Typed source", source_type: metadataType }
+      }]
+      render(<SourceList />)
+      expect(screen.getByText(label, { exact: true })).toBeInTheDocument()
+      fireEvent.click(screen.getByRole("button", { name: "View source 1" }))
+      const dialog = await screen.findByRole("dialog")
+      expect(within(dialog).getByText(label, { exact: true })).toBeInTheDocument()
+    }
+  )
+
+  it("opens an uploaded media source in Media instead of resolving its filename as a route", async () => {
+    state.results = [{
+      id: "r1", sourceId: "1", sourceType: "media_db", content: "Project Aster source.", score: 1,
+      metadata: { title: "Aster", source_type: "media_db", url: "full-single-uat-study.txt" }
+    }]
+    render(<SourceList />)
+    fireEvent.click(screen.getByRole("button", { name: "View source 1" }))
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Open in Media" }))
+    expect(window.open).toHaveBeenCalledWith("/media?id=1", "_blank", "noopener,noreferrer")
   })
 
   it("opens and closes full source preview modal from source actions", async () => {

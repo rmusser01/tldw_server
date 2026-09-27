@@ -4,6 +4,10 @@ import { emitSplashAfterLoginSuccess } from "@/services/splash-events"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
 import { clearSourceReviewHandoffs } from "@/services/tldw/source-review-handoff"
+import { clearFlashcardsGenerateHandoffs } from "@/services/tldw/flashcards-generate-handoff"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { clearStandaloneHtmlSessionRecords } from "@/services/tldw/standalone-html-session-records"
+import { deriveScopedUserId, deriveTokenOrgId } from "@/utils/media-navigation-scope"
 
 export interface LoginCredentials {
   username: string
@@ -21,10 +25,6 @@ type OrgListResponse = {
   items?: Array<{ id: number }>
 }
 
-type OrgDetailResponse = {
-  id: number
-}
-
 export interface UserInfo {
   id: number
   username: string
@@ -35,6 +35,16 @@ export interface UserInfo {
 
 const API_KEY_PROFILE_PATH = "/api/v1/users/me/profile"
 const API_KEY_VALIDATION_TIMEOUT_MS = 30000
+
+const emitLogoutPrincipalBoundary = (): void => {
+  void clearFlashcardsGenerateHandoffs().catch(() => console.warn("Could not clear private Flashcards transfers during sign-out."))
+  if (typeof window === "undefined") return
+  window.dispatchEvent(
+    new CustomEvent("tldw:auth-principal-changed", {
+      detail: { kind: "logout" }
+    })
+  )
+}
 
 const buildApiKeyValidationUrl = (serverUrl: string): string => {
   const trimmed = String(serverUrl || "").trim()
@@ -55,7 +65,7 @@ export class TldwAuthService {
     return isHostedTldwDeployment()
   }
 
-  private async ensureOrgId(): Promise<void> {
+  private async ensureHostedOrgId(): Promise<void> {
     try {
       const orgs = await bgRequest<OrgListResponse>({
         path: "/api/v1/orgs",
@@ -67,38 +77,21 @@ export class TldwAuthService {
         return
       }
     } catch {
-      // ignore and continue to hosted fallback or self-host create below
-    }
-
-    if (this.isHostedMode()) {
-      try {
-        const profile = await tldwClient.getCurrentUserProfile({
-          includeRaw: true
-        })
-        const activeOrgId = Number(
-          profile?.active_org_id ??
-          profile?.org_id ??
-          profile?.raw?.active_org_id ??
-          0
-        )
-        if (Number.isFinite(activeOrgId) && activeOrgId > 0) {
-          await tldwClient.updateConfig({ orgId: activeOrgId })
-        }
-      } catch {
-        // best-effort only
-      }
-      return
+      // Continue to the hosted profile fallback below.
     }
 
     try {
-      const created = await bgRequest<OrgDetailResponse>({
-        path: "/api/v1/orgs",
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: { name: "Personal Workspace" }
+      const profile = await tldwClient.getCurrentUserProfile({
+        includeRaw: true
       })
-      if (created?.id) {
-        await tldwClient.updateConfig({ orgId: created.id })
+      const activeOrgId = Number(
+        profile?.active_org_id ??
+        profile?.org_id ??
+        profile?.raw?.active_org_id ??
+        0
+      )
+      if (Number.isFinite(activeOrgId) && activeOrgId > 0) {
+        await tldwClient.updateConfig({ orgId: activeOrgId })
       }
     } catch {
       // best-effort only
@@ -131,10 +124,11 @@ export class TldwAuthService {
     await tldwClient.updateConfig({
       authMode: 'multi-user',
       accessToken: hostedMode ? undefined : tokens.access_token,
-      refreshToken: hostedMode ? undefined : tokens.refresh_token
+      refreshToken: hostedMode ? undefined : tokens.refresh_token,
+      ...(hostedMode ? {} : { orgId: deriveTokenOrgId(tokens.access_token) })
     })
 
-    await this.ensureOrgId()
+    if (hostedMode) await this.ensureHostedOrgId()
 
     if (!hostedMode && tokens.expires_in) {
       this.setupTokenRefresh(tokens.expires_in)
@@ -183,10 +177,11 @@ export class TldwAuthService {
     await tldwClient.updateConfig({
       authMode: 'multi-user',
       accessToken: hostedMode ? undefined : tokens.access_token,
-      refreshToken: hostedMode ? undefined : tokens.refresh_token
+      refreshToken: hostedMode ? undefined : tokens.refresh_token,
+      ...(hostedMode ? {} : { orgId: deriveTokenOrgId(tokens.access_token) })
     })
 
-    await this.ensureOrgId()
+    if (hostedMode) await this.ensureHostedOrgId()
 
     if (!hostedMode && tokens.expires_in) {
       this.setupTokenRefresh(tokens.expires_in)
@@ -211,9 +206,11 @@ export class TldwAuthService {
           method: 'DELETE'
         })
         await tldwClient.clearCookieSingleUserSession()
+        emitLogoutPrincipalBoundary()
         return
       }
       await tldwClient.clearManualSingleUserCredentials()
+      emitLogoutPrincipalBoundary()
       return
     }
 
@@ -222,8 +219,8 @@ export class TldwAuthService {
         path: this.isHostedMode() ? '/api/auth/logout' : '/api/v1/auth/logout',
         method: 'POST'
       })
-    } catch (error) {
-      console.error('Server logout failed:', error)
+    } catch {
+      console.warn('Server logout unavailable; continuing local sign-out without confirmed remote revocation.')
     }
 
     clearSourceReviewHandoffs()
@@ -239,6 +236,9 @@ export class TldwAuthService {
       clearTimeout(this.refreshTimer)
       this.refreshTimer = null
     }
+
+    clearStandaloneHtmlSessionRecords()
+    emitLogoutPrincipalBoundary()
   }
 
   /**
@@ -259,28 +259,60 @@ export class TldwAuthService {
   }
 
   private async performTokenRefresh(): Promise<TokenResponse> {
+    const refreshTimer = this.refreshTimer
+    await tldwClient.initialize()
     const config = await tldwClient.getConfig()
     if (!config || !config.refreshToken) {
       throw new Error('No refresh token available')
     }
 
-    const tokens = await bgRequest<TokenResponse>({
-      path: '/api/v1/auth/refresh',
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: { refresh_token: config.refreshToken }
+    const scopedUserId = deriveScopedUserId({
+      userId: null,
+      authMode: config.authMode,
+      accessToken: config.accessToken ?? null
     })
+    const expectedUserId = scopedUserId === "user:anonymous"
+      ? null
+      : scopedUserId.slice("user:".length)
 
-    const latestConfig = await tldwClient.getConfig()
+    let tokens: TokenResponse
+    try {
+      tokens = await bgRequest<TokenResponse>({
+        path: '/api/v1/auth/refresh',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: { refresh_token: config.refreshToken },
+        servicePromptConfig: {
+          serverUrl: config.serverUrl,
+          authMode: config.authMode,
+          authSource: config.authSource,
+          orgId: config.orgId,
+          expectedUserId,
+          expectedRefreshToken: config.refreshToken
+        }
+      })
+    } catch (error) {
+      if ((error as { status?: number } | null)?.status === 401) {
+        if (!await tldwClient.invalidateRefreshSession(config)) {
+          throw createServicePromptScopeChangedError()
+        }
+        if (this.refreshTimer && this.refreshTimer === refreshTimer) {
+          clearTimeout(this.refreshTimer)
+          this.refreshTimer = null
+        }
+      }
+      throw error
+    }
 
-    // Persist rotated refresh tokens; the backend rotates them by default.
-    await tldwClient.updateConfig({
-      accessToken: tokens.access_token,
-      refreshToken:
-        tokens.refresh_token ||
-        latestConfig?.refreshToken ||
-        config.refreshToken
-    })
+    const committed = await tldwClient.commitTokenRefresh(
+      config,
+      config.refreshToken,
+      {
+        accessToken: tokens.access_token,
+        refreshToken: tokens.refresh_token || config.refreshToken
+      }
+    )
+    if (!committed) throw createServicePromptScopeChangedError()
 
     // Set up auto-refresh if expires_in is provided
     if (tokens.expires_in) {
@@ -334,7 +366,10 @@ export class TldwAuthService {
         noAuth: true
       })
       if (!session?.authenticated || !session.user) {
-        throw new Error('Not authenticated')
+        throw Object.assign(new Error('Not authenticated'), {
+          status: 401,
+          code: 'not_authenticated'
+        })
       }
       return session.user
     }

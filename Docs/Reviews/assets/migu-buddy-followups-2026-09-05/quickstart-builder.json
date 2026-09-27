@@ -1,0 +1,54 @@
+{
+  "images": [
+    {
+      "alt": "Buddy preview",
+      "complete": true,
+      "width": 96,
+      "height": 96,
+      "blob": true
+    },
+    {
+      "alt": "Migu UAT Repaired",
+      "complete": true,
+      "width": 96,
+      "height": 96,
+      "blob": true
+    }
+  ],
+  "routes": [
+    {
+      "path": "/api/v1/users/me",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/persona/profiles",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/notifications",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/ingestion-sources/capabilities",
+      "status": 200
+    },
+    {
+      "path": "/api/v1/config/docs-info",
+      "status": 200
+    }
+  ],
+  "cookies": [
+    {
+      "name": "tldw_single_user_session",
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "csrf_token",
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    }
+  ]
+}

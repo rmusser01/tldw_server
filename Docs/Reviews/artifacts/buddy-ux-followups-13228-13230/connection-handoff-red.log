@@ -1,0 +1,51 @@
+
+ RUN  v4.0.18 /private/tmp/tldw-server-buddy-persona-ux/apps/packages/ui
+
+ ❯ src/services/__tests__/buddies.test.ts (12 tests | 1 failed) 63ms
+     ✓ sends attachment version and scope without interpreting the client slot as authority 2ms
+     ✓ does not treat a revoked attachment as an empty successful response 1ms
+     ✓ rechecks workspace membership before reading a cached transcript 1ms
+     ✓ never reads a different conversation through a conversation attachment 1ms
+     ✓ passes bounded profile and conversation pages to the server 0ms
+     ✓ reads later activity pages even when earlier conversations have no result 1ms
+     ✓ keeps active turn queries separate from paged recent history 0ms
+     ✓ does not continue a transcript read under changed credentials 0ms
+     ✓ checks caller lifetime before issuing the follow-up message read 0ms
+   ✓ loads effective Buddy reply settings only after the authorized transcript read 1ms
+   ✓ does not read reply settings after a connection change during the transcript request 0ms
+   × does not dispatch reply settings to a connection changed during transport configuration 54ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/services/__tests__/buddies.test.ts > does not dispatch reply settings to a connection changed during transport configuration
+AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+
+Received:
+
+  1st vi.fn() call:
+
+    Array [
+      Object {
+        "accessToken": "second",
+        "serverUrl": "https://second.invalid",
+      },
+    ]
+
+
+Number of calls: 1
+
+ ❯ src/services/__tests__/buddies.test.ts:236:24
+    234|   release!(changed)
+    235|   await rejection
+    236|   expect(dispatch).not.toHaveBeenCalled()
+       |                        ^
+    237| })
+    238|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 11 passed (12)
+   Start at  23:31:33
+   Duration  1.45s (transform 259ms, setup 262ms, import 223ms, tests 63ms, environment 774ms)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+from decimal import Decimal
+from fractions import Fraction
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 
@@ -75,6 +77,69 @@ def test_fetch_request_normalizes_fields_and_proxy_maps() -> None:
     assert request.allow_redirects is True
     assert request.impersonate == "chrome120"
     assert request.proxies["https"] == "http://proxy.example:8080"
+
+
+@pytest.mark.unit
+def test_fetch_request_defaults_max_response_bytes_to_none() -> None:
+    request = FetchRequest(url="https://example.com/article")
+
+    assert request.max_response_bytes is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", [7, 7.0, "7"])
+def test_fetch_request_normalizes_positive_max_response_bytes(value: object) -> None:
+    request = FetchRequest(
+        url="https://example.com/article",
+        max_response_bytes=value,
+    )
+
+    assert request.max_response_bytes == 7
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "value",
+    [
+        True,
+        False,
+        0,
+        -1,
+        1.5,
+        Decimal("1.5"),
+        Fraction(3, 2),
+        "not-a-number",
+    ],
+)
+def test_fetch_request_rejects_non_positive_integer_max_response_bytes(
+    value: object,
+) -> None:
+    with pytest.raises(ValueError, match="max_response_bytes must be a positive integer"):
+        FetchRequest(
+            url="https://example.com/article",
+            max_response_bytes=value,
+        )
+
+
+@pytest.mark.unit
+def test_fetch_request_preserves_context_as_tenth_positional_argument() -> None:
+    context = RuntimeRequestContext(source="article_extract", stage="pre_fetch")
+
+    request = FetchRequest(
+        "https://example.com/article",
+        "GET",
+        {},
+        {},
+        None,
+        "httpx",
+        True,
+        None,
+        None,
+        context,
+    )
+
+    assert request.context is context
+    assert request.max_response_bytes is None
 
 
 @pytest.mark.unit

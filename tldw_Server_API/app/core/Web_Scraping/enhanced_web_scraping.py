@@ -34,12 +34,15 @@ from typing import Any, Callable, Optional
 from urllib.parse import urlparse
 
 import aiofiles
+import httpx
 import trafilatura
 from bs4 import BeautifulSoup
 from loguru import logger
 from playwright.async_api import Browser, async_playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.exceptions import NetworkError
 from tldw_Server_API.app.core.http_client import afetch
 
 #
@@ -51,8 +54,18 @@ from tldw_Server_API.app.core.Metrics.metrics_logger import (
     log_gauge,
     log_histogram,
 )
+from tldw_Server_API.app.core.Security.safe_pickle import safe_pickle_loads
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.Utils import get_database_dir
+from tldw_Server_API.app.core.Web_Scraping import preflight as preflight_facade
+from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
+    browser_transport_failure_result,
+    default_browser_transport_decision,
+    resolve_browser_transport_decision,
+)
+from tldw_Server_API.app.core.Web_Scraping.content import convert_html_to_markdown
+from tldw_Server_API.app.core.Web_Scraping.extraction import extract_article_with_pipeline
+from tldw_Server_API.app.core.Web_Scraping.extraction_async import run_extraction_in_thread
 from tldw_Server_API.app.core.Web_Scraping.filters import (
     ContentTypeFilter,
     DomainFilter,
@@ -66,6 +79,8 @@ from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
     decide_web_outbound_policy,
     decide_web_outbound_policy_sync,
 )
+from tldw_Server_API.app.core.Web_Scraping.policy import DefaultWebOutboundPolicyChecker
+from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
 from tldw_Server_API.app.core.Web_Scraping.scoring import (
     CompositeScorer,
     DomainAuthorityScorer,
@@ -79,11 +94,27 @@ from tldw_Server_API.app.core.Web_Scraping.scoring import (
 from tldw_Server_API.app.core.Web_Scraping.scraper_router import DEFAULT_HANDLER, ScraperRouter
 from tldw_Server_API.app.core.Web_Scraping.ua_profiles import build_browser_headers, profile_to_impersonate
 from tldw_Server_API.app.core.Web_Scraping.url_utils import normalize_for_crawl
-from tldw_Server_API.app.core.Security.safe_pickle import safe_pickle_loads
+
+
+class ArticleRetrievalError(ValueError):
+    """A terminal HTTP response that must not be retried using another transport."""
+
+
+_WEBSCRAPE_TIMEOUT_EXCEPTIONS = (TimeoutError, httpx.TimeoutException, PlaywrightTimeoutError)
+
+
+def _failed_scrape_result(url: str, error: Exception) -> dict[str, Any]:
+    """Preserve typed timeout metadata even when the transport message is empty."""
+    result = {"url": url, "error": str(error), "extraction_successful": False}
+    if isinstance(error, _WEBSCRAPE_TIMEOUT_EXCEPTIONS) or (
+        isinstance(error, NetworkError) and error.classification == "timeout"
+    ):
+        result["error_code"] = "extraction_timeout"
+    return result
+
 
 _WEBSCRAPE_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
-    asyncio.TimeoutError,
+    *_WEBSCRAPE_TIMEOUT_EXCEPTIONS,
     AssertionError,
     AttributeError,
     ConnectionError,
@@ -92,10 +123,10 @@ _WEBSCRAPE_NONCRITICAL_EXCEPTIONS = (
     IndexError,
     KeyError,
     LookupError,
+    NetworkError,
     OSError,
     PermissionError,
     RuntimeError,
-    TimeoutError,
     TypeError,
     ValueError,
     UnicodeDecodeError,
@@ -129,6 +160,9 @@ DEFAULT_USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 BEST_FIRST_BATCH_SIZE = 10
+
+
+_ENHANCED_POLICY_CHECKER = DefaultWebOutboundPolicyChecker()
 
 # Stable skip reasons for crawl observability. Keep this list small and
 # explicit to prevent accidental metric cardinality growth.
@@ -731,9 +765,9 @@ class ScrapingJobQueue:
                         job.status = JobStatus.CANCELLED
                         job.error = job.error or "Job cancelled"
                         job.result = None
-                    elif result.get("error"):
+                    elif result.get("error") or result.get("extraction_successful") is False:
                         job.status = JobStatus.FAILED
-                        job.error = result["error"]
+                        job.error = result.get("error") or "Source extraction failed"
 
                         # Retry if possible
                         if job.retries < job.max_retries:
@@ -744,6 +778,9 @@ class ScrapingJobQueue:
                             await self._queues[job.priority].put(job)
                             logger.info(f"Retrying job {job.job_id} ({job.retries}/{job.max_retries})")
                             continue
+                        # Keep the terminal extraction details for batch consumers
+                        # while preserving the queue's failed-future contract.
+                        job.result = result
                     else:
                         job.status = JobStatus.COMPLETED
                         job.result = result
@@ -803,7 +840,7 @@ class ScrapingJobQueue:
         else:
             # Fallback to importing the standalone scraping function
             logger.warning(f"No parent scraper available for job {job.job_id}, using fallback scraping")
-            from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import scrape_article
+            from tldw_Server_API.app.core.Web_Scraping.orchestration import scrape_article
             return await scrape_article(
                 job.url,
                 custom_cookies=job.metadata.get('custom_cookies'),
@@ -1024,72 +1061,6 @@ class EnhancedWebScraper:
             headers["User-Agent"] = user_agent
         return headers
 
-    async def _run_preflight_analysis(self, url: str) -> Optional[dict[str, Any]]:
-        cfg = self.config or {}
-        enabled = self._as_bool(cfg.get("web_scraper_preflight_analyzers", False), False)
-        if not enabled:
-            return None
-
-        find_all = self._as_bool(cfg.get("web_scraper_preflight_find_all_waf", False), False)
-        impersonate = self._as_bool(cfg.get("web_scraper_preflight_impersonate", False), False)
-        scan_depth_raw = str(cfg.get("web_scraper_preflight_scan_depth", "") or "").strip().lower()
-        if scan_depth_raw not in {"default", "thorough", "deep"}:
-            scan_depth_raw = "default"
-
-        try:
-            timeout_s = float(cfg.get("web_scraper_preflight_timeout_s", 0) or 0)
-        except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS:
-            timeout_s = 0.0
-
-        try:
-            from tldw_Server_API.app.core.Web_Scraping.scraper_analyzers import run_analysis
-
-            task = asyncio.to_thread(
-                run_analysis,
-                url,
-                find_all=find_all,
-                impersonate=impersonate,
-                scan_depth=scan_depth_raw,
-            )
-            if timeout_s and timeout_s > 0:
-                return await asyncio.wait_for(task, timeout=timeout_s)
-            return await task
-        except asyncio.TimeoutError:
-            logger.debug(f"Preflight analysis timed out for {url}")
-            return None
-        except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as exc:
-            logger.debug(f"Preflight analysis failed for {url}: {exc}")
-            return None
-
-    @staticmethod
-    def _apply_preflight_advice(
-        preflight: Optional[dict[str, Any]],
-        backend_choice: str,
-        method: str,
-        backend_setting: str,
-    ) -> tuple[str, str, list[str]]:
-        notes: list[str] = []
-        if not preflight or not isinstance(preflight, dict):
-            return backend_choice, method, notes
-
-        results = preflight.get("results", {})
-        if isinstance(results, dict):
-            js_result = results.get("js", {}) or {}
-            if (
-                method == "auto"
-                and js_result.get("status") == "success"
-                and (js_result.get("js_required") or js_result.get("is_spa"))
-            ):
-                method = "playwright"
-                notes.append("js_required")
-
-            tls_result = results.get("tls", {}) or {}
-            if backend_setting == "auto" and tls_result.get("status") == "active":
-                backend_choice = "curl"
-                notes.append("tls_active")
-
-        return backend_choice, method, notes
-
     def _build_cookie_map(
         self,
         url: str,
@@ -1182,11 +1153,6 @@ class EnhancedWebScraper:
         cluster_settings: Optional[dict[str, Any]] = None,
         allow_llm_extraction: bool = True,
     ) -> dict[str, Any]:
-        from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
-            convert_html_to_markdown,
-            extract_article_with_pipeline,
-        )
-
         data = extract_article_with_pipeline(
             html,
             url,
@@ -1228,6 +1194,8 @@ class EnhancedWebScraper:
                 )
                 elapsed = max(0.0, time.time() - t0)
                 return html, "curl", elapsed
+            except ArticleRetrievalError:
+                raise
             except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(f"curl backend failed; falling back to httpx: {exc}")
         t0 = time.time()
@@ -1240,6 +1208,9 @@ class EnhancedWebScraper:
                 cookies=cookies,
                 proxies=proxies,
             )
+            response_status = int(getattr(resp, "status_code", getattr(resp, "status", 0)))
+            if not 200 <= response_status < 300:
+                raise ArticleRetrievalError(f"Article retrieval failed: HTTP {response_status} (expected terminal 2xx response)")
         finally:
             await self._close_response(resp)
         backend_used = "httpx"
@@ -1276,7 +1247,7 @@ class EnhancedWebScraper:
         status = int(resp.get("status", 0))
         if 200 <= status < 300:
             return resp["text"]
-        raise ValueError(f"curl fetch did not reach a terminal 2xx response (status={status})")
+        raise ArticleRetrievalError(f"curl fetch did not reach a terminal 2xx response (status={status})")
 
     @staticmethod
     async def _close_response(resp: Any) -> None:
@@ -1302,24 +1273,34 @@ class EnhancedWebScraper:
         """Start the scraper"""
         await self.job_queue.start()
 
-        try:
-            # Initialize Playwright
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(
-                headless=True,
-                args=['--no-sandbox', '--disable-setuid-sandbox']
-            )
-            logger.info("Playwright browser initialized successfully")
-        except ImportError:
-            logger.warning("Playwright not installed. Run: pip install playwright && playwright install chromium")
-            logger.warning("Web scraping will proceed without JavaScript rendering support")
-            self._playwright = None
-            self._browser = None
-        except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
-            logger.error(f"Failed to initialize Playwright browser: {e}")
-            logger.warning("Web scraping will proceed without JavaScript rendering support")
-            self._playwright = None
-            self._browser = None
+        transport = resolve_browser_transport_decision(
+            default_browser_transport_decision,
+            component="enhanced_web_scraper",
+        )
+        if not transport.allowed:
+            logger.bind(
+                component="enhanced_web_scraper",
+                operation="start_browser",
+                reason=transport.reason,
+            ).warning("Playwright browser startup skipped by transport policy.")
+        else:
+            try:
+                self._playwright = await async_playwright().start()
+                self._browser = await self._playwright.chromium.launch(
+                    headless=True,
+                    args=['--no-sandbox', '--disable-setuid-sandbox']
+                )
+                logger.info("Playwright browser initialized successfully")
+            except ImportError:
+                logger.warning("Playwright not installed. Run: pip install playwright && playwright install chromium")
+                logger.warning("Web scraping will proceed without JavaScript rendering support")
+                self._playwright = None
+                self._browser = None
+            except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
+                logger.error(f"Failed to initialize Playwright browser: {e}")
+                logger.warning("Web scraping will proceed without JavaScript rendering support")
+                self._playwright = None
+                self._browser = None
 
         # Ensure dedup flush on process exit
         atexit.register(lambda: self.deduplicator.flush())
@@ -1351,8 +1332,18 @@ class EnhancedWebScraper:
         # Apply rate limiting
         await self.rate_limiter.acquire()
 
+        preflight_payload = None
+
+        def _attach_preflight(result: dict[str, Any]) -> dict[str, Any]:
+            if preflight_payload and isinstance(result, dict):
+                result.setdefault("preflight_analysis", preflight_payload)
+            return result
+
         try:
-            plan, backend_choice, handler_path = self._resolve_scrape_plan(url)
+            plan, backend_choice, handler_path = await asyncio.to_thread(
+                self._resolve_scrape_plan,
+                url,
+            )
             handler_path = str(handler_path or "")
             is_default_handler = (not handler_path) or handler_path == DEFAULT_HANDLER
             handler_func = resolve_handler(handler_path) if not is_default_handler else None
@@ -1373,58 +1364,58 @@ class EnhancedWebScraper:
             if backend_choice in {"httpx", "auto"}:
                 try:
                     from tldw_Server_API.app.core import http_client as _http_client
+
                     headers = _http_client._sanitize_accept_encoding_for_backend(headers, "httpx")  # type: ignore[attr-defined]
                 except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS:
                     pass
 
-            preflight_payload = None
-
-            def _attach_preflight(result: dict[str, Any]) -> dict[str, Any]:
-                if preflight_payload and isinstance(result, dict):
-                    result.setdefault("preflight_analysis", preflight_payload)
-                return result
-
+            options = preflight_facade.PreflightOptions.from_mapping(self.config or {})
             try:
-                decision = await decide_web_outbound_policy(
+                target = await preflight_facade.evaluate_target(
                     url,
                     respect_robots=bool(getattr(plan, "respect_robots", True)),
                     user_agent=headers.get("User-Agent", DEFAULT_USER_AGENT),
-                    source="enhanced_scrape",
-                    stage="pre_fetch",
+                    request_context=RuntimeRequestContext(source="enhanced_scrape", stage="pre_fetch"),
                     config={"web_scraper": self.config or {}},
+                    policy_checker=_ENHANCED_POLICY_CHECKER,
                 )
-            except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as exc:
-                return _attach_preflight({
-                    "url": url,
-                    "error": f"Outbound policy evaluation failed: {exc}",
-                    "extraction_successful": False,
-                })
+            except asyncio.CancelledError:
+                raise
+            except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS:
+                logger.error("Outbound policy evaluation failed.")
+                return _attach_preflight(
+                    {
+                        "url": url,
+                        "error": "Outbound policy evaluation failed. Please contact system administrator.",
+                        "extraction_successful": False,
+                    }
+                )
 
-            if not decision.allowed:
-                return _attach_preflight(_blocked_scrape_result(url, decision))
+            if not target.decision.allowed:
+                return _attach_preflight(_blocked_scrape_result(url, target.decision))
 
-            preflight_analysis = await self._run_preflight_analysis(url)
-            backend_setting = str(getattr(plan, "backend", "auto") or "auto").lower()
-            backend_choice, method, preflight_notes = self._apply_preflight_advice(
-                preflight_analysis, backend_choice, method, backend_setting
+            preflight_result = None
+            if options.enabled:
+                context = preflight_facade.build_execution_context(
+                    target,
+                    options,
+                    policy_checker=_ENHANCED_POLICY_CHECKER,
+                )
+                preflight_result = await preflight_facade.run_preflight(target, options, context)
+            backend_setting = str(getattr(plan, "backend", "auto") or "auto").lower().strip()
+            backend_choice, method, preflight_result = preflight_facade.apply_preflight_advice(
+                preflight_result,
+                backend=backend_choice,
+                method=method,
+                backend_setting=backend_setting,
             )
+            preflight_notes = list(preflight_result.advice.notes) if preflight_result is not None else []
             if preflight_notes:
-                logger.debug(f"Preflight advice for {url}: {preflight_notes}")
-
-            include_preflight = self._as_bool(
-                (self.config or {}).get("web_scraper_preflight_include_results", False),
-                False,
+                logger.debug(f"Preflight advice: {preflight_notes}")
+            preflight_payload = preflight_facade.public_preflight_payload(
+                preflight_result,
+                options.include_results,
             )
-            preflight_payload = None
-            if include_preflight and preflight_analysis is not None:
-                preflight_payload = {
-                    "analysis": preflight_analysis,
-                    "advice": {
-                        "backend": backend_choice,
-                        "method": method,
-                        "notes": preflight_notes,
-                    },
-                }
 
             effective_method = method
             if backend_choice == "playwright":
@@ -1490,13 +1481,13 @@ class EnhancedWebScraper:
             else:
                 raise ValueError(f"Unknown scraping method: {effective_method}")
 
+        except asyncio.CancelledError:
+            raise
         except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to scrape {url}: {e}")
-            return {
-                "url": url,
-                "error": str(e),
-                "extraction_successful": False
-            }
+            return _attach_preflight(
+                _failed_scrape_result(url, e)
+            )
 
     async def _scrape_with_trafilatura(
         self,
@@ -1542,9 +1533,9 @@ class EnhancedWebScraper:
                 outcome="error",
                 elapsed_s=elapsed,
             )
-            return {"url": url, "error": str(exc), "extraction_successful": False}
+            return _failed_scrape_result(url, exc)
 
-        data = await asyncio.to_thread(
+        data = await run_extraction_in_thread(
             self._extract_from_html_with_pipeline,
             html,
             url,
@@ -1621,6 +1612,12 @@ class EnhancedWebScraper:
         allow_llm_extraction: bool = True,
     ) -> dict[str, Any]:
         """Scrape using Playwright for JavaScript-heavy sites"""
+        transport = resolve_browser_transport_decision(
+            default_browser_transport_decision,
+            component="enhanced_web_scraper",
+        )
+        if not transport.allowed:
+            return browser_transport_failure_result(url, transport)
         # Fallback gracefully if browser isn't initialized
         if not self._browser:
             return await self._scrape_with_trafilatura(
@@ -1673,13 +1670,21 @@ class EnhancedWebScraper:
 
         try:
             # Navigate with timeout
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            response = await page.goto(url, wait_until="networkidle", timeout=30000)
+            if response is None:
+                raise ArticleRetrievalError(
+                    "Article retrieval failed: no navigation response (expected terminal 2xx response)"
+                )
+            if not 200 <= response.status < 300:
+                raise ArticleRetrievalError(
+                    f"Article retrieval failed: HTTP {response.status} (expected terminal 2xx response)"
+                )
 
             # Wait for content to load
             await page.wait_for_load_state("domcontentloaded")
 
             html = await page.content()
-            data = await asyncio.to_thread(
+            data = await run_extraction_in_thread(
                 self._extract_from_html_with_pipeline,
                 html,
                 url,
@@ -1765,7 +1770,7 @@ class EnhancedWebScraper:
                 outcome="error",
                 elapsed_s=elapsed,
             )
-            return {"url": url, "error": str(exc), "extraction_successful": False}
+            return _failed_scrape_result(url, exc)
 
         finally:
             await page.close()
@@ -1815,9 +1820,9 @@ class EnhancedWebScraper:
                 outcome="error",
                 elapsed_s=elapsed,
             )
-            return {"url": url, "error": str(exc), "extraction_successful": False}
+            return _failed_scrape_result(url, exc)
 
-        data = await asyncio.to_thread(
+        data = await run_extraction_in_thread(
             self._extract_from_html_with_pipeline,
             html,
             url,
@@ -1910,6 +1915,7 @@ class EnhancedWebScraper:
         **kwargs,
     ) -> list[dict[str, Any]]:
         """Scrape multiple URLs concurrently"""
+        summary_prompt_overrides = kwargs.pop("summary_prompt_overrides", None)
         jobs = []
         futures = []
 
@@ -1948,6 +1954,7 @@ class EnhancedWebScraper:
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 final_results.append({
+                    **(jobs[i].result or {}),
                     "url": urls[i],
                     "error": str(result),
                     "extraction_successful": False
@@ -1957,6 +1964,7 @@ class EnhancedWebScraper:
                 if summarize and result.get('extraction_successful') and result.get('content'):
                     summary = await self._summarize_content(
                         result['content'],
+                        summary_prompt_overrides=summary_prompt_overrides,
                         **kwargs
                     )
                     result['summary'] = summary
@@ -1968,13 +1976,17 @@ class EnhancedWebScraper:
     async def _summarize_content(self, content: str, **kwargs) -> str:
         """Summarize content using LLM"""
         try:
+            overrides = kwargs.get('summary_prompt_overrides') or {}
+            system_default = kwargs.get('system_prompt')
+            if system_default is None:
+                system_default = 'Summarize this article concisely.'
             summary = analyze(
                 input_data=content,
-                custom_prompt_arg=kwargs.get('custom_prompt', ''),
+                custom_prompt_arg=overrides.get('user', kwargs.get('custom_prompt', '')),
                 api_name=kwargs.get('api_name', 'openai'),
                 api_key=kwargs.get('api_key'),
                 temp=kwargs.get('temperature', 0.7),
-                system_message=kwargs.get('system_message', 'Summarize this article concisely.')
+                system_message=overrides.get('system', kwargs.get('system_message', system_default))
             )
             return summary
         except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
@@ -2020,6 +2032,7 @@ class EnhancedWebScraper:
                 "processed_urls": 0,
                 "current_url": sitemap_url,
                 "started_at": datetime.now().isoformat(),
+                "owner_user_id": None if user_id is None else str(user_id),
             }
         cookies = self._build_cookie_map(sitemap_url, custom_cookies)
         resp = await afetch(
@@ -2104,6 +2117,7 @@ class EnhancedWebScraper:
                 "pages_scraped": 0,
                 "current_url": base_url,
                 "started_at": datetime.now().isoformat(),
+                "owner_user_id": None if user_id is None else str(user_id),
             }
         visited: set[str] = set()
         base_norm = normalize_for_crawl(base_url, base_url)
@@ -2737,9 +2751,21 @@ class EnhancedWebScraper:
             logger.warning(f"Error parsing links from content: {e}")
             return []
 
-    def get_progress(self, task_name: str) -> dict[str, Any]:
-        """Get progress for a specific task"""
-        return self._progress.get(task_name, {})
+    def get_progress(
+        self, task_name: str, *, owner_user_id: Optional[str] = None
+    ) -> dict[str, Any]:
+        """Get progress for a specific task.
+
+        ``self._progress`` is process-global and shared by every caller, so a
+        task id alone is not an authorization claim. Request handlers must pass
+        ``owner_user_id``; a task belonging to somebody else reads as absent.
+        """
+        entry = self._progress.get(task_name, {})
+        if owner_user_id is None or not entry:
+            return entry
+        if str(entry.get("owner_user_id") or "") != str(owner_user_id):
+            return {}
+        return entry
 
     async def save_progress(self, task_name: str, filepath: Path):
         """Save progress to file for resumability"""

@@ -29,14 +29,31 @@ vi.mock("@/services/background-proxy", () => ({
 
 import {
   __resetQuickIngestRuntimeHealthForTests,
-  cancelQuickIngestSession,
+  cancelQuickIngestSession as cancelBatch,
   getQuickIngestAnalysisProviderWarning,
-  startQuickIngestSession,
-  submitQuickIngestBatch
+  startQuickIngestSession as startBatch,
+  submitQuickIngestBatch as submitBatch
 } from "@/services/tldw/quick-ingest-batch"
 import { DUPLICATE_SKIP_MESSAGE } from "@/components/Common/QuickIngest/constants"
 
+const requestScope = { config: { serverUrl: "https://server-a.test", authMode: "single-user" as const, expectedSingleUserApiKeyScope: "synthetic-scope" }, userId: null }
+const submitQuickIngestBatch = (input: Parameters<typeof submitBatch>[0]) => submitBatch({ requestScope, ...input })
+const startQuickIngestSession = (input: Parameters<typeof startBatch>[0]) => startBatch({ requestScope, ...input })
+const cancelQuickIngestSession = (input: Parameters<typeof cancelBatch>[0]) => cancelBatch({ requestScope, ...input })
+
 describe("submitQuickIngestBatch", () => {
+  it("retains saved-source Warning data through the real direct upload and job poller", async () => {
+    const terminal = { status: "Warning", media_id: 1, error: null, warnings: ["Analysis failed for chunk 1"] }
+    mocks.bgUpload.mockResolvedValue({ batch_id: "saved-warning", jobs: [{ id: 101 }] })
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: { status: "completed", result: terminal, error_message: null } })
+    const result = await submitQuickIngestBatch({
+      entries: [], files: [{ id: "source", name: "source.txt", type: "text/plain", data: [65] }],
+      storeRemote: true, processOnly: false,
+    })
+    expect(result.results).toEqual([expect.objectContaining({ id: "source", status: "ok", data: terminal })])
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/media/ingest/jobs/101", method: "GET" }))
+  })
+
   beforeEach(() => {
     __resetQuickIngestRuntimeHealthForTests()
     vi.useRealTimers()
@@ -45,6 +62,26 @@ describe("submitQuickIngestBatch", () => {
     mocks.sendMessage.mockReset()
     mocks.bgRequest.mockReset()
     mocks.bgUpload.mockReset()
+  })
+
+  it("rejects an unowned legacy batch and cancellation before any dispatch", async () => {
+    await expect(submitBatch({ entries: [], files: [], storeRemote: true, processOnly: false })).rejects.toThrow()
+    await expect(cancelBatch({ sessionId: "qi-direct-old", batchIds: ["foreign-colliding-7"] })).rejects.toThrow()
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+    expect(mocks.bgUpload).not.toHaveBeenCalled()
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it("stops after an authority change during upload without polling or cancelling another owner's job", async () => {
+    const controller = new AbortController()
+    mocks.bgUpload.mockImplementation(async () => { controller.abort(); return { batch_id: "old-batch", jobs: [{ id: 7 }] } })
+    await expect(submitQuickIngestBatch({
+      entries: [{ id: "private", url: "https://source.test/doc.pdf", type: "pdf" }], files: [], storeRemote: true, processOnly: false,
+      signal: controller.signal,
+    })).rejects.toThrow()
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+    expect(mocks.bgUpload.mock.calls[0][0]).toMatchObject({ servicePromptConfig: expect.objectContaining({ serverUrl: "https://server-a.test" }) })
   })
 
   it("warns when analysis is enabled without an analysis provider", () => {
@@ -295,13 +332,14 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
-  it("surfaces direct HTML scrape responses with zero stored articles as failed", async () => {
+  it("retains safe extraction categories through direct HTML batch results", async () => {
     mocks.bgRequest.mockResolvedValue({
       status: "persist-ok",
       media_ids: [],
       total_articles: 1,
       stored_articles: 0,
-      errors: ["Failed to extract: http://localhost:8080/e2e/source.html"]
+      errors: ["Source access was blocked by the website or outbound access policy."],
+      extraction_failures: [{ code: "source_access_denied" }]
     })
 
     const result = await submitQuickIngestBatch({
@@ -328,7 +366,8 @@ describe("submitQuickIngestBatch", () => {
     expect(result.results?.[0]).toMatchObject({
       id: "entry-failed-html",
       status: "error",
-      error: "Failed to extract: http://localhost:8080/e2e/source.html"
+      error: "Source access was blocked by the website or outbound access policy.",
+      data: { extraction_failures: [{ code: "source_access_denied" }] }
     })
   })
 
@@ -2101,6 +2140,7 @@ describe("submitQuickIngestBatch", () => {
       expect.objectContaining({
         type: "tldw:quick-ingest/cancel",
         payload: {
+          requestScope,
           sessionId: "qi-session-123",
           reason: "user_cancelled"
         }

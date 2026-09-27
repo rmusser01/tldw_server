@@ -253,18 +253,22 @@ class TestMessageMetadata:
         ).fetchone()
         assert exists is not None
 
-    def test_migration_v12_to_v13_creates_table(self, db_path, client_id):
+    def test_migration_v12_to_v13_creates_table(self, db_path, client_id, monkeypatch):
+        def initialize_historical(db):
+            with db.transaction() as conn:
+                db._apply_schema_v4(conn)
+                steps = db._sqlite_linear_migration_steps()
+                for prior in range(4, 12):
+                    steps[prior](conn)
+                assert db._get_db_version(conn) == 12
+                tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                assert {"message_metadata", "note_attachments"}.isdisjoint(tables)
 
-        db = CharactersRAGDB(db_path, client_id)
-        db.close_connection()
-
-        with sqlite3.connect(str(db_path)) as conn:
-            conn.execute(
-                "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
-                (12, CharactersRAGDB._SCHEMA_NAME),
-            )
-            conn.execute("DROP TABLE IF EXISTS message_metadata")
-            conn.commit()
+        with monkeypatch.context() as patch:
+            patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 12)
+            patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical)
+            db = CharactersRAGDB(db_path, client_id)
+            db.close_connection()
 
         db = CharactersRAGDB(db_path, client_id)
         conn = db.get_connection()

@@ -47,16 +47,25 @@ export const createSaveMessageOnSuccess = (
 ) => {
   return async (e: any): Promise<string | null> => {
     if (!temporaryChat) {
+      const conversationId =
+        e?.saveToDb === false
+          ? ""
+          : typeof e?.conversationId === "string"
+            ? e.conversationId.trim()
+            : e?.conversationId != null
+              ? String(e.conversationId).trim()
+              : ""
+      const setHistoryIdTarget =
+        typeof e?.setHistoryId === "function" ? e.setHistoryId : setHistoryId
+      const resolvedSetHistoryId = conversationId
+        ? (id: string) =>
+            setHistoryIdTarget(id, { preserveServerChatId: true })
+        : setHistoryIdTarget
       const historyId = await saveSuccess({
         ...e,
-        setHistoryId: e?.setHistoryId ?? setHistoryId
+        ...(e?.saveToDb === false ? { conversationId: undefined } : {}),
+        setHistoryId: resolvedSetHistoryId
       })
-      const conversationId =
-        typeof e?.conversationId === "string"
-          ? e.conversationId.trim()
-          : e?.conversationId != null
-            ? String(e.conversationId).trim()
-            : ""
       if (conversationId.length > 0) {
         options?.onServerConversationLinked?.(conversationId)
       }
@@ -76,11 +85,14 @@ export const createSaveMessageOnError = (
 ) => {
   return async (e: any): Promise<string | null> => {
     if (!temporaryChat) {
+      const setHistoryIdTarget = e?.setHistoryId ?? setHistoryId
       return await saveError({
         ...e,
         history: e?.history ?? history,
         setHistory: e?.setHistory ?? setHistory,
-        setHistoryId: e?.setHistoryId ?? setHistoryId
+        setHistoryId: e?.conversationId
+          ? (id: string) => setHistoryIdTarget(id, { preserveServerChatId: true })
+          : setHistoryIdTarget
       })
     } else {
       const historyToUpdate = Array.isArray(e?.history) ? e.history : history

@@ -1,3 +1,5 @@
+import { HistorySelectionProvider } from '@/hooks/chat/useHistorySelection';
+import { formatSelectedHistory } from '@/db/dexie/helpers';
 import React, { lazy, Suspense, useState, useContext, useCallback } from 'react';
 
 import { Drawer, Tooltip } from 'antd';
@@ -62,7 +64,6 @@ import { CommandPalette } from '@/components/Common/CommandPalette';
 import {
   useConnectionActions,
   useConnectionState,
-  useConnectionUxState,
 } from '@/hooks/useConnectionState';
 import { ConnectionPhase } from '@/types/connection';
 
@@ -91,6 +92,14 @@ type OptionLayoutProps = {
   hideSidebar?: boolean;
   allowNestedHideHeader?: boolean;
   allowNestedHideSidebar?: boolean;
+};
+
+type BackendUnavailableCandidate = {
+  detail: BackendUnreachableDetail;
+  sequence: number;
+  baselineLastCheckedAt: number | null;
+  baselineChecksSinceConfigChange: number;
+  baselineConsecutiveFailures: number;
 };
 
 const SHORTCUT_LOADING_MIN_MS = 0;
@@ -130,10 +139,21 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   const historyId = useStoreMessageOption((state) => state.historyId);
   const serverChatId = useStoreMessageOption((state) => state.serverChatId);
   const mobileSidebarPathRef = React.useRef(location.pathname);
-  const { phase, isConnected } = useConnectionState();
+  const {
+    phase,
+    isConnected,
+    isChecking,
+    lastCheckedAt,
+    checksSinceConfigChange,
+    consecutiveFailures,
+  } = useConnectionState();
   const { checkOnce } = useConnectionActions();
-  const { isChecking } = useConnectionUxState();
   const { fatalBackendRecoveryActive } = useBackendRecoveryUi();
+  const backendUnavailableSequenceRef = React.useRef(0);
+  const [backendUnavailableCandidate, setBackendUnavailableCandidate] =
+    useState<BackendUnavailableCandidate | null>(null);
+  const [settledBackendUnavailableSequence, setSettledBackendUnavailableSequence] =
+    useState<number | null>(null);
   const [backendUnavailableDetail, setBackendUnavailableDetail] =
     useState<BackendUnreachableDetail | null>(null);
   const suppressBackendUnavailableModal = React.useMemo(() => {
@@ -152,6 +172,11 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     !hideHeader &&
     !hideSidebar &&
     !isMobileViewport;
+  const headerSidebarCollapsed = showChatSidebar
+    ? isMobileViewport
+      ? !sidebarOpen
+      : chatSidebarCollapsed
+    : !sidebarOpen;
   const stickyChatLayoutActive = isChatScreen && stickyChatInput;
   const useInlineBackendUnavailableAlert =
     /^\/settings(\/|$)/.test(location.pathname);
@@ -204,40 +229,98 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     });
   }, [location.pathname, setChatSidebarCollapsed]);
 
+  const corroborateBackendUnavailable = React.useCallback(
+    (detail: BackendUnreachableDetail) => {
+      const sequence = backendUnavailableSequenceRef.current + 1;
+      backendUnavailableSequenceRef.current = sequence;
+      setBackendUnavailableCandidate({
+        detail,
+        sequence,
+        baselineLastCheckedAt: lastCheckedAt,
+        baselineChecksSinceConfigChange: checksSinceConfigChange,
+        baselineConsecutiveFailures: consecutiveFailures,
+      });
+      setSettledBackendUnavailableSequence(null);
+      setBackendUnavailableDetail(null);
+      void checkOnce({ force: true })
+        .catch(() => undefined)
+        .finally(() => {
+          if (backendUnavailableSequenceRef.current === sequence) {
+            setSettledBackendUnavailableSequence(sequence);
+          }
+        });
+    },
+    [checkOnce, checksSinceConfigChange, consecutiveFailures, lastCheckedAt]
+  );
+
   React.useEffect(() => {
     if (typeof window === 'undefined') return;
     const onBackendUnreachable = (event: Event) => {
       if (suppressBackendUnavailableModal) return;
       const detail = (event as CustomEvent<BackendUnreachableDetail | undefined>)?.detail;
       if (!detail || typeof detail !== 'object') return;
-      setBackendUnavailableDetail(detail);
-      void checkOnce({ force: true }).catch(() => undefined);
+      corroborateBackendUnavailable(detail);
     };
 
     window.addEventListener(BACKEND_UNREACHABLE_EVENT, onBackendUnreachable as EventListener);
     return () => {
       window.removeEventListener(BACKEND_UNREACHABLE_EVENT, onBackendUnreachable as EventListener);
     };
-  }, [checkOnce, suppressBackendUnavailableModal]);
+  }, [corroborateBackendUnavailable, suppressBackendUnavailableModal]);
 
   React.useEffect(() => {
-    if (!isChecking && isConnected && phase === ConnectionPhase.CONNECTED) {
-      setBackendUnavailableDetail(null);
+    if (
+      !backendUnavailableCandidate ||
+      isChecking ||
+      settledBackendUnavailableSequence !== backendUnavailableCandidate.sequence ||
+      (lastCheckedAt === backendUnavailableCandidate.baselineLastCheckedAt &&
+        checksSinceConfigChange ===
+          backendUnavailableCandidate.baselineChecksSinceConfigChange)
+    ) {
+      return;
     }
-  }, [isChecking, isConnected, phase]);
+
+    const forcedCheckFailed =
+      consecutiveFailures > backendUnavailableCandidate.baselineConsecutiveFailures;
+
+    if (!forcedCheckFailed && isConnected && phase === ConnectionPhase.CONNECTED) {
+      setBackendUnavailableCandidate(null);
+      setBackendUnavailableDetail(null);
+      return;
+    }
+
+    if (forcedCheckFailed || (!isConnected && phase === ConnectionPhase.ERROR)) {
+      setBackendUnavailableDetail(backendUnavailableCandidate.detail);
+    }
+    setBackendUnavailableCandidate(null);
+  }, [
+    backendUnavailableCandidate,
+    checksSinceConfigChange,
+    consecutiveFailures,
+    isChecking,
+    isConnected,
+    lastCheckedAt,
+    phase,
+    settledBackendUnavailableSequence,
+  ]);
 
   const closeBackendUnavailableModal = React.useCallback(() => {
+    backendUnavailableSequenceRef.current += 1;
+    setBackendUnavailableCandidate(null);
+    setSettledBackendUnavailableSequence(null);
     setBackendUnavailableDetail(null);
   }, []);
 
   const openHealthDiagnostics = React.useCallback(() => {
-    setBackendUnavailableDetail(null);
+    closeBackendUnavailableModal();
     navigate('/settings/health');
-  }, [navigate]);
+  }, [closeBackendUnavailableModal, navigate]);
 
   const retryConnectionCheck = React.useCallback(() => {
-    void checkOnce({ force: true }).catch(() => undefined);
-  }, [checkOnce]);
+    if (backendUnavailableDetail) {
+      corroborateBackendUnavailable(backendUnavailableDetail);
+    }
+  }, [backendUnavailableDetail, corroborateBackendUnavailable]);
 
   // Create toggle function for sidebar
   const toggleSidebar = () => {
@@ -256,7 +339,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
   };
 
   React.useEffect(() => {
-    if (isMobileViewport && !showChatSidebar) return;
+    if (!showChatSidebar) return;
     if (!isMobileViewport && sidebarOpen) {
       setSidebarOpen(false);
     }
@@ -386,6 +469,14 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
         )}
         style={chatScreenBackgroundStyle}
       >
+        {/* A bypass link is only useful as the FIRST focusable element -
+            before the sidebar and header it exists to skip (#2889). */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-text focus:shadow"
+        >
+          Skip to main content
+        </a>
         {/* Persistent ChatSidebar when feature flag enabled */}
         {shouldRenderChatSidebar && (
           <ChatSidebar
@@ -399,74 +490,73 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           />
         )}
         <main
+          id="main-content"
+          tabIndex={-1}
           className={classNames(
-            'relative flex-1 min-w-0 flex flex-col',
+            'relative flex-1 min-w-0 flex flex-col outline-none',
             hideHeader ? 'bg-bg ' : ''
           )}
           data-demo-mode={demoEnabled ? 'on' : 'off'}
         >
-          {hideHeader ? (
+          <div
+            data-chat-scroll-owner={
+              !hideHeader && isViewportConstrainedRoute && stickyChatLayoutActive
+                ? 'transcript'
+                : undefined
+            }
+            className={classNames(
+              hideHeader
+                ? 'contents'
+                : isViewportConstrainedRoute
+                  ? 'relative flex min-h-0 min-w-0 flex-1 flex-col'
+                  : 'relative flex w-full min-w-0 max-w-full flex-col min-h-[135vh]',
+              !hideHeader && isViewportConstrainedRoute
+                ? stickyChatLayoutActive
+                  ? 'overflow-hidden'
+                  : 'overflow-y-auto'
+                : undefined
+            )}
+          >
+            {!hideHeader && (
+              <div
+                key="shell-header"
+                className={classNames(
+                  'relative z-20 w-full min-w-0',
+                  isViewportConstrainedRoute ? 'shrink-0' : undefined
+                )}
+              >
+                <Header
+                  onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
+                  sidebarCollapsed={headerSidebarCollapsed}
+                  notificationCount={notificationCount}
+                  notificationState={notificationState}
+                  onRetryNotifications={retryNotifications}
+                  onOpenNotifications={handleOpenNotifications}
+                />
+              </div>
+            )}
             <div
+              key="route-content"
               data-chat-scroll-owner={
                 hideHeaderViewportShell && stickyChatLayoutActive
                   ? 'transcript'
                   : undefined
               }
               className={classNames(
-                'relative flex min-h-screen flex-1 flex-col',
-                hideHeaderViewportShell
-                  ? 'min-w-0 items-stretch justify-start overflow-hidden px-0 py-0'
-                  : 'items-center justify-center overflow-auto px-4 py-10 sm:px-8'
+                hideHeader
+                  ? 'relative flex min-h-screen flex-1 flex-col'
+                  : 'relative flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col',
+                hideHeader
+                  ? hideHeaderViewportShell
+                    ? 'min-w-0 items-stretch justify-start overflow-hidden px-0 py-0'
+                    : 'items-center justify-center overflow-auto px-4 py-10 sm:px-8'
+                  : undefined
               )}
             >
               {children}
               {shortcutLoading && renderShortcutOverlay()}
             </div>
-          ) : isViewportConstrainedRoute ? (
-            <div
-              data-chat-scroll-owner={stickyChatLayoutActive ? 'transcript' : undefined}
-              className={classNames(
-                'relative flex min-h-0 min-w-0 flex-1 flex-col',
-                stickyChatLayoutActive ? 'overflow-hidden' : 'overflow-y-auto'
-              )}
-            >
-              <div className="relative z-20 w-full min-w-0 shrink-0">
-                <Header
-                  onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
-                  sidebarCollapsed={
-                    showChatSidebar && isMobileViewport ? !sidebarOpen : chatSidebarCollapsed
-                  }
-                  notificationCount={notificationCount}
-                  notificationState={notificationState}
-                  onRetryNotifications={retryNotifications}
-                  onOpenNotifications={handleOpenNotifications}
-                />
-              </div>
-              <div className="relative flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col">
-                {children}
-                {shortcutLoading && renderShortcutOverlay()}
-              </div>
-            </div>
-          ) : (
-            <div className="relative flex w-full min-w-0 max-w-full flex-col min-h-[135vh]">
-              <div className="relative z-20 w-full min-w-0">
-                <Header
-                  onToggleSidebar={hideSidebar ? undefined : toggleSidebar}
-                  sidebarCollapsed={
-                    showChatSidebar && isMobileViewport ? !sidebarOpen : chatSidebarCollapsed
-                  }
-                  notificationCount={notificationCount}
-                  notificationState={notificationState}
-                  onRetryNotifications={retryNotifications}
-                  onOpenNotifications={handleOpenNotifications}
-                />
-              </div>
-              <div className="relative flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col">
-                {children}
-                {shortcutLoading && renderShortcutOverlay()}
-              </div>
-            </div>
-          )}
+          </div>
           {/* Mobile Drawer for ChatSidebar when the persistent sidebar is enabled */}
           {!hideHeader && showChatSidebar && !hideSidebar && isMobileViewport && (
             <Drawer
@@ -492,6 +582,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                 collapsed={false}
                 openResetKey={chatSidebarOpenResetKey}
                 onToggleCollapse={() => setSidebarOpen(false)}
+                onConversationSelected={() => setSidebarOpen(false)}
               />
             </Drawer>
           )}
@@ -750,7 +841,7 @@ function RootLayoutShell({
 
   const notificationsEnabled = !effectiveHideHeader;
 
-  return (
+  const content = (
     <DemoModeProvider>
       <NotificationRuntimeOwner enabled={notificationsEnabled}>
         <LayoutShellContext.Provider value={{ inShell: true, setOverrides }}>
@@ -763,6 +854,18 @@ function RootLayoutShell({
       </NotificationRuntimeOwner>
     </DemoModeProvider>
   );
+  return location.pathname === "/chat" ? (
+    <HistorySelectionProvider
+      storageKey="tldw-h1-playground-reference"
+      onCapture={(capture) => {
+        const display = formatSelectedHistory(capture);
+        useStoreMessageOption.getState().setHistory(display.history);
+        useStoreMessageOption.getState().setMessages(display.messages);
+      }}
+    >
+      {content}
+    </HistorySelectionProvider>
+  ) : content;
 }
 
 function NotificationRuntimeOwner({

@@ -11,7 +11,6 @@ from tldw_Server_API.app.core.Infrastructure.provider_registry import (
     ProviderStatus,
 )
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -92,6 +91,36 @@ def test_sync_get_adapter_materializes_once_under_concurrency() -> None:
     assert len(results) == 6
     assert len({id(adapter) for adapter in results}) == 1
     assert state["init_count"] == 1
+
+
+def test_sync_stale_materialization_calls_disposer_once() -> None:
+    discarded: list[tuple[str, object]] = []
+
+    class _FirstAdapter:
+        pass
+
+    class _SecondAdapter:
+        pass
+
+    def _materialize(provider_name: str, spec: object) -> object:
+        assert isinstance(spec, type)
+        adapter = spec()
+        registry.register_adapter(provider_name, _SecondAdapter)
+        return adapter
+
+    registry: ProviderRegistryBase[object] = ProviderRegistryBase(
+        adapter_materializer=_materialize,
+        adapter_disposer=lambda provider_name, adapter: discarded.append(
+            (provider_name, adapter)
+        ),
+    )
+    registry.register_adapter("provider", _FirstAdapter)
+
+    assert registry.get_adapter("provider") is None
+    assert len(discarded) == 1
+    assert discarded[0][0] == "provider"
+    assert isinstance(discarded[0][1], _FirstAdapter)
+    assert registry.get_cached_adapters() == {}
 
 
 def test_register_dotted_path_adapter() -> None:

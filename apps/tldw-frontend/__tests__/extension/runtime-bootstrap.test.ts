@@ -14,6 +14,7 @@ const originalApiUrl = process.env.NEXT_PUBLIC_API_URL
 const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
 const originalXApiKey = process.env.NEXT_PUBLIC_X_API_KEY
 const originalWindowLocation = window.location
+let beforeManualSessionCredentialLock: (() => void) | null = null
 
 const setWindowLocation = (href: string) => {
   Object.defineProperty(window, "location", {
@@ -108,6 +109,20 @@ describe("runtime-bootstrap chrome shim", () => {
     vi.resetModules()
     localStorage.clear()
     sessionStorage.clear()
+    beforeManualSessionCredentialLock = null
+    vi.stubGlobal(
+      "navigator",
+      Object.create(window.navigator, {
+        locks: {
+          value: {
+            request: async (_name: string, work: () => unknown) => {
+              beforeManualSessionCredentialLock?.()
+              return await work()
+            }
+          }
+        }
+      })
+    )
   })
 
   afterEach(() => {
@@ -673,6 +688,57 @@ describe("runtime-bootstrap chrome shim", () => {
     await importAndAwaitBootstrap()
 
     expect(readStoredValue("tldwConfig")).toEqual(manualConfig)
+  })
+
+  it("preserves a newly written matching session record while bootstrap waits for the credential lock", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({
+        authMode: "single-user",
+        credentialSource: "manual",
+        apiKeyPersistence: "session",
+        apiKeyServerOrigin: "https://stale.example.test",
+        serverUrl: "https://stale.example.test"
+      })
+    )
+    sessionStorage.setItem(
+      "tldwManualSessionApiKey",
+      JSON.stringify({
+        credentialSource: "manual",
+        apiKeyPersistence: "session",
+        apiKeyServerOrigin: "https://stale.example.test",
+        apiKey: "stale-session-key"
+      })
+    )
+    beforeManualSessionCredentialLock = () => {
+      localStorage.setItem(
+        "tldwConfig",
+        JSON.stringify({
+          authMode: "single-user",
+          credentialSource: "manual",
+          apiKeyPersistence: "session",
+          apiKeyServerOrigin: "https://remote.example.test",
+          serverUrl: "https://remote.example.test"
+        })
+      )
+      sessionStorage.setItem(
+        "tldwManualSessionApiKey",
+        JSON.stringify({
+          credentialSource: "manual",
+          apiKeyPersistence: "session",
+          apiKeyServerOrigin: "https://remote.example.test",
+          apiKey: "new-session-key"
+        })
+      )
+    }
+    stubCookieRuntimeFetch()
+
+    await importAndAwaitBootstrap()
+
+    expect(sessionStorage.getItem("tldwManualSessionApiKey")).toContain(
+      "new-session-key"
+    )
   })
 
   it("preserves manual config and legacy slots when the cookie probe fails", async () => {

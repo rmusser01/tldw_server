@@ -25,6 +25,7 @@ def audit_governor_coverage(
     app: Any,
     *,
     excluded_prefixes: list[str] | None = None,
+    route_limit: int = 50,
 ) -> dict[str, Any]:
     """Audit which routes are governor-protected.
 
@@ -35,10 +36,13 @@ def audit_governor_coverage(
         app: The FastAPI application instance.
         excluded_prefixes: Route prefixes to consider unprotected.
             Defaults to health/docs routes.
+        route_limit: Maximum number of entries returned in each route list.
+            Counts always reflect the full totals; ``route_list_limit`` in the
+            response lets callers detect a truncated list (#2890).
 
     Returns:
         Dict with total_routes, protected/unprotected counts and lists,
-        coverage percentage, and excluded prefixes.
+        coverage percentage, excluded prefixes, and the applied list limit.
     """
     prefixes = excluded_prefixes if excluded_prefixes is not None else list(DEFAULT_EXCLUDED_PREFIXES)
 
@@ -73,14 +77,16 @@ def audit_governor_coverage(
         coverage,
     )
 
+    safe_limit = max(1, int(route_limit))
     return {
         "total_routes": total,
         "protected_count": len(protected),
         "unprotected_count": len(unprotected),
         "coverage_pct": round(coverage, 1),
         "excluded_prefixes": prefixes,
-        "protected_routes": protected[:50],
-        "unprotected_routes": unprotected[:50],
+        "route_list_limit": safe_limit,
+        "protected_routes": protected[:safe_limit],
+        "unprotected_routes": unprotected[:safe_limit],
     }
 
 

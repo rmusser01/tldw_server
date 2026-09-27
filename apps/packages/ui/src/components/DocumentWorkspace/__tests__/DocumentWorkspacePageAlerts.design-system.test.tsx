@@ -1,9 +1,11 @@
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import type { QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { DocumentWorkspacePage } from "../DocumentWorkspacePage"
 
 const testState = vi.hoisted(() => ({
+  openFromPicker: null as null | ((id: number, hint: "pdf", operation: QuickIngestOperation) => Promise<void>),
   workspace: {} as Record<string, unknown>,
   searchParams: new URLSearchParams(),
   getMediaDetails: vi.fn(() => new Promise(() => {})),
@@ -125,7 +127,7 @@ vi.mock("../DocumentViewer", () => ({
 }))
 
 vi.mock("../DocumentPickerModal", () => ({
-  default: () => null
+  default: ({ onOpenDocument }: { onOpenDocument: NonNullable<typeof testState.openFromPicker> }) => { testState.openFromPicker = onOpenDocument; return <div>Picker mounted</div> }
 }))
 
 const createWorkspaceState = (
@@ -156,9 +158,31 @@ const findRenderedAlert = async (container: HTMLElement, text: string) =>
 describe("DocumentWorkspacePage design-system alerts", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    testState.openFromPicker = null
     testState.workspace = createWorkspaceState()
     testState.searchParams = new URLSearchParams()
     testState.getMediaDetails.mockImplementation(() => new Promise(() => {}))
+  })
+
+  it.each(["metadata", "file"])("abandons a Picker %s read after the captured owner changes", async (stage) => {
+    let release!: (value: unknown) => void
+    const delayed = new Promise(resolve => { release = resolve })
+    testState.getMediaDetails.mockImplementation(async () => stage === "metadata" ? delayed : ({ type: "pdf", title: "Bob private" }))
+    const { bgRequest } = await import("@/services/background-proxy")
+    vi.mocked(bgRequest).mockImplementation(async () => delayed)
+    render(<DocumentWorkspacePage />)
+    fireEvent.click(screen.getByTestId("document-open-picker-button"))
+    await screen.findByText("Picker mounted")
+    const controller = new AbortController()
+    const operation: QuickIngestOperation = { authorityKey: "owner-a", requestScope: { config: { serverUrl: "https://a.test", authMode: "multi-user" }, userId: 1 }, signal: controller.signal, isCurrent: () => !controller.signal.aborted, assertCurrent: () => controller.signal.throwIfAborted() }
+    let pending!: Promise<void>
+    await act(async () => { pending = testState.openFromPicker!(7, "pdf", operation); await Promise.resolve() })
+    expect(testState.getMediaDetails).toHaveBeenCalledWith(7, expect.objectContaining({ requestScope: operation.requestScope, signal: operation.signal }))
+    if (stage === "file") expect(bgRequest).toHaveBeenCalledWith(expect.objectContaining({ servicePromptConfig: expect.objectContaining({ serverUrl: "https://a.test", expectedUserId: 1 }), abortSignal: operation.signal }))
+    controller.abort()
+    await act(async () => { release(stage === "metadata" ? { type: "pdf", title: "Bob private" } : new ArrayBuffer(3)); await pending })
+    if (stage === "metadata") expect(bgRequest).not.toHaveBeenCalled()
+    expect(testState.workspace.openDocument).not.toHaveBeenCalled()
   })
 
   it("renders the auto-open loading state through the design-system Alert", async () => {

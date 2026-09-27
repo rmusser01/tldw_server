@@ -48,7 +48,6 @@ from tldw_Server_API.app.core.Scheduler.handlers import (
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
 _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

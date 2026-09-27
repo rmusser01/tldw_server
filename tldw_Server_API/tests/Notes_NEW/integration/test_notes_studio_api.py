@@ -11,7 +11,6 @@ from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
-
 pytestmark = pytest.mark.integration
 
 
@@ -56,9 +55,10 @@ def client_with_notes_studio_db(tmp_path, monkeypatch):
 
     service_cls = notes_endpoint.NotesStudioService
 
-    def _service_factory(*, db):
+    def _service_factory(*, db, user_id):
         return service_cls(
             db=db,
+            user_id=user_id,
             generation_adapter=_test_generation_adapter,
             diagram_adapter=_test_diagram_adapter,
         )

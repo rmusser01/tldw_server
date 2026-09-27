@@ -75,6 +75,19 @@ const progressRows: FlashcardDeckProgress[] = [
 ]
 
 describe("DeckStudyDashboard", () => {
+  it.each([
+    { label: "expired learning", due: 5, learning: 5, new: 0, ready: 5 },
+    { label: "future learning", due: 0, learning: 5, new: 0, ready: 0 },
+    { label: "mixed states", due: 3, learning: 4, new: 2, ready: 5 }
+  ])("counts $label eligibility without adding the overlapping learning bucket", ({ due, learning, new: newCount, ready }) => {
+    render(<DeckStudyDashboard decks={[buildDeck(1, "Biology")]} deckProgress={[{
+      deck_id: 1, deck_name: "Biology", total: 9, due, learning, new: newCount, mature: 0
+    }]} onReviewDeck={() => {}} onCramDeck={() => {}} onManageDeck={() => {}} />)
+    const review = screen.getByRole("button", { name: ready ? `Review ${ready} ready` : "Caught up" })
+    expect(review).toHaveProperty("disabled", ready === 0)
+    expect(screen.getByText(`Learning: ${learning}`)).toBeInTheDocument()
+  })
+
   it("sorts ready decks first and shows deck queue counts", () => {
     render(
       <DeckStudyDashboard
@@ -120,7 +133,7 @@ describe("DeckStudyDashboard", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Review 4 ready" }))
+    fireEvent.click(screen.getByRole("button", { name: "Review 3 ready" }))
     fireEvent.click(screen.getByRole("button", { name: "Cram" }))
     fireEvent.click(screen.getByRole("button", { name: "Edit" }))
     fireEvent.click(screen.getByRole("button", { name: "Scheduler" }))
@@ -190,6 +203,6 @@ describe("DeckStudyDashboard", () => {
     )
 
     expect(screen.getByText("Deck 99")).toBeInTheDocument()
-    expect(screen.getByText("Review 2 ready")).toBeInTheDocument()
+    expect(screen.getByText("Review 1 ready")).toBeInTheDocument()
   })
 })

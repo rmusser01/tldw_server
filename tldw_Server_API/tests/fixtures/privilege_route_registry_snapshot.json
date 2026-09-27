@@ -4881,6 +4881,43 @@
     {
       "dependencies": [
         {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.get_auth_principal",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "llm_routing_deps.get_request_routing_decision_store",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Generate and validate one draft-only candidate without persistence.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.prompts.improve_prompt_endpoint",
+      "methods": [
+        "POST"
+      ],
+      "name": "improve_prompt_endpoint",
+      "path": "/api/v1/prompts/improve",
+      "rate_limit_resources": [],
+      "summary": "Improve one isolated prompt draft with the active chat model",
+      "tags": [
+        "prompts",
+        "prompts"
+      ]
+    },
+    {
+      "dependencies": [
+        {
           "id": "ChaCha_Notes_DB_Deps.get_chacha_db_for_user",
           "module": "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps",
           "type": "dependency"
@@ -7575,6 +7612,45 @@
       "summary": null,
       "tags": [
         "media"
+      ]
+    }
+  ],
+  "prompts.improve": [
+    {
+      "dependencies": [
+        {
+          "id": "User_DB_Handling.get_request_user",
+          "module": "tldw_Server_API.app.core.AuthNZ.User_DB_Handling",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps.get_auth_principal",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "llm_routing_deps.get_request_routing_decision_store",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps",
+          "type": "dependency"
+        }
+      ],
+      "description": "Generate and validate one draft-only candidate without persistence.",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.prompts.improve_prompt_endpoint",
+      "methods": [
+        "POST"
+      ],
+      "name": "improve_prompt_endpoint",
+      "path": "/api/v1/prompts/improve",
+      "rate_limit_resources": [],
+      "summary": "Improve one isolated prompt draft with the active chat model",
+      "tags": [
+        "prompts",
+        "prompts"
       ]
     }
   ],

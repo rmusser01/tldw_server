@@ -20,6 +20,7 @@ export type ReadAlongCacheKey = {
 
 export type TtsSettingsSignatureInput = {
   provider: string
+  backend?: string | null
   model?: string | null
   voice?: string | null
   speed?: number | null
@@ -52,6 +53,7 @@ const normalizeOpaqueIdSignaturePart = (value: unknown): string =>
 
 export const buildTtsSettingsSignature = ({
   provider,
+  backend,
   model,
   voice,
   speed,
@@ -63,6 +65,7 @@ export const buildTtsSettingsSignature = ({
 
   return [
     `provider:${normalizeCaseInsensitiveSignaturePart(provider)}`,
+    `backend:${normalizeCaseInsensitiveSignaturePart(backend)}`,
     `model:${normalizeOpaqueIdSignaturePart(model)}`,
     `voice:${normalizeOpaqueIdSignaturePart(voice)}`,
     `speed:${normalizedSpeed}`,

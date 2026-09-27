@@ -283,6 +283,7 @@ errors.log
 !Docs/Published/Evaluations/samples/dataset_quick.json
 !Docs/Published/Evaluations/samples/rag_pipeline_eval_inline.json
 !Docs/Published/Evaluations/samples/run_request.json
+!Docs/Published/Evaluations/baselines/web_retrieval_quality_v1.json
 !Docs/Published/Monitoring/Grafana_Streaming_Basics.json
 !.impeccable/design.json
 !tldw_Server_API/app/core/Evaluations/data/bullshit_benchmark/questions_v2.json
@@ -293,6 +294,8 @@ errors.log
 !apps/packages/voice-assistant-sdk/tsconfig.json
 !apps/packages/ui/src/assets/locale/**/*.json
 !apps/packages/ui/src/public/_locales/**/*.json
+!apps/tldw-frontend/e2e/onboarding-uat/mock-openai/responses/chat/analysis-one.json
+!apps/tldw-frontend/e2e/onboarding-uat/mock-openai/responses/chat/analysis-two.json
 !apps/packages/ui/src/assets/locale/*/settings.json
 !apps/packages/ui/src/assets/locale/*/sidepanel.json
 !Docs/Product/WebUI/M1_4_Alias_Rollup_Week3_Natural_2026_02_13.json
@@ -372,6 +375,7 @@ models/flashrank/**/.DS_Store
 
 # Detritus
 /cache
+/.benchmarks/stt/
 /.tmp
 /tldw_Server_API/Test_Cache
 /logs
@@ -420,3 +424,8 @@ Dockerfiles/Monitoring/secrets/
 /.playwright-cli
 /output
 /apps/tldw-frontend/output
+
+# Bundled pixel-migu manifests are production package resources.
+!tldw_Server_API/app/core/Persona/assets/starter_packs/pixel-migu/manifest.json
+!tldw_Server_API/app/core/Visual_Identities/assets/pixel-migu/pixel-migu.character.json
+!tldw_Server_API/app/core/Visual_Identities/assets/pixel-migu/visual_identity_pack.json

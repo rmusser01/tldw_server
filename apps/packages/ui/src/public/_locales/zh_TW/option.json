@@ -2722,5 +2722,8 @@
   },
   "header_connectionCard_connectedCaption": {
     "message": "現在可以在選項頁和側邊欄中使用聊天和工具。"
+  },
+  "notesSearch_offlineSaveUnavailable": {
+    "message": "在確認您的帳戶和本機儲存空間之前，離線儲存無法使用。您的變更仍未儲存。"
   }
 }

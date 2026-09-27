@@ -117,7 +117,8 @@ describe("AnswerModelMenu", () => {
 
   it("loads provider options and suggested models", async () => {
     const onGenerationProviderChange = vi.fn()
-    renderMenu({ onGenerationProviderChange })
+    const onGenerationModelChange = vi.fn()
+    renderMenu({ generationProvider: "openai", onGenerationProviderChange, onGenerationModelChange })
 
     await waitFor(() => {
       expect(tldwClient.getProviders).toHaveBeenCalled()
@@ -129,10 +130,38 @@ describe("AnswerModelMenu", () => {
     })
 
     expect(onGenerationProviderChange).toHaveBeenCalledWith("openai")
+    expect(onGenerationModelChange).toHaveBeenCalledWith("gpt-4o-mini")
     expect(screen.getByRole("combobox", { name: "Answer model" })).toHaveAttribute(
       "placeholder",
       "Default: gpt-4o-mini"
     )
+  })
+
+  it("does not present the Chat default model as the RAG server default", async () => {
+    renderMenu()
+    await waitFor(() => expect(tldwClient.getProviders).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole("button", { name: "Choose answer model" }))
+    expect(screen.getByRole("button", { name: "Choose answer model" })).toHaveAttribute(
+      "title", "Answer generation uses Server default"
+    )
+    expect(screen.getByRole("combobox", { name: "Answer model" })).toHaveAttribute(
+      "placeholder", "Use RAG server default"
+    )
+  })
+
+  it("selects the configured local model with its provider", async () => {
+    vi.mocked(tldwClient.getProviders).mockResolvedValueOnce({
+      default_provider: "llama.cpp",
+      providers: [{ name: "llama", display_name: "Llama.cpp", default_model: "local-model.gguf" }],
+    })
+    const onGenerationProviderChange = vi.fn()
+    const onGenerationModelChange = vi.fn()
+    renderMenu({ onGenerationProviderChange, onGenerationModelChange })
+    fireEvent.click(screen.getByRole("button", { name: "Choose answer model" }))
+    await screen.findByRole("option", { name: "Llama.cpp" })
+    fireEvent.change(screen.getByRole("combobox", { name: "Answer provider" }), { target: { value: "llama" } })
+    expect(onGenerationProviderChange).toHaveBeenCalledWith("llama")
+    expect(onGenerationModelChange).toHaveBeenCalledWith("local-model.gguf")
   })
 
   it("clears an explicit provider when Server default is selected", async () => {

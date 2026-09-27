@@ -2,6 +2,7 @@ import pytest
 
 from tldw_Server_API.app.core.RAG.rag_service import semantic_cache
 from tldw_Server_API.app.core.RAG.rag_service.semantic_cache import SemanticCache
+from tldw_Server_API.app.core.RAG.rag_service.types import Document
 
 pytestmark = pytest.mark.unit
 
@@ -35,6 +36,43 @@ async def test_embedding_failure_log_omits_exception_details(
     assert "/private/" not in joined
     assert "secret-token" not in joined
     assert "embedding failed" not in joined
+
+
+@pytest.mark.asyncio
+async def test_retrieval_payload_is_cloned_at_set_and_get_boundaries() -> None:
+    document = Document(
+        id="doc-1",
+        content="retrieved evidence",
+        metadata={"nested": {"count": 1}},
+    )
+    payload = {
+        "documents": [document],
+        "answer": "STALE_SENTINEL",
+    }
+    cache = SemanticCache()
+
+    await cache.set("query", payload)
+    document.content = "caller mutation"
+    document.metadata["nested"]["count"] = 2
+    first = await cache.get("query")
+
+    assert first == {
+        "documents": [
+            {
+                "id": "doc-1",
+                "content": "retrieved evidence",
+                "metadata": {"nested": {"count": 1}, "source": "media_db"},
+                "score": 0.0,
+            }
+        ],
+        "metadata": {"kind": "retrieval_documents", "schema_version": 1},
+    }
+    first["documents"][0]["content"] = "consumer mutation"
+
+    second = await cache.get("query")
+
+    assert second["documents"][0]["content"] == "retrieved evidence"
+    assert "STALE_SENTINEL" not in repr(cache._cache)
 
 
 def test_save_failure_log_omits_exception_details(

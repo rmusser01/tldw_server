@@ -1,0 +1,24 @@
+{
+  "observed_at": "2026-09-06T00:56:08.787713+00:00",
+  "tested_revision": "f71d593e6701ef2e4f8fdfec26f2be09b5ca64ef",
+  "endpoint_source_matches_launch": true,
+  "idle_before_explicit_start": true,
+  "observed_states": [
+    "idle",
+    "preparing",
+    "listening",
+    "thinking",
+    "idle"
+  ],
+  "manual_commit": true,
+  "auto_resume": false,
+  "prompted_window_seconds": 20,
+  "committed_transcript": "reply with Apply with the Blue Notebook is ready.",
+  "assistant_reply": "Apply with the Blue Notebook is ready.",
+  "tts_chunk_notices": 5,
+  "gratitude_prefix_absent": true,
+  "final_connection": "disconnected",
+  "human_playback_confirmation": "heard clearly",
+  "human_repetition_confirmation": "said Reply with once",
+  "acceptance": "audible reply passed; transcript contains unspoken duplicated prefix"
+}

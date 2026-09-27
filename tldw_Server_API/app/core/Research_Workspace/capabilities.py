@@ -536,13 +536,7 @@ def _collect_slides_health(*, user_id: int | str | None = None) -> Mapping[str, 
         db = try_get_slides_db_for_user(current_user=SimpleNamespace(id=user_id))
         if db is None:
             return {"status": "unavailable", "reason_code": "slides_unavailable"}
-        db.list_presentations(
-            limit=1,
-            offset=0,
-            include_deleted=True,
-            sort_column="created_at",
-            sort_direction="DESC",
-        )
+        db.probe_health()
         return {"status": "ok"}
     except Exception:
         logger.exception("Failed to collect Research Workspace Slides health")

@@ -12,11 +12,15 @@ from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.errors import InputError
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_search_cursor import (
+    decode_email_cursor,
+    email_cursor_scope,
+    encode_email_cursor,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-
 
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 _EMAIL_WINDOW_RE = re.compile(r"(\d+)([smhdwy])")
@@ -91,7 +95,12 @@ def _sqlite_fts_literal_term(value: str) -> str | None:
     return f'"{escaped}"'
 
 
-def _parse_email_operator_query(self, query: str | None) -> list[list[dict[str, Any]]]:
+def _parse_email_operator_query(
+    self,
+    query: str | None,
+    *,
+    as_of: datetime | None = None,
+) -> list[list[dict[str, Any]]]:
     cleaned = str(query or "").strip()
     if not cleaned:
         return [[]]
@@ -154,12 +163,18 @@ def _parse_email_operator_query(self, query: str | None) -> list[list[dict[str, 
                 "negated": negated,
             }
         elif field_name in {"older_than", "newer_than"} and field_value:
-            delta = _parse_email_relative_window(field_value)
+            try:
+                delta = _parse_email_relative_window(field_value)
+                threshold = (
+                    ((as_of or datetime.now(timezone.utc)) - delta).isoformat()
+                    if delta is not None else None
+                )
+            except (ValueError, OverflowError) as exc:
+                raise InputError("Email relative date is outside the supported range.") from exc
             if delta is None:
                 raise InputError(
                     f"Invalid {field_name}: expected patterns like 7d, 12h, 30m."
                 )  # noqa: TRY003
-            threshold = (datetime.now(timezone.utc) - delta).isoformat()
             term = {
                 "kind": field_name,
                 "value": threshold,
@@ -191,8 +206,13 @@ def search_email_messages(
     include_deleted: bool = False,
     limit: int = 50,
     offset: int = 0,
-) -> tuple[list[dict[str, Any]], int]:
-    """Search normalized email messages with Stage-1 operator support."""
+    cursor: str | None = None,
+) -> tuple[list[dict[str, Any]], int] | tuple[list[dict[str, Any]], int, str | None]:
+    """Search emails; omitted cursor returns (rows, total), otherwise adds next_cursor.
+
+    An empty cursor starts keyset traversal. Cursors use descending date/ID order
+    with missing dates last, and cannot be combined with a nonzero offset.
+    """
 
     query_present = "true" if isinstance(query, str) and query.strip() else "false"
     include_deleted_label = "true" if include_deleted else "false"
@@ -207,6 +227,8 @@ def search_email_messages(
     )
 
     try:
+        if cursor is not None and offset != 0:
+            raise InputError("Email cursor pagination requires offset=0.")
         try:
             limit_int = max(1, min(500, int(limit)))
         except _MEDIA_NONCRITICAL_EXCEPTIONS:
@@ -217,7 +239,13 @@ def search_email_messages(
             offset_int = 0
 
         resolved_tenant = self._resolve_email_tenant_id(tenant_id)
-        parsed_groups = _parse_email_operator_query(self, query)
+        scope = email_cursor_scope(resolved_tenant, query, include_deleted)
+        as_of = datetime.now(timezone.utc)
+        position = None
+        if cursor is not None and cursor != "":
+            as_of, date, message_id = decode_email_cursor(cursor, scope)
+            position = (date, message_id)
+        parsed_groups = _parse_email_operator_query(self, query, as_of=as_of)
 
         where_clauses = ["em.tenant_id = ?"]
         if not include_deleted:
@@ -350,6 +378,21 @@ def search_email_messages(
             "JOIN Media m ON m.id = em.media_id "
             "WHERE " + where_sql
         )
+        page_from = base_from
+        page_params = list(where_params)
+        if position is not None:
+            date, message_id = position
+            if date is None:
+                page_from += " AND em.internal_date IS NULL AND em.id < ?"
+                page_params.append(message_id)
+            else:
+                page_from += (
+                    " AND (em.internal_date < ? OR (em.internal_date = ? AND em.id < ?) OR em.internal_date IS NULL)"
+                )
+                page_params.extend([date, date, message_id])
+        ordering = " ORDER BY em.internal_date DESC, em.id DESC "
+        if cursor is not None:
+            ordering = " ORDER BY em.internal_date DESC NULLS LAST, em.id DESC "
 
         with self.transaction() as conn:
             count_row = self._fetchone_with_connection(
@@ -380,12 +423,9 @@ def search_email_messages(
                     "em.label_text AS label_text, "
                     "em.has_attachments AS has_attachments, "
                     "(SELECT COUNT(*) FROM email_attachments ea WHERE ea.email_message_id = em.id) "
-                    "AS attachment_count"
-                    + base_from +
-                    " ORDER BY em.internal_date DESC, em.id DESC "
-                    "LIMIT ? OFFSET ?"
+                    "AS attachment_count" + page_from + ordering + "LIMIT ? OFFSET ?"
                 ),
-                (*where_params, limit_int, offset_int),
+                (*page_params, limit_int + (cursor is not None), offset_int),
             )
 
         _emit_email_metric_counter(
@@ -404,6 +444,11 @@ def search_email_messages(
                 "include_deleted": include_deleted_label,
             },
         )
+        if cursor is not None:
+            has_more = len(rows) > limit_int
+            rows = rows[:limit_int]
+            next_cursor = encode_email_cursor(scope, as_of, rows[-1]) if has_more else None
+            return rows, total, next_cursor
         return rows, total
     except InputError:
         _emit_email_metric_counter(

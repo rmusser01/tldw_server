@@ -1,0 +1,1550 @@
+{
+  "$comment": "Draft 2020-12 provides structural validation only; implementations must also process the required tldw semantic vocabulary. Canonical JSON uses RFC 8785: https://www.rfc-editor.org/rfc/rfc8785",
+  "$defs": {
+    "ActorType": {
+      "enum": [
+        "user",
+        "agent",
+        "system"
+      ],
+      "title": "ActorType",
+      "type": "string"
+    },
+    "AgentVisibility": {
+      "enum": [
+        "agent_visible",
+        "user_only"
+      ],
+      "title": "AgentVisibility",
+      "type": "string"
+    },
+    "ConstraintPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "constraint",
+          "default": "constraint",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "subject": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "value"
+      ],
+      "title": "ConstraintPayload",
+      "type": "object"
+    },
+    "ConventionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "convention",
+          "default": "convention",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "subject": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "value"
+      ],
+      "title": "ConventionPayload",
+      "type": "object"
+    },
+    "CorrectionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "correction",
+          "default": "correction",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "subject": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "value"
+      ],
+      "title": "CorrectionPayload",
+      "type": "object"
+    },
+    "GoalPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "goal",
+          "default": "goal",
+          "title": "Kind",
+          "type": "string"
+        },
+        "outcome": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Outcome",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "subject": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "outcome"
+      ],
+      "title": "GoalPayload",
+      "type": "object"
+    },
+    "IdentityPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "identity",
+          "default": "identity",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "subject": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "value"
+      ],
+      "title": "IdentityPayload",
+      "type": "object"
+    },
+    "LegacyUnclassifiedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "legacy_unclassified",
+          "default": "legacy_unclassified",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "text": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "LegacyUnclassifiedPayload",
+      "type": "object"
+    },
+    "PreferencePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "preference",
+          "default": "preference",
+          "title": "Kind",
+          "type": "string"
+        },
+        "polarity": {
+          "enum": [
+            "like",
+            "dislike"
+          ],
+          "title": "Polarity",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "subject": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "polarity",
+        "value"
+      ],
+      "title": "PreferencePayload",
+      "type": "object"
+    },
+    "ProfileControls": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_visibility": {
+          "$ref": "#/$defs/AgentVisibility"
+        },
+        "sync_mode": {
+          "$ref": "#/$defs/SyncMode"
+        }
+      },
+      "required": [
+        "sync_mode",
+        "agent_visibility"
+      ],
+      "title": "ProfileControls",
+      "type": "object"
+    },
+    "ProfileManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "current_version_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Current Version Id",
+          "type": "string"
+        },
+        "profile_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "purge_generation": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Purge Generation",
+          "type": "integer"
+        },
+        "revision": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile_id",
+        "revision",
+        "purge_generation",
+        "created_at",
+        "updated_at",
+        "current_version_id"
+      ],
+      "title": "ProfileManifest",
+      "type": "object"
+    },
+    "ProfileProposal": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "create"
+              },
+              "state": {
+                "const": "pending"
+              }
+            },
+            "required": [
+              "state",
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "base_version_id": {
+                "type": "null"
+              },
+              "proposed_record": {
+                "allOf": [
+                  {
+                    "not": {
+                      "type": "null"
+                    }
+                  },
+                  {
+                    "properties": {
+                      "payload": {
+                        "not": {
+                          "type": "null"
+                        }
+                      },
+                      "state": {
+                        "const": "active"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "payload"
+                    ]
+                  }
+                ]
+              },
+              "target_record_id": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "update"
+              },
+              "state": {
+                "const": "pending"
+              }
+            },
+            "required": [
+              "state",
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "base_version_id": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "proposed_record": {
+                "allOf": [
+                  {
+                    "not": {
+                      "type": "null"
+                    }
+                  },
+                  {
+                    "properties": {
+                      "payload": {
+                        "not": {
+                          "type": "null"
+                        }
+                      },
+                      "state": {
+                        "const": "active"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "payload"
+                    ]
+                  }
+                ]
+              },
+              "target_record_id": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "archive"
+              },
+              "state": {
+                "const": "pending"
+              }
+            },
+            "required": [
+              "state",
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "base_version_id": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "proposed_record": {
+                "type": "null"
+              },
+              "target_record_id": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "promote"
+              },
+              "state": {
+                "const": "pending"
+              }
+            },
+            "required": [
+              "state",
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "base_version_id": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "proposed_record": {
+                "type": "null"
+              },
+              "target_record_id": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "not": {
+                  "const": "pending"
+                }
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "confidence": {
+                "type": "null"
+              },
+              "proposed_record": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "create"
+              },
+              "state": {
+                "not": {
+                  "const": "pending"
+                }
+              }
+            },
+            "required": [
+              "state",
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "base_version_id": {
+                "type": "null"
+              },
+              "target_record_id": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "update",
+                  "archive",
+                  "promote"
+                ]
+              },
+              "state": {
+                "not": {
+                  "const": "pending"
+                }
+              }
+            },
+            "required": [
+              "state",
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "base_version_id": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "target_record_id": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "base_version_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Base Version Id"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "operation": {
+          "$ref": "#/$defs/ProposalOperation"
+        },
+        "profile_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "proposal_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Proposal Id",
+          "type": "string"
+        },
+        "proposed_record": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProfileRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provenance": {
+          "$ref": "#/$defs/ProfileProvenance"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "scope_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Scope Id",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ProposalState",
+          "default": "pending"
+        },
+        "target_record_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Target Record Id"
+        }
+      },
+      "required": [
+        "proposal_id",
+        "profile_id",
+        "scope_id",
+        "operation",
+        "target_record_id",
+        "base_version_id",
+        "proposed_record",
+        "provenance",
+        "created_at",
+        "expires_at"
+      ],
+      "title": "ProfileProposal",
+      "type": "object"
+    },
+    "ProfileProvenance": {
+      "additionalProperties": false,
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/ActorType"
+        },
+        "derived_from_record_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Derived From Record Id"
+        },
+        "reason_code": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Reason Code",
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/ProvenanceSource"
+        },
+        "source_hashes": {
+          "default": [],
+          "items": {
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Source Hashes",
+          "type": "array"
+        },
+        "source_references": {
+          "default": [],
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Source References",
+          "type": "array"
+        }
+      },
+      "required": [
+        "source",
+        "actor",
+        "reason_code"
+      ],
+      "title": "ProfileProvenance",
+      "type": "object"
+    },
+    "ProfileRecord": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "deleted"
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "expires_at": {
+                "type": "null"
+              },
+              "no_expiry": {
+                "const": false
+              },
+              "payload": {
+                "type": "null"
+              },
+              "semantic_key": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "not": {
+                  "const": "deleted"
+                }
+              }
+            },
+            "required": [
+              "state"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            },
+            "required": [
+              "payload"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "identity"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/IdentityPayload"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "preference"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/PreferencePayload"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "relationship"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/RelationshipPayload"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "correction"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CorrectionPayload"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "constraint"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ConstraintPayload"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "goal"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/GoalPayload"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "convention"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ConventionPayload"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "working_context"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/WorkingContextPayload"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "legacy_unclassified"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/LegacyUnclassifiedPayload"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "working_context"
+              },
+              "state": {
+                "not": {
+                  "const": "deleted"
+                }
+              }
+            },
+            "required": [
+              "state",
+              "kind"
+            ]
+          },
+          "then": {
+            "oneOf": [
+              {
+                "properties": {
+                  "expires_at": {
+                    "not": {
+                      "type": "null"
+                    }
+                  },
+                  "no_expiry": {
+                    "const": false
+                  }
+                },
+                "required": [
+                  "expires_at"
+                ]
+              },
+              {
+                "properties": {
+                  "expires_at": {
+                    "type": "null"
+                  },
+                  "no_expiry": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "no_expiry"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "not": {
+                  "const": "working_context"
+                }
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "expires_at": {
+                "type": "null"
+              },
+              "no_expiry": {
+                "const": false
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "controls": {
+          "$ref": "#/$defs/ProfileControls"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "kind": {
+          "$ref": "#/$defs/RecordKind"
+        },
+        "no_expiry": {
+          "default": false,
+          "title": "No Expiry",
+          "type": "boolean"
+        },
+        "parent_version_id": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parent Version Id"
+        },
+        "payload": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "constraint": "#/$defs/ConstraintPayload",
+                  "convention": "#/$defs/ConventionPayload",
+                  "correction": "#/$defs/CorrectionPayload",
+                  "goal": "#/$defs/GoalPayload",
+                  "identity": "#/$defs/IdentityPayload",
+                  "legacy_unclassified": "#/$defs/LegacyUnclassifiedPayload",
+                  "preference": "#/$defs/PreferencePayload",
+                  "relationship": "#/$defs/RelationshipPayload",
+                  "working_context": "#/$defs/WorkingContextPayload"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/IdentityPayload"
+                },
+                {
+                  "$ref": "#/$defs/PreferencePayload"
+                },
+                {
+                  "$ref": "#/$defs/RelationshipPayload"
+                },
+                {
+                  "$ref": "#/$defs/CorrectionPayload"
+                },
+                {
+                  "$ref": "#/$defs/ConstraintPayload"
+                },
+                {
+                  "$ref": "#/$defs/GoalPayload"
+                },
+                {
+                  "$ref": "#/$defs/ConventionPayload"
+                },
+                {
+                  "$ref": "#/$defs/WorkingContextPayload"
+                },
+                {
+                  "$ref": "#/$defs/LegacyUnclassifiedPayload"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payload"
+        },
+        "profile_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/ProfileProvenance"
+        },
+        "record_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Record Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "scope_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Scope Id",
+          "type": "string"
+        },
+        "semantic_key": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SemanticKey"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "state": {
+          "$ref": "#/$defs/RecordState"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        },
+        "version_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Version Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "profile_id",
+        "record_id",
+        "scope_id",
+        "kind",
+        "state",
+        "controls",
+        "provenance",
+        "version_id",
+        "parent_version_id",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "ProfileRecord",
+      "type": "object"
+    },
+    "ProfileScope": {
+      "additionalProperties": false,
+      "properties": {
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ScopeKind"
+        },
+        "profile_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "scope_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Scope Id",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        },
+        "version_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Version Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scope_id",
+        "profile_id",
+        "kind",
+        "version_id",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "ProfileScope",
+      "type": "object"
+    },
+    "ProposalOperation": {
+      "enum": [
+        "create",
+        "update",
+        "archive",
+        "promote"
+      ],
+      "title": "ProposalOperation",
+      "type": "string"
+    },
+    "ProposalState": {
+      "enum": [
+        "pending",
+        "accepted",
+        "rejected",
+        "superseded",
+        "expired"
+      ],
+      "title": "ProposalState",
+      "type": "string"
+    },
+    "ProvenanceSource": {
+      "enum": [
+        "manual",
+        "agent",
+        "import",
+        "migration"
+      ],
+      "title": "ProvenanceSource",
+      "type": "string"
+    },
+    "RecordKind": {
+      "enum": [
+        "identity",
+        "preference",
+        "relationship",
+        "correction",
+        "constraint",
+        "goal",
+        "convention",
+        "working_context",
+        "legacy_unclassified"
+      ],
+      "title": "RecordKind",
+      "type": "string"
+    },
+    "RecordState": {
+      "enum": [
+        "active",
+        "archived",
+        "deleted"
+      ],
+      "title": "RecordState",
+      "type": "string"
+    },
+    "RelationshipPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "relationship",
+          "default": "relationship",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "subject": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "value"
+      ],
+      "title": "RelationshipPayload",
+      "type": "object"
+    },
+    "ScopeKind": {
+      "enum": [
+        "global",
+        "workspace"
+      ],
+      "title": "ScopeKind",
+      "type": "string"
+    },
+    "SemanticKey": {
+      "additionalProperties": false,
+      "properties": {
+        "namespace": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Namespace",
+          "type": "string"
+        },
+        "subject": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        }
+      },
+      "required": [
+        "namespace",
+        "subject"
+      ],
+      "title": "SemanticKey",
+      "type": "object"
+    },
+    "SyncMode": {
+      "enum": [
+        "device_only",
+        "syncable"
+      ],
+      "title": "SyncMode",
+      "type": "string"
+    },
+    "WorkingContextPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "working_context",
+          "default": "working_context",
+          "title": "Kind",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Schema Version",
+          "type": "integer"
+        },
+        "subject": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        },
+        "value": {
+          "maxLength": 16384,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "value"
+      ],
+      "title": "WorkingContextPayload",
+      "type": "object"
+    }
+  },
+  "$id": "urn:tldw:profile-core:schema:personal-context:1",
+  "$schema": "urn:tldw:profile-core:json-schema:dialect:1",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/ProfileManifest"
+    },
+    {
+      "$ref": "#/$defs/ProfileScope"
+    },
+    {
+      "$ref": "#/$defs/ProfileRecord"
+    },
+    {
+      "$ref": "#/$defs/ProfileProposal"
+    }
+  ],
+  "title": "tldw Personal Context Profile v1",
+  "version": 1,
+  "x-tldw-profile-semantics": {
+    "canonicalDateTime": "utc-milliseconds-v1",
+    "canonicalPayloadMaxUtf8Bytes": 16384,
+    "canonicalization": "rfc8785-v1",
+    "iJsonMaxSafeInteger": 9007199254740991,
+    "pendingProposalExpiryDays": 90,
+    "proposalIdentityAndVersionLinks": "exact-v1",
+    "timestampInvariants": "exact-v1"
+  }
+}

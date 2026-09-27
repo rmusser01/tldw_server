@@ -1261,5 +1261,17 @@
   },
   "modelSelect_sort_localFirst": {
     "message": "Local-first"
+  },
+  "help_loadFailed": {
+    "message": "Hjælpen kunne ikke indlæses. Opret forbindelse igen, gem dine ændringer, og genindlæs siden."
+  },
+  "help_loading": {
+    "message": "Indlæser hjælp…"
+  },
+  "help_confirmReload": {
+    "message": "Genindlæs denne side? Ikke-gemte ændringer kan gå tabt."
+  },
+  "help_reload": {
+    "message": "Genindlæs siden"
   }
 }

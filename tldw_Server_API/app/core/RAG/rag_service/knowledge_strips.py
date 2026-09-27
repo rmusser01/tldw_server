@@ -8,14 +8,19 @@ answer quality and reducing noise.
 Part of the Self-Correcting RAG feature set (Stage 4).
 """
 
-import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    SYNC_ADAPTER_CALL_POOL,
+    await_bounded_sync_call,
+    await_owned_worker,
+)
 from tldw_Server_API.app.core.LLM_Calls.structured_output import (
     StructuredOutputOptions,
     parse_structured_output,
@@ -175,6 +180,10 @@ class KnowledgeStripsProcessor:
         strip_size_tokens: int = 100,
         min_relevance_score: float = 0.3,
         analyze_fn: Optional[Callable] = None,
+        llm_provider: str = "openai",
+        llm_model: Optional[str] = None,
+        credential_runtime: Any = None,
+        credential_handle: Any = None,
     ):
         """
         Initialize the knowledge strips processor.
@@ -183,10 +192,20 @@ class KnowledgeStripsProcessor:
             strip_size_tokens: Target size for each strip in tokens
             min_relevance_score: Minimum relevance score to keep a strip
             analyze_fn: Optional LLM function for grading (uses heuristic if None)
+            llm_provider: Effective LLM provider for grading.
+            llm_model: Optional effective model override.
+            credential_runtime: Optional request-scoped provider credential runtime.
+            credential_handle: Pre-resolved provider credentials for the sync analyzer.
         """
         self.strip_size_tokens = strip_size_tokens
         self.min_relevance_score = min_relevance_score
         self._analyze = analyze_fn
+        self.llm_provider = llm_provider
+        self.llm_model = llm_model
+        self.credential_runtime = credential_runtime
+        self.credential_handle = credential_handle
+        self._credential_marked = False
+        self._llm_unavailable = False
 
     async def process(
         self,
@@ -206,6 +225,8 @@ class KnowledgeStripsProcessor:
             KnowledgeStripsResult with filtered strips and rebuilt documents
         """
         start_time = time.time()
+        self._credential_marked = False
+        self._llm_unavailable = False
 
         if not documents:
             return KnowledgeStripsResult(
@@ -258,8 +279,22 @@ class KnowledgeStripsProcessor:
 
         # Step 2: Score each strip for relevance
         if self._analyze:
-            # Use LLM-based scoring
-            all_strips = await self._score_strips_llm(query, all_strips)
+            if self.credential_runtime is not None and self.credential_handle is None:
+                try:
+                    self.credential_handle = await self.credential_runtime.resolve(
+                        self.llm_provider,
+                        model=self.llm_model,
+                    )
+                    if self.credential_handle is None:
+                        raise RuntimeError("provider unavailable")
+                except Exception:
+                    logger.warning("LLM strip grading credentials unavailable")
+                    self._llm_unavailable = True
+                    all_strips = self._score_strips_heuristic(query, all_strips)
+                else:
+                    all_strips = await self._score_strips_llm(query, all_strips)
+            else:
+                all_strips = await self._score_strips_llm(query, all_strips)
         else:
             # Use heuristic scoring
             all_strips = self._score_strips_heuristic(query, all_strips)
@@ -297,6 +332,18 @@ class KnowledgeStripsProcessor:
                 "strip_size_tokens": self.strip_size_tokens,
                 "min_relevance_score": self.min_relevance_score,
                 "top_k": top_k,
+                **(
+                    {
+                        "verification_available": not self._llm_unavailable,
+                        **(
+                            {"failure_code": "provider_unavailable"}
+                            if self._llm_unavailable
+                            else {}
+                        ),
+                    }
+                    if self.credential_runtime is not None
+                    else {}
+                ),
             },
         )
 
@@ -348,17 +395,77 @@ For each strip, provide a JSON object with:
 - "relevance": score from 0.0 to 1.0
 
 Respond with a JSON array of objects.
-JSON:"""
+            JSON:"""
 
             try:
-                raw_response = await asyncio.to_thread(
-                    analyze_fn,
-                    "openai",
-                    "",
-                    prompt,
-                    None,
-                    "You are a relevance grader. Output valid JSON only.",
-                    0.1,
+                if self.credential_handle is None and self.llm_model is None:
+                    _call_analyzer = partial(
+                        analyze_fn,
+                        "openai",
+                        "",
+                        prompt,
+                        None,
+                        "You are a relevance grader. Output valid JSON only.",
+                        0.1,
+                    )
+                else:
+                    call_kwargs: dict[str, Any] = {}
+                    if self.llm_model is not None:
+                        call_kwargs["model_override"] = self.llm_model
+                    if self.credential_handle is not None:
+                        call_kwargs.update(
+                            app_config=self.credential_handle.app_config,
+                            credentials_resolved=True,
+                            provider_credentials=self.credential_handle,
+                            raise_on_error=True,
+                        )
+
+                    _call_analyzer = partial(
+                        analyze_fn,
+                        self.llm_provider,
+                        prompt,
+                        None,
+                        (
+                            self.credential_handle.api_key
+                            if self.credential_handle is not None
+                            else None
+                        ),
+                        "You are a relevance grader. Output valid JSON only.",
+                        0.1,
+                        **call_kwargs,
+                    )
+
+                async def _call_and_mark(
+                    analyzer: Callable[[], Any],
+                ) -> Any:
+                    raw = await await_bounded_sync_call(
+                        analyzer,
+                        pool=SYNC_ADAPTER_CALL_POOL,
+                        exhaustion_message=(
+                            "Knowledge strips adapter capacity is exhausted"
+                        ),
+                    )
+                    if (
+                        self.credential_handle is not None
+                        and isinstance(raw, str)
+                        and raw.startswith("Error:")
+                    ):
+                        raise RuntimeError("provider unavailable")
+                    if (
+                        self.credential_handle is not None
+                        and not self._credential_marked
+                    ):
+                        await self.credential_runtime.mark_used(
+                            self.credential_handle
+                        )
+                        self._credential_marked = True
+                    return raw
+
+                operation = _call_and_mark(_call_analyzer)
+                raw_response = (
+                    await await_owned_worker(operation)
+                    if self.credential_handle is not None
+                    else await operation
                 )
 
                 # Parse response
@@ -383,6 +490,8 @@ JSON:"""
 
             except Exception:
                 logger.warning("LLM strip scoring failed, falling back to heuristic")
+                if self.credential_runtime is not None:
+                    self._llm_unavailable = True
                 # Fall back to heuristic for this batch
                 for strip in batch:
                     strip.relevance_score = _score_strip_relevance(query, strip.text)
@@ -457,6 +566,9 @@ async def process_knowledge_strips(
     min_relevance: float = 0.3,
     max_strips: int = 20,
     use_llm_grading: bool = False,
+    llm_provider: str = "openai",
+    llm_model: Optional[str] = None,
+    credential_runtime: Any = None,
 ) -> tuple[list[Document], dict[str, Any]]:
     """
     Convenience function to process documents into knowledge strips.
@@ -468,14 +580,25 @@ async def process_knowledge_strips(
         min_relevance: Minimum relevance score to keep
         max_strips: Maximum strips to return
         use_llm_grading: Whether to use LLM for grading (default: heuristic)
+        llm_provider: Effective LLM provider for grading.
+        llm_model: Optional effective model override.
+        credential_runtime: Optional request-scoped provider credential runtime.
 
     Returns:
         Tuple of (filtered_documents, metadata)
     """
     analyze_fn = None
+    credential_handle = None
+    credential_failure = False
     if use_llm_grading:
         try:
             import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
+
+            if credential_runtime is not None:
+                credential_handle = await credential_runtime.resolve(
+                    llm_provider,
+                    model=llm_model,
+                )
 
             def _analyze(*args, **kwargs):
                 return sgl.analyze(*args, **kwargs)
@@ -483,11 +606,19 @@ async def process_knowledge_strips(
             analyze_fn = _analyze
         except ImportError:
             logger.warning("LLM module not available for strip grading")
+            credential_failure = credential_runtime is not None
+        except Exception:
+            logger.warning("LLM strip grading credentials unavailable")
+            credential_failure = True
 
     processor = KnowledgeStripsProcessor(
         strip_size_tokens=strip_size_tokens,
         min_relevance_score=min_relevance,
         analyze_fn=analyze_fn,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        credential_runtime=credential_runtime,
+        credential_handle=credential_handle,
     )
 
     result = await processor.process(query, documents, top_k=max_strips)
@@ -502,5 +633,13 @@ async def process_knowledge_strips(
         "strip_size_tokens": strip_size_tokens,
         "min_relevance": min_relevance,
     }
+    if use_llm_grading and credential_runtime is not None:
+        unavailable = credential_failure or not result.metadata.get(
+            "verification_available",
+            analyze_fn is not None,
+        )
+        metadata["verification_available"] = not unavailable
+        if unavailable:
+            metadata["failure_code"] = "provider_unavailable"
 
     return result.documents, metadata

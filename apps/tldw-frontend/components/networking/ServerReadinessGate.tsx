@@ -42,7 +42,7 @@ const ENTERABLE_HTTP_STATUSES = new Set([200, 206])
 const READY_HEALTH_STATUSES = new Set(["healthy", "ok"])
 const HEALTHY_CHECK_STATUSES = new Set(["healthy", "ok"])
 const SERVER_READINESS_STATE_EVENT = "tldw:server-readiness-state"
-const HEALTH_PATH = "/api/v1/health"
+const HEALTH_PATH = "/health"
 
 const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, "")
 const buildHealthUrl = (origin: string): string =>
@@ -333,8 +333,15 @@ export const ServerReadinessGate: React.FC<{
   children: React.ReactNode
   allowDegraded?: boolean
   bypass?: boolean
-}> = ({ children, allowDegraded = false, bypass = false }) => {
-  const configuredServerUrl = useConnectionStore((s) => s.state.serverUrl)
+  configuredServerUrl?: string | null
+}> = ({
+  children,
+  allowDegraded = false,
+  bypass = false,
+  configuredServerUrl = null
+}) => {
+  const storedServerUrl = useConnectionStore((s) => s.state.serverUrl)
+  const effectiveServerUrl = storedServerUrl || configuredServerUrl
   const offlineBypassEnabled = shouldBypassReadinessForOffline()
   const [gate, setGate] = React.useState<GateState>(() =>
     offlineBypassEnabled ? "ready" : "checking"
@@ -349,12 +356,12 @@ export const ServerReadinessGate: React.FC<{
     () => {
       if (bypass || offlineBypassEnabled) return HEALTH_PATH
       return resolveReadinessHealthUrl({
-        configuredServerUrl,
+        configuredServerUrl: effectiveServerUrl,
         env: _env,
         pageOrigin
       })
     },
-    [bypass, configuredServerUrl, offlineBypassEnabled, pageOrigin]
+    [bypass, effectiveServerUrl, offlineBypassEnabled, pageOrigin]
   )
 
   const retryNow = React.useCallback(() => {

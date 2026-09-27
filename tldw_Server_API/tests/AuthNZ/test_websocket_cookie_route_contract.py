@@ -68,7 +68,7 @@ def _websocket_handlers(path: Path) -> set[str]:
 def test_first_party_websocket_route_inventory_is_complete():
     api_root = REPO_ROOT / "tldw_Server_API/app/api/v1"
     discovered = {
-        str(path.relative_to(REPO_ROOT)): handlers
+        path.relative_to(REPO_ROOT).as_posix(): handlers
         for path in api_root.rglob("*.py")
         if (handlers := _websocket_handlers(path))
     }

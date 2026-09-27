@@ -8,6 +8,7 @@ interface CollapsibleSectionProps {
   defaultOpen?: boolean
   storageKey?: string
   testId?: string
+  onOpenChange?: (open: boolean) => void
   children: React.ReactNode
 }
 
@@ -18,6 +19,7 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   defaultOpen = false,
   storageKey,
   testId,
+  onOpenChange,
   children,
 }) => {
   const [open, setOpen] = React.useState(() => {
@@ -33,18 +35,17 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   })
 
   const toggle = React.useCallback(() => {
-    setOpen((prev) => {
-      const next = !prev
-      if (storageKey) {
-        try {
-          localStorage.setItem(`notes-section-${storageKey}`, String(next))
-        } catch {
-          /* ignore */
-        }
+    const next = !open
+    if (storageKey) {
+      try {
+        localStorage.setItem(`notes-section-${storageKey}`, String(next))
+      } catch {
+        /* ignore */
       }
-      return next
-    })
-  }, [storageKey])
+    }
+    setOpen(next)
+    onOpenChange?.(next)
+  }, [open, storageKey, onOpenChange])
 
   return (
     <div data-testid={testId}>

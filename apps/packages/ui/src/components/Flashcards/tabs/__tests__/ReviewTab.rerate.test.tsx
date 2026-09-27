@@ -34,6 +34,11 @@ const messageSpies = {
   destroy: vi.fn()
 }
 
+vi.mock("@/services/service-prompts", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+  ...await import("./review-scope-fixture")
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -93,7 +98,7 @@ vi.mock("../../hooks", () => ({
   useCramQueueQuery: vi.fn(),
   useReviewQuery: vi.fn(),
   useReviewFlashcardMutation: vi.fn(),
-  useEndFlashcardReviewSessionMutation: vi.fn(),
+  useEndFlashcardReviewSessionMutation: vi.fn(() => ({ mutateAsync: vi.fn().mockResolvedValue({ id: 77 }), isPending: false })),
   useRecentFlashcardReviewSessionsQuery: vi.fn(() => ({
     data: [],
     isLoading: false,
@@ -169,7 +174,8 @@ describe("ReviewTab re-rate action", () => {
   const firstCard = makeCard({
     uuid: "review-card-1",
     front: "Question one",
-    back: "Answer one"
+    back: "Answer one",
+    next_intervals: { again: "< 1 min", hard: "6 days", good: "10 days", easy: "13 days" }
   })
   const secondCard = makeCard({
     uuid: "review-card-2",
@@ -195,22 +201,26 @@ describe("ReviewTab re-rate action", () => {
     )
     vi.mocked(useCramQueueQuery).mockReturnValue({ data: [] } as any)
     vi.mocked(useReviewFlashcardMutation).mockReturnValue({
-      mutateAsync: vi.fn().mockImplementation(async () => {
+      mutateAsync: vi.fn().mockImplementation(async ({ rating }) => {
         currentCard = secondCard
         return {
+          review_session_id: 77,
           uuid: firstCard.uuid,
           ef: 2.6,
           interval_days: 2,
           repetitions: 2,
           lapses: 0,
           due_at: "2026-02-20T09:30:00.000Z",
-          version: 2
+          version: 2,
+          next_intervals: rating === 2
+            ? { again: "< 1 min", hard: "20 days", good: "35 days", easy: "2 mo" }
+            : { again: "< 1 min", hard: "14 days", good: "25 days", easy: "1 mo" }
         }
       }),
       isPending: false
     } as any)
     vi.mocked(useEndFlashcardReviewSessionMutation).mockReturnValue({
-      mutateAsync: vi.fn(),
+      mutateAsync: vi.fn().mockResolvedValue({ id: 77 }),
       isPending: false
     } as any)
     vi.mocked(useRecentFlashcardReviewSessionsQuery).mockReturnValue({
@@ -293,5 +303,47 @@ describe("ReviewTab re-rate action", () => {
       expect(screen.getByText("Question one")).toBeInTheDocument()
       expect(screen.getByText("Answer one")).toBeInTheDocument()
     })
+    fireEvent.click(screen.getByTestId("flashcards-review-rate-4"))
+    const mutation = vi.mocked(useReviewFlashcardMutation).mock.results[0].value.mutateAsync
+    await waitFor(() => expect(mutation).toHaveBeenCalledTimes(2))
+    expect(mutation.mock.calls[1][0]).toEqual(expect.objectContaining({
+      cardUuid: firstCard.uuid, rating: 5, reviewSessionId: 77,
+      reviewContext: { review_mode: "due", deck_id: 1, tag_filter: null }
+    }))
+    expect(vi.mocked(useEndFlashcardReviewSessionMutation).mock.results[0].value.mutateAsync).not.toHaveBeenCalled()
+  })
+
+  it("uses each saved schedule for the next re-rate preview while retaining card content", async () => {
+    render(<ReviewTab onNavigateToCreate={vi.fn()} onNavigateToImport={vi.fn()}
+      reviewDeckId={1} onReviewDeckChange={vi.fn()} isActive />)
+    fireEvent.click(screen.getByTestId("flashcards-review-show-answer"))
+    expect(screen.getByTestId("flashcards-review-rate-2")).toHaveTextContent("6 days")
+    fireEvent.click(screen.getByTestId("flashcards-review-rate-3"))
+    await screen.findByText("Question two")
+    fireEvent.click(screen.getByTestId("flashcards-review-undo-rating"))
+    expect(await screen.findByText("Answer one")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-review-rate-2")).toHaveTextContent("14 days")
+    expect(screen.getByTestId("flashcards-review-rate-3")).toHaveTextContent("25 days")
+    expect(screen.getByTestId("flashcards-review-rate-4")).toHaveTextContent("1 mo")
+    fireEvent.click(screen.getByTestId("flashcards-review-rate-2"))
+    await screen.findByText("Question two")
+    fireEvent.click(screen.getByTestId("flashcards-review-undo-rating"))
+    expect(await screen.findByText("Question one")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-review-rate-2")).toHaveTextContent("20 days")
+    expect(screen.getByTestId("flashcards-review-rate-3")).toHaveTextContent("35 days")
+    expect(screen.getByTestId("flashcards-review-rate-4")).toHaveTextContent("2 mo")
+  })
+
+  it("keeps the current preview and does not enable re-rate when saving fails", async () => {
+    const mutation = vi.mocked(useReviewFlashcardMutation)().mutateAsync
+    vi.mocked(mutation).mockRejectedValueOnce(new Error("Controlled review failure"))
+    render(<ReviewTab onNavigateToCreate={vi.fn()} onNavigateToImport={vi.fn()}
+      reviewDeckId={1} onReviewDeckChange={vi.fn()} isActive />)
+    fireEvent.click(screen.getByTestId("flashcards-review-show-answer"))
+    fireEvent.click(screen.getByTestId("flashcards-review-rate-3"))
+    await screen.findByText("Review not saved")
+    expect(screen.getByText("Answer one")).toBeInTheDocument()
+    expect(screen.getByTestId("flashcards-review-rate-2")).toHaveTextContent("6 days")
+    expect(screen.queryByTestId("flashcards-review-undo-rating")).not.toBeInTheDocument()
   })
 })

@@ -8,7 +8,16 @@ describe('Vitest setup contract', () => {
     const setupPath = path.resolve(__dirname, '..', 'vitest.setup.ts');
     const source = fs.readFileSync(setupPath, 'utf8');
 
-    expect(source).toContain("import '../packages/ui/vitest.setup';");
+    // The baseline is awaited after the web mocks are registered so its
+    // imports see the same Dexie/React Query adapters as the test modules.
+    const baselineImport = source.indexOf("await import('../packages/ui/vitest.setup')");
+    const queryMock = source.indexOf("vi.doMock('@tanstack/react-query'");
+    const dexieMock = source.indexOf("vi.doMock('@/db/dexie/schema'");
+    expect(baselineImport).toBeGreaterThanOrEqual(0);
+    expect(queryMock).toBeGreaterThanOrEqual(0);
+    expect(dexieMock).toBeGreaterThanOrEqual(0);
+    expect(baselineImport).toBeGreaterThan(queryMock);
+    expect(baselineImport).toBeGreaterThan(dexieMock);
   });
 
   it('provides browser APIs required by the characters harness', () => {

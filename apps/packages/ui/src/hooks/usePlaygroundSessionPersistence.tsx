@@ -1,3 +1,5 @@
+import { restoreReadableLocalComparison } from "@/hooks/useLoadLocalConversation"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { useStoreMessageOption } from "@/store/option"
@@ -7,6 +9,7 @@ import {
   formatToChatHistory,
   formatToMessage,
   getFullChatData,
+  getSessionFiles,
   getPromptById
 } from "@/db/dexie/helpers"
 import { useStoreChatModelSettings } from "@/store/model"
@@ -19,22 +22,16 @@ import {
   resolveEffectiveAssistantState
 } from "@/hooks/chat/effective-assistant-state"
 import {
-  characterToAssistantSelection,
   getAssistantSelectionMode,
   normalizeAssistantSelection
 } from "@/types/assistant-selection"
-import {
-  SELECTED_ASSISTANT_STORAGE_KEY,
-  parseSelectedAssistantValue,
-  selectedAssistantStorage
-} from "@/utils/selected-assistant-storage"
-import {
-  SELECTED_CHARACTER_STORAGE_KEY,
-  parseSelectedCharacterValue,
-  selectedCharacterStorage
-} from "@/utils/selected-character-storage"
 
 const DEBOUNCE_MS = 1000
+
+export type PlaygroundSessionRestoreOutcome =
+  | "restored"
+  | "not-restored"
+  | "cancelled"
 
 /**
  * Hook to persist and restore playground session state.
@@ -44,6 +41,9 @@ const DEBOUNCE_MS = 1000
  * - Clears session when user starts a new chat
  */
 export function usePlaygroundSessionPersistence() {
+  const historySelection = useHistorySelectionContext()
+  const selectionRef = useRef(historySelection)
+  selectionRef.current = historySelection
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isRestoringRef = useRef(false)
   const initialRestoreSettledRef = useRef(false)
@@ -55,7 +55,12 @@ export function usePlaygroundSessionPersistence() {
   const clearSession = usePlaygroundSessionStore((s) => s.clearSession)
   const isSessionValid = usePlaygroundSessionStore((s) => s.isSessionValid)
   const [currentScopeKey, setCurrentScopeKey] = useState<string | null>(null)
-  const [sessionScopeReady, setSessionScopeReady] = useState(false)
+  const [connectionScopeReady, setSessionScopeReady] = useState(false)
+  const persistenceRevision = sessionStore.restoreRevision
+  const isCurrentPersistence = useCallback(
+    () => usePlaygroundSessionStore.getState().restoreRevision === persistenceRevision,
+    [persistenceRevision]
+  )
 
   // Main message option store
   const {
@@ -69,6 +74,7 @@ export function usePlaygroundSessionPersistence() {
     webSearch,
     compareMode,
     compareSelectedModels,
+    fileRetrievalEnabled,
     ragMediaIds,
     ragSearchMode,
     ragTopK,
@@ -78,6 +84,7 @@ export function usePlaygroundSessionPersistence() {
     temporaryChat,
     setHistoryId,
     setServerChatId,
+    setServerChatTitle,
     setServerChatCharacterId,
     setServerChatAssistantKind,
     setServerChatAssistantId,
@@ -87,6 +94,7 @@ export function usePlaygroundSessionPersistence() {
     setWebSearch,
     setCompareMode,
     setCompareSelectedModels,
+    setFileRetrievalEnabled,
     setRagMediaIds,
     setRagSearchMode,
     setRagTopK,
@@ -108,6 +116,7 @@ export function usePlaygroundSessionPersistence() {
       webSearch: state.webSearch,
       compareMode: state.compareMode,
       compareSelectedModels: state.compareSelectedModels,
+      fileRetrievalEnabled: state.fileRetrievalEnabled,
       ragMediaIds: state.ragMediaIds,
       ragSearchMode: state.ragSearchMode,
       ragTopK: state.ragTopK,
@@ -117,6 +126,7 @@ export function usePlaygroundSessionPersistence() {
       temporaryChat: state.temporaryChat,
       setHistoryId: state.setHistoryId,
       setServerChatId: state.setServerChatId,
+      setServerChatTitle: state.setServerChatTitle,
       setServerChatCharacterId: state.setServerChatCharacterId,
       setServerChatAssistantKind: state.setServerChatAssistantKind,
       setServerChatAssistantId: state.setServerChatAssistantId,
@@ -126,6 +136,7 @@ export function usePlaygroundSessionPersistence() {
       setWebSearch: state.setWebSearch,
       setCompareMode: state.setCompareMode,
       setCompareSelectedModels: state.setCompareSelectedModels,
+      setFileRetrievalEnabled: state.setFileRetrievalEnabled,
       setRagMediaIds: state.setRagMediaIds,
       setRagSearchMode: state.setRagSearchMode,
       setRagTopK: state.setRagTopK,
@@ -140,7 +151,18 @@ export function usePlaygroundSessionPersistence() {
   )
 
   const { setSystemPrompt } = useStoreChatModelSettings()
-  const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
+  const [selectedAssistant, setSelectedAssistant, assistantMeta] = useSelectedAssistant(null)
+  const sessionScopeReady = connectionScopeReady && !assistantMeta?.isLoading
+  const readOwnedSelection = assistantMeta?.readSelection
+  // Form handoffs can arrive before initial hydration starts or while its DB
+  // read is pending, even with identical values. Observe accepted intent, not
+  // value equality; this baseline is used only for the initial saved target.
+  const initialSourceSelectionRef = useRef({
+    revision: sessionStore.sourceSelectionRevision,
+    scopeKey: sessionStore.scopeKey,
+    historyId: sessionStore.historyId,
+    serverChatId: sessionStore.serverChatId
+  })
 
   const resolveCurrentScopeKey = useCallback(async (): Promise<string> => {
     const config = await tldwClient.getConfig().catch(() => null)
@@ -166,6 +188,7 @@ export function usePlaygroundSessionPersistence() {
   }, [lastConfigUpdatedAt, resolveCurrentScopeKey, serverUrl])
 
   const buildPersistableSessionSnapshot = useCallback(() => {
+    if (!isCurrentPersistence()) return null
     // Don't save while a restore is replaying into the stores.
     if (isRestoringRef.current) return null
 
@@ -234,6 +257,7 @@ export function usePlaygroundSessionPersistence() {
       null
 
     return {
+      historySelectionReference: selectionRef.current?.getReference() ?? null,
       historyId,
       serverChatId,
       trackedAssistantSelection,
@@ -247,6 +271,7 @@ export function usePlaygroundSessionPersistence() {
       webSearch,
       compareMode,
       compareSelectedModels,
+      fileRetrievalEnabled,
       ragMediaIds,
       ragSearchMode,
       ragTopK,
@@ -255,6 +280,7 @@ export function usePlaygroundSessionPersistence() {
       queuedMessages
     }
   }, [
+    isCurrentPersistence,
     historyId,
     serverChatId,
     serverChatAssistantKind,
@@ -265,6 +291,7 @@ export function usePlaygroundSessionPersistence() {
     webSearch,
     compareMode,
     compareSelectedModels,
+    fileRetrievalEnabled,
     ragMediaIds,
     ragSearchMode,
     ragTopK,
@@ -340,13 +367,7 @@ export function usePlaygroundSessionPersistence() {
       }
 
       try {
-        const storedAssistant = normalizeAssistantSelection(
-          parseSelectedAssistantValue(
-            await selectedAssistantStorage.get<unknown>(
-              SELECTED_ASSISTANT_STORAGE_KEY
-            )
-          )
-        )
+        const storedAssistant = await readOwnedSelection?.()
         if (
           storedAssistant &&
           getAssistantSelectionMode(storedAssistant) === "tracked" &&
@@ -363,45 +384,27 @@ export function usePlaygroundSessionPersistence() {
           }
         }
       } catch {
-        // ignore tracked assistant storage hydration failures during session save
-      }
-
-      if (snapshot.trackedAssistantKind === "character") {
-        try {
-          const legacyCharacterSelection = characterToAssistantSelection(
-            parseSelectedCharacterValue<Record<string, unknown>>(
-              await selectedCharacterStorage.get<unknown>(
-                SELECTED_CHARACTER_STORAGE_KEY
-              )
-            )
-          )
-          if (
-            legacyCharacterSelection &&
-            legacyCharacterSelection.id === snapshot.trackedAssistantId
-          ) {
-            return {
-              ...snapshot,
-              trackedAssistantSelection: legacyCharacterSelection,
-              trackedAssistantDisplayName:
-                legacyCharacterSelection.name ?? snapshot.trackedAssistantDisplayName,
-              trackedAssistantAvatarUrl:
-                legacyCharacterSelection.avatar_url ??
-                snapshot.trackedAssistantAvatarUrl
-            }
-          }
-        } catch {
-          // ignore legacy character storage hydration failures during session save
-        }
+        // Keep canonical metadata when owned selection storage is unavailable.
       }
 
       return snapshot
     },
-    []
+    [readOwnedSelection]
   )
 
   useEffect(() => {
     latestSessionSnapshotRef.current = buildPersistableSessionSnapshot()
   }, [buildPersistableSessionSnapshot])
+
+  useEffect(() => {
+    if (!sessionScopeReady) return
+    if (isSessionValid(currentScopeKey)) return
+
+    // A fresh or invalid session has nothing to replay. Treat that initial
+    // restore lifecycle as settled so the first server chat can be persisted
+    // immediately, including when the user reloads before the debounce fires.
+    initialRestoreSettledRef.current = true
+  }, [currentScopeKey, isSessionValid, sessionScopeReady])
 
   useEffect(() => {
     if (!initialRestoreSettledRef.current) return
@@ -424,6 +427,7 @@ export function usePlaygroundSessionPersistence() {
     lastImmediateSaveKeyRef.current = immediateSaveKey
 
     void enrichTrackedAssistantSnapshot(snapshot).then((enrichedSnapshot) => {
+      if (!isCurrentPersistence()) return
       saveSession({
         ...enrichedSnapshot,
         scopeKey: currentScopeKey
@@ -432,6 +436,7 @@ export function usePlaygroundSessionPersistence() {
   }, [
     buildPersistableSessionSnapshot,
     currentScopeKey,
+    isCurrentPersistence,
     enrichTrackedAssistantSnapshot,
     saveSession,
     sessionScopeReady
@@ -453,6 +458,7 @@ export function usePlaygroundSessionPersistence() {
         resolveCurrentScopeKey(),
         enrichTrackedAssistantSnapshot(snapshot)
       ]).then(([scopeKey, enrichedSnapshot]) => {
+        if (!isCurrentPersistence() || (currentScopeKey && scopeKey !== currentScopeKey)) return
         saveSession({
           ...enrichedSnapshot,
           scopeKey
@@ -462,6 +468,8 @@ export function usePlaygroundSessionPersistence() {
   }, [
     buildPersistableSessionSnapshot,
     enrichTrackedAssistantSnapshot,
+    currentScopeKey,
+    isCurrentPersistence,
     resolveCurrentScopeKey,
     saveSession
   ])
@@ -471,6 +479,7 @@ export function usePlaygroundSessionPersistence() {
       clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
+    if (!isCurrentPersistence()) return
     // Prefer a fresh snapshot over the ref to avoid saving stale state on unmount.
     const snapshot = buildPersistableSessionSnapshot() ?? latestSessionSnapshotRef.current
     if (!snapshot) return
@@ -478,6 +487,7 @@ export function usePlaygroundSessionPersistence() {
       resolveCurrentScopeKey(),
       enrichTrackedAssistantSnapshot(snapshot)
     ]).then(([scopeKey, enrichedSnapshot]) => {
+      if (!isCurrentPersistence() || (currentScopeKey && scopeKey !== currentScopeKey)) return
       saveSession({
         ...enrichedSnapshot,
         scopeKey
@@ -486,6 +496,8 @@ export function usePlaygroundSessionPersistence() {
   }, [
     buildPersistableSessionSnapshot,
     enrichTrackedAssistantSnapshot,
+    currentScopeKey,
+    isCurrentPersistence,
     resolveCurrentScopeKey,
     saveSession
   ])
@@ -515,12 +527,87 @@ export function usePlaygroundSessionPersistence() {
   }, [])
 
   // Restore session from persisted state
-  const restoreSession = useCallback(async (): Promise<boolean> => {
+  const restoreSession = useCallback(async (): Promise<PlaygroundSessionRestoreOutcome> => {
+    selectionRef.current?.beginLoad()
+    let selectionCurrent = selectionRef.current?.fence() || (() => true)
+    if (!sessionScopeReady) return "cancelled"
+    const initialSelection = initialSourceSelectionRef.current
+    const selectionBeforeRestore =
+      !initialRestoreSettledRef.current &&
+      initialSelection.scopeKey === sessionStore.scopeKey &&
+      initialSelection.historyId === sessionStore.historyId &&
+      initialSelection.serverChatId === sessionStore.serverChatId
+        ? initialSelection.revision
+        : usePlaygroundSessionStore.getState().sourceSelectionRevision
+    const restoreRevision =
+      usePlaygroundSessionStore.getState().restoreRevision
+    const isCurrentRestore = () =>
+      usePlaygroundSessionStore.getState().restoreRevision === restoreRevision && selectionCurrent()
     const scopeKey = await resolveCurrentScopeKey()
-    if (!isSessionValid(scopeKey)) {
+    if (!isCurrentRestore()) {
+      initialRestoreSettledRef.current = true
+      return "cancelled"
+    }
+    const tabReference = selectionRef.current?.getStoredReference()
+    const sharedReference = sessionStore.historySelectionReference
+    const matchesShared = tabReference && sharedReference &&
+      tabReference.profile_id === sharedReference.profile_id &&
+      tabReference.owner_key === sharedReference.owner_key &&
+      tabReference.conversation_id === sharedReference.conversation_id
+    const canReuseSharedSession = matchesShared && isSessionValid(scopeKey) &&
+      (tabReference.owner_kind === "local"
+        ? sessionStore.historyId === tabReference.conversation_id && !sessionStore.serverChatId
+        : sessionStore.serverChatId === tabReference.conversation_id)
+    if (tabReference) {
+      const selected = selectionRef.current!
+      const loaded = await selected.loadConversation(tabReference.owner_kind === "local"
+        ? { historyId: tabReference.conversation_id } : { serverChatId: tabReference.conversation_id }, tabReference)
+      if (!loaded || usePlaygroundSessionStore.getState().restoreRevision !== restoreRevision) return "cancelled"
+      selectionCurrent = selected.fence()
+      // A failed owner validation stays visible; never substitute the other tab's session.
+      if (!selected.getCurrent().capture) return "restored"
+      setHistoryId(tabReference.owner_kind === "local" ? tabReference.conversation_id : null)
+      setServerChatId(tabReference.owner_kind === "native" ? tabReference.conversation_id : null)
+      if (!canReuseSharedSession) {
+        setQueuedMessages([])
+        setServerChatAssistantKind(null)
+        setServerChatAssistantId(null)
+        setServerChatCharacterId(null)
+        setServerChatPersonaMemoryMode(null)
+        setServerChatMetaLoaded(false)
+        await setSelectedAssistant(null)
+        if (!isCurrentRestore()) return "cancelled"
+        setSystemPrompt("")
+        useStoreMessageOption.getState().setContextFiles([])
+        if (tabReference.owner_kind === "local") {
+          const chatData = await getFullChatData(tabReference.conversation_id)
+          if (!isCurrentRestore()) return "cancelled"
+          if (chatData) {
+            const prompt = chatData.historyInfo.last_used_prompt
+            setSystemPrompt(prompt?.prompt_content || "")
+            const files = await getSessionFiles(tabReference.conversation_id)
+            if (!isCurrentRestore()) return "cancelled"
+            useStoreMessageOption.getState().setContextFiles(files)
+            if (chatData.historyInfo.model_id) useStoreMessageOption.getState().setSelectedModel(chatData.historyInfo.model_id)
+            if (selected.getCurrent().capture?.status !== "captured") {
+              if (selected.getCurrent().error === "unsupported_comparison_history") {
+                await restoreReadableLocalComparison(selected, display => { setHistory(display.history); setMessages(display.messages) }, chatData)
+                if (!isCurrentRestore()) return "cancelled"
+              } else {
+                setHistory(formatToChatHistory(chatData.messages))
+                setMessages(formatToMessage(chatData.messages))
+              }
+            }
+          }
+        }
+        initialRestoreSettledRef.current = true
+        return "restored"
+      }
+    }
+    if (!tabReference && !isSessionValid(scopeKey)) {
       clearSession()
       initialRestoreSettledRef.current = true
-      return false
+      return "not-restored"
     }
 
     const savedHistoryId = sessionStore.historyId
@@ -536,30 +623,56 @@ export function usePlaygroundSessionPersistence() {
       sessionStore.trackedAssistantAvatarUrl ?? null
     const savedQueue = sessionStore.queuedMessages ?? []
     if (!savedHistoryId && !savedServerChatId && savedQueue.length === 0) {
-      return false
+      initialRestoreSettledRef.current = true
+      return "not-restored"
     }
 
     isRestoringRef.current = true
 
     try {
+      let cachedServerTitle: string | null = null
       if (savedHistoryId) {
         // Restore messages from Dexie
         const chatData = await getFullChatData(savedHistoryId)
+        if (!isCurrentRestore()) return "cancelled"
         if (!chatData) {
+          if (tabReference) return "restored"
           // History was deleted, clear session
           clearSession()
-          return false
+          return "not-restored"
+        }
+        if (chatData.historyInfo.server_chat_id === savedServerChatId) {
+          cachedServerTitle = chatData.historyInfo.title || null
         }
 
+        if (selectionRef.current && !tabReference) {
+          if (!await selectionRef.current.loadConversation({ historyId: savedHistoryId, serverChatId: savedServerChatId }, tabReference || sessionStore.historySelectionReference)) return "cancelled"
+          if (usePlaygroundSessionStore.getState().restoreRevision !== restoreRevision) return "cancelled"
+          selectionCurrent = selectionRef.current.fence()
+          const current = selectionRef.current.getCurrent()
+          if (!current.capture && current.error) {
+            if (current.error === "unbound_server_mirror") {
+              // Preserve the local read-only locator; binding is a separate explicit action.
+              setHistoryId(savedHistoryId)
+              setServerChatId(null)
+              setHistory(formatToChatHistory(chatData.messages))
+              setMessages(formatToMessage(chatData.messages))
+            }
+            return "restored"
+          }
+        }
         // Restore messages and history
         setHistoryId(savedHistoryId)
-        setHistory(formatToChatHistory(chatData.messages))
-        setMessages(formatToMessage(chatData.messages))
+        if (selectionRef.current?.getCurrent().capture?.status !== "captured") {
+          setHistory(formatToChatHistory(chatData.messages))
+          setMessages(formatToMessage(chatData.messages))
+        }
 
         // Restore system prompt if present
         const lastUsedPrompt = (chatData.historyInfo as any)?.last_used_prompt
         if (lastUsedPrompt?.prompt_id) {
           const prompt = await getPromptById(lastUsedPrompt.prompt_id)
+          if (!isCurrentRestore()) return "cancelled"
           if (prompt) {
             setSelectedSystemPrompt(lastUsedPrompt.prompt_id)
             setSystemPrompt(prompt.content)
@@ -570,34 +683,22 @@ export function usePlaygroundSessionPersistence() {
       }
 
       // Restore settings from session store
-      if (savedServerChatId) {
+      if (savedServerChatId && selectionRef.current?.getCurrent().error !== "unbound_server_mirror") {
+        if (!savedHistoryId && selectionRef.current && !tabReference) {
+          if (!await selectionRef.current.loadConversation({ serverChatId: savedServerChatId }, tabReference || sessionStore.historySelectionReference)) return "cancelled"
+          if (usePlaygroundSessionStore.getState().restoreRevision !== restoreRevision) return "cancelled"
+          selectionCurrent = selectionRef.current.fence()
+          if (!selectionRef.current.getCurrent().capture && selectionRef.current.getCurrent().error) return "restored"
+        }
         if (!savedHistoryId) {
           setHistoryId(null)
-          setHistory([])
-          setMessages([])
-        }
-        setServerChatId(savedServerChatId)
-        if (
-          savedTrackedAssistantSelection &&
-          getAssistantSelectionMode(savedTrackedAssistantSelection) === "tracked"
-        ) {
-          await setSelectedAssistant(savedTrackedAssistantSelection)
-        } else if (savedTrackedAssistantKind && savedTrackedAssistantId) {
-          const reconstructedSelection = normalizeAssistantSelection({
-            kind: savedTrackedAssistantKind,
-            id: savedTrackedAssistantId,
-            name:
-              savedTrackedAssistantDisplayName ??
-              (savedTrackedAssistantKind === "persona" ? "Persona" : "Assistant"),
-            avatar_url: savedTrackedAssistantAvatarUrl,
-            metadata: {
-              selectionMode: "tracked"
-            }
-          })
-          if (reconstructedSelection) {
-            await setSelectedAssistant(reconstructedSelection)
+          if (selectionRef.current?.getCurrent().capture?.status !== "captured") {
+            setHistory([])
+            setMessages([])
           }
         }
+        setServerChatId(savedServerChatId)
+        setServerChatTitle(cachedServerTitle)
         if (savedTrackedAssistantKind && savedTrackedAssistantId) {
           if (savedTrackedAssistantKind === "character") {
             setServerChatCharacterId(savedTrackedCharacterId ?? savedTrackedAssistantId)
@@ -612,20 +713,60 @@ export function usePlaygroundSessionPersistence() {
               sessionStore.serverChatPersonaMemoryMode ?? "read_only"
             )
           }
-          setServerChatMetaLoaded(true)
+          // Cached assistant identity omits canonical title/version metadata.
+          // Publish it before awaiting storage so a server refresh stays authoritative.
+          setServerChatMetaLoaded(false)
+        }
+        if (
+          savedTrackedAssistantSelection &&
+          getAssistantSelectionMode(savedTrackedAssistantSelection) === "tracked"
+        ) {
+          await setSelectedAssistant(savedTrackedAssistantSelection, {
+            isCurrent: isCurrentRestore
+          })
+          if (!isCurrentRestore()) return "cancelled"
+        } else if (savedTrackedAssistantKind && savedTrackedAssistantId) {
+          const reconstructedSelection = normalizeAssistantSelection({
+            kind: savedTrackedAssistantKind,
+            id: savedTrackedAssistantId,
+            name:
+              savedTrackedAssistantDisplayName ??
+              (savedTrackedAssistantKind === "persona" ? "Persona" : "Assistant"),
+            avatar_url: savedTrackedAssistantAvatarUrl,
+            metadata: {
+              selectionMode: "tracked"
+            }
+          })
+          if (reconstructedSelection) {
+            await setSelectedAssistant(reconstructedSelection, {
+              isCurrent: isCurrentRestore
+            })
+            if (!isCurrentRestore()) return "cancelled"
+          }
         }
       }
-      setChatMode(sessionStore.chatMode)
+      const sourceSelectionChanged =
+        usePlaygroundSessionStore.getState().sourceSelectionRevision !==
+        selectionBeforeRestore
+      if (!sourceSelectionChanged) {
+        setChatMode(sessionStore.chatMode)
+        setFileRetrievalEnabled(sessionStore.fileRetrievalEnabled === true)
+        if (sessionStore.ragMediaIds) {
+          setRagMediaIds(sessionStore.ragMediaIds)
+        }
+      }
       setWebSearch(sessionStore.webSearch)
-      setCompareMode(sessionStore.compareMode)
-      if (sessionStore.compareSelectedModels.length > 0) {
-        setCompareSelectedModels(sessionStore.compareSelectedModels)
+      const restoredOwner = selectionRef.current?.getCurrent().owner
+      // Local H1 comparison is restored from its per-conversation compareStates.
+      // A shared session snapshot can predate that asynchronous owner hydration.
+      if (restoredOwner?.kind !== "local" || restoredOwner.conversation_id !== savedHistoryId) {
+        setCompareMode(sessionStore.compareMode)
+        if (sessionStore.compareSelectedModels.length > 0) {
+          setCompareSelectedModels(sessionStore.compareSelectedModels)
+        }
       }
 
       // Restore RAG settings
-      if (sessionStore.ragMediaIds) {
-        setRagMediaIds(sessionStore.ragMediaIds)
-      }
       setRagSearchMode(sessionStore.ragSearchMode)
       if (sessionStore.ragTopK !== null) {
         setRagTopK(sessionStore.ragTopK)
@@ -634,22 +775,24 @@ export function usePlaygroundSessionPersistence() {
       setRagEnableCitations(sessionStore.ragEnableCitations)
       setQueuedMessages(restoreQueuedRequests(savedQueue))
 
-      return true
+      return "restored"
     } catch (error) {
       console.warn("Failed to restore session:", error)
       clearSession()
-      return false
+      return "not-restored"
     } finally {
       isRestoringRef.current = false
       initialRestoreSettledRef.current = true
     }
   }, [
+    sessionScopeReady,
     isSessionValid,
     sessionStore,
     clearSession,
     resolveCurrentScopeKey,
     setHistoryId,
     setServerChatId,
+    setServerChatTitle,
     setServerChatAssistantId,
     setServerChatAssistantKind,
     setServerChatCharacterId,
@@ -664,6 +807,7 @@ export function usePlaygroundSessionPersistence() {
     setWebSearch,
     setCompareMode,
     setCompareSelectedModels,
+    setFileRetrievalEnabled,
     setRagMediaIds,
     setRagSearchMode,
     setRagTopK,
@@ -679,6 +823,7 @@ export function usePlaygroundSessionPersistence() {
       saveTimerRef.current = null
     }
     initialRestoreSettledRef.current = true
+    selectionRef.current?.reset()
     clearSession()
   }, [clearSession])
 

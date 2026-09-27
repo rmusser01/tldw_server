@@ -46,6 +46,7 @@ const PROVIDER_KEY_ALIASES: Record<string, string> = {
   "llama-cpp": "llama",
   llama_cpp: "llama",
   llamacpp: "llama",
+  localllm: "local",
   oobabooga: "ooba",
   tabbyapi: "tabby",
   "z.ai": "zai",

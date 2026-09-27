@@ -1,3 +1,4 @@
+import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope"
 import { useMemo } from "react"
 import { MISSION_CARDS, type MissionCard } from "../mission-cards"
 import { useMilestoneStore, type MilestoneId } from "@/store/milestones"
@@ -17,11 +18,18 @@ export type UseMissionCardsResult = {
 
 export function useMissionCards(): UseMissionCardsResult {
   const userPersona = useConnectionStore((s) => s.state.userPersona)
+  const homeScope = useHomeMilestoneScope()
+  const scopedMilestones = useMilestoneStore((s) => s.scopedMilestones)
   const completedMilestones = useMilestoneStore((s) => s.completedMilestones)
 
   return useMemo(() => {
     // Use completedMilestones directly instead of isMilestoneCompleted
-    const isCompleted = (id: MilestoneId) => completedMilestones[id] != null
+    const isCompleted = (id: MilestoneId) => {
+      if (id === "first_connection" || id === "first_chat" || id === "first_ingest") {
+        return Boolean(homeScope && scopedMilestones[homeScope]?.[id] != null)
+      }
+      return completedMilestones[id] != null
+    }
 
     // 1. Filter by persona
     const personaCards = MISSION_CARDS.filter((card) => {
@@ -60,5 +68,5 @@ export function useMissionCards(): UseMissionCardsResult {
       totalCount,
       allComplete: completedCount === totalCount && totalCount > 0
     }
-  }, [userPersona, completedMilestones])
+  }, [userPersona, completedMilestones, homeScope, scopedMilestones])
 }

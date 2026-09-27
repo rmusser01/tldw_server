@@ -1,8 +1,7 @@
-import os
 import json
+import os
 
 import pytest
-
 
 pytestmark = pytest.mark.integration
 
@@ -38,13 +37,14 @@ async def test_redis_streams_roundtrip_smoke():
         assert items and items[0][1]["hello"] == "world"
         # Acknowledge path (create group, read, ack)
         try:
-            await client.xgroup_create(stream, "g", id="$", mkstream=True)
-        except Exception:
-            _ = None
-        msgs = await client.xreadgroup("g", "c1", {stream: ">"}, count=1, block=100)
-        if msgs:
-            s, arr = msgs[0]
-            mid = arr[0][0]
-            await client.xack(stream, "g", mid)
+            await client.xgroup_create(stream, "g", id="0", mkstream=True)
+        except aioredis.ResponseError as exc:
+            if "BUSYGROUP" not in str(exc):
+                raise
+        msgs = await client.xreadgroup("g", "c1", {stream: ">"}, count=1)
+        assert msgs
+        _, arr = msgs[0]
+        mid = arr[0][0]
+        assert await client.xack(stream, "g", mid) == 1
     finally:
         await client.close()

@@ -49,7 +49,10 @@ vi.mock("../../hooks", () => ({
   useUpdateQuizMutation: vi.fn(),
   useCreateQuestionMutation: vi.fn(),
   useUpdateQuestionMutation: vi.fn(),
-  useDeleteQuestionMutation: vi.fn()
+  useDeleteQuestionMutation: vi.fn(),
+  useAllOsceStationsQuery: vi.fn(() => ({ data: [], isLoading: false })),
+  useDeleteOsceStationMutation: vi.fn(() => ({ mutateAsync: vi.fn(), isPending: false })),
+  useOsceStationQuery: vi.fn(() => ({ data: undefined, isLoading: false }))
 }))
 
 if (!(globalThis as any).ResizeObserver) {

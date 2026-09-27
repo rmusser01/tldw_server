@@ -75,13 +75,19 @@ const TestWrapper: React.FC<{
   allCharacters?: any[]
   activeTab?: "entries" | "attachments" | "stats" | "settings"
   statsData?: any | null
+  attachmentsLoading?: boolean
+  attachmentsError?: boolean
+  onRetryAttachments?: () => void
 }> = ({
   worldBook = mockWorldBook,
   attachedCharacters = mockAttachedCharacters,
   allWorldBooks = [mockWorldBook],
   allCharacters = mockAllCharacters,
   activeTab = "entries",
-  statsData = null
+  statsData = null,
+  attachmentsLoading = false,
+  attachmentsError = false,
+  onRetryAttachments = vi.fn()
 }) => {
   const [entryForm] = Form.useForm()
   const [settingsForm] = Form.useForm()
@@ -105,6 +111,9 @@ const TestWrapper: React.FC<{
       statsData={statsData}
       statsLoading={false}
       statsError={null}
+      attachmentsLoading={attachmentsLoading}
+      attachmentsError={attachmentsError}
+      onRetryAttachments={onRetryAttachments}
     />
   )
 }
@@ -187,6 +196,26 @@ describe("WorldBookDetailPanel", () => {
       "href",
       "/characters?from=world-books&focusCharacterId=10&focusWorldBookId=1"
     )
+  })
+
+  it("shows a retryable error when attachment hydration fails", async () => {
+    const user = userEvent.setup()
+    const onRetryAttachments = vi.fn()
+    render(
+      <TestWrapper
+        activeTab="attachments"
+        attachmentsError
+        onRetryAttachments={onRetryAttachments}
+      />
+    )
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Unable to load character attachments. Try again."
+    )
+    expect(screen.getByText("Character attachments unavailable")).toBeInTheDocument()
+    expect(screen.queryByText("No characters attached.")).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Try again" }))
+    expect(onRetryAttachments).toHaveBeenCalledTimes(1)
   })
 
   it("renders live stats content instead of the loading placeholder when stats data is provided", () => {

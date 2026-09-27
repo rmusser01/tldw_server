@@ -4,6 +4,9 @@ from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any
 
+CLAIMS_CONTEXT_WINDOW_CHARS_MAX = 20000
+CLAIMS_EXTRACTION_PASSES_MAX = 10
+
 
 def _resolve_settings(settings_obj: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
     if settings_obj is not None:
@@ -233,15 +236,16 @@ def resolve_claims_context_window_chars(
             or invalid. Example default: ``0``.
 
     Returns:
-        int: Context-window size in characters, guaranteed to be ``>= 0``.
+        int: Context-window size in characters, guaranteed to be between ``0``
+        and ``CLAIMS_CONTEXT_WINDOW_CHARS_MAX``.
 
     Behavior:
         Reads ``CLAIMS_CONTEXT_WINDOW_CHARS`` via ``_get_int`` and clamps the
-        result with ``max(0, value)`` so negative values become ``0``.
+        result to the supported runtime range.
     """
     settings_map = _resolve_settings(settings_obj)
     value = _get_int(settings_map, "CLAIMS_CONTEXT_WINDOW_CHARS", default=default)
-    return max(0, value)
+    return min(CLAIMS_CONTEXT_WINDOW_CHARS_MAX, max(0, value))
 
 
 def resolve_claims_extraction_passes(
@@ -258,18 +262,21 @@ def resolve_claims_extraction_passes(
             missing or invalid. Example default: ``1``.
 
     Returns:
-        int: Pass count guaranteed to be ``>= 1``.
+        int: Pass count guaranteed to be between ``1`` and
+        ``CLAIMS_EXTRACTION_PASSES_MAX``.
 
     Behavior:
         Reads ``CLAIMS_EXTRACTION_PASSES`` via ``_get_int`` and clamps the
-        result with ``max(1, value)`` so invalid low values become ``1``.
+        result to the supported runtime range.
     """
     settings_map = _resolve_settings(settings_obj)
     value = _get_int(settings_map, "CLAIMS_EXTRACTION_PASSES", default=default)
-    return max(1, value)
+    return min(CLAIMS_EXTRACTION_PASSES_MAX, max(1, value))
 
 
 __all__ = [
+    "CLAIMS_CONTEXT_WINDOW_CHARS_MAX",
+    "CLAIMS_EXTRACTION_PASSES_MAX",
     "resolve_claims_alignment_config",
     "resolve_claims_context_window_chars",
     "resolve_claims_extraction_passes",

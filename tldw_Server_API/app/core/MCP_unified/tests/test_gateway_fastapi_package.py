@@ -2425,12 +2425,24 @@ def test_gateway_external_runtime_lifecycle_logs_unexpected_startup_exception(
 
 def test_gateway_status_includes_package_boundary_metadata() -> None:
     app = create_gateway_app(_FakeGatewayRuntime())
-    status_route = next(
-        route
-        for route in app.routes
-        if getattr(route, "path", None) == "/mcp/status"
+
+    # Asserted through the OpenAPI schema rather than by walking app.routes. FastAPI
+    # 0.141 / Starlette 1.6 changed include_router to put a single private
+    # _IncludedRouter object in app.routes instead of flattening the router's routes
+    # into it, so the old `next(r for r in app.routes if r.path == "/mcp/status")` raised
+    # StopIteration -- a dependency-version change, not a missing route. The endpoint
+    # itself was never broken, as the TestClient call below shows. The schema is public
+    # API and states the same thing. See TASK-13358.
+    schema = app.openapi()
+    assert "/mcp/status" in schema["paths"], sorted(schema["paths"])
+    success_schema = (
+        schema["paths"]["/mcp/status"]["get"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]
     )
-    assert getattr(status_route, "response_model", None) is gateway_fastapi.GatewayReadinessStatusResponse
+    assert success_schema == {
+        "$ref": f"#/components/schemas/{gateway_fastapi.GatewayReadinessStatusResponse.__name__}"
+    }, success_schema
 
     with TestClient(app) as client:
         response = client.get("/mcp/status")
@@ -2440,7 +2452,7 @@ def test_gateway_status_includes_package_boundary_metadata() -> None:
     assert payload["status"] == "ok"
     assert payload["name"] == "unit-gateway"
     assert payload["version"] == "0.0-test"
-    assert payload["package"]["package_status"] == "internal-experimental"
+    assert payload["package"]["package_status"] == "public-alpha"
     assert payload["package"]["publishing_status"] == "published"
     assert payload["package"]["source_distribution"] == "tldw-server"
     assert payload["transport"]["mount_path"] == "/mcp"
@@ -5720,7 +5732,7 @@ def test_gateway_fastapi_app_handles_basic_jsonrpc_flow() -> None:
         assert status_payload["status"] == "ok"
         assert status_payload["name"] == "unit-gateway"
         assert status_payload["version"] == "0.0-test"
-        assert status_payload["package"]["package_status"] == "internal-experimental"
+        assert status_payload["package"]["package_status"] == "public-alpha"
 
         initialized = client.post(
             "/mcp/request",

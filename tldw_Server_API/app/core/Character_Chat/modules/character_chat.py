@@ -7,7 +7,6 @@ facade.
 """
 
 import base64
-import random
 import re
 import threading
 import time
@@ -29,6 +28,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.Workspaces.assistant_defaults import project_assistant_startup
 
 _CHAR_CHAT_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -765,34 +765,15 @@ def start_new_chat_session(
     logger.debug("Starting new chat session for character_id: {}, user: {}", character_id, user_name)
 
     original_first_message_content: Optional[str] = None
-    original_alternate_greetings: Optional[list[str]] = None
-
-    def _normalize_alt_greeting(value: Any) -> Optional[str]:
-        """Normalize value (Any) to UTF-8 text or None (Optional[str]); bytes/memoryview are decoded with errors replaced."""
-        if isinstance(value, str):
-            return value
-        if isinstance(value, memoryview):
-            value = value.tobytes()
-        if isinstance(value, (bytes, bytearray)):
-            try:
-                return bytes(value).decode("utf-8")
-            except _CHAR_CHAT_NONCRITICAL_EXCEPTIONS:
-                return bytes(value).decode("utf-8", errors="replace")
-        return None
 
     try:
+        from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+            create_character_conversation,
+        )
+
         raw_char_data_for_first_message = db.get_character_card_by_id(character_id)
         if raw_char_data_for_first_message:
             original_first_message_content = raw_char_data_for_first_message.get("first_message")
-            ag = raw_char_data_for_first_message.get("alternate_greetings")
-            if isinstance(ag, list):
-                # Normalize bytes-like greetings to text
-                normalized: list[str] = []
-                for entry in ag:
-                    greeting = _normalize_alt_greeting(entry)
-                    if isinstance(greeting, str):
-                        normalized.append(greeting)
-                original_alternate_greetings = normalized
         else:
             logger.warning(
                 'Could not load raw character data for ID {} to get original first message.',
@@ -819,22 +800,8 @@ def start_new_chat_session(
         conv_payload = {
             "character_id": character_id,
             "title": conv_title,
+            "client_id": str(db.client_id),
         }
-        conversation_id_val = db.add_conversation(conv_payload)
-
-        if not conversation_id_val:
-            logger.error(
-                'Failed to create conversation record in DB for character {}.',
-                char_name,
-            )
-            return None, char_data, initial_ui_history, img
-
-        logger.info(
-            "Created new conversation ID: {} for character '{}'.",
-            conversation_id_val,
-            char_name,
-        )
-
         def _restore_first_message_template(text: str) -> str:
             restored = text
             user_token = str(user_name).strip() if user_name is not None else ""
@@ -854,23 +821,7 @@ def start_new_chat_session(
             return restored
 
         message_to_store_in_db: Optional[str] = original_first_message_content
-
-        # Apply optional greeting strategy selection using raw (unprocessed) fields
-        selected_alt: Optional[str] = None
-        try:
-            if greeting_strategy in {"alternate_random", "alternate_index"} and original_alternate_greetings:
-                if greeting_strategy == "alternate_random":
-                    if original_alternate_greetings:
-                        # Non-security greeting selection.
-                        selected_alt = random.choice(original_alternate_greetings)  # nosec B311
-                elif greeting_strategy == "alternate_index":
-                    if isinstance(alternate_index, int) and alternate_index >= 0 and alternate_index < len(original_alternate_greetings):
-                        selected_alt = original_alternate_greetings[alternate_index]
-        except _CHAR_CHAT_NONCRITICAL_EXCEPTIONS as _sel_err:
-            logger.debug("Alternate greeting selection failed: {}", _sel_err)
-
-        if isinstance(selected_alt, str) and selected_alt.strip():
-            message_to_store_in_db = selected_alt
+        used_compatibility_fallback = False
 
         if message_to_store_in_db is None:
             fallback_processed: Optional[str] = None
@@ -899,15 +850,46 @@ def start_new_chat_session(
                         char_name,
                         conversation_id_val,
                     )
+                used_compatibility_fallback = True
+
+        fallback_greeting = (
+            {
+                "content": message_to_store_in_db or "",
+                "source": "first_message",
+                "source_index": 0,
+            }
+            if used_compatibility_fallback
+            else None
+        )
+        conversation_id_val = create_character_conversation(
+            db,
+            conversation_data=conv_payload,
+            seed_first_message=True,
+            greeting_strategy=greeting_strategy or "default",
+            greeting_alternate_index=alternate_index,
+            fallback_greeting=fallback_greeting,
+        )
+
+        created_state = db.get_roleplay_resume_state(conversation_id_val)
+        snapshot_payload = (
+            (created_state.get("behavior_snapshot") or {}).get("payload") or {}
+        )
+        snapshot_participants = snapshot_payload.get("participants") or []
+        accepted_greeting = (
+            snapshot_participants[0].get("greeting")
+            if snapshot_participants
+            else {}
+        )
+        accepted_content = str((accepted_greeting or {}).get("content") or "")
+        message_to_store_in_db = accepted_content if accepted_content.strip() else None
+
+        logger.info(
+            "Created new conversation ID: {} for character '{}'.",
+            conversation_id_val,
+            char_name,
+        )
 
         if message_to_store_in_db:
-            db.add_message(
-                {
-                    "conversation_id": conversation_id_val,
-                    "sender": char_name,
-                    "content": message_to_store_in_db,
-                }
-            )
             logger.debug(
                 "Added character's first message to new conversation {}.",
                 conversation_id_val,
@@ -945,6 +927,20 @@ def start_new_chat_session(
         return conversation_id_val, char_data, initial_ui_history, img
 
 
+def _public_conversation_metadata(
+    db: CharactersRAGDB, row: dict[str, Any], *,
+    workspace_visibility_cache: dict[str, bool] | None = None,
+) -> dict[str, Any]:
+    """Copy library metadata, replacing only internal origin with a safe value."""
+    result = dict(row)
+    raw = result.pop("assistant_startup_json", None)
+    result["assistant_startup"] = project_assistant_startup(
+        db, raw=raw, user_id=db.owner_user_id,
+        workspace_visibility_cache=workspace_visibility_cache,
+    ).model_dump()
+    return result
+
+
 def list_character_conversations(
     db: CharactersRAGDB,
     character_id: int,
@@ -955,12 +951,14 @@ def list_character_conversations(
     """List active conversations for a given character."""
 
     try:
-        return db.get_conversations_for_character(
+        rows = db.get_conversations_for_character(
             character_id,
             limit=limit,
             offset=offset,
             client_id=client_id,
         )
+        workspace_visibility_cache: dict[str, bool] = {}
+        return [_public_conversation_metadata(db, row, workspace_visibility_cache=workspace_visibility_cache) for row in rows]
     except CharactersRAGDBError as exc:
         logger.error(
             'Failed to list conversations for character ID {}: {}',
@@ -982,7 +980,8 @@ def get_conversation_metadata(db: CharactersRAGDB, conversation_id: str) -> Opti
     """Retrieve metadata for a specific conversation."""
 
     try:
-        return db.get_conversation_by_id(conversation_id)
+        row = db.get_conversation_by_id(conversation_id)
+        return _public_conversation_metadata(db, row) if row is not None else None
     except CharactersRAGDBError as exc:
         logger.error(
             'Failed to get metadata for conversation ID {}: {}',
@@ -1087,12 +1086,14 @@ def search_conversations_by_title_query(
     """Search conversations by title."""
 
     try:
-        return db.search_conversations_by_title(
+        rows = db.search_conversations_by_title(
             title_query,
             character_id=character_id,
             limit=limit,
             client_id=client_id,
         )
+        workspace_visibility_cache: dict[str, bool] = {}
+        return [_public_conversation_metadata(db, row, workspace_visibility_cache=workspace_visibility_cache) for row in rows]
     except CharactersRAGDBError as exc:
         logger.error(
             "Failed to search conversations with query '{}': {}",
@@ -1166,6 +1167,7 @@ def post_message_to_conversation(
     image_data: Optional[bytes] = None,
     image_mime_type: Optional[str] = None,
     sender_override: Optional[str] = None,
+    owner_user_id: int | str | None = None,
 ) -> Optional[str]:
     """Post a new message to a specified conversation."""
 
@@ -1261,7 +1263,8 @@ def post_message_to_conversation(
             try:
                 from tldw_Server_API.app.core.Chat.conversation_enrichment import schedule_auto_tagging
 
-                schedule_auto_tagging(db, conversation_id)
+                if owner_user_id is not None:
+                    schedule_auto_tagging(db, conversation_id, owner_user_id=owner_user_id)
             except _CHAR_CHAT_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(
                     'Auto-tagging trigger skipped for conversation {}: {}',

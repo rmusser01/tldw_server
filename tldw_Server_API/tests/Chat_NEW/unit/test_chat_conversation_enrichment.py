@@ -39,7 +39,7 @@ def test_auto_tag_idempotency_and_manual_override(chacha_db):
             }
         )
 
-    result = auto_tag_conversation(chacha_db, conversation_id)
+    result = auto_tag_conversation(chacha_db, conversation_id, owner_user_id="test-user")
     assert result.updated is True
 
     conversation = chacha_db.get_conversation_by_id(conversation_id)
@@ -47,7 +47,7 @@ def test_auto_tag_idempotency_and_manual_override(chacha_db):
     first_tagged_message_id = conversation.get("topic_last_tagged_message_id")
     first_version = conversation.get("version")
 
-    result_repeat = auto_tag_conversation(chacha_db, conversation_id)
+    result_repeat = auto_tag_conversation(chacha_db, conversation_id, owner_user_id="test-user")
     assert result_repeat.updated is False
 
     conversation_repeat = chacha_db.get_conversation_by_id(conversation_id)
@@ -70,7 +70,7 @@ def test_auto_tag_idempotency_and_manual_override(chacha_db):
         manual_version,
     )
 
-    result_manual = auto_tag_conversation(chacha_db, conversation_id)
+    result_manual = auto_tag_conversation(chacha_db, conversation_id, owner_user_id="test-user")
     assert result_manual.updated is False
     conversation_manual = chacha_db.get_conversation_by_id(conversation_id)
     assert conversation_manual.get("topic_label") == "Manual Topic"

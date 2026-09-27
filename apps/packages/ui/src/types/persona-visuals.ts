@@ -279,6 +279,8 @@ export interface PersonaVisualStarterPackAssetSummary {
   mime_type: string
   asset_role: PersonaVisualAssetRole | string
   byte_size: number
+  width?: number | null
+  height?: number | null
 }
 
 export type PersonaVisualStarterComplexityTier =

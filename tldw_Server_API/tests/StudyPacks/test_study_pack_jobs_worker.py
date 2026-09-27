@@ -276,9 +276,8 @@ async def test_get_databases_for_user_closes_note_db_when_media_lookup_fails(
 
     note_db = FakeNoteDb()
 
-    async def fake_get_chacha_db_for_user_id(user_id: int, *, client_id: str):
+    async def fake_get_chacha_db_for_user_id(user_id: int):
         assert user_id == 1  # nosec B101
-        assert client_id == "study-pack-worker-1"  # nosec B101
         return note_db
 
     def fake_get_media_db_for_owner(user_id: int):

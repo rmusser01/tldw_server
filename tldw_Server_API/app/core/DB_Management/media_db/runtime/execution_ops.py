@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
-from loguru import logger as logging
 import sqlite3
+from contextlib import suppress
 from typing import Any
+
+from loguru import logger as logging
 
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
-    DatabaseError as BackendDatabaseError,
     QueryResult,
+)
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.execution import (
@@ -117,6 +120,7 @@ def execute_query(
     *,
     commit: bool = False,
     connection: Any | None = None,
+    log_errors: bool = True,
 ):
     """
     Executes a single SQL query.
@@ -126,6 +130,9 @@ def execute_query(
     - sync-trigger IntegrityError passthrough,
     - backend error translation, and
     - the existing query-result adapter contract.
+
+    Sensitive bounded-source reads set ``log_errors=False`` so a driver decode
+    error cannot echo stored source text through this lower-level boundary.
     """
     prepared_query, prepared_params = self._prepare_backend_statement(query, params)
 
@@ -181,26 +188,54 @@ def execute_query(
         except sqlite3.IntegrityError as exc:
             msg = str(exc).lower()
             if "sync error" in msg:
-                logging.exception("Sync Validation Failed")
-                raise
+                if log_errors:
+                    logging.exception("Sync Validation Failed")
+                    raise
+                logging.error("Redacted SQLite sync validation failure ({})", type(exc).__name__)
+                raise DatabaseError("Integrity constraint violation.") from None
+            if not log_errors:
+                logging.error("Redacted SQLite integrity failure ({})", type(exc).__name__)
+                raise DatabaseError("Integrity constraint violation.") from None
             logging.error("Integrity error executing query: {}", exc, exc_info=True)
             raise DatabaseError(f"Integrity constraint violation: {exc}") from exc  # noqa: TRY003
         except sqlite3.Error as exc:
+            if not log_errors:
+                logging.error("Redacted SQLite query failure ({})", type(exc).__name__)
+                raise DatabaseError("Query execution failed.") from None
             logging.error("SQLite query failed: {}", exc, exc_info=True)
             raise DatabaseError(f"Query execution failed: {exc}") from exc  # noqa: TRY003
 
     try:
+        backend_options = {} if log_errors else {"log_errors": False}
         if eff_conn is None:
-            result = self.backend.execute(prepared_query, prepared_params)
+            result = self.backend.execute(
+                prepared_query,
+                prepared_params,
+                **backend_options,
+            )
         else:
-            result = self.backend.execute(prepared_query, prepared_params, connection=eff_conn)
+            result = self.backend.execute(
+                prepared_query,
+                prepared_params,
+                connection=eff_conn,
+                **backend_options,
+            )
+            redacted_commit_failure = False
             if commit:
                 try:
                     eff_conn.commit()
                 except _MEDIA_NONCRITICAL_EXCEPTIONS as exc:
-                    raise DatabaseError(f"Backend commit failed: {exc}") from exc  # noqa: TRY003
+                    if log_errors:
+                        raise DatabaseError(f"Backend commit failed: {exc}") from exc  # noqa: TRY003
+                    logging.error("Redacted backend commit failure ({})", type(exc).__name__)
+                    redacted_commit_failure = True
+            if redacted_commit_failure:
+                raise DatabaseError("Backend commit failed.")
         return BackendCursorAdapter(result)
     except BackendDatabaseError as exc:
+        if not log_errors:
+            logging.error("Redacted backend query failure ({})", type(exc).__name__)
+            raise DatabaseError("Backend query execution failed.") from None
         logging.error("Backend query failed: {}", exc, exc_info=True)
         raise DatabaseError(f"Backend query execution failed: {exc}") from exc  # noqa: TRY003
 

@@ -168,6 +168,11 @@ class PromptVersion(BaseModel):
     change_description: Optional[str]
     created_at: datetime
     parent_version_id: Optional[int]
+    prompt_format: Literal["legacy", "structured"] = "legacy"
+    prompt_schema_version: Optional[int] = None
+    prompt_definition: Optional[dict[str, Any]] = None
+    system_prompt: Optional[str] = None
+    user_prompt: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -203,6 +208,7 @@ class StructuredPromptPreviewResponse(BaseModel):
     """Preview response with assembled messages and legacy compatibility text."""
     prompt_format: Literal["legacy", "structured"]
     prompt_schema_version: Optional[int] = None
+    rendered_text: Optional[str] = None
     assembled_messages: list[dict[str, str]] = Field(default_factory=list)
     legacy_system_prompt: str = ""
     legacy_user_prompt: str = ""

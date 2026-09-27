@@ -16,7 +16,9 @@ const {
   syncChatSettingsForServerChatMock,
   getConfigMock,
   savePlaygroundSessionMock,
-  buildChatSurfaceScopeKeyFromConfigMock
+  buildChatSurfaceScopeKeyFromConfigMock,
+  loadServicePromptSnapshotMock,
+  releaseServicePromptSnapshotMock
 } = vi.hoisted(() => ({
   createChatMock: vi.fn(),
   getChatMock: vi.fn(),
@@ -30,7 +32,13 @@ const {
   syncChatSettingsForServerChatMock: vi.fn(async () => null),
   getConfigMock: vi.fn(),
   savePlaygroundSessionMock: vi.fn(),
-  buildChatSurfaceScopeKeyFromConfigMock: vi.fn()
+  buildChatSurfaceScopeKeyFromConfigMock: vi.fn(),
+  loadServicePromptSnapshotMock: vi.fn(),
+  releaseServicePromptSnapshotMock: vi.fn()
+}))
+
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: loadServicePromptSnapshotMock
 }))
 
 vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
@@ -254,6 +262,50 @@ const createHookOptions = () => ({
   clearMessageSteering: vi.fn()
 })
 
+const servicePromptSnapshot = {
+  scopeKey: "scope:captured-user",
+  requestScope: {
+    config: {
+      serverUrl: "http://127.0.0.1:8000",
+      authMode: "multi-user" as const,
+      authSource: "manual" as const
+    },
+    userId: 42
+  },
+  capability: "supported" as const,
+  scopeSignal: new AbortController().signal,
+  scopeInvalidatedSignal: new AbortController().signal,
+  definitions: {
+    "chat.rag.answer": {
+      definition: { id: "chat.rag.answer", parts: [] },
+      parts: { template: "Answer" },
+      source: "packaged" as const,
+      revision: null
+    },
+    "chat.rag.question_rewrite": {
+      definition: { id: "chat.rag.question_rewrite", parts: [] },
+      parts: { template: "Rewrite" },
+      source: "packaged" as const,
+      revision: null
+    },
+    "chat.web_search.answer": {
+      definition: { id: "chat.web_search.answer", parts: [] },
+      parts: { template: "Web answer" },
+      source: "packaged" as const,
+      revision: null
+    }
+  },
+  release: releaseServicePromptSnapshotMock
+}
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 describe("useChatActions persona integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -264,6 +316,7 @@ describe("useChatActions persona integration", () => {
       apiKey: "test-key"
     })
     buildChatSurfaceScopeKeyFromConfigMock.mockReturnValue("scope:chat")
+    loadServicePromptSnapshotMock.mockResolvedValue(servicePromptSnapshot)
     createChatMock.mockResolvedValue({
       id: "persona-chat-1",
       title: "Persona chat",
@@ -303,7 +356,7 @@ describe("useChatActions persona integration", () => {
       cluster_id: undefined,
       source: undefined,
       external_ref: undefined
-    })
+    }, { scope: undefined, requestScope: servicePromptSnapshot.requestScope, signal: servicePromptSnapshot.scopeSignal })
     expect(options.setServerChatId).toHaveBeenCalledWith("persona-chat-1")
     expect(options.setServerChatCharacterId).toHaveBeenCalledWith(null)
     expect(options.setServerChatAssistantKind).toHaveBeenCalledWith("persona")
@@ -327,7 +380,7 @@ describe("useChatActions persona integration", () => {
         trackedAssistantDisplayName: "Garden Helper",
         trackedAssistantAvatarUrl: null,
         serverChatPersonaMemoryMode: "read_only",
-        scopeKey: "scope:chat",
+        scopeKey: servicePromptSnapshot.scopeKey,
         trackedAssistantSelection: expect.objectContaining({
           kind: "persona",
           id: "garden-helper",
@@ -359,6 +412,41 @@ describe("useChatActions persona integration", () => {
     )
   })
 
+  it.each(["turn", "reply"])("captures the tracked %s owner before mirror linking and releases it", async operation => {
+    const pending = deferred<typeof servicePromptSnapshot>()
+    loadServicePromptSnapshotMock.mockReturnValueOnce(pending.promise)
+    const options = { ...createHookOptions(), serverChatId: "persona-chat-1", serverChatMetaLoaded: true, serverChatAssistantKind: "persona", serverChatAssistantId: "garden-helper", compareFeatureEnabled: true }
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    let request!: Promise<unknown>
+    act(() => { request = operation === "turn" ? result.current.onSubmit({ message: "Owned follow-up", image: "" }) : result.current.sendPerModelReply({ clusterId: "cluster", modelId: "openai:gpt-4.1", message: "Owned reply" }) })
+    await vi.waitFor(() => expect(loadServicePromptSnapshotMock).toHaveBeenCalledTimes(1))
+    expect(options.ensureServerChatHistoryId).not.toHaveBeenCalled()
+    await act(async () => { pending.resolve(servicePromptSnapshot); await request })
+    expect(options.ensureServerChatHistoryId).toHaveBeenCalledWith("persona-chat-1", options.serverChatTitle || undefined, servicePromptSnapshot.scopeInvalidatedSignal, servicePromptSnapshot)
+    expect(servicePromptSnapshot.release).toHaveBeenCalledTimes(1)
+  })
+
+  it("persists the canonical captured scope for a prompt-backed persona turn", async () => {
+    const options = {
+      ...createHookOptions(),
+      webSearch: true
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Search with this persona",
+        image: ""
+      })
+    })
+
+    expect(savePlaygroundSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ scopeKey: "scope:captured-user" })
+    )
+    expect(buildChatSurfaceScopeKeyFromConfigMock).not.toHaveBeenCalled()
+    expect(releaseServicePromptSnapshotMock).toHaveBeenCalledTimes(1)
+  })
+
   it("passes workspace scope through when creating a persona-backed chat", async () => {
     const scope = { type: "workspace", workspaceId: "workspace-1" } as const
     const options = {
@@ -385,7 +473,7 @@ describe("useChatActions persona integration", () => {
         source: undefined,
         external_ref: undefined
       },
-      { scope }
+      { scope, requestScope: servicePromptSnapshot.requestScope, signal: servicePromptSnapshot.scopeSignal }
     )
     expect(normalChatModeMock).toHaveBeenCalledWith(
       "Hello scoped persona",
@@ -443,7 +531,7 @@ describe("useChatActions persona integration", () => {
       cluster_id: undefined,
       source: undefined,
       external_ref: undefined
-    })
+    }, { scope: undefined, requestScope: servicePromptSnapshot.requestScope, signal: servicePromptSnapshot.scopeSignal })
     expect(options.setServerChatAssistantKind).toHaveBeenCalledWith("persona")
     expect(options.setServerChatAssistantId).toHaveBeenCalledWith(
       "workspace-helper"
@@ -520,7 +608,9 @@ describe("useChatActions persona integration", () => {
       expect.objectContaining({
         state: "in-progress"
       }),
-      { scope }
+      expect.objectContaining({
+        scope
+      })
     )
     expect(options.setServerChatId).toHaveBeenCalledWith("workspace-plain-chat")
     expect(options.setServerChatAssistantKind).toHaveBeenCalledWith(null)
@@ -558,6 +648,25 @@ describe("useChatActions persona integration", () => {
       }),
       { scope }
     )
+  })
+
+  it("adopts the first persisted plain chat so server message actions become available", async () => {
+    createChatMock.mockResolvedValueOnce({ id: "first-saved-chat", title: "Hello" })
+    normalChatModeMock.mockImplementationOnce(async (...args: unknown[]) => {
+      const params = args[6] as { saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null> }
+      await params.saveMessageOnSuccess({
+        historyId: null, selectedModel: "deepseek-chat", message: "Hello", image: "",
+        fullText: "Saved answer", source: [], saveToDb: true, conversationId: "first-saved-chat"
+      })
+    })
+    const options = {
+      ...createHookOptions(), serverChatId: null, serverChatTitle: null,
+      serverChatAssistantKind: null, serverChatAssistantId: null,
+      serverChatCharacterId: null, selectedAssistant: null, historyId: null
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+    await act(async () => { await result.current.onSubmit({ message: "Hello", image: "" }) })
+    expect(options.setServerChatId).toHaveBeenCalledWith("first-saved-chat")
   })
 
   it("rejects a stale server chat id from another scope before workspace sends", async () => {
@@ -604,7 +713,7 @@ describe("useChatActions persona integration", () => {
       expect.objectContaining({
         state: "in-progress"
       }),
-      { scope }
+      expect.objectContaining({ scope })
     )
     expect(options.setServerChatId).toHaveBeenLastCalledWith(
       "workspace-fresh-chat"
@@ -661,7 +770,11 @@ describe("useChatActions persona integration", () => {
       expect.objectContaining({
         state: "in-progress"
       }),
-      { scope }
+      expect.objectContaining({
+        scope,
+        requestScope: servicePromptSnapshot.requestScope,
+        signal: servicePromptSnapshot.scopeSignal
+      })
     )
     expect(ragModeMock).toHaveBeenCalledWith(
       "Use staged source",
@@ -683,7 +796,82 @@ describe("useChatActions persona integration", () => {
     )
   })
 
-  it("keeps plain global sends out of the workspace server-chat bootstrap path", async () => {
+  it("does not publish workspace chat metadata when scope changes during history linking", async () => {
+    const scope = {
+      type: "workspace",
+      workspaceId: "workspace-scope-race"
+    } as const
+    const scopeController = new AbortController()
+    const scopedSnapshot = {
+      ...servicePromptSnapshot,
+      scopeSignal: new AbortController().signal,
+      scopeInvalidatedSignal: scopeController.signal
+    }
+    loadServicePromptSnapshotMock.mockResolvedValueOnce(scopedSnapshot)
+    createChatMock.mockResolvedValueOnce({
+      id: "workspace-scope-race-chat",
+      title: "Workspace scope race",
+      state: "resolved",
+      version: 5,
+      topic_label: "Race topic",
+      cluster_id: "race-cluster",
+      source: "workspace",
+      external_ref: "race-ref"
+    })
+    const historyLink = deferred<string | null>()
+    const options = {
+      ...createHookOptions(),
+      scope,
+      selectedAssistant: null,
+      ensureServerChatHistoryId: vi.fn(() => historyLink.promise)
+    }
+    const { result } = renderHook(() => useChatActions(options as any))
+
+    let submission!: ReturnType<typeof result.current.onSubmit>
+    act(() => {
+      submission = result.current.onSubmit({
+        message: "Keep workspace state scoped",
+        image: "",
+        requestOverrides: {
+          fileRetrievalEnabled: true,
+          ragMediaIds: [101]
+        }
+      })
+    })
+    await vi.waitFor(() =>
+      expect(options.ensureServerChatHistoryId).toHaveBeenCalledTimes(1)
+    )
+    scopeController.abort()
+    historyLink.resolve("history-stale")
+
+    await act(async () => {
+      await submission
+    })
+
+    expect(options.ensureServerChatHistoryId).toHaveBeenCalledWith(
+      "workspace-scope-race-chat",
+      "Workspace scope race",
+      scopeController.signal,
+      scopedSnapshot
+    )
+    expect(options.setServerChatId).not.toHaveBeenCalled()
+    expect(options.setServerChatTitle).not.toHaveBeenCalled()
+    expect(options.setServerChatCharacterId).not.toHaveBeenCalled()
+    expect(options.setServerChatAssistantKind).not.toHaveBeenCalled()
+    expect(options.setServerChatAssistantId).not.toHaveBeenCalled()
+    expect(options.setServerChatPersonaMemoryMode).not.toHaveBeenCalled()
+    expect(options.setServerChatMetaLoaded).not.toHaveBeenCalled()
+    expect(options.setServerChatState).not.toHaveBeenCalled()
+    expect(options.setServerChatVersion).not.toHaveBeenCalled()
+    expect(options.setServerChatTopic).not.toHaveBeenCalled()
+    expect(options.setServerChatClusterId).not.toHaveBeenCalled()
+    expect(options.setServerChatSource).not.toHaveBeenCalled()
+    expect(options.setServerChatExternalRef).not.toHaveBeenCalled()
+    expect(options.invalidateServerChatHistory).not.toHaveBeenCalled()
+    expect(ragModeMock).not.toHaveBeenCalled()
+  })
+
+  it("reuses an existing global conversation through inference and local persistence", async () => {
     let capturedParams:
       | {
           conversationId?: string | null
@@ -725,10 +913,10 @@ describe("useChatActions persona integration", () => {
     })
 
     expect(createChatMock).not.toHaveBeenCalled()
-    expect(capturedParams?.serverChatId).toBeUndefined()
-    expect(capturedParams?.conversationId).toBeUndefined()
+    expect(capturedParams?.serverChatId).toBe("existing-global-chat")
+    expect(capturedParams?.conversationId).toBe("existing-global-chat")
     expect(baseSaveMessageOnSuccessMock).toHaveBeenCalledWith(
-      expect.not.objectContaining({
+      expect.objectContaining({
         conversationId: "existing-global-chat"
       })
     )
@@ -781,7 +969,7 @@ describe("useChatActions persona integration", () => {
       cluster_id: undefined,
       source: undefined,
       external_ref: undefined
-    })
+    }, { scope: undefined, requestScope: servicePromptSnapshot.requestScope, signal: servicePromptSnapshot.scopeSignal })
     expect(options.setServerChatAssistantKind).toHaveBeenLastCalledWith("persona")
     expect(options.setServerChatAssistantId).toHaveBeenLastCalledWith(
       "garden-helper"

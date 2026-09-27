@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -25,6 +26,7 @@ from tldw_Server_API.app.core.Sandbox.policy import SandboxPolicy, SandboxPolicy
 from tldw_Server_API.app.core.Sandbox.runners.vz_linux_runner import VZLinuxRunner
 from tldw_Server_API.app.core.Sandbox.service import SandboxService
 from tldw_Server_API.app.core.Sandbox.streams import get_hub
+from tldw_Server_API.tests.sandbox.test_vz_linux_real_host_e2e import _expect
 
 
 def test_vz_linux_fake_run_completes(monkeypatch) -> None:
@@ -460,11 +462,32 @@ def test_vz_linux_session_create_vm_readiness_failure_does_not_persist_reuse_sta
 
 
 @pytest.mark.unit
-def test_vz_linux_session_create_vm_guest_agent_mismatch_fails_closed(
+@pytest.mark.parametrize(
+    "workspace_root,capabilities,rejection",
+    [
+        pytest.param(
+            "/var/empty",
+            "output_cap_v1",
+            "vz_linux_guest_agent_workspace_mismatch, vz_linux_guest_agent_required_capability_missing",
+            id="workspace-and-capability-mismatch",
+        ),
+        pytest.param(
+            "/workspace-mismatch/0123456789abcdef0123456789abcdef",
+            "exec,output_cap_v1",
+            "vz_linux_guest_agent_workspace_mismatch",
+            id="workspace-only-mismatch",
+        ),
+        pytest.param("/workspace", "exec,output_cap_v1", None, id="healthy-workspace-control"),
+    ],
+)
+def test_vz_linux_session_create_vm_guest_agent_admission(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    workspace_root: str,
+    capabilities: str,
+    rejection: str | None,
 ) -> None:
-    """Reject a newly-created session VM when helper metadata reports mismatch."""
+    """Reject workspace mismatch independently of capabilities; admit a valid root."""
 
     monkeypatch.delenv("TLDW_SANDBOX_VZ_LINUX_FAKE_EXEC", raising=False)
     calls: list[str] = []
@@ -476,15 +499,15 @@ def test_vz_linux_session_create_vm_guest_agent_mismatch_fails_closed(
 
         def get_vz_session_control(self, session_id: str) -> None:
             """Return no reusable VM for the tested session."""
-            assert session_id == "sess-new-guest-agent-mismatch"
+            _expect(session_id == "sess-new-guest-agent-mismatch", "Wrong admission session")
             return None
 
         def put_vz_session_control(self, **kwargs: object) -> None:
-            """Record unexpected session-control persistence."""
+            """Record whether admission permits session-control persistence."""
             stored.append(dict(kwargs))
 
     class _FakeHelper:
-        """Helper double that creates a VM with mismatched guest metadata."""
+        """Helper double for independent workspace and capability admission cases."""
 
         def validate_template(self, request: dict[str, object]) -> dict[str, object]:
             """Pretend the image template is valid."""
@@ -496,25 +519,27 @@ def test_vz_linux_session_create_vm_guest_agent_mismatch_fails_closed(
             }
 
         def create_vm(self, request: dict[str, object]) -> HelperVMReply:
-            """Return a created VM whose guest metadata explicitly mismatches."""
+            """Return only the metadata selected by this admission case."""
             calls.append("create_vm")
-            assert request["session_id"] == "sess-new-guest-agent-mismatch"
-            assert request["session_mode"] is True
+            _expect(request["session_id"] == "sess-new-guest-agent-mismatch", "Wrong create session")
+            _expect(request["session_mode"] is True, "Expected a reusable session VM")
             return HelperVMReply(
                 vm_id="vm-new-guest-agent-mismatch",
                 state="created",
                 details={
                     "guest_version": "0.9.0",
-                    "guest_workspace_root": "/var/empty",
+                    "guest_workspace_root": workspace_root,
                     "guest_capabilities_known": "true",
-                    "guest_capabilities": "output_cap_v1",
+                    "guest_capabilities": capabilities,
                 },
             )
 
         def exec_guest(self, *, vm_id: str, request: dict[str, object]) -> HelperExecReply:
-            """Fail the call-order assertion if the runner reaches guest execution."""
+            """Return output only when the runner admits guest execution."""
             calls.append("exec_guest")
-            return HelperExecReply(exit_code=0, stdout=b"should-not-run\n")
+            _expect(vm_id == "vm-new-guest-agent-mismatch", "Wrong execution VM")
+            _expect(request["cwd"] == "/workspace", "Wrong execution workspace")
+            return HelperExecReply(exit_code=0, stdout=b"ok\n")
 
         def terminate_vm(self, vm_id: str) -> bool:
             """Record cleanup of the rejected VM."""
@@ -524,8 +549,9 @@ def test_vz_linux_session_create_vm_guest_agent_mismatch_fails_closed(
 
     monkeypatch.setattr(vz_linux_module.VZLinuxRunner, "helper_client_cls", _FakeHelper)
 
+    run_id = f"vz-run-new-guest-agent-{uuid4().hex}"
     status = VZLinuxRunner(session_control_store=_Store()).start_run(
-        run_id="vz-run-new-guest-agent-mismatch",
+        run_id=run_id,
         spec=RunSpec(
             session_id="sess-new-guest-agent-mismatch",
             runtime=RuntimeType.vz_linux,
@@ -536,11 +562,22 @@ def test_vz_linux_session_create_vm_guest_agent_mismatch_fails_closed(
         session_workspace=str(tmp_path),
     )
 
-    assert status.phase == RunPhase.failed
-    assert "vz_linux_guest_agent_workspace_mismatch" in status.message
-    assert calls == ["validate_template", "create_vm", "terminate_vm"]
-    assert stored == []
-    assert terminated == ["vm-new-guest-agent-mismatch"]
+    frames = get_hub().get_buffer_snapshot(run_id)
+    stdout = "".join(str(frame.get("data", "")) for frame in frames if frame.get("type") == "stdout")
+    if rejection is not None:
+        _expect(status.phase == RunPhase.failed, "Mismatched guest was admitted")
+        _expect(status.message == f"vz_linux execution error: {rejection}", f"Wrong rejection: {status.message}")
+        _expect(calls == ["validate_template", "create_vm", "terminate_vm"], "Expected rejection before exec")
+        _expect(stored == [], "Rejected VM retained reusable control")
+        _expect(terminated == ["vm-new-guest-agent-mismatch"], "Rejected VM was not cleaned up")
+        _expect(stdout == "", "Rejected guest returned output")
+    else:
+        _expect(status.phase == RunPhase.completed and status.exit_code == 0, "Healthy guest was not admitted")
+        _expect(stdout == "ok\n", f"Wrong healthy output: {stdout!r}")
+        _expect(calls == ["validate_template", "create_vm", "exec_guest"], "Healthy guest was not executed")
+        _expect(len(stored) == 1, "Expected one reusable session control")
+        _expect(stored[0]["vm_id"] == "vm-new-guest-agent-mismatch", "Wrong persisted VM")
+        _expect(terminated == [], "Healthy session VM was destroyed")
 
 
 def test_vz_linux_raw_template_path_ignores_unavailable_image_store(monkeypatch, tmp_path) -> None:

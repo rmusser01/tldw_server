@@ -1,4 +1,7 @@
 {
+  "onboarding_loginSettingsError": {
+    "message": "Impossibile aprire le impostazioni di accesso. Riprova."
+  },
   "navigation_serverAndAuth": {
     "message": "Server e Auth"
   },

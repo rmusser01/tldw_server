@@ -595,8 +595,8 @@ export function LocalChatList({
                       loadRequestRef.current = requestId
                       setLoadingChatId(chat.id)
                       try {
-                        await loadLocalConversation(chat.id)
-                        if (loadRequestRef.current === requestId) {
+                        const accepted = await loadLocalConversation(chat.id)
+                        if (accepted && loadRequestRef.current === requestId) {
                           onSelectChat?.(chat.id)
                         }
                       } catch (error) {

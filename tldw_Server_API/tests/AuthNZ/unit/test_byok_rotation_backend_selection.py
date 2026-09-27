@@ -19,15 +19,21 @@ class _PoolStub:
 
 
 class _ConnStub:
-    def __init__(self) -> None:
+    def __init__(self, *, changed: bool = True) -> None:
+        self.changed = changed
         self.execute_calls: list[tuple[str, tuple[object, ...]]] = []
-        self.executemany_calls: list[tuple[str, list[tuple[str, int]]]] = []
 
-    async def execute(self, query: str, *params: object) -> None:
+    async def execute(self, query: str, *params: object):
         self.execute_calls.append((query, params))
+        if "$1" in query:
+            return f"UPDATE {1 if self.changed else 0}"
 
-    async def executemany(self, query: str, params: list[tuple[str, int]]) -> None:
-        self.executemany_calls.append((query, params))
+        class _Cursor:
+            pass
+
+        cursor = _Cursor()
+        cursor.rowcount = 1 if self.changed else 0
+        return cursor
 
 
 @pytest.mark.asyncio
@@ -100,37 +106,60 @@ async def test_rotate_byok_secrets_uses_postgres_when_pool_has_asyncpg_pool(
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_apply_updates_sqlite_path_uses_execute_even_when_executemany_exists() -> None:
+async def test_apply_update_if_unchanged_sqlite_uses_blob_cas() -> None:
     conn = _ConnStub()
 
-    await byok_rotation_module._apply_updates(
+    updated = await byok_rotation_module._apply_update_if_unchanged(
         conn,
         table="user_provider_secrets",
-        updates=[("blob-a", 1), ("blob-b", 2)],
+        updated_blob="blob-new",
+        row_id=1,
+        expected_blob="blob-old",
         is_postgres=False,
     )
 
-    assert conn.executemany_calls == []
-    assert len(conn.execute_calls) == 2
-    assert all("?" in query for query, _ in conn.execute_calls)
-    assert all("$1" not in query for query, _ in conn.execute_calls)
+    assert updated is True
+    assert len(conn.execute_calls) == 1
+    query, params = conn.execute_calls[0]
+    assert query.count("?") == 3
+    assert "encrypted_blob = ?" in query
+    assert params == (("blob-new", 1, "blob-old"),)
 
 
 @pytest.mark.asyncio
 @pytest.mark.unit
-async def test_apply_updates_postgres_path_uses_executemany() -> None:
+async def test_apply_update_if_unchanged_postgres_uses_blob_cas() -> None:
     conn = _ConnStub()
 
-    await byok_rotation_module._apply_updates(
+    updated = await byok_rotation_module._apply_update_if_unchanged(
         conn,
         table="org_provider_secrets",
-        updates=[("blob-c", 3), ("blob-d", 4)],
+        updated_blob="blob-new",
+        row_id=3,
+        expected_blob="blob-old",
         is_postgres=True,
     )
 
-    assert conn.execute_calls == []
-    assert len(conn.executemany_calls) == 1
-    query, params = conn.executemany_calls[0]
-    assert "$1" in query
+    assert updated is True
+    assert len(conn.execute_calls) == 1
+    query, params = conn.execute_calls[0]
+    assert "$1" in query and "$3" in query
     assert "?" not in query
-    assert params == [("blob-c", 3), ("blob-d", 4)]
+    assert params == ("blob-new", 3, "blob-old")
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_apply_update_if_unchanged_reports_cas_miss() -> None:
+    conn = _ConnStub(changed=False)
+
+    updated = await byok_rotation_module._apply_update_if_unchanged(
+        conn,
+        table="user_provider_secrets",
+        updated_blob="blob-new",
+        row_id=1,
+        expected_blob="blob-stale",
+        is_postgres=True,
+    )
+
+    assert updated is False

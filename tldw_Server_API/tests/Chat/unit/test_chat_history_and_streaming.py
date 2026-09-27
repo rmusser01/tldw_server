@@ -1,13 +1,19 @@
 import asyncio
-from contextlib import asynccontextmanager
+import base64
+import io
+import json
+from contextlib import asynccontextmanager, nullcontext
 from typing import Any, Dict, Optional, List
 
 import pytest
+from loguru import logger
+from PIL import Image
 from unittest.mock import AsyncMock, MagicMock
 
 pytestmark = pytest.mark.unit
 
 from tldw_Server_API.app.core.Chat import chat_service
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
 from tldw_Server_API.app.core.Chat.streaming_utils import StreamingResponseHandler
 
 
@@ -25,7 +31,7 @@ class DummyChatDB:
         self._records = records
         self.client_id = "client"
 
-    def get_messages_for_conversation(self, conversation_id: str, limit: int, offset: int, order: str):
+    def get_messages_for_conversation(self, conversation_id: str, limit: int, offset: int, order: str, *, strict_images: bool = False):
         assert conversation_id == "conv"
         assert offset == 0
         assert order in ("ASC", "DESC")
@@ -57,6 +63,11 @@ class DummyChatDBWithMetadata(DummyChatDB):
                 "sender_name": "system-command",
             },
         }
+
+
+@pytest.mark.parametrize("content", [["literal"], [None]])
+def test_chat_error_envelope_leaves_malformed_content_parts_unchanged(content):
+    assert chat_service._is_saved_chat_error_envelope({"role": "assistant", "content": content}) is False
 
 
 @pytest.mark.asyncio
@@ -335,6 +346,226 @@ async def test_build_context_honors_sender_role_metadata():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("history_order", ["asc", "desc"])
+@pytest.mark.parametrize(
+    "last_role,last_content,retry_content,expected_writes,expected_history_count",
+    [
+        ("assistant", '__tldw_error__:{"summary":"Failed","hint":"Retry"}', "question", 0, 1),
+        ("assistant", '__tldw_error__:{"summary":"Failed","hint":"Retry"}', "different", 1, 2),
+        ("assistant", "Successful answer", "question", 1, 3),
+        ("assistant", '__tldw_error__:{"summary":"Quoted example"}', "question", 1, 3),
+        ("assistant", "__tldw_error__:not-json", "question", 1, 3),
+        ("user", '__tldw_error__:{"summary":"Failed","hint":"Retry"}', "question", 1, 3),
+    ],
+)
+async def test_failed_turn_retry_preserves_history_without_replaying_diagnostics(
+    history_order, last_role, last_content, retry_content, expected_writes, expected_history_count, monkeypatch
+):
+    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
+
+    monkeypatch.delenv("CHAT_TRIM_USER_ONLY_OVERLAP", raising=False)
+
+    class SavedChatDB(DummyChatDB):
+        def get_conversation_by_id(self, conversation_id):
+            return {"id": conversation_id, "character_id": 1, "client_id": "client"}
+
+    db = SavedChatDB([
+        {"id": "question", "sender": "user", "content": "question", "timestamp": 1},
+        {"id": "last", "sender": last_role, "content": last_content, "timestamp": 2},
+    ])
+    request = ChatCompletionRequest(
+        model="test-model", save_to_db=True, history_message_order=history_order,
+        messages=[{"role": "user", "content": retry_content}],
+    )
+    save = AsyncMock()
+    result = await chat_service.build_context_and_messages(
+        chat_db=db, request_data=request, loop=asyncio.get_running_loop(), metrics=MagicMock(),
+        default_save_to_db=False, final_conversation_id="conv", save_message_fn=save,
+    )
+
+    assert len(result[4]) == expected_history_count
+    assert save.await_count == expected_writes
+    assert db._records[-1]["content"] == last_content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("history_limit,history_order", [(1, "asc"), (20, "asc"), (20, "desc")])
+async def test_explicit_failed_retry_uses_actual_tail_even_outside_context_window(history_limit, history_order):
+    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
+
+    class SavedDB(DummyChatDB):
+        def get_conversation_by_id(self, _id):
+            return {"id": "conv", "character_id": 1, "client_id": "client"}
+
+    records = [
+        {"id": "earlier", "sender": "assistant", "content": "Earlier reply", "timestamp": 1},
+        {"id": "failed-user", "sender": "user", "content": "Question for {{char}}", "timestamp": 2},
+    ]
+    request = ChatCompletionRequest(
+        model="test", conversation_id="conv", save_to_db=True,
+        history_message_limit=history_limit, history_message_order=history_order,
+        messages=[{"role": "user", "content": records[-1]["content"]}],
+        metadata={"tldw_retry_failed_turn": True},
+    )
+    save = AsyncMock()
+    state = {}
+    result = await chat_service.build_context_and_messages(
+        chat_db=SavedDB(records), request_data=request, loop=asyncio.get_running_loop(), metrics=MagicMock(),
+        default_save_to_db=False, final_conversation_id="conv", save_message_fn=save, runtime_state=state,
+    )
+    save.assert_not_awaited()
+    assert state["user_message_id"] == "failed-user"
+    assert sum(message["role"] == "user" for message in result[4]) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("marker", ["client-user", "", "x" * 129, {"unsafe": "object"}])
+async def test_client_correlation_is_bounded_and_only_attached_to_final_persisted_user(marker):
+    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
+
+    class SavedDB(DummyChatDB):
+        def get_conversation_by_id(self, _id):
+            return {"id": "conv", "character_id": 1, "client_id": "client"}
+
+    request = ChatCompletionRequest(model="test", save_to_db=True, conversation_id="conv",
+        messages=[{"role": "user", "content": "Earlier"}, {"role": "user", "content": "Current"}],
+        metadata={"tldw_client_message_id": marker})
+    save = AsyncMock(return_value="saved-user")
+    result = await chat_service.build_context_and_messages(chat_db=SavedDB([]), request_data=request,
+        loop=asyncio.get_running_loop(), metrics=MagicMock(), default_save_to_db=False,
+        final_conversation_id="conv", save_message_fn=save)
+    stored = [call.args[2] for call in save.await_args_list]
+    assert "client_message_id" not in stored[0]
+    assert stored[1].get("client_message_id") == (marker if marker == "client-user" else None)
+    assert all("client_message_id" not in message for message in result[4])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extra", [None, {}, {"client_message_id": "same"}, {"client_message_id": "different"}])
+async def test_retry_client_identity_respects_saved_correlation_and_legacy_metadata(extra):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
+
+    class SavedDB(DummyChatDB):
+        def get_conversation_by_id(self, _id):
+            return {"id": "conv", "character_id": 1, "client_id": "client"}
+        def get_message_metadata(self, _id):
+            return {"extra": extra}
+
+    request = ChatCompletionRequest(model="test", save_to_db=True, conversation_id="conv",
+        messages=[{"role": "user", "content": "Question"}],
+        metadata={"tldw_client_message_id": "same", "tldw_retry_failed_turn": True})
+    save = AsyncMock()
+    state = {}
+    call = chat_service.build_context_and_messages(chat_db=SavedDB([
+        {"id": "user", "sender": "user", "content": "Question", "timestamp": 1}]), request_data=request,
+        loop=asyncio.get_running_loop(), metrics=MagicMock(), default_save_to_db=False,
+        final_conversation_id="conv", save_message_fn=save, runtime_state=state)
+    if extra == {"client_message_id": "different"}:
+        with pytest.raises(HTTPException) as error:
+            await call
+        assert error.value.status_code == 409
+    else:
+        await call
+        assert state["user_message_id"] == "user"
+    save.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["matching-image", "changed-image", "answered", "legacy-error", "not-persisted", "ordinary-repeat"])
+async def test_failed_retry_identity_conflict_and_compatibility_controls(kind):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
+
+    class SavedDB(DummyChatDB):
+        def get_conversation_by_id(self, _id):
+            return {"id": "conv", "character_id": 1, "client_id": "client"}
+
+    records = [{"id": "failed-user", "sender": "user", "content": "Question", "timestamp": 1}]
+    content = "Question"
+    if "image" in kind:
+        buffer = io.BytesIO()
+        Image.new("RGB", (2, 2), "red").save(buffer, format="PNG")
+        records[0]["images"] = [{"image_data": buffer.getvalue(), "image_mime_type": "image/png"}]
+        if kind == "changed-image":
+            buffer = io.BytesIO()
+            Image.new("RGB", (2, 2), "blue").save(buffer, format="PNG")
+        content = [{"type": "text", "text": "Question"}, {"type": "image_url", "image_url": {
+            "url": "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode()
+        }}]
+    if kind in {"answered", "legacy-error"}:
+        records.append({"id": "assistant", "sender": "assistant", "timestamp": 2,
+                        "content": "Answer" if kind == "answered" else '__tldw_error__:{"summary":"Failed","hint":"Retry"}'})
+    if kind == "not-persisted":
+        records = []
+    request = ChatCompletionRequest(
+        model="test", save_to_db=True, conversation_id="conv", messages=[{"role": "user", "content": content}],
+        metadata={"tldw_retry_failed_turn": kind != "ordinary-repeat"},
+    )
+    save = AsyncMock(return_value="new-user")
+    state = {}
+    call = chat_service.build_context_and_messages(
+        chat_db=SavedDB(records), request_data=request, loop=asyncio.get_running_loop(), metrics=MagicMock(),
+        default_save_to_db=False, final_conversation_id="conv", save_message_fn=save, runtime_state=state,
+    )
+    if kind in {"changed-image", "answered"}:
+        with pytest.raises(HTTPException) as error:
+            await call
+        assert error.value.status_code == 409
+        save.assert_not_awaited()
+    else:
+        await call
+        assert state["user_message_id"] == ("new-user" if kind in {"ordinary-repeat", "not-persisted"} else "failed-user")
+        assert save.await_count == (1 if kind in {"ordinary-repeat", "not-persisted"} else 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "owner,requested_character,expected_id,expected_created",
+    [
+        ("client", None, "conv", False),
+        ("client", "2", "fork", True),
+        ("other-client", None, "fork", True),
+    ],
+)
+async def test_build_context_preserves_owned_neutral_conversation_only_for_implicit_assistant(
+    owner, requested_character, expected_id, expected_created
+):
+    class NeutralChatDB(DummyChatDB):
+        def get_conversation_by_id(self, conversation_id):
+            return {
+                "id": conversation_id,
+                "character_id": None,
+                "assistant_kind": None,
+                "assistant_id": None,
+                "client_id": owner,
+            }
+
+        def transaction(self):
+            return nullcontext()
+
+        def add_conversation(self, conversation):
+            return "fork"
+
+    request = DummyRequestData(save_to_db=True)
+    request.character_id = requested_character
+    result = await chat_service.build_context_and_messages(
+        chat_db=NeutralChatDB([]),
+        request_data=request,
+        loop=asyncio.get_running_loop(),
+        metrics=MagicMock(),
+        default_save_to_db=False,
+        final_conversation_id="conv",
+        save_message_fn=AsyncMock(),
+    )
+
+    assert (result[2], result[3], result[5]) == (expected_id, expected_created, True)
+    assert result[0]["system_prompt"] == "Prompt"
+
+
+@pytest.mark.asyncio
 async def test_build_context_persists_full_transcript_when_enabled():
     class DummyChatDBWithConversation(DummyChatDB):
         def get_conversation_by_id(self, conversation_id: str):
@@ -454,6 +685,7 @@ async def test_streaming_handler_persists_tool_calls():
 
     async def chunk_stream():
         yield "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n"
+        yield 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
         yield "data: [DONE]\n\n"
 
     saver = DummySave()
@@ -595,3 +827,138 @@ def test_document_generator_accepts_string_ids(tmp_path):
 
     job = generator.get_job_status(job_id)
     assert job is not None
+
+
+_STREAM_ERROR_SENTINEL = "sk-stream-secret /private/provider.log https://provider.invalid/raw"
+
+
+def _stream_error_payload(wire_shape: str, *, known: bool) -> object:
+    code = "provider_authentication_failed" if known else "provider_private_failure"
+    nested = {"error": {"code": code, "message": _STREAM_ERROR_SENTINEL}}
+    if wire_shape == "dict":
+        return nested
+    if wire_shape == "bare":
+        return {"code": code, "message": _STREAM_ERROR_SENTINEL}
+    encoded = f"data: {json.dumps(nested)}\n\n"
+    return encoded.encode() if wire_shape == "bytes" else encoded
+
+
+def _error_frames(chunks: list[str]) -> list[dict[str, Any]]:
+    frames: list[dict[str, Any]] = []
+    for chunk in chunks:
+        for line in chunk.splitlines():
+            if not line.startswith("data: ") or line == "data: [DONE]":
+                continue
+            try:
+                payload = json.loads(line.removeprefix("data: "))
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict) and "error" in payload:
+                frames.append(payload)
+    return frames
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream_kind", ["sync", "async"])
+@pytest.mark.parametrize("wire_shape", ["dict", "string", "bytes"])
+@pytest.mark.parametrize("known", [True, False])
+async def test_streaming_handler_sanitizes_every_inband_error_shape(
+    stream_kind,
+    wire_shape,
+    known,
+):
+    payload = _stream_error_payload(wire_shape, known=known)
+    closed = False
+
+    if stream_kind == "async":
+
+        async def source():
+            nonlocal closed
+            try:
+                yield payload
+            finally:
+                closed = True
+
+    else:
+
+        def source():
+            nonlocal closed
+            try:
+                yield payload
+            finally:
+                closed = True
+
+    handler = StreamingResponseHandler("conv", "model", heartbeat_interval=0)
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, format="{message}")
+    try:
+        chunks = [chunk async for chunk in handler.safe_stream_generator(source())]
+    finally:
+        logger.remove(sink_id)
+
+    frames = _error_frames(chunks)
+    expected_code = "provider_authentication_failed" if known else "provider_unavailable"
+    assert len(frames) == 1
+    assert frames[0]["error"] == {
+        "code": expected_code,
+        "type": expected_code,
+        "message": (
+            "The selected provider credentials could not be authenticated."
+            if known
+            else "The chat service provider is currently unavailable."
+        ),
+    }
+    assert sum(chunk.strip().lower() == "data: [done]" for chunk in chunks) == 1
+    assert closed is True
+    assert _STREAM_ERROR_SENTINEL not in "".join(chunks)
+    assert _STREAM_ERROR_SENTINEL not in "".join(logs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream_kind", ["sync", "async"])
+@pytest.mark.parametrize("known", [True, False])
+async def test_streaming_handler_sanitizes_raised_provider_errors(stream_kind, known):
+    closed = False
+    error = (
+        ChatAuthenticationError(_STREAM_ERROR_SENTINEL, provider="openai")
+        if known
+        else RuntimeError(_STREAM_ERROR_SENTINEL)
+    )
+
+    if stream_kind == "async":
+
+        async def source():
+            nonlocal closed
+            try:
+                if False:
+                    yield ""
+                raise error
+            finally:
+                closed = True
+
+    else:
+
+        def source():
+            nonlocal closed
+            try:
+                if False:
+                    yield ""
+                raise error
+            finally:
+                closed = True
+
+    handler = StreamingResponseHandler("conv", "model", heartbeat_interval=0)
+    logs: list[str] = []
+    sink_id = logger.add(logs.append, format="{message}")
+    try:
+        chunks = [chunk async for chunk in handler.safe_stream_generator(source())]
+    finally:
+        logger.remove(sink_id)
+
+    frames = _error_frames(chunks)
+    expected_code = "provider_authentication_failed" if known else "provider_unavailable"
+    assert len(frames) == 1
+    assert frames[0]["error"]["code"] == expected_code
+    assert closed is True
+    assert _STREAM_ERROR_SENTINEL not in "".join(chunks)
+    assert _STREAM_ERROR_SENTINEL not in "".join(logs)

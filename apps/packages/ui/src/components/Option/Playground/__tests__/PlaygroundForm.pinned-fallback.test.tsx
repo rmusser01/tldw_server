@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
+import { encodeChatErrorPayload } from "@/utils/chat-error-message"
 import { PlaygroundForm } from "../PlaygroundForm"
 
 const onSubmitMock = vi.hoisted(() => vi.fn(async (_payload: unknown) => null))
@@ -55,6 +56,7 @@ const playgroundFormConnectionState = vi.hoisted(() => ({
 
 const createMessageOptionState = () => ({
   onSubmit: onSubmitMock,
+  regenerateLastMessage: vi.fn(async () => undefined),
   messages: [],
   selectedModel: "deepseek-chat",
   selectedModelIsLoading: false,
@@ -143,6 +145,9 @@ vi.mock("react-i18next", () => ({
     }
   })
 }))
+
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => null }))
+vi.mock("@/components/Chat/composer/PromptAssistComposerAction", () => ({ PromptAssistComposerAction: () => null }))
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: [] }),
@@ -891,6 +896,19 @@ beforeEach(() => {
 })
 
 describe("PlaygroundForm pinned fallback", () => {
+  it("Retry chat regenerates the failed turn instead of appending its user again", async () => {
+    const user = userEvent.setup()
+    const state = playgroundFormMessageOptionState.value
+    state.messages = [
+      { id: "question", isBot: false, message: "Failed question" },
+      { id: "failure", isBot: true, message: encodeChatErrorPayload({ summary: "Provider failed", hint: "Retry", detail: "Upstream failed" }) }
+    ]
+    render(<MemoryRouter><PlaygroundForm droppedFiles={[]} /></MemoryRouter>)
+    await user.click(screen.getByRole("button", { name: "Retry chat" }))
+    expect(state.regenerateLastMessage).toHaveBeenCalledTimes(1)
+    expect(onSubmitMock).not.toHaveBeenCalled()
+  })
+
   it("uses one shared disconnected recovery notice without duplicate composer copy", async () => {
     const user = userEvent.setup()
     playgroundFormConnectionState.phase = "disconnected"

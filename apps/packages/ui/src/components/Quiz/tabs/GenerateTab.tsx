@@ -5,6 +5,7 @@ import {
   Card,
   Checkbox,
   Form,
+  Input,
   InputNumber,
   Select,
   Space,
@@ -30,6 +31,7 @@ import {
   listQuizGenerationProfiles,
   type AvailableQuizGenerationProfile,
   type QuestionType,
+  type QuestionQuizGenerationProfile,
   type QuizGenerateSource,
   type QuizGenerationProfile,
   type QuizGenerationProfileDefinition,
@@ -44,7 +46,9 @@ import {
   type FlashcardGeneratedDraft,
   type StudyPackSourceSelection,
 } from "@/services/flashcards";
-import { buildFlashcardsGenerateRoute } from "@/services/tldw/flashcards-generate-handoff";
+import { buildFlashcardsGenerateRoute, createFlashcardsGenerateHandoff, removeFlashcardsGenerateHandoff, type FlashcardsGenerateIntent } from "@/services/tldw/flashcards-generate-handoff";
+import type { ServicePromptSnapshot } from "@/services/service-prompts";
+import { flashcardsHandoffAuthority, loadFlashcardsTransferSnapshot } from "@/services/tldw/flashcards-generate-transfer";
 import { buildFlashcardsStudyRouteFromQuiz } from "@/services/tldw/quiz-flashcards-handoff";
 import type { SourceReviewHandoffPayload } from "@/services/tldw/source-review-handoff";
 import type { TakeTabNavigationIntent } from "../navigation";
@@ -120,7 +124,7 @@ type AvailableGenerationProfileDefinition = Omit<
 const isAvailableGenerationProfile = (
   profile: QuizGenerationProfileDefinition,
 ): profile is AvailableGenerationProfileDefinition =>
-  profile.status === "available" && profile.id !== "osce_scenario";
+  profile.status === "available";
 
 const DEFAULT_GENERATION_PROFILE = QUIZ_GENERATION_PROFILES[0] as AvailableGenerationProfileDefinition;
 
@@ -498,20 +502,20 @@ const normalizeFlashcardListResponse = (
 const getFirstNonEmptyString = (...values: unknown[]): string => {
   for (const value of values) {
     if (typeof value === "string" && value.trim().length > 0) {
-      return value.trim();
+      return value;
     }
   }
   return "";
 };
 
 const extractMediaText = (details: unknown): string => {
-  if (typeof details === "string") return details.trim();
+  if (typeof details === "string") return details;
   const record = asRecord(details);
   if (!record) return "";
 
   const content = record.content;
   if (typeof content === "string" && content.trim().length > 0) {
-    return content.trim();
+    return content;
   }
   const contentRecord = asRecord(content);
   if (contentRecord) {
@@ -630,6 +634,31 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
   const debouncedMediaSearch = useDebounce(mediaSearchInput, 300);
   const debouncedNotesSearch = useDebounce(notesSearchInput, 300);
   const generateAbortRef = React.useRef<AbortController | null>(null);
+  const flashcardsTransferRef = React.useRef<{ token?: string; scopeSignal: AbortSignal; release: () => void } | null>(null);
+  const clearFlashcardsTransfer = React.useCallback(() => {
+    const previous = flashcardsTransferRef.current;
+    flashcardsTransferRef.current = null;
+    previous?.release();
+    if (previous?.token) void removeFlashcardsGenerateHandoff(previous.token).catch(() => console.warn("Could not remove an abandoned Flashcards transfer."));
+  }, []);
+  const continueFlashcards = () => {
+    const route = generatedPreview?.flashcardsSummary?.handoffRoute;
+    if (!route) return;
+    const transfer = flashcardsTransferRef.current;
+    if (transfer?.scopeSignal.aborted) return;
+    const token = transfer?.token;
+    // Explicit Continue transfers ownership to the destination. A normal router
+    // unmount must still release the lease, but must not delete its delivery.
+    if (transfer) transfer.token = undefined;
+    try {
+      navigate(route);
+      clearFlashcardsTransfer();
+    } catch {
+      if (transfer && flashcardsTransferRef.current === transfer) transfer.token = token;
+      else if (token) void removeFlashcardsGenerateHandoff(token).catch(() => console.warn("Could not remove an abandoned Flashcards transfer."));
+      void messageApi.error("Flashcards could not be opened. Your generation preview is still available.");
+    }
+  };
   const { data: serverGenerationProfiles } = useQuery<
     QuizGenerationProfileDefinition[]
   >({
@@ -661,6 +690,11 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
     generationProfiles,
     Form.useWatch("generationProfile", form),
   );
+  const isOsceProfile = selectedGenerationProfile.output_kind === "osce_stations";
+  const selectedStationCount =
+    Form.useWatch("numStations", form) ??
+    selectedGenerationProfile.default_num_stations ??
+    1;
   const profileLocksQuestionShape = !usesQuestionPlanShape(
     selectedGenerationProfile.id,
   );
@@ -853,8 +887,9 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
   React.useEffect(() => {
     return () => {
       generateAbortRef.current?.abort();
+      clearFlashcardsTransfer();
     };
-  }, []);
+  }, [clearFlashcardsTransfer]);
 
   const hasMoreMedia =
     mediaTotal != null
@@ -1089,18 +1124,18 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
         defaultValue: "Select at least one source to generate a quiz.",
       });
     }
-    if (totalQuestions === 0) {
+    if (!isOsceProfile && totalQuestions === 0) {
       return t("option:quiz.generateBlockedNoQuestions", {
         defaultValue: "Enable at least one question type.",
       });
     }
-    if (totalQuestions > 100) {
+    if (!isOsceProfile && totalQuestions > 100) {
       return t("option:quiz.generateBlockedTooManyQuestions", {
         defaultValue: "Reduce the mix to 100 questions or fewer.",
       });
     }
     return null;
-  }, [hasSelectedSources, totalQuestions, t]);
+  }, [hasSelectedSources, isOsceProfile, totalQuestions, t]);
 
   const canGenerate = !generateBlockReason && !generationInFlight;
 
@@ -1149,6 +1184,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
     (value: QuizGenerationProfile) => {
       const profile = getGenerationProfile(generationProfiles, value);
       form.setFieldValue("difficulty", profile.default_difficulty);
+      form.setFieldValue("numStations", profile.default_num_stations ?? 1);
       setQuestionPlanRows((rows) => {
         if (usesQuestionPlanShape(profile.id)) {
           return DEFAULT_QUESTION_PLAN_ROWS.map((row) => ({ ...row }));
@@ -1180,9 +1216,12 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
       difficulty?: "easy" | "medium" | "hard" | "mixed";
       focusTopics: string[];
       signal?: AbortSignal;
+      snapshot: ServicePromptSnapshot;
     }): Promise<FlashcardsSummary> => {
       const fallbackRoute = "/flashcards?tab=importExport";
+      let sourceIntent: FlashcardsGenerateIntent | undefined;
       const throwIfAborted = () => {
+        params.snapshot.scopeSignal.throwIfAborted();
         if (params.signal?.aborted) {
           const abortError = new Error("aborted");
           abortError.name = "AbortError";
@@ -1190,6 +1229,14 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
         }
       };
 
+      const handoffRoute = async () => {
+        throwIfAborted();
+        if (!sourceIntent) return fallbackRoute;
+        const token = await createFlashcardsGenerateHandoff(sourceIntent, flashcardsHandoffAuthority(params.snapshot), params.snapshot.scopeSignal);
+        if (flashcardsTransferRef.current) flashcardsTransferRef.current.token = token;
+        throwIfAborted();
+        return buildFlashcardsGenerateRoute(token);
+      };
       throwIfAborted();
 
       try {
@@ -1197,14 +1244,13 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
           include_content: true,
           include_versions: false,
           include_version_content: false,
-          signal: params.signal,
+          signal: params.snapshot.scopeSignal,
+            requestScope: params.snapshot.requestScope,
         });
         throwIfAborted();
 
-        const sourceText = extractMediaText(details).slice(
-          0,
-          MAX_FLASHCARD_SOURCE_TEXT_CHARS,
-        );
+        const fullSourceText = extractMediaText(details);
+        const sourceText = fullSourceText.slice(0, MAX_FLASHCARD_SOURCE_TEXT_CHARS);
         if (!sourceText) {
           return {
             status: "failed",
@@ -1219,12 +1265,13 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
           };
         }
 
-        const handoffRoute = buildFlashcardsGenerateRoute({
+        sourceIntent = {
           text: sourceText,
           sourceType: "media",
           sourceId: String(params.mediaId),
           sourceTitle: params.mediaTitle,
-        });
+          truncated: fullSourceText.length > sourceText.length,
+        };
 
         const generated = await generateFlashcards(
           {
@@ -1235,7 +1282,8 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
               params.focusTopics.length > 0 ? params.focusTopics : undefined,
           },
           {
-            signal: params.signal,
+            signal: params.snapshot.scopeSignal,
+            requestScope: params.snapshot.requestScope,
           },
         );
         throwIfAborted();
@@ -1250,7 +1298,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
             errorDetail: t("option:quiz.studyMaterialsEmptyFlashcards", {
               defaultValue: "Flashcard generation returned no usable cards.",
             }),
-            handoffRoute,
+            handoffRoute: await handoffRoute(),
           };
         }
 
@@ -1263,7 +1311,8 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
             }),
           },
           {
-            signal: params.signal,
+            signal: params.snapshot.scopeSignal,
+            requestScope: params.snapshot.requestScope,
           },
         );
         throwIfAborted();
@@ -1285,7 +1334,8 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                 source_ref_id: String(params.mediaId),
               },
               {
-                signal: params.signal,
+                signal: params.snapshot.scopeSignal,
+                requestScope: params.snapshot.requestScope,
               },
             ),
           ),
@@ -1312,9 +1362,10 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                   defaultValue: "Unable to save generated flashcards.",
                 })
               : null,
-          handoffRoute,
+          handoffRoute: status === "success" ? fallbackRoute : await handoffRoute(),
         };
       } catch (error) {
+        throwIfAborted();
         if (isAbortError(error)) throw error;
         return {
           status: "failed",
@@ -1348,7 +1399,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
       return;
     }
 
-    if (totalQuestions === 0 || totalQuestions > 100) {
+    if (!isOsceProfile && (totalQuestions === 0 || totalQuestions > 100)) {
       return;
     }
 
@@ -1357,37 +1408,81 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
     try {
       const values = await form.validateFields();
       setGeneratedPreview(null);
+      clearFlashcardsTransfer();
 
       const focusTopics = normalizeFocusTopics(values.focusTopics);
+      const apiProvider = String(values.apiProvider ?? "").trim() || undefined;
+      const verificationProvider =
+        String(values.verificationProvider ?? "").trim() || undefined;
       const generationProfile = getGenerationProfile(
         generationProfiles,
         values.generationProfile,
       );
       const usesQuestionPlan = usesQuestionPlanShape(generationProfile.id);
-      const shouldGenerateStudyMaterials = Boolean(
+      const isOsceGeneration = generationProfile.output_kind === "osce_stations";
+      const shouldGenerateStudyMaterials = !isOsceGeneration && Boolean(
         values.generateStudyMaterials,
       );
       requestAbortController = new AbortController();
       generateAbortRef.current = requestAbortController;
       setGenerationInFlight(true);
+      let flashcardsSnapshot: ServicePromptSnapshot | undefined;
+      if (shouldGenerateStudyMaterials) {
+        const controller = requestAbortController;
+        flashcardsSnapshot = await loadFlashcardsTransferSnapshot(controller.signal);
+        flashcardsSnapshot.scopeSignal.throwIfAborted();
+        const invalidate = () => {
+          controller.abort();
+          setGeneratedPreview(null);
+          clearFlashcardsTransfer();
+        };
+        flashcardsSnapshot.scopeSignal.addEventListener("abort", invalidate, { once: true });
+        const snapshot = flashcardsSnapshot;
+        flashcardsTransferRef.current = { scopeSignal: snapshot.scopeSignal, release: () => {
+          snapshot.scopeSignal.removeEventListener("abort", invalidate);
+          snapshot.release();
+        } };
+      }
 
       const generated = await generateMutation.mutateAsync({
-        request: {
-          sources: selectedSources,
-          generation_profile: generationProfile.id,
-          num_questions: totalQuestions,
-          ...(usesQuestionPlan
-            ? { question_plan: enabledPlanRows }
-            : { question_types: generationProfile.default_question_types }),
-          difficulty: values.difficulty,
-          focus_topics: focusTopics.length > 0 ? focusTopics : undefined,
-        },
+        request: isOsceGeneration
+          ? {
+              sources: selectedSources,
+              generation_profile: "osce_scenario",
+              num_stations: sanitizeInputNumber(values.numStations, 1, 10) ?? 1,
+              difficulty: values.difficulty,
+              focus_topics: focusTopics.length > 0 ? focusTopics : undefined,
+              api_provider: apiProvider,
+              claims_verification_provider: verificationProvider,
+            }
+          : {
+              sources: selectedSources,
+              generation_profile: generationProfile.id as QuestionQuizGenerationProfile,
+              num_questions: totalQuestions,
+              ...(usesQuestionPlan
+                ? { question_plan: enabledPlanRows }
+                : { question_types: generationProfile.default_question_types }),
+              difficulty: values.difficulty,
+              focus_topics: focusTopics.length > 0 ? focusTopics : undefined,
+              api_provider: apiProvider,
+              claims_verification_provider: verificationProvider,
+            },
         signal: requestAbortController.signal,
       });
       if (requestAbortController.signal.aborted) return;
 
       const generatedQuizName =
         generated.quiz.name || `Quiz #${generated.quiz.id}`;
+
+      if (isOsceGeneration) {
+        messageApi.success(
+          t("option:quiz.generateOsceSuccess", {
+            defaultValue: "OSCE generated. Review the stations in Manage.",
+          }),
+        );
+        onNavigateToManage?.();
+        return;
+      }
       let flashcardsSummary: FlashcardsSummary | null = null;
 
       if (shouldGenerateStudyMaterials) {
@@ -1405,6 +1500,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
           };
         } else {
           flashcardsSummary = await generateStudyMaterialsFlashcards({
+            snapshot: flashcardsSnapshot!,
             mediaId: selectedMediaId,
             mediaTitle: selectedMedia?.title || `Media #${selectedMediaId}`,
             quizName: generatedQuizName,
@@ -1876,6 +1972,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                 generationProfile: "standard_recall",
                 difficulty: "mixed",
                 focusTopics: [],
+                numStations: 1,
                 generateStudyMaterials: false,
               }}
             >
@@ -1901,6 +1998,23 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                 />
               </Form.Item>
 
+              {isOsceProfile ? (
+                <Form.Item
+                  name="numStations"
+                  label={t("option:quiz.stations", { defaultValue: "Stations" })}
+                  rules={[{ required: true }]}
+                >
+                  <InputNumber
+                    min={1}
+                    max={10}
+                    precision={0}
+                    step={1}
+                    aria-label="Stations"
+                    className="w-full"
+                    disabled={generationInFlight}
+                  />
+                </Form.Item>
+              ) : (
               <div className="mb-6 space-y-3">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                   <div>
@@ -2090,6 +2204,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                   })}
                 </div>
               </div>
+              )}
 
               <Form.Item
                 name="difficulty"
@@ -2163,7 +2278,26 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                 />
               </Form.Item>
 
-              <div className="space-y-1">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Form.Item
+                  name="apiProvider"
+                  label={t("option:quiz.generationProvider", {
+                    defaultValue: "Generation provider (optional)",
+                  })}
+                >
+                  <Input allowClear disabled={generationInFlight} />
+                </Form.Item>
+                <Form.Item
+                  name="verificationProvider"
+                  label={t("option:quiz.verificationProvider", {
+                    defaultValue: "Verification provider (optional)",
+                  })}
+                >
+                  <Input allowClear disabled={generationInFlight} />
+                </Form.Item>
+              </div>
+
+              {!isOsceProfile ? <div className="space-y-1">
                 <Form.Item
                   name="generateStudyMaterials"
                   valuePropName="checked"
@@ -2193,7 +2327,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                           "Uses the selected media content to create a companion deck.",
                       })}
                 </p>
-              </div>
+              </div> : null}
             </Form>
           </Card>
 
@@ -2213,10 +2347,12 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                   {selectedSourcesLabel}
                 </dd>
                 <dt className="text-text-subtle">
-                  {t("option:quiz.questions", { defaultValue: "Questions" })}
+                  {isOsceProfile
+                    ? t("option:quiz.stations", { defaultValue: "Stations" })
+                    : t("option:quiz.questions", { defaultValue: "Questions" })}
                 </dt>
                 <dd className="text-right font-medium text-text">
-                  {totalQuestions}
+                  {isOsceProfile ? selectedStationCount : totalQuestions}
                 </dd>
                 <dt className="text-text-subtle">
                   {t("option:quiz.difficulty", { defaultValue: "Difficulty" })}
@@ -2226,16 +2362,16 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                     (option) => option.value === selectedDifficulty,
                   )?.label ?? selectedDifficulty}
                 </dd>
-                <dt className="text-text-subtle">
+                {!isOsceProfile ? <dt className="text-text-subtle">
                   {t("option:quiz.studyMaterials", {
                     defaultValue: "Study materials",
                   })}
-                </dt>
-                <dd className="text-right font-medium text-text">
+                </dt> : null}
+                {!isOsceProfile ? <dd className="text-right font-medium text-text">
                   {shouldGenerateStudyMaterials
                     ? t("common:enabled", { defaultValue: "Enabled" })
                     : t("common:off", { defaultValue: "Off" })}
-                </dd>
+                </dd> : null}
               </dl>
 
               {generateBlockReason ? (
@@ -2285,16 +2421,18 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
               ) : (
                 <Button
                   type="primary"
-                  icon={<RocketOutlined />}
+                  icon={<RocketOutlined aria-hidden />}
                   size="large"
                   onClick={handleGenerate}
                   loading={generationInFlight}
                   disabled={!canGenerate}
                   block
                 >
-                  {t("option:quiz.generateQuiz", {
-                    defaultValue: "Generate Quiz",
-                  })}
+                  {isOsceProfile
+                    ? t("option:quiz.generateOsce", { defaultValue: "Generate OSCE" })
+                    : t("option:quiz.generateQuiz", {
+                        defaultValue: "Generate Quiz",
+                      })}
                 </Button>
               )}
             </div>
@@ -2401,12 +2539,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = ({
                   generatedPreview.flashcardsSummary.status !== "success" ? (
                     <Button
                       data-testid="generate-continue-flashcards-button"
-                      onClick={() =>
-                        navigate(
-                          generatedPreview.flashcardsSummary
-                            ?.handoffRoute as string,
-                        )
-                      }
+                      onClick={continueFlashcards}
                     >
                       {t("option:quiz.continueFlashcardsGeneration", {
                         defaultValue: "Continue in Flashcards",

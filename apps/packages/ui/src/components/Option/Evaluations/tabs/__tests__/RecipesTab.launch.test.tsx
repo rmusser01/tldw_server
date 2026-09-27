@@ -1604,7 +1604,7 @@ describe("RecipesTab recipe launch flow", () => {
 
     renderRecipesTab()
 
-    expect(screen.getByText("Unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Error")).toBeInTheDocument()
     expect(screen.getByText("Unable to load recipes")).toBeInTheDocument()
     expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
       "/api/v1/evaluations/recipes"

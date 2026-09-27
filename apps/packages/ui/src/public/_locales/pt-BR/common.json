@@ -1261,5 +1261,17 @@
   },
   "modelSelect_sort_localFirst": {
     "message": "Local-first"
+  },
+  "help_loadFailed": {
+    "message": "Não foi possível carregar a ajuda. Reconecte-se, salve as alterações e recarregue a página."
+  },
+  "help_loading": {
+    "message": "Carregando ajuda…"
+  },
+  "help_confirmReload": {
+    "message": "Recarregar esta página? Alterações não salvas podem ser perdidas."
+  },
+  "help_reload": {
+    "message": "Recarregar página"
   }
 }

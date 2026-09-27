@@ -97,6 +97,7 @@ def create_keyword_data(keyword_id: int, keyword: str, client_id: str) -> dict:
     now = datetime.now(timezone.utc)
     return {
         "id": keyword_id,
+        "sync_id": str(uuid.uuid4()),
         "keyword": keyword,
         "created_at": now.isoformat(),
         "last_modified": now.isoformat(),
