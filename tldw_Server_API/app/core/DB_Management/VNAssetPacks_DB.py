@@ -1817,6 +1817,7 @@ class VNAssetPacksRepository:
                 (
                     (error, batch_id, int(slot["slot_id"]), int(batch["pack_id"]), batch_id)
                     for slot in recipe["slots"]
+                    if int(slot["variant_count"]) > 0
                 ),
             )
 

@@ -964,6 +964,76 @@ def test_generation_marks_batch_failed_when_parent_enqueue_is_rejected(
     assert batches[0]["enqueue_error"] == "queued job quota exceeded"
 
 
+def test_rejected_parent_enqueue_preserves_zero_variant_slots(
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+) -> None:
+    depth = next(slot for slot in pack_with_slots.slots if slot.variant_count == 0)
+    before = service.repo.get_slot(depth.id)
+    with pytest.raises(ValueError, match="queued job quota exceeded"):
+        service.start_generation(pack_with_slots.id, jobs_manager=RejectingJobs())
+
+    batch = service.repo.list_batches(pack_with_slots.id)[0]
+    stored_depth = service.repo.get_slot(depth.id)
+    assert stored_depth["status"] == before["status"]
+    assert stored_depth["last_error"] == before["last_error"]
+    assert stored_depth["last_failed_batch_id"] == before["last_failed_batch_id"]
+    assert depth.id not in service.get_generation_status(pack_with_slots.id).failed_slot_batch_ids
+    for slot in pack_with_slots.slots:
+        if slot.variant_count > 0:
+            assert service.repo.get_slot(slot.id)["last_failed_batch_id"] == batch["id"]
+
+
+@pytest.mark.parametrize("explicit_source", [False, True])
+@pytest.mark.parametrize("recorded_failure", [False, True])
+def test_retry_slot_api_rejects_zero_variant_source_without_enqueue(
+    service: VNAssetPackService,
+    pack_with_slots: SimpleNamespace,
+    fake_jobs: FakeJobs,
+    explicit_source: bool,
+    recorded_failure: bool,
+) -> None:
+    depth = next(slot for slot in pack_with_slots.slots if slot.variant_count == 0)
+    with pytest.raises(ValueError, match="queued job quota exceeded"):
+        service.start_generation(pack_with_slots.id, jobs_manager=RejectingJobs())
+    source = service.repo.list_batches(pack_with_slots.id)[0]
+    # Cover older enqueue failures as well as sources without recorded slot failure.
+    service.repo.update_slot(depth.id, {
+        "status": "failed" if recorded_failure else depth.status,
+        "last_error": "queued job quota exceeded" if recorded_failure else None,
+        "last_failed_batch_id": source["id"] if recorded_failure else None,
+    })
+    app = FastAPI()
+    app.include_router(vn_assets_router, prefix="/api/v1/vn")
+    app.dependency_overrides[get_request_user] = lambda: User(id=1, username="vn-generator")
+    app.dependency_overrides[vn_assets_endpoint._service] = lambda: service
+    app.dependency_overrides[vn_assets_endpoint._job_manager] = lambda: fake_jobs
+    payload: dict[str, Any] = {"idempotency_key": "zero-variant-retry"}
+    if explicit_source:
+        payload["source_batch_id"] = source["id"]
+
+    response = TestClient(app).post(
+        f"/api/v1/vn/vn-assets/packs/{pack_with_slots.id}/slots/{depth.id}/retry",
+        json=payload,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "vn_asset_retry_source_unavailable"
+    assert len(service.repo.list_batches(pack_with_slots.id)) == 1
+    assert fake_jobs.created == []
+    background_item = service.repo.create_item(
+        pack_id=pack_with_slots.id, slot_id=depth.depends_on_slot_id,
+        variant_index=0, review_status="draft",
+    )
+    service.review_item_for_pack(
+        pack_with_slots.id, int(background_item["id"]),
+        VNAssetReviewRequest(review_status="approved", preferred=True),
+    )
+    lazy_batch = service.repo.list_batches(pack_with_slots.id)[0]
+    assert lazy_batch["planned_count"] == 1
+    assert json.loads(lazy_batch["options_json"])["slot_ids"] == [depth.id]
+
+
 @pytest.mark.asyncio
 async def test_lost_parent_enqueue_response_recovers_slot_status(
     service: VNAssetPackService,

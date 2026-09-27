@@ -748,6 +748,8 @@ class VNAssetPackService:
             )
             raise
         count = int(authored_slot["variant_count"])
+        if count == 0:
+            raise ValueError("vn_asset_retry_source_unavailable")
         if request.variant_count is not None and request.variant_count != count:
             raise ValueError("vn_asset_retry_override_conflict")
         self._enforce_item_limit(len(self.repo.list_items(pack_id)) + count)
