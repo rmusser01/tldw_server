@@ -1,10 +1,10 @@
 ---
 id: TASK-13385
 title: Recover pending VN generation commands after reload
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-09-27 15:25'
-updated_date: '2026-09-27 16:12'
+updated_date: '2026-09-27 17:27'
 labels:
   - vn-assets
   - frontend
@@ -56,6 +56,10 @@ Final corrected full-browser check used backend detail.code/message/details/retr
 Requester selected option2 (push and create PR), not merge. Fetched dev718c191082f1d6372fb6fe000ac763dcc07ffcbd; its four new commits touch only unrelated audio resampling/test and task13304/13382 records. Unpublished branch rebased conflict-free from old8b12335c171aaa3a40bc38a2076c4f89962e674f; range-diff shows all3patches unchanged and unrelated base files match dev byte-for-byte. Fresh97tests passed11.44s, typecheck0, scopedESLint0warnings and diffcheck0 on rebased head802bef1194309bb7543e7a0ccbf2395527f9da03. No remote branch or existing PR found; publish normally without force. Prior independent review and browser evidence apply to unchanged source patches, not a claim of completed new-head hosted review. Human-written Change summary and live CI remain merge gates; no merge or automation requested.
 
 Published requester-approved branch codex/vn-command-recovery by normal push, verified local/remote head01a964685dbe0b667ac85c898ab97496c63d6a06, and created PR3028 against dev: https://github.com/rmusser01/tldw_server/pull/3028. Attached PR to this chat. Human-owned Change summary explicitly pending; AI-authored summary is not a substitute. No merge or auto-merge enabled. Task implementation remains Done; hosted CI/review and human summary are PR integration gates, not claims of completion. Final tracking-only commit will be pushed normally after verifying remote ownership.
+
+Requester explicitly authorized protected rebase of PR3028 onto latest dev, scoped remediation of posted Qodo findings and a normal merge only after complete current-head review and all live required gates. Human-written Change summary was provided and published verbatim before this authorization; design approval was never merge authorization. Verified clean owned local/remote head5de2ed11671f593968a86aef24d3be0422488f75; latest dev35d6dd90d4c3b703a753efdbd926e30af4f9eac5 contains only unrelated MCP tests/task records. Rebase was conflict-free and all five prior patches are unchanged in range-diff. Local preview-only UI dependency link and CLI-created colliding archive13379 remain untracked and excluded. PR review plan: IMPLEMENTATION_PLAN_vn_command_recovery_pr_review.md. Fresh verification and new-head reviews remain pending.
+
+Fresh verification after rebase onto dev35d6dd90d4c3b703a753efdbd926e30af4f9eac5: all97 VN/frontend real fetch-client tests passed (15.28s), frontend typecheck passed, scoped ESLint zero warnings and diff checks passed. Unrelated MCP tests/task13358/task13380/base workflows match dev byte-for-byte. Bandit unchanged VN Python baseline returned zero findings/errors; it does not scan touched TypeScript. Only scoped design wording distinguishes approved design from human-summary/current-head review/CI merge gates; no production behavior changed. Qodo discussion4116043591 was posted before the human summary, while merge/auto-merge were intentionally disabled. Human summary now published verbatim, explicit gated merge authorization received; reply and exact-new-head hosted reviews will follow protected publication. Task remains In Progress until verified merge.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

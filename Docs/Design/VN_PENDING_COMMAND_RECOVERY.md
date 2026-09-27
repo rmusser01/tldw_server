@@ -1,6 +1,8 @@
 # VN Pending Command Recovery
 
-Task: TASK-13385. Approved by the requester on 2026-09-27.
+Task: TASK-13385. Design approved by the requester on 2026-09-27.
+Design approval does not authorize merging or waive the human-written Change
+summary, current-head review or required CI merge gates.
 
 Persist only unresolved workbench Start/Retry commands in tab-scoped sessionStorage
 before POST: version, verified server API base/account ID, pack/slot ID, original
