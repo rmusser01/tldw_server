@@ -364,3 +364,65 @@ retried or cancelled; Windows syntax does not qualify a Windows Docker host.
 TASK-13376.9 is complete for its bounded rendering correction, tests and review.
 Parent TASK-13376 and Stage 4 remain In Progress for native/core-format and G12
 requirements. The application is not release-qualified.
+
+## Native amd64 loading verification and retained Bun diagnostic
+
+On continuation, the exact-source native amd64 job in
+[run 36293327915](https://github.com/rmusser01/tldw_server/actions/runs/36293327915)
+succeeded. Its provisional artifact `10923931392` was downloaded to
+`/private/tmp/task13376-native-3ef013bd94-amd64`; the ZIP matched GitHub's
+published SHA256
+`2b23a7538951c2d44aca8e71fb98538e9fb1a975ad1fc67386ebbda98e565275`.
+Local verification confirmed the signed manifest, all eight bundled file
+artifacts, exact source `3ef013bd94d389454e0b10b67060f9a95e9089af` and
+linux/amd64 evidence: all 13 lifecycle and all 38 browser checks passed.
+The previously failing `manual_master_key_absent_2` now passes on native
+compiled artifacts. Manifest SHA256 is
+`6678dcaa0a96a011fd1771e5c96e2b4bfe1c3792cfc0184f63b3f5416597927d`;
+bundle archive SHA256 is
+`fa90e4c4df40ed56819e2614cf9a01514fe40f9b23986c4e91df016ed9a62fbb`.
+
+This remains initial-wizard/managed-connection evidence with
+`planned_setup_complete=false`; it does not repeat the separate ordinary
+provider/document workflow on the new revision. Aggregate bounded G2/G4/G10
+evidence is true, G12 remains false, and the unchanged promotion verifier
+correctly refuses the candidate. Windows helper syntax passed. Native arm64
+was still building at the latest API check, so the two-platform gate remains
+open. The docs-only `3257217765` run also remained In Progress. No job was
+retried or cancelled. Whole-frontend typecheck remains an existing non-blocking
+failed step, not a newly passing quality gate.
+
+TASK-13376.10 separately reassessed the exhausted ordinary-build path before
+one retained-evidence diagnostic. Earlier probes lost the timed-out child's
+script identity; their successful all-thread probe still classified scripts
+as unknown. The new diagnostic used verified cached Bun 1.3.2 Debian arm64
+digest `ff851006c8b322761d53593e7a78c92d09ec0a6bc09a55f81c9861e614761d9a`
+and unchanged production COPY/lockfile inputs, in an isolated image ending
+before install. It ran the ordinary frozen install once, without verbosity,
+script or concurrency changes, under a 300-second timeout plus 15-second grace.
+Raw stdout, stable descendant argv/cwd/executable/package metadata and
+CPU/I/O/thread-wait snapshots are retained privately at
+`/private/tmp/task13376-bun-stall-diagnosis-3ef013bd94`.
+
+The install returned 0, reporting 3665 packages installed in 85.08 seconds;
+the diagnostic monitor finished in 92 seconds. Observed children included
+canvas 3.2.1 and Puppeteer 24.36.0 `node install.mjs`, both running the Bun
+executable. Puppeteer remained active at the 82-second snapshot with increasing
+CPU and I/O counters and 731975680 bytes written. Puppeteer documents browser
+downloads during [installation](https://pptr.dev/next/guides/installation);
+the local package is a dev dependency used by the CDP examination script.
+This successful run identifies previously unclassified scripts, but does not
+identify the earlier stalled child or establish a Bun/Puppeteer root cause.
+No stall was reproduced and no additional install or product fix followed.
+
+Shell syntax and a real timeout/sh/sleep descendant preflight passed. A separate
+two-second sleep fixture verified expected exit 124 while preserving its log
+and descendant snapshots; that fixture did not install dependencies. Exact
+recorded ownership labels/IDs were checked before removing only the diagnostic
+container and image. All baseline images, containers and volumes were retained,
+including both unrelated PostgreSQL services. Host evidence and all prior
+candidate/recovery files remain. Tracked changes in this continuation are
+Markdown/task records only; `git diff --check` passed and Bandit has no applicable
+new Python production scope. The completed task's own diagnostic plan is
+preserved in Git history and private evidence, then removed under AGENTS.md;
+the broader qualification plan remains In Progress.

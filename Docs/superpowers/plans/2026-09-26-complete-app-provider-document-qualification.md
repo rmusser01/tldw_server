@@ -175,3 +175,17 @@ services. No signed candidate or fresh browser/lifecycle result is claimed.
 Native run `36293327915` was In Progress at the final check, with Windows syntax
 passed and Linux candidate builds running. Stage 4 remains In Progress; the
 earlier successful ordinary workflow is specific to `9709d0dcb7`.
+
+Continuation verified native amd64 source `3ef013bd94`: all 13 lifecycle and
+38 browser checks passed, including `manual_master_key_absent_2`. The downloaded
+artifact ZIP digest, signed manifest and eight bundled file hashes verified;
+the unchanged promotion gate refused G12=false. This remains initial-wizard
+evidence with planned full setup false. Arm64 was still building at the latest
+check, Windows helper syntax passed, and the full native/core-format/G12 matrix
+remains open. TASK-13376.10 ran one separately scoped retained-evidence frozen
+Bun install: it passed in 85.08 seconds (92-second monitor), identified active
+Puppeteer/canvas children and did not reproduce the stall. Timeout retention
+was verified with a sleep fixture. Exact owned diagnostic cleanup preserved all
+baseline Docker resources and private evidence. No runtime/dependency change,
+further candidate retry, requirement waiver or new ordinary workflow is claimed.
+Stage 4 remains In Progress; see the acceptance review for exact hashes and limits.
