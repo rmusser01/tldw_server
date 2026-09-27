@@ -58,13 +58,15 @@ tests. Its minor diagnostics finding is corrected: safe validation details or
 asset/errno are reported without file contents (new assertion red, then 108
 tests green again). Existing browser-helper contract tests passed 59 tests after
 the sandbox's localhost-listen restriction required an authorized rerun.
-Rebuilt signed candidate verification remains pending. The lifecycle restart check now verifies
-saved provider fields as well as the existing data sentinel.
+The lifecycle restart check verifies saved provider fields as well as the
+existing data sentinel. Fresh signed-source verification is recorded below.
 
-The fresh local build needs additional free host disk space: approximately
-12 GiB available versus an 8.8 GiB backend rootfs plus build/export overhead.
-Permission to reclaim Docker's reported 14.7 GB unused shared build cache is
-pending; no cache pruning or retained-image/evidence deletion has occurred.
+The user approved reclaiming unused Docker build cache after the host disk
+limit blocked the fresh build. `docker buildx prune --builder default --force`
+reclaimed 14.72 GB. Exact before/after identities matched for all 32 images,
+2 containers and 6 volumes; no image, container or volume pruning occurred.
+Private cleanup evidence is retained at
+`/private/tmp/task13376-cache-cleanup-9709d0dcb7`.
 
 ## Stage 3: Qualify the ordinary fresh browser workflow
 **Goal**: Build and verify a candidate from clean committed source; complete
@@ -77,7 +79,7 @@ presented for review before implementation.
 **Tests**: Existing candidate signature/lifecycle/browser checks, then ordinary
 provider validation/save/first chat, document upload/search/application chat with
 the configured repository mock. Only disposable owned test resources are used.
-**Status**: In Progress
+**Status**: Complete
 
 Fresh candidate source `cb581a1e16032df27e4026afd784c9a682b584c1` passed
 built-backend qualification, 13 lifecycle and 38 initial-browser checks.
@@ -97,6 +99,17 @@ falsely reports no providers/models because its separate precheck omits the
 cookie session. Additional behavior changes await review/approval; see
 `Docs/superpowers/reviews/2026-09-26-complete-app-provider-document-qualification.md`.
 
+The earlier `cb581a1e16` result above is retained as failure history. After the
+two approved corrections, source `9709d0dcb7e846d3a7366a3412afa933208f4b10`
+passed built-backend checks, 13 lifecycle checks and 38 initial-browser checks
+on local linux/arm64. The final signed archive was extracted into fresh private
+state outside the checkout at `/private/tmp/task13376-workflow-9709d0dcb7`.
+Ordinary WebUI provider validation/save/wizard chat, Markdown upload, lexical
+search and application chat all passed. Provider status was Healthy without
+the prior false missing-provider/model banner. No manual server API key or
+frontend/server URL wiring was used. This local mock-provider result does not
+qualify commercial providers, vector retrieval or chat answer quality.
+
 ## Stage 4: Verify persistence and record the actual result
 **Goal**: Stop/start retains provider configuration and document data, with an
 accurate acceptance record and recoverable evidence.
@@ -115,3 +128,25 @@ outside the persistent config volume, and were absent after container
 recreation. Full qualification stays false. amd64 native initial-browser
 qualification also failed `manual_master_key_absent_2`; its cause is unverified.
 Preserve the private evidence/state and record these blockers before any fix.
+
+That failure belongs to the earlier `cb581a1e16` candidate. On the corrected
+`9709d0dcb7` candidate, signed stop/start recreated the application containers;
+ordinary full-text search returned the retained document and exact marker,
+and a distinct post-restart chat request returned the mock response. Provider
+settings were not re-entered. Screenshots and `workflow-evidence.json` record
+the successful bounded ordinary workflow separately from initial-wizard
+evidence. Owned application/mock/registry containers were removed; named data
+and configuration volumes, private state, evidence and images were retained.
+The two unrelated PostgreSQL containers remain running.
+
+Native run `36280791905` failed amd64 `manual_master_key_absent_2` after its
+13 lifecycle checks passed. Arm64 reached the 180-minute job deadline during
+Bun install; its root cause remains unverified. Windows syntax passed, which
+does not qualify a Windows Docker host. Local signed ordinary workflow passed;
+full product qualification, native/core-format gates and G12 remain open.
+Stage 4 remains In Progress for those unresolved qualification results.
+
+A separate setup-loading defect has two failing read-only diagnostic cases
+(18 existing cases pass): incomplete initial state/metadata exposes the manual
+API-key form. The proposed correction is pending user approval and has not been
+implemented. Existing browser acceptance checks remain unchanged.

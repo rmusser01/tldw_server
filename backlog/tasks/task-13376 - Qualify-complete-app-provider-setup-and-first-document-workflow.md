@@ -4,7 +4,7 @@ title: Qualify complete-app provider setup and first-document workflow
 status: In Progress
 assignee: []
 created_date: '2026-09-26 16:38'
-updated_date: '2026-09-26 23:49'
+updated_date: '2026-09-27 03:53'
 labels:
   - distribution
   - qualification
@@ -27,8 +27,8 @@ Explicit unresolved product acceptance checkpoint from the user-approved review 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 From a fresh signed extracted paired candidate outside a checkout, complete ordinary provider setup with a deterministic mock using the real WebUI and no manual backend master key or frontend-server URL wiring.
-- [ ] #2 Use ordinary UI controls to ingest a Markdown document, find its content through search, and complete a chat with the configured mock provider; fail on setup or application errors.
-- [ ] #3 Stop/start preserves provider configuration and document data; record exact candidate source, platform, browser and novice instructions with full-setup evidence distinct from initial-wizard checks.
+- [x] #2 Use ordinary UI controls to ingest a Markdown document, find its content through search, and complete a chat with the configured mock provider; fail on setup or application errors.
+- [x] #3 Stop/start preserves provider configuration and document data; record exact candidate source, platform, browser and novice instructions with full-setup evidence distinct from initial-wizard checks.
 - [x] #4 Keep full-provider/document qualification false until all required workflows pass; retain the complete native platform and core-format matrix as separate required product gates.
 <!-- AC:END -->
 
@@ -64,6 +64,8 @@ Approved fix committed and pushed as cb581a1e16032df27e4026afd784c9a682b584c1. F
 Fresh signed-candidate ordinary browser run: provider validation/save/wizard chat passed; Home media readiness no longer demands the master key. First-source File upload of the harmless Markdown fixture passed (1 succeeded/0 failed, UI2s); full-text search cobaltparcel13376 returned exact stored content. Chat with this media returned the deterministic mock response, but falsely displayed No LLM provider configured / No chat models configured, reproduced by Refresh. TldwModels.ts isConfiguredForModels and cache scope omit cookie-session auth. Signed stop/start passed and document/search retained, but new chat failed model_not_available for custom-openai-api/gpt-4. Read-only sanitized backend probe confirms packaged config.txt outside persistent volume lost saved URL/model/key/default on recreation; persistent .env retained. Full qualification false. Review/proposal recorded in Docs/superpowers/reviews/2026-09-26-complete-app-provider-document-qualification.md. Two bounded additional corrections presented for approval; no additional production edits. CI amd64 lifecycle passed but manual_master_key_absent_2 failed; root cause unverified. Arm64 still running, not cancelled. Exact engine version unavailable via supported browser API, not claimed. Owned application/mock/registry cleanup verified with retained state/volumes/images/evidence; unrelated PostgreSQL containers remain running. AC2/3 and task completion remain open.
 
 User approved both root causes on 2026-09-26. Child tasks TASK-13376.7 and TASK-13376.8 now implement cookie catalog auth/cache and persistent managed config. 52 model/readiness tests, 108 Python entrypoint/helper/setup regressions pass; Bandit0 production findings. Native run36265212062 ultimately failed amd64 manual_master_key_absent_2 and arm64 timed out after180min during Bun install; no waiver/retry/cancellation. Fresh build currently constrained by12GiB host free disk versus8.8GiB backend rootfs plus build/export overhead. Cleanup of unused shared build cache requested separately; no pruning occurred. Existing evidence/state/images retained.
+
+Corrected clean signed source 9709d0dcb7e846d3a7366a3412afa933208f4b10 passed built-backend qualification, 13 lifecycle checks and 38 initial-browser checks locally on linux/arm64. Fresh ordinary WebUI provider validation/save/wizard chat, harmless Markdown ingest (1 succeeded, 0 failed, 2s UI elapsed), full-text search and application chat passed without a manual server key or frontend/server wiring. Signed stop/start recreated containers; search and a distinct new chat passed without re-entering provider settings. Provider stayed Healthy; false missing-provider/model warnings were absent. Separate ordinary evidence is passed=true/planned_setup_complete=true at /private/tmp/task13376-workflow-9709d0dcb7/workflow-evidence.json; initial-wizard evidence is unchanged and full_product_qualification=false. Exact source, hashes, browser/version limitation and replay steps are in the updated review. File-chooser control stalled 2090.6105s despite requested timeouts; that does not measure ingestion time. Owned test containers removed; named volumes, state, images, evidence and workspace retained; unrelated PostgreSQL services preserved. User-approved unused build-cache cleanup reclaimed 14.72 GB with all prior 32 image, 2 container and 6 volume identities preserved. Native CI 36280791905 failed amd64 manual_master_key_absent_2 after 13 lifecycle checks passed; arm64 hit its 180-minute deadline during Bun install, root cause unverified. Windows syntax only passed. Separate loading defect: 2 failing read-only diagnostic cases, 18 existing cases passing; concrete loading-only correction awaits user approval with no implementation or acceptance-check edits. Children TASK-13376.7/.8 are complete; parent remains In Progress for native/loading/full matrix/G12 follow-ups. No waiver, CI retry, manual cancellation, publication or merge.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

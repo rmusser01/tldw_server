@@ -186,7 +186,124 @@ browser qualification. The prior failed evidence remains unchanged. That old
 native CI run ultimately ended with amd64's browser failure and an arm64
 180-minute timeout during Bun install. Those failures remain unwaived.
 
-The next local build is constrained by approximately 12 GiB free host storage
-versus the measured 8.8 GiB backend rootfs plus build/export overhead. Reclaiming
-the shared unused build cache requires the separately requested permission;
-no pruning or retained-state/evidence/image deletion has occurred.
+The user subsequently approved unused build-cache cleanup. The default
+builder's unused cache prune reclaimed 14.72 GB; exact before/after image,
+container and volume identities matched (32 images, 2 containers, 6 volumes).
+No image, volume or system prune was performed. This resolved the local
+build-space blocker without removing retained state or prior evidence.
+
+## Corrected signed candidate: ordinary workflow and restart passed
+
+The local candidate was built from clean committed source
+`9709d0dcb7e846d3a7366a3412afa933208f4b10` on linux/arm64 under macOS Docker
+Desktop. Built-backend qualification, 13 lifecycle checks (including saved
+provider fields after recreation) and 38 initial-browser checks passed. The
+pipeline exited 0; its separate promotion gate correctly refused G12=false.
+The initial-browser artifact retains its original limited scope and
+`planned_setup_complete=false`; it was not rewritten to stand in for the
+ordinary workflow below.
+
+Final manifest SHA256:
+`95c5fc1e5037032174afca8fcf6510d84a29b8244a28469ad6b5afcbf5135527`.
+Final archive SHA256:
+`cc1496f929d3bf68eea1661433e00f2ae3a5519365307603d2edc2b122b7303a`.
+Candidate evidence remains at `/private/tmp/task13376-candidate-9709d0dcb7`.
+The final signed archive was extracted outside the checkout into
+`/private/tmp/task13376-workflow-9709d0dcb7/bundle` with fresh private instance
+state, serving only `http://127.0.0.1:19084`. The signing private key was removed
+by the candidate pipeline. Exact browser engine version is unavailable through
+supported APIs; the browser was Codex's in-app browser, with no version inferred.
+
+The ordinary WebUI workflow passed without entering a server master key or
+wiring frontend/backend URLs. It used the repository's mock provider on only
+the instance private network, a disposable placeholder credential and model
+`gpt-4`. Provider validation discovered models; saving masked the placeholder.
+The wizard's test chat completed. Home allowed the first document workflow.
+Markdown ingest reported 1 succeeded, 0 failed and 2 seconds elapsed.
+Full-text search for `cobaltparcel13376` returned the stored document and exact
+content. `Chat with this media` opened the composer and ordinary Send returned
+the expected mock response. Provider status was Healthy; the earlier false
+missing-provider/model banner was absent without refreshing models or changing
+strict selection.
+
+Signed stop/start recreated the application containers with the same private
+state and origin. The mock container was disconnected before stop and
+reconnected to the recreated private network under its existing alias. No
+provider settings were re-entered. A fresh full-text search again found the
+document and content; a distinct post-restart application chat request returned
+the expected mock response with provider status Healthy. Retained old chat
+history alone was not counted as a new request.
+
+The bounded replay steps were:
+
+1. Run the signed start helper and open its loopback setup URL; choose **Set up
+   in WebUI**, **Solo, Docker**, and acknowledge the local-access/privacy notice.
+2. Configure **Custom OpenAI-compatible** with the test fixture's private URL,
+   disposable placeholder key and `gpt-4`; validate, save and continue.
+3. Keep local-path ingestion off and balanced/automatic defaults; defer optional
+   audio, RAG and storage configuration, skip optional MCP tools, then send the
+   wizard test chat.
+4. On Home choose **File**, **Add source**, and **Browse files**; upload the
+   harmless Markdown fixture and choose **Use defaults & process**.
+5. Open the succeeded document in Media. Select full-text search, enter
+   `cobaltparcel13376` and verify the result/content. Use **Chat with this media**
+   and **Send message**, then verify the returned mock response.
+6. Run signed stop/start, reload, repeat the ordinary document search and send
+   a new chat request without re-entering provider configuration.
+
+These steps qualify local mock-provider integration and Markdown lexical
+search/chat persistence. They do not qualify vector retrieval, commercial
+provider access, answer quality or the full format/platform matrix. Optional
+Companion personalization remained disabled by the existing backend feature
+configuration; it was not enabled as part of this task.
+
+Private `workflow-evidence.json` now records `passed=true` and
+`planned_setup_complete=true` for this separate bounded ordinary workflow,
+with `full_product_qualification=false`. Screenshots and visible DOM records
+include `search-before-restart`, `chat-before-restart`, `search-after-restart`
+and `chat-after-restart`. Prior failed `cb581a1e16` evidence remains unchanged.
+The browser file-chooser tool took 2090.6105 seconds despite its requested
+timeouts before queuing the file; this is a browser-control limitation, not
+the application's measured 2-second ingestion time.
+
+After verification, the signed stop helper removed owned application containers
+and the exact recorded mock/registry IDs were removed. Named backend data and
+configuration volumes, private state, images, workspace and evidence remain.
+Both unrelated PostgreSQL containers remain running. The owned browser tab was
+closed. No release publication or PR merge occurred.
+
+## Remaining native failures and separately proposed loading correction
+
+[Native CI run 36280791905](https://github.com/rmusser01/tldw_server/actions/runs/36280791905)
+ended in failure. amd64 passed all 13 lifecycle checks, including persistent
+provider fields, but failed initial-browser `manual_master_key_absent_2` with
+`manual_master_key_required`. Arm64 was cancelled by its 180-minute job deadline
+during `bun install --frozen-lockfile --cwd /app/apps`, after its last recorded
+download/extraction output. The underlying Bun stall remains unverified; local
+Bun install and Next build completing do not resolve that native failure.
+Windows syntax passed; actual Windows Docker qualification remains open.
+No CI retry, manual cancellation or requirement waiver was performed.
+
+A read-only diagnostic of the actual setup route reproduces a separate
+loading defect: two new cases fail while all 18 existing route cases pass.
+When initial setup state/metadata are incomplete, the route exposes the manual
+API-key form. `showLoader = loading && !state` also drops the loader when state
+arrives before metadata, while setup choice remains unavailable. This is
+consistent with the native browser failure; direct native runtime attribution
+has not yet been proved.
+
+The concrete proposal is to show only a loading surface during incomplete
+initial state/metadata loading, retain manual recovery after loading/errors
+finish, and add regression tests without changing browser acceptance checks.
+User approval for this separate correction is pending. No implementation edit
+has been made. Read-only diagnostic output is retained at
+`/private/tmp/task13376-setup-loading-diagnosis.log`.
+
+The two approved root-cause fixes now have successful local ordinary and restart
+evidence. Native failures, the loading proposal, full native/core-format gates
+and G12 remain open; the application is not release-qualified.
+
+This final evidence update changes only Markdown documentation and Backlog task
+records. `git diff --check` passed; there is no new Python scope for Bandit or
+behavior change requiring another regression run. The production verification
+and independent review recorded above still apply to the tested source commit.
