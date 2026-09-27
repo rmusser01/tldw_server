@@ -7,6 +7,7 @@ import json
 import uuid
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from inspect import isawaitable
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,7 @@ from tldw_Server_API.app.core.VN_Assets.storage import (
     generated_file_matches_vn_asset,
     generated_file_size_bytes,
     resolve_vn_asset_storage_path,
+    unlink_vn_asset_storage_file,
     vn_asset_source_ref,
 )
 from tldw_Server_API.app.services.storage_quota_service import get_storage_service
@@ -197,6 +199,11 @@ class VNAssetGenerationWorker:
             if replay is not None:
                 return replay
         if _is_terminal_batch_status(batch["status"]):
+            if recipe_version == 1 and batch["status"] == "cancelled":
+                await self._cleanup_cancelled_variant_storage(
+                    batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
+                    user_id=user_id, pack_id=pack_id,
+                )
             self._cancel_terminal_batch_jobs(
                 user_id=user_id,
                 pack_id=pack_id,
@@ -397,7 +404,7 @@ class VNAssetGenerationWorker:
         item_id = _positive_int(outcome.get("item_id"))
         if item_id is None:
             return None
-        item = self.repo.get_item(item_id)
+        item = await self.repo.run_worker_replay_operation(partial(self.repo.get_item, item_id))
         if item is None or int(item["pack_id"]) != pack_id or int(item["slot_id"]) != slot_id:
             raise VNAssetGenerationError("vn_asset_recipe_item_missing", batch_id=batch_id, item_id=item_id)
         files_repo = self.generated_files_repo
@@ -449,35 +456,39 @@ class VNAssetGenerationWorker:
             )
         if outcome["outcome_status"] == "completed":
             return _generated_variant_result(item, batch_id=batch_id)
-        if attached_file_id is None:
-            storage_path = str(file_record["storage_path"])
-            recipe = self.repo.get_batch_recipe(batch_id, slot_id, variant_index)
-            if recipe is None:
-                raise VNAssetGenerationError("vn_asset_recipe_not_found", batch_id=batch_id, slot_id=slot_id)
+        def reconcile() -> dict[str, Any]:
+            """Finish synchronous reconciliation/fences using only thread-owned handles."""
+            reconciled = item
+            if attached_file_id is None:
+                recipe = self.repo.get_batch_recipe(batch_id, slot_id, variant_index)
+                if recipe is None:
+                    raise VNAssetGenerationError("vn_asset_recipe_not_found", batch_id=batch_id, slot_id=slot_id)
+                if job is not None:
+                    self._require_current_job_lease(job, user_id=user_id)
+                reconciled = self.repo.update_item_storage(
+                    item_id,
+                    generated_file_id=int(file_record["id"]),
+                    storage_ref=str(file_record["storage_path"]),
+                    mime_type=str(file_record.get("mime_type") or "image/png"),
+                    width=_positive_int(recipe.get("width")),
+                    height=_positive_int(recipe.get("height")),
+                    bytes=generated_file_size_bytes(file_record),
+                    batch_id=batch_id if attempt_token else None,
+                    slot_id=slot_id if attempt_token else None,
+                    variant_index=variant_index if attempt_token else None,
+                    attempt_token=attempt_token,
+                    validate_authority=(lambda: self._require_current_job_lease(job, user_id=user_id)) if job else None,
+                ) or reconciled
             if job is not None:
                 self._require_current_job_lease(job, user_id=user_id)
-            item = self.repo.update_item_storage(
-                item_id,
-                generated_file_id=int(file_record["id"]),
-                storage_ref=storage_path,
-                mime_type=str(file_record.get("mime_type") or "image/png"),
-                width=_positive_int(recipe.get("width")),
-                height=_positive_int(recipe.get("height")),
-                bytes=generated_file_size_bytes(file_record),
-                batch_id=batch_id if attempt_token else None,
-                slot_id=slot_id if attempt_token else None,
-                variant_index=variant_index if attempt_token else None,
+            return self.repo.complete_variant(
+                batch_id=batch_id, slot_id=slot_id,
+                variant_index=variant_index, item_id=item_id,
                 attempt_token=attempt_token,
                 validate_authority=(lambda: self._require_current_job_lease(job, user_id=user_id)) if job else None,
-            ) or item
-        if job is not None:
-            self._require_current_job_lease(job, user_id=user_id)
-        item = self.repo.complete_variant(
-            batch_id=batch_id, slot_id=slot_id,
-            variant_index=variant_index, item_id=item_id,
-            attempt_token=attempt_token,
-            validate_authority=(lambda: self._require_current_job_lease(job, user_id=user_id)) if job else None,
-        )
+            )
+
+        item = await self.repo.run_worker_replay_operation(reconcile)
         return _generated_variant_result(item, batch_id=batch_id)
 
     def handle_job(self, job: Mapping[str, Any]) -> dict[str, Any]:
@@ -966,6 +977,7 @@ class VNAssetGenerationWorker:
                 **item_fields,
             )
         item_id = int(item["id"])
+        file_record: dict[str, Any] | None = None
         try:
             file_record = await _maybe_await(
                 self.save_vn_asset_image(
@@ -996,11 +1008,21 @@ class VNAssetGenerationWorker:
                 validate_authority=(lambda: self._require_current_job_lease(job, user_id=user_id)) if job else None,
             ) or item
         except VNAssetGenerationError:
+            if attempt_token is not None and file_record is not None:
+                await self._cleanup_cancelled_variant_storage(
+                    batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
+                    user_id=user_id, pack_id=pack_id, file_record=file_record,
+                )
             raise
         except Exception as exc:
             if int(batch.get("recipe_version") or 0) == 0:
                 self.repo.delete_item(item_id)
                 raise
+            if file_record is not None:
+                await self._cleanup_cancelled_variant_storage(
+                    batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
+                    user_id=user_id, pack_id=pack_id, file_record=file_record,
+                )
             raise VNAssetGenerationError(
                 "vn_asset_storage_handoff_retryable", retryable=True,
                 batch_id=batch_id, slot_id=slot_id, item_id=item_id,
@@ -1033,6 +1055,67 @@ class VNAssetGenerationWorker:
             backend,
         )
         return _generated_variant_result(item, batch_id=batch_id)
+
+    async def _cleanup_cancelled_variant_storage(
+        self, *, batch_id: int, slot_id: int, variant_index: int,
+        user_id: int, pack_id: int, file_record: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Release only an owned unreferenced file orphaned by terminal cancellation.
+
+        Recheck the current registry and VN admission before quota-aware removal.
+        Lease takeover/requested cancellation without a terminal VN outcome stays
+        recoverable. Referenced/foreign files and ledger/counters are unchanged.
+        Keep registration/charge until unlink succeeds so terminal redelivery can
+        retry physical failures. Failed unregistration conservatively retains
+        charge for already-missing bytes until redelivery; failures propagate.
+        """
+        identity = {
+            "batch_id": batch_id, "slot_id": slot_id, "variant_index": variant_index,
+            "user_id": user_id, "pack_id": pack_id,
+        }
+        item = await self.repo.run_worker_replay_operation(partial(
+            self.repo.get_cancelled_variant_storage_item, **identity,
+        ))
+        if item is None:
+            return
+        files_repo = self.generated_files_repo
+        storage_service = None
+        if files_repo is None:
+            storage_service = await get_storage_service()
+            files_repo = await storage_service.get_generated_files_repo()
+        if file_record is None:
+            file_record = await _maybe_await(files_repo.get_file_by_source_ref(
+                user_id=user_id, source_feature=SOURCE_FEATURE_VN_ASSETS,
+                source_ref=vn_asset_source_ref(int(item["id"])),
+            ))
+        if file_record is None or _positive_int(file_record.get("id")) is None:
+            return
+        file_id = int(file_record["id"])
+        current = await _maybe_await(files_repo.get_file_by_id(file_id))
+        try:
+            matches = current is not None and generated_file_matches_vn_asset(
+                current, user_id=user_id, item_id=int(item["id"]),
+            )
+        except (TypeError, ValueError):
+            matches = False
+        if not matches or current is None:
+            return
+        storage_path = str(current.get("storage_path") or "")
+        resolve_vn_asset_storage_path(user_id=user_id, storage_path=storage_path)
+        if await self.repo.run_worker_replay_operation(partial(
+            self.repo.get_cancelled_variant_storage_item, **identity, generated_file_id=file_id,
+        )) is None:
+            return
+        unregister = self.unregister_generated_file
+        if unregister is None:
+            storage_service = storage_service or await get_storage_service()
+            unregister = storage_service.unregister_generated_file
+        await asyncio.to_thread(unlink_vn_asset_storage_file, user_id=user_id, storage_path=storage_path)
+        if not await _maybe_await(unregister(file_id, hard_delete=True)):
+            raise VNAssetGenerationError(
+                "vn_asset_cancelled_storage_cleanup_retryable", retryable=True,
+                batch_id=batch_id, item_id=int(item["id"]),
+            )
 
     def _resolve_backend(self, requested_backend: Any) -> str:
         requested_backend = _first_text(requested_backend)

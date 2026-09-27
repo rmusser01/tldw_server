@@ -1766,6 +1766,41 @@ class VNAssetPacksRepository:
         row = cursor.fetchone()
         return int(row["count"] if row is not None else 0)
 
+    def get_cancelled_variant_storage_item(
+        self, *, batch_id: int, slot_id: int, variant_index: int,
+        pack_id: int, user_id: int, generated_file_id: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Admit cleanup of a hidden, unattached reservation in a cancelled V1 batch.
+
+        Verify owner/pack/recipe identity and, when supplied, reject every item
+        reference to the file. The VN write admission serializes observation
+        with cancellation/attachment; no registration, item or ledger is removed.
+        This is not a distributed transaction with storage. Native errors propagate.
+        """
+        self._ensure_schema_initialized()
+        with self.db.transaction() as conn:
+            _lock_variant(conn, batch_id, slot_id, variant_index)
+            with closing(conn.execute(
+                """SELECT item.* FROM vn_asset_generation_recipes AS recipe
+                JOIN vn_asset_batches AS batch ON batch.id = recipe.batch_id
+                JOIN vn_asset_items AS item ON item.id = recipe.item_id
+                JOIN vn_asset_packs AS pack ON pack.id = item.pack_id
+                WHERE recipe.batch_id = ? AND recipe.slot_id = ? AND recipe.variant_index = ?
+                  AND batch.recipe_version = 1 AND batch.status = 'cancelled'
+                  AND recipe.outcome_status = 'cancelled'
+                  AND batch.pack_id = ? AND batch.requested_by_user_id = ?
+                  AND item.pack_id = batch.pack_id AND item.slot_id = recipe.slot_id
+                  AND pack.owner_user_id = ? AND item.review_status = 'hidden'
+                  AND item.generated_file_id IS NULL
+                  AND (? IS NULL OR NOT EXISTS (
+                      SELECT 1 FROM vn_asset_items WHERE generated_file_id = ?
+                  ))""",
+                (batch_id, slot_id, variant_index, pack_id, user_id, user_id,
+                 generated_file_id, generated_file_id),
+            )) as cursor:
+                row = cursor.fetchone()
+            return dict(row) if row is not None else None
+
     def update_item_review(
         self,
         item_id: int,
@@ -2249,6 +2284,42 @@ class VNAssetPacksRepository:
         return await asyncio.to_thread(
             _read_variant_outcome_file, self.db.db_path.as_uri(), batch_id, slot_id, variant_index,
         )
+
+    async def run_worker_replay_operation(
+        self, operation: Callable[[], dict[str, Any] | None],
+    ) -> dict[str, Any] | None:
+        """Await a complete worker replay read/transition on a fresh owning thread.
+
+        The callback must materialize its result and finish all cursor/transaction
+        work before returning. Only dict/None crosses the boundary. Close only the
+        fresh thread's repository handle, including after an exception. Cancellation
+        waits for commit/rollback/close before propagating. Private-memory databases
+        and active caller transactions retain the owner-thread fallback; schema
+        setup stays caller-owned. This is not universally asynchronous DB access.
+        """
+        self._ensure_schema_initialized()
+        if self.db.is_memory_db or self.db.get_connection().in_transaction:
+            return operation()
+
+        def run_owned() -> dict[str, Any] | None:
+            """Dispose only the new thread's connection after the full operation."""
+            try:
+                return operation()
+            finally:
+                self.db.close_connection()
+
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="vn-replay") as executor:
+            pending = asyncio.get_running_loop().run_in_executor(executor, copy_context().run, run_owned)
+            cancellation: asyncio.CancelledError | None = None
+            while not pending.done():
+                try:
+                    await asyncio.shield(pending)
+                except asyncio.CancelledError as exc:
+                    cancellation = exc
+            result = pending.result()
+            if cancellation is not None:
+                raise cancellation
+            return result
 
     def claim_variant(
         self,

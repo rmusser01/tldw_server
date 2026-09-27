@@ -47,6 +47,7 @@ class FakeStorageService:
         self.records: dict[str, dict[str, Any]] = {}
 
     async def get_vn_generated_file(self, *, user_id: int, source_ref: str) -> dict[str, Any] | None:
+        """Return an owned registration only when its stored bytes are valid."""
         from tldw_Server_API.app.core.VN_Assets.storage import resolve_vn_asset_storage_path
 
         record = self.records.get(source_ref)
@@ -1043,6 +1044,7 @@ async def test_cleanup_deletes_item_before_unlinking_file(
     assert service.repo.get_item(asset_with_generated_file.item_id) is None
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_cleanup_completed_v1_preserves_ledger_and_removes_file(
     chacha_db: CharactersRAGDB,
@@ -1050,6 +1052,7 @@ async def test_cleanup_completed_v1_preserves_ledger_and_removes_file(
     fake_generated_files_repo: FakeGeneratedFilesRepo,
     outputs_dir: Path,
 ) -> None:
+    """Remove completed V1 storage while preserving outcomes and batch counters."""
     asset = asset_with_generated_file
     service = VNAssetPackService(chacha_db, owner_user_id=USER_ID)
     batch = service.repo.create_batch(

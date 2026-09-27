@@ -1,5 +1,111 @@
 # PR 3016 VN Durability Review Implementation Plan
 
+## Current Review Wave: Tasks 31 To 34
+
+**Base head:** 2e4d51ab77986e208c907011458975b1798ffb44.
+**Live dev:** f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07, unchanged.
+**Tracking:** TASK-13369. **Spec:** Docs/Design/2026-09-25-vn-pr-3016-review.md.
+Full request5850977372 completed with review5328119056 at23:44:20Z and exact-head
+terminal5851000825 at23:44:24Z; busy5850978447 removed/fresh404. Seven new threads
+are unresolved;63reviews55threads36comments, all outer/nested pages exhausted.
+Tasks1-30 remain frozen/closed; AC5 reopened and AC6 pending. No duplicate review.
+
+### Task 31: Terminal Cancellation Storage Handoff
+**Owner:** controller, critical-path investigation/TDD.
+**Scope:** worker.py, VNAssetPacks_DB.py and a new focused cancellation test module;
+existing storage quota cleanup only if its supported API cannot safely suffice.
+- [x] Reproduce registered-but-unattached storage after terminal cancellation.
+- [x] Conditionally reclaim only the owned unreferenced registration/bytes when
+  cancellation permanently prevents reconciliation. Preserve referenced files,
+  ordinary lease takeover/retry recovery, approvals and historical counters.
+- [x] Real database/byte and quota-facing controls, bounded affected tests,
+  typed/documented APIs, scoped Bandit baseline, immutable evidence/report.
+
+### Task 32: Replay Repository I/O Boundary
+**Owner:** controller, same worker/repository write set after Task31.
+- [x] Prove public replay yields during slow synchronous repository operations.
+- [x] Use existing thread-owned complete-operation patterns; do not transfer
+  active transactions/cursors across threads. Preserve private-memory and active
+  caller transaction fallbacks; no universal asynchronous repository promise.
+- [x] Focused public replay/ownership/connection-lifecycle controls and frozen
+  evidence; do not rerun completed broad suites.
+
+### Task 33: SQLite Retry Index Definition Admission
+**Owner:** fresh independent Jobs sidecar.
+**Scope:** jobs_failed_requeue.py, test_job_retry_admission_index.py; narrowly
+affected SQLite-only migration fakes only if needed, no PostgreSQL changes.
+- [x] Sensitive RED for same-name wrong-table/columns/predicate SQLite indexes.
+- [x] Fail closed with existing JobsRetryAdmissionIndexError without replacing
+  foreign definitions; accept genuine required index and preserve native errors.
+- [x] Focused real SQLite migration/query-plan/identity controls, scoped static
+  baseline and immutable evidence/report; existing PostgreSQL evidence historical.
+
+### Task 34: Small Test And Format Contracts
+**Owner:** fresh disjoint test-quality sidecar.
+**Scope:** test_storage_cleanup.py, service.py formatting only, receipt test only.
+- [x] Exactly one integration tier and immediate docs for the cited cleanup
+  symbols, without executable changes. Wrap the cited >120-character call only.
+- [x] Replace brittle exact diagnostic wording/call-array assertions with public
+  receipt/storage outcomes and broad sensitive-content exclusion, retaining
+  useful diagnosis coverage and production diagnostic bytes unchanged.
+- [x] Focused affected cases, AST/format preservation and appropriate scoped
+  statics/security baseline; immutable evidence/report, no covering-suite repeat.
+
+### Integration Gate
+- [x] Fresh independent SPEC/QUALITY/final changed-contract review.
+- [x] Controller narrow final verification on matching frozen bytes.
+- [ ] Applicable normal hooks, scoped commit/FFpush, individual verified replies.
+- [ ] One full exact new-head Qodo run completed/no actionable findings; seven
+  required CI passes/current strict base/human summary before normal merge.
+
+### Task 31 Fix1: Retryable Physical Cleanup
+Independent exact-source control-flow audit found hard unregistration precedes
+unlink. A transient unlink failure loses the only rediscoverable file record.
+- [x] Public real-byte RED for temporary unlink failure and cancellation.
+- [x] Unlink the guarded terminal orphan before hard unregistration. Retain
+  registry/charge until bytes are removed; failed unregistration may conservatively
+  retain charge for already-missing bytes, which terminal redelivery releases.
+- [x] Narrow existing reference/foreign/recoverable controls and scoped statics,
+  separate immutable fix1 package and independent scoped re-review. Preserve the
+  initial40-entry evidence; its live source hashes become historical after fixes.
+- [x] Independent scoped fix1 re-review and final wave interaction approval.
+
+Chandrasekhar independent fix1 SPEC/QUALITY/final PASS/T31-R1 ADDRESSED; final
+Tasks32-34 interactions PASS/no new actionable finding. Source/AST/XML/hash
+audit only, not fresh independent tests/scans. Initial reviewer manifest now
+finished10verified; early unfinished checkpoint is historical. Main12backend
+passed26deselected0failerrorsskips4warnings8.80s/XML12time8.139; frontend13passed
+37filter-skips657ms/XML50skipped37time0.003577709. MainBandit9files0/errors[],
+onlyB101excluded; MainRuff unchangedworker/serviceBLE001s/notclean. Source11/
+preservation215 hashes checked0. Reviewer final own freeze/closure pending;
+normal hooks/commitFFpush/replies/newfullQodo/exactsevenCI/merge remain pending.
+
+Fix1 frozen21 entries verified, public RED2fail then GREEN9pass/final3pass,
+0errors/skips4warnings each; counts overlap/not summed. Exact worker cleanup
+statement order only and immediate docs changed; all16other class methods
+unchanged. First Ruff F811 corrected using existing explicit fixture re-export,
+final baseline BLE001 retained. Initial40 artifacts preserved; two live entries
+superseded by fix1. Chandrasekhar initial Task31 FAIL/Tasks32-34 PASS; scoped
+re-review ACTIVE/no commitpushrepliesmerge. Initial own reviewer manifest was
+unfinished on early finding return; no claim it was verified yet.
+
+Ruling: higher-priority critical-path guidance keeps the coupled worker changes
+local and delegates only disjoint sidecars. Every change still receives fresh
+independent review. No cleanup of worktree, evidence, backups or applied stashes.
+The prior completed wave below is historical, not open work.
+
+Tasks31-34 implementation COMPLETE LOCAL, independent review pending. Task33
+Gibbs/Task34 Pauli CLOSED/all own sessions exited. Worker26bounded pass4warnings
+18.07s; SQLite37focused pass/17PG deselected plus separate4controls pass;
+cleanup1pass4warnings and receipt50pass, not summed. Actual RED and negative
+controls/fallback/rollback/drain/reference checks retained. Scoped Bandit no new
+findings, unchanged worker/service BLE001s qualified/not lintclean. 40/Task33/
+78 fresh manifests bind matching final bytes. Task34 width allegation refuted
+on current115-character line; minimal call wrap retained as requested style,
+not evidence of a126-character violation. Initial controller freeze zsh path
+variable error corrected/qualified; only corrected manifest check passes.
+No commit/push/replies/resolutions/new review request/merge at this checkpoint.
+
 ## Current Review Wave: Tasks 28 To 30
 
 **Exact head:** ebb20e907e53788ba605271d30ec06daab1bdf81.
@@ -46,9 +152,10 @@ Tasks1-27 frozen/closed; their historical records below are not pending work.
 ### Integration Gate
 - [x] Fresh independent SPEC/QUALITY/final changed-contract review.
 - [x] Narrow controller verification on matching frozen bytes.
-- [ ] Normal applicable hooks and scoped commit/push.
-- [ ] Individual tested or reasoned replies; resolve only verified. ONE full
-  exact new-head review after actual code push, no duplicate unchanged-head run.
+- [x] Normal applicable hooks and scoped commit/push.
+- [x] Individual tested or reasoned replies; resolve only verified. Request ONE
+  full exact new-head review after actual code push, no duplicate unchanged-head run.
+- [ ] Completed full exact-head review with no actionable findings.
 - [ ] Seven required contexts passing/current strict base/human summary before
   normal merge; verify MERGED, then official Backlog finalization/heartbeat pause.
 
@@ -69,6 +176,24 @@ Controller final narrow7backend passed0errors/skips6warnings6.49s/XML7time5.872;
 Controller scoped Bandit matches exactly six baseline testB106/errors[], only
 B101 excluded, zero production findings; compile/diff and scoped statics passed
 with previously qualified unchanged worker BLE001. No broad suites repeated.
+
+Current integration head2e4d51ab77986e208c907011458975b1798ffb44:
+normal eight-file commit/FF push/GitHub verified; protected devf5 unchanged.
+Applicable explicit normal hooks passed/no-file skipped not passes; normal
+commit emitted no hook output, no commit-stage execution claim or bypass.
+Inherited packing/gc notices preserved, no cleanup. All needed agents/tests/
+hooks/commit/push sessions CLOSED. Individual replies4113384243/4113384341/
+4113384505/4113384623 exact bodies verified, all four threads resolved.
+Fresh62reviews48threads0unresolved36conversation comments/all outer+nested
+pages exhausted. Four human COMMENTED objects are our replies, not Qodo full
+review. ONE request5850977372 at23:40:21Z PENDING/busy5850978447 at23:40:32Z;
+push-summary0bugs0rules33historical omissions/exactfooter not full completion.
+Newhead54checks33queued21completed (1cancelled1neutral19skipped), seven required
+absent/CodeRabbit success only/no actionable failure. AC5 addressed/AC6pending,
+OPEN/BLOCKED/mergedAtnull/no merge attempt. Verification-onlybody23:42:48Z
+exactbody/head verified human/allothers/latestCubicfooter preserved.
+Only task/plan integration notes locally dirty afterpush; no tracking-only push
+invalidating pending review. Preserve worktree, evidence, main, backups/stashes.
 
 
 ## Current Review Wave: Tasks 26 And 27

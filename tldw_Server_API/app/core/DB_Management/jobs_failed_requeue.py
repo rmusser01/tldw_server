@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from contextlib import AbstractContextManager, closing, nullcontext, suppress
 from datetime import datetime
@@ -85,11 +86,45 @@ def _lock_pg_retry_admission_index(executor: Any) -> None:
         sleep(min(0.05, remaining))
 
 
+def _sqlite_retry_admission_index_matches(executor: Any) -> bool:
+    """Verify native index structure and the complete literal SQLite definition."""
+    row = executor.execute(
+        "SELECT tbl_name,sql FROM main.sqlite_schema "
+        "WHERE type='index' AND name='idx_job_events_retry_admissions'"
+    ).fetchone()
+    if row is None or row[0] != "job_events" or not row[1]:
+        return False
+    listed = executor.execute(
+        'SELECT "unique",origin,partial FROM pragma_index_list(\'job_events\') '
+        "WHERE name='idx_job_events_retry_admissions'"
+    ).fetchone()
+    if listed is None or tuple(listed) != (0, "c", 1):
+        return False
+    keys = executor.execute(
+        'SELECT name,desc,coll FROM pragma_index_xinfo(\'idx_job_events_retry_admissions\') '
+        'WHERE "key"=1 ORDER BY seqno'
+    ).fetchall()
+    if [tuple(key) for key in keys] != [
+        ("domain", 0, "BINARY"), ("owner_user_id", 0, "BINARY"), ("created_at", 0, "BINARY"),
+    ]:
+        return False
+    # Match a bounded DDL grammar, not normalized SQL: comments/expressions
+    # cannot disguise a different predicate, and the value stays case-sensitive.
+    return re.fullmatch(
+        r'(?i:CREATE\s+INDEX\s+(?:idx_job_events_retry_admissions|"idx_job_events_retry_admissions")\s+'
+        r'ON\s+(?:job_events|"job_events")\s*\(\s*(?:domain|"domain")\s*,\s*'
+        r'(?:owner_user_id|"owner_user_id")\s*,\s*(?:created_at|"created_at")\s*\)\s+'
+        r'WHERE\s+(?:event_type|"event_type")\s*)=\s*\'job\.retry_admitted\'\s*',
+        row[1],
+    ) is not None
+
+
 def ensure_retry_admission_index(executor: Any, *, backend: str) -> None:
     """Ensure the partial index for explicit retry admissions; return None.
 
     Args:
-        executor: SQLite connection/cursor with ``execute``, or a psycopg 3
+        executor: SQLite connection/cursor whose ``execute`` returns a cursor
+            with tuple-row ``fetchone``/``fetchall`` (including sqlite3.Row), or a psycopg 3
             cursor with ``execute`` and tuple-row ``fetchone`` on an autocommit
             connection. The Jobs ``job_events`` table must already exist in
             the current schema; PostgreSQL also reads system catalogs/settings.
@@ -98,7 +133,12 @@ def ensure_retry_admission_index(executor: Any, *, backend: str) -> None:
     Ownership and side effects:
         The caller owns and closes the executor/connection. This helper does
         not begin, commit or roll back a transaction. SQLite executes CREATE
-        INDEX IF NOT EXISTS in the caller's schema transaction. PostgreSQL's
+        INDEX IF NOT EXISTS in the caller's schema transaction, then verifies
+        the main-schema table, nonunique partial index, ordered ascending BINARY
+        keys and literal predicate. Its bounded definition grammar accepts
+        whitespace/keyword case and double-quoted names, not alternate expressions
+        or comments; a foreign same-name index is never dropped or replaced.
+        PostgreSQL's
         concurrent-index phase requires autocommit, acquires a session advisory
         lock, verifies ready indexes and repairs only the exact owned definition
         after failed builds. It releases the lock best-effort, suppressing only
@@ -109,8 +149,9 @@ def ensure_retry_admission_index(executor: Any, *, backend: str) -> None:
 
     Raises:
         ValueError: Unsupported backend.
-        JobsRetryAdmissionIndexError: PostgreSQL advisory-lock timeout, foreign
-            index collision or failed index verification (a RuntimeError subtype).
+        JobsRetryAdmissionIndexError: SQLite/PostgreSQL foreign index collision
+            or failed verification, or PostgreSQL advisory-lock timeout
+            (a RuntimeError subtype).
         ImportError: The PostgreSQL branch cannot import psycopg.
         sqlite3.Error / psycopg.Error: Native DDL, catalog, timeout, permission
             or transaction-mode failures propagate unchanged (except unlock).
@@ -121,6 +162,10 @@ def ensure_retry_admission_index(executor: Any, *, backend: str) -> None:
             "CREATE INDEX IF NOT EXISTS idx_job_events_retry_admissions "
             "ON job_events(domain,owner_user_id,created_at) WHERE event_type='job.retry_admitted'"
         )
+        if not _sqlite_retry_admission_index_matches(executor):
+            raise JobsRetryAdmissionIndexError(
+                "Jobs retry-admission index definition collision or verification failed; refusing replacement"
+            )
     elif backend == "postgres":
         import psycopg
 

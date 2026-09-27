@@ -216,6 +216,177 @@ def test_rate_query_uses_retry_index_not_global_event_history(
                 assert any(node.get("Index Name") == INDEX_NAME for node in nodes), nodes
 
 
+@pytest.mark.parametrize("entrypoint", ["helper", "migration"])
+@pytest.mark.parametrize("collision_ddl", [
+    pytest.param(
+        "CREATE INDEX idx_job_events_retry_admissions ON foreign_events(domain,owner_user_id,created_at) "
+        "WHERE event_type='job.retry_admitted'", id="wrong-table",
+    ),
+    pytest.param(
+        "CREATE INDEX idx_job_events_retry_admissions ON job_events(domain,created_at) "
+        "WHERE event_type='job.retry_admitted'", id="missing-column",
+    ),
+    pytest.param(
+        "CREATE INDEX idx_job_events_retry_admissions ON job_events(owner_user_id,domain,created_at) "
+        "WHERE event_type='job.retry_admitted'", id="column-order",
+    ),
+    pytest.param(
+        "CREATE INDEX idx_job_events_retry_admissions ON job_events(domain,owner_user_id,created_at,event_type) "
+        "WHERE event_type='job.retry_admitted'", id="extra-column",
+    ),
+    pytest.param(
+        "CREATE INDEX idx_job_events_retry_admissions ON job_events(domain,owner_user_id,created_at) "
+        "WHERE event_type='job.completed'", id="wrong-predicate",
+    ),
+    pytest.param(
+        "CREATE INDEX idx_job_events_retry_admissions ON job_events(domain,owner_user_id,created_at)",
+        id="no-predicate",
+    ),
+    pytest.param(
+        "CREATE INDEX idx_job_events_retry_admissions ON job_events(domain,owner_user_id,created_at) "
+        "WHERE event_type='job.retry_admitted' OR event_type='job.completed'", id="broader-predicate",
+    ),
+    pytest.param(
+        "CREATE INDEX idx_job_events_retry_admissions ON job_events(domain,owner_user_id,created_at) "
+        "WHERE event_type='job.retry_admitted' AND owner_user_id='42'", id="narrower-predicate",
+    ),
+    pytest.param(
+        "CREATE INDEX idx_job_events_retry_admissions ON job_events(domain,owner_user_id,created_at) "
+        "WHERE event_type='JOB.RETRY_ADMITTED'", id="literal-case",
+    ),
+    pytest.param(
+        "CREATE INDEX idx_job_events_retry_admissions ON job_events(domain,owner_user_id,created_at) "
+        "WHERE event_type='job.completed' -- WHERE event_type='job.retry_admitted'", id="comment-spoof",
+    ),
+    pytest.param(
+        "CREATE INDEX idx_job_events_retry_admissions ON job_events(domain,owner_user_id,created_at DESC) "
+        "WHERE event_type='job.retry_admitted'", id="descending",
+    ),
+    pytest.param(
+        "CREATE INDEX idx_job_events_retry_admissions ON job_events(domain COLLATE NOCASE,owner_user_id,created_at) "
+        "WHERE event_type='job.retry_admitted'", id="collation",
+    ),
+    pytest.param(
+        "CREATE UNIQUE INDEX idx_job_events_retry_admissions ON job_events(domain,owner_user_id,created_at) "
+        "WHERE event_type='job.retry_admitted'", id="unique",
+    ),
+    pytest.param(
+        "CREATE INDEX idx_job_events_retry_admissions ON job_events(lower(domain),owner_user_id,created_at) "
+        "WHERE event_type='job.retry_admitted'", id="expression",
+    ),
+])
+def test_sqlite_foreign_retry_index_fails_closed_without_replacing_history(
+    tmp_path: Path, collision_ddl: str, entrypoint: str,
+) -> None:
+    """Same-name collisions reject admission without changing their index or rows."""
+    database = IndexDatabase("sqlite", tmp_path / "collision.db")
+    database.ensure()
+    seed_event_history(database, include_retries=True)
+    with closing(database.connect()) as conn, conn:
+        conn.execute("DROP INDEX idx_job_events_retry_admissions")
+        conn.execute("CREATE TABLE foreign_events(domain TEXT,owner_user_id TEXT,created_at TEXT,event_type TEXT)")
+        conn.execute("INSERT INTO foreign_events VALUES('foreign','43','2026-09-25','job.retry_admitted')")
+        conn.execute(
+            "INSERT INTO jobs(domain,queue,job_type,payload,status,owner_user_id) "
+            "VALUES('vn_assets','default','legacy','{}','failed','42')"
+        )
+        conn.execute(collision_ddl)
+        original = conn.execute("SELECT * FROM sqlite_schema WHERE name=?", (INDEX_NAME,)).fetchone()
+        history = conn.execute("SELECT * FROM job_events ORDER BY id").fetchall()
+        jobs = conn.execute("SELECT * FROM jobs ORDER BY id").fetchall()
+    for _ in range(2):
+        with pytest.raises(JobsRetryAdmissionIndexError, match="retry.admission.*(definition|collision)"):
+            if entrypoint == "migration":
+                database.ensure()
+            else:
+                with closing(database.connect()) as conn, conn, closing(conn.cursor()) as cur:
+                    ensure_retry_admission_index(cur, backend="sqlite")
+        with closing(database.connect()) as conn:
+            assert conn.execute("SELECT * FROM sqlite_schema WHERE name=?", (INDEX_NAME,)).fetchone() == original
+            assert conn.execute("SELECT * FROM job_events ORDER BY id").fetchall() == history
+            assert conn.execute("SELECT * FROM jobs ORDER BY id").fetchall() == jobs
+            assert conn.execute("SELECT * FROM foreign_events").fetchall() == [
+                ("foreign", "43", "2026-09-25", "job.retry_admitted"),
+            ]
+
+
+@pytest.mark.parametrize("index_ddl", [
+    "CREATE INDEX idx_job_events_retry_admissions ON job_events(domain,owner_user_id,created_at) "
+    "WHERE event_type='job.retry_admitted'",
+    'create index "idx_job_events_retry_admissions" on "job_events" '
+    '("domain", "owner_user_id", "created_at")\nwhere "event_type" = \'job.retry_admitted\'',
+])
+def test_sqlite_correct_existing_retry_index_preserves_identity(tmp_path: Path, index_ddl: str) -> None:
+    """Literal retry indexes survive repeat admission, including SQL formatting."""
+    database = IndexDatabase("sqlite", tmp_path / "correct.db")
+    database.ensure()
+    seed_event_history(database, include_retries=True)
+    with closing(database.connect()) as conn, conn:
+        conn.execute("DROP INDEX idx_job_events_retry_admissions")
+        conn.execute(index_ddl)
+        original = conn.execute("SELECT * FROM sqlite_schema WHERE name=?", (INDEX_NAME,)).fetchone()
+        for _ in range(2):
+            assert ensure_retry_admission_index(conn, backend="sqlite") is None
+        assert conn.execute("SELECT * FROM sqlite_schema WHERE name=?", (INDEX_NAME,)).fetchone() == original
+        captured = CapturedQuery(conn.cursor())
+        try:
+            assert count_recent_job_admissions(
+                captured, backend="sqlite", domain="vn_assets", owner_user_id="42", now="2026-09-25 12:00:00",
+            ) == 1
+            steps = conn.execute("EXPLAIN QUERY PLAN " + captured.sql, captured.params).fetchall()
+            assert any(INDEX_NAME in step[3] and "SEARCH" in step[3] for step in steps), steps
+        finally:
+            captured.cursor.close()
+    database.ensure()
+    with closing(database.connect()) as conn:
+        assert conn.execute("SELECT * FROM sqlite_schema WHERE name=?", (INDEX_NAME,)).fetchone() == original
+        assert conn.execute("SELECT COUNT(*) FROM job_events").fetchone() == (404,)
+
+
+def test_sqlite_retry_index_verifies_fresh_creation(tmp_path: Path) -> None:
+    """A lost newly created definition is not reported as successful admission."""
+    database = IndexDatabase("sqlite", tmp_path / "fresh.db")
+    database.ensure()
+    with closing(database.connect()) as conn, conn:
+        conn.execute("DROP INDEX idx_job_events_retry_admissions")
+
+        class LostCreation:
+            """Inject index loss after real CREATE at the executor boundary."""
+
+            def execute(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
+                """Forward native operations, dropping only the freshly created index."""
+                result = conn.execute(sql, params)
+                if sql.startswith("CREATE INDEX IF NOT EXISTS idx_job_events_retry_admissions"):
+                    conn.execute("DROP INDEX idx_job_events_retry_admissions")
+                return result
+
+        with pytest.raises(JobsRetryAdmissionIndexError, match="retry.admission.*verification"):
+            ensure_retry_admission_index(LostCreation(), backend="sqlite")
+        assert conn.execute("SELECT COUNT(*) FROM job_events").fetchone() == (0,)
+
+
+@pytest.mark.parametrize("phase", ["create", "catalog"])
+def test_sqlite_retry_index_native_errors_propagate(tmp_path: Path, phase: str) -> None:
+    """Native SQLite DDL and catalog permission failures retain their type."""
+    database = IndexDatabase("sqlite", tmp_path / "native.db")
+    database.ensure()
+    with closing(database.connect()) as conn:
+        def deny(action: int, _arg1: str, _arg2: str, _db: str, _source: str) -> int:
+            """Deny just the selected native SQLite operation."""
+            denied = sqlite3.SQLITE_CREATE_INDEX if phase == "create" else sqlite3.SQLITE_SELECT
+            return sqlite3.SQLITE_DENY if action == denied else sqlite3.SQLITE_OK
+
+        if phase == "create":
+            conn.execute("DROP INDEX idx_job_events_retry_admissions")
+        conn.set_authorizer(deny)
+        try:
+            with pytest.raises(sqlite3.DatabaseError):
+                ensure_retry_admission_index(conn, backend="sqlite")
+        finally:
+            conn.set_authorizer(None)
+        assert conn.execute("SELECT COUNT(*) FROM job_events").fetchone() == (0,)
+
+
 @pytest.fixture
 def failed_pg_retry_index(jobs_pg_dsn: str) -> Iterator[tuple[IndexDatabase, Any]]:
     """Leave a real invalid concurrent-build index behind a live writer lock."""

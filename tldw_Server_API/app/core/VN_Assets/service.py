@@ -133,7 +133,10 @@ class VNAssetPackService:
         with self.repo.db.transaction():
             # Another client may have completed the receipt after our claim.
             current = self.repo.get_idempotency_record(
-                owner_user_id=owner_user_id, scope=scope, resource_id=resource_id, idempotency_key=idempotency_key,
+                owner_user_id=owner_user_id,
+                scope=scope,
+                resource_id=resource_id,
+                idempotency_key=idempotency_key,
             )
             if current is not None and current["status"] == "completed":
                 return json.loads(str(current["response_json"]))

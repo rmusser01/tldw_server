@@ -27,10 +27,16 @@ describe('VN asset pending generation storage', () => {
   afterEach(() => vi.restoreAllMocks());
 
   describe('receipt failure diagnosis', () => {
-    const malformedWarning = '[vn-assets] Ignoring malformed pending generation receipt JSON.';
-    const invalidWarning = '[vn-assets] Ignoring invalid pending generation receipt.';
-    const readWarning = '[vn-assets] Could not read pending generation receipt: session storage unavailable.';
-    const removeWarning = '[vn-assets] Could not remove invalid pending generation receipt: session storage unavailable.';
+    function expectSanitizedWarnings(...sensitiveContent: string[]) {
+      expect(console.warn).toHaveBeenCalled();
+      const diagnostics = vi.mocked(console.warn).mock.calls.flat().map(String).join('\n');
+      expect(diagnostics).not.toMatch(
+        /private-request-key|other-request-key|vn-assets:pending-generation:|raw-storage-exception|SecurityError|SyntaxError|"kind"|"key"|"slotId"/,
+      );
+      for (const content of sensitiveContent.filter(Boolean)) {
+        expect(diagnostics).not.toContain(content);
+      }
+    }
 
     beforeEach(() => vi.spyOn(console, 'warn').mockImplementation(() => {}));
 
@@ -49,18 +55,20 @@ describe('VN asset pending generation storage', () => {
       expect(window.sessionStorage.getItem(storageKey)).toBeNull();
       expect(window.sessionStorage.getItem(otherOwnerKey)).toBe(otherReceipt);
       expect(window.sessionStorage.getItem(otherPackKey)).toBe(otherReceipt);
-      expect(vi.mocked(console.warn).mock.calls).toEqual([[malformedWarning]]);
+      expectSanitizedWarnings(raw, storageKey);
 
+      vi.mocked(console.warn).mockClear();
       expect(readPendingVNAssetGeneration(1, 7)).toBeNull();
-      expect(vi.mocked(console.warn).mock.calls).toEqual([[malformedWarning]]);
+      expect(console.warn).not.toHaveBeenCalled();
     });
 
-    it('distinguishes an invalid receipt from malformed JSON without logging the payload', () => {
-      window.sessionStorage.setItem(storageKey, JSON.stringify({ kind: 'unknown', key: 'private-request-key' }));
+    it('diagnoses and removes an invalid receipt without logging its payload', () => {
+      const raw = JSON.stringify({ kind: 'unknown', key: 'private-request-key' });
+      window.sessionStorage.setItem(storageKey, raw);
 
       expect(readPendingVNAssetGeneration(1, 7)).toBeNull();
       expect(window.sessionStorage.getItem(storageKey)).toBeNull();
-      expect(vi.mocked(console.warn).mock.calls).toEqual([[invalidWarning]]);
+      expectSanitizedWarnings(raw, storageKey);
     });
 
     it.each(['getter', 'getItem'] as const)('diagnoses a storage %s failure without throwing or removing a receipt', (boundary) => {
@@ -69,31 +77,33 @@ describe('VN asset pending generation storage', () => {
       const raw = JSON.stringify({ kind: 'retry', slotId: 12, key: 'private-request-key' });
       storage.setItem(storageKey, raw);
       const remove = vi.spyOn(storagePrototype, 'removeItem');
-      const failure = new DOMException(`${storageKey}: ${raw}`, 'SecurityError');
+      const failure = new DOMException(`raw-storage-exception: ${storageKey}: ${raw}`, 'SecurityError');
       const read = boundary === 'getter'
         ? vi.spyOn(window, 'sessionStorage', 'get').mockImplementation(() => { throw failure; })
         : vi.spyOn(storagePrototype, 'getItem').mockImplementation(() => { throw failure; });
 
       expect(readPendingVNAssetGeneration(1, 7)).toBeNull();
       expect(remove).not.toHaveBeenCalled();
-      expect(vi.mocked(console.warn).mock.calls).toEqual([[readWarning]]);
+      expectSanitizedWarnings(raw, storageKey, failure.message);
       read.mockRestore();
       expect(storage.getItem(storageKey)).toBe(raw);
     });
 
     it.each([
-      { label: 'malformed', raw: '{"key":"private-request-key"', warning: malformedWarning },
-      { label: 'invalid', raw: '{"kind":"unknown","key":"private-request-key"}', warning: invalidWarning },
-    ])('diagnoses a $label receipt and a removal failure separately without throwing', ({ raw, warning }) => {
+      { label: 'malformed', raw: '{"key":"private-request-key"' },
+      { label: 'invalid', raw: '{"kind":"unknown","key":"private-request-key"}' },
+    ])('diagnoses a $label receipt and a removal failure separately without throwing', ({ raw }) => {
       const storage = window.sessionStorage;
       storage.setItem(storageKey, raw);
+      const failure = new DOMException(`raw-storage-exception: ${storageKey}: ${raw}`, 'SecurityError');
       vi.spyOn(Object.getPrototypeOf(storage) as Storage, 'removeItem').mockImplementation(() => {
-        throw new DOMException(`${storageKey}: ${raw}`, 'SecurityError');
+        throw failure;
       });
 
       expect(readPendingVNAssetGeneration(1, 7)).toBeNull();
       expect(window.sessionStorage.getItem(storageKey)).toBe(raw);
-      expect(vi.mocked(console.warn).mock.calls).toEqual([[warning], [removeWarning]]);
+      expectSanitizedWarnings(raw, storageKey, failure.message);
+      expect(console.warn).toHaveBeenCalledTimes(2);
     });
 
     it('removes malformed JSON using the acquired storage handle without rereading its getter', () => {
@@ -106,7 +116,7 @@ describe('VN asset pending generation storage', () => {
       expect(readPendingVNAssetGeneration(1, 7)).toBeNull();
       expect(storage.getItem(storageKey)).toBeNull();
       expect(getter).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(console.warn).mock.calls).toEqual([[malformedWarning]]);
+      expectSanitizedWarnings(storageKey, '{"key":"private-request-key"');
     });
 
     it.each(['start', 'retry'] as const)('does not diagnose or rewrite a valid %s receipt', (kind) => {
