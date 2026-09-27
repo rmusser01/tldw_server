@@ -2,7 +2,16 @@
 
 Published release notes entry point.
 
-## 0.1.44 - 2026-09-27 (candidate)
+## 0.1.45 - 2026-09-27
+
+Patch release rolling up three changes merged after 0.1.44. [Complete inventory](https://github.com/rmusser01/tldw_server/blob/main/Docs/Development/releases/0.1.45-change-inventory.md).
+
+- **License gate** — A license-gate run cancelled before it reached a verdict, including one superseded by a newer run for the same PR, no longer posts a false policy failure; the status stays pending, which remains fail-closed (#3029, #3032).
+- **SQLite startup under sqlglot 30.20** — The canonical SQLite users table is accepted under sqlglot 30.20.0, and one shared DDL constant is pinned by a positive test (#3030).
+
+No schema migrations or upgrade steps beyond 0.1.44's. The protected frontend source is unchanged since 0.1.44.
+
+## 0.1.44 - 2026-09-27
 
 Includes the complete frozen development range since v0.1.43: 272 commits across 37 merged PRs. [Complete inventory](https://github.com/rmusser01/tldw_server/blob/main/Docs/Development/releases/0.1.44-change-inventory.md).
 
@@ -34,7 +43,7 @@ Includes the complete frozen development range since v0.1.43: 272 commits across
 - PostgreSQL application credentials must use a **NOSUPERUSER, NOBYPASSRLS role that does not own content tables**; migrations still run as the owner. Existing deployments using a privileged application role will fail startup until corrected. Existing pgvector tables require owner-prefixed migration to be listed; previously issued ownerless Chatbook signed URLs stop verifying (#2985).
 - Native fork storage/projection is preparatory; later fork recovery/synchronization remains separate. Broader UAT and certification are separately tracked; targeted regressions do not establish a fresh full-matrix pass. See [#2963](https://github.com/rmusser01/tldw_server/pull/2963), [#2985](https://github.com/rmusser01/tldw_server/pull/2985), and [#3002](https://github.com/rmusser01/tldw_server/pull/3002) for migration/compatibility details.
 
-The candidate proposes a September 27, 2026 release date and September 27, 2028 at 12:00 UTC Countdown start, subject to final approval. Older release grants stay unchanged. Server artifacts exclude protected frontend material; no protected frontend binary is published. Publication and final CI approval are pending.
+Released September 27, 2026; the protected frontend Countdown starts September 27, 2028 at 12:00 UTC. Older release grants stay unchanged. Server artifacts exclude protected frontend material; no protected frontend binary is published.
 
 Release review additionally hardens PostgreSQL startup policy verification, required isolation gates, commit-bound merge checks and corrupt history-metadata errors, retains invalidated history leases during automatic restoration, and localizes macro settings controls.
 
