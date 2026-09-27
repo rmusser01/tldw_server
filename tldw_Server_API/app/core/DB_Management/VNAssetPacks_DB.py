@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
@@ -1902,10 +1902,12 @@ class VNAssetPacksRepository:
         error: str,
         planned_count: int | None = None,
         enqueued_count: int | None = None,
+        failed_slot_ids: Iterable[int] = (),
     ) -> dict[str, Any]:
+        """Record active fanout failure and any exhausted, still-owned slots atomically."""
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """UPDATE vn_asset_batches
                    SET status = 'failed',
                        planned_count = COALESCE(?, planned_count),
@@ -1917,6 +1919,15 @@ class VNAssetPacksRepository:
                    )""",
                 (planned_count, enqueued_count, error, batch_id),
             )
+            if cursor.rowcount:
+                conn.executemany(
+                    """UPDATE vn_asset_slots
+                       SET status = 'failed', last_error = ?, last_failed_batch_id = ?,
+                           updated_at = CURRENT_TIMESTAMP
+                       WHERE id = ? AND latest_generation_batch_id = ?
+                         AND pack_id = (SELECT pack_id FROM vn_asset_batches WHERE id = ?)""",
+                    ((error, batch_id, slot_id, batch_id, batch_id) for slot_id in failed_slot_ids),
+                )
         batch = self.get_batch(batch_id)
         if batch is None:
             raise ValueError("vn_asset_batch_not_found")

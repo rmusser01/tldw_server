@@ -394,6 +394,164 @@ def test_parent_retry_resumes_partial_fanout_after_transient_enqueue_failure(
     assert len(child_jobs.created) == status.planned_count
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resolution_failure", [False, True])
+@pytest.mark.parametrize("async_dispatch", [False, True])
+@pytest.mark.parametrize("retry_remaining", [False, True])
+async def test_parent_fanout_failure_provenance_waits_for_retry_exhaustion(
+    service: VNAssetPackService,
+    fake_jobs: FakeJobs,
+    pack_with_slots: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    resolution_failure: bool,
+    async_dispatch: bool,
+    retry_remaining: bool,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    started = service.start_generation(pack_with_slots.id)
+    parent = {**fake_jobs.created[0], "max_retries": 1, "retry_count": 0 if retry_remaining else 1}
+    registry = FakeImageRegistry(FakeImageAdapter())
+    worker = VNAssetGenerationWorker(repo=service.repo, jobs_manager=fake_jobs, image_registry=registry)
+    create_job = fake_jobs.create_job
+
+    def reject_second_child(**kwargs: Any) -> dict[str, Any]:
+        children = [row for row in fake_jobs.created if row["job_type"] == "vn_asset_generate_variant"]
+        if kwargs.get("job_type") == "vn_asset_generate_variant" and children:
+            raise ValueError("child job quota exceeded")
+        return create_job(**kwargs)
+
+    error = "image_backend_unavailable" if resolution_failure else "child job quota exceeded"
+    with monkeypatch.context() as patch:
+        if resolution_failure:
+            patch.setattr(registry, "resolve_backend", lambda _requested: None)
+        else:
+            patch.setattr(fake_jobs, "create_job", reject_second_child)
+        with pytest.raises(ValueError, match=error):
+            if async_dispatch:
+                await worker.handle_job_async(parent)
+            else:
+                worker.handle_job(parent)
+
+    status = service.get_generation_status(pack_with_slots.id)
+    assert status.status == "failed"
+    assert service.repo.get_batch(started.batch_id)["failed_count"] == 0
+    for slot in pack_with_slots.slots:
+        stored = service.repo.get_slot(slot.id)
+        exhausted = slot.variant_count > 0 and not retry_remaining
+        assert stored["last_failed_batch_id"] == (started.batch_id if exhausted else None)
+        assert stored["last_error"] == (error if exhausted else None)
+        assert (stored["status"] == "failed") is exhausted
+        assert status.failed_slot_recipe_available.get(slot.id, False) is exhausted
+
+    recovered = await worker.handle_job_async(parent)
+    assert recovered["status"] == "enqueued"
+    assert recovered["enqueued_count"] == started.planned_count
+    assert service.repo.get_batch(started.batch_id)["enqueue_error"] is None
+    for slot in pack_with_slots.slots:
+        stored = service.repo.get_slot(slot.id)
+        assert stored["last_failed_batch_id"] is None
+        assert stored["last_error"] is None
+        assert stored["status"] != "failed"
+
+
+@pytest.mark.parametrize("terminal_status", ["cancelled", "completed", None])
+def test_exhausted_fanout_failure_preserves_terminal_batches_and_newer_slot_ownership(
+    service: VNAssetPackService,
+    fake_jobs: FakeJobs,
+    pack_with_slots: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_status: str | None,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    started = service.start_generation(pack_with_slots.id)
+    parent = {**fake_jobs.created[0], "max_retries": 1, "retry_count": 1}
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs, image_registry=FakeImageRegistry(FakeImageAdapter()),
+    )
+    if terminal_status is None:
+        service.start_generation(pack_with_slots.id)
+    before = [service.repo.get_slot(slot.id) for slot in pack_with_slots.slots]
+
+    def fail_after_batch_advances(*_args: Any, **_kwargs: Any) -> None:
+        if terminal_status:
+            service.repo.update_batch(started.batch_id, {"status": terminal_status})
+        raise RuntimeError("late fanout failure")
+
+    monkeypatch.setattr(service.repo, "complete_batch_fanout", fail_after_batch_advances)
+    with pytest.raises(RuntimeError, match="late fanout failure"):
+        worker.handle_job(parent)
+
+    assert [service.repo.get_slot(slot.id) for slot in pack_with_slots.slots] == before
+    assert service.repo.get_batch(started.batch_id)["status"] == (terminal_status or "failed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("resolution_failure", [False, True])
+async def test_retry_api_replays_source_after_real_parent_retry_exhaustion(
+    service: VNAssetPackService,
+    character_id: int,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    resolution_failure: bool,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    pack = service.create_pack(VNAssetPackCreate(title="Exhausted fanout", primary_character_id=character_id))
+    slot = service.create_slot(pack.id, VNAssetSlotCreate(asset_type="sprite", slot_key="sprite.primary"))
+    jobs = JobManager(db_path=tmp_path / "jobs.db")
+    started = service.start_generation(pack.id, jobs_manager=jobs)
+    registry = FakeImageRegistry(FakeImageAdapter())
+    worker = VNAssetGenerationWorker(repo=service.repo, jobs_manager=jobs, image_registry=registry)
+    create_job = jobs.create_job
+
+    def reject_child(**kwargs: Any) -> dict[str, Any]:
+        if kwargs.get("job_type") == "vn_asset_generate_variant":
+            raise ValueError("child job quota exceeded")
+        return create_job(**kwargs)
+
+    error = "image_backend_unavailable" if resolution_failure else "child job quota exceeded"
+    with monkeypatch.context() as patch:
+        if resolution_failure:
+            patch.setattr(registry, "resolve_backend", lambda _requested: None)
+        else:
+            patch.setattr(jobs, "create_job", reject_child)
+        while True:
+            parent = jobs.acquire_next_job(
+                domain="vn_assets", queue=vn_asset_jobs_queue(), lease_seconds=120,
+                worker_id="fanout-worker", owner_user_id="1",
+            )
+            assert parent is not None
+            exhausted = parent["retry_count"] >= parent["max_retries"]
+            with pytest.raises(ValueError, match=error):
+                await worker.handle_job_async(parent)
+            status = service.get_generation_status(pack.id)
+            assert status.failed_slot_batch_ids.get(slot.id) == (started.batch_id if exhausted else None)
+            assert jobs.fail_job(
+                parent["id"], error=error, retryable=True, backoff_seconds=0,
+                worker_id="fanout-worker", lease_id=parent["lease_id"],
+            )
+            if exhausted:
+                break
+
+    assert jobs.list_jobs(domain="vn_assets", owner_user_id="1")[0]["status"] == "failed"
+    app = FastAPI()
+    app.include_router(vn_assets_router, prefix="/api/v1/vn")
+    app.dependency_overrides[get_request_user] = lambda: User(id=1, username="vn-generator")
+    app.dependency_overrides[vn_assets_endpoint._service] = lambda: service
+    app.dependency_overrides[vn_assets_endpoint._job_manager] = lambda: jobs
+    response = TestClient(app).post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/slots/{slot.id}/retry",
+        json={"idempotency_key": "exhausted-parent-retry"},
+    )
+    assert response.status_code == 202
+    assert response.json()["source_batch_id"] == started.batch_id
+    assert json.loads(service.repo.get_batch(response.json()["batch_id"])["recipe_json"])["slots"] == (
+        json.loads(service.repo.get_batch(started.batch_id)["recipe_json"])["slots"]
+    )
+
+
 @pytest.mark.parametrize("processing", [False, True])
 @pytest.mark.parametrize("lost_response", [False, True])
 @pytest.mark.parametrize("active_child", [False, True])

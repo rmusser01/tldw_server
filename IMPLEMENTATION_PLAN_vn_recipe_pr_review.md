@@ -22,6 +22,15 @@
 **Tests**: VN backend suite, frontend VN tests and typecheck, OpenAPI drift, Ruff, Bandit, and PR checks.
 **Status**: In Progress
 
+### Exhausted Parent Fanout Provenance Follow-Up (2026-09-27 UTC)
+
+- CodeRabbit discussion `4114415959` identified exhausted parent fanout failures leaving owned slots without failed-source provenance. Four sync/async execution-resolution and partial-child-enqueue cases failed before the fix; seven retryable, terminal-batch and newer-owner controls passed. An initial test invocation used a temporary directory outside the database-approved root and produced setup errors; the approved-root rerun obtained genuine red evidence.
+- Pass the parent job's retry budget through both dispatch entrypoints. Only after exhaustion, record failure status, error and source on validated positive-work slots in the same transaction as the guarded active batch failure. Preserve zero-work slots, retryable attempts, cancelled/completed batches and newer ownership. Existing successful fanout recovery clears only matching failure metadata.
+- The generation/repository suite passed 133 tests (125.74s), and all 385 VN backend tests passed (248.13s). Both real Jobs automatic-retry-exhaustion/API cases failed with the new provenance write temporarily removed; the repository file was restored byte-identically to the full-suite-tested state. All 13 focused checks then passed (12.15s). Compilation, scoped Ruff with existing BLE001/UP035 exclusions, OpenAPI drift and diff checks passed; Bandit returned zero findings/errors. Earlier 37 frontend tests and typecheck passed on this unchanged dev base; this follow-up changes no frontend or public schema.
+- Clarified the review's prompt-retention inference at `https://github.com/rmusser01/tldw_server/pull/3015#issuecomment-5853652721`: historical prompts in the owned database are the approved replay contract; soft deletion is not erasure, status/Retry reject deleted or foreign packs, and pack export's explicit batch allowlist excludes recipes. Do not invent backup-erasure promises or silently change historical replay through expiry.
+- CodeRabbit verified those boundaries and withdrew the retention inference as an actionable blocker at `https://github.com/rmusser01/tldw_server/pull/3015#issuecomment-5853661247`. Broader database-history/backup retention remains separate from approved replay; no unrelated policy or code change is needed.
+- TASK-13378 and Stage 4 remain In Progress. Confirm owned remote head/base before publishing, reply inline with final evidence, obtain changed-head full review and all required checks, then merge normally with exact-head protection.
+
 ### Incremental Review Follow-Up (2026-09-25)
 
 - Rebased on the latest `origin/dev` without conflicts. The rebased OpenAPI fingerprint passes the drift check.

@@ -70,7 +70,13 @@ class VNAssetGenerationWorker:
         self.unregister_generated_file = unregister_generated_file
         self.preflight_storage_quota = preflight_storage_quota
 
-    def handle_enqueue_batch(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+    def handle_enqueue_batch(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        job: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Fan out accepted work, recording owned-slot failures only after retry exhaustion."""
         pack_id = _payload_int(payload, "pack_id")
         batch_id = _payload_int(payload, "batch_id")
         user_id = _payload_int(payload, "user_id")
@@ -90,6 +96,7 @@ class VNAssetGenerationWorker:
             }
 
         if batch.get("recipe_json") is not None:
+            slots = []
             try:
                 recipe = load_recipe(batch["recipe_json"], pack_id=pack_id, owner_user_id=user_id)
                 slots = recipe["slots"]
@@ -106,7 +113,12 @@ class VNAssetGenerationWorker:
                 self._execution_recipe(batch)
                 planned_count = sum(int(slot["variant_count"]) for slot in slots)
             except Exception as exc:
-                self.repo.fail_batch_fanout_if_active(batch_id, error=str(exc))
+                self.repo.fail_batch_fanout_if_active(
+                    batch_id,
+                    error=str(exc),
+                    failed_slot_ids=[int(slot["slot_id"]) for slot in slots if int(slot["variant_count"]) > 0]
+                    if not _job_has_retry_remaining(job) else (),
+                )
                 raise
         else:
             slots = self.repo.list_slots(pack_id)
@@ -147,6 +159,12 @@ class VNAssetGenerationWorker:
                 planned_count=planned_count,
                 enqueued_count=enqueued_count,
                 error=str(exc),
+                failed_slot_ids=[
+                    int(slot["slot_id"] if batch.get("recipe_json") is not None else slot["id"])
+                    for slot in slots
+                    if int(slot["variant_count"] if batch.get("recipe_json") is not None
+                           else variant_count_override or slot["variant_count"]) > 0
+                ] if not _job_has_retry_remaining(job) else (),
             )
             raise
 
@@ -224,7 +242,7 @@ class VNAssetGenerationWorker:
         job_type = str(job.get("job_type") or "").strip()
         payload = job.get("payload") or {}
         if job_type == VN_ASSET_ENQUEUE_BATCH_JOB_TYPE:
-            return self.handle_enqueue_batch(payload)
+            return self.handle_enqueue_batch(payload, job=job)
         if job_type == VN_ASSET_GENERATE_VARIANT_JOB_TYPE:
             raise ValueError("vn_asset_generate_variant_requires_async_handler")
         if job_type == VN_PACK_EXPORT_JOB_TYPE:
@@ -239,7 +257,7 @@ class VNAssetGenerationWorker:
         job_type = str(job.get("job_type") or "").strip()
         payload = job.get("payload") or {}
         if job_type == VN_ASSET_ENQUEUE_BATCH_JOB_TYPE:
-            return self.handle_enqueue_batch(payload)
+            return self.handle_enqueue_batch(payload, job=job)
         if job_type == VN_ASSET_GENERATE_VARIANT_JOB_TYPE:
             return await self.handle_generate_variant(payload, job=job)
         if job_type == VN_PACK_EXPORT_JOB_TYPE:
