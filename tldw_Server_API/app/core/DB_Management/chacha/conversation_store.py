@@ -563,7 +563,7 @@ class ConversationStore:
         scope_type: str | None = None,
         workspace_id: str | None = None,
     ) -> bool:
-        """Replace Sync fields atomically, preserving local origin only for equivalent bindings."""
+        """Replace Sync fields and invalidate receipts atomically on binding changes."""
 
         del object_hash
         normalized_id = str(conversation_id).strip()
@@ -623,11 +623,7 @@ class ConversationStore:
             with self._db.transaction() as conn:
                 inserted = conn.execute(query, params)
                 if inserted.rowcount == 0:
-                    current_query = (
-                        "SELECT character_id, assistant_kind, assistant_id, persona_memory_mode, "
-                        "assistant_startup_json, required_projection_version, native_bundle_json, "
-                        "native_creation_operation_kind, native_creation_operation_id FROM conversations WHERE id = ?"
-                    )
+                    current_query = "SELECT * FROM conversations WHERE id = ?"
                     if self._db.backend_type == BackendType.POSTGRESQL:
                         current_query += " FOR UPDATE"
                     current = conn.execute(current_query, (normalized_id,)).fetchone()
@@ -660,6 +656,10 @@ class ConversationStore:
                         """,
                         # Preserve created_at; replace every other existing Sync field.
                         (*params[1:13], *params[14:], startup_json, normalized_id),
+                    )
+                    after = conn.execute("SELECT * FROM conversations WHERE id = ?", (normalized_id,)).fetchone()
+                    self._db.workspace_chat_startups.invalidate_changed_binding(
+                        normalized_id, dict(current), dict(after), conn=conn,
                     )
             logger.info("Upserted conversation projection from Sync v2 for ID: {}.", normalized_id)
             return True
@@ -1124,12 +1124,7 @@ class ConversationStore:
 
         try:
             with self._db.transaction() as conn:
-                current_query = (
-                    "SELECT title, version, deleted, character_id, assistant_kind, assistant_id, persona_memory_mode, "
-                    "required_projection_version, native_bundle_json, "
-                    "native_creation_operation_kind, native_creation_operation_id "
-                    "FROM conversations WHERE id = ?"
-                )
+                current_query = "SELECT * FROM conversations WHERE id = ?"
                 if self._db.backend_type == BackendType.POSTGRESQL:
                     current_query += " FOR UPDATE"
                 current_state = conn.execute(
@@ -1309,6 +1304,12 @@ class ConversationStore:
                             f"concurrently (expected v{expected_version} for update)."
                         )
                     raise ConflictError(msg, entity="conversations", entity_id=conversation_id)
+
+                if assistant_update_requested:
+                    after = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+                    self._db.workspace_chat_startups.invalidate_changed_binding(
+                        conversation_id, dict(current_state), dict(after), conn=conn,
+                    )
 
                 logger.info(
                     "Updated conversation ID {} from version {} to version {} (FTS handled by DB triggers). "
