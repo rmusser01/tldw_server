@@ -1,10 +1,10 @@
 ---
 id: TASK-13361
 title: A cancelled license-gate job publishes a policy-violation status
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-23 17:13'
-updated_date: '2026-09-27 19:44'
+updated_date: '2026-09-27 23:59'
 labels:
   - ci
   - security
@@ -60,10 +60,10 @@ status.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A cancelled license-gate job leaves the trusted-policy status pending, not failure
+- [x] #1 A cancelled license-gate job leaves the trusted-policy status pending, not failure
 - [x] #2 A genuine policy violation still publishes failure
 - [x] #3 A crashed evaluation step still publishes failure
-- [ ] #4 Verified by cancelling a run deliberately and observing the resulting commit status
+- [x] #4 Verified by cancelling a run deliberately and observing the resulting commit status
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -115,6 +115,8 @@ CORRECTION 2026-09-27: the !cancelled() fix from #3029 does NOT work, and AC #1 
 Follow-up from Qodo on #3032, declined there with reasons: a run superseded by cancel-in-progress but cancelled only after evaluate completes can still publish its verdict over the newer run's status. Pre-existing (always() had it too) and low impact, since superseding runs evaluate the same head SHA under a base-qualified context. A real guard means a latest-run check inside the hash-pinned publish body, which is a deliberate trusted-gate change for its own PR.
 
 CORRECTION 2 (2026-09-27): both live tests above were invalid. pull_request_target runs the workflow file from the DEFAULT branch (main), not the PR base (dev). A runner debug log of rerun 36345134991 attempt 2 shows the Publish step evaluated plain always(), which is main's version. So neither #3029 (!cancelled()) nor #3032 (verdict-gated condition) has run, and the earlier claim that cancelled() stayed false after a cancelled step is unproven: the runs never evaluated it. #3032's condition stays as the fix. It also covers a cancel before evaluation, whatever cancelled() does. It takes effect only when dev is released to main. AC #1 and AC #4 must be verified live after that release. The same applies to any change to a pull_request_target workflow: it is inert until it reaches main.
+
+VERIFIED LIVE 2026-09-27, after v0.1.45 put the fix on main: license-gate run 36353925069 on PR #3035 was cancelled during Checkout after posting pending. Evaluate was skipped, Publish trusted policy result was skipped, and frontend-license-policy/trusted/dev stayed pending. Before v0.1.45 the same cancellation posted failure (runs 36342617339, 36345134991). All ACs are met.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
