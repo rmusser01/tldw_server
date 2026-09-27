@@ -402,6 +402,8 @@ LEGACY_USER_PATHS = (
     "/api/v1/persona/profiles",
     "/api/v1/notifications",
     "/api/v1/ingestion-sources/capabilities",
+    "/api/v1/chat/conversations?order_by=recency&limit=50&keywords=__knowledge_QA__",
+    "/api/v1/chats/conversations?keywords=__knowledge_QA__",
 )
 
 
@@ -526,6 +528,64 @@ def test_legacy_user_cookie_is_not_accepted_in_multi_user_mode(
 
     for path in LEGACY_USER_PATHS:
         assert client.get(path).status_code == 401
+
+
+@pytest.mark.parametrize(
+    "roles,permissions,is_admin,expected_status",
+    [
+        (["admin"], [], False, 200),
+        ([], ["*"], False, 200),
+        (["user"], ["chat.read"], False, 401),
+        ([], [], True, 401),
+    ],
+)
+def test_cookie_scope_guard_uses_verified_claims(
+    single_user_cookie_client, monkeypatch, tmp_path, roles, permissions, is_admin, expected_status
+) -> None:
+    """Resolve a real cookie before enforcing explicit admin claims."""
+    from tldw_Server_API.app.core.AuthNZ import auth_principal_resolver
+
+    client, api_key = single_user_cookie_client
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
+    assert _mint(client, api_key).status_code == 200
+    original_build = auth_principal_resolver._build_principal_from_user
+
+    def build_with_claims(*args, **kwargs):
+        principal = original_build(*args, **kwargs)
+        # Session validation remains real; vary only the verified policy input.
+        principal.roles = roles
+        principal.permissions = permissions
+        principal.is_admin = is_admin
+        return principal
+
+    monkeypatch.setattr(auth_principal_resolver, "_build_principal_from_user", build_with_claims)
+
+    response = client.get("/api/v1/chat/conversations?keywords=__knowledge_QA__")
+
+    assert response.status_code == expected_status, response.text
+
+
+def test_cookie_scope_guard_respects_disabled_admin_bypass(single_user_cookie_client) -> None:
+    """Even a valid admin cookie cannot waive a guard with bypass disabled."""
+    from fastapi import Depends
+
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_token_scope
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+
+    client, api_key = single_user_cookie_client
+
+    @client.app.get(
+        "/api/v1/authnz/cookie-scope-without-admin-bypass",
+        dependencies=[Depends(require_token_scope("any", allow_admin_bypass=False))],
+    )
+    async def guarded(_user=Depends(get_request_user)):  # noqa: B008
+        return {"ok": True}
+
+    assert _mint(client, api_key).status_code == 200
+
+    response = client.get("/api/v1/authnz/cookie-scope-without-admin-bypass")
+
+    assert response.status_code == 401
 
 
 @pytest.mark.parametrize("principal_first", [False, True])

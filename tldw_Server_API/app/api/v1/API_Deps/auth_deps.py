@@ -2583,7 +2583,11 @@ def require_token_scope(
                     principal = ctx.principal
             except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS:
                 principal = None
-            if principal is None and credentials:
+            # Resolve headerless cookies without changing API-key constraint ordering.
+            if principal is None and (
+                credentials
+                or (request.headers.get("Authorization") is None and request.headers.get("X-API-KEY") is None)
+            ):
                 try:
                     resolver = get_auth_principal
                     try:

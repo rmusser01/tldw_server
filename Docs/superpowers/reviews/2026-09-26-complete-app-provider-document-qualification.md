@@ -633,3 +633,76 @@ actual signed-candidate Knowledge history with the ordinary workflow.
 No production/test auth code has been changed at this checkpoint. This changes
 a shared authentication guard beyond the approved Docker install flag and
 requires the requester's review before implementation.
+
+### 2026-09-27 approved cookie-principal guard correction (TASK-13376.13)
+
+The requester approved the preceding bounded correction. Real minted-cookie
+HTTP tests reproduced `401 Authentication required` on the canonical Knowledge
+conversation-history route and its `/api/v1/chats/conversations` alias before
+implementation. An initial alias test used an incorrect URL and returned 404;
+that test-only mistake was corrected and the real alias independently returned
+the expected 401. Real session validation is retained throughout the tests.
+
+Independent review caught a P1 in the initial unconditional resolution
+condition: resolving an `X-API-KEY` owner's admin principal before its guard
+could bypass a restricted key's scope, endpoint, method, path and quota
+constraints. Five added regression cases failed before correction. The final
+condition preserves the existing bearer branch and adds resolution only when
+both explicit `Authorization` and `X-API-KEY` headers are absent, including
+preserving the significance of empty explicit headers. Cached contexts and
+the explicit admin role/permission check remain unchanged. Re-review reported
+the P1 resolved and no unresolved important findings.
+
+The final 82-case cookie/session and scoped-token regression run and exact
+signed candidate qualification are pending at this checkpoint. Scoped Black
+checks and Ruff pass; whole-file Black differences were already present in
+HEAD. Production Bandit reports zero findings. The unfiltered test scan
+reports pytest assertions (`B101`); its separate non-assert scan reports zero
+findings. No product gates have been relaxed, and no release or promotion is
+authorized by this correction.
+
+Host validation follow-up: the default Python 3.11.13/pytest 8.4.1 run
+reported `82 passed, 241 warnings` before expensive final garbage collection;
+the owned process was stopped and returned 143, so that summary is not counted
+as clean process completion. Its native sample showed a 16.5 GB footprint and
+active `gc_collect_main`, rather than an executor-join wait. Pytest's installed
+unraisable-exception cleanup explicitly performs five full collections, which
+is a compatible caller candidate; allocation/retention ownership is unproven.
+A third diagnostic with explicit plugins exited 139. The exact-PID macOS crash
+report places its faulting thread in `faulthandler`'s stack dumper invoked by
+the private recurring capture, so this is not evidence of a Pydantic defect.
+The diagnostic is removed from further runs. No validation or cleanup is
+disabled and no project dependency/runtime versions change.
+
+After stopping host retries and reviewing the evidence, the same 82 cases are
+being checked in an owned disposable container using the existing backend
+Python 3.12.14 image. Current source/tests are mounted read-only and hashed;
+the disposable venv uses the existing candidate helper's pytest 9.0.3,
+pytest-asyncio 1.3.0 and Hypothesis 6.138.2 pins, retaining timeout 2.4.0 and
+random-order 4.1.0 validation plugins from the host run. It retains repository
+fixtures and cleanup, the same ordering seed, and all assertions. This source
+overlay check is not itself an exact committed/signed candidate. Qualification
+and commit remain pending its result.
+
+Final regression verification: the first disposable Docker run produced
+78 passed/4 failed because the read-only config mount prevented creation of
+`session_encryption.key.lock`; service/JWT validation correctly failed closed.
+Using the existing HTTP fixture's test encryption key corrected that runner
+setup. The first grouped preflight also stopped before tests because its
+collection parser received verbose tree output; using the appropriate quiet
+collection flag corrected it without changing assertions or repository code.
+
+The final grouped run completed all **82 unique cases**, comprising 40 existing
+scope/service/route-chain tests and 42 cookie integration cases. All eight
+pytest processes exited zero and their XML contained no failures, errors or
+skips; the driver rejected duplicate or missing cases. The outer container
+also exited zero after 804 seconds. Current source hashes were unchanged;
+owned cleanup preserved all baseline containers, images and volumes, including
+both unrelated running PostgreSQL services. The private aggregate proof,
+log (SHA-256 `ee263fa15db59101d595946d7d19e726f800c804d59983025247ebd1f233f1bc`),
+journal and seven captured XML reports are retained under
+`/private/tmp/task13376-cookie-docker-grouped-v2`. Final guest XML validation
+and zero-exit evidence are in the aggregate log; the last optional host copy
+arrived after owned cleanup and did not mutate anything. Exact committed
+signed-candidate and ordinary browser qualification now follow. No validation
+waiver, production runtime change or promotion follows from this test result.

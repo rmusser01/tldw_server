@@ -1,17 +1,17 @@
 import asyncio
-import os
 from types import SimpleNamespace
 
+import pytest
 from fastapi import Depends, FastAPI
-from fastapi.testclient import TestClient
 from fastapi.security import HTTPAuthorizationCredentials
+from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_token_scope
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 
 
 class _StubSessionManager:
@@ -533,3 +533,53 @@ def test_require_token_scope_fails_closed_on_api_key_backend_error(monkeypatch):
         asyncio.run(dep(request=req, credentials=creds, jwt_service=object(), db_pool=object()))
     assert exc.value.status_code == 403
     assert exc.value.detail == "Forbidden: unable to validate API key constraints"
+
+
+@pytest.mark.parametrize(
+    "method,constraints,detail",
+    [
+        ("POST", {}, "lacks required scope"),
+        ("GET", {"llm_allowed_endpoints": ["other.endpoint"]}, "endpoint not permitted"),
+        ("GET", {"metadata": {"allowed_methods": ["POST"]}}, "method not permitted"),
+        ("GET", {"metadata": {"allowed_paths": ["/other"]}}, "path not permitted"),
+        ("GET", {"metadata": {"max_calls": 0}}, "quota exceeded"),
+    ],
+)
+def test_header_api_key_keeps_constraints_for_admin_owner(monkeypatch, method, constraints, detail):
+    """Resolving a cookie must not widen a restricted X-API-KEY's authority."""
+    from fastapi import HTTPException
+
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    reset_settings()
+
+    class APIKeyManager:
+        async def validate_api_key(self, api_key, ip_address=None, record_usage=True):
+            return {"id": 99, "user_id": 42, "scope": "read", **constraints}
+
+    async def key_manager():
+        return APIKeyManager()
+
+    async def admin_owner(_request):
+        return SimpleNamespace(roles=["admin"], permissions=[], is_admin=True)
+
+    async def exhausted_quota(*args, **kwargs):
+        raise HTTPException(status_code=403, detail="Forbidden: API key quota exceeded")
+
+    monkeypatch.setattr(auth_deps, "get_api_key_manager", key_manager)
+    monkeypatch.setattr(auth_deps, "_consume_or_defer_token_quota", exhausted_quota)
+    request = SimpleNamespace(
+        method=method,
+        headers={"X-API-KEY": "tldw_restricted.key"},
+        scope={"path": "/protected"},
+        url=SimpleNamespace(path="/protected"),
+        client=SimpleNamespace(host="127.0.0.1"),
+        state=SimpleNamespace(),
+        app=SimpleNamespace(dependency_overrides={auth_deps.get_auth_principal: admin_owner}),
+    )
+    guard = require_token_scope("any", endpoint_id="unit.restricted", count_as="run")
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(guard(request=request, credentials=None, jwt_service=object(), db_pool=object()))
+
+    assert exc.value.status_code == 403
+    assert detail in exc.value.detail
