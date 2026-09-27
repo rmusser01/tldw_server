@@ -4,7 +4,7 @@ title: Qualify complete-app provider setup and first-document workflow
 status: In Progress
 assignee: []
 created_date: '2026-09-26 16:38'
-updated_date: '2026-09-27 05:06'
+updated_date: '2026-09-27 05:25'
 labels:
   - distribution
   - qualification
@@ -70,6 +70,8 @@ Corrected clean signed source 9709d0dcb7e846d3a7366a3412afa933208f4b10 passed bu
 Loading correction committed/pushed as 3ef013bd94d389454e0b10b67060f9a95e9089af. All 60 affected regressions passed after red 6 failed/18 passed; independent review found no actionable issue and independently passed 24 route tests. Managed production WebUI compilation, token synchronization and bundle budgets passed using existing installed dependencies; existing build skips whole-frontend typecheck. Fresh signed linux/arm64 candidate was blocked during unchanged Bun frozen install after resolved/extracted256, with no progress for1090s. Only strictly revalidated owned Buildx was sent SIGTERM under reviewed15-minute bound; pipeline exited130 and removed owned registry, preserving both unrelated PostgreSQL services and private recovery material/images/evidence. No new signed candidate or browser/lifecycle result, no retry/runtime/dependency change. Native run36293327915 is In Progress on exact3ef source: Windows helper syntax passed; both Linux candidate builds running. Full release/native/core-format/G12 gates remain open. Review and plan contain final evidence and limits. Child TASK-13376.9 is Done; parent remains In Progress. Earlier ordinary workflow evidence stays specific to9709d0dcb7.
 
 Completed the bounded retained-evidence diagnostic, not a Bun fix. Install passed85.08s without reproducing the stall; successful-run Puppeteer/canvas identity is now known and private evidence survives timeout fixtures. Scoped cleanup verified. Native amd64 loading fix independently passes13 lifecycle/38 browser checks; arm64 and full native/core-format/G12 gates remain open. Exact evidence/hashes and qualification limits are recorded in the acceptance review; parent remains In Progress.
+
+TASK13376.11 completed one private BuildKit diagnostic: reproduced resolved256/no-progress, install exit124 at300s, Buildx1 at303s. Retained966records identify Puppeteer24.36.0 node install.mjs executing Bun as pending child, static CPU/I/O232-299s; internal cause remains unknown. Baseline Docker resources retained. Prepared Docker-only PUPPETEER_SKIP_DOWNLOAD RUN proposal awaits requester review and remains unapplied. Source3ef nativeamd64 passes; nativearm64 stillbuilding. No additionalcandidate retry/CIcancel/push/release. Broader qualification Stage4 remainsInProgress.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

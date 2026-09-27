@@ -426,3 +426,55 @@ Markdown/task records only; `git diff --check` passed and Bandit has no applicab
 new Python production scope. The completed task's own diagnostic plan is
 preserved in Git history and private evidence, then removed under AGENTS.md;
 the broader qualification plan remains In Progress.
+
+## BuildKit capture of the pending Puppeteer install
+
+TASK-13376.11 compared that successful container install with the actual stalled
+BuildKit boundary. The completed native amd64 job log confirms its Docker
+dependency install took 12.74 seconds. A separate, single BuildKit diagnostic
+used the same cached Bun 1.3.2 digest and unchanged production COPY inputs and
+frozen lockfile. Encoded descendant records were written to a private host log
+so a failed RUN layer could not discard them. No diagnostic image was tagged,
+loaded or substituted for a candidate; the build exported cache only.
+
+This run reproduced the same visible output (`Resolved, downloaded and
+extracted [256]`) and exceeded the five-minute bound. The inner install exited
+124 at 300 seconds; Buildx returned 1 after 303 seconds. The outer 420-second
+guard did not fire. All 966 records decoded without path/base64/conflicting
+duplicate errors, including the final install log and exit status. Evidence is
+retained at `/private/tmp/task13376-buildkit-bun-stall-3ef013bd94`, with host log
+SHA256 `2542bb6df13cefdd31954f5bfabbdd292d46b5412867a5996f0ad957e91929af`.
+
+The stable pending descendant was `node install.mjs`, cwd
+`/app/apps/node_modules/.bun/puppeteer@24.36.0+1fb4c65d43e298b9/node_modules/puppeteer`,
+executing `/usr/local/bin/bun`. Captured package metadata confirms Puppeteer
+24.36.0. Its CPU counter remained 1417 ticks and write counter 793305088 bytes
+from seconds 232 through 299; the parent Bun install also remained unchanged
+in those samples. Thread waits included epoll/futex. The canvas prebuild child
+was last observed at second 61 and was absent afterward. These observations
+identify the pending lifecycle script in this reproduction. They do not explain
+the script's internal wait or prove every historical stall had this cause.
+
+Source inspection of the locked Puppeteer installer shows automatic browser
+installation and an HTTP helper without an explicit request timeout. This is a
+possible explanation, not a captured network/JavaScript stack diagnosis. The
+frontend's only Puppeteer import found outside dependencies is the developer
+`scripts/cdp-examine-workflows.ts`; runtime stages do not copy its browser cache.
+Candidate browser verification installs Playwright explicitly. A private,
+reviewable patch proposes `PUPPETEER_SKIP_DOWNLOAD=true` scoped to the Docker
+dependency RUN, using the documented
+[Puppeteer configuration flag](https://pptr.dev/api/puppeteer.configuration).
+The proposal removes unnecessary automatic browser installation from that
+build; it is not yet applied or validated and awaits the requester's decision.
+No Bun/runtime/dependency versions, local developer installs or browser tests
+were changed.
+
+Decoder fixtures verified binary argv retention and rejection of malformed
+base64, path traversal, unapproved filenames and echoed script text. Shell
+syntax passed. The previously verified descendant/timeout fixture was reused;
+no second dependency installation ran. Inventory comparison retained every
+baseline image, container and volume, including unrelated PostgreSQL services.
+Tracked changes are Markdown/task records only, so Bandit has no applicable
+production Python scope. The bounded diagnostic is complete; root-cause repair,
+native arm64, full workflow on the latest source and broader release gates
+remain open. Existing CI jobs were neither retried nor cancelled.

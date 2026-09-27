@@ -189,3 +189,14 @@ was verified with a sleep fixture. Exact owned diagnostic cleanup preserved all
 baseline Docker resources and private evidence. No runtime/dependency change,
 further candidate retry, requirement waiver or new ordinary workflow is claimed.
 Stage 4 remains In Progress; see the acceptance review for exact hashes and limits.
+
+TASK-13376.11 captured the actual BuildKit stall in one unchanged-input diagnostic:
+timeout exit 124 at 300 seconds, Buildx exit 1 at 303 seconds, and 966 private
+evidence records retained. The pending child was Puppeteer 24.36.0
+`node install.mjs`, actually running Bun; CPU and I/O were unchanged from 232
+through 299 seconds. Canvas had exited. Baseline Docker resources
+were preserved. This identifies the pending script; its internal cause remains
+unproven. A prepared Docker-only skip-download proposal awaits requester review
+and remains unapplied. No second install/candidate retry or CI cancellation.
+Both existing native runs still have arm64 building with amd64 and Windows syntax
+passed. The broader workflow/latest-source and release gates remain open.
