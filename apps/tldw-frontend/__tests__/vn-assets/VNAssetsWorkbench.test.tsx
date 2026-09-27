@@ -164,6 +164,44 @@ describe('VNAssetsWorkbench', () => {
     expect(mocks.startVNAssetGeneration.mock.calls[1]).toEqual([7, request]);
   });
 
+  it.each(['start', 'retry'])('explains a saved request conflict restored during %s verification without sending new work', async (kind) => {
+    existingFailedPack();
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    const button = await screen.findByRole('button', { name: kind === 'start' ? 'Start generation' : 'Retry sprite_neutral' });
+    await waitFor(() => expect(button).toBeEnabled());
+    let resolveProfile!: (value: unknown) => void;
+    mocks.profile.mockImplementationOnce(() => new Promise((resolve) => { resolveProfile = resolve; }));
+    await user.click(button);
+    const command = {
+      packId: 7,
+      ...(kind === 'retry' ? { slotId: 12 } : {}),
+      request: {
+        idempotency_key: 'vn-generation-restored-original-key',
+        ...(kind === 'retry' ? { source_batch_id: 41 } : {}),
+      },
+    };
+    const raw = JSON.stringify({
+      version: 1, scope: { server: 'http://localhost:8000/api/v1', principal: '1' }, commands: [command],
+    });
+    sessionStorage.setItem('tldw:vn-generation:pending:v1', raw);
+    await act(async () => resolveProfile({ user: { id: 1, is_active: true } }));
+    expect(screen.getByText(/unconfirmed request already exists for this pack/i)).toBeInTheDocument();
+    expect(sessionStorage.getItem('tldw:vn-generation:pending:v1')).toBe(raw);
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Retry sprite_neutral' })).toBeDisabled();
+    const recover = screen.getByRole('button', { name: 'Recover pending request' });
+    expect(recover).toBeEnabled();
+    await user.click(recover);
+    if (kind === 'start') expect(mocks.startVNAssetGeneration).toHaveBeenCalledWith(7, command.request);
+    else expect(mocks.retryVNAssetSlot).toHaveBeenCalledWith(7, 12, command.request);
+    await waitFor(() => expect(sessionStorage.length).toBe(0));
+    expect(screen.queryByText(/unconfirmed request already exists for this pack/i)).not.toBeInTheDocument();
+  });
+
   it('does not replay an old command when pre-send verification discovers a different account', async () => {
     existingFailedPack();
     mocks.startVNAssetGeneration.mockRejectedValueOnce(new Error('Connection lost'));

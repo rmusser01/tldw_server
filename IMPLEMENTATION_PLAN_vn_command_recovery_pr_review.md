@@ -233,6 +233,24 @@ worker), frontend typecheck and both scoped lint commands. Unchanged VN Python
 Bandit has zero findings/errors over 9064 lines; it does not scan TypeScript.
 Existing Node/Next advisories and environments remain unchanged.
 
+Qodo's exact a642bfa reassessment completed at 20:56:06 UTC with zero bugs and
+two scoped rule findings (4116918856 and 4116918857). Pre-send verification can
+reread a different-key command for the same pack; `remember` blocked the new
+request without explaining the conflict. Both rendered Start/Retry regressions
+failed before the fix (2 failed, 0.422s test time). The hook now reports a safe
+conflict message, leaves the original journal byte-identical, and sends no new
+work. Explicit recovery still sends the saved body/key and clears only after
+acknowledgement. Separately split quota, read and cleanup failures into three
+isolated tests; the original combined test passed before splitting, so this is
+test hygiene rather than new bug evidence. All five focused tests pass (0.873s
+test time). Final full verification passes all 198 VN/fetch/shared-auth tests
+(62.30s, one worker), typecheck and both scoped lint commands. Fresh unchanged
+Python VN Bandit has zero findings/errors over 9064 lines, not a TypeScript scan.
+Backend, workflows, unrelated tasks and shared auth-service files match dev
+19215eb89ba658b13babe28fc2185d6821a0c462. Complete changed-head hosted reviews
+and exact-head CI remain pending. The a642bfa CodeRabbit request was rate-limited;
+no duplicate request or paid billing was enabled.
+
 ## Stage 3: Gated Merge
 
 **Goal**: Merge normally only after current-head review and live dev gates pass.

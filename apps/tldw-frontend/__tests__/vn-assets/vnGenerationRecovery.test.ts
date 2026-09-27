@@ -62,13 +62,20 @@ describe('VN generation recovery journal', () => {
     expect(sessionStorage.getItem(key)).toBe(raw);
   });
 
-  it('surfaces quota, read and cleanup failures', () => {
+  it('surfaces a quota failure when writing a command', () => {
     const prototype = Object.getPrototypeOf(window.sessionStorage);
-    const spy = vi.spyOn(prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+    vi.spyOn(prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
     expect(() => writeVNCommands(scope, [command])).toThrow(/unavailable/);
-    spy.mockRestore();
+  });
+
+  it('surfaces a denied read of saved commands', () => {
+    const prototype = Object.getPrototypeOf(window.sessionStorage);
     vi.spyOn(prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });
     expect(() => readVNCommands(scope)).toThrow(/unavailable/);
+  });
+
+  it('surfaces a denied cleanup of saved commands', () => {
+    const prototype = Object.getPrototypeOf(window.sessionStorage);
     vi.spyOn(prototype, 'removeItem').mockImplementation(() => { throw new Error('denied'); });
     expect(() => clearVNCommands()).toThrow(/unavailable/);
   });

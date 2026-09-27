@@ -77,7 +77,10 @@ export function useVNGenerationRecovery(onBoundary: (resetAccount: boolean) => v
   const remember = useCallback((capture: Capture, command: VNPendingCommand): boolean => {
     if (!isCurrent(capture)) return false;
     const existing = records.current.find((record) => record.packId === command.packId);
-    if (existing && existing.request.idempotency_key !== command.request.idempotency_key) return false;
+    if (existing && existing.request.idempotency_key !== command.request.idempotency_key) {
+      setError('An unconfirmed request already exists for this pack. Recover the pending request before sending another.');
+      return false;
+    }
     const next = [...records.current.filter((record) => record.packId !== command.packId), command];
     try {
       writeVNCommands(capture.scope, next);
