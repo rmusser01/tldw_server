@@ -17,7 +17,6 @@
 import copy
 import inspect
 import json
-import os
 import re
 from collections.abc import Generator
 from typing import Any, Callable, Optional, Union
@@ -490,75 +489,6 @@ def recursive_summarize_chunks(
     return current_summary
 
 
-def extract_text_from_input(input_data: Any) -> str:
-    """Extracts usable text content from various input types."""
-    logging.debug(f"Extracting text from input of type: {type(input_data)}")
-    if isinstance(input_data, str):
-        # Check if it's a file path
-        if os.path.isfile(input_data):
-            logging.debug(f"Input is a file path: {input_data}")
-            try:
-                with open(input_data, encoding='utf-8') as f:
-                    content = f.read()
-                # Attempt to parse as JSON, otherwise return raw content
-                try:
-                    data = json.loads(content)
-                    logging.debug("File content parsed as JSON.")
-                    return extract_text_from_input(data) # Recurse with parsed data
-                except json.JSONDecodeError:
-                    logging.debug("File content is not JSON, returning raw text.")
-                    return content.strip()
-            except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS as e:
-                logging.error(f"Error reading file {input_data}: {e}")
-                return ""
-        # Check if it's a JSON string
-        elif input_data.strip().startswith('{') or input_data.strip().startswith('['):
-             logging.debug("Input is potentially a JSON string.")
-             try:
-                 data = json.loads(input_data)
-                 logging.debug("Input string parsed as JSON.")
-                 return extract_text_from_input(data) # Recurse with parsed data
-             except json.JSONDecodeError:
-                 logging.debug("Input string is not JSON, treating as plain text.")
-                 return input_data.strip()
-        # Otherwise, treat as plain text
-        else:
-            logging.debug("Input is a plain text string.")
-            return input_data.strip()
-
-    elif isinstance(input_data, dict):
-        logging.debug("Input is a dictionary.")
-        # Prioritize known structures
-        if 'transcription' in input_data:
-            logging.debug("Extracting text from 'transcription' field.")
-            return extract_text_from_segments(input_data['transcription'])
-        elif 'segments' in input_data:
-            logging.debug("Extracting text from 'segments' field.")
-            return extract_text_from_segments(input_data['segments'])
-        elif 'text' in input_data:
-             logging.debug("Extracting text from 'text' field.")
-             return str(input_data['text']).strip()
-        elif 'content' in input_data:
-             logging.debug("Extracting text from 'content' field.")
-             return str(input_data['content']).strip()
-        else:
-            # Fallback: try to convert the whole dict to string (might be noisy)
-            logging.warning("No specific text field found in dict, converting entire dict to string.")
-            try:
-                return json.dumps(input_data, indent=2)
-            except _SUMMARIZATION_NONCRITICAL_EXCEPTIONS:
-                 return str(input_data) # Final fallback
-
-    elif isinstance(input_data, list):
-        logging.debug("Input is a list, assuming list of segments.")
-        # Assume it's a list of segments like {'Text': '...'} or {'text': '...'}
-        return extract_text_from_segments(input_data)
-
-    else:
-        logging.warning(f"Unhandled input type: {type(input_data)}. Attempting string conversion.")
-        return str(input_data).strip()
-
-
 # --- Internal API Dispatcher ---
 def _dispatch_to_api(
     text_to_summarize: str,
@@ -639,7 +569,7 @@ def analyze(
     Performs analysis(summarization by default) using a specified API, with optional chunking strategies. Provide a system prompt to avoid summarization.
 
     Args:
-        input_data: Data to analyze(Default is summarization) (text string, file path to JSON, dict, list of dicts).
+        input_data: Data to analyze(Default is summarization) (text string, JSON object string, or dict). File paths are never read.
         custom_prompt_arg: Custom prompt instructions for the LLM.
         api_name: Name of the API service to use (e.g., 'openai', 'anthropic', 'ollama').
         api_key: Optional API key. If None, the specific API function will attempt to load from config.
@@ -871,56 +801,21 @@ def analyze(
 
 
 
-def extract_metadata_and_content(input_data):
-    metadata = {}
-    content = ""
+def extract_text_from_input(input_data: Any) -> str:
+    """Extract the text ``analyze()`` should send to the provider.
 
-    if isinstance(input_data, str):
-        if os.path.exists(input_data):
-            with open(input_data, encoding='utf-8') as file:
-                data = json.load(file)
-        else:
-            try:
-                data = json.loads(input_data)
-            except json.JSONDecodeError:
-                return {}, input_data
-    elif isinstance(input_data, dict):
-        data = input_data
-    else:
-        return {}, str(input_data)
-
-    # Extract metadata
-    metadata['title'] = data.get('title', 'No title available')
-    metadata['author'] = data.get('author', 'Unknown author')
-
-    # Extract content
-    if 'transcription' in data:
-        content = extract_text_from_segments(data['transcription'])
-    elif 'segments' in data:
-        content = extract_text_from_segments(data['segments'])
-    elif 'content' in data:
-        content = data['content']
-    else:
-        content = json.dumps(data)
-
-    return metadata, content
-
-
-def format_input_with_metadata(metadata, content):
-    formatted_input = f"Title: {metadata.get('title', 'No title available')}\n"
-    formatted_input += f"Author: {metadata.get('author', 'Unknown author')}\n\n"
-    formatted_input += content
-    return formatted_input
-
-
-
-def extract_text_from_input(input_data):  # noqa: F811
+    Strings are never treated as file paths: a string that names a file is
+    returned as literal text, so callers cannot make ``analyze()`` read from disk
+    (TASK-13288, superseding the TASK-2425 shadowing note). A string holding a JSON
+    object is unpacked like a dict; any other string, including scalar or array
+    JSON, is literal text.
+    """
     if isinstance(input_data, str):
         try:
-            # Try to parse as JSON
             data = json.loads(input_data)
         except json.JSONDecodeError:
-            # If not valid JSON, treat as plain text
+            return input_data
+        if not isinstance(data, dict):
             return input_data
     elif isinstance(input_data, dict):
         data = input_data
@@ -944,6 +839,10 @@ def extract_text_from_input(input_data):  # noqa: F811
     elif 'segments' in data:
         segments_text = extract_text_from_segments(data['segments'])
         text_parts.append(f"Segments: {segments_text}")
+    elif 'text' in data:
+        text_parts.append(str(data['text']).strip())
+    elif 'content' in data:
+        text_parts.append(str(data['content']).strip())
 
     return '\n\n'.join(text_parts)
 

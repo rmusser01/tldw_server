@@ -23,7 +23,6 @@ from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
-from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     get_prompt_studio_db,
@@ -58,7 +57,6 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
 )
 from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Chat.streaming_utils import sanitized_provider_stream_exception
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import DatabaseError, PromptStudioDatabase
 from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
@@ -360,32 +358,18 @@ async def create_evaluation(
 
         if getattr(evaluation, 'run_async', False):
             # Create a pending evaluation record tied to this request
-            eval_uuid = str(uuid.uuid4())
-            conn = db.get_connection()
-            cursor = conn.cursor()
-            model_configs = json.dumps(configs_list)
-            started_ts = datetime.utcnow()
-            cursor.execute(
-                """
-                INSERT INTO prompt_studio_evaluations (
-                    uuid, project_id, prompt_id, name, description,
-                    test_case_ids, model_configs, status, client_id, started_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?)
-                """,
-                (
-                    eval_uuid,
-                    project_id,
-                    evaluation.prompt_id,
-                    evaluation.name or "Evaluation",
-                    evaluation.description or "",
-                    json.dumps(test_case_ids),
-                    model_configs,
-                    user_context.get("client_id", "api"),
-                    started_ts,
-                ),
+            created_record = db.create_evaluation(
+                prompt_id=evaluation.prompt_id,
+                project_id=project_id,
+                model_configs=configs_list,
+                status="running",
+                test_case_ids=test_case_ids,
+                client_id=user_context.get("client_id", "api"),
+                name=evaluation.name or "Evaluation",
+                description=evaluation.description or "",
             )
-            eval_id = cursor.lastrowid
-            conn.commit()
+            eval_id = created_record["id"]
+            eval_uuid = created_record["uuid"]
 
             # In test environments, run inline to ensure timely completion for polling tests
             import os as _os
@@ -667,28 +651,9 @@ async def get_evaluation(
         Evaluation details
     """
     try:
-        conn = db.get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT id, uuid, project_id, prompt_id, name, description,
-                   status, started_at, created_at, completed_at, aggregate_metrics
-            FROM prompt_studio_evaluations
-            WHERE id = ?
-        """, (evaluation_id,))
-
-        row = cursor.fetchone()
-        if not row:
+        eval_dict = db.get_evaluation(evaluation_id)
+        if not eval_dict:
             raise HTTPException(status_code=404, detail="Evaluation not found")
-
-        # Build a plain dict using sqlite3.Row mapping support
-        try:
-            keys = row.keys() if hasattr(row, 'keys') else [d[0] for d in cursor.description]
-            eval_dict = {k: row[k] if hasattr(row, 'keys') else row[i] for i, k in enumerate(keys)}
-        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-            # Final fallback: zip description to row tuple
-            cols = [d[0] for d in cursor.description]
-            eval_dict = {c: row[idx] for idx, c in enumerate(cols)}
 
         # Normalize metrics
         agg = eval_dict.get("aggregate_metrics")
@@ -784,43 +749,8 @@ async def delete_evaluation(
         Success message
     """
     try:
-        conn = db.get_connection()
-        cursor = conn.cursor()
-
-        supports_soft_delete = False
-        try:
-            if db.backend_type == BackendType.POSTGRESQL and db.backend is not None:
-                table_info = db.backend.get_table_info(
-                    "prompt_studio_evaluations",
-                    connection=conn.raw_connection,
-                )
-                columns = {info.get("name") for info in table_info}
-            else:
-                cursor.execute("PRAGMA table_info(prompt_studio_evaluations)")
-                columns = {row[1] for row in cursor.fetchall()}
-            supports_soft_delete = "deleted" in columns and "deleted_at" in columns
-        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-            logger.debug("Failed to check prompt_studio_evaluations columns")
-
-        if supports_soft_delete:
-            cursor.execute(
-                """
-                UPDATE prompt_studio_evaluations
-                SET deleted = 1, deleted_at = ?
-                WHERE id = ?
-                """,
-                (datetime.utcnow(), evaluation_id),
-            )
-        else:
-            cursor.execute(
-                "DELETE FROM prompt_studio_evaluations WHERE id = ?",
-                (evaluation_id,),
-            )
-
-        if cursor.rowcount == 0:
+        if not db.delete_evaluation(evaluation_id):
             raise HTTPException(status_code=404, detail="Evaluation not found")
-
-        conn.commit()
 
         return {"message": f"Evaluation {evaluation_id} deleted successfully"}
 
@@ -912,11 +842,8 @@ async def run_evaluation_async(
     """
     import json as _json
 
-    conn = None
-    cursor = None
+    record_loaded = False
     try:
-        conn = db.get_connection()
-        cursor = conn.cursor()
         with log_context(
             request_id=request_id,
             traceparent=traceparent,
@@ -927,37 +854,26 @@ async def run_evaluation_async(
                 evaluation_id,
             )
 
-            cursor.execute(
-                """
-                SELECT id, project_id, prompt_id, test_case_ids, model_configs
-                FROM prompt_studio_evaluations
-                WHERE id = ?
-                """,
-                (evaluation_id,),
-            )
-            row = cursor.fetchone()
-            if not row:
+            record = db.get_evaluation(evaluation_id)
+            if not record:
                 raise RuntimeError("Evaluation not found")
+            record_loaded = True
+            db.update_evaluation(evaluation_id, {"status": "running", "started_at": datetime.utcnow()})
 
-            cursor.execute(
-                """
-                UPDATE prompt_studio_evaluations
-                SET status = 'running', started_at = ?
-                WHERE id = ?
-                """,
-                (datetime.utcnow(), evaluation_id),
-            )
-            conn.commit()
-
-            _id, _project_id, prompt_id, tc_ids_json, model_cfg_json = row
-            try:
-                test_case_ids = _json.loads(tc_ids_json) if tc_ids_json else []
-            except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-                test_case_ids = []
-            try:
-                cfg_raw = _json.loads(model_cfg_json) if model_cfg_json else {}
-            except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-                cfg_raw = {}
+            prompt_id = record.get("prompt_id")
+            # The repository decodes JSON columns; tolerate a raw string from older rows.
+            test_case_ids = record.get("test_case_ids") or []
+            cfg_raw = record.get("model_configs") or {}
+            for name, value in (("test_case_ids", test_case_ids), ("model_configs", cfg_raw)):
+                if isinstance(value, str):
+                    try:
+                        decoded = _json.loads(value)
+                    except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
+                        decoded = [] if name == "test_case_ids" else {}
+                    if name == "test_case_ids":
+                        test_case_ids = decoded
+                    else:
+                        cfg_raw = decoded
 
             if isinstance(cfg_raw, list) and cfg_raw:
                 cfg = cfg_raw[0]
@@ -1059,17 +975,9 @@ async def run_evaluation_async(
             "PS evaluation.async.cancelled evaluation_id={}",
             evaluation_id,
         )
-        if cursor is not None and conn is not None:
+        if record_loaded:
             try:
-                cursor.execute(
-                    """
-                    UPDATE prompt_studio_evaluations
-                    SET status = 'cancelled', error_message = ?, completed_at = ?
-                    WHERE id = ? AND status IN ('pending', 'running')
-                    """,
-                    ("Evaluation cancelled", datetime.utcnow(), evaluation_id),
-                )
-                conn.commit()
+                db.cancel_evaluation_if_active(evaluation_id, "Evaluation cancelled")
             except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
                 cancellation_log.warning(
                     "PS evaluation.async.cancel_persist_failed evaluation_id={}",
@@ -1084,17 +992,9 @@ async def run_evaluation_async(
             ps_job_kind="evaluations",
             traceparent=traceparent,
         ).error("Failed to run async evaluation error_code={}", safe_error.code)
-        if cursor is not None and conn is not None:
+        if record_loaded:
             try:
-                cursor.execute(
-                    """
-                    UPDATE prompt_studio_evaluations
-                    SET status = 'failed', error_message = ?
-                    WHERE id = ?
-                    """,
-                    (str(safe_error), evaluation_id),
-                )
-                conn.commit()
+                db.update_evaluation(evaluation_id, {"status": "failed", "error_message": str(safe_error)})
             except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
                 pass
     finally:

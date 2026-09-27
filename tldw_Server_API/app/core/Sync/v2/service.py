@@ -1307,6 +1307,35 @@ class SyncRestorePreview:
     metadata_only_allowed: bool = True
 
 
+def _safe_pull_boundary(
+    *,
+    raw_envelopes: Sequence[Any],
+    page: Sequence[Any],
+    has_visible_lookahead: bool,
+    blocker_cursor: int | None,
+    restore_barrier: int | None,
+    default: int,
+) -> int:
+    """Highest server_sequence a pull cursor may advance to.
+
+    A cursor may never pass an envelope that was WITHHELD rather than delivered.
+    Advancing past an ordering blocker (ADR-034) or a restore barrier skips those
+    envelopes permanently while telling the client it is caught up.
+
+    Both pull paths derive their boundary here. The legacy adapter-v1 path previously
+    took ``max()`` over the raw list, which includes withheld envelopes.
+    """
+    safe = [
+        envelope
+        for envelope in raw_envelopes
+        if (blocker_cursor is None or envelope.server_sequence < blocker_cursor)
+        and (restore_barrier is None or envelope.server_sequence < restore_barrier)
+    ]
+    if has_visible_lookahead and page and restore_barrier is None:
+        return page[-1].server_sequence
+    return max((envelope.server_sequence for envelope in safe), default=default)
+
+
 class SyncV2Service:
     """Core Sync v2 service with injected persistence and adapter dependencies."""
 
@@ -2477,16 +2506,45 @@ class SyncV2Service:
         return outcome
 
     def prepare_notes_suggestion_authority(
-        self, *, user_id: str, dataset: SyncDataset, note_db: Any | None = None
+        self,
+        *,
+        user_id: str,
+        dataset: SyncDataset,
+        note_db: Any | None = None,
+        require_default: bool = True,
+        store: Any | None = None,
     ) -> None:
-        """Fence prior local review state before a real Notes default snapshot."""
+        """Fence prior local review state before a real Notes default snapshot.
 
-        actual = self.store.get_dataset(dataset.dataset_id)
+        Ownership and personal scope are always required -- they are what keep one
+        user's Notes suggestion scope out of another's.
+
+        ``require_default`` additionally demands the chatbook default markers. It is
+        True by default, but must be False when the dataset is ALREADY the bound
+        Personal Context authority: Sync_DB.personal_context_bootstrap_transaction
+        deliberately selects ``bound_rows[0]`` whatever its markers, and carries an
+        explicit ``require_chatbook_default`` flag that it relaxes for exactly this
+        case. Applying the default requirement there refused a legitimately bound
+        non-default authority and failed six tests, surfacing as the unhelpful
+        ``personal_context_snapshot_unavailable`` because profile.py maps any other
+        SyncStoreError to it.
+        """
+
+        # Read through the caller's store when one is given. During bootstrap the
+        # dataset is created inside the guard's transaction, and self.store holds no
+        # connection to it -- on PostgreSQL that uncommitted row is invisible to any
+        # other connection, so this lookup returned None and the fence refused a
+        # dataset that plainly existed. SQLite hid the bug.
+        reader = store if store is not None else self.store
+        actual = reader.get_dataset(dataset.dataset_id)
         if (
             actual is None
             or actual.owner_user_id != user_id
             or actual.scope_type != "personal"
-            or actual.metadata.get("default_personal") is not True
+        ):
+            raise SyncStoreError("Notes suggestion authority requires the owned default dataset")
+        if require_default and (
+            actual.metadata.get("default_personal") is not True
             or actual.metadata.get("client_family") != "chatbook"
         ):
             raise SyncStoreError("Notes suggestion authority requires the owned default dataset")
@@ -3299,6 +3357,43 @@ class SyncV2Service:
                 offline_restore_window_seconds=offline_restore_window_seconds,
             )
         )
+        if apply_blob_gc:
+            # Reap upload sessions that timed out mid-upload. Their slot counts against
+            # max_active_blob_uploads and their reserved_quota_bytes counts against the
+            # user's quota, and nothing else releases them: the upload_id is minted
+            # server-side and never returned, so the cancel endpoint cannot reach an
+            # orphan. Eight transient failures used to disable attachments for good.
+            try:
+                expired_sessions = self.store.expire_blob_upload_sessions(
+                    dataset_id=dataset_id,
+                )
+            except SyncStoreError as error:
+                logger.bind(
+                    operation="sync_retention_blob_upload_expiry",
+                    dataset_id=dataset_id,
+                    exception_type=type(error).__name__,
+                ).warning("Blob upload session expiry failed (error={})", type(error).__name__)
+            else:
+                # Staged chunk files are otherwise only removed by complete and cancel.
+                for upload_id in expired_sessions if self.blob_store is not None else ():
+                    try:
+                        self.blob_store.discard_upload(upload_id)
+                    except (OSError, SyncBlobStoreError) as error:
+                        logger.bind(
+                            operation="sync_retention_blob_upload_expiry",
+                            dataset_id=dataset_id,
+                            upload_id=upload_id,
+                        ).warning("Expired upload chunk cleanup failed (error={})", type(error).__name__)
+                if expired_sessions:
+                    logger.bind(
+                        operation="sync_retention_blob_upload_expiry",
+                        dataset_id=dataset_id,
+                        expired_session_count=len(expired_sessions),
+                    ).info(
+                        "Expired {} stale blob upload session(s)",
+                        len(expired_sessions),
+                    )
+
         blob_gc, revalidated_blob_blocked, blob_fence_mutated = (
             self._apply_retention_blob_gc(
                 dataset=dataset,
@@ -5239,7 +5334,7 @@ class SyncV2Service:
                 personal_context_relay=relay_continuation,
                 personal_context_exchange=verified_exchange,
             )
-        raw_envelopes, visible = self._scan_pull_page(
+        raw_envelopes, visible, blocker_cursor = self._scan_pull_page(
             dataset_id=dataset_id,
             device_id=device_id,
             since_sequence=since_sequence,
@@ -5258,13 +5353,20 @@ class SyncV2Service:
         ]
         has_visible_lookahead = len(visible) > page_limit
         has_more = has_visible_lookahead or len(raw_envelopes) > page_limit
-        if has_visible_lookahead and page:
-            next_sequence = page[-1].server_sequence
-        else:
-            next_sequence = max(
-                (envelope.server_sequence for envelope in raw_envelopes),
-                default=since_sequence,
-            )
+        next_sequence = _safe_pull_boundary(
+            raw_envelopes=raw_envelopes,
+            page=page,
+            has_visible_lookahead=has_visible_lookahead,
+            blocker_cursor=blocker_cursor,
+            restore_barrier=None,
+            default=since_sequence,
+        )
+        if not page and next_sequence <= since_sequence:
+            # A blocker withheld everything past the boundary, so the cursor cannot
+            # advance. Reporting has_more here would livelock the client: it would
+            # re-request the same cursor forever. There is genuinely nothing more
+            # deliverable until the conflict is resolved, so stop and let it re-poll.
+            has_more = False
         if raw_envelopes:
             self._update_cursors(
                 dataset_id,
@@ -6891,12 +6993,21 @@ class SyncV2Service:
                                 resolution_envelope=resolution_envelope,
                                 resolved_by_device_id=device_id,
                                 notes=None,
-                                personal_context_exchange=personal_context_exchange,
                                 _conflict=conflict,
                                 _store=guarded_store,
-                                _verified_personal_context_exchange=verified_exchange,
                             )
-                except Exception:  # noqa: BLE001 - preserve per-item API outcomes.
+                except Exception as exc:  # noqa: BLE001 - preserve per-item API outcomes.
+                    # Keep the per-item outcome contract, but do not discard the cause.
+                    # Every failure mode inside resolve_batch_item collapsed to the same
+                    # opaque rejection, so a real regression, a stale fixture and a
+                    # KeyError on dataset metadata were indistinguishable from the API
+                    # response and the logs.
+                    logger.opt(exception=True).warning(
+                        "Sync v2 conflict resolution item {} rejected: {}: {}",
+                        index,
+                        type(exc).__name__,
+                        exc,
+                    )
                     rejected.append(index)
                     continue
                 selected[conflict_id] = outcome
@@ -6926,11 +7037,8 @@ class SyncV2Service:
         resolved_by_envelope_id: str | None = None,
         resolved_by_device_id: str | None = None,
         notes: str | None = None,
-        require_personal_context_conflict: bool = False,
-        personal_context_exchange: object | None = None,
         _conflict: SyncConflict | None = None,
         _store: SyncV2Store | None = None,
-        _verified_personal_context_exchange: PersonalContextExchangeProof | None = None,
     ) -> SyncConflict:
         active_store = _store or self.store
         conflict = _conflict or active_store.get_conflict(conflict_id)
@@ -6938,8 +7046,6 @@ class SyncV2Service:
             raise SyncStoreError("Sync conflict was not found or is not accessible")
         if dataset_id is not None and conflict.dataset_id != dataset_id:
             raise SyncStoreError("Sync conflict was not found or is not accessible")
-        if require_personal_context_conflict and not conflict.domain.startswith("personal_context."):
-            raise SyncStoreError("Personal Context conflict identity is not valid for this conflict")
         if conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS:
             raise SyncStoreError("Personal Context conflict resolution requires an exact batched review")
         try:
@@ -6950,17 +7056,6 @@ class SyncV2Service:
             )
         except SyncStoreError as exc:
             raise SyncStoreError("Sync conflict was not found or is not accessible") from exc
-        if (
-            conflict.domain in PERSONAL_CONTEXT_SYNC_DOMAINS
-            and _verified_personal_context_exchange is None
-        ):
-            self.require_active_exchange(
-                dataset=dataset,
-                user_id=user_id,
-                device_id=resolved_by_device_id,
-                exchange=personal_context_exchange,
-                store=active_store,
-            )
         if action not in {"overwrite", "duplicate_rename", "skip"}:
             raise SyncStoreError(f"Sync conflict resolution action is not supported: {action}")
         if conflict.status != "unresolved":
@@ -10270,22 +10365,13 @@ class SyncV2Service:
             or restore_barrier is not None
             or not source_exhausted
         )
-        safe_raw_envelopes = [
-            envelope
-            for envelope in raw_envelopes
-            if (blocker_cursor is None or envelope.server_sequence < blocker_cursor)
-            and (
-                restore_barrier is None
-                or envelope.server_sequence < restore_barrier
-            )
-        ]
-        boundary = (
-            page[-1].server_sequence
-            if has_visible_lookahead and page and restore_barrier is None
-            else max(
-                (envelope.server_sequence for envelope in safe_raw_envelopes),
-                default=0,
-            )
+        boundary = _safe_pull_boundary(
+            raw_envelopes=raw_envelopes,
+            page=page,
+            has_visible_lookahead=has_visible_lookahead,
+            blocker_cursor=blocker_cursor,
+            restore_barrier=restore_barrier,
+            default=0,
         )
         next_watermarks = dict(watermarks)
         for envelope in raw_envelopes:
@@ -10694,7 +10780,7 @@ class SyncV2Service:
         include_own_changes: bool,
         adapter_versions: Sequence[int] | None = None,
         personal_context_egress_authorized: bool = False,
-    ) -> tuple[list[SyncEnvelope], list[SyncEnvelope]]:
+    ) -> tuple[list[SyncEnvelope], list[SyncEnvelope], int | None]:
         raw = self.store.list_envelopes_after(
             dataset_id,
             since_sequence,
@@ -10733,7 +10819,9 @@ class SyncV2Service:
                 authorized=personal_context_egress_authorized,
             )
         ]
-        return raw, visible
+        # Returned, not discarded: the caller needs it to work out how far the
+        # cursor may safely advance.
+        return raw, visible, blocker_cursor
 
     def _expand_restore_mutation_groups(
         self,
@@ -10999,6 +11087,7 @@ class SyncV2Service:
         if domain is not None and domain not in dataset.domains:
             raise SyncInvalidDomainError(f"Sync domain is not enrolled for this dataset: {domain}")
         return dataset
+
 
     def _validate_blob_limits(
         self,

@@ -195,7 +195,7 @@ class TestEvaluationIntegration:
                 )
 
                 assert result["method"] == "llm"
-                assert result["score"] == 0.8  # 4/5
+                assert result["score"] == 0.75  # (4-1)/4; was 0.8 under the old raw/5.0
 
     @pytest.mark.asyncio
     async def test_concurrent_evaluations(self, evaluation_manager):

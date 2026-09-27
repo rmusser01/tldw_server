@@ -3,9 +3,10 @@ id: TASK-13288
 title: >-
   Resolve extract_text_from_input shadowing without re-opening the arbitrary
   file read
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 03:56'
+updated_date: '2026-09-23 23:20'
 labels:
   - llm
   - security
@@ -43,22 +44,38 @@ Source: comprehensive core-module review prompt smoke run, findings LLM_Calls-1 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A failing test reproduces the dict-input regression before any production edit: analyze(api, {"text": ...}) currently returns the extraction-error string
-- [ ] #2 A test pins the security property explicitly: a filesystem path passed through analyze() is NOT read from disk, and that test fails if the file-reading branch is ever restored
-- [ ] #3 Exactly one module-level definition of extract_text_from_input remains, and the inline # noqa: F811 is gone
-- [ ] #4 The surviving implementation handles text and content keys, and does not read files from caller-controlled paths
-- [ ] #5 Scalar JSON input ("123", "true", "null") no longer raises a TypeError that is swallowed into a generic error string
-- [ ] #6 Dead helpers extract_metadata_and_content and format_input_with_metadata are removed, or retained with a documented reason
-- [ ] #7 TASK-2425 is cross-referenced and its non-active conclusion is re-verified or explicitly superseded
-- [ ] #8 Bandit run for touched scope
+- [x] #1 A failing test reproduces the dict-input regression before any production edit: analyze(api, {"text": ...}) currently returns the extraction-error string
+- [x] #2 A test pins the security property explicitly: a filesystem path passed through analyze() is NOT read from disk, and that test fails if the file-reading branch is ever restored
+- [x] #3 Exactly one module-level definition of extract_text_from_input remains, and the inline # noqa: F811 is gone
+- [x] #4 The surviving implementation handles text and content keys, and does not read files from caller-controlled paths
+- [x] #5 Scalar JSON input ("123", "true", "null") no longer raises a TypeError that is swallowed into a generic error string
+- [x] #6 Dead helpers extract_metadata_and_content and format_input_with_metadata are removed, or retained with a documented reason
+- [x] #7 TASK-2425 is cross-referenced and its non-active conclusion is re-verified or explicitly superseded
+- [x] #8 Bandit run for touched scope
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Fix commit aec7b5a6cf. New test file tldw_Server_API/tests/LLM_Calls/test_summarization_input_extraction.py (11 tests). RED on ea1cbc6941: 8 failed / 3 passed (single-definition check, text+content dict keys via analyze(), scalar/non-object JSON '123','true','null','"quoted"','[1, 2]'). The two security tests passed on old code only because of the shadowing. GREEN: 11 passed. Mutation check: re-adding an os.path.isfile/open branch to the surviving extractor makes test_filesystem_path_is_not_read and test_extractor_never_opens_files fail (2 failed / 9 passed), so the security property is now pinned by tests, not definition order.
+
+TASK-2425 cross-reference: its 'file read not active through analyze()' conclusion was correct but rested on the second definition shadowing the first. Superseded: the file-reading definition is deleted, the surviving extractor documents that strings are never treated as paths, and analyze()'s docstring no longer advertises 'file path to JSON'. extract_metadata_and_content and format_input_with_metadata had zero references in app/ or tests/ and are deleted (the former also opened caller paths). Unused 'import os' removed.
+
+Suite comparison (LLM_Calls, Translation, Evaluations/unit/test_rag_evaluator.py, Chat/unit/test_authoritative_adapter_translation.py): before 17 failed / 650 passed, after 9 failed / 658 passed; the 9 remaining failures are identical before and after (pre-existing strict_filter/top_k tests), the other 8 before-failures are the new red tests. Bandit -ll on Summarization_General_Lib.py: no findings. Ruff clean on touched files.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+One module-level extract_text_from_input remains (no noqa: F811). It never reads files, handles text/content keys, and treats any string that is not a JSON object as literal text, so analyze() no longer errors on {'text': ...}/{'content': ...} or scalar JSON. Dead file-reading helpers removed. Tests pin the no-file-read property explicitly. No known skips.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

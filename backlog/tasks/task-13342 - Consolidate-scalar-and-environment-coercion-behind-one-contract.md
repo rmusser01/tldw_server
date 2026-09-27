@@ -1,10 +1,10 @@
 ---
 id: TASK-13342
 title: Consolidate scalar and environment coercion behind one contract
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 05:10'
-updated_date: '2026-09-23 00:11'
+updated_date: '2026-09-22 05:11'
 labels:
   - refactor
   - security
@@ -49,14 +49,25 @@ Found by the comprehensive core-module review (TASK-13293). All three defects in
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
+Superseded by TASK-13322, which was filed first and identifies a better root cause: the de-facto canonical is_truthy lives in core/testing.py, a module documented as test-mode detection, imported by 140 production files -- so engineers reasonably write their own rather than importing production flag semantics from testing.py. 13322 also found a defect this task missed: one truthy set lowercases without stripping, so a trailing space from a docker-compose environment: list flips DOTS_VLLM_USE_DATA_URL to False and sends a server-local path to a remote vLLM.
+
+The design doc Docs/Design/2026-09-21-scalar-and-env-coercion-consolidation-design.md remains the design of record and is now referenced from 13322. It contributes what 13322 does not carry: the three-way contract decision (truthy / falsy / unrecognised returns explicit default) with the argument for why the two-way contract is what makes the fail-open class expressible; the ratchet-over-mass-refactor decision; the TRUTHY/FALSY union derived so no currently-accepted spelling changes meaning; the five staged migration gates; and the explicit exclusions.
+
+Closing as duplicate rather than merging, so one task owns the work.
+
+
+Notes recorded on dev by the parallel core-review work (merged 2026-09-23):
 REOPENED. Closing this as a duplicate of TASK-13322 was wrong, and Qodo caught it on PR #2981.
-
 TASK-13322's file was added in commit 9b4d78bf46, which exists only on the branch fix/core-module-review-batch-1. That branch has no pull request and has not reached dev, so the file is absent from dev and from every branch that will merge. The backlog CLI resolves TASK-13322 because it reads state outside this branch, which is what made the duplicate look real.
-
 Net effect of the closure would have been to delete the only in-repo record of three fail-open coercion defects -- one of them an SSRF escape hatch, where TTS audio_cpp_config._as_bool ends 'return bool(value)' so allow_remote_base_url = n evaluates True and disables the loopback guard (ADR-026 governs). Qodo's description of the consequence was right; only its phrasing ('the claimed canonical duplicate is not represented in the repository') read as if the task had never existed, which is why I initially judged the finding wrong.
-
 This task stays open until either the work is done or TASK-13322 actually lands on dev. If 13322 lands, reconcile then: 13322 carries the root cause (core/testing.py:30 is_truthy imported by 140 production files from a module documented as test-mode helpers) and the OCR three-truthy-sets finding, while this task carries the google_adapter._env_flag and request_resolution._is_truthy_value defects and the explicit fail-closed acceptance criterion. Neither is a superset of the other.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Duplicate of TASK-13322. Design doc retained and linked from 13322.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

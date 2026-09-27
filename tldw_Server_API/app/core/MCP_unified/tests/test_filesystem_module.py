@@ -3675,3 +3675,94 @@ modules:
     await server._register_default_modules()
 
     assert captured_settings["spill_dir"] == ".workspace-spills"  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_fs_write_preserves_tabs_and_form_feeds_round_trip(tmp_path: Path) -> None:
+    """Tab-significant and page-separated content must reach disk byte-for-byte.
+
+    The base sanitizer used to drop "\t", so fs.write wrote a Makefile whose recipe
+    had lost its required tab and still reported success: expected_sha256 hashes the
+    on-disk pre-image, never what we wrote, so the integrity guard structurally
+    cannot catch it. Form feeds hit the same path -- they are the conventional page
+    separator in Python, Lisp and C sources -- and fs.write stripped those while
+    fs.edit's strings were exempt.
+    """
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(ModuleConfig(name="filesystem"), workspace_root_resolver=resolver)
+    context = RequestContext(
+        request_id="req-fs-write-tabs",
+        user_id="7",
+        session_id="sess-1",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    makefile = "all:\n\tgcc -o x x.c\n\nclean:\n\trm -f x\n"
+    await mod.execute_tool(
+        "fs.write",
+        {"path": "Makefile", "content": makefile, "mode": "create"},
+        context=context,
+    )
+    assert (workspace_root / "Makefile").read_text(encoding="utf-8") == makefile  # nosec B101
+
+    page_separated = "def a():\n    pass\n\x0c\ndef b():\n    pass\n"
+    await mod.execute_tool(
+        "fs.write_text",
+        {"path": "mod.py", "content": page_separated},
+        context=context,
+    )
+    assert (workspace_root / "mod.py").read_text(encoding="utf-8") == page_separated  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_fs_edit_matches_a_tab_indented_old_string(tmp_path: Path) -> None:
+    """fs.edit does exact replacement, so a stripped tab made it unusable on such files."""
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    target = workspace_root / "Makefile"
+    target.write_text("all:\n\tgcc -o x x.c\n", encoding="utf-8")
+
+    resolver = _FakeWorkspaceRootResolver(
+        {
+            "workspace_root": str(workspace_root),
+            "workspace_id": "workspace-1",
+            "source": "sandbox_workspace_lookup",
+            "reason": None,
+        }
+    )
+    mod = FilesystemModule(
+        ModuleConfig(name="filesystem", settings={"read_receipt_secret": "unit-test-secret"}),
+        workspace_root_resolver=resolver,
+    )
+    context = RequestContext(
+        request_id="req-fs-edit-tabs",
+        user_id="7",
+        session_id="sess-1",
+        metadata={"workspace_id": "workspace-1"},
+    )
+
+    # The real workflow: read, then edit against the returned pre-image receipt. The
+    # old_string here is exactly what the read handed back, tab included.
+    read_result = await mod.execute_tool("fs.read", {"path": "Makefile"}, context=context)
+    assert "\tgcc -o x x.c" in read_result["content"]  # nosec B101
+
+    await mod.execute_tool(
+        "fs.edit",
+        {
+            "path": "Makefile",
+            "old_string": "\tgcc -o x x.c",
+            "new_string": "\tgcc -O2 -o x x.c",
+            "read_receipt": read_result["read_receipt"],
+        },
+        context=context,
+    )
+    assert target.read_text(encoding="utf-8") == "all:\n\tgcc -O2 -o x x.c\n"  # nosec B101

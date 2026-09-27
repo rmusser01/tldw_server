@@ -588,3 +588,51 @@ class TestNemoModelsActual:
 
         model = load_canary_model()
         assert model is not None
+
+
+def test_concurrent_canary_loads_call_factory_once(monkeypatch, tmp_path):
+    """Two threads missing the cache for the same key must load the (1-3 GB)
+    model once, not twice (check-then-act race without a lock)."""
+    import threading
+    import time
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+        Audio_Transcription_Nemo as nemo_mod,
+    )
+
+    calls = []
+
+    def _from_pretrained(name):
+        calls.append(name)
+        time.sleep(0.2)  # widen the race window
+        return MagicMock()
+
+    asr = types.ModuleType("nemo.collections.asr")
+    asr.models = types.SimpleNamespace(
+        EncDecMultiTaskModel=types.SimpleNamespace(from_pretrained=_from_pretrained)
+    )
+    collections = types.ModuleType("nemo.collections")
+    collections.asr = asr
+    nemo = types.ModuleType("nemo")
+    nemo.collections = collections
+    monkeypatch.setitem(sys.modules, "nemo", nemo)
+    monkeypatch.setitem(sys.modules, "nemo.collections", collections)
+    monkeypatch.setitem(sys.modules, "nemo.collections.asr", asr)
+    monkeypatch.setattr(nemo_mod, "_torch_cuda_available", lambda **_kw: False)
+    monkeypatch.setattr(nemo_mod, "get_stt_config", lambda: {})
+    monkeypatch.setattr(nemo_mod, "_model_cache", {})
+    monkeypatch.setattr(nemo_mod, "_get_cache_dir", lambda: tmp_path)
+    monkeypatch.setenv("NEMO_CACHE_DIR", str(tmp_path))  # restored on teardown
+
+    results = []
+    threads = [
+        threading.Thread(target=lambda: results.append(nemo_mod.load_canary_model()))
+        for _ in range(2)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(calls) == 1
+    assert results[0] is results[1]

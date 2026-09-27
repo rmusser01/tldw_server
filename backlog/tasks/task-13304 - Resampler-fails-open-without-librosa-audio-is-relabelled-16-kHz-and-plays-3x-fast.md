@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-09-22 04:52'
-updated_date: '2026-09-27 17:32'
+updated_date: '2026-09-23 19:34'
 labels:
   - bug
   - audio
@@ -52,21 +52,24 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] #1 A failing test simulates a missing librosa and asserts the pipeline does not claim 16 kHz for un-resampled audio
-- [x] #2 The other two fail-open resamplers in the module are corrected in the same pass
-- [x] #3 _resample returns audio at target_sr on every path (librosa, else the scipy/linear fallback), so the callers' unconditional sample_rate = 16000 is true
-- [x] #4 Non-positive rates raise ValueError and empty audio passes through, with or without scipy
+- [ ] #1 A failing test simulates a missing librosa and asserts the pipeline does not claim 16 kHz for un-resampled audio
+- [ ] #2 _resample raises or returns a signal the caller must handle, rather than returning input unchanged
+- [ ] #3 Both callers only set sample_rate = 16000 when resampling actually occurred
+- [ ] #4 The other two fail-open resamplers in the module are corrected in the same pass
+- [ ] #5 A missing resampling dependency surfaces as an error to the client, not a warning in the log
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Fixed on fix/audio-resampler-fails-open.
+Duplicate of TASK-13308 (filed twice during the 2026-09-22 review). Work and status are tracked there.
 
+
+Notes from the parallel implementation (merged 2026-09-27):
+Fixed on fix/audio-resampler-fails-open.
 CORRECTION TO THE TASK'S COUNT. It states "three of six resamplers in the module fail open
 this way". I found ONE that fails open unconditionally without librosa:
 Audio_Buffered_Transcription._resample. Surveyed every resampler in the Audio package:
-
   Audio_Buffered_Transcription.py:534  _resample                      <- THE DEFECT
   Audio_Streaming_Unified.py:281       _resample_audio_if_needed      narrow fail-open: its
       final `except: return audio` fires only if the linear interpolation itself raises,
@@ -77,13 +80,10 @@ Audio_Buffered_Transcription._resample. Surveyed every resampler in the Audio pa
       the task cites)
   Audio_Transcription_Lib.py:357       _resample_audio_without_librosa correct
   Audio_Transcription_VibeVoice.py:179 / Audio_Transcription_Qwen3ASR.py:192  _maybe_resample
-
 The Parakeet-MLX sites (Audio_Transcription_Parakeet_MLX.py:551, :685) use a BARE
 `import librosa` with no try/except, so without librosa they raise ImportError -- failing
 closed and loudly. That is the opposite of this defect and needs no change here.
-
 So the blast radius is one function, not three. Recording rather than inflating the count.
-
 THE FIX. _resample now returns audio at target_sr in every branch. librosa stays primary
 because its resampling is higher quality; the fallback is the one Audio_Transcription_Lib
 already uses -- _resample_audio_without_librosa: scipy polyphase where available, linear
@@ -91,11 +91,9 @@ interpolation otherwise. Imported lazily inside the function, because Audio_Stre
 documents that pulling Audio_Transcription_Lib in eagerly drags heavy optional dependencies
 into every import of the module. An orig_sr == target_sr fast path was added too, so the
 no-op case does not depend on the fallback at all.
-
 Left alone deliberately: the two callers still set `sample_rate = 16000` unconditionally.
 That is now TRUE rather than asserted, which is the point -- the assignment was never the bug,
 the resampler lying to it was.
-
 VERIFICATION
 - tests/Audio/test_buffered_transcription_resample.py: 7 passed. Simulates librosa's absence
   with a None entry in sys.modules, which is what makes `import librosa` raise.
@@ -116,8 +114,16 @@ VERIFICATION
   this venv running FastAPI 0.141.1 against a pyproject pin of >=0.136.3,<0.137.0 -- see
   TASK-13382. Unrelated to resampling.
 
+
+Notes from the other branch (merged 2026-09-27):
 Closed 2026-09-27 after #3024 merged. ACs amended to the implemented contract: the original #2/#3/#5 assumed a raise-and-surface fix, but _resample now actually resamples, so there is no failure left to signal or surface. Old #4 ('the other two') is checked because the survey above found only one fail-open resampler. Qodo follow-up on #3024 added the rate and empty-input guards (new #4), with 11 tests.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Closed as duplicate of TASK-13308.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

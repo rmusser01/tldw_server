@@ -15,6 +15,10 @@ from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import (
     PromptStudioDatabase,
     _BackendPromptStudioDatabase,
 )
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.prompt_studio_db.repositories.optimizations import (
+    OptimizationsRepository,
+)
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio import (
     optimization_engine as optimization_engine_module,
@@ -823,11 +827,13 @@ class _ReturningCursor:
 def _postgres_sql_capture(
     returning_row: dict[str, Any] | None = None,
 ) -> tuple[
-    _BackendPromptStudioDatabase,
+    OptimizationsRepository,
     list[tuple[str, tuple[Any, ...]]],
 ]:
+    """The optimizations repository over a stub PostgreSQL session that records its SQL."""
     database = object.__new__(_BackendPromptStudioDatabase)
     database._write_lock = threading.RLock()
+    database.backend_type = BackendType.POSTGRESQL
     statements: list[tuple[str, tuple[Any, ...]]] = []
 
     @contextmanager
@@ -851,15 +857,15 @@ def _postgres_sql_capture(
         lambda _cursor, row: dict(row)
     )
     database._log_sync_event = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
-    return database, statements
+    return OptimizationsRepository(database), statements
 
 
 def test_postgres_completion_transition_reports_cas_loser() -> None:
-    database, _statements = _postgres_sql_capture()
-    database._cursor_exec = (  # type: ignore[method-assign]
+    repository, _statements = _postgres_sql_capture()
+    repository.session._cursor_exec = (  # type: ignore[method-assign]
         lambda _connection, _statement, _params: _ReturningCursor(None)
     )
-    database.get_optimization = (  # type: ignore[method-assign]
+    repository.get = (  # type: ignore[method-assign]
         lambda _optimization_id, **_kwargs: {
             "id": 17,
             "uuid": "opt-17",
@@ -867,7 +873,7 @@ def test_postgres_completion_transition_reports_cas_loser() -> None:
         }
     )
 
-    row, applied = database.complete_optimization(
+    row, applied = repository.complete(
         17,
         iterations_completed=1,
         _return_transition_applied=True,
@@ -878,9 +884,9 @@ def test_postgres_completion_transition_reports_cas_loser() -> None:
 
 
 def test_postgres_optimization_update_expected_uuid_is_in_atomic_where() -> None:
-    database, statements = _postgres_sql_capture()
+    repository, statements = _postgres_sql_capture()
 
-    database.update_optimization(
+    repository.update(
         17,
         {"status": "cancelled"},
         expected_statuses=("completed",),
@@ -905,12 +911,12 @@ def test_postgres_optimization_update_expected_uuid_is_in_atomic_where() -> None
 def test_postgres_terminal_transition_update_has_atomic_status_guard(
     transition: str,
 ) -> None:
-    database, statements = _postgres_sql_capture()
+    repository, statements = _postgres_sql_capture()
 
     if transition == "complete":
-        database.complete_optimization(17, iterations_completed=1)
+        repository.complete(17, iterations_completed=1)
     else:
-        database.set_optimization_status(
+        repository.set_status(
             17,
             "cancelled",
             error_message="user cancelled",

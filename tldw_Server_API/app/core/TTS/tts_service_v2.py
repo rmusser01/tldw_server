@@ -1251,7 +1251,6 @@ class TTSServiceV2:
             if hasattr(adapter, "convert_audio_format"):
                 maybe = adapter.convert_audio_format(  # type: ignore[call-arg]
                     merged,
-                    source_format=AudioFormat.PCM,
                     target_format=request.format,
                     sample_rate=sample_rate,
                 )

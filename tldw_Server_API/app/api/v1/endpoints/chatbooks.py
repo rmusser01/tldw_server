@@ -75,6 +75,7 @@ from ..schemas.chatbook_schemas import (
 from ..schemas.chatbook_schemas import (
     ChatbookVersion as SchemaChatbookVersion,
 )
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 _CHATBOOKS_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -99,7 +100,7 @@ router = APIRouter(prefix="/chatbooks", tags=["chatbooks"])
 
 # Use central limiter instance
 
-_ADMIN_CLAIM_PERMISSIONS = {"*", "system.configure"}
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 _IMPORT_UPLOAD_PREFIX_RE = re.compile(r"^import_[0-9a-fA-F]{32}_(.+)$")
 _QUOTED_ABSOLUTE_PATH_RE = re.compile(
     r"([\"'])((?:[A-Za-z]:\\|\\\\|/)[^\"'\r\n]+)\1"

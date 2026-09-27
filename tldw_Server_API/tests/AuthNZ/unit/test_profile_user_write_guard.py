@@ -1158,3 +1158,30 @@ def test_profile_user_capability_cannot_be_constructed_directly() -> None:
         )
     with pytest.raises(TypeError):
         _ProfileUserSql()
+
+
+def test_sqlite_users_bootstrap_autoincrement_is_judged_structurally(monkeypatch) -> None:
+    """A bare AUTOINCREMENT constraint must stay canonical however sqlglot renders it.
+
+    sqlglot 30.20 renders a standalone AUTOINCREMENT as "" (it emits it only next to an
+    INTEGER PRIMARY KEY). The guard compared rendered SQL, so the canonical SQLite users
+    bootstrap was rejected and every users table creation failed. Simulate that renderer.
+    """
+    from sqlglot import exp
+
+    from tldw_Server_API.app.core.AuthNZ import profile_user_write_guard as guard
+
+    real_sql = exp.Expression.sql
+
+    def render_bare_autoincrement_as_empty(self, *args, **kwargs):
+        if isinstance(self, exp.AutoIncrementColumnConstraint):
+            return ""
+        return real_sql(self, *args, **kwargs)
+
+    monkeypatch.setattr(exp.Expression, "sql", render_bare_autoincrement_as_empty)
+    assert guard._bootstrap_simple_constraint_is_canonical(
+        exp.AutoIncrementColumnConstraint(), backend="sqlite"
+    )
+    assert not guard._bootstrap_simple_constraint_is_canonical(
+        exp.AutoIncrementColumnConstraint(start=exp.Literal.number(5)), backend="sqlite"
+    )

@@ -50,6 +50,38 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "requires_embeddings: Tests requiring embedding API access")
 
 
+@pytest.fixture(scope="session")
+def _evaluations_authnz_db_url(tmp_path_factory) -> str:
+    return f"sqlite:///{tmp_path_factory.mktemp('evals_authnz') / 'users.db'}"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_authnz_daily_ledger(monkeypatch, _evaluations_authnz_db_url):
+    """Keep the suite out of the checkout's Databases/users.db (TASK-13368).
+
+    The root conftest defaults DATABASE_URL to the checkout's users.db, so the
+    evaluations limiter's ResourceDailyLedger spent real daily quota on every local
+    run. Point AuthNZ at a session-scoped temp DB, and rebuild the cached settings,
+    pool and ledger only when something (another suite, or a test resetting the
+    pool) left them pointing elsewhere.
+    """
+    from tldw_Server_API.app.core.AuthNZ import database as authnz_db
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
+    from tldw_Server_API.app.core.Evaluations import user_rate_limiter
+
+    url = _evaluations_authnz_db_url
+    monkeypatch.setenv("DATABASE_URL", url)
+    pool = authnz_db._db_pool
+    pool_url = getattr(getattr(pool, "settings", None), "DATABASE_URL", None)
+    if pool is not None and pool_url != url:
+        asyncio.run(authnz_db.reset_db_pool())
+        user_rate_limiter._evals_daily_ledger = None
+    elif get_settings().DATABASE_URL != url:
+        reset_settings()
+        user_rate_limiter._evals_daily_ledger = None
+    yield
+
+
 # ============================================================================
 # Database Fixtures with Full Schema
 # ============================================================================

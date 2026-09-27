@@ -21,6 +21,17 @@ import json  # noqa: E402
 import logging  # noqa: E402
 import os  # noqa: E402
 import random  # noqa: E402
+
+# Retry delay computation and HTTP retriability classification moved to
+# core/Utils/backoff.py so they are reusable and so this module shrinks. Bound to the
+# original private names: tests monkeypatch the delay helpers, and the call sites
+# below resolve all of them as module globals.
+from tldw_Server_API.app.core.Utils.backoff import (  # noqa: E402,F401
+    classify_http_retry as _should_retry,
+    decorrelated_jitter_delay as _decorrelated_jitter_sleep,
+    is_dns_resolution_error as _is_dns_resolution_error,
+    parse_retry_after_seconds as _parse_retry_after_delay_seconds,
+)
 import re  # noqa: E402
 import socket  # noqa: E402
 import ssl  # noqa: E402
@@ -601,7 +612,8 @@ def _get_project_version() -> str:
             _CACHED_VERSION = _importlib_metadata.version("tldw-server")  # type: ignore[attr-defined]
             if _CACHED_VERSION:
                 return _CACHED_VERSION
-    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
+    # PackageNotFoundError (not pip-installed, e.g. a source checkout) is an ImportError.
+    except (ImportError, *_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
         pass
     # 3) Fallback: parse pyproject.toml in repo root
     try:
@@ -1979,46 +1991,6 @@ def _get_response_url(resp: Any, fallback: str) -> str:
     return str(fallback)
 
 
-def _is_dns_resolution_error(exc: Exception) -> bool:
-    """Best-effort detection of DNS resolution / unknown-host failures.
-
-    Looks for socket.gaierror in the exception chain and for common
-    platform-specific substrings in the message, including the explicit
-    sentinel used by this module ("DNSResolutionError").
-    """
-    try:
-        if getattr(exc, "_tldw_dns_resolution", False):
-            return True
-    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-        pass
-    try:
-        import socket as _socket
-
-        markers = (
-            "nodename nor servname provided",
-            "Name or service not known",
-            "Temporary failure in name resolution",
-            "Host could not be resolved",
-            "DNSResolutionError",
-        )
-        seen_ids: set[int] = set()
-        cur: BaseException | None = exc
-        while cur is not None and id(cur) not in seen_ids:
-            seen_ids.add(id(cur))
-            if isinstance(cur, _socket.gaierror):
-                return True
-            msg = str(cur)
-            if any(m in msg for m in markers):
-                return True
-            next_exc = getattr(cur, "__cause__", None) or getattr(cur, "__context__", None)
-            if not isinstance(next_exc, BaseException):
-                break
-            cur = next_exc
-    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-        return False
-    return False
-
-
 def _is_aiohttp_client(client: Any) -> bool:
     if aiohttp is None:
         return False
@@ -2306,56 +2278,6 @@ def _build_aiohttp_form(data: Any | None, files: Any | None) -> aiohttp.FormData
             content_type=content_type,
         )
     return form
-
-
-def _decorrelated_jitter_sleep(prev: float, base_ms: int, cap_s: int) -> float:
-    base = max(0.001, base_ms / 1000.0)
-    cap = max(base, float(cap_s))
-    sleep = base if prev <= 0 else min(cap, random.uniform(base, prev * 3))  # nosec B311
-    return sleep
-
-
-def _parse_retry_after_delay_seconds(
-    retry_after: str | None,
-    *,
-    now: datetime | None = None,
-) -> float | None:
-    """Parse Retry-After as delta-seconds or HTTP-date and return seconds to wait."""
-    if not retry_after:
-        return None
-    try:
-        return max(0.0, float(retry_after.strip()))
-    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-        pass
-
-    try:
-        parsed = parsedate_to_datetime(retry_after.strip())
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        current = now or datetime.now(timezone.utc)
-        return max(0.0, (parsed - current).total_seconds())
-    except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-        return None
-
-
-def _should_retry(method: str, status: int | None, exc: Exception | None, policy: RetryPolicy) -> tuple[bool, str]:
-    m = method.upper()
-    if exc is not None:
-        if m not in policy.retry_on_methods and not policy.retry_on_unsafe:
-            return False, "method_not_retriable"
-        # Treat DNS resolution / unknown-host failures as permanent.
-        try:
-            if _is_dns_resolution_error(exc):
-                return False, exc.__class__.__name__
-        except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-            pass
-        # Other network-level exceptions remain retriable.
-        return True, exc.__class__.__name__
-    if status is None:
-        return False, "no_status"
-    if status in policy.retry_on_status and (m in policy.retry_on_methods or policy.retry_on_unsafe):
-        return True, f"{status}"
-    return False, "status_not_retriable"
 
 
 def _build_default_headers(component: str | None = None) -> dict[str, str]:

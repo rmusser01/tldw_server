@@ -1875,44 +1875,13 @@ def _build_url_match_clause(
     return f"{column} IN ({placeholders})", url_candidates
 
 
-def _resolve_ingestion_file_validator(media_mod: Any | None) -> Any:
-    """
-    Resolve the shared file validator instance used by media ingestion flows.
-
-    Prefer the endpoint-exported validator patchpoint (for tests that
-    monkeypatch `endpoints.media.file_validator_instance`) and fall back to
-    the core dependency singleton.
-    """
-    try:
-        from tldw_Server_API.app.api.v1.API_Deps.validations_deps import (  # type: ignore  # noqa: E501
-            file_validator_instance as core_file_validator_instance,
-        )
-    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-        from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import (  # type: ignore  # noqa: E501
-            FileValidator,
-        )
-
-        core_file_validator_instance = FileValidator()
-
-    if media_mod is not None:
-        try:
-            return getattr(
-                media_mod,
-                "file_validator_instance",
-                core_file_validator_instance,
-            )
-        except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-            return core_file_validator_instance
-    return core_file_validator_instance
-
-
 def _validate_downloaded_url_file(
     *,
     downloaded_path: FilePath,
     processing_filename: str | None,
     media_type: Any,
     form_data: Any,
-    media_mod: Any | None,
+    file_validator: Any,
     allowed_extensions: set[str] | None,
 ) -> None:
     """
@@ -1927,7 +1896,7 @@ def _validate_downloaded_url_file(
         process_and_validate_file,
     )
 
-    validator = _resolve_ingestion_file_validator(media_mod)
+    validator = file_validator
     normalized_allowed_extensions = (
         {str(ext).lower() for ext in allowed_extensions if ext} if allowed_extensions is not None else None
     )
@@ -2671,6 +2640,15 @@ async def cleanup_superseded_original_files(
     return warnings
 
 
+def _optional_template_classifier() -> Any | None:
+    """Chunking's TemplateClassifier, or None when chunking templates are unavailable."""
+    try:
+        from tldw_Server_API.app.core.Chunking.templates import TemplateClassifier
+    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - minimal profiles
+        return None
+    return TemplateClassifier
+
+
 async def add_media_orchestrate(
     background_tasks: BackgroundTasks,
     form_data: Any,
@@ -2683,58 +2661,33 @@ async def add_media_orchestrate(
     max_download_bytes: int | None = None,
     allowed_download_content_types: set[str] | None = None,
     trusted_source_metadata_by_url: Mapping[str, dict[str, Any]] | None = None,
+    *,
+    file_validator: Any | None = None,
+    temp_dir_manager_cls: Any | None = None,
+    template_classifier: Any | None = None,
+    process_document_content: Callable[..., Any] | None = None,
 ) -> Any:
     """
     Orchestration helper for the `/media/add` endpoint.
 
-    This function now owns the full ingestion and processing pipeline
-    that previously lived in endpoint-local helpers, while resolving
-    selected helpers from modular `media` exports so tests can
-    monkeypatch `endpoints.media.*` patch points.
+    This function owns the full ingestion and processing pipeline. The
+    collaborators below default to the core implementations; callers (and
+    tests) inject replacements explicitly rather than patching an API module.
     """
-    # Resolve helpers via the modular `media` exports when available so
-    # tests that patch `endpoints.media.*` continue to work. Fall back
-    # to core implementations when those exports are unavailable.
-    try:
-        from tldw_Server_API.app.api.v1.endpoints import (  # type: ignore
-            media as media_mod,
-        )
-    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - ultra-minimal profiles
-        media_mod = None  # type: ignore[assignment]
-
     _validate_inputs = validate_add_media_inputs
     _prepare_common_options = prepare_common_options
     _determine_final_status = determine_add_media_final_status
 
-    from tldw_Server_API.app.api.v1.API_Deps.validations_deps import (  # type: ignore  # noqa: E501
-        file_validator_instance as core_file_validator_instance,
-    )
     from tldw_Server_API.app.core.Ingestion_Media_Processing import (  # type: ignore  # noqa: E501
         input_sourcing as input_sourcing_mod,
     )
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import (
+        get_default_file_validator,
+    )
 
-    CoreTempDirManager = input_sourcing_mod.TempDirManager
-
-    if media_mod is not None:
-        file_validator_instance = getattr(  # type: ignore[assignment]
-            media_mod,
-            "file_validator_instance",
-            core_file_validator_instance,
-        )
-        TemplateClassifier = getattr(  # type: ignore[assignment]
-            media_mod,
-            "TemplateClassifier",
-            None,
-        )
-        TempDirManagerCls = getattr(  # type: ignore[assignment]
-            media_mod,
-            "TempDirManager",
-            CoreTempDirManager,
-        )
-    else:  # pragma: no cover - fallback for minimal profiles
-        file_validator_instance = core_file_validator_instance  # type: ignore[assignment]
-        TemplateClassifier = None  # type: ignore[assignment]
-        TempDirManagerCls = CoreTempDirManager  # type: ignore[assignment]
+    file_validator_instance = file_validator or get_default_file_validator()
+    TempDirManagerCls = temp_dir_manager_cls or input_sourcing_mod.TempDirManager
+    TemplateClassifier = template_classifier or _optional_template_classifier()
 
     request_started_at = time.monotonic()
     request_outcome = "error"
@@ -3226,6 +3179,8 @@ async def add_media_orchestrate(
                             max_download_bytes=max_download_bytes,
                             allowed_download_content_types=allowed_download_content_types,
                             trusted_source_metadata_by_url=trusted_source_metadata_by_url,
+                            file_validator=file_validator_instance,
+                            process_document_content=process_document_content,
                         )
 
                 tasks = [_run_doc_item(source) for source in all_valid_input_sources]
@@ -4864,6 +4819,9 @@ async def process_document_like_item(
     max_download_bytes: int | None = None,
     allowed_download_content_types: set[str] | None = None,
     trusted_source_metadata_by_url: Mapping[str, dict[str, Any]] | None = None,
+    *,
+    file_validator: Any | None = None,
+    process_document_content: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """
     Core helper that handles download/prep, processing, and DB persistence for
@@ -4873,14 +4831,12 @@ async def process_document_like_item(
     This mirrors the behavior of the previous endpoint-local
     `_process_document_like_item` implementation while living in core.
     """
-    # Resolve media-module exports when available so validator monkeypatching
-    # (`endpoints.media.file_validator_instance`) continues to apply.
-    try:  # type: ignore[assignment]
-        from tldw_Server_API.app.api.v1.endpoints import (  # type: ignore
-            media as _media_mod,
+    if file_validator is None:
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import (
+            get_default_file_validator,
         )
-    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - ultra-minimal profiles
-        _media_mod = None  # type: ignore[assignment]
+
+        file_validator = get_default_file_validator()
 
     final_result: dict[str, Any] = {
         "status": "Pending",
@@ -4972,7 +4928,7 @@ async def process_document_like_item(
                     processing_filename=processing_filename,
                     media_type=media_type,
                     form_data=form_data,
-                    media_mod=_media_mod,
+                    file_validator=file_validator,
                     allowed_extensions=allowed_extensions,
                 )
 
@@ -5076,6 +5032,9 @@ async def process_document_like_item(
             final_result["processing_source"] = processing_source
 
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as prep_err:
+        # Includes HTTPException on purpose: an SSRF block or per-URL quota rejection
+        # fails this item only. Callers (the /media/add gather, the ingest-jobs
+        # worker, the reading service) expect an Error result, not a raise.
         error_detail = str(getattr(prep_err, "detail", prep_err))
         prep_error_type = type(prep_err).__name__
         temp_dir_exists: bool | None = None
@@ -5193,19 +5152,7 @@ async def process_document_like_item(
                 raise ValueError("Document processing requires a file path.")
             import tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files as docs  # type: ignore  # noqa: E501
 
-            # Prefer endpoint-exported `media.process_document_content` so
-            # tests can patch it; fall back to the core implementation.
-            if _media_mod is not None:
-                try:
-                    processing_func = getattr(  # type: ignore[assignment]
-                        _media_mod,
-                        "process_document_content",
-                        docs.process_document_content,
-                    )
-                except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - defensive
-                    processing_func = docs.process_document_content
-            else:  # pragma: no cover - minimal profiles
-                processing_func = docs.process_document_content
+            processing_func = process_document_content or docs.process_document_content
 
             specific_args = {
                 "doc_path": processing_filepath,
@@ -5217,17 +5164,7 @@ async def process_document_like_item(
                 raise ValueError("JSON processing requires a file path.")
             import tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files as docs  # type: ignore  # noqa: E501
 
-            if _media_mod is not None:
-                try:
-                    processing_func = getattr(  # type: ignore[assignment]
-                        _media_mod,
-                        "process_document_content",
-                        docs.process_document_content,
-                    )
-                except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - defensive
-                    processing_func = docs.process_document_content
-            else:  # pragma: no cover
-                processing_func = docs.process_document_content
+            processing_func = process_document_content or docs.process_document_content
 
             specific_args = {
                 "doc_path": processing_filepath,

@@ -45,6 +45,7 @@ from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import (
 
 # Import existing components
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 _WEB_SCRAPE_CONFIG_PARSE_EXCEPTIONS = (TypeError, ValueError)
 _EXTRACTION_FAILURE_MESSAGES = {
@@ -90,7 +91,7 @@ _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
 )
 _PLATFORM_ADMIN_ROLES = frozenset({"admin"})
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
 def _web_chunking_form(

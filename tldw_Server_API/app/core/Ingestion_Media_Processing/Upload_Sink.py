@@ -1186,6 +1186,19 @@ class FileValidator:
             return xml_content
 
 
+_default_file_validator: Optional["FileValidator"] = None
+
+
+def get_default_file_validator() -> FileValidator:
+    """The process-wide validator ingestion uses unless a caller injects its own."""
+    global _default_file_validator
+    if _default_file_validator is None:
+        from tldw_Server_API.app.core.config import YARA_RULES_PATH
+
+        _default_file_validator = FileValidator(yara_rules_path=YARA_RULES_PATH)
+    return _default_file_validator
+
+
 def process_and_validate_file(
         file_path: Union[str, Path],
         validator: FileValidator,  # Pass an initialized FileValidator instance

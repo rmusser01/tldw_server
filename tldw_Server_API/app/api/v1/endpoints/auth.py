@@ -164,6 +164,7 @@ from tldw_Server_API.app.services.auth_service import (
     verify_user_email_once as _svc_verify_user_email_once,
 )
 from tldw_Server_API.app.services.registration_service import RegistrationService
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 _AUTH_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -715,7 +716,7 @@ def _current_user_id(user: Any) -> Optional[int]:
 
 
 _PLATFORM_ADMIN_ROLES = frozenset({"admin"})
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
 def _normalized_claim_values(values: Any) -> set[str]:

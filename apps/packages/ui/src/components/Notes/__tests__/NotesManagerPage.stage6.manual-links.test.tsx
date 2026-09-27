@@ -4,9 +4,34 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import NotesManagerPage from '../NotesManagerPage'
 
-vi.mock('@/components/Notes/hooks/useNotesGraphAuthorityScope', () => ({
-  useNotesGraphAuthorityScope: () => 'test-notes-authority'
+const notesConnectionConfig = {
+  serverUrl: 'https://notes.example.test',
+  authMode: 'multi-user' as const,
+  accessToken: 'test-access-token'
+}
+
+vi.mock('@/hooks/useCanonicalConnectionConfig', () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: notesConnectionConfig,
+    loading: false,
+    authorityLoading: false
+  })
 }))
+
+vi.mock('@/services/tldw/TldwAuth', () => ({
+  tldwAuth: {
+    getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true }))
+  }
+}))
+
+vi.mock('@/components/Notes/hooks/useNotesGraphAuthorityScope', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/Notes/hooks/useNotesGraphAuthorityScope')>()
+  return {
+    ...actual,
+    useNotesGraphAuthorityScope: () =>
+      actual.createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, 1)
+  }
+})
 
 const {
   mockBgRequest,
@@ -161,6 +186,12 @@ const saveSeedNote = async () => {
   })
 }
 
+// Connections load on demand: the section must be opened before links render.
+const openConnections = async () => {
+  fireEvent.click(screen.getByTestId('notes-section-connections-toggle'))
+  await screen.findByTestId('notes-graph-relation-panels')
+}
+
 describe('NotesManagerPage stage 6 manual link management', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -227,6 +258,7 @@ describe('NotesManagerPage stage 6 manual link management', () => {
 
     renderPage()
     await saveSeedNote()
+    await openConnections()
 
     const targetContainer = screen.getByTestId('notes-manual-link-target-select')
     const targetContent = targetContainer.querySelector('.ant-select-content') || targetContainer
@@ -311,6 +343,7 @@ describe('NotesManagerPage stage 6 manual link management', () => {
 
     renderPage()
     await saveSeedNote()
+    await openConnections()
 
     const targetContainer2 = screen.getByTestId('notes-manual-link-target-select')
     const targetContent2 = targetContainer2.querySelector('.ant-select-content') || targetContainer2
@@ -376,6 +409,7 @@ describe('NotesManagerPage stage 6 manual link management', () => {
 
     renderPage()
     await saveSeedNote()
+    await openConnections()
 
     const unavailableLink = await screen.findByTestId('notes-manual-link-e_missing-link')
     expect(unavailableLink).toHaveTextContent('Unavailable note')

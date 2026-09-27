@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Context_Integrity.resolver import (
     ContextIntegrityResolver,
     get_global_context_integrity_resolver,
 )
+from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
 from .runtime_provider_call import (
@@ -317,7 +318,7 @@ def _extract_stream_text(chunk: Any) -> Optional[str]:
                 continue
             if lowered.startswith("data:"):
                 data = line[5:].strip()
-                if not data or data.lower() == "[done]":
+                if not data or is_done_line(line):
                     continue
                 try:
                     payload = json.loads(data)

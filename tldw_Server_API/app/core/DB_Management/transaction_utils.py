@@ -10,6 +10,7 @@ from typing import Callable, Optional, TypeVar
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.async_db_wrapper import AsyncDatabaseWrapper
+from tldw_Server_API.app.core.Utils.backoff import capped_exponential_delay
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -68,7 +69,12 @@ async def db_transaction(db: CharactersRAGDB, max_retries: int = 3):
             retry_count += 1
             last_error = e
             if retry_count < max_retries:
-                wait_time = 0.1 * (2 ** retry_count)  # Exponential backoff
+                # Shared short capped-exponential schedule for in-process contention.
+                # jitter=False preserves this call site's existing timing; enabling it
+                # is a deliberate follow-up, not part of the consolidation.
+                wait_time = capped_exponential_delay(
+                    retry_count, base_s=0.1, jitter=False
+                )
                 logger.warning(f"Transaction conflict, retrying in {wait_time}s (attempt {retry_count}/{max_retries})")
                 await asyncio.sleep(wait_time)
             else:

@@ -462,6 +462,9 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
             assert tuple(
                 dependency for dependency in needs if dependency not in {"admission", "await_license"}
             ) == original_needs
+            # The two gates travel together: a job that honours admission must also
+            # wait for the license verdict, or the pull_request path runs it unordered.
+            assert ("admission" in needs) == ("await_license" in needs), (name, job_name)
 
             root = not original_needs
             directly_guarded = (name, job_name) in DIRECT_ADMISSION_JOBS

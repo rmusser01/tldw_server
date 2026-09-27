@@ -9,6 +9,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
     fold_provider_credential_rows,
@@ -57,18 +58,7 @@ class AuthnzUserProviderSecretsRepo:
     def _normalize_datetime_for_postgres(dt: datetime) -> datetime:
         return dt.replace(tzinfo=None) if getattr(dt, "tzinfo", None) else dt
 
-    @staticmethod
-    def _row_to_dict(row: Any) -> dict[str, Any]:
-        if isinstance(row, dict):
-            return dict(row)
-        try:
-            keys = row.keys()
-            return {key: row[key] for key in keys}
-        except Exception as row_keys_error:
-            logger.bind(error_type=type(row_keys_error).__name__).debug(
-                "User provider secret row key materialization failed; falling back to dict(row)"
-            )
-        return dict(row)
+    _row_to_dict = staticmethod(row_dict)
 
     @staticmethod
     def _select_authoritative_row(

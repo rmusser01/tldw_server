@@ -1843,7 +1843,7 @@ class MediaModule(BaseModule):
 
             if permanent:
                 # Hard delete (requires admin)
-                if not self._is_admin(context):
+                if not self.caller_is_admin(context):
                     raise PermissionError("Admin role required for permanent delete")
                 deleted = permanently_delete_item(dbi, media_id)
                 if not deleted:
@@ -2054,12 +2054,6 @@ class MediaModule(BaseModule):
         except _MEDIA_MODULE_NONCRITICAL_EXCEPTIONS:
             return False
 
-    def _is_admin(self, context: Any | None) -> bool:
-        try:
-            roles = (getattr(context, "metadata", {}) or {}).get("roles")
-            return isinstance(roles, list) and any(str(r).lower() == "admin" for r in roles)
-        except _MEDIA_MODULE_NONCRITICAL_EXCEPTIONS:
-            return False
 
     def _assert_media_access(self, media_id: int, context: Any | None, dbi: Optional[MediaDbLike] = None) -> None:
         """Enforce that non-admin users can only access their own media when ownership is present."""
@@ -2073,7 +2067,7 @@ class MediaModule(BaseModule):
             if self._allow_anonymous_access() and not strict_ownership:
                 return
             raise PermissionError("User context required for media access")
-        if self._is_admin(context):
+        if self.caller_is_admin(context):
             return
         dbi = dbi or self._open_media_db(context)
         try:

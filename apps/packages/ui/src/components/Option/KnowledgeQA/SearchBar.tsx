@@ -13,6 +13,7 @@ import {
   shouldShowSuggestionPrototype,
   type QuerySuggestion,
 } from "./querySuggestions"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const EXAMPLE_QUERIES = [
   "What are the key findings from the research?",
@@ -37,17 +38,6 @@ type SearchBarProps = {
   webFallbackAvailable?: boolean
   searchBlockedMessage?: string | null
   widthMode?: "compact" | "wide"
-}
-
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
-  const tagName = target.tagName.toUpperCase()
-  return (
-    tagName === "INPUT" ||
-    tagName === "TEXTAREA" ||
-    tagName === "SELECT" ||
-    target.isContentEditable
-  )
 }
 
 function isInteractiveControlTarget(target: EventTarget | null): boolean {

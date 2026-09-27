@@ -6,6 +6,7 @@ import type { PdfDocumentProxy } from "@/hooks/document-workspace/usePdfSearch"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
 import { ViewerToolbar } from "./ViewerToolbar"
 import type { DocumentType } from "../types"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const PdfDocument = React.lazy(() =>
   import("./PdfViewer/PdfDocument").then((module) => ({
@@ -134,10 +135,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       }
 
       // Don't handle navigation if focus is in an input
-      if (
-        document.activeElement?.tagName === "INPUT" ||
-        document.activeElement?.tagName === "TEXTAREA"
-      ) {
+      if (isEditableTarget(document.activeElement)) {
         return
       }
 

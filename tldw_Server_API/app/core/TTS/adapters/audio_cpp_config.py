@@ -9,24 +9,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from tldw_Server_API.app.core.Utils.coercion import parse_bool
+
 from ..tts_exceptions import TTSValidationError
 
 PROVIDER_KEY = "audio_cpp"
 _SCALAR_TYPES = (str, int, float, bool)
-
-
-def _as_bool(value: Any, default: bool = False) -> bool:
-    if value is None:
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"1", "true", "yes", "on"}:
-            return True
-        if normalized in {"0", "false", "no", "off"}:
-            return False
-    return bool(value)
 
 
 def _is_loopback_host(host: str | None) -> bool:
@@ -130,7 +118,7 @@ class AudioCppConfig:
         repo_root: Path | None = None,
     ) -> AudioCppConfig:
         extra_params = dict(config.get("extra_params") or {})
-        allow_remote = _as_bool(extra_params.get("allow_remote_base_url"), default=False)
+        allow_remote = parse_bool(extra_params.get("allow_remote_base_url"), default=False, key="audio_cpp.allow_remote_base_url")
         mode = str(extra_params.get("external_voice_reference_mode") or "disabled").strip().lower()
         if mode not in {"disabled", "shared_path"}:
             raise TTSValidationError(
@@ -147,10 +135,10 @@ class AudioCppConfig:
             model=str(config.get("model") or "audio-cpp/pocket-tts"),
             model_path=config.get("model_path"),
             timeout=int(config.get("timeout") or 300),
-            managed=_as_bool(extra_params.get("managed"), default=False),
+            managed=parse_bool(extra_params.get("managed"), default=False, key="audio_cpp.managed"),
             allow_remote_base_url=allow_remote,
             external_voice_reference_mode=mode,
-            retain_request_artifacts=_as_bool(extra_params.get("retain_request_artifacts"), default=False),
+            retain_request_artifacts=parse_bool(extra_params.get("retain_request_artifacts"), default=False, key="audio_cpp.retain_request_artifacts"),
             request_option_allowlist=tuple(str(item) for item in allowlist),
             server={"backend": config.get("backend") or "cuda", **dict(extra_params.get("server") or {})},
             repo_root=Path(repo_root or Path.cwd()).resolve(strict=False),
@@ -209,7 +197,7 @@ class AudioCppConfig:
             "backend": str(self.server.get("backend") or "cuda"),
             "idle_unload_ms": max(0, int(float(self.server.get("idle_shutdown_seconds", 900)) * 1000)),
             "port": int(self.server.get("port") or 8080),
-            "lazy_load": _as_bool(self.server.get("lazy_load"), default=True),
+            "lazy_load": parse_bool(self.server.get("lazy_load"), default=True, key="audio_cpp.server.lazy_load"),
             "device": self.server.get("device", 0),
             "threads": int(self.server.get("threads") or 1),
             "models_root": str(self.models_root),

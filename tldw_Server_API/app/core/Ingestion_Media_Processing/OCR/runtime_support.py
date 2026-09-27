@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import base64
+import contextlib
+from collections.abc import Iterator
 import http.client
 import json
 import os
 import platform
 import re
 import signal
+import tempfile
 import time
 from dataclasses import dataclass, field
 from threading import RLock
@@ -54,6 +58,32 @@ def _parse_argv_json(value: Any) -> tuple[str, ...]:
     if not isinstance(parsed, list):
         return ()
     return tuple(str(item) for item in parsed)
+
+
+@contextlib.contextmanager
+def image_payload(image_bytes: bytes, *, use_data_url: bool) -> Iterator[dict[str, Any]]:
+    """The chat-completions ``image_url`` part for ``image_bytes``, valid until exit.
+
+    Either a PNG data URL, or a temp-file path for servers that read local files. The
+    file must outlive the request that names it, so it is removed on exit, not before.
+    """
+    if use_data_url:
+        b64 = base64.b64encode(image_bytes).decode("ascii")
+        yield {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
+        return
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
+        # Record the path before writing, so a write that fails (full disk) is still
+        # cleaned up; discard_staged_page_image reports removal failures.
+        path = handle.name
+        try:
+            handle.write(image_bytes)
+        except BaseException:
+            discard_staged_page_image(path)
+            raise
+    try:
+        yield {"type": "image_url", "image_url": {"url": path}}
+    finally:
+        discard_staged_page_image(path)
 
 
 def _pick_positive_cap(*caps: int | None) -> int | None:

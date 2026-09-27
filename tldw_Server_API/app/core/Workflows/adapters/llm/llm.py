@@ -13,6 +13,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.exceptions import AdapterError
+from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
@@ -183,7 +184,7 @@ async def run_llm_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
             raw = raw.strip()
             if not raw:
                 continue
-            if raw.lower() == "data: [done]":
+            if is_done_line(raw):
                 break
             if raw.startswith("data:"):
                 payload = raw[5:].strip()

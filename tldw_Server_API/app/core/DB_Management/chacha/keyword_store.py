@@ -932,6 +932,16 @@ class KeywordStore:
             return 0
         return int(row["total"] if isinstance(row, dict) else row[0])
 
+    def list_conversation_keyword_links(self, limit: int, offset: int) -> list[dict[str, Any]]:
+        """Conversation-keyword links, owner-scoped exactly as count_conversation_keyword_links."""
+        owner_clause, owner_params = self._db._selected_keyword_link_filter("conversation_keywords", "ck", owner_client_id=self._db.client_id)
+        cursor = self._db.execute_query(
+            "SELECT ck.conversation_id, ck.keyword_id FROM conversation_keywords ck"  # nosec B608 - fixed fragments
+            f" WHERE 1 = 1{owner_clause} ORDER BY ck.conversation_id ASC, ck.keyword_id ASC LIMIT ? OFFSET ?",
+            (*owner_params, limit, offset),
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
     def get_keywords_for_conversations(self, conversation_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
         """Fetch keywords for multiple conversations in a single query."""
         if not conversation_ids:
@@ -1019,6 +1029,16 @@ class KeywordStore:
         if row is None:
             return 0
         return int(row["total"] if isinstance(row, dict) else row[0])
+
+    def list_collection_keyword_links(self, limit: int, offset: int) -> list[dict[str, Any]]:
+        """Collection-keyword links, owner-scoped exactly as count_collection_keyword_links."""
+        owner_clause, owner_params = self._db._selected_keyword_link_filter("collection_keywords", "ck", owner_client_id=self._db.client_id)
+        cursor = self._db.execute_query(
+            "SELECT ck.collection_id, ck.keyword_id FROM collection_keywords ck"  # nosec B608 - fixed fragments
+            f" WHERE 1 = 1{owner_clause} ORDER BY ck.collection_id ASC, ck.keyword_id ASC LIMIT ? OFFSET ?",
+            (*owner_params, limit, offset),
+        )
+        return [dict(row) for row in cursor.fetchall()]
 
     def get_collections_for_keyword(self, keyword_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         order_clause = self._db._case_insensitive_order_clause("kc.name")
