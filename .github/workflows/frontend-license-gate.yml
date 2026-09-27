@@ -42,7 +42,14 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ github.sha }}
-          fetch-depth: 0
+          # Depth 1, not 0. This job reads no history: the owner path below exits before
+          # touching a git object, and the non-owner path does its own explicit
+          # `git fetch --depth=1` of the base ref and refs/pull/N/head, then diffs those two
+          # SHAs. A full clone here is 834 MB over 17,899 commits inside a 5-minute job
+          # timeout (:19), which is why this step kept being cancelled mid-checkout and the
+          # fail-closed publisher then stamped a policy-violation status on the commit.
+          # See TASK-13361.
+          fetch-depth: 1
           persist-credentials: false
 
       - id: evaluate
