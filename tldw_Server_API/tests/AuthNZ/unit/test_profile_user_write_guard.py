@@ -579,6 +579,61 @@ def test_profile_anchor_ddl_requires_one_shot_capability(statement: str) -> None
         )
 
 
+_SQLITE_USERS_BOOTSTRAP = """
+    CREATE TABLE IF NOT EXISTS main.users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT UNIQUE NOT NULL DEFAULT (lower(hex(randomblob(16)))),
+        username TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        metadata TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        is_superuser INTEGER NOT NULL DEFAULT 0,
+        role TEXT NOT NULL DEFAULT 'user',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_login TIMESTAMP,
+        email_verified INTEGER NOT NULL DEFAULT 0,
+        is_verified INTEGER NOT NULL DEFAULT 0,
+        two_factor_enabled INTEGER NOT NULL DEFAULT 0,
+        failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+        locked_until TIMESTAMP,
+        storage_quota_mb INTEGER NOT NULL DEFAULT 5120,
+        storage_used_mb INTEGER NOT NULL DEFAULT 0,
+        email_verified_at TIMESTAMP,
+        two_factor_secret TEXT,
+        totp_secret TEXT,
+        backup_codes TEXT,
+        created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        password_changed_at TIMESTAMP,
+        profile_version TEXT NOT NULL DEFAULT (STRFTIME('%Y-%m-%dT%H:%M:%f000Z', 'now'))
+    )
+"""
+
+
+def test_the_sqlite_users_bootstrap_is_canonical() -> None:
+    """The exact DDL Users_DB runs on SQLite must pass the guard.
+
+    Only the PostgreSQL bootstrap had a positive test. sqlglot 30.20.0 stopped rendering a
+    standalone AutoIncrementColumnConstraint (it now emits AUTOINCREMENT only with its
+    INTEGER PRIMARY KEY context), so the guard compared '' to 'AUTOINCREMENT', rejected the
+    canonical table, and every SQLite AuthNZ startup failed with "Failed to create users
+    table". Nothing failed here, because nothing here asserted the SQLite shape.
+    """
+    assert _is_canonical_users_bootstrap_sql(_SQLITE_USERS_BOOTSTRAP, backend="sqlite")
+
+
+def test_the_sqlite_users_bootstrap_rejects_autoincrement_off_the_id_column() -> None:
+    """Control: accepting AUTOINCREMENT by type must not accept it on any column."""
+    moved = _SQLITE_USERS_BOOTSTRAP.replace(
+        "failed_login_attempts INTEGER NOT NULL DEFAULT 0",
+        "failed_login_attempts INTEGER NOT NULL DEFAULT 0 AUTOINCREMENT",
+        1,
+    )
+    assert moved != _SQLITE_USERS_BOOTSTRAP
+    assert not _is_canonical_users_bootstrap_sql(moved, backend="sqlite")
+
+
 def test_users_bootstrap_requires_exact_one_shot_capability() -> None:
     connection = object()
     statement = """
