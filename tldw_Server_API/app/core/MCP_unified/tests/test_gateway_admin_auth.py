@@ -151,29 +151,31 @@ def test_gateway_admin_auth_does_not_gate_status_or_jsonrpc() -> None:
             json={"jsonrpc": "2.0", "method": "tools/list", "id": "tools-1"},
         )
 
-    # The point of this test is that admin auth does not gate these two routes.
-    assert status.status_code == 200
-    assert tools.status_code == 200
+    # The subject is access, not payload shape: neither endpoint may answer 401/403 just
+    # because admin auth is configured.
+    assert status.status_code == 200, status.text
+    assert tools.status_code == 200, tools.text
     assert tools.json()["result"]["tools"][0]["name"] == "echo.search"
 
-    # Identity fields, asserted individually. This was an exact-dict comparison, which
-    # went red as soon as the status payload grew transport, package, profile_store,
-    # external_servers, default_profile, warnings and next_actions blocks -- none of
-    # which this test is about.
-    body = status.json()
-    assert body["status"] == "ok"
-    assert body["name"] == "admin-auth-test"
-    assert body["version"] == "0.0-test"
+    # Identity checked as a subset. This was an exact-dict comparison against three keys,
+    # so it broke when /status grew its readiness metadata -- a field addition, not a
+    # regression in what this test is about. See TASK-13358.
+    payload = status.json()
+    assert payload["status"] == "ok"
+    assert payload["name"] == "admin-auth-test"
+    assert payload["version"] == "0.0-test"
 
-    # The admin_auth block is reported on an UNAUTHENTICATED route, so it may say that
-    # a key is configured but must never disclose it.
-    admin_auth = body["admin_auth"]
-    assert admin_auth == {
+    # /status is unauthenticated, so the fields it grew must not include the credential.
+    # They currently describe the admin-auth *configuration* (enabled, configured,
+    # header_name), which is not secret; the key itself must never appear.
+    assert "test-admin-key" not in status.text, (
+        "the configured admin api_key is present in the unauthenticated /status body"
+    )
+    assert payload["admin_auth"] == {
         "enabled": True,
         "configured": True,
         "header_name": "X-MCP-Gateway-Admin-Key",
-    }
-    assert "test-admin-key" not in status.text
+    }, payload["admin_auth"]
 
 
 @pytest.mark.parametrize("suffix", [".json", ".toml"])

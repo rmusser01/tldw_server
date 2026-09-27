@@ -2423,32 +2423,26 @@ def test_gateway_external_runtime_lifecycle_logs_unexpected_startup_exception(
     ]
 
 
-def _find_route(app, suffix: str):
-    """Find a gateway route by path suffix, wherever the app keeps it.
-
-    This used to be `next(r for r in app.routes if r.path == "/mcp/status")`, which
-    went red with StopIteration once the gateway stopped registering absolute paths
-    on the application. Its routes now live on an APIRouter reached through a custom
-    _IncludedRouter wrapper, with paths relative to the mount ("/status"), so nothing
-    on app.routes carries the full path any more. The endpoint itself is unchanged --
-    GET /mcp/status still answers 200 -- so this is a lookup that drifted, not a
-    regression.
-    """
-    pending = list(app.routes)
-    while pending:
-        route = pending.pop()
-        path = getattr(route, "path", None)
-        if path and path.endswith(suffix):
-            return route
-        inner = getattr(route, "original_router", None) or getattr(route, "app", None)
-        pending.extend(getattr(inner, "routes", []))
-    raise AssertionError(f"no route ending in {suffix!r} found")
-
-
 def test_gateway_status_includes_package_boundary_metadata() -> None:
     app = create_gateway_app(_FakeGatewayRuntime())
-    status_route = _find_route(app, "/status")
-    assert getattr(status_route, "response_model", None) is gateway_fastapi.GatewayReadinessStatusResponse
+
+    # Asserted through the OpenAPI schema rather than by walking app.routes. FastAPI
+    # 0.141 / Starlette 1.6 changed include_router to put a single private
+    # _IncludedRouter object in app.routes instead of flattening the router's routes
+    # into it, so the old `next(r for r in app.routes if r.path == "/mcp/status")` raised
+    # StopIteration -- a dependency-version change, not a missing route. The endpoint
+    # itself was never broken, as the TestClient call below shows. The schema is public
+    # API and states the same thing. See TASK-13358.
+    schema = app.openapi()
+    assert "/mcp/status" in schema["paths"], sorted(schema["paths"])
+    success_schema = (
+        schema["paths"]["/mcp/status"]["get"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]
+    )
+    assert success_schema == {
+        "$ref": f"#/components/schemas/{gateway_fastapi.GatewayReadinessStatusResponse.__name__}"
+    }, success_schema
 
     with TestClient(app) as client:
         response = client.get("/mcp/status")

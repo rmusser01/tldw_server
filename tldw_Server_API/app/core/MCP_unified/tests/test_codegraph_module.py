@@ -209,15 +209,15 @@ async def test_codegraph_status_is_read_only_when_index_is_absent(tmp_path: Path
 
 @pytest.mark.asyncio
 async def test_codegraph_index_and_files_roundtrip(tmp_path: Path) -> None:
-    # The TypeScript half of this test needs the optional `codegraph` extra. Without
-    # tree_sitter + tree_sitter_typescript the language registry marks TypeScript as
-    # having no symbol extraction, the .ts file is dropped from foundation_candidates
-    # before indexing, and files_indexed is 1 rather than 2. That is a missing optional
-    # dependency, not a product regression -- so skip loudly instead of failing.
-    pytest.importorskip(
-        "tree_sitter_typescript",
-        reason="needs the optional 'codegraph' extra (pip install -e '.[codegraph]')",
-    )
+    # This test indexes a .ts file and asserts both files are indexed, so it needs the
+    # same guard the .tsx test already uses. Python's symbol_extraction is unconditional
+    # in the language registry, but TypeScript's is `not typescript_missing` -- so without
+    # tree_sitter_typescript installed, ui.ts is filtered out of foundation_candidates and
+    # this failed with `assert 1 == 2` rather than skipping. An unrunnable environment
+    # must skip; only a real regression should fail. See TASK-13358. Only the .ts parser
+    # gates this: the indexer registers TypeScript on load_parser("typescript") alone.
+    if not load_parser("typescript").available:
+        pytest.skip("tree-sitter-typescript parser is not available")
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
     (workspace_root / "app.py").write_text("x = 1\n", encoding="utf-8")

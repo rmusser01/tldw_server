@@ -16,14 +16,15 @@ from mcp_unified.gateway.tool_discovery import (
     resolve_profile_tool_call,
     search_profile_tools,
 )
-from mcp_unified.gateway import tool_discovery as _tool_discovery_module
 from mcp_unified.profiles.models import MCPProfile, ProfilePolicy
 
-# Derived from the imported module rather than spelled out relative to the repo root.
-# The hardcoded path was REPO_ROOT / "mcp_unified" / "gateway" / "tool_discovery.py",
-# which went stale -- and stayed silently stale -- when the package moved under
-# apps/mcp-unified/src/. Asking the module where it lives cannot drift.
-TOOL_DISCOVERY_PATH = Path(_tool_discovery_module.__file__).resolve()
+# Taken from the imported module rather than reconstructed from the repo root. The
+# previous form was REPO_ROOT / "mcp_unified" / "gateway" / "tool_discovery.py", which
+# stopped resolving when the standalone package moved to a src layout under
+# apps/mcp-unified/src/ -- the test then failed with FileNotFoundError before asserting
+# anything about the boundary. Deriving it from the module the test already imports means
+# it follows any future move. See TASK-13358.
+TOOL_DISCOVERY_PATH = Path(tool_discovery.__file__).resolve()
 
 
 def _profile(
