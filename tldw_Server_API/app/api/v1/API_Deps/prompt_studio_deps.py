@@ -330,12 +330,18 @@ async def get_prompt_studio_user(
         if asyncio.iscoroutine(maybe_user):
             maybe_user = await maybe_user
         if isinstance(maybe_user, dict) and maybe_user.get("id") is not None:
+            # This branch is reachable outside TEST_MODE. The hook injects an
+            # identity for tests; it must not also confer privilege. Granting
+            # is_admin here short-circuits require_project_access, which returns
+            # True for any admin before it compares project ownership, so
+            # anything that makes this stub return a dict becomes a full
+            # cross-account bypass. Identity only.
             user_context = {
                 "user_id": str(maybe_user.get("id")),
                 "client_id": client_id_value or "web",
                 "is_authenticated": True,
-                "is_admin": True,
-                "permissions": ["all"],
+                "is_admin": False,
+                "permissions": [],
                 "rg_policy_id": getattr(request.state, "rg_policy_id", None),
             }
             request.state.user_context = user_context

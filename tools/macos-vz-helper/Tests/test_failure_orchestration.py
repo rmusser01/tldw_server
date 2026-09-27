@@ -469,7 +469,7 @@ class HelperStatus:
 
 @pytest.mark.unit
 @pytest.mark.parametrize("failure", [None, "rejected", "raised"])
-def test_exercise_isolates_eight_cases_and_unwinds_failed_runs(
+def test_exercise_isolates_ten_cases_and_unwinds_failed_runs(
     drill: ModuleType,
     materializer: ModuleType,
     source_bundle: Path,
@@ -500,11 +500,17 @@ def test_exercise_isolates_eight_cases_and_unwinds_failed_runs(
         (packet / "build.json").write_text(json.dumps({"profile": profile}), encoding="utf-8")
         return binary
 
-    def install_agent(client: Any, boot: Path, target: Path, binary: Path, packet: Path) -> None:
+    def install_agent(
+        client: Any, boot: Path, target: Path, binary: Path, packet: Path, *, installer: Path | None = None
+    ) -> None:
         """Change only the offline fault-source disk, never its separate boot clone."""
         assert client is helper
         assert boot != target
         assert (boot / "rootfs.img").read_bytes() == b"healthy"
+        expected_installer = (
+            drill.FIXTURES / "install-missing-agent.sh" if packet.name == "missing_agent-prepare" else None
+        )
+        assert installer == expected_installer
         (target / "rootfs.img").write_bytes(binary.read_bytes())
 
     def run_case(
@@ -551,16 +557,22 @@ def test_exercise_isolates_eight_cases_and_unwinds_failed_runs(
         drill.exercise(materializer, ctl, source_bundle, tmp_path / "helper", evidence, receipt, factory)
     expected = [
         (profile, negative)
-        for profile in ("mismatch", "readiness", "protocol", "workspace")
+        for profile in ("mismatch", "readiness", "protocol", "workspace", "missing_agent")
         for negative in (False, True)
     ]
     assert [(profile, negative) for profile, negative, _, _ in seen] == (expected[:2] if failure else expected)
     run_paths = [path for _, _, healthy, fault in seen for path in (healthy, fault)]
     assert len(set(run_paths)) == 2 * len(seen)
     assert all(path.is_relative_to(evidence / "image-store/runs") for path in run_paths)
-    assert builder.call_count == 4
-    assert [call.args[0] for call in builder.call_args_list] == ["mismatch", "readiness", "protocol", "workspace"]
-    assert installer.call_count == (1 if failure else 4)
+    assert builder.call_count == 5
+    assert [call.args[0] for call in builder.call_args_list] == [
+        "mismatch",
+        "readiness",
+        "protocol",
+        "workspace",
+        "missing_agent",
+    ]
+    assert installer.call_count == (1 if failure else 5)
     expected_cases = {
         "mismatch-positive": {"ok": True},
         "mismatch-negative": {"ok": failure != "rejected"},
@@ -570,6 +582,8 @@ def test_exercise_isolates_eight_cases_and_unwinds_failed_runs(
         "protocol-negative": {"ok": True},
         "workspace-positive": {"ok": True},
         "workspace-negative": {"ok": True},
+        "missing_agent-positive": {"ok": True},
+        "missing_agent-negative": {"ok": True},
     }
     if failure:
         expected_cases = {name: result for name, result in expected_cases.items() if name.startswith("mismatch")}
@@ -585,7 +599,7 @@ def test_exercise_isolates_eight_cases_and_unwinds_failed_runs(
     assert not Path(receipt["lifecycle"]["runtime_dir"]).exists()
     assert receipt["errors"] == []
     tracked_disks = disk_probe.call_args.args[0]
-    assert len(tracked_disks) == (6 if failure else 24)
+    assert len(tracked_disks) == (6 if failure else 30)
     assert {path / "rootfs.img" for path in run_paths}.issubset(set(tracked_disks))
     if failure:
         helper.terminate_vm.assert_called_once_with("leftover")

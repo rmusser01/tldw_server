@@ -25,7 +25,6 @@ from tldw_Server_API.app.core.Metrics.metrics_manager import (
 from tldw_Server_API.app.core.testing import is_truthy
 
 _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

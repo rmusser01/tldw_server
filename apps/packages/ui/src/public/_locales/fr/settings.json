@@ -1,4 +1,7 @@
 {
+  "onboarding_loginSettingsError": {
+    "message": "Impossible d’ouvrir les paramètres de connexion. Réessayez."
+  },
   "navigation_serverAndAuth": {
     "message": "Serveur et Auth"
   },
@@ -3445,5 +3448,89 @@
   },
   "sidepanelSettings_local_title": {
     "message": "Comportement du panneau latéral"
+  },
+  "chatMacrosSettings_title": {
+    "message": "Macros de discussion"
+  },
+  "chatMacrosSettings_description": {
+    "message": "Créez des procédures de discussion réutilisables et choisissez la présentation de leurs résultats."
+  },
+  "chatMacrosSettings_new": {
+    "message": "Nouvelle macro"
+  },
+  "chatMacrosSettings_importLabel": {
+    "message": "Importer une macro"
+  },
+  "chatMacrosSettings_import": {
+    "message": "Importer"
+  },
+  "chatMacrosSettings_refresh": {
+    "message": "Actualiser les macros"
+  },
+  "chatMacrosSettings_macros": {
+    "message": "Macros"
+  },
+  "chatMacrosSettings_profiles": {
+    "message": "Profils de sortie"
+  },
+  "chatMacrosSettings_catalog": {
+    "message": "Catalogue de macros"
+  },
+  "chatMacrosSettings_loadingMacros": {
+    "message": "Chargement des macros"
+  },
+  "chatMacrosSettings_retryCatalog": {
+    "message": "Réessayer le catalogue"
+  },
+  "chatMacrosSettings_empty": {
+    "message": "Aucune macro trouvée."
+  },
+  "chatMacrosSettings_importFile": {
+    "message": "Importer un fichier YAML de macro"
+  },
+  "chatMacrosSettings_tabs": {
+    "message": "Paramètres des macros de discussion"
+  },
+  "chatMacrosSettings_cloneName": {
+    "message": "Nom de la copie"
+  },
+  "chatMacrosSettings_cloning": {
+    "message": "Copie en cours"
+  },
+  "chatMacrosSettings_clone": {
+    "message": "Copier /{{command}}"
+  },
+  "chatMacrosSettings_select": {
+    "message": "Sélectionner /{{command}}"
+  },
+  "chatMacrosSettings_toggle": {
+    "message": "Activer ou désactiver /{{command}}"
+  },
+  "chatMacrosSettings_loadingProfiles": {
+    "message": "Chargement des profils de sortie"
+  },
+  "chatMacrosSettings_retrySettings": {
+    "message": "Réessayer les paramètres"
+  },
+  "chatMacrosSettings_enabled": {
+    "message": "Activé"
+  },
+  "chatMacrosSettings_disabled": {
+    "message": "Désactivé"
+  },
+  "chatMacrosSettings_valid": {
+    "message": "Valide"
+  },
+  "chatMacrosSettings_invalid": {
+    "message": "Invalide"
+  },
+  "chatMacrosSettings_unknown": {
+    "message": "Inconnu"
+  },
+  "chatMacrosSettings_builtin": {
+    "message": "Intégré"
+  },
+  "chatMacrosSettings_user": {
+    "message": "Utilisateur"
   }
 }

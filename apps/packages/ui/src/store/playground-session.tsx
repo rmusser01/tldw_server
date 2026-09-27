@@ -1,3 +1,4 @@
+import type { HistorySelectionReference } from "@/hooks/chat/useHistorySelection"
 import { createWithEqualityFn } from "zustand/traditional"
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
@@ -64,6 +65,7 @@ const createBrowserStorage = (): StateStorage => {
 
 export interface PlaygroundSessionData {
   // Core identifier (used to restore messages from Dexie)
+  historySelectionReference?: HistorySelectionReference | null
   historyId: string | null
   serverChatId: string | null
   trackedAssistantSelection: AssistantSelection | null
@@ -95,6 +97,8 @@ export interface PlaygroundSessionData {
 }
 
 interface PlaygroundSessionState extends PlaygroundSessionData {
+  serverChatSelectionIntent: { chatId: string } | null
+  requestServerChatSelection: (chatId: string) => void
   restoreRevision: number
   sourceSelectionRevision: number
   // Actions
@@ -107,6 +111,7 @@ interface PlaygroundSessionState extends PlaygroundSessionData {
 }
 
 const initialState: PlaygroundSessionData = {
+  historySelectionReference: null,
   historyId: null,
   serverChatId: null,
   trackedAssistantSelection: null,
@@ -137,6 +142,9 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
       ...initialState,
       restoreRevision: 0,
       sourceSelectionRevision: 0,
+      serverChatSelectionIntent: null,
+      requestServerChatSelection: (chatId) =>
+        set({ serverChatSelectionIntent: { chatId } }),
 
       saveSession: (data) =>
         set((state) => ({
@@ -148,6 +156,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
       clearSession: () =>
         set((state) => ({
           ...initialState,
+          serverChatSelectionIntent: null,
           lastUpdated: 0,
           restoreRevision: state.restoreRevision + 1
         })),
@@ -195,6 +204,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
         typeof window !== "undefined" ? createBrowserStorage() : createMemoryStorage()
       ),
       partialize: (state) => ({
+        historySelectionReference: state.historySelectionReference,
         historyId: state.historyId,
         serverChatId: state.serverChatId,
         trackedAssistantSelection: state.trackedAssistantSelection,

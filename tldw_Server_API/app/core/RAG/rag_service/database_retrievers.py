@@ -2721,7 +2721,7 @@ class NotesDBRetriever(BaseRetriever):
 ' || COALESCE(n.content, '')
         """
         if is_postgres:
-            sql = """
+            sql = f"""
                 SELECT
                     n.id,
                     LENGTH({formatted_text}) AS _standalone_source_full_chars,

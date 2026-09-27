@@ -5,6 +5,9 @@ import os
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
+from tldw_Server_API.app.core.http_client import (
+    create_client as _hc_create_client,
+)
 from tldw_Server_API.app.core.LLM_Calls.cache_intents import (
     apply_billing_prompt_cache_intent,
     attach_cache_intent_metadata,
@@ -20,15 +23,6 @@ from tldw_Server_API.app.core.LLM_Calls.sse import (
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
 
 from .base import ChatProvider
-
-
-def _prefer_httpx_in_tests() -> bool:
-    return bool(os.getenv("PYTEST_CURRENT_TEST"))
-
-
-from tldw_Server_API.app.core.http_client import (
-    create_client as _hc_create_client,
-)
 
 http_client_factory = _hc_create_client
 
@@ -187,7 +181,7 @@ class OpenRouterAdapter(ChatProvider):
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
-        if _prefer_httpx_in_tests() or os.getenv("PYTEST_CURRENT_TEST") or self._use_native_http():
+        if self._use_native_http():
             api_key = request.get("api_key")
             headers = self._headers(api_key, request)
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"
@@ -213,7 +207,7 @@ class OpenRouterAdapter(ChatProvider):
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
         request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
-        if _prefer_httpx_in_tests() or os.getenv("PYTEST_CURRENT_TEST") or self._use_native_http():
+        if self._use_native_http():
             api_key = request.get("api_key")
             headers = self._headers(api_key, request)
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"

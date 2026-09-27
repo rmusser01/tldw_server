@@ -40,7 +40,6 @@ from tldw_Server_API.app.core.testing import (
 )
 
 _JOBS_ADMIN_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

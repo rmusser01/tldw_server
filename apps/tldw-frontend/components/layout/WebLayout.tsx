@@ -1,3 +1,5 @@
+import { HistorySelectionProvider } from '@/hooks/chat/useHistorySelection';
+import { formatSelectedHistory } from '@/db/dexie/helpers';
 import React, { lazy, Suspense, useState, useContext, useCallback } from 'react';
 
 import { Drawer, Tooltip } from 'antd';
@@ -839,7 +841,7 @@ function RootLayoutShell({
 
   const notificationsEnabled = !effectiveHideHeader;
 
-  return (
+  const content = (
     <DemoModeProvider>
       <NotificationRuntimeOwner enabled={notificationsEnabled}>
         <LayoutShellContext.Provider value={{ inShell: true, setOverrides }}>
@@ -852,6 +854,18 @@ function RootLayoutShell({
       </NotificationRuntimeOwner>
     </DemoModeProvider>
   );
+  return location.pathname === "/chat" ? (
+    <HistorySelectionProvider
+      storageKey="tldw-h1-playground-reference"
+      onCapture={(capture) => {
+        const display = formatSelectedHistory(capture);
+        useStoreMessageOption.getState().setHistory(display.history);
+        useStoreMessageOption.getState().setMessages(display.messages);
+      }}
+    >
+      {content}
+    </HistorySelectionProvider>
+  ) : content;
 }
 
 function NotificationRuntimeOwner({

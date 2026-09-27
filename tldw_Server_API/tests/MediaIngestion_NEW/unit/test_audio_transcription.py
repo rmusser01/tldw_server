@@ -555,6 +555,35 @@ def test_validate_qwen2audio_model_identifier_allows_local_path_under_base(monke
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("identifier", ["organization/local-model", "./organization/local-model"])
+def test_qwen_loader_rejects_shadowing_directory_before_loading(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, identifier: str,
+) -> None:
+    """A Hub-shaped CWD directory must not reach Transformers outside the managed root."""
+    model_root = tmp_path / "approved-models"
+    model_root.mkdir()
+    (tmp_path / "organization" / "local-model").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(atlib, "WHISPER_MODEL_BASE_DIR", model_root)
+    monkeypatch.setattr(atlib, "qwen_processor", None)
+    monkeypatch.setattr(atlib, "qwen_model", None)
+    monkeypatch.setattr(atlib, "load_and_log_configs", lambda: {
+        "STT-Settings": {"qwen2audio_enabled": True, "qwen2audio_model_id": identifier},
+    })
+
+    def unexpected_torch(*, allow_import: bool) -> None:
+        """Reject any loader progress after an unconfined local identifier."""
+        pytest.fail("Unconfined local model reached runtime loading")
+
+    monkeypatch.setattr(atlib, "_get_torch", unexpected_torch)
+
+    with pytest.raises(ValueError, match="must resolve under"):
+        atlib.validate_qwen2audio_model_identifier(identifier)
+    with pytest.raises(RuntimeError, match="Invalid Qwen2Audio model identifier"):
+        atlib.load_qwen2audio()
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("provider", ["qwen2audio"])
 @pytest.mark.parametrize("identifier", ["local-model", "organization/local-model"])
 def test_model_identifier_rejects_existing_relative_directory_outside_root(

@@ -5903,7 +5903,12 @@ async def requeue_dlq_item(
                     try:
                         validate_schema(req.stage, original)
                     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as ve:
-                        logger.warning("DLQ payload schema validation failed: {}", type(ve).__name__)
+                        logger.bind(
+                            operation="dlq_requeue",
+                            stage=req.stage.strip().lower(),
+                            stream=dlq_stream,
+                            entry_id=entry_id,
+                        ).warning("DLQ payload schema validation failed: {}", type(ve).__name__)
                         warning = "Payload schema validation failed"
         except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
             pass
@@ -6004,7 +6009,12 @@ async def requeue_dlq_bulk(
                                 try:
                                     validate_schema(req.stage, original)
                                 except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS as ve:
-                                    logger.warning("DLQ payload schema validation failed: {}", type(ve).__name__)
+                                    logger.bind(
+                                        operation="dlq_requeue_bulk",
+                                        stage=req.stage.strip().lower(),
+                                        stream=dlq_stream,
+                                        entry_id=eid_found,
+                                    ).warning("DLQ payload schema validation failed: {}", type(ve).__name__)
                                     warning = "Payload schema validation failed"
                     except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
                         pass

@@ -46,7 +46,6 @@ from ..disk_space import get_free_disk_space_gb
 MediaDbLike = Any
 
 _MEDIA_MODULE_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

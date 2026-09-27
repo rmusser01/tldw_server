@@ -265,6 +265,8 @@ class ElevenLabsAdapter(TTSAdapter):
                 provider=self.provider_name.lower(),
                 base_url=self.base_url
             )
+            # Borrowed from the shared pool: the pool owns teardown, not this adapter.
+            self._owns_http_client = False
 
             # Test API connection and fetch user voices
             await self._fetch_user_voices()
@@ -675,16 +677,29 @@ class ElevenLabsAdapter(TTSAdapter):
 
     async def _cleanup_resources(self):
         """Clean up ElevenLabs adapter resources"""
-        if self.client:
+        # Close only a client this adapter created itself. Pooled clients come from
+        # tts_resource_manager.ConnectionPool, which caches one per provider and hands
+        # the same object to every later borrower; calling aclose() on one without
+        # evicting it from _pools left the next request with a closed client and the
+        # provider dead until process restart, defeating the retry-after-cooldown
+        # behaviour ADR-011 requires. Only the pool may tear those down, via
+        # close_pool().
+        #
+        # Ownership defaults to False when unrecorded: wrongly closing a pooled client
+        # is a permanent provider outage, while wrongly leaving an owned client open is
+        # a bounded leak, so the unknown case takes the smaller failure.
+        owns_client = getattr(self, "_owns_http_client", False)
+        if self.client is not None and owns_client:
             try:
                 await self.client.aclose()
-                self.client = None
-                logger.debug(f"{self.provider_name}: HTTP client closed")
             except (AttributeError, OSError, RuntimeError) as e:
                 logger.warning(
-                    f"{self.provider_name}: Error closing HTTP client; "
+                    f"{self.provider_name}: Error closing owned HTTP client; "
                     f"exception_type={_safe_exception_label(e)}"
                 )
+        self.client = None
+        self._owns_http_client = False
+        logger.debug(f"{self.provider_name}: Resources cleaned up")
 
     def map_voice(self, voice_id: str) -> str:
         """Map generic voice ID to ElevenLabs voice"""
@@ -775,6 +790,9 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
         if not self.client:
             from tldw_Server_API.app.core.http_client import create_async_client
             self.client = create_async_client()
+            # Created here rather than borrowed from the pool: this adapter owns it
+            # and must close it on cleanup.
+            self._owns_http_client = True
         headers = {"xi-api-key": self.api_key}
         resp = await afetch(
             method="GET",
@@ -791,6 +809,9 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
         if not self.client:
             from tldw_Server_API.app.core.http_client import create_async_client
             self.client = create_async_client()
+            # Created here rather than borrowed from the pool: this adapter owns it
+            # and must close it on cleanup.
+            self._owns_http_client = True
         headers = {"xi-api-key": self.api_key}
         resp = await afetch(
             method="GET",
@@ -806,6 +827,9 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
         if not self.client:
             from tldw_Server_API.app.core.http_client import create_async_client
             self.client = create_async_client()
+            # Created here rather than borrowed from the pool: this adapter owns it
+            # and must close it on cleanup.
+            self._owns_http_client = True
         headers = {"xi-api-key": self.api_key, "Content-Type": "application/json"}
         payload = {"name": name, "samples": [s.decode("latin1") if isinstance(s, (bytes, bytearray)) else s for s in samples]}
         resp = await afetch(
@@ -824,6 +848,9 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
         if not self.client:
             from tldw_Server_API.app.core.http_client import create_async_client
             self.client = create_async_client()
+            # Created here rather than borrowed from the pool: this adapter owns it
+            # and must close it on cleanup.
+            self._owns_http_client = True
         headers = {"xi-api-key": self.api_key}
         resp = await afetch(
             method="GET",
@@ -904,6 +931,9 @@ class ElevenLabsTTSAdapter(ElevenLabsAdapter):
             # Use centralized client (still httpx.AsyncClient) for policy defaults
             from tldw_Server_API.app.core.http_client import create_async_client
             self.client = create_async_client()
+            # Created here rather than borrowed from the pool: this adapter owns it
+            # and must close it on cleanup.
+            self._owns_http_client = True
 
         # Prepare voice/model
         voice_id = self._get_voice_id(request.voice or "rachel")

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import json
 import threading
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from fastapi import FastAPI
+from pydantic import ValidationError
+from starlette.requests import Request
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import health
@@ -23,7 +27,9 @@ pytestmark = pytest.mark.unit
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ready", [True, False])
-async def test_compatibility_readiness_retains_typed_client_fields(monkeypatch, ready):
+async def test_compatibility_readiness_retains_typed_client_fields(
+    monkeypatch: pytest.MonkeyPatch, ready: bool,
+) -> None:
     """Legacy typed clients receive a readiness boolean and sanitized diagnostics."""
     import json
     from datetime import datetime
@@ -43,7 +49,86 @@ async def test_compatibility_readiness_retains_typed_client_fields(monkeypatch, 
     assert body["db"] == {"ok": ready, "backend": "sqlite"}
     assert body["engine"] == {"queue_depth": 0}
     assert datetime.fromisoformat(body["time"]).tzinfo is not None
+    assert body["time"].endswith("+00:00")
     assert response.status_code == (200 if ready else 503)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("snapshot", "field"),
+    [
+        (ReadinessSnapshot("false", None, {}), "ready"),
+        (ReadinessSnapshot(True, None, {"engine": []}), "engine"),
+        (ReadinessSnapshot(True, None, {"database": {"type": 42}}), "db"),
+        (ReadinessSnapshot(True, None, {"workflows_db": []}), "workflows_db"),
+        (ReadinessSnapshot(True, None, {"providers_initialized": "false"}), "providers_initialized"),
+    ],
+)
+async def test_compatibility_readiness_rejects_malformed_collector_fields(
+    monkeypatch: pytest.MonkeyPatch, snapshot: ReadinessSnapshot, field: str,
+) -> None:
+    """Validate the assembled body even though JSONResponse bypasses FastAPI validation."""
+    monkeypatch.setattr(readiness_service, "collect_readiness_snapshot", AsyncMock(return_value=snapshot))
+    with pytest.raises(ValidationError) as exc_info:
+        await health.api_readiness(Request({"type": "http", "app": FastAPI()}))
+    assert any(error["loc"][0] == field for error in exc_info.value.errors())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ready", [True, False])
+async def test_compatibility_readiness_preserves_operator_details_and_dynamic_metrics(
+    monkeypatch: pytest.MonkeyPatch, ready: bool,
+) -> None:
+    """Preserve sanitized optional sections, nullable metrics and forward-compatible detail."""
+    details = {
+        "database": {"status": "healthy" if ready else "unhealthy", "type": "postgresql", "pool_size": 3},
+        "engine": {"queue_depth": None, "active_workflows": 2, "future_metric": {"values": [1, 2]}},
+        "workflows_db": {"schema_version": None, "expected_version": None},
+        "providers_initialized": True,
+        "provider_health": {"local": {"ready": True, "latency": 0.25}},
+        "otel_available": False,
+        "rg_policy": {"version": 2, "store": None, "policies": None},
+        "future_diagnostic": {"available": True},
+    }
+    snapshot = ReadinessSnapshot(ready, None if ready else "database_unavailable", details)
+    monkeypatch.setattr(readiness_service, "collect_readiness_snapshot", AsyncMock(return_value=snapshot))
+    response = await health.api_readiness(Request({"type": "http", "app": FastAPI()}))
+    body = json.loads(response.body)
+    assert {key: body[key] for key in details} == details
+    assert body["ready"] is ready
+    assert response.status_code == (200 if ready else 503)
+    assert response.headers["Cache-Control"] == "no-store"
+    if ready:
+        assert "reason" not in body
+    else:
+        assert body["reason"] == "database_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_compatibility_readiness_does_not_add_absent_operator_sections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A draining snapshot keeps its existing sparse response shape."""
+    snapshot = ReadinessSnapshot(False, "shutdown_in_progress", {})
+    monkeypatch.setattr(readiness_service, "collect_readiness_snapshot", AsyncMock(return_value=snapshot))
+    response = await health.api_readiness(Request({"type": "http", "app": FastAPI()}))
+    body = json.loads(response.body)
+    assert set(body) == {"status", "reason", "ready", "engine", "db", "time"}
+    assert body["db"] == {"ok": False, "backend": None}
+    assert response.status_code == 503
+    assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_compatibility_readiness_declares_success_and_unavailable_response_schema() -> None:
+    """Typed clients receive the validated contract for both readiness outcomes."""
+    app = FastAPI()
+    app.include_router(health.router, prefix="/api/v1")
+    schema: dict[str, Any] = app.openapi()
+    responses = schema["paths"]["/api/v1/health/ready"]["get"]["responses"]
+    for code in ("200", "503"):
+        assert responses[code]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/ReadinessResponse",
+        }
 
 
 def test_internal_projection_discards_all_detail() -> None:

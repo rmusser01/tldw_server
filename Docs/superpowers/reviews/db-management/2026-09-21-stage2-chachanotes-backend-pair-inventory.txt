@@ -1,0 +1,101 @@
+# ChaChaNotes_DB.py CharactersRAGDB _sqlite/_postgres pair inventory, generated 2026-09-21
+# class CharactersRAGDB: 730-44806 (44077 lines), 800 statically defined methods
+
+## 34 _sqlite/_postgres method pairs
+base name                                                          sqlite   loc         postgres   loc
+_initialize_schema                                            20349-21169   821      24881-25300   420
+_ensure_study_pack_schema                                     23140-23272   133      23274-23871   598
+_verify_notes_moodboard_studio_schema                         14174-14183    10      15495-16186   692
+_ensure_workspace_subresource_schema                          19086-19390   305      19657-19923   267
+_verify_note_task_schema                                      12958-12985    28      16614-17048   435
+_migrate_from_v62_to_v63                                      14185-14225    41      15106-15493   388
+_ensure_flashcard_scheduler_schema                            22023-22271   249      22431-22583   153
+_notes_graph_schema                                           11462-11599   138      17492-17634   143
+_migrate_from_v59_to_v60                                      12987-13021    35      17236-17441   206
+_ensure_note_folder_schema                                    18191-18246    56      18287-18458   172
+_ensure_source_review_schema                                  19428-19434     7      19443-19638   196
+_ensure_flashcard_template_schema                             21569-21602    34      21604-21747   144
+_ensure_recent_voice_command_schema                           17981-18111   131      18144-18189    46
+_ensure_flashcard_asset_schema                                21475-21567    93      22350-22429    80
+_create_note_attachment_schema                                11969-12054    86      16188-16258    71
+_ensure_study_assistant_schema                                22619-22683    65      22685-22755    71
+_ensure_workspace_file_inventory_schema                       20021-20089    69      20091-20152    62
+_ensure_web_clipper_schema                                    18535-18581    47      18583-18631    49
+_ensure_workspace_migration_schema                            19925-19974    50      19976-20019    44
+_ensure_quiz_remediation_conversion_schema                    24743-24783    41      24785-24829    45
+_ensure_recent_persona_schema                                 17926-17979    54      18113-18142    30
+_ensure_flashcard_deck_sharing_schema                         22273-22301    29      22585-22617    33
+_ensure_workspace_source_saved_view_schema                    19024-19052    29      19054-19084    31
+_ensure_workspace_study_material_schema                       20154-20188    35      20190-20202    13
+_ensure_prompt_presets_schema                                 21196-21217    22      21219-21244    26
+_migrate_from_v63_to_v64                                      14227-14259    33      17474-17485    12
+_dedupe_suggestion_generation_links                           23093-23113    21      23115-23138    24
+_migrate_from_v61_to_v62                                      13034-13065    32      17462-17472    11
+_ensure_note_folder_sync_suppression_schema                   18249-18266    18      18268-18285    18
+_ensure_note_studio_schema                                    18460-18464     5      18481-18507    27
+_ensure_note_graph_suggestion_schema                          18466-18479    14      18509-18524    16
+_migrate_from_v60_to_v61                                      13023-13032    10      17443-17460    18
+_ensure_chat_macros_schema                                    19436-19441     6      19640-19646     7
+_create_note_task_schema_v60                                  12638-12640     3      12329-12331     3
+
+# total LOC in paired methods: 7301 (16.1% of the 45,292-line file)
+
+## UNPAIRED _sqlite only (36)
+  _copy_note_task_graph_v60_sqlite
+  _copy_notes_moodboard_studio_graph_v61_sqlite
+  _create_note_task_indexes_v60_sqlite
+  _create_notes_moodboard_studio_indexes_v61_sqlite
+  _create_notes_moodboard_studio_schema_v61_sqlite
+  _ensure_character_cards_fts_columns_sqlite
+  _ensure_character_cards_fts_triggers_sqlite
+  _ensure_conversations_fts_triggers_sqlite
+  _ensure_flashcard_fts_triggers_sqlite
+  _ensure_flashcard_scheduler_sync_triggers_sqlite
+  _ensure_manuscript_annotations_schema_sqlite
+  _ensure_notes_fts_triggers_sqlite
+  _ensure_persona_persistence_schema_sqlite
+  _ensure_study_pack_sync_triggers_sqlite
+  _ensure_workspace_activity_events_schema_sqlite
+  _ensure_workspace_assistant_defaults_schema_sqlite
+  _expected_note_task_catalog_sqlite
+  _expected_note_task_v59_catalog_sqlite
+  _expected_notes_moodboard_studio_catalog_sqlite
+  _missing_current_schema_core_tables_sqlite
+  _note_attachment_uuid_check_sqlite
+  _note_task_catalog_snapshot_sqlite
+  _note_task_v59_catalog_snapshot_sqlite
+  _notes_moodboard_studio_catalog_snapshot_sqlite
+  _notes_moodboard_studio_v61_data_proof_sqlite
+  _notes_moodboard_studio_v61_semantic_proof_sqlite
+  _notes_moodboard_studio_v61_streaming_query_proof_sqlite
+  _notes_moodboard_studio_v61_streaming_rows_sqlite
+  _rebuild_conversations_fts_sqlite
+  _reset_empty_partial_current_schema_marker_sqlite
+  _self_heal_character_cards_fts_sqlite
+  _validate_notes_moodboard_studio_v60_source_sqlite
+  _verify_note_task_tables_v61_sqlite
+  _verify_note_task_v59_catalog_sqlite
+  _verify_notes_moodboard_studio_v61_copy_sqlite
+  _verify_required_fts_tables_sqlite
+
+## UNPAIRED _postgres only (20)
+  _apply_schema_v4_postgres
+  _configure_note_graph_suggestion_receipt_delete_trigger_postgres
+  _ensure_chacha_rls_postgres
+  _ensure_manuscript_phase2_sync_triggers_postgres
+  _get_schema_version_postgres
+  _migrate_from_v54_to_v55_postgres
+  _migrate_from_v55_to_v56_postgres
+  _migrate_from_v56_to_v57_postgres
+  _migrate_from_v57_to_v58_postgres
+  _migrate_from_v58_to_v59_postgres
+  _migrate_from_v64_to_v65_postgres
+  _migrate_from_v65_to_v66_postgres
+  _migrate_from_v66_to_v67_postgres
+  _migrate_from_v67_to_v68_postgres
+  _migrate_from_v68_to_v69_postgres
+  _migrate_from_v69_to_v70_postgres
+  _set_schema_version_postgres
+  _transform_sqlite_schema_statement_for_postgres
+  _validate_note_task_source_postgres
+  _verify_note_attachment_schema_postgres

@@ -434,3 +434,39 @@ def test_rls_hidden_lifecycle_operation_reports_missing_and_preserves_row(
     assert result.no_transition_reason is NoTransitionReason.MISSING
     assert result.row is None
     assert _read_lifecycle_facts(admin_dsn, job_id) == before
+
+
+def test_rls_denies_everything_when_no_context_was_established(monkeypatch):
+    """Missing tenant context must mean no rows, not every row.
+
+    The owner predicate used to read
+
+        (NULLIF(current_setting('app.owner_user_id', true), '') IS NULL
+         OR owner_user_id = ...)
+
+    so an unset GUC matched every row of every account. clear_rls_context and
+    the ContextVar defaults both produce exactly that state, which is what any
+    Jobs query issued without a prior set_rls_context runs under -- and that is
+    most of them, since only a handful of call sites set it.
+
+    This asserts the inverted behaviour against a real PostgreSQL server with
+    the policies installed and a non-bypassing role connected.
+    """
+    admin_dsn, rls_dsn = _dsn_or_skip(monkeypatch)
+    ensure_jobs_tables_pg(admin_dsn)
+    ensure_jobs_rls_policies_pg(admin_dsn)
+    _seed(admin_dsn)
+
+    jm = JobManager(backend="postgres", db_url=rls_dsn)
+
+    # Sanity: the seeded rows really are there for someone who may see them.
+    JobManager.set_rls_context(is_admin=True, domain_allowlist=None, owner_user_id=None)
+    assert len(jm.list_jobs()) >= 4
+
+    # The regression: no context at all.
+    JobManager.clear_rls_context()
+    assert jm.list_jobs() == []
+
+    # A blank owner must not widen either; empty NULLIFs to NULL like unset.
+    JobManager.set_rls_context(is_admin=False, domain_allowlist=None, owner_user_id="")
+    assert jm.list_jobs() == []

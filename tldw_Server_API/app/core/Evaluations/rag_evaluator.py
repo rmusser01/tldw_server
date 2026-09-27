@@ -136,6 +136,15 @@ def _simple_tokens(text: str) -> list[str]:
     return tokens
 
 
+# Alias metric keys are recorded alongside their canonical twins (pointing at the
+# same result dict) so the response stays OpenAI-style. They must not be scored as
+# independent metrics, or the aliased metric is weighted twice.
+_CANONICAL_METRIC_FOR_ALIAS = {
+    "answer_relevance": "relevance",
+    "answer_faithfulness": "faithfulness",
+}
+
+
 class RAGEvaluator:
     """Evaluator for RAG system performance"""
 
@@ -1053,9 +1062,34 @@ class RAGEvaluator:
         if not metrics:
             return 0.0
 
+        # Drop alias keys whose canonical twin is also present: both point at the
+        # same result dict, so scoring both weights that metric twice and inflates
+        # the overall score. An alias that is the only remaining copy (the caller
+        # dropped the canonical) is scored normally. Aliases stay in the response.
+        dropped_aliases = {
+            name: canonical
+            for name, canonical in (
+                (n, _CANONICAL_METRIC_FOR_ALIAS.get(n)) for n in metrics
+            )
+            if canonical is not None and canonical in metrics
+        }
+        metrics = {n: d for n, d in metrics.items() if n not in dropped_aliases}
+
         # Default to equal weights
         if weights is None:
             weights = dict.fromkeys(metrics.keys(), 1.0)
+        elif dropped_aliases:
+            # A caller may legitimately weight a metric under its alias, since
+            # evaluate() treats an alias request as a request for the canonical
+            # computation. The alias entry was just dropped, so carry its weight onto
+            # the canonical key -- otherwise the scoring loop below, which requires an
+            # exact weight key per retained metric, leaves that metric unweighted and
+            # the aggregate collapses to 0.0. Canonical keys take precedence when both
+            # forms are supplied.
+            weights = dict(weights)
+            for alias, canonical in dropped_aliases.items():
+                if alias in weights and canonical not in weights:
+                    weights[canonical] = weights[alias]
 
         total_weight = 0
         weighted_sum = 0

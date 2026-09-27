@@ -48,7 +48,7 @@ from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
 )
 
 from ...tool_observability import build_execution_eval_metadata
-from ..base import BaseModule, ModuleConfig, create_tool_definition
+from ..base import CONTROL_CHARS_RE, BaseModule, ModuleConfig, create_tool_definition
 from .filesystem_diff import FilesystemPatchError, PatchFile, apply_patch_to_text, parse_unified_diff
 from .filesystem_receipts import ReadReceiptError, ReadReceiptManager
 from .notebook_files import apply_cell_edit, parse_notebook_payload, summarize_notebook
@@ -605,6 +605,16 @@ class FilesystemModule(BaseModule):
         ]
 
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
+        # The per-key exemptions below do not protect what they name on the production
+        # path: tool_execution/security.py:harden_and_sanitize_tool_arguments already
+        # called self.sanitize_input(arguments) unconditionally before execute_tool was
+        # reached, so old_string/new_string/source/diff arrive already stripped and
+        # exempting them from a second, idempotent pass changes nothing. They cannot be
+        # made to work from here -- sanitize_input receives the whole dict with no tool
+        # name, so the upstream pass has no way to know which keys this tool exempts.
+        # Left in place rather than deleted: the intent (byte-preserve exact-match
+        # strings) is right, and honouring it means threading tool_name through
+        # sanitize_input across all 22 inheriting modules. TASK-13294 AC#6.
         raw_args = arguments or {}
         if tool_name == "fs.edit":
             args = {
@@ -1462,19 +1472,10 @@ class FilesystemModule(BaseModule):
                 )
         return candidates
 
-    def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
-        """Sanitize filesystem inputs while allowing portable glob syntax."""
-
-        if _depth > 20:
-            raise ValueError("Input too deeply nested")
-
-        if isinstance(input_data, str):
-            return "".join(ch for ch in input_data if ch >= " " or ch == "\n")
-        if isinstance(input_data, dict):
-            return {k: self.sanitize_input(v, _depth + 1) for k, v in input_data.items()}
-        if isinstance(input_data, list):
-            return [self.sanitize_input(v, _depth + 1) for v in input_data]
-        return input_data
+    # No sanitize_input override. It existed to allow portable glob syntax past the
+    # base SQL-injection denylist, which is gone (TASK-13294). Keeping it meant keeping
+    # a second copy of the char predicate in sync with the base -- the drift that left
+    # fs.write corrupting tab-significant files after the base was already fixed.
 
     @staticmethod
     def _sanitize_patch_diff(input_data: Any) -> Any:
@@ -1482,7 +1483,8 @@ class FilesystemModule(BaseModule):
 
         if not isinstance(input_data, str):
             return input_data
-        return "".join(ch for ch in input_data if ch >= " " or ch in {"\n", "\r", "\t"})
+        # Same rule as BaseModule.sanitize_input, from the one shared definition.
+        return CONTROL_CHARS_RE.sub("", input_data)
 
     async def _resolve_workspace_root(self, context: Any | None) -> Path:
         metadata = getattr(context, "metadata", None)
@@ -1716,6 +1718,32 @@ class FilesystemModule(BaseModule):
         limit: int,
         walk_entry_limit: int,
     ) -> dict[str, Any]:
+        """Walk ``base`` and return the entries matching ``pattern`` for ``fs.glob``.
+
+        Args:
+            workspace_root: Root that returned paths are made relative to.
+            base: Directory to walk; must exist and be a directory.
+            pattern: Portable glob matched against workspace-relative paths.
+            include_hidden: Include dot-files and dot-directories.
+            include_files: Include regular files.
+            include_directories: Include directories.
+            follow_symlinks: Descend into symlinked directories.
+            case_sensitive: Match ``pattern`` case-sensitively.
+            respect_gitignore: Skip paths ignored by the workspace's ignore rules.
+            sort_by: ``"path"`` for path order; otherwise newest-modified first.
+            limit: Maximum number of matches returned.
+            walk_entry_limit: Maximum entries visited before the walk is truncated.
+
+        Returns:
+            ``{"base_path", "pattern", "matches", "truncated", "remaining_count",
+            "eval"}``. Each match is ``{"path", "type"}`` plus ``"size"`` for files; an
+            entry whose metadata cannot be read is still listed, with ``"size": None``
+            and ``"size_unavailable": True``, rather than failing the whole glob.
+
+        Raises:
+            FileNotFoundError: ``base`` does not exist.
+            NotADirectoryError: ``base`` is not a directory.
+        """
         if not base.exists():
             raise FileNotFoundError(f"path not found: {base}")
         if not base.is_dir():
@@ -1775,7 +1803,22 @@ class FilesystemModule(BaseModule):
                     is_directory=candidate_kind == "directory",
                 ):
                     continue
-                is_symlink = candidate.is_symlink()
+                try:
+                    is_symlink = candidate.is_symlink()
+                except OSError as exc:
+                    # An entry whose metadata cannot be read must still be listed. On
+                    # 3.12 Path.is_symlink() goes through Path.stat(follow_symlinks=
+                    # False), the same call the size block below already tolerates -- so
+                    # leaving this one bare made fs.glob raise for the whole pattern
+                    # instead of marking one entry size_unavailable. Fall back to the
+                    # kind os.walk already reported. See TASK-13291.
+                    logger.debug(
+                        "Unable to determine fs.glob symlink status for workspace path "
+                        "{}; using the walk-reported kind: {}",
+                        rel_path,
+                        exc.__class__.__name__,
+                    )
+                    is_symlink = False
                 if is_symlink:
                     candidate_type = "symlink"
                 else:

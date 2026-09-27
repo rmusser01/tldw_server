@@ -320,3 +320,92 @@ def pg_database_config_session(pg_temp_db_session):
         pg_user=str(pg_temp_db_session["user"]),
         pg_password=str(pg_temp_db_session.get("password") or ""),
     )
+
+
+@pytest.fixture(scope="function")
+def pg_restricted_backend(pg_database_config):
+    """Yield a PostgreSQL backend whose role cannot bypass row-level security.
+
+    ``pg_database_config`` connects with the admin DSN, and every supported
+    setup documents that DSN as a superuser -- the bundled container's
+    ``tldw_user`` is ``rolsuper=true, rolbypassrls=true``.  A superuser is
+    exempt from RLS *even under* ``FORCE ROW LEVEL SECURITY``, so a test that
+    asserts a policy through the plain config passes whether or not the policy
+    exists.  That is finding F1 of the cross-user isolation audit, reproduced
+    inside the test harness.
+
+    The restricted role owns the objects it creates, which is why the policies
+    under test must use ``FORCE ROW LEVEL SECURITY`` -- plain ``ENABLE`` exempts
+    the owner.
+
+    Roughly ten tests hand-rolled this setup before it lived here; prefer this
+    fixture over another copy.
+    """
+    from dataclasses import replace
+
+    from psycopg import sql
+
+    from tldw_Server_API.app.core.DB_Management.backends.factory import (
+        DatabaseBackendFactory,
+    )
+
+    role = "tldw_rls_" + uuid.uuid4().hex
+    password = uuid.uuid4().hex
+    admin = DatabaseBackendFactory.create_backend(pg_database_config)
+    backend = None
+    try:
+        with admin.transaction() as conn:
+            conn.execute(
+                sql.SQL(
+                    "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOBYPASSRLS "
+                    "NOINHERIT NOCREATEDB NOCREATEROLE"
+                ).format(sql.Identifier(role), sql.Literal(password))
+            )
+            conn.execute(
+                sql.SQL("GRANT USAGE, CREATE ON SCHEMA public TO {}").format(
+                    sql.Identifier(role)
+                )
+            )
+            conn.execute(
+                sql.SQL("GRANT CREATE ON DATABASE {} TO {}").format(
+                    sql.Identifier(pg_database_config.pg_database),
+                    sql.Identifier(role),
+                )
+            )
+            # Migrations that verify `relowner = current_user::regrole` refuse to
+            # run for a role that merely holds CREATE, so hand it the schema.
+            # This also makes it the table owner, which is precisely why the
+            # policies under test need FORCE ROW LEVEL SECURITY: plain ENABLE
+            # exempts the owner and the assertions would pass vacuously.
+            conn.execute(
+                sql.SQL("ALTER SCHEMA public OWNER TO {}").format(sql.Identifier(role))
+            )
+
+        backend = DatabaseBackendFactory.create_backend(
+            replace(
+                pg_database_config,
+                pg_user=role,
+                pg_password=password,
+                connection_string=None,
+                # Isolation tests routinely hold two owners' handles open at
+                # once; a single-connection pool deadlocks on the second.
+                pool_size=5,
+                max_overflow=5,
+            )
+        )
+        # Fail loudly rather than silently proving nothing.
+        with backend.transaction() as conn:
+            flags = conn.execute(
+                "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user"
+            ).fetchone()
+        assert not flags["rolsuper"], f"{role} unexpectedly holds SUPERUSER"
+        assert not flags["rolbypassrls"], f"{role} unexpectedly holds BYPASSRLS"
+
+        yield backend
+    finally:
+        if backend is not None:
+            backend.get_pool().close_all()
+        with admin.transaction() as conn:
+            conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
+            conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+        admin.get_pool().close_all()

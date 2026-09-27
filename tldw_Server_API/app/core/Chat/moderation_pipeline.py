@@ -46,7 +46,6 @@ _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     UnicodeDecodeError,
     ValueError,
     _json.JSONDecodeError,
-    asyncio.CancelledError,
 )
 
 ReviewItemCallback = Callable[..., Awaitable[None] | None]

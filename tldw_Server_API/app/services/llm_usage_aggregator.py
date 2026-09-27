@@ -21,7 +21,6 @@ from tldw_Server_API.app.services.lifecycle_workers import (
 )
 
 _LLM_USAGE_AGGREGATOR_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AttributeError,
     KeyError,
     OSError,

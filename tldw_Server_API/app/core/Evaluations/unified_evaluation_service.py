@@ -28,7 +28,6 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
 )
 
 _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

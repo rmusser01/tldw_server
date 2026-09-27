@@ -1,4 +1,7 @@
 {
+  "onboarding_loginSettingsError": {
+    "message": "ログイン設定を開けませんでした。もう一度お試しください。"
+  },
   "navigation_serverAndAuth": {
     "message": "サーバーと認証"
   },

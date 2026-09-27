@@ -90,7 +90,6 @@ router = APIRouter()
 
 
 _DATA_OPS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

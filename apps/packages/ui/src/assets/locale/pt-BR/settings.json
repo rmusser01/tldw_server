@@ -1000,6 +1000,7 @@
     }
   },
   "onboarding": {
+    "loginSettingsError": "Não foi possível abrir as configurações de login. Tente novamente.",
     "title": "Bem-vindo(a) ao tldw Browser Assistant — vamos conectar você",
     "description": "Conecte esta extensão ao seu servidor tldw (um aplicativo separado em execução na sua máquina ou servidor). Vamos orientar você para adicionar a URL, a chave API e verificar se tudo está acessível.",
     "exploreWithoutServer": "Você pode explorar a interface sem um servidor; alguns recursos (chat, ingestão de mídia, busca no Knowledge) permanecerão desativados até você se conectar.",

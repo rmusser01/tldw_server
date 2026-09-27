@@ -306,26 +306,10 @@ class RunCommandModule(BaseModule):
         self._validate_env_file_arguments(arguments)
         self._validate_shell_name_arguments(tool_name, arguments)
 
-    def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
-        """Sanitize input while allowing CLI flags like `--help` and shell-like tokens."""
-
-        if _depth > 20:
-            raise ValueError("Input too deeply nested")
-
-        def _clean_string(value: str) -> str:
-            cleaned = []
-            for ch in value:
-                if ch == "\n" or ch == "\t" or ch >= " ":
-                    cleaned.append(ch)
-            return "".join(cleaned)
-
-        if isinstance(input_data, str):
-            return _clean_string(input_data)
-        if isinstance(input_data, dict):
-            return {k: self.sanitize_input(v, _depth + 1) for k, v in input_data.items()}
-        if isinstance(input_data, list):
-            return [self.sanitize_input(v, _depth + 1) for v in input_data]
-        return input_data
+    # No sanitize_input override. It existed to allow CLI flags like `--help` past the
+    # base SQL-injection denylist, which is gone (TASK-13294). What the override still
+    # did on its own was drop every carriage return and let DEL (\x7f) through. The
+    # base preserves \t, \n and \r and strips DEL, so allowing `--help` needs no code.
 
     def is_write_tool_call(
         self,

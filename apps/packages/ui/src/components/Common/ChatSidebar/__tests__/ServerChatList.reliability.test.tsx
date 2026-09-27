@@ -241,10 +241,8 @@ describe("ServerChatList reliability states", () => {
     render(<ServerChatList searchQuery="" onConversationSelected={onConversationSelected} />)
     fireEvent.click(screen.getByRole("button", { name: "Select Recovered chat" }))
     expect(onConversationSelected).toHaveBeenCalledTimes(1)
-    expect(mocks.selectServerChat).toHaveBeenCalledTimes(alreadySelected ? 0 : 1)
-    if (!alreadySelected) {
-      expect(mocks.selectServerChat.mock.invocationCallOrder[0]).toBeLessThan(onConversationSelected.mock.invocationCallOrder[0])
-    }
+    expect(mocks.selectServerChat).toHaveBeenCalledTimes(1)
+    expect(mocks.selectServerChat.mock.invocationCallOrder[0]).toBeLessThan(onConversationSelected.mock.invocationCallOrder[0])
   })
 
   it.each(["bulk", "trash"])("does not report conversation selection for %s actions", (mode) => {

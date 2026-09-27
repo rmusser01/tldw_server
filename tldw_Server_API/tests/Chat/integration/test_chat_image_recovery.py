@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 
@@ -10,7 +11,8 @@ from fastapi import HTTPException
 from PIL import Image
 
 from tldw_Server_API.app.api.v1.endpoints import character_messages
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from tldw_Server_API.tests.Chat.integration import test_persona_backed_chat_conversations as fixtures
 
 persona_chat_db = fixtures.persona_chat_db
@@ -347,3 +349,51 @@ def test_image_detail_survives_saved_turn_reuse(persona_chat_client, persona_cha
     images = [part["image_url"] for part in users[-1]["content"] if part["type"] == "image_url"]
     assert [(image["url"], image["detail"]) for image in images] == [(url, detail), (other_url, other_detail)]
     assert len([row for row in persona_chat_db.get_messages_for_conversation(chat_id) if row["sender"] == "user"]) == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("large_image", [False, True], ids=["standard-decoder", "chunked-decoder"])
+@pytest.mark.parametrize(("options", "expected"), [
+    ({}, "auto"),
+    ({"detail": None}, "auto"),
+    ({"detail": "unsupported"}, "auto"),
+    ({"detail": ""}, "auto"),
+    ({"detail": 1}, "auto"),
+    ({"detail": True}, "auto"),
+    ({"detail": ["high"]}, "auto"),
+    ({"detail": {"level": "high"}}, "auto"),
+    ({"detail": "auto"}, "auto"),
+    ({"detail": "high"}, "high"),
+    ({"detail": "low"}, "low"),
+])
+async def test_saved_image_detail_normalization_allows_replay(
+    persona_chat_db: CharactersRAGDB, large_image: bool,
+    options: dict[str, object], expected: str,
+) -> None:
+    """Raw internal content must save replayable image options through either decoder."""
+    from tldw_Server_API.app.core.Chat.chat_service import _saved_user_content_parts
+
+    output = io.BytesIO()
+    image = (
+        Image.frombytes("RGB", (256, 256), hashlib.shake_256(b"image-fixture").digest(256 * 256 * 3))
+        if large_image else Image.new("RGB", (2, 2), "red")
+    )
+    image.save(output, format="PNG")
+    url = "data:image/png;base64," + base64.b64encode(output.getvalue()).decode()
+    assert (len(url) > 100000) is large_image
+    chat_id = persona_chat_db.add_conversation({"client_id": "1", "title": "Image detail normalization"})
+
+    message_id = await chat_endpoint._save_message_turn_to_db(
+        persona_chat_db, chat_id,
+        {"role": "user", "content": [{"type": "image_url", "image_url": {"url": url, **options}}]},
+    )
+
+    row = persona_chat_db.get_messages_for_conversation(chat_id, strict_images=True)[0]
+    assert row["id"] == message_id
+    extra = persona_chat_db.get_message_metadata(message_id)["extra"]
+    replay = _saved_user_content_parts(row, extra)
+    assert replay == [{"type": "image_url", "image_url": {
+        "url": "data:image/png;base64," + base64.b64encode(row["images"][0]["image_data"]).decode(),
+        "detail": expected,
+    }}]

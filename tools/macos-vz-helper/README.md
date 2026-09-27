@@ -165,8 +165,8 @@ plist before any manual cleanup. Do not add this opt-in to scheduled CI.
 ### Reproducible Guest Failure Workflow
 
 Use this explicit, manual-only command to prepare and run the capability-mismatch,
-acknowledged-handshake readiness-timeout, guest protocol-version mismatch, and
-advertised-workspace mismatch drills.
+acknowledged-handshake readiness-timeout, guest protocol-version mismatch,
+advertised-workspace mismatch, and missing-agent startup drills.
 It also runs a negative control for each drill. Production guest code, normal
 smoke behavior, and scheduled CI are unchanged.
 
@@ -174,7 +174,7 @@ Prerequisites: Apple Silicon macOS, the project Python environment (including
 pytest-timeout), Go with this repository's agent dependencies already cached,
 an explicitly selected signed helper, and a known-good Debian arm64 bundle.
 The bundle must use an ext4 `rootfs.img` and contain `e2fsck`, `debugfs`, `cmp`,
-and `sha256sum`. It must not be in use or modified by another process. Preparation
+`sha256sum`, `sed`, `mv`, and `/bin/sleep`. It must not be in use or modified by another process. Preparation
 is offline: the command does not download Go dependencies or provision Debian.
 Use the existing build/sign instructions above for the helper.
 
@@ -190,20 +190,34 @@ python tools/macos-vz-helper/scripts/vz-failure-drill.py \
 ```
 
 The evidence directory must be new and its parent must already exist. The
-workflow builds four **test-only Go overlays** from the checkout, failing closed
-if the source anchors have changed. A separate disposable healthy VM installs
-each binary into an **offline image-store clone**, verifies the installed bytes,
-and checks the filesystem. Each test attempt gets fresh healthy/fault clones;
+workflow builds four **test-only Go overlays** and stages one test-only shell
+launcher. A separate disposable healthy VM installs each artifact into an
+**offline image-store clone**, verifies the installed bytes, and checks the
+filesystem. The missing-agent installer also preserves and verifies the
+original agent under a second path. The launcher records a fresh nonce and VM
+ID in the guest workspace before withholding agent startup; its negative
+control starts the preserved original agent through that same launcher.
+Each test attempt gets fresh healthy/fault clones;
 neither canonical nor prepared fault sources are booted. The command manages
 its own direct helper with a unique private socket and PID file. It never
 attaches to an existing helper, installs launchd services, or reboots the host.
 
-Exit zero requires four passing live tests, four negative controls failing at
+Exit zero requires five passing live tests, five negative controls failing at
 their specific execution assertions, no skipped tests, no cleanup errors, empty
 VM inventory, closed disposable disks, helper shutdown, and unchanged source
 boot-artifact/manifest/build-provenance hashes. This is not a full directory
 inventory: unrelated files such as operator notes are outside the fingerprint.
 An unrelated boot failure is not a successful negative control.
+
+The missing-agent fixture replaces the guest executable in a disposable rootfs
+with a shell launcher. A nonce-matched proof in the guest workspace must show
+that its service started before the host accepts `guest_transport_timeout` as
+the intended failure. No fault-VM exec may be dispatched, and helper and
+session-control state must be empty afterward. The negative control boots a
+separate clone of that same launcher, asks it to exec the preserved original
+agent, and requires completed real execution. Healthy recovery then runs two
+commands on one VM. This proves service startup and missing VSock connection;
+it does not prove kernel boot-hang recovery or mount isolation.
 
 The protocol fixture changes only the guest's initial VSock handshake version
 to `999`, not the host-helper JSON protocol or guest capability metadata. A

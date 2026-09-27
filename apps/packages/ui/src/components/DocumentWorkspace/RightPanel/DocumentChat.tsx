@@ -65,7 +65,7 @@ export const DocumentChat: React.FC = () => {
     serverChatId,
     actionInfo,
     selectedModel
-  } = useMessageOption()
+  } = useMessageOption({ hydrateServerChat: true })
 
   const { data: documentMetadata } = useDocumentMetadata(activeDocumentId)
 

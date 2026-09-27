@@ -265,7 +265,9 @@ def _get_http_status_from_exception(exc: Exception) -> Optional[int]:
             return None
     if isinstance(exc, NetworkError):
         import re
-        match = re.search(r"HTTP\\s+(\\d{3})", str(exc))
+        # See LLM_Calls/error_utils.py: the double-escaped form matched a literal
+        # backslash and could never match "HTTP 429".
+        match = re.search(r"HTTP\s+(\d{3})", str(exc))
         if match:
             try:
                 return int(match.group(1))

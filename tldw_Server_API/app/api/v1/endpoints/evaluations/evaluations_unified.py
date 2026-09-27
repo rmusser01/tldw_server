@@ -99,7 +99,6 @@ from tldw_Server_API.app.core.testing import (
 
 # Non-critical exceptions for defensive guards and best-effort flows
 _EVALS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

@@ -1,3 +1,5 @@
+"""Contract tests for required CI gates and complete, nonduplicated test shards."""
+
 import ast
 import fnmatch
 import json
@@ -779,6 +781,7 @@ def test_linux_311_smoke_is_sharded_for_timeout_control() -> None:
 
 
 def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
+    """Require each feature's tests to be covered once by its designated shards."""
     workflow = _load(".github/workflows/ci.yml")
     matrix_jobs = [
         "full-suite-linux-312-shards",
@@ -1401,8 +1404,10 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         # a feature directory rather than a DB-specific one).
         auth_db_extra_files = {
             "tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py",
+            "tldw_Server_API/tests/Workspaces/test_assistant_startup_projection.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py",
+            "tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py",
             "tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py",

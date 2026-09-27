@@ -327,13 +327,12 @@ def test_ordinary_pr_workflow_inventory_and_direct_triggers_are_frozen() -> None
 
 def test_all_ordinary_workflows_call_exact_inert_admission_gate() -> None:
     for name, (data, _) in _load_ordinary_workflows().items():
-        assert _trigger(data)["workflow_run"] == {
-            "workflows": ["Frontend License Gate Audit"],
-            "types": ["completed"],
-        }, name
+        # PR runs now wait directly; duplicate workflow_run triggers were removed.
+        assert "workflow_run" not in _trigger(data), name  # nosec B101 - regression assertion
 
         admission = data["jobs"]["admission"]
-        assert admission == {
+        await_license = data["jobs"]["await_license"]
+        assert (admission, await_license) == ({  # nosec B101 - regression assertion
             "if": (
                 "vars.LICENSE_FIRST_CI_ENABLED == 'true' && "
                 "github.event_name == 'workflow_run' && "
@@ -342,7 +341,11 @@ def test_all_ordinary_workflows_call_exact_inert_admission_gate() -> None:
             "uses": "./.github/workflows/license-first-admission.yml",
             "with": {"workflow_file": name},
             "permissions": EXPECTED_PERMISSIONS,
-        }, name
+        }, {
+            "if": "github.event_name == 'pull_request'",
+            "uses": "./.github/workflows/license-first-await.yml",
+            "permissions": {"contents": "read", "statuses": "read"},
+        }), name
 
 
 def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> None:
@@ -356,7 +359,13 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
             needs.admission.result == 'success' &&
             needs.admission.outputs.should_run == 'true'
           ) ||
-          github.event_name != 'workflow_run'
+          (
+            github.event_name != 'workflow_run' &&
+            (
+              needs.await_license.result == 'skipped' ||
+              needs.await_license.outputs.license_passed == 'true'
+            )
+          )
         )
         """
     )
@@ -397,12 +406,16 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
 
     for name, (data, _) in _load_ordinary_workflows().items():
         jobs = data["jobs"]
-        assert tuple(job_name for job_name in jobs if job_name != "admission") == ORIGINAL_JOB_NAMES[name]
+        assert tuple(  # nosec B101 - regression assertion
+            job_name for job_name in jobs if job_name not in {"admission", "await_license"}
+        ) == ORIGINAL_JOB_NAMES[name]
         for job_name in ORIGINAL_JOB_NAMES[name]:
             job = jobs[job_name]
             needs = _needs(job)
             original_needs = ORIGINAL_DEPENDENCIES.get((name, job_name), ())
-            assert tuple(dependency for dependency in needs if dependency != "admission") == original_needs
+            assert tuple(  # nosec B101 - regression assertion
+                dependency for dependency in needs if dependency not in {"admission", "await_license"}
+            ) == original_needs
 
             root = not original_needs
             directly_guarded = (name, job_name) in DIRECT_ADMISSION_JOBS
@@ -412,7 +425,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     assert "admission" not in needs, (name, job_name)
                     assert job.get("if") is None, (name, job_name)
                     continue
-                assert needs.count("admission") == 1, (name, job_name)
+                assert (needs.count("admission"), needs.count("await_license")) == (1, 1), (name, job_name)  # nosec B101 - regression assertion
                 extra_condition = None
                 if name == "frontend-e2e-tiers.yml":
                     extra_condition = frontend_conditions[job_name]
@@ -435,7 +448,50 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 expected_condition = admission_clause
                 if extra_condition:
                     expected_condition += f" && ({extra_condition})"
-                assert _normalized(job.get("if")) == _normalized(expected_condition), (name, job_name)
+                actual_failure_step = expected_failure_step = None
+                if (name, job_name) == ("backend-required.yml", "backend-required"):
+                    # A rejected audit must report failure before checking out PR code.
+                    expected_condition = """
+                        always() && !cancelled() &&
+                        (
+                          (
+                            github.event_name == 'workflow_run' &&
+                            needs.admission.result == 'success' &&
+                            needs.admission.outputs.should_run == 'true' &&
+                            needs.changes.result == 'success'
+                          ) ||
+                          (
+                            github.event_name != 'workflow_run' &&
+                            (
+                              needs.await_license.result == 'skipped' ||
+                              needs.await_license.outputs.license_passed == 'true'
+                            ) &&
+                            needs.changes.result == 'success'
+                          ) ||
+                          (
+                            github.event_name != 'workflow_run' &&
+                            needs.await_license.result != 'skipped' &&
+                            needs.await_license.outputs.license_passed != 'true'
+                          )
+                        )
+                    """
+                    actual_failure_step = job["steps"][0]
+                    expected_failure_step = {
+                        "name": "Require the license audit to have passed",
+                        "if": (
+                            "github.event_name != 'workflow_run' && "
+                            "needs.await_license.result != 'skipped' && "
+                            "needs.await_license.outputs.license_passed != 'true'"
+                        ),
+                        "run": (
+                            'echo "::error::License audit did not pass for this PR head, '
+                            'so the gates were not run. Fix the licence policy failure and re-run."\n'
+                            "exit 1\n"
+                        ),
+                    }
+                assert (_normalized(job.get("if")), actual_failure_step) == (  # nosec B101 - regression assertion
+                    _normalized(expected_condition), expected_failure_step
+                ), (name, job_name)
             else:
                 assert "admission" not in needs, (name, job_name)
                 if name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
@@ -481,7 +537,15 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     workflows = _load_ordinary_workflows()
+    # The group is scoped by event name as well as by pull request. Without that scope a
+    # pull_request run and the workflow_run run that follows it resolve the suffix to the
+    # same PR number, share one group, and cancel-in-progress kills the pull_request run
+    # -- the only run that can report a status to the pull request, because these
+    # workflows hold only `contents: read` and rely on GitHub's implicit check run, which
+    # for a workflow_run event attaches to the default branch rather than the PR head.
+    # See TASK-13355.
     concurrency_suffix = (
+        "${{ github.event_name }}-"
         "${{ github.event.workflow_run.pull_requests[0].number || "
         "github.event.pull_request.number || github.ref || github.run_id }}"
     )
@@ -1013,3 +1077,16 @@ def test_helper_is_the_only_checked_out_program_and_owns_all_outputs() -> None:
     assert script.count('"${GITHUB_OUTPUT}"') == 1
     assert ">>" not in script
     assert _unquoted_shell_expansions(script) == []
+
+
+def test_backend_required_enforces_isolation_ratchets():
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gate = next(step for step in steps if step.get("name") == "Enforce tenant isolation ratchets")
+    assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
+    for suite in (
+        "tldw_Server_API/tests/CI/test_rls_coverage_ratchet.py",
+        "tldw_Server_API/tests/lint/test_route_auth_ratchet.py",
+        "tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py",
+    ):
+        assert suite in gate["run"]  # nosec B101 - regression assertion

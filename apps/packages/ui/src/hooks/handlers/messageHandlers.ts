@@ -1,20 +1,50 @@
-import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser } from "@/utils/local-rag-diagnostic"
-import { type ChatHistory, type Message } from "~/store/option"
+import i18n from "i18next"
+import { getLocalRagDiagnosticUser } from "@/utils/local-rag-diagnostic"
+import type { UploadedFile } from "@/db"
+import { commitLocalFork, prepareLocalFork } from "@/db/dexie/branch"
 import {
-  deleteChatForEdit,
+  type ForkDispatchClaim,
+  claimForkOperation,
+  finishForkOperation,
+  forkOperationResult,
+  prepareForkOperation,
+  recordForkCandidate
+} from "@/db/dexie/fork-operations"
+import {
   formatToChatHistory,
   formatToMessage,
-  saveHistory,
-  saveMessage,
-  updateMessageByIndex
+  updateMessageById
 } from "@/db/dexie/helpers"
-import { generateBranchMessage } from "@/db/dexie/branch"
-import { getPromptById, getSessionFiles, UploadedFile } from "@/db"
-import { tldwClient, type ConversationState } from "@/services/tldw/TldwApiClient"
-import { normalizeConversationState } from "@/utils/conversation-state"
-import type { NotificationInstance } from "antd/es/notification/interface"
+import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import {
+  commitNativeFork,
+  prepareNativeFork
+} from "@/services/chat-history-selection"
+import type { ConversationState } from "@/services/tldw/TldwApiClient"
 import type { ChatScope } from "@/types/chat-scope"
+import type { ForkRequestV1, ForkResultV1 } from "@/types/history-selection"
+import { isGreetingMessageType } from "@/utils/character-greetings"
+import { isImageGenerationMessageType } from "@/utils/image-generation-chat"
+import type { NotificationInstance } from "antd/es/notification/interface"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+
+import { type ChatHistory, type Message } from "~/store/option"
+
+/** Derive provider display history from the same visible identities after a successful mutation. */
+export const historyFromVisibleMessages = (messages: Message[]): ChatHistory =>
+  messages
+    .filter(
+      (message) =>
+        !isGreetingMessageType(message.messageType) &&
+        !isImageGenerationMessageType(message.messageType)
+    )
+    .map((message) => ({
+      role: message.role ?? (message.isBot ? "assistant" : "user"),
+      content: message.message,
+      images: message.images,
+      image: message.images?.[0],
+      messageType: message.messageType
+    }))
 
 export const createRegenerateLastMessage = ({
   validateBeforeSubmitFn,
@@ -23,7 +53,10 @@ export const createRegenerateLastMessage = ({
   setHistory,
   setMessages,
   onSubmit,
-  beforeSubmit
+  beforeSubmit,
+  historySelection,
+  notification,
+  allowOrdinaryRetry = false
 }: {
   validateBeforeSubmitFn: () => boolean
   history: ChatHistory
@@ -31,6 +64,9 @@ export const createRegenerateLastMessage = ({
   setHistory: (history: ChatHistory) => void
   setMessages: (messages: Message[]) => void
   onSubmit: (params: any) => Promise<ChatSubmitResult | void>
+  historySelection?: HistorySelectionController | null
+  notification?: NotificationInstance
+  allowOrdinaryRetry?: boolean
   beforeSubmit?: (params: {
     lastAssistant: Message
     lastAssistantIndex: number
@@ -49,6 +85,14 @@ export const createRegenerateLastMessage = ({
   >
 }) => {
   return async () => {
+    if (!allowOrdinaryRetry || historySelection) {
+      const target = [...messages].reverse().find((row) => row.isBot && row.id)
+      const error = Object.assign(new Error("unsupported_history_regeneration"), {
+        boundary: target ? { kind: "before_message", message_id: target.id } : null
+      })
+      notification?.error({ message: "Message action unavailable", description: error.message })
+      throw error
+    }
     if (typeof setHistory !== "function") {
       console.error("[chat] regenerate aborted: setHistory is not callable", {
         setHistoryType: typeof setHistory
@@ -136,428 +180,262 @@ export const createRegenerateLastMessage = ({
   }
 }
 
-export const createEditMessage = ({
-  messages,
-  history,
-  setMessages,
-  setHistory,
-  historyId,
-  validateBeforeSubmitFn,
-  onSubmit
-}: {
-  messages: Message[]
-  history: ChatHistory
-  setMessages: (messages: Message[]) => void
-  setHistory: (history: ChatHistory) => void
-  historyId: string | null
-  validateBeforeSubmitFn: () => boolean
-  onSubmit: (params: any) => Promise<unknown>
-}) => {
-  return async (
-    index: number,
-    message: string,
-    isHuman: boolean,
-    isSend: boolean
-  ) => {
-    const newHistory = history
-    const eligibleMessages = excludeLocalRagDiagnostics(messages)
-    const historyIndex = eligibleMessages.indexOf(messages[index])
-    const prefixLength = messages.slice(0, index).filter(row => eligibleMessages.includes(row)).length
-
-    // if human message and send then only trigger the submit
+export const createEditMessage =
+  (options: {
+    messages: Message[]
+    history: ChatHistory
+    setMessages: (messages: Message[]) => void
+    setHistory: (history: ChatHistory) => void
+    historyId: string | null
+    validateBeforeSubmitFn: () => boolean
+    onSubmit: (params: any) => Promise<unknown>
+    captureViewFence?: () => () => boolean
+    mutate?: (target: Message, content: string) => Promise<void>
+    notification?: NotificationInstance
+  }) =>
+  async (index: number, message: string, isHuman: boolean, isSend: boolean) => {
+    const target = options.messages[index]
+    if (!target?.id) throw new Error("missing_message")
+    // Capture the stable action boundary synchronously. Unsupported forms must not choose/truncate.
+    const boundary = { kind: "before_message", message_id: target.id } as const
     if (isHuman && isSend) {
-      const isOk = validateBeforeSubmitFn()
-
-      if (!isOk) {
-        return
-      }
-
-      const currentHumanMessage = messages[index]
-      const updatedMessages = messages.map((msg, idx) =>
-        idx === index ? { ...msg, message } : msg
+      const error = new Error(
+        `unsupported_history_edit_and_send:${boundary.message_id}`
       )
-      const previousMessages = updatedMessages.slice(0, index + 1)
-      setMessages(previousMessages)
-      const previousHistory = newHistory.slice(0, prefixLength)
-      setHistory(previousHistory)
-      await updateMessageByIndex(historyId, index, message)
-      await deleteChatForEdit(historyId, index)
-      const abortController = new AbortController()
-      await onSubmit({
-        message: message,
-        image: currentHumanMessage.images[0] || "",
-        isRegenerate: true,
-        messages: previousMessages,
-        memory: previousHistory,
-        controller: abortController
+      options.notification?.error({
+        message: "Message action unavailable",
+        description: error.message
       })
-      return
+      throw error
     }
-    const updatedMessages = messages.map((msg, idx) =>
-      idx === index ? { ...msg, message } : msg
-    )
-    setMessages(updatedMessages)
-    const updatedHistory = newHistory.map((item, idx) =>
-      idx === historyIndex ? { ...item, content: message } : item
-    )
-    setHistory(updatedHistory)
-    await updateMessageByIndex(historyId, index, message)
-  }
-}
-
-export const createBranchMessage = ({
-  notification,
-  setMessages,
-  setHistory,
-  historyId,
-  setHistoryId,
-  setContext,
-  setSelectedSystemPrompt,
-  setSystemPrompt,
-  serverChatId,
-  scope,
-  setServerChatId,
-  setServerChatState,
-  setServerChatVersion,
-  setServerChatTitle,
-  setServerChatCharacterId,
-  setServerChatMetaLoaded,
-  setServerChatTopic,
-  setServerChatClusterId,
-  setServerChatSource,
-  setServerChatExternalRef,
-  characterId,
-  chatTitle,
-  serverChatState,
-  serverChatTopic,
-  serverChatClusterId,
-  serverChatSource,
-  serverChatExternalRef,
-  messages,
-  history,
-  onServerChatMutated,
-  onServerChatBranchAccepted,
-  serverOnly = false
-}: {
-  setMessages: (messages: Message[]) => void
-  setHistory: (history: ChatHistory) => void
-  historyId: string | null
-  setHistoryId: (id: string | null) => void
-  setSelectedSystemPrompt?: (prompt: string) => void
-  setSystemPrompt?: (prompt: string) => void
-  setContext?: (context: UploadedFile[]) => void
-  serverChatId?: string | null
-  scope?: ChatScope
-  setServerChatId?: (id: string | null) => void
-  setServerChatState?: (state: ConversationState | null) => void
-  setServerChatVersion?: (version: number | null) => void
-  setServerChatTitle?: (title: string | null) => void
-  setServerChatCharacterId?: (id: string | number | null) => void
-  setServerChatMetaLoaded?: (loaded: boolean) => void
-  setServerChatTopic?: (topic: string | null) => void
-  setServerChatClusterId?: (clusterId: string | null) => void
-  setServerChatSource?: (source: string | null) => void
-  setServerChatExternalRef?: (ref: string | null) => void
-  characterId?: string | number | null
-  chatTitle?: string | null
-  serverChatState?: ConversationState | null
-  serverChatTopic?: string | null
-  serverChatClusterId?: string | null
-  serverChatSource?: string | null
-  serverChatExternalRef?: string | null
-  messages?: Message[]
-  history?: ChatHistory
-  onServerChatMutated?: () => void
-  onServerChatBranchAccepted?: (
-    chatId: string,
-    characterId: string | number
-  ) => void
-  serverOnly?: boolean
-  notification: NotificationInstance
-}) => {
-  const createLocalBranch = async (index: number): Promise<string | null> => {
-    if (!historyId) {
-      // No persisted history; nothing to branch from.
-      return null
-    }
-
+    if (!options.historyId && !options.mutate)
+      throw new Error("temporary_history_unavailable")
+    const current = options.captureViewFence?.() ?? (() => true)
     try {
-      const newBranch = await generateBranchMessage(historyId, index)
-      setHistory(formatToChatHistory(newBranch.messages))
-      setMessages(formatToMessage(newBranch.messages))
-      setHistoryId(newBranch.history.id)
-      const systemFiles = await getSessionFiles(newBranch.history.id)
-      if (setContext) {
-        setContext(systemFiles)
-      }
+      if (options.mutate) await options.mutate(target, message)
+      else await updateMessageById(options.historyId!, target.id, message)
+    } catch (error) {
+      options.notification?.error({
+        message: "Message edit failed",
+        description:
+          error instanceof Error ? error.message : "message_edit_failed"
+      })
+      throw error
+    }
+    if (!current()) return
+    const updated = options.messages.map((row) =>
+      row.id === target.id ? { ...row, message } : row
+    )
+    options.setMessages(updated)
+    options.setHistory(historyFromVisibleMessages(updated))
+  }
 
-      const lastUsedPrompt = newBranch?.history?.last_used_prompt
-      if (lastUsedPrompt) {
-        if (lastUsedPrompt.prompt_id) {
-          const prompt = await getPromptById(lastUsedPrompt.prompt_id)
-          if (prompt && setSelectedSystemPrompt) {
-            setSelectedSystemPrompt(lastUsedPrompt.prompt_id)
+export const createBranchMessage =
+  (options: {
+    setMessages: (messages: Message[]) => void
+    setHistory: (history: ChatHistory) => void
+    historyId: string | null
+    setHistoryId: (id: string | null) => void
+    setSelectedSystemPrompt?: (prompt: string) => void
+    setSystemPrompt?: (prompt: string) => void
+    setContext?: (context: UploadedFile[]) => void
+    serverChatId?: string | null
+    scope?: ChatScope
+    setServerChatId?: (id: string | null) => void
+    setServerChatState?: (state: ConversationState | null) => void
+    setServerChatVersion?: (version: number | null) => void
+    setServerChatTitle?: (title: string | null) => void
+    setServerChatCharacterId?: (id: string | number | null) => void
+    setServerChatMetaLoaded?: (loaded: boolean) => void
+    setServerChatTopic?: (topic: string | null) => void
+    setServerChatClusterId?: (clusterId: string | null) => void
+    setServerChatSource?: (source: string | null) => void
+    setServerChatExternalRef?: (ref: string | null) => void
+    characterId?: string | number | null
+    chatTitle?: string | null
+    serverChatState?: ConversationState | null
+    serverChatTopic?: string | null
+    serverChatClusterId?: string | null
+    serverChatSource?: string | null
+    serverChatExternalRef?: string | null
+    messages?: Message[]
+    history?: ChatHistory
+    onServerChatMutated?: () => void
+    serverOnly?: boolean
+    historySelection?: HistorySelectionController | null
+    onOpened?: (childId: string) => void
+    notification: NotificationInstance
+
+    captureViewFence?: () => () => boolean
+  }) =>
+  async (request: ForkRequestV1): Promise<ForkResultV1> => {
+    const binding = {
+      operation_id: request.operation_id,
+      owner_key: request.owner_key
+    }
+    const current = options.captureViewFence?.() ?? (() => true)
+    const origin = options.historySelection?.getCurrent?.()
+    const native = origin?.owner?.kind === "native" ? origin.owner : null
+    if ((options.serverChatId || options.serverOnly) && !native)
+      return {
+        ...binding,
+        state: "blocked",
+        code: "native_fork_projection_unavailable"
+      }
+    if (!native && (!options.historyId || options.historyId === "temp"))
+      return {
+        ...binding,
+        state: "blocked",
+        code: "temporary_history_unavailable"
+      }
+    if (
+      request.input.selection.conversation_id !==
+      (native?.conversation_id ?? options.historyId)
+    )
+      return {
+        ...binding,
+        state: "rejected",
+        code: "owner_conversation_mismatch"
+      }
+    let observed: ForkResultV1 | undefined
+    let outcomeRecorded = false
+    let claim: ForkDispatchClaim | null = null
+    try {
+      const operation = await prepareForkOperation(request, {
+        kind: native ? "native" : "local",
+        scope: native?.scope ?? { type: "global" }
+      })
+      if (
+        operation.operation_id !== request.operation_id ||
+        operation.state !== "prepared"
+      )
+        return forkOperationResult(operation)
+      claim = await claimForkOperation(operation)
+      if (!claim) return forkOperationResult(operation)
+      const prepared = native
+        ? await prepareNativeFork(native, request, { validate_lease: current })
+        : await prepareLocalFork(request, { validate_lease: current })
+      if (!current()) throw new Error("stale_selection")
+      // Dispatch has begun: a later view change only suppresses application of the actual owner result.
+      const result = native
+        ? await commitNativeFork(
+            prepared as Awaited<ReturnType<typeof prepareNativeFork>>,
+            (childId) => recordForkCandidate(claim!, childId)
+          )
+        : await commitLocalFork(
+            prepared as Awaited<ReturnType<typeof prepareLocalFork>>
+          )
+      observed = result
+      await finishForkOperation(claim, result)
+      outcomeRecorded = true
+      if (
+        (result.state !== "committed" && result.state !== "legacy_completed") ||
+        !current()
+      )
+        return result
+      const controller = options.historySelection
+      if (!controller) return result
+      await controller.loadConversation(
+        native
+          ? { serverChatId: result.child_id, scope: native.scope }
+          : { historyId: result.child_id },
+        undefined,
+        (receipt) => {
+          const live = controller.getCurrent()
+          if (
+            live.status !== "ready" ||
+            live.owner !== receipt.owner ||
+            live.view !== receipt.view ||
+            receipt.owner.kind !== (native ? "native" : "local") ||
+            receipt.owner.conversation_id !== result.child_id ||
+            receipt.view.conversation_id !== result.child_id ||
+            receipt.view.owner_key !== result.owner_key
+          )
+            return
+          if (native) {
+            if (
+              receipt.owner.kind !== "native" ||
+              !receipt.owner.validate_lease()
+            )
+              return
+            const expected = native.scope ?? { type: "global" }
+            const actual = receipt.owner.scope ?? { type: "global" }
+            if (
+              actual.type !== expected.type ||
+              (actual.type === "workspace" &&
+                expected.type === "workspace" &&
+                actual.workspaceId !== expected.workspaceId)
+            )
+              return
+            options.setHistoryId(null)
+            options.setContext?.([])
+            options.setSelectedSystemPrompt?.("")
+            options.setSystemPrompt?.("")
+            options.setServerChatMetaLoaded?.(false)
+            options.setServerChatId?.(result.child_id)
+            options.onOpened?.(result.child_id)
+            return
           }
+          const local = prepared as Awaited<ReturnType<typeof prepareLocalFork>>
+          options.setHistory(formatToChatHistory(local.messages))
+          options.setMessages(formatToMessage(local.messages))
+          options.setContext?.(local.files?.files ?? [])
+          options.setSelectedSystemPrompt?.("")
+          options.setSystemPrompt?.(
+            local.history.last_used_prompt?.prompt_content ?? ""
+          )
+          options.setHistoryId(result.child_id)
+          options.onOpened?.(result.child_id)
         }
-        if (setSystemPrompt) {
-          setSystemPrompt(lastUsedPrompt.prompt_content)
-        }
-      }
-      return newBranch.history.id
-    } catch (e) {
-      return null
-    }
-  }
-
-  const createLocalBranchFromSnapshot = async (
-    index: number,
-    branchTitle: string
-  ): Promise<string | null> => {
-    if (!messages || messages.length === 0) {
-      return null
-    }
-
-    const snapshot = messages.slice(0, index + 1)
-    if (snapshot.length === 0) {
-      return null
-    }
-
-    try {
-      const newHistory = await saveHistory(branchTitle, false, "branch")
-      const savedMessages: any[] = []
-
-      for (let i = 0; i < snapshot.length; i++) {
-        const msg = snapshot[i]
-        const role =
-          msg.name === "System"
-            ? "system"
-            : msg.isBot
-              ? "assistant"
-              : "user"
-        const name =
-          msg.name ||
-          (role === "assistant"
-            ? "Assistant"
-            : role === "system"
-              ? "System"
-              : "You")
-        const saved = await saveMessage({
-          history_id: newHistory.id,
-          name,
-          role,
-          content: String(msg.message ?? ""),
-          images: msg.images || [],
-          source: msg.sources || [],
-          time: i,
-          message_type: msg.messageType,
-          clusterId: msg.clusterId,
-          modelId: msg.modelId,
-          modelImage: msg.modelImage,
-          modelName: msg.modelName,
-          parent_message_id: msg.parentMessageId ?? null,
-          documents: msg.documents
+      )
+      return result
+    } catch (error) {
+      const code = error instanceof Error ? error.message : "local_fork_failed"
+      if (
+        observed?.state === "committed" ||
+        observed?.state === "legacy_completed"
+      ) {
+        if (
+          !outcomeRecorded &&
+          (!current() || (native && !native.validate_lease()))
+        )
+          return observed
+        options.notification.warning({
+          message: outcomeRecorded
+            ? i18n.t("playground:historySelection.copyOpenFailed", {
+                defaultValue: "Copy saved; opening failed"
+              })
+            : i18n.t("playground:historySelection.copyRecordFailed", {
+                defaultValue: "Copy saved; recovery record update failed"
+              }),
+          description: outcomeRecorded
+            ? code
+            : i18n.t("playground:historySelection.copyRecordFailedDetail", {
+                defaultValue:
+                  "Saved copy: {{childId}}. Its recovery record could not be updated. Reason: {{code}}",
+                childId: observed.child_id,
+                code
+              })
         })
-        savedMessages.push(saved)
-      }
-
-      setHistory(formatToChatHistory(savedMessages))
-      setMessages(formatToMessage(savedMessages))
-      setHistoryId(newHistory.id)
-      if (setContext) {
-        setContext([])
-      }
-      return newHistory.id
-    } catch (e) {
-      return null
-    }
-  }
-
-  return async (index: number): Promise<string | null> => {
-    // When a server-backed character chat is active, create a new server chat
-    // branched from the current context and mirror the prefix messages.
-    if (serverChatId) {
-      try {
-        await tldwClient.initialize().catch(() => null)
-
-        let resolvedTitle = (chatTitle || "").trim()
-        let resolvedCharacterId = characterId ?? null
-        let resolvedState = normalizeConversationState(
-          serverChatState || "in-progress"
-        )
-        try {
-          const chat = await tldwClient.getChat(
-            serverChatId,
-            scope ? { scope } : undefined
-          )
-          if (!resolvedTitle) {
-            resolvedTitle = (chat?.title || "").trim()
-          }
-          const chatCharacterId =
-            (chat as any)?.character_id ?? (chat as any)?.characterId ?? null
-          if (chatCharacterId != null) {
-            resolvedCharacterId = chatCharacterId
-          }
-          resolvedState = normalizeConversationState(
-            (chat as any)?.state ??
-              (chat as any)?.conversation_state ??
-              resolvedState
-          )
-        } catch (e) {
-          // server metadata fetch failed; continue with resolved defaults
-        }
-
-        const originalTitle =
-          resolvedTitle || (serverChatTopic || "").trim() || "Extension chat"
-        const shortId = String(serverChatId).slice(0, 8)
-        const base =
-          originalTitle.length > 60
-            ? `${originalTitle.slice(0, 57)}…`
-            : originalTitle
-        const branchTitle = `${base} [${shortId}] · msg #${index + 1}`
-
-        if (resolvedCharacterId == null) {
-          throw new Error("Cannot branch server chat without character_id")
-        }
-
-        const payload: Record<string, any> = {
-          title: branchTitle,
-          parent_conversation_id: serverChatId,
-          state: resolvedState,
-          topic_label: serverChatTopic || undefined,
-          cluster_id: serverChatClusterId || undefined,
-          source: serverChatSource || undefined,
-          external_ref: serverChatExternalRef || undefined
-        }
-        if (resolvedCharacterId != null) {
-          payload.character_id = resolvedCharacterId
-        }
-
-        const created = await tldwClient.createChat(
-          payload,
-          scope ? { scope } : undefined
-        )
-        const rawId =
-          (created as any)?.id ?? (created as any)?.chat_id ?? created
-        const newChatId = rawId != null ? String(rawId) : ""
-        if (!newChatId) {
-          throw new Error("Failed to create server branch chat")
-        }
-        onServerChatMutated?.()
-
-        const snapshot: ChatHistory =
-          (history && Array.isArray(history) ? history : []).slice(
-            0,
-            index + 1
-          )
-
-        for (const msg of snapshot) {
-          const content = (msg.content || "").trim()
-          if (!content) continue
-          const role =
-            msg.role === "system" ||
-            msg.role === "assistant" ||
-            msg.role === "user"
-              ? msg.role
-              : "user"
-          await tldwClient.addChatMessage(
-            newChatId,
-            {
-              role,
-              content
-            },
-            scope ? { scope } : undefined
-          )
-        }
-
-        onServerChatBranchAccepted?.(newChatId, resolvedCharacterId)
-        if (setServerChatId) {
-          setServerChatId(newChatId)
-        }
-        if (setServerChatState) {
-          setServerChatState(
-            (created as any)?.state ??
-              (created as any)?.conversation_state ??
-              "in-progress"
-          )
-        }
-        if (setServerChatVersion) {
-          setServerChatVersion((created as any)?.version ?? null)
-        }
-        if (setServerChatTopic) {
-          setServerChatTopic((created as any)?.topic_label ?? null)
-        }
-        if (setServerChatClusterId) {
-          setServerChatClusterId((created as any)?.cluster_id ?? null)
-        }
-        if (setServerChatSource) {
-          setServerChatSource((created as any)?.source ?? null)
-        }
-        if (setServerChatExternalRef) {
-          setServerChatExternalRef((created as any)?.external_ref ?? null)
-        }
-        if (setServerChatTitle) {
-          setServerChatTitle(
-            String((created as any)?.title ?? chatTitle ?? "")
-          )
-        }
-        if (setServerChatCharacterId) {
-          setServerChatCharacterId(
-            (created as any)?.character_id ?? characterId ?? null
-          )
-        }
-        if (setServerChatMetaLoaded) {
-          setServerChatMetaLoaded(true)
-        }
-
-        if (messages && messages.length > 0) {
-          const slicedMessages = messages.slice(0, index + 1)
-          setMessages(slicedMessages)
-          if (history && history.length > 0) {
-            setHistory(snapshot)
-          }
-        }
-
-        return newChatId
-      } catch (e) {
-        // server branch failed; attempt local fallback
-        if (serverOnly) {
-          notification.error({
-            message: "Branch failed",
-            description:
-              "Unable to create a branched server chat. Check your server connection and try again."
-          })
-          return null
-        }
-        const fallbackTitle = `${String(serverChatId).slice(0, 8)} · msg #${
-          index + 1
-        }`
-        const fallbackId =
-          (await createLocalBranch(index)) ??
-          (await createLocalBranchFromSnapshot(index, fallbackTitle))
-        if (fallbackId) {
-          notification.warning({
-            message: "Branch fallback",
-            description:
-              "Server branch failed. Created a local branch instead."
-          })
-          return fallbackId
-        }
-        notification.error({
+      } else
+        options.notification.error({
           message: "Branch failed",
-          description:
-            "Unable to create a branched server chat. Check your server connection and try again."
+          description: code
         })
-        return null
+      const result = observed ?? {
+        ...binding,
+        state: "rejected" as const,
+        code
       }
+      if (!observed && claim)
+        await finishForkOperation(claim, result).catch(() => {})
+      return result
+    } finally {
+      await Promise.resolve(
+        options.historySelection?.refreshForkOperations?.()
+      ).catch(() => {})
     }
-
-    // Local Dexie-backed branch (existing behavior)
-    return (
-      (await createLocalBranch(index)) ??
-      (await createLocalBranchFromSnapshot(index, `Branch · msg #${index + 1}`))
-    )
   }
-}
 
 export const createStopStreamingRequest = (
   abortController: AbortController | null,

@@ -14,12 +14,18 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    RequireRole,
+    get_auth_principal,
+)
 from tldw_Server_API.app.core import config as config_mod
+from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.byok_config import (
     PROVIDER_APP_CONFIG_KEYS,
     is_runtime_base_url_override,
@@ -390,9 +396,19 @@ async def get_tokenizer_config() -> TokenizerConfig:
     return TokenizerConfig(mode=mode, divisor=divisor)
 
 
-@router.put("/config/tokenizer", response_model=TokenizerConfig)
+@router.put(
+    "/config/tokenizer",
+    response_model=TokenizerConfig,
+    dependencies=[
+        Depends(get_auth_principal),
+        Depends(RequireRole("admin")),
+        Depends(RequirePermission(SYSTEM_CONFIGURE)),
+    ],
+)
 async def update_tokenizer_config(update: TokenizerUpdate) -> TokenizerConfig:
-    # Update in-memory settings; non-persistent across restarts
+    # Process-global and shared by every user: token estimation feeds quota
+    # and cost accounting, so a wide divisor makes everyone's requests look
+    # small. Admin-only. Non-persistent across restarts.
     global_settings["TOKEN_ESTIMATOR_MODE"] = update.mode
     global_settings["TOKEN_CHAR_APPROX_DIVISOR"] = int(update.divisor)
     return TokenizerConfig(mode=update.mode, divisor=int(update.divisor))

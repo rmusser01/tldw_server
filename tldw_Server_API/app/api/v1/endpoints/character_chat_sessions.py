@@ -39,6 +39,13 @@ from fastapi.responses import StreamingResponse
 from loguru import logger
 from pydantic import ValidationError
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
+
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    get_request_user,
+    require_expected_user,
+)
 
 # Database and authentication dependencies
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -88,26 +95,20 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
+from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope
+from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
+)
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     apply_llm_provider_overrides_to_listing,
     capture_provider_override_call_snapshot,
     get_llm_provider_overrides_snapshot,
     get_override_model_priority,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-    record_byok_missing_credentials,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import derive_trusted_credential_scope
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCredentialRuntime,
-)
-from tldw_Server_API.app.core.exceptions import raise_detached_error
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-    User,
-    get_request_user,
-    require_expected_user,
 )
 
 # Character chat helpers
@@ -127,15 +128,15 @@ from tldw_Server_API.app.core.Character_Chat.character_conversation_factory impo
     reject_resumable_behavior_credentials,
     validate_resumable_behavior_boole,
 )
-from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
-    ChatSettingsSizeError,
-    INTERNAL_CHAT_SETTINGS_KEYS,
-    validate_chat_settings_storage,
-)
 
 # Rate limiting
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import (
     get_character_rate_limiter,
+)
+from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
+    INTERNAL_CHAT_SETTINGS_KEYS,
+    ChatSettingsSizeError,
+    validate_chat_settings_storage,
 )
 
 # Import shared constants
@@ -151,6 +152,7 @@ from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
     apply_world_book_prompt_context,
     build_world_book_prompt_context,
 )
+from tldw_Server_API.app.core.exceptions import raise_detached_error
 
 MAX_STREAM_PERSIST_USAGE_BYTES = 4_096
 from tldw_Server_API.app.core.Character_Chat.emote_directives import (
@@ -171,6 +173,12 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets im
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     sanitize_sender_name,
 )
+from tldw_Server_API.app.core.Chat.bounded_daemon import (
+    STREAM_CLEANUP_DAEMON_POOL,
+    STREAM_DAEMON_POOL,
+    await_bounded_daemon_with_timeout,
+    await_owned_worker,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 
 # Chat helpers and utilities
@@ -180,12 +188,6 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     perform_chat_api_call,
     perform_chat_api_call_async,
     resolve_provider_and_model,
-)
-from tldw_Server_API.app.core.Chat.bounded_daemon import (
-    STREAM_CLEANUP_DAEMON_POOL,
-    STREAM_DAEMON_POOL,
-    await_bounded_daemon_with_timeout,
-    await_owned_worker,
 )
 from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
@@ -211,6 +213,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
+from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.routing import (
     InMemoryRoutingDecisionStore,
     RouterRequest,
@@ -227,15 +232,13 @@ from tldw_Server_API.app.core.LLM_Calls.routing import (
 from tldw_Server_API.app.core.LLM_Calls.routing.candidate_pool import (
     build_candidate_pool,
 )
-from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
-from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
-from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
-from tldw_Server_API.app.core.Research.service import ResearchService
 from tldw_Server_API.app.core.LLM_Calls.sse import ensure_sse_line, normalize_provider_line, sse_done
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (
     PersonaExemplarPromptAssembly,
     assemble_persona_exemplar_prompt,
 )
+from tldw_Server_API.app.core.Research.service import ResearchService
+
 # Completion schemas centralized in schemas/chat_session_schemas.py
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
@@ -252,12 +255,12 @@ from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.common import parse_boolean
 from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
+from tldw_Server_API.app.core.Workspaces.assistant_defaults import project_assistant_startup
 
 from .llm_providers import get_configured_providers
 
 _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS = (
     ChatAPIError,
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,
@@ -1771,6 +1774,9 @@ def reset_complete_windows() -> None:
 def _conversation_list_item_fields(
     conv_data: dict[str, Any],
     *,
+    db: CharactersRAGDB,
+    user_id: str,
+    workspace_visibility_cache: dict[str, bool] | None = None,
     settings: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """Build fields shared by list and detail conversation responses."""
@@ -1781,6 +1787,10 @@ def _conversation_list_item_fields(
         assistant_id = str(character_id)
     return {
         "id": conv_data.get('id', ''),
+        "assistant_startup": project_assistant_startup(
+            db, raw=conv_data.get("assistant_startup_json"), user_id=user_id,
+            workspace_visibility_cache=workspace_visibility_cache,
+        ),
         "scope_type": conv_data.get("scope_type") or "global",
         "workspace_id": conv_data.get("workspace_id"),
         "character_id": character_id,
@@ -1810,6 +1820,8 @@ def _conversation_list_item_fields(
 def _convert_db_conversation_to_response(
     conv_data: dict[str, Any],
     *,
+    db: CharactersRAGDB,
+    user_id: str,
     settings: Optional[dict[str, Any]] = None,
     resume_state: Optional[dict[str, Any]] = None,
 ) -> ChatSessionResponse:
@@ -1817,7 +1829,7 @@ def _convert_db_conversation_to_response(
     state = resume_state or {}
     snapshot = state.get("behavior_snapshot") or {"status": "missing"}
     tail = state.get("tail") or {"message_id": None, "message_version": None}
-    detail_fields = _conversation_list_item_fields(conv_data, settings=settings)
+    detail_fields = _conversation_list_item_fields(conv_data, db=db, user_id=user_id, settings=settings)
     detail_fields["message_count"] = state.get(
         "message_count",
         conv_data.get('message_count', 0),
@@ -1842,10 +1854,16 @@ def _convert_db_conversation_to_response(
 def _convert_db_conversation_to_list_item(
     conv_data: dict[str, Any],
     *,
+    db: CharactersRAGDB,
+    user_id: str,
+    workspace_visibility_cache: dict[str, bool] | None = None,
     settings: Optional[dict[str, Any]] = None,
 ) -> ChatSessionListItem:
     """Convert a conversation without materializing detail-only resume authority."""
-    return ChatSessionListItem(**_conversation_list_item_fields(conv_data, settings=settings))
+    return ChatSessionListItem(**_conversation_list_item_fields(
+        conv_data, db=db, user_id=user_id, settings=settings,
+        workspace_visibility_cache=workspace_visibility_cache,
+    ))
 
 
 def _assistant_display_name(record: Mapping[str, Any] | None) -> str | None:
@@ -3891,7 +3909,6 @@ def _maybe_trigger_character_memory_extraction(
 
     def _run_extraction() -> None:
         from tldw_Server_API.app.api.v1.endpoints.character_memory import (
-            _persona_id_for_character,
             get_or_create_character_persona_profile,
         )
         from tldw_Server_API.app.core.Character_Chat.modules.character_memory_extraction import (
@@ -4533,9 +4550,14 @@ async def create_chat_session(
     """
     try:
         scope = _resolve_chat_scope(session_data.scope_type, session_data.workspace_id)
-        from tldw_Server_API.app.core.Workspaces.assistant_defaults import resolve_new_conversation_assistant
+        from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
+        from tldw_Server_API.app.core.Workspaces.assistant_defaults import (
+            create_workspace_persona_conversation,
+            require_workspace_for_chat_creation,
+        )
 
-        session_data = resolve_new_conversation_assistant(db, user_id=str(current_user.id), request=session_data)
+        if scope.scope_type == "workspace":
+            await run_in_threadpool(require_workspace_for_chat_creation, db, scope.workspace_id)
         # Check rate limits
         rate_limiter = get_character_rate_limiter()
         await rate_limiter.check_rate_limit(current_user.id, "chat_create")
@@ -4702,6 +4724,9 @@ async def create_chat_session(
                 seed_first_message=seed_first_message,
                 greeting_strategy=greeting_strategy,
                 greeting_alternate_index=alternate_index,
+                **({"assistant_startup": AssistantStartup(
+                    source="fork" if validated_parent_id else "explicit",
+                )} if scope.scope_type == "workspace" else {}),
             )
             if seed_first_message:
                 created_state = db.get_roleplay_resume_state(created_id)
@@ -4721,6 +4746,11 @@ async def create_chat_session(
                     else "no_greeting"
                 )
             created_with_factory = True
+        elif scope.scope_type == "workspace":
+            created_id = create_workspace_persona_conversation(
+                db, user_id=str(current_user.id), request=session_data,
+                conversation_data=conv_data, title_timestamp=timestamp,
+            )
         else:
             # Add to database
             created_id = db.add_conversation(conv_data)
@@ -4819,6 +4849,7 @@ async def create_chat_session(
                 str(current_user.id),
             ),
             resume_state=db.get_roleplay_resume_state(created_id),
+            db=db, user_id=str(current_user.id),
         )
 
     except HTTPException:
@@ -5058,7 +5089,8 @@ async def delete_preset(
 # ========================================================================
 
 @router.get("/{chat_id}", response_model=ChatSessionResponse,
-            summary="Get chat session details", tags=["Chat Sessions"])
+            summary="Get chat session details", tags=["Chat Sessions"],
+            dependencies=[Depends(require_expected_user)])
 async def get_chat_session(
     chat_id: str = Path(..., description="Chat session ID"),
     include_settings: bool = Query(
@@ -5104,6 +5136,7 @@ async def get_chat_session(
             ),
             settings=settings_payload,
             resume_state=resume_state,
+            db=db, user_id=str(current_user.id),
         )
 
     except HTTPException:
@@ -7319,6 +7352,7 @@ async def list_chat_sessions(
             user_id_str,
         )
         chats: list[ChatSessionListItem] = []
+        workspace_visibility_cache: dict[str, bool] = {}
         for conv in user_conversations:
             settings_payload: Optional[dict[str, Any]] = None
             if include_settings:
@@ -7333,6 +7367,8 @@ async def list_chat_sessions(
                         persona_names=persona_names,
                     ),
                     settings=settings_payload,
+                    db=db, user_id=user_id_str,
+                    workspace_visibility_cache=workspace_visibility_cache,
                 )
             )
 
@@ -7440,6 +7476,7 @@ async def update_chat_session(
                 str(current_user.id),
             ),
             resume_state=db.get_roleplay_resume_state(chat_id),
+            db=db, user_id=str(current_user.id),
         )
 
     except ConflictError as e:
@@ -7463,6 +7500,7 @@ async def update_chat_session(
     "/{chat_id}/settings",
     response_model=ChatSettingsResponse,
     summary="Get chat settings",
+    dependencies=[Depends(require_expected_user)],
     tags=["Chat Sessions"],
 )
 async def get_chat_settings(
@@ -7541,6 +7579,7 @@ async def get_chat_settings(
     "/{chat_id}/settings",
     response_model=ChatSettingsResponse,
     summary="Update chat settings",
+    dependencies=[Depends(require_expected_user)],
     tags=["Chat Sessions"],
 )
 async def update_chat_settings(
@@ -7903,6 +7942,11 @@ async def restore_chat_session(
 
         # Already active: return current state as idempotent success.
         if not conversation.get("deleted"):
+            db.restore_conversation(
+                chat_id,
+                expected_version if expected_version is not None else conversation.get("version", 1),
+                require_already_active=True,
+            )
             try:
                 conversation['message_count'] = db.count_messages_for_conversation(chat_id)
             except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
@@ -7914,6 +7958,7 @@ async def restore_chat_session(
                     str(current_user.id),
                 ),
                 resume_state=db.get_roleplay_resume_state(chat_id),
+                db=db, user_id=str(current_user.id),
             )
 
         if _active_chat_sync_service(current_user, scope) is not None:
@@ -7935,6 +7980,7 @@ async def restore_chat_session(
                 str(current_user.id),
             ),
             resume_state=db.get_roleplay_resume_state(chat_id),
+            db=db, user_id=str(current_user.id),
         )
 
     except ConflictError as e:
@@ -8195,6 +8241,7 @@ async def export_chat_history(
     tags=["Chat Sessions"],
 )
 async def persist_streamed_assistant_message(
+    request: Request,
     chat_id: str = Path(..., description="Chat session ID"),
     body: CharacterChatStreamPersistRequest = Body(...),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -8210,102 +8257,110 @@ async def persist_streamed_assistant_message(
         if _active_chat_sync_service(current_user, conversation_scope) is not None:
             raise _chat_completion_persist_sync_unsupported_error()
 
-        settings_row = db.get_conversation_settings(chat_id)
-        history_messages = db.get_messages_for_conversation(chat_id, limit=1000, offset=0) or []
-        history_messages = [m for m in history_messages if not m.get("deleted")]
+        if body.tldw_history_admission_v1 is not None:
+            # Client-composed result provenance is stable across later branch,
+            # participant, and live-card changes. These are display metadata,
+            # never an authorization or conversation-selection authority.
+            resolved_speaker_id = body.speaker_character_id
+            resolved_speaker_name = (body.speaker_character_name or "").strip() or "Assistant"
+            resolved_turn_mode = "single"
+        else:
+            settings_row = db.get_conversation_settings(chat_id)
+            history_messages = db.get_messages_for_conversation(chat_id, limit=1000, offset=0) or []
+            history_messages = [m for m in history_messages if not m.get("deleted")]
 
-        turn_context = _resolve_chat_turn_context(
-            db=db,
-            conversation=conversation,
-            settings_row=settings_row,
-            history_messages=history_messages,
-            directed_character_id=body.speaker_character_id,
-        )
-        if (
-            body.speaker_character_id is not None
-            and not turn_context.get("directed_character_applied")
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="speaker_character_id must reference a selected participant in this chat",
+            turn_context = _resolve_chat_turn_context(
+                db=db,
+                conversation=conversation,
+                settings_row=settings_row,
+                history_messages=history_messages,
+                directed_character_id=body.speaker_character_id,
             )
-
-        participants = turn_context.get("participants") or []
-        participants_by_alias: dict[str, dict[str, Any]] = {}
-        for participant in participants:
-            aliases = _normalize_sender_aliases([participant.get("name", "")])
-            for alias in aliases:
-                participants_by_alias.setdefault(alias, participant)
-
-        resolved_participant: Optional[dict[str, Any]] = None
-        requested_speaker_name = (
-            body.speaker_character_name.strip()
-            if isinstance(body.speaker_character_name, str)
-            else ""
-        )
-
-        if body.speaker_character_id is not None:
-            requested_id = _normalize_character_id(body.speaker_character_id)
-            resolved_participant = next(
-                (
-                    participant
-                    for participant in participants
-                    if _normalize_character_id(participant.get("id")) == requested_id
-                ),
-                None,
-            )
-
-        if requested_speaker_name:
-            requested_aliases = _normalize_sender_aliases([requested_speaker_name])
-            matched_by_name = next(
-                (
-                    participants_by_alias.get(alias)
-                    for alias in requested_aliases
-                    if alias in participants_by_alias
-                ),
-                None,
-            )
-            if matched_by_name is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="speaker_character_name must reference a selected participant in this chat",
-                )
             if (
-                resolved_participant is not None
-                and _normalize_character_id(matched_by_name.get("id"))
-                != _normalize_character_id(resolved_participant.get("id"))
+                body.speaker_character_id is not None
+                and not turn_context.get("directed_character_applied")
             ):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="speaker_character_id and speaker_character_name must reference the same participant",
+                    detail="speaker_character_id must reference a selected participant in this chat",
                 )
-            resolved_participant = matched_by_name
 
-        if resolved_participant is None:
-            active_character_id = _normalize_character_id(turn_context.get("active_character_id"))
-            resolved_participant = next(
-                (
-                    participant
-                    for participant in participants
-                    if _normalize_character_id(participant.get("id")) == active_character_id
-                ),
-                None,
+            participants = turn_context.get("participants") or []
+            participants_by_alias: dict[str, dict[str, Any]] = {}
+            for participant in participants:
+                aliases = _normalize_sender_aliases([participant.get("name", "")])
+                for alias in aliases:
+                    participants_by_alias.setdefault(alias, participant)
+
+            resolved_participant: Optional[dict[str, Any]] = None
+            requested_speaker_name = (
+                body.speaker_character_name.strip()
+                if isinstance(body.speaker_character_name, str)
+                else ""
             )
-        if resolved_participant is None and participants:
-            resolved_participant = participants[0]
 
-        resolved_speaker_id = (
-            _normalize_character_id(resolved_participant.get("id"))
-            if isinstance(resolved_participant, dict)
-            else _normalize_character_id(turn_context.get("active_character_id"))
-        )
-        resolved_speaker_name = (
-            str((resolved_participant or {}).get("name") or turn_context.get("active_character_name") or "").strip()
-        )
-        if not resolved_speaker_name:
-            char_card = db.get_character_card_by_id(conversation.get("character_id")) or {}
-            resolved_speaker_name = str(char_card.get("name") or "Assistant").strip() or "Assistant"
-        resolved_turn_mode = str(turn_context.get("turn_taking_mode") or "single").strip() or "single"
+            if body.speaker_character_id is not None:
+                requested_id = _normalize_character_id(body.speaker_character_id)
+                resolved_participant = next(
+                    (
+                        participant
+                        for participant in participants
+                        if _normalize_character_id(participant.get("id")) == requested_id
+                    ),
+                    None,
+                )
+
+            if requested_speaker_name:
+                requested_aliases = _normalize_sender_aliases([requested_speaker_name])
+                matched_by_name = next(
+                    (
+                        participants_by_alias.get(alias)
+                        for alias in requested_aliases
+                        if alias in participants_by_alias
+                    ),
+                    None,
+                )
+                if matched_by_name is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="speaker_character_name must reference a selected participant in this chat",
+                    )
+                if (
+                    resolved_participant is not None
+                    and _normalize_character_id(matched_by_name.get("id"))
+                    != _normalize_character_id(resolved_participant.get("id"))
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="speaker_character_id and speaker_character_name must reference the same participant",
+                    )
+                resolved_participant = matched_by_name
+
+            if resolved_participant is None:
+                active_character_id = _normalize_character_id(turn_context.get("active_character_id"))
+                resolved_participant = next(
+                    (
+                        participant
+                        for participant in participants
+                        if _normalize_character_id(participant.get("id")) == active_character_id
+                    ),
+                    None,
+                )
+            if resolved_participant is None and participants:
+                resolved_participant = participants[0]
+
+            resolved_speaker_id = (
+                _normalize_character_id(resolved_participant.get("id"))
+                if isinstance(resolved_participant, dict)
+                else _normalize_character_id(turn_context.get("active_character_id"))
+            )
+            resolved_speaker_name = (
+                str((resolved_participant or {}).get("name") or turn_context.get("active_character_name") or "").strip()
+            )
+            if not resolved_speaker_name:
+                char_card = db.get_character_card_by_id(conversation.get("character_id")) or {}
+                resolved_speaker_name = str(char_card.get("name") or "Assistant").strip() or "Assistant"
+            resolved_turn_mode = str(turn_context.get("turn_taking_mode") or "single").strip() or "single"
         requested_assistant_message_id = (
             body.assistant_message_id.strip()
             if isinstance(body.assistant_message_id, str)
@@ -8332,12 +8387,14 @@ async def persist_streamed_assistant_message(
         resolved_visual_mood = (
             emote_events[-1].state if emote_events else resolved_emotes.mood_label
         )
-        visual_identity_metadata = _safe_resolve_character_visual_identity(
-            db=db,
-            current_user=current_user,
-            actor_id=resolved_speaker_id,
-            mood_label=_optional_text_metadata(resolved_visual_mood),
-        )
+        visual_identity_metadata = None
+        if body.tldw_history_admission_v1 is None:
+            visual_identity_metadata = _safe_resolve_character_visual_identity(
+                db=db,
+                current_user=current_user,
+                actor_id=resolved_speaker_id,
+                mood_label=_optional_text_metadata(resolved_visual_mood),
+            )
         persist_fingerprint = None
         if not requested_assistant_message_id and getattr(body, "user_message_id", None):
             persist_fingerprint = _build_stream_persist_fingerprint(
@@ -8363,7 +8420,7 @@ async def persist_streamed_assistant_message(
                 )
 
         existing_persist = None
-        if requested_assistant_message_id:
+        if requested_assistant_message_id and body.tldw_history_admission_v1 is None:
             existing_persist = _load_existing_stream_persist_message_by_id(
                 db,
                 chat_id,
@@ -8432,6 +8489,39 @@ async def persist_streamed_assistant_message(
             usage=_validate_stream_persist_usage(getattr(body, "usage", None)),
             visual_identity=visual_identity_metadata,
         )
+
+        if body.tldw_history_admission_v1 is not None:
+            from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+            from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
+            normalized_tool_calls = _validate_and_truncate_tool_calls(body.tool_calls)
+            payload = {
+                "id": requested_assistant_message_id,
+                "sender": "assistant",
+                "content": assistant_content,
+                "tool_calls": normalized_tool_calls,
+                "extra_metadata": metadata_extra,
+                "ranking": body.ranking,
+            }
+            if "user_message_id" in body.model_fields_set:
+                payload["parent_message_id"] = body.user_message_id
+            try:
+                assistant_msg_id = db.settle_history_admission(
+                    chat_id,
+                    body.tldw_history_admission_v1.model_dump(mode="json"),
+                    payload,
+                    owner_client_id=str(current_user.id),
+                    owner_key=native_history_owner_key(request, current_user.id),
+                )
+            except HistorySelectionError as exc:
+                raise HTTPException(409, detail={"status": "stale_selection", "code": exc.code}) from exc
+            # Metadata is normalized and protected in the settlement transaction.
+            # Only the independent conversation rating remains a later side effect.
+            _update_chat_rating_after_stream_persist(
+                db,
+                chat_id=chat_id,
+                chat_rating=body.chat_rating,
+            )
+            return CharacterChatStreamPersistResponse(chat_id=chat_id, assistant_message_id=assistant_msg_id, saved=True)
 
         # Persist assistant response via Character_Chat guardrails
         try:

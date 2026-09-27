@@ -46,7 +46,7 @@ from tldw_Server_API.app.api.v1.endpoints.media.input_contracts import (
     validate_media_inputs,
 )
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessAudiosForm
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,

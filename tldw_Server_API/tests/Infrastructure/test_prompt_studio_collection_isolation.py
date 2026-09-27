@@ -4,8 +4,13 @@ import os
 import runpy
 from pathlib import Path
 
+import pytest
 
-def test_prompt_studio_collection_preserves_shared_app_and_environment(monkeypatch):
+
+@pytest.mark.integration
+def test_prompt_studio_collection_preserves_shared_app_and_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Importing another suite must preserve existing app identity and routing."""
     import tldw_Server_API.app.main as main
 

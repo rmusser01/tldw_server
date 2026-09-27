@@ -31,6 +31,7 @@ from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequireRole,
     User,
     get_request_user,
     rbac_rate_limit,
@@ -2754,7 +2755,10 @@ async def public_import(
 @router.get(
     "/admin/shares",
     response_model=AdminShareListResponse,
-    dependencies=[Depends(rbac_rate_limit("sharing.admin"))],
+    dependencies=[
+        Depends(RequireRole("admin")),
+        Depends(rbac_rate_limit("sharing.admin")),
+    ],
     summary="List all shares (admin)",
 )
 async def admin_list_shares(
@@ -2783,7 +2787,10 @@ async def admin_list_shares(
 
 @router.patch(
     "/admin/config",
-    dependencies=[Depends(rbac_rate_limit("sharing.admin"))],
+    dependencies=[
+        Depends(RequireRole("admin")),
+        Depends(rbac_rate_limit("sharing.admin")),
+    ],
     summary="Update sharing configuration",
 )
 async def admin_update_config(
@@ -2805,7 +2812,10 @@ async def admin_update_config(
 @router.get(
     "/admin/audit",
     response_model=AuditLogResponse,
-    dependencies=[Depends(rbac_rate_limit("sharing.admin"))],
+    dependencies=[
+        Depends(RequireRole("admin")),
+        Depends(rbac_rate_limit("sharing.admin")),
+    ],
     summary="Query sharing audit log",
 )
 async def admin_audit_log(

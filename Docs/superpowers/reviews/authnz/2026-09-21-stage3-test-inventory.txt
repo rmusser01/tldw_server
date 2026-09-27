@@ -1,0 +1,50 @@
+# AuthNZ test inventory (2026-09-21)
+# Located by import-grep, never by path.
+
+## Five AuthNZ test trees: files / LOC
+AuthNZ: files=226 loc=53734 conftest_loc=2083
+AuthNZ_Unit: files=93 loc=30569 conftest_loc=none
+AuthNZ_SQLite: files=48 loc=11984 conftest_loc=16
+AuthNZ_Postgres: files=21 loc=4779 conftest_loc=36
+AuthNZ_Federation: files=10 loc=2675 conftest_loc=none
+
+## Files importing core.AuthNZ, by directory (top 25)
+ 118 tldw_Server_API/tests/AuthNZ/unit
+  84 tldw_Server_API/tests/AuthNZ_Unit
+  66 tldw_Server_API/tests/AuthNZ/integration
+  58 tldw_Server_API/tests/Admin
+  55 tldw_Server_API/tests/Watchlists
+  47 tldw_Server_API/tests/AuthNZ_SQLite
+  36 tldw_Server_API/tests/Audio
+  30 tldw_Server_API/tests/Jobs
+  29 tldw_Server_API/tests/Workflows
+  29 tldw_Server_API/tests/Embeddings
+  26 tldw_Server_API/tests/Evaluations
+  22 tldw_Server_API/tests/Claims
+  20 tldw_Server_API/tests/Admin_Webhooks
+  19 tldw_Server_API/tests/Chat/integration
+  19 tldw_Server_API/tests/AuthNZ_Postgres
+  17 tldw_Server_API/tests/Resource_Governance
+  17 tldw_Server_API/tests/Media
+  16 tldw_Server_API/tests/RAG_NEW/unit
+  15 tldw_Server_API/tests/MCP_unified
+  15 tldw_Server_API/tests/Character_Chat
+  14 tldw_Server_API/tests/UserProfile
+  14 tldw_Server_API/tests/sandbox
+  14 tldw_Server_API/tests/Persona
+  13 tldw_Server_API/tests/RAG_NEW/integration
+  13 tldw_Server_API/tests/LLM_Adapters/unit
+
+## isolated_test_environment requesters, by directory
+  45 tldw_Server_API/tests/AuthNZ/integration
+   3 tldw_Server_API/tests/Resource_Governance/integration
+   2 tldw_Server_API/tests/MCP_unified
+   1 tldw_Server_API/tests/wizard
+   1 tldw_Server_API/tests/Watchlists
+   1 tldw_Server_API/tests/Tools
+   1 tldw_Server_API/tests/Resource_Governance
+   1 tldw_Server_API/tests/Evaluations
+   1 tldw_Server_API/tests/Collections
+   1 tldw_Server_API/tests/AuthNZ/unit
+   1 tldw_Server_API/tests/AuthNZ/property
+   1 tldw_Server_API/tests/AuthNZ

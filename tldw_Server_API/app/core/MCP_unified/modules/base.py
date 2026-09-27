@@ -6,6 +6,7 @@ Includes health checking, metrics, circuit breaker support, and proper error han
 
 import asyncio
 import contextlib
+import re
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
@@ -323,6 +324,12 @@ def _is_circuit_breaker_open_error(exc: BaseException) -> bool:
         and hasattr(exc, "breaker_name")
         and hasattr(exc, "recovery_timeout")
     )
+
+
+# C0 and C1 control characters and DEL, excluding \t (\x09), \n (\x0a) and \r (\x0d),
+# which are load-bearing in file content. Defined here rather than in a module
+# implementation because every module inherits the sanitizer that uses it.
+CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 
 class BaseModule(ABC):
@@ -775,24 +782,23 @@ class BaseModule(ABC):
         if _depth > 20:
             raise ValueError("Input too deeply nested")
 
-        dangerous_patterns = [
-            "';",
-            '";',
-            "--",
-            "/*",
-            "*/",
-            "xp_",
-            "sp_",
-            "\\x00",
-        ]
-
         def _check_str(s: str) -> str:
-            ls = s.lower()
-            for pattern in dangerous_patterns:
-                if pattern in ls:
-                    raise ValueError(f"Potentially dangerous input detected: {pattern}")
-            # Strip NULs and control chars
-            return "".join(ch for ch in s if ch >= " " or ch == "\n")
+            # Strip NULs and control characters, preserving \t, \n and \r, which are
+            # syntactically load-bearing in file content. Dropping \t silently
+            # corrupted every tab-significant file written through fs.write (a
+            # Makefile, a TSV) while reporting success, and made fs.edit's exact
+            # string replacement permanently unable to match a tab-indented file.
+            #
+            # There is deliberately no SQL-injection denylist here. It rejected any
+            # string containing "';", '";', "--", "/*", "*/", "xp_" or "sp_" anywhere,
+            # on data that is bound to parameterised queries -- MCP_unified contains no
+            # f-string or %-formatted SQL for those substrings to escape into, so it
+            # bought no protection. What it did was refuse a filename containing "xp_",
+            # every glob, every markdown rule, every git pathspec and every punycode
+            # domain, as a protocol InvalidParams error on a harmless tool call.
+            # web_tool_base.sanitize_input already carried this fix for web tools only.
+            # See TASK-13294.
+            return CONTROL_CHARS_RE.sub("", s)
 
         if isinstance(input_data, str):
             return _check_str(input_data)

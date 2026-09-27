@@ -29,5 +29,9 @@ root-cause investigation. These focused checks do not claim the entire broader
 suite passed. Existing event/persistence assertions were retained, and an added
 no-transport case confirms optimization still completes and persists its results.
 
-Candidate carry: 82 Media/MCTS/licensing checks pass, including all 13 explicit
-protected-source checks. Candidate Bandit21/21 and Ruff0/0 introduce no findings.
+Final sync validation: 161 directly affected Prompt Studio tests and 19 workflow/
+collection contracts both exit successfully with publication-matching pytest
+plugins. An earlier combined 180-case run reported all cases passed but needed
+interruption during session cleanup; it is not claimed as a clean-exit pass.
+The candidate separately passes 82 Media/MCTS/licensing cases, including all 13
+protected-source checks, with Bandit21/21 and Ruff0/0.

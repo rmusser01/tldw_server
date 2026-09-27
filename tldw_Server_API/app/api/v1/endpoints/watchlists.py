@@ -288,7 +288,6 @@ from tldw_Server_API.app.api.v1.schemas.watchlists_schemas import (  # noqa: E40
 )
 
 _WATCHLISTS_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AssertionError,
     AttributeError,
     ConnectionError,

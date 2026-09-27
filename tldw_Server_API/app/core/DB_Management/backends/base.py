@@ -25,6 +25,17 @@ class UniqueConstraintError(DatabaseError):
     """A uniqueness conflict, without driver diagnostics or identifying payload."""
 
 
+class AuthorizationDeniedError(DatabaseError):
+    """PostgreSQL refused the statement under SQLSTATE 42501.
+
+    Covers both a row-level security policy denial and a plain table privilege
+    denial; PostgreSQL reports them with the same code, and telling them apart
+    would mean parsing the driver message, which is exactly what stays
+    redacted. Naming the class of refusal is enough to diagnose it, and carries
+    no query text, parameters or row values.
+    """
+
+
 class NotSupportedError(DatabaseError):
     """Raised when a feature is not supported by the backend."""
     pass

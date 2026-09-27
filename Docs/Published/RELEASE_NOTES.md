@@ -2,9 +2,45 @@
 
 Published release notes entry point.
 
-## 0.1.43 - 2026-09-20 (draft)
+## 0.1.44 - 2026-09-27 (candidate)
 
-This candidate includes all 616 commits merged into the frozen development
+Includes the complete frozen development range since v0.1.43: 272 commits across 37 merged PRs. [Complete inventory](https://github.com/rmusser01/tldw_server/blob/main/Docs/Development/releases/0.1.44-change-inventory.md).
+
+
+
+- **Chat Macros v1.1** — Guided and YAML authoring, import/export, cloning, validation and named output-profile editors; built-ins remain immutable (#2951).
+- **Workspace Persona provenance** — Persist local startup selection, opt-out and origin together, redact inaccessible origins and prevent forged import provenance (#2963).
+- **Chat history and fork foundations** — Owner-validated history selection and independent local-copy identities/assets in the WebUI and full-page extension (#2968). Native fork contracts, retained-context projection and operation storage are groundwork; no public native-fork flow is exposed yet (#3002).
+- **VN generation recipes** — Snapshot generation settings at acceptance and replay failed-slot recipes on Retry; Regenerate uses current settings (#3015).
+
+
+
+- **Authentication and tenant isolation** — Enforce cross-user ownership across endpoints, storage, workflow and worker access; PostgreSQL core-chat RLS, owner-isolation tests and auth/scope/RLS ratchets. Audio diagnostics and warm-up require admin access; provider-initializing TTS health/catalog requires authentication (#2985, #2986, #2991, #2993, #2995, #2998, #2999, #3005, #2968).
+- **CI and licensing** — Separate event concurrency so required gates report, run licensing admission before dependent gates, reduce audit clone depth, add Kanban/ACP/MCP coverage and timezone guards, and ship the canonical MCP GPL text (#2981, #2987–#2990, #2997, #3004, #3007, #3010, #3013).
+- **Release records** — Carry completed 0.1.43 post-publication review records and prepare consistent 0.1.44 metadata, source manifest and proposed legal dates. Update architecture/workflow inventories and record reproducible missing-agent macOS VM startup recovery (#3014, #3017).
+
+
+
+- **Post-release review repairs** — Clear denied chat selection safely, improve sign-in recovery copy, normalize image detail, restore readiness compatibility, include production configuration in packages, and isolate test fixtures and diagnostics (#2978).
+- **Core reliability** — Correct share-link signing/error handling, PostgreSQL Notes slides candidates, duplicate RAG metric counting, MCP tab/carriage-return preservation, UTC timestamp interpretation, MLX cache ownership and other independently reproduced core defects (#2980).
+- **Cancellation, OCR and Sync** — Propagate cancellation, preserve OCR input until consumed, keep withheld Sync envelopes reachable, and expire abandoned blob uploads so quota is released (#2982, #3006).
+- **MCP and integration** — Remove ineffective SQL denylist filtering while retaining parameterized-query boundaries; fix MCP test failures and media auth import boundaries; remove production branching on pytest environment state (#2996, #2997, #3012, #2983).
+
+- **Audio resampling and MCP tests** — Buffered audio without librosa now actually resamples through the existing scipy/linear fallback; invalid rates are rejected and empty audio is retained (#3024). MCP assertions, workspace checks and optional-parser requirements are corrected (#3025). Chat NetworkError status/retry translation remains a separately tracked known defect (TASK-13381, #3026).
+
+### Upgrade requirements and limits
+
+- Back up persistent data and **drain all API, worker and direct database writers** before registered per-user schema migrations. Restart only compatible binaries. Mixed-version rolling upgrades and data-preserving rollback to old binaries are unsupported (#2963, #2968, #3002).
+- PostgreSQL application credentials must use a **NOSUPERUSER, NOBYPASSRLS role that does not own content tables**; migrations still run as the owner. Existing deployments using a privileged application role will fail startup until corrected. Existing pgvector tables require owner-prefixed migration to be listed; previously issued ownerless Chatbook signed URLs stop verifying (#2985).
+- Native fork storage/projection is preparatory; later fork recovery/synchronization remains separate. Broader UAT and certification are separately tracked; targeted regressions do not establish a fresh full-matrix pass. See [#2963](https://github.com/rmusser01/tldw_server/pull/2963), [#2985](https://github.com/rmusser01/tldw_server/pull/2985), and [#3002](https://github.com/rmusser01/tldw_server/pull/3002) for migration/compatibility details.
+
+The candidate proposes a September 27, 2026 release date and September 27, 2028 at 12:00 UTC Countdown start, subject to final approval. Older release grants stay unchanged. Server artifacts exclude protected frontend material; no protected frontend binary is published. Publication and final CI approval are pending.
+
+Release review additionally hardens PostgreSQL startup policy verification, required isolation gates, commit-bound merge checks and corrupt history-metadata errors, retains invalidated history leases during automatic restoration, and localizes macro settings controls.
+
+## 0.1.43 - 2026-09-20
+
+This release includes all 616 commits merged into the frozen development
 snapshot through PR #2970 after `v0.1.42`, preserving the release-only repairs.
 
 - OSCE scenario practice, advanced quiz fixtures/metrics, structured prompt
@@ -16,6 +52,8 @@ snapshot through PR #2970 after `v0.1.42`, preserving the release-only repairs.
 - PostgreSQL ownership, queries, migrations, timestamps and transaction/shutdown
   repairs across Notes, Study, Characters, World Books, media, prompts and auth.
 - Fresh-install usability/recovery fixes and real macOS guest recovery drills.
+- Prompt Studio optimization events recover correctly when optional WebSocket
+  transport finishes loading after a startup import cycle.
 - Release review fixes preserve image quality options during chat retry and
   regeneration, retire media requests/actions on account changes, isolate saved
   media collections/favorites, limit OSCE traffic, and keep local model paths out
@@ -28,17 +66,17 @@ assigned to a signed-in account, because their original owner cannot be verified
 Back up persistent data before upgrading. UAT261 remains open by requester
 direction; the previous full four-configuration UAT matrix failed and subsequent
 targeted repairs do not establish a new full-matrix pass. Wider certification
-remains separately tracked. The candidate requires exact-head CI/review and a
-requester-written Change summary before merge.
+remains separately tracked. The release passed all 73 reported CI checks and final protected-source verification;
+the requester approved the release and its PR-specific human-summary waiver.
 
-The new protected source record proposes a September 20, 2026 release date and
-September 20, 2028 at 12:00 UTC Countdown start. Requester review is pending.
+The approved protected source record uses a September 20, 2026 release date and
+September 20, 2028 at 12:00 UTC Countdown start.
 The prior 0.1.42 grant is unchanged. Server packages/images exclude protected
-frontend material; no protected frontend binary publication is planned.
+frontend material; no protected frontend binary is published.
 
 See the repository [complete change inventory](https://github.com/rmusser01/tldw_server/blob/main/Docs/Development/releases/0.1.43-change-inventory.md)
 and [execution plan](https://github.com/rmusser01/tldw_server/blob/main/Docs/superpowers/plans/2026-09-20-release-0.1.43-plan.md)
-for all merged PRs, commits, verification and outstanding release decisions.
+for the full change inventory, verification, and separately tracked readiness work.
 
 ## 0.1.42 - 2026-09-10
 

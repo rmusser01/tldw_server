@@ -23,10 +23,6 @@ from .base import ChatProvider
 http_client_factory = _hc_create_client
 
 
-def _prefer_httpx_in_tests() -> bool:
-    return bool(os.getenv("PYTEST_CURRENT_TEST"))
-
-
 class GroqAdapter(ChatProvider):
     name = "groq"
 
@@ -128,7 +124,7 @@ class GroqAdapter(ChatProvider):
     def chat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
-        if _prefer_httpx_in_tests() or os.getenv("PYTEST_CURRENT_TEST") or self._use_native_http():
+        if self._use_native_http():
             api_key = request.get("api_key")
             headers = self._headers(api_key)
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"
@@ -153,7 +149,7 @@ class GroqAdapter(ChatProvider):
     def stream(self, request: dict[str, Any], *, timeout: float | None = None) -> Iterable[str]:
         request = self._bind_request_credentials(request)
         request = validate_payload(self.name, request or {})
-        if _prefer_httpx_in_tests() or os.getenv("PYTEST_CURRENT_TEST") or self._use_native_http():
+        if self._use_native_http():
             api_key = request.get("api_key")
             headers = self._headers(api_key)
             url = f"{self._resolve_base_url(request).rstrip('/')}/chat/completions"

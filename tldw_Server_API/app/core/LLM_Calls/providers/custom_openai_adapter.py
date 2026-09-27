@@ -122,8 +122,6 @@ class CustomOpenAIAdapter(ChatProvider):
 
     def _use_native_http(self) -> bool:
         import os
-        if os.getenv("PYTEST_CURRENT_TEST"):
-            return True
         v = (os.getenv("LLM_ADAPTERS_NATIVE_HTTP_CUSTOM_OPENAI") or "").strip().lower()
         if v in {"0", "false", "no", "off"}:
             return False

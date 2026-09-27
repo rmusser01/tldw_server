@@ -463,6 +463,9 @@ def _sync_v2_settings_from_env() -> SyncV2Settings:
         max_blob_bytes=_sync_v2_optional_positive_int_env("SYNC_V2_MAX_BLOB_BYTES"),
         max_chunk_bytes=_sync_v2_positive_int_env("SYNC_V2_MAX_CHUNK_BYTES", default=4_194_304),
         max_active_blob_uploads=_sync_v2_positive_int_env("SYNC_V2_MAX_ACTIVE_BLOB_UPLOADS", default=8),
+        blob_upload_session_ttl_seconds=_sync_v2_non_negative_int_env(
+            "SYNC_V2_BLOB_UPLOAD_SESSION_TTL_SECONDS", default=86_400
+        ),
         user_blob_quota_bytes=_sync_v2_optional_positive_int_env("SYNC_V2_USER_BLOB_QUOTA_BYTES"),
         server_trusted_encryption=server_trusted_encryption_status_from_env(),
         personal_context=personal_context_sync_capabilities_from_env(),
@@ -481,6 +484,25 @@ def _sync_v2_positive_int_env(name: str, *, default: int) -> int:
     if value is None or not value.strip():
         return default
     return _sync_v2_parse_positive_int_env(name, value)
+
+
+def _sync_v2_non_negative_int_env(name: str, *, default: int) -> int:
+    """Read a setting where 0 is a meaningful value, not an error.
+
+    The blob upload TTL uses this: 0 means "no expiry", which restores the
+    pre-TASK-13321 behaviour deliberately. _sync_v2_positive_int_env rejects 0, so it
+    cannot express that.
+    """
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        parsed = int(value.strip())
+    except ValueError:
+        raise ValueError(f"{name} must be a non-negative integer") from None
+    if parsed < 0:
+        raise ValueError(f"{name} must be a non-negative integer")
+    return parsed
 
 
 def _sync_v2_optional_positive_int_env(name: str) -> int | None:

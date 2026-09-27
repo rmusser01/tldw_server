@@ -142,7 +142,10 @@ def get_http_status_from_exception(exc: Exception) -> int | None:
             except (TypeError, ValueError):
                 pass
     if isinstance(exc, NetworkError):
-        match = re.search(r"HTTP\\s+(\\d{3})", str(exc))
+        # Single-escaped: inside a raw string `\\s` is a literal backslash + 's', so the
+        # double-escaped form could never match a real "HTTP 429" message. The status
+        # was then lost and the caller defaulted to 502.
+        match = re.search(r"HTTP\s+(\d{3})", str(exc))
         if match:
             try:
                 return int(match.group(1))

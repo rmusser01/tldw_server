@@ -908,11 +908,25 @@ describe('ResearchRunsPage', () => {
 
   it('lazy-loads artifacts and completed bundles', async () => {
     const user = userEvent.setup();
+    mocks.subscribeResearchRunEvents.mockImplementation((options: {
+      sessionId: string;
+      onEvent: (event: { event: string; id?: number; payload?: unknown }) => void;
+    }) => {
+      streamHandlers.set(options.sessionId, options.onEvent);
+      return () => {};
+    });
 
     renderWithProviders(<ResearchRunsPage />);
 
     await screen.findByText('Investigate local evidence');
-    await user.click(screen.getByRole('button', { name: 'Load plan.json' }));
+    await waitFor(() => expect(streamHandlers.has('rs_1')).toBe(true));
+    expect(screen.queryByRole('button', { name: 'Load plan.json' })).not.toBeInTheDocument();
+    // Run history can render before the independent event-stream snapshot.
+    const artifactButton = screen.findByRole('button', { name: 'Load plan.json' });
+    act(() => {
+      emitStreamEvent('rs_1', { event: 'snapshot', id: 5, payload: currentSnapshot });
+    });
+    await user.click(await artifactButton);
     await waitFor(() => {
       expect(mocks.getResearchArtifact).toHaveBeenCalledWith('rs_1', 'plan.json');
     });
@@ -930,6 +944,7 @@ describe('ResearchRunsPage', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Refresh selected run' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Load bundle' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Load bundle' }));
     await waitFor(() => {
       expect(mocks.getResearchBundle).toHaveBeenCalledWith('rs_1');

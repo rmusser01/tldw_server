@@ -354,6 +354,58 @@ def test_notes_boolean_literals_reach_postgres_driver_as_booleans(query, expecte
     cursor.execute.assert_called_once_with(expected, params)
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize("operation", ["search", "metadata"])
+@pytest.mark.parametrize("path", ["backend", "chacha-transaction", "chacha-adapter"])
+def test_chat_helpers_reach_postgres_driver_with_boolean_visibility_filters(
+    monkeypatch: pytest.MonkeyPatch, operation: str, path: str,
+) -> None:
+    """Keep helper SQL portable without sending integer boolean comparisons to psycopg."""
+    from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
+    from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import PostgreSQLBackend
+    from tldw_Server_API.app.core.DB_Management.chacha.chat_history_queries import (
+        get_chat_history_metadata,
+        search_chat_history,
+    )
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendConnectionWrapper
+
+    backend = PostgreSQLBackend(DatabaseConfig(backend_type=BackendType.POSTGRESQL))
+    db = _make_postgres_db()
+    db._backend = backend
+    connection = MagicMock()
+    cursor = connection.cursor.return_value
+    cursor.description = [("id",)]
+    cursor.statusmessage = "SELECT 1"
+    cursor.rowcount = 1
+    cursor.fetchall.return_value = [{"id": "message-1"}]
+    wrapped_connection = BackendConnectionWrapper(db, connection, backend)
+    monkeypatch.setattr(db, "get_connection", lambda: wrapped_connection)
+
+    def execute(query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+        if path == "backend":
+            return backend.execute(query, params, connection=connection).rows
+        if path == "chacha-transaction":
+            return wrapped_connection.execute(query, params).fetchall()
+        return db.execute_query(query, params).fetchall()
+
+    if operation == "search":
+        result = search_chat_history(execute, "needle'", db_adapter=db, limit=3)
+        assert result == [{"id": "message-1"}]
+        expected_params = ("pg-test", "%needle'%", "knowledge_qa", 3)
+    else:
+        result = get_chat_history_metadata(execute, "message-1", db_adapter=db)
+        assert result == {"id": "message-1"}
+        expected_params = ("message-1", "pg-test")
+
+    cursor.execute.assert_called_once()
+    sql, params = cursor.execute.call_args.args
+    assert "m.deleted = FALSE" in sql
+    assert "conv.deleted = FALSE" in sql
+    assert "conv.client_id = %s" in sql
+    assert "deleted = 0" not in sql
+    assert params == expected_params
+
+
 @pytest.mark.parametrize("operation", ["single", "foreign-note", "batch", "reverse", "foreign-keyword"])
 def test_postgres_note_keyword_queries_filter_both_endpoints(postgres_db, operation):
     """Execute the PostgreSQL-selected predicates against malformed link rows.

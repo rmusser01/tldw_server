@@ -62,7 +62,6 @@ from . import context_integrity as context_integrity_endpoints
 from . import startup_warnings as startup_warnings_endpoints
 
 _ADMIN_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

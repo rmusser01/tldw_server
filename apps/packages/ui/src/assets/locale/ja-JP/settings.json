@@ -1003,6 +1003,7 @@
     }
   },
   "onboarding": {
+    "loginSettingsError": "ログイン設定を開けませんでした。もう一度お試しください。",
     "title": "Welcome — Let’s get you connected",
     "description": "Configure your server and authentication. We’ll verify the connection and RAG health inline.",
     "learnMoreTldw": "tldw サーバーの仕組みを学ぶ",

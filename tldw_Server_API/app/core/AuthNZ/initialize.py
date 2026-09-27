@@ -50,7 +50,6 @@ from tldw_Server_API.app.core.DB_Management.Users_DB import ensure_user_director
 from tldw_Server_API.app.core.testing import is_test_mode
 
 _AUTHNZ_INIT_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     asyncio.TimeoutError,
     AssertionError,
     AttributeError,

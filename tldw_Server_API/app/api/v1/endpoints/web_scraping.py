@@ -162,7 +162,9 @@ async def get_scraping_progress(
         if not service._initialized:
             raise HTTPException(status_code=503, detail="Service not initialized")
 
-        progress = service.scraper.get_progress(task_id)
+        progress = service.scraper.get_progress(
+            task_id, owner_user_id=str(current_user.id)
+        )
         if not progress:
             raise HTTPException(status_code=404, detail="Task not found or no progress available")
 

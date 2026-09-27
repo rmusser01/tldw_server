@@ -85,6 +85,45 @@ def get_current_media_schema_version() -> int:
     return int(media_database_cls._CURRENT_SCHEMA_VERSION)
 
 
+def assert_postgres_role_cannot_bypass_rls(backend: Any, *, connection: Any = None) -> None:
+    """Fail when the connected role is exempt from row-level security.
+
+    Postgres skips RLS entirely for SUPERUSER and BYPASSRLS roles, so a
+    deployment whose application DSN points at the role that created the
+    database (the common case when the app and the postgres container read the
+    same env file) enforces no policies at all, however many are installed.
+
+    Raised as a startup error rather than logged: a server that cannot isolate
+    tenants should refuse to serve rather than serve everyone everything.
+    """
+    result = backend.execute(
+        "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user",
+        connection=connection,
+    )
+    row = result.first if result else None
+    if row is None:
+        raise RuntimeError(
+            "PostgreSQL role validation failed: could not read the current role "
+            "from pg_roles, so RLS enforcement cannot be confirmed."
+        )
+    if isinstance(row, dict):
+        is_super = bool(row.get("rolsuper"))
+        bypasses = bool(row.get("rolbypassrls"))
+    else:
+        is_super = bool(row[0])
+        bypasses = bool(row[1])
+
+    if is_super or bypasses:
+        trait = "SUPERUSER" if is_super else "BYPASSRLS"
+        raise RuntimeError(
+            f"PostgreSQL role validation failed: the application connects as a {trait} "
+            "role, which bypasses row-level security, so tenant isolation policies "
+            "are not enforced. Create a dedicated application role that is "
+            "NOSUPERUSER, NOBYPASSRLS, and not the owner of the content tables, "
+            "then point the application DSN at it. Run migrations as the owner."
+        )
+
+
 def validate_postgres_content_backend(
     *,
     get_content_backend_instance: ContentBackendResolver,
@@ -178,6 +217,12 @@ def validate_postgres_content_backend(
                             "Apply policies via pg_rls_policies.ensure_* helpers or run: "
                             "python -m tldw_Server_API.app.core.DB_Management.migration_tools --apply-rls"
                         )
+
+            # Policies above are inert if the runtime role can step around them.
+            # ENABLE exempts the table owner; FORCE closes that, but neither
+            # binds a SUPERUSER or a BYPASSRLS role -- for those, RLS is simply
+            # not evaluated and every policy checked above is decoration.
+            assert_postgres_role_cannot_bypass_rls(backend, connection=conn)
     finally:
         with contextlib.suppress(RUNTIME_FACTORY_EXCEPTIONS):
             validator.close_connection()
@@ -185,6 +230,7 @@ def validate_postgres_content_backend(
 
 __all__ = [
     "MediaDbRuntimeConfig",
+    "assert_postgres_role_cannot_bypass_rls",
     "RUNTIME_FACTORY_EXCEPTIONS",
     "create_media_database",
     "get_current_media_schema_version",

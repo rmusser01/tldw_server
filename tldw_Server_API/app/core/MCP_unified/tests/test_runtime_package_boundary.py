@@ -377,8 +377,18 @@ def _sdist_project_members(sdist_members: set[str]) -> set[str]:
 def standalone_distributions(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> tuple[Path, Path]:
-    """Build standalone artifacts once for distribution metadata tests."""
+    """Build standalone artifacts once for distribution metadata tests.
 
+    The same environment guard the one direct caller of the build already used. Without
+    it, every test depending on this fixture ERRORed rather than skipped whenever the
+    build-system requirements were unresolvable -- e.g. a venv where setuptools is
+    importable but has no dist-info metadata, which makes `python -m build` fail with
+    "Backend 'setuptools.build_meta' is not available" under the PIP_NO_INDEX=1 and
+    --no-build-isolation this smoke uses. An unrunnable environment must skip; only a
+    real regression should fail. See TASK-13291.
+    """
+
+    _require_offline_build_tools()
     return _build_standalone_distributions(
         tmp_path_factory.mktemp("mcp_unified_distribution")
     )
@@ -586,13 +596,19 @@ def test_mcp_unified_publish_metadata_is_ready_for_public_alpha() -> None:
 
 
 def test_mcp_unified_package_license_file_is_local_to_project() -> None:
-    """Standalone artifacts should include a package-local license file."""
+    """Standalone artifacts ship the verbatim GPL-3.0-only text as their licence file.
 
-    root_license = REPO_ROOT / "LICENSE"
+    Compared against LICENSES/GPL-3.0-only.txt, not the root LICENSE. The root file is
+    the repository's multi-licence scope map (it places apps/mcp-unified under
+    GPL-3.0-only as unlisted material), not a licence text, so byte-equality with it
+    could never hold once the scope map was introduced.
+    """
 
-    assert root_license.is_file()  # nosec B101
+    canonical = REPO_ROOT / "LICENSES" / "GPL-3.0-only.txt"
+
+    assert canonical.is_file()  # nosec B101
     assert PACKAGE_LICENSE.is_file()  # nosec B101
-    assert PACKAGE_LICENSE.read_text(encoding="utf-8") == root_license.read_text(encoding="utf-8")  # nosec B101
+    assert PACKAGE_LICENSE.read_text(encoding="utf-8") == canonical.read_text(encoding="utf-8")  # nosec B101
 
 
 def test_mcp_unified_package_declares_pep561_typed_marker() -> None:

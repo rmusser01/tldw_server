@@ -23,7 +23,6 @@ from tldw_Server_API.app.core.Personalization.companion_user_ids import (
 )
 
 _PERSONALIZATION_CONSOLIDATION_NONCRITICAL_EXCEPTIONS = (
-    asyncio.CancelledError,
     AttributeError,
     ConnectionError,
     KeyError,

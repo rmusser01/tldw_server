@@ -1,4 +1,7 @@
 {
+  "onboarding_loginSettingsError": {
+    "message": "ലോഗിൻ ക്രമീകരണങ്ങൾ തുറക്കാനായില്ല. വീണ്ടും ശ്രമിക്കുക."
+  },
   "navigation_serverAndAuth": {
     "message": "സെർവർ & ഓത്"
   },
