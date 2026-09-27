@@ -1,11 +1,13 @@
 # Persona Workspace Defaults Parity Assessment
 
-Status: Assessment complete; Stage 1 implemented and locally verified, pending merge. Stages 2-5 remain pending. Proposed later-stage decisions below require review as part of the implementation plan.
+Status: Original assessment complete. Stage 1 and Stage 2A/2B delivered through merged PR #2963 on 2026-09-27. Stage 2C planning refresh is complete under TASK-13245.6, awaiting requester review before execution; Stage 2D and Stages 3-5 remain open. The original pinned matrix below is historical, not a fresh cross-client parity claim. Proposed later-stage decisions require their scoped review gates.
 
 Tracking: [#2950](https://github.com/rmusser01/tldw_server/issues/2950), TASK-13243. Predecessor [#1911](https://github.com/rmusser01/tldw_server/issues/1911) remains closed for completed V1 scope.
 
 Contract: [Workspace Assistant Defaults PRD](../Product/Workspace_Persona_Defaults_PRD.md).
 Execution: [staged implementation plan](../superpowers/plans/2026-09-13-persona-workspace-parity-implementation-plan.md).
+
+Current backend planning: [Stage 2C integration refresh](2026-09-27-persona-workspace-strict-startup-refresh.md), based on server `9668e1454b0b28b7a4de13e1a35496fa0b368c42`. Chatbook dev ref `74965f694f435c590366ec66d671d3506d440ebc` was checked only; no refreshed Chatbook source/runtime parity audit is claimed.
 
 ## Baselines And Method
 

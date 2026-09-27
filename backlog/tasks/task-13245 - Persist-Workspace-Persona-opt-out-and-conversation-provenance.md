@@ -4,7 +4,7 @@ title: Persist Workspace Persona opt-out and conversation provenance
 status: In Progress
 assignee: []
 created_date: '2026-09-13 18:15'
-updated_date: '2026-09-27 10:43'
+updated_date: '2026-09-27 15:57'
 labels:
   - persona
   - workspaces
@@ -17,6 +17,9 @@ documentation:
   - >-
     Docs/superpowers/plans/2026-09-13-persona-workspace-parity-implementation-plan.md
   - Docs/Design/2026-09-13-persona-workspace-choice-provenance-design.md
+  - Docs/Design/2026-09-27-persona-workspace-strict-startup-refresh.md
+  - >-
+    Docs/superpowers/plans/2026-09-27-persona-workspace-strict-startup-implementation-plan.md
 priority: high
 ---
 
@@ -44,6 +47,10 @@ Design prerequisite TASK-13245.1 completed and published as draft PR #2958 (stac
 Requester-requested second design review completed in TASK-13245.1/PR #2958. Verified/amended silent strict-selector downgrade on older servers (dedicated route), mixed-version cached-writer hazard (offline migration), lifecycle activation ordering, and unbounded permanent receipts (finite owner-scoped budget including tombstones). Independent re-review found no remaining material contract issues. Runtime untouched; revised contract and implementation verification gates still apply.
 
 2026-09-27 delivery update: prerequisite resolver/choice and local startup-provenance stack merged normally into dev through PR #2963 at 10:40:42Z, merge commit 056d9adbb3f50243183ba8c6a3e9b367a21f1799 (head e5064376a67997901c2c33ddfe9e83b233c97bdf). TASK-13245.5 Done. All 70 exact-head hosted checks passed; requester-owned human summary and fresh review gates satisfied without admin bypass. Final integration 1095 passed/four known Bash>=4 skips/zero failures, including 734 Persona/Sync cases on official isolated SQLite/live-PostgreSQL fixtures; production Bandit clean across 14 files. Opt-out/provenance migrations are SQLite v69/v70 and PostgreSQL v73/v74. Canonical parity plan records merged 2A/local-2B delivery and exact evidence. Parent remains In Progress and its broad acceptance criteria remain unchecked: Stage 2C dedicated strict startup/versioned receipt/idempotency/send-time admission and Stage 2D broader validation are not implemented or certified by this merge. Tool-profile, provisioning/backfill and Research Workspace surface adoption remain separate open work; do not claim overall parity. Overarching issue #2950 remains open. Shared dirty checkout and other agents containers unchanged; heartbeat stopped.
+
+2026-09-27: continued after normal integrated PR2963 merge. Created planning child TASK-13245.6 for Stage2C on latest audited server base 9668e1454b0b28b7a4de13e1a35496fa0b368c42 with native H1/H2. New design/plan explicitly requires receipt RLS in shared PostgreSQL, endpoint Persona guard before routing/credentials, deadlock-safe FK/replay locks and closure-fenced receipt-bound restore/Sync resurrection before route activation. Planning review/baseline underway; no runtime edits. Corrected stale completed Stage2A child TASK-13245.2 to Done based on integrated merge. Parent remains In Progress; Stage2C/2D and broader tool-profile/provisioning/Research work remain open.
+
+2026-09-27 Stage 2C planning child TASK-13245.6 complete: current-dev source-backed refresh and five-stage plan independently reviewed; requester review required before runtime execution. Fresh unmodified official SQLite/live-PG baseline: 490 passed, one failed, one known SQLite parametrization skip, six warnings. Native PostgreSQL cascade retry leaks its enumeration read transaction after child failure; exact causal diagnostic recorded and separate prerequisite TASK-13245.7 filed To Do, not hidden or claimed fixed. Persona prompt/memory fixtures pass without modification. Canonical docs updated; no app/test/workflow diff against audited dev9668. Stage 2C/2D, profile/provisioning and Research adoption remain open; no broader parity certification.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

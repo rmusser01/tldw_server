@@ -1,6 +1,6 @@
 # Workspace Persona Choices And Startup Provenance
 
-Status: Proposed Stage 2 contract, awaiting user approval. No runtime changes are authorized by this document alone.
+Status: Reviewed and approved Stage 2 contract (TASK-13245.1). Stages 2A/2B delivered through merged PR #2963 on 2026-09-27; Stage 2C/2D remain open. The [current-dev Stage 2C refresh](2026-09-27-persona-workspace-strict-startup-refresh.md) records newer native-history integration and requires requester review before execution. No runtime changes are authorized by this document alone.
 
 Tracking: [#2950](https://github.com/rmusser01/tldw_server/issues/2950), TASK-13245, design TASK-13245.1. Depends on Stage 1 [#2957](https://github.com/rmusser01/tldw_server/pull/2957) and the [parity plan](../superpowers/plans/2026-09-13-persona-workspace-parity-implementation-plan.md).
 
