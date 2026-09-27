@@ -114,10 +114,11 @@ Optional add-ons (apply AFTER your base profile is healthy):
 ## Current Status
 
 Current release line:
-- `0.1.43` Beta status. Expect rough edges and please report issues.
+- `0.1.44` Beta status. Expect rough edges and please report issues.
 - Primary client surfaces are the Next.js WebUI, Admin UI, and browser extension.
 - Package metadata is prepared under the canonical PyPI name `tldw-server`; use a repository checkout until publishing is complete.
-- The `dev` branch carries work beyond `0.1.43`; this draft candidate includes all changes since `v0.1.42` through PR #2970. See [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
+- The `dev` branch remains the home for ongoing work beyond `0.1.44`.
+- This draft candidate includes all changes since `v0.1.43` through frozen PR #3002. See [CHANGELOG.md](CHANGELOG.md) for the PR rollup and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for the published release entry point.
 
 <details>
 <summary>Current focus and migration notes from the old Gradio version</summary>
@@ -152,14 +153,26 @@ Current release line:
 ## What's New (in the last few releases)
 
 <details>
-<summary>0.1.43 release candidate</summary>
+<summary>0.1.44 release candidate</summary>
+
+- Chat Macros v1.1 authoring/output profiles, local Workspace Persona provenance and owner-validated Chat history selection.
+- Reproducible VN failed-slot recipes; native-fork projection/storage groundwork (public native forks are not enabled yet).
+- PostgreSQL tenant isolation, authenticated diagnostic access, core reliability, Sync/OCR/cancellation and post-0.1.43 review repairs.
+- All 258 commits and 34 merged PRs are listed in the [change inventory](Docs/Development/releases/0.1.44-change-inventory.md).
+- Back up and drain all database writers before migrating. PostgreSQL needs a dedicated NOSUPERUSER/NOBYPASSRLS application role that does not own content tables. Mixed-version rolling upgrades and old-binary rollback are unsupported.
+- See [release notes](Docs/Published/RELEASE_NOTES.md) and the [release plan](Docs/superpowers/plans/2026-09-27-release-0.1.44-plan.md) for migration details, limits and pending final release/date approval.
+
+</details>
+
+<details>
+<summary>0.1.43 release</summary>
 
 - OSCE practice, advanced quiz metrics, structured prompt recipes and Writing Predict/Fill service prompts.
 - Usable-provider scheduled-task overrides, Explainer navigation and visual-novel generation recovery.
 - Fresh-install and post-merge repairs across Chat, Notes, Study, World Books, account isolation and PostgreSQL lifecycle handling.
 - macOS guest mismatch, timeout and launchd recovery drills.
 - All 616 commits through PR #2970 are listed in the [change inventory](Docs/Development/releases/0.1.43-change-inventory.md).
-- This is a draft: exact-head CI, the human Change summary, legal-date review and publication remain pending. See the [release plan](Docs/superpowers/plans/2026-09-20-release-0.1.43-plan.md).
+- Published and verified; main-to-dev synchronization and post-publication review repairs are complete. See the [release plan](Docs/superpowers/plans/2026-09-20-release-0.1.43-plan.md).
 - Back up persistent data before upgrading. UAT261 remains open and a fresh complete UAT matrix is outstanding.
 
 </details>
@@ -179,9 +192,10 @@ Included in the `0.1.42` release candidate (frozen through PR #2941):
 Still active on `dev`:
 - Treat [CHANGELOG.md](CHANGELOG.md) as the authoritative branch-level history for work after this frozen release.
 
-Currently landing on `dev` (post-`0.1.43` branch work):
-- Continue the license-first CI cutover only after this release is published and
-  synchronized back to `dev`.
+License-first CI follow-ups are merged and included in the 0.1.44 candidate.
+
+Currently landing on `dev` (post-`0.1.44` branch work):
+- Follow the backlog for separately tracked UAT, native-fork recovery/synchronization and certification work.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full running history and [Docs/Published/RELEASE_NOTES.md](Docs/Published/RELEASE_NOTES.md) for published release notes.
 
