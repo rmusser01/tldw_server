@@ -872,9 +872,14 @@ def _bootstrap_simple_constraint_is_canonical(
     *,
     backend: str,
 ) -> bool:
+    if isinstance(kind, exp.AutoIncrementColumnConstraint):
+        # Judged structurally, not by rendering: sqlglot >= 30.20 renders a bare
+        # AUTOINCREMENT as "" (it only emits it alongside an INTEGER PRIMARY KEY), which
+        # made the canonical users bootstrap look non-canonical and every SQLite users
+        # table creation fail. A canonical AUTOINCREMENT carries no arguments.
+        return not any(value is not None for value in kind.args.values())
     expected_sql: dict[type[exp.Expression], str] = {
         exp.PrimaryKeyColumnConstraint: "PRIMARY KEY",
-        exp.AutoIncrementColumnConstraint: "AUTOINCREMENT",
         exp.UniqueColumnConstraint: "UNIQUE",
         exp.NotNullColumnConstraint: "NOT NULL",
     }
