@@ -210,6 +210,29 @@ pass (3.18s); all 174 VN/fetch/shared-auth tests pass (32.69s), typecheck and bo
 scoped lint commands pass. Fresh unchanged VN Python Bandit remains clear over
 9064 lines, not a TypeScript scan. Complete new-head reviews and CI remain gates.
 
+CodeRabbit's prior 973025 review posted findings 4116871656 and 4116871660
+during the protected rebase. An empty profile body throws before the hook can
+display its safe missing-identity message. Two shared lookup and two rendered
+workbench cases failed before optional profile access (4 failed, 0.187s test
+time). No profile absence is converted into a legacy fallback.
+
+Twelve rendered Start/Retry lifecycle cases failed before preserving ownership:
+focus, pageshow and config revalidation enabled recovery while the original POST
+was unresolved (12 failed, 12 controls passed, 8.81s test time). The first focused
+filter matched only the empty-profile cases, not the quoted parameterized command
+names; corrected the filter before claiming command regression evidence.
+Same-account boundaries now preserve every in-flight command. Actual authority
+boundaries still clear old ownership; matching tokens alone release a new guard.
+The now-unnecessary command-kind wrapper was reduced to the original symbol map.
+All 29 focused checks pass (11.27s test time), including four new old-account
+Start/Retry completion controls and existing cancellation/profile controls.
+Settled ambiguous requests and remounts remain explicitly recoverable with their
+original key; no concurrent replay, automatic POST or backend guarantee is added.
+Final full qualification passes all 194 VN/fetch/shared-auth tests (59.99s, one
+worker), frontend typecheck and both scoped lint commands. Unchanged VN Python
+Bandit has zero findings/errors over 9064 lines; it does not scan TypeScript.
+Existing Node/Next advisories and environments remain unchanged.
+
 ## Stage 3: Gated Merge
 
 **Goal**: Merge normally only after current-head review and live dev gates pass.

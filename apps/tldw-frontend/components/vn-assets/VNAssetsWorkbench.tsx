@@ -62,7 +62,7 @@ export default function VNAssetsWorkbench() {
   const [preflightError, setPreflightError] = useState<string | null>(null);
   const [preflightRevision, setPreflightRevision] = useState(0);
   const [loadedPackId, setLoadedPackId] = useState<number | null>(null);
-  const generationCommandPending = useRef(new Map<number, { token: symbol; kind: 'generation' | 'cancel' }>());
+  const generationCommandPending = useRef(new Map<number, symbol>());
   const [pendingCommands, setPendingCommands] = useState<Record<number, { kind: 'start' | 'retry' | 'cancel'; slotId?: number }>>({});
   const selectedPackIdRef = useRef<number | null>(null);
   const refreshRevision = useRef(0);
@@ -83,12 +83,10 @@ export default function VNAssetsWorkbench() {
   const [discardConfirmed, setDiscardConfirmed] = useState(false);
   const [accountRevision, setAccountRevision] = useState(0);
   const recovery = useVNGenerationRecovery(useCallback((resetAccount: boolean) => {
-    for (const [packId, command] of generationCommandPending.current) {
-      if (resetAccount || command.kind !== 'cancel') generationCommandPending.current.delete(packId);
+    if (resetAccount) {
+      generationCommandPending.current.clear();
+      setPendingCommands({});
     }
-    setPendingCommands((previous) => resetAccount ? {} : Object.fromEntries(
-      Object.entries(previous).filter(([, command]) => command.kind === 'cancel'),
-    ));
     setDiscardConfirmed(false);
     ++refreshRevision.current;
     if (resetAccount) {
@@ -103,7 +101,7 @@ export default function VNAssetsWorkbench() {
   const starterMatrix = starterMatrices[0] ?? null;
 
   const finishGenerationCommand = useCallback((packId: number, token: symbol): void => {
-    if (generationCommandPending.current.get(packId)?.token !== token) return;
+    if (generationCommandPending.current.get(packId) !== token) return;
     generationCommandPending.current.delete(packId);
     setPendingCommands((previous) => {
       const next = { ...previous };
@@ -323,7 +321,7 @@ export default function VNAssetsWorkbench() {
     if (!selectedPack || loadedPackId !== selectedPack.id || !recovery.ready ||
         generationCommandPending.current.has(selectedPack.id) || (savedCommand && !recover)) return;
     const token = Symbol('generation-command');
-    generationCommandPending.current.set(selectedPack.id, { token, kind: 'generation' });
+    generationCommandPending.current.set(selectedPack.id, token);
     ++refreshRevision.current;
     const packId = selectedPack.id;
     const sourceBatchId = slotId === undefined ? null : generation?.failed_slot_batch_ids?.[slotId];
@@ -366,7 +364,7 @@ export default function VNAssetsWorkbench() {
   const handleCancelGeneration = useCallback(async () => {
     if (!selectedPack || !recovery.ready || savedCommand || generationCommandPending.current.has(selectedPack.id)) return;
     const token = Symbol('cancel-command');
-    generationCommandPending.current.set(selectedPack.id, { token, kind: 'cancel' });
+    generationCommandPending.current.set(selectedPack.id, token);
     ++refreshRevision.current;
     setPendingCommands((previous) => ({ ...previous, [selectedPack.id]: { kind: 'cancel' } }));
     setError(null);

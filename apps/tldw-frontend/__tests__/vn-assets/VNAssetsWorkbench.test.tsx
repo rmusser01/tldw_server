@@ -521,6 +521,23 @@ describe('VNAssetsWorkbench', () => {
     expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
   });
 
+  it.each([undefined, null])('shows the safe verification message for an empty profile body: %s', async (body) => {
+    existingFailedPack();
+    mocks.profile.mockResolvedValue(body);
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await screen.findByText(/Current server and account could not be verified\.|Cannot read properties/);
+    expect(screen.getByText('Current server and account could not be verified.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+    expect(mocks.profile.mock.calls.map(([path]) => path)).toEqual(['/users/me/profile']);
+    mocks.profile.mockResolvedValue({ user: { id: 1, is_active: true } });
+    await user.click(screen.getByRole('button', { name: 'Retry recovery check' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+  });
+
   it.each([404, 410])('verifies a legacy single-user principal after profile HTTP %s', async (status) => {
     existingFailedPack();
     mocks.profile.mockImplementation(async (path) => {
@@ -688,6 +705,52 @@ describe('VNAssetsWorkbench', () => {
     await act(async () => { resolveStart({ status: 'queued' }); });
   });
 
+  it.each(['start', 'retry'].flatMap((kind) =>
+    ['focus', 'pageshow', 'tldw:config-updated'].flatMap((event) =>
+      ['success', 'failure'].map((outcome) => ({ kind, event, outcome }))),
+  ))('keeps an unresolved $kind guarded across same-account $event until $outcome', async ({ kind, event, outcome }) => {
+    existingFailedPack();
+    const send = kind === 'start' ? mocks.startVNAssetGeneration : mocks.retryVNAssetSlot;
+    let resolveFirst!: (value: unknown) => void;
+    let rejectFirst!: (reason: Error) => void;
+    send.mockImplementationOnce(() => new Promise((resolve, reject) => {
+      resolveFirst = resolve;
+      rejectFirst = reject;
+    }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    const button = await screen.findByRole('button', { name: kind === 'start' ? 'Start generation' : 'Retry sprite_neutral' });
+    await waitFor(() => expect(button).toBeEnabled());
+    await user.click(button);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    const original = [...send.mock.calls[0]];
+    const saved = sessionStorage.getItem('tldw:vn-generation:pending:v1');
+    act(() => window.dispatchEvent(new Event(event)));
+    await waitFor(() => expect(mocks.profile).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(mocks.getVNAssetGeneration).toHaveBeenCalledTimes(2));
+    const recover = screen.getByRole('button', { name: 'Recover pending request' });
+    expect(recover).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Retry sprite_neutral' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    await user.click(recover);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem('tldw:vn-generation:pending:v1')).toBe(saved);
+    await act(async () => {
+      if (outcome === 'success') resolveFirst({ status: 'queued', batch_id: 42 });
+      else rejectFirst(Object.assign(new Error('Stale generation response'), { status: 422 }));
+    });
+    await waitFor(() => expect(recover).toBeEnabled());
+    expect(screen.getByLabelText('Generation status')).toHaveTextContent('failed');
+    expect(screen.queryByText('Stale generation response')).not.toBeInTheDocument();
+    expect(sessionStorage.getItem('tldw:vn-generation:pending:v1')).toBe(saved);
+    await user.click(recover);
+    await waitFor(() => expect(send.mock.calls[1]).toEqual(original));
+    await waitFor(() => expect(sessionStorage.length).toBe(0));
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+  });
+
   it.each(['focus', 'pageshow'].flatMap((event) =>
     ['success', 'failure'].flatMap((outcome) =>
       ['processing', 'failed'].map((status) => ({ event, outcome, status }))),
@@ -727,6 +790,47 @@ describe('VNAssetsWorkbench', () => {
     expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
     expect(mocks.cancelVNAssetGeneration).toHaveBeenCalledTimes(1);
   });
+
+  it.each(['start', 'retry'].flatMap((kind) => ['success', 'failure'].map((outcome) => ({ kind, outcome }))))(
+    'keeps new-account work locked after an old $kind settles with $outcome', async ({ kind, outcome }) => {
+      existingFailedPack();
+      const send = kind === 'start' ? mocks.startVNAssetGeneration : mocks.retryVNAssetSlot;
+      let resolveOld!: (value: unknown) => void;
+      let rejectOld!: (reason: Error) => void;
+      let resolveNew!: (value: unknown) => void;
+      send.mockImplementationOnce(() => new Promise((resolve, reject) => {
+        resolveOld = resolve;
+        rejectOld = reject;
+      }));
+      mocks.startVNAssetGeneration.mockImplementationOnce(() => new Promise((resolve) => { resolveNew = resolve; }));
+      const user = userEvent.setup();
+      render(<VNAssetsWorkbench />);
+      const button = await screen.findByRole('button', { name: kind === 'start' ? 'Start generation' : 'Retry sprite_neutral' });
+      await waitFor(() => expect(button).toBeEnabled());
+      await user.click(button);
+      await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+      mocks.profile.mockResolvedValue({ user: { id: 2, is_active: true } });
+      act(() => window.dispatchEvent(new CustomEvent('tldw:auth-principal-changed', { detail: { kind: 'switch' } })));
+      const start = screen.getByRole('button', { name: 'Start generation' });
+      await waitFor(() => expect(start).toBeEnabled());
+      await user.click(start);
+      await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(kind === 'start' ? 2 : 1));
+      const saved = sessionStorage.getItem('tldw:vn-generation:pending:v1');
+      await act(async () => {
+        if (outcome === 'success') resolveOld({ status: 'queued', batch_id: 41 });
+        else rejectOld(new Error('Other account generation'));
+      });
+      expect(screen.getByRole('button', { name: 'Recover pending request' })).toBeDisabled();
+      expect(start).toBeDisabled();
+      expect(screen.getByLabelText('Generation status')).toHaveTextContent('failed');
+      expect(screen.queryByText('Other account generation')).not.toBeInTheDocument();
+      expect(sessionStorage.getItem('tldw:vn-generation:pending:v1')).toBe(saved);
+      await act(async () => resolveNew({ status: 'queued', batch_id: 43 }));
+      expect(screen.getByLabelText('Generation status')).toHaveTextContent('queued');
+      expect(sessionStorage.length).toBe(0);
+      expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(['success', 'failure'])('releases an old-account Cancel guard without unlocking new work on late %s', async (outcome) => {
     existingFailedPack();

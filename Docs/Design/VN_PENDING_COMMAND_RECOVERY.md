@@ -31,6 +31,9 @@ Logout/account/server boundaries invalidate current async operations immediately
 revalidation permits retained commands only for the same verified authority.
 Successful focus/pageshow revalidation restarts interrupted detail reads without
 posting generation; command pre-send verification does not restart those reads.
+Same-authority revalidation preserves in-flight Start/Retry/Cancel ownership
+until the matching request settles; only then may explicit recovery replay the
+retained Start/Retry command. Actual authority boundaries clear old ownership.
 Unmount leaves the journal intact but prevents late callbacks from changing it.
 An invalid current server setting is reported while ignoring in-flight outcomes;
 stale captures cannot report that validation error against a newer authority.

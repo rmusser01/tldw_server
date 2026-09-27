@@ -48,6 +48,16 @@ describe("fresh authenticated principal lookup", () => {
     expect(await fetchCurrentPrincipal(read)).toBeUndefined()
   })
 
+  it.each([undefined, null])("returns missing identity for an empty profile body: %s", async (body) => {
+    const paths: string[] = []
+    const read = async <T>(path: string): Promise<T> => {
+      paths.push(path)
+      return body as T
+    }
+    expect(await fetchCurrentPrincipal(read)).toBeUndefined()
+    expect(paths).toEqual(["/users/me/profile"])
+  })
+
   it("propagates failure of the legacy endpoint", async () => {
     const failure = Object.assign(new Error("Not authenticated"), { status: 401 })
     const read = async <T>(path: string): Promise<T> => {
