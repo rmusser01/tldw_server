@@ -169,9 +169,12 @@ export function useHistorySelection(
   const invalidate = useCallback(() => {
     epoch.current += 1
     if (mounted.current) {
-      setForkOperations([])
+      // Keep already-empty lists: a fresh [] would re-render every consumer on
+      // each load start, and callers that start a load from an effect would
+      // then loop without end (e.g. a failed settings-return local load).
+      setForkOperations((current) => (current.length ? [] : current))
       setForkOperationsError(null)
-      setRecoveries([])
+      setRecoveries((current) => (current.length ? [] : current))
       setRecoveryError(null)
     }
     request.current?.abort()
