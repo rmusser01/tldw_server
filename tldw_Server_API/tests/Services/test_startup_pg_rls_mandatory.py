@@ -71,8 +71,8 @@ async def test_non_owner_role_verifies_instead_of_installing(monkeypatch):
     """
     monkeypatch.setattr(infra, "_postgres_content_mode_active", lambda: True)
     rows = [
-        {"relname": "notes", "relrowsecurity": True, "relforcerowsecurity": True, "policy_count": 2},
-        {"relname": "character_cards", "relrowsecurity": True, "relforcerowsecurity": True, "policy_count": 1},
+        {"relname": name, "relrowsecurity": True, "relforcerowsecurity": True, "policy_count": 1}
+        for name in ("notes", "character_cards", "conversations", "messages", "chacha_keywords", "keyword_collections", "sync_log")
     ]
     monkeypatch.setattr(infra, "_build_rls_backend", lambda: _Backend(rows), raising=False)
     _patch_backend_returning(monkeypatch, _Backend(rows))
@@ -143,3 +143,20 @@ async def test_sqlite_mode_with_the_flag_on_still_only_warns(monkeypatch):
         raise RuntimeError("policy install exploded")
 
     await infra._maybe_ensure_pg_rls(_boom)  # must not raise
+
+
+@pytest.mark.parametrize("missing", ["conversations", "messages", "chacha_keywords", "keyword_collections", "sync_log", "notes", "character_cards"])
+def test_non_owner_probe_rejects_missing_required_content_table(missing):
+    names = {"conversations", "messages", "chacha_keywords", "keyword_collections", "sync_log", "notes", "character_cards"}
+    rows = [{"relname": name, "relrowsecurity": True, "relforcerowsecurity": True, "policy_count": 1} for name in names - {missing}]
+    with pytest.raises(RuntimeError, match=missing):
+        infra._assert_pg_rls_policies_present(_Backend(rows), _privilege_error())
+
+
+@pytest.mark.parametrize("field,value", [("relrowsecurity", False), ("relforcerowsecurity", False), ("policy_count", 0)])
+def test_non_owner_probe_rejects_unprotected_chat_table(field, value):
+    names = {"conversations", "messages", "chacha_keywords", "keyword_collections", "sync_log", "notes", "character_cards"}
+    rows = [{"relname": name, "relrowsecurity": True, "relforcerowsecurity": True, "policy_count": 1} for name in names]
+    next(row for row in rows if row["relname"] == "messages")[field] = value
+    with pytest.raises(RuntimeError, match="messages"):
+        infra._assert_pg_rls_policies_present(_Backend(rows), _privilege_error())

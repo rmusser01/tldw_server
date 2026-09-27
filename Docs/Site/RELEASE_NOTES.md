@@ -34,6 +34,8 @@ Includes the complete frozen development range since v0.1.43: 258 commits across
 
 The candidate proposes a September 27, 2026 release date and September 27, 2028 at 12:00 UTC Countdown start, subject to final approval. Older release grants stay unchanged. Server artifacts exclude protected frontend material; no protected frontend binary is published. Publication and final CI approval are pending.
 
+Release review additionally hardens PostgreSQL startup policy verification, required isolation gates, commit-bound merge checks and corrupt history-metadata errors, retains invalidated history leases during automatic restoration, and localizes macro settings controls.
+
 ## 0.1.43 - 2026-09-20
 
 This release includes all 616 commits merged into the frozen development

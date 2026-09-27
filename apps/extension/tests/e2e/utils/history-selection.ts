@@ -785,6 +785,17 @@ export async function qualifyChildIsolation(page: Page, server: Awaited<ReturnTy
   expect((await readStore(page, 'sessionFiles')).find(row => row.sessionId === 'h1-source')).toEqual(sourceFiles)
 }
 
+/** Account switching writes known fixture credentials, never copies persisted account secrets. */
+export async function switchHistoryFixtureAccount(page: Page, serverUrl: string) {
+  await page.evaluate(async (config) => {
+    if (location.protocol === 'chrome-extension:') {
+      await chrome.storage.local.set({ tldwConfig: config })
+    } else {
+      localStorage.setItem('tldwConfig', JSON.stringify(config))
+    }
+  }, { ...historySeedConfig(serverUrl).tldwConfig, apiKey: 'h1-other-account-key' })
+}
+
 export async function qualifyForeignWorkspaceAndAccountRead(page: Page, server: Awaited<ReturnType<typeof startHistoryServer>>, base: string) {
   const child = await nativeForkAndSend(page, server)
   await injectHistoryStorage(page)
@@ -810,16 +821,7 @@ export async function qualifyForeignWorkspaceAndAccountRead(page: Page, server: 
     await expect(settingsPage.getByTestId('chat-input')).toBeVisible()
     await page.reload()
     await held.started
-    await settingsPage.evaluate(async () => {
-      if (location.protocol === 'chrome-extension:') {
-        const { tldwConfig } = await chrome.storage.local.get('tldwConfig')
-        const value = typeof tldwConfig === 'string' ? JSON.parse(tldwConfig) : tldwConfig
-        await chrome.storage.local.set({ tldwConfig: { ...value, apiKey: 'h1-other-account-key' } })
-      } else {
-        const value = JSON.parse(localStorage.getItem('tldwConfig')!)
-        localStorage.setItem('tldwConfig', JSON.stringify({ ...value, apiKey: 'h1-other-account-key' }))
-      }
-    })
+    await switchHistoryFixtureAccount(settingsPage, server.url)
     await expect(page.getByTestId('playground-chat-shell').getByText('Selected history unavailable', { exact: true })).toBeVisible()
     await expect(page.getByTestId('playground-chat-shell').getByText('request_config_scope_changed', { exact: true })).toHaveCount(1)
     held.release()

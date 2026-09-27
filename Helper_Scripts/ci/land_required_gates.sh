@@ -42,19 +42,25 @@ fi
 
 latest_run() {
   # $1 = workflow name; prints "<id> <status> <conclusion> <headSha>"
-  gh run list --repo "$REPO" --branch "$BRANCH" --workflow "$1" --limit 1 \
+  gh run list --repo "$REPO" --branch "$BRANCH" --workflow "$1" --commit "$HEAD_SHA" --limit 1 \
     --json databaseId,status,conclusion,headSha \
-    --template '{{range .}}{{printf "%.0f" .databaseId}} {{.status}} {{.conclusion}} {{.headSha}}{{end}}'
+    --template '{{range .}}{{printf "%.0f" .databaseId}} {{.status}} {{if .conclusion}}{{.conclusion}}{{else}}pending{{end}} {{.headSha}}{{end}}'
 }
 
 printf '=== PR #%s (%s @ %s): waiting for the audit on this sha ===\n' "$PR" "$BRANCH" "$SHORT"
+audit_passed=false
 i=0
 while [ "$i" -lt 90 ]; do
   set -- $(latest_run "$AUDIT" || true)
   status="${2:-unknown}"
   sha="${4:-}"
   if [ "$status" = "completed" ] && [ "$sha" = "$HEAD_SHA" ]; then
-    echo "audit for $SHORT completed"
+    if [ "${3:-}" != "success" ]; then
+      echo "audit for $SHORT did not pass" >&2
+      exit 1
+    fi
+    audit_passed=true
+    echo "audit for $SHORT passed"
     break
   fi
   printf '  waiting: audit %s on %s\n' "$status" "$(printf '%s' "$sha" | cut -c1-8)"
@@ -62,12 +68,18 @@ while [ "$i" -lt 90 ]; do
   sleep 20
 done
 
+[ "$audit_passed" = true ] || { echo "Timed out waiting for the current-head audit" >&2; exit 1; }
+
 printf '=== PR #%s: ensuring the six gates run ===\n' "$PR"
 for wf in $GATES; do
   set -- $(latest_run "$wf" || true)
   id="${1:-}"
   status="${2:-}"
   concl="${3:-}"
+  if [ "${4:-}" != "$HEAD_SHA" ]; then
+    echo "No current-head run for $wf; refusing to use or rerun stale checks" >&2
+    exit 1
+  fi
   case "$status:$concl" in
     completed:success)        printf '  %-24s already success\n' "$wf";;
     queued:*|in_progress:*)   printf '  %-24s already running (%s)\n' "$wf" "$status";;
@@ -83,15 +95,20 @@ for wf in $GATES; do
 done
 
 printf '=== PR #%s: waiting for the six gates ===\n' "$PR"
+gates_passed=false
 i=0
 while [ "$i" -lt 150 ]; do
   ok=0
   bad=''
   for wf in $GATES; do
     set -- $(latest_run "$wf" || true)
-    case "${3:-}" in
-      success)                  ok=$((ok + 1));;
-      failure|timed_out|cancelled) bad="$bad $wf:${3}";;
+    if [ "${4:-}" != "$HEAD_SHA" ]; then
+      bad="$bad $wf:stale-head"
+      continue
+    fi
+    case "${2:-}:${3:-}" in
+      completed:success)                  ok=$((ok + 1));;
+      completed:failure|completed:timed_out|completed:cancelled) bad="$bad $wf:${3}";;
     esac
   done
   if [ -n "$bad" ]; then
@@ -99,12 +116,18 @@ while [ "$i" -lt 150 ]; do
     exit 1
   fi
   if [ "$ok" -eq 6 ]; then
+    gates_passed=true
     printf 'PR #%s: all six gates green\n' "$PR"
     break
   fi
   i=$((i + 1))
   sleep 30
 done
+
+[ "$gates_passed" = true ] || { echo "Timed out waiting for six current-head gates" >&2; exit 1; }
+
+CURRENT_HEAD="$(gh pr view --repo "$REPO" "$PR" --json headRefOid --template '{{.headRefOid}}')"
+[ "$CURRENT_HEAD" = "$HEAD_SHA" ] || { echo "PR head changed during validation" >&2; exit 1; }
 
 if [ "$NO_MERGE" = "--no-merge" ]; then
   printf 'PR #%s: --no-merge given, stopping before merge\n' "$PR"
@@ -113,4 +136,4 @@ fi
 
 printf '=== PR #%s: merging ===\n' "$PR"
 # --merge, not --squash: squash merges are rejected repository-wide.
-gh pr merge --repo "$REPO" "$PR" --merge
+gh pr merge --repo "$REPO" "$PR" --merge --match-head-commit "$HEAD_SHA"

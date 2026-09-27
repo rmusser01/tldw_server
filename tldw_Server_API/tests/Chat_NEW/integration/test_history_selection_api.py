@@ -524,3 +524,24 @@ def test_limited_native_copy_explicit_plain_identity_and_child_chain_reopen(hist
     edited = client.put(f"/api/v1/chats/{child}/settings{scope}", headers=headers, json={"settings": {"authorNote": "legitimate edit"}})
     assert edited.status_code == 200, edited.text
     assert client.get(f"/api/v1/chats/{child}/settings{scope}", headers=headers).json()["settings"]["authorNote"] == "legitimate edit"
+
+
+@pytest.mark.parametrize("field", ["tool_calls_json", "extra_json"])
+def test_capture_reports_corrupt_selected_metadata_as_conflict(history_api, field):
+    client, db, cid, headers = history_api
+    empty = capture(client, cid, headers).json()
+    selection = resolve_history_selection(empty["snapshot"], empty["view"], "send", "metadata-test")["selection"]
+    accepted = client.post(f"/api/v1/chats/{cid}/messages", headers=headers, json={
+        "id": "corrupt", "role": "user", "content": "input", "tldw_history_selection_v1": selection,
+    })
+    assert accepted.status_code == 201, accepted.text
+    db.set_message_metadata_extra("corrupt", {"valid": True})
+    with db.transaction() as conn:
+        sql = {
+            "tool_calls_json": "UPDATE message_metadata SET tool_calls_json = ? WHERE message_id = ?",
+            "extra_json": "UPDATE message_metadata SET extra_json = ? WHERE message_id = ?",
+        }[field]
+        conn.execute(sql, ("{broken", "corrupt"))
+    response = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": "corrupt"})
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"]["code"] == "invalid_metadata"  # nosec B101 - regression assertion

@@ -312,7 +312,7 @@ export default function VNAssetsWorkbench() {
     try {
       const request = {
         idempotency_key: idempotencyKey,
-        ...(slotId !== undefined && sourceBatchId != null ? { source_batch_id: sourceBatchId } : {}),
+        ...(slotId !== undefined && sourceBatchId !== null && sourceBatchId !== undefined ? { source_batch_id: sourceBatchId } : {}),
       };
       const nextGeneration = slotId === undefined
         ? await startVNAssetGeneration(packId, request)

@@ -51,6 +51,11 @@ _ENABLE_RLS_RE = re.compile(
     r"ENABLE\s+ROW\s+LEVEL\s+SECURITY",
     re.IGNORECASE,
 )
+_FORCE_RLS_RE = re.compile(
+    r"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?[\"'`]?([A-Za-z_0-9.]+)[\"'`]?\s+"
+    r"FORCE\s+ROW\s+LEVEL\s+SECURITY",
+    re.IGNORECASE,
+)
 # CREATE TABLE forms whose name is built at runtime, e.g. psycopg's
 # sql.Identifier composition. The name cannot be resolved statically, so these
 # are reported rather than ignored: silently skipping them is how a new
@@ -75,7 +80,7 @@ class CoverageReport:
         owned_tables: Tables whose CREATE TABLE names an ownership column, and
             which therefore hold rows belonging to a particular account.
         policy_tables: Tables that both have a CREATE POLICY and have row-level
-            security switched on. A policy alone is not protection, so both are
+            security enabled and forced for the owner. A policy alone is not protection; all three are
             required before a table counts as covered.
         dynamic_table_sites: ``path:line`` for CREATE TABLE statements whose
             name is built at runtime. A static scan cannot resolve those, so
@@ -116,6 +121,7 @@ def scan_source(roots: list[Path]) -> CoverageReport:
     owned: set[str] = set()
     with_policy: set[str] = set()
     rls_enabled: set[str] = set()
+    rls_forced: set[str] = set()
     dynamic: list[str] = []
 
     for root in roots:
@@ -141,6 +147,9 @@ def scan_source(roots: list[Path]) -> CoverageReport:
             for match in _ENABLE_RLS_RE.finditer(text):
                 rls_enabled.add(_normalise(match.group(1)))
 
+            for match in _FORCE_RLS_RE.finditer(text):
+                rls_forced.add(_normalise(match.group(1)))
+
             for match in _CREATE_TABLE_RE.finditer(text):
                 body = _column_list(text, match.end() - 1)
                 if _OWNER_RE.search(body):
@@ -150,8 +159,8 @@ def scan_source(roots: list[Path]) -> CoverageReport:
                 line = text[: match.start()].count("\n") + 1
                 dynamic.append(f"{path}:{line}")
 
-    # Coverage means a policy AND row-level security switched on for the table.
-    policied = with_policy & rls_enabled
+    # Coverage requires a policy, ENABLE, and FORCE to bind the table owner.
+    policied = with_policy & rls_enabled & rls_forced
     return CoverageReport(
         frozenset(owned), frozenset(policied), tuple(sorted(dynamic))
     )

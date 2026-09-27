@@ -39,6 +39,7 @@ and this project adheres to Some kind of Versioning
 
 ### Fixed
 
+- **Release review** — Verify named PostgreSQL chat-isolation policies at startup, enforce isolation ratchets in required CI, reject stale/timed-out merge checks, return bounded errors for corrupt selected history metadata, retain invalidated history leases during automatic restore, and localize macro settings controls. See [review follow-up](Docs/Development/releases/0.1.44-review-follow-up.md).
 - **Post-release review repairs** — Clear denied chat selection safely, improve sign-in recovery copy, normalize image detail, restore readiness compatibility, include production configuration in packages, and isolate test fixtures and diagnostics (#2978).
 - **Core reliability** — Correct share-link signing/error handling, PostgreSQL Notes slides candidates, duplicate RAG metric counting, MCP tab/carriage-return preservation, UTC timestamp interpretation, MLX cache ownership and other independently reproduced core defects (#2980).
 - **Cancellation, OCR and Sync** — Propagate cancellation, preserve OCR input until consumed, keep withheld Sync envelopes reachable, and expire abandoned blob uploads so quota is released (#2982, #3006).

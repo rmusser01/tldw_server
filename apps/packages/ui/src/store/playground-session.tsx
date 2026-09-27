@@ -97,6 +97,8 @@ export interface PlaygroundSessionData {
 }
 
 interface PlaygroundSessionState extends PlaygroundSessionData {
+  serverChatSelectionIntent: { chatId: string } | null
+  requestServerChatSelection: (chatId: string) => void
   restoreRevision: number
   sourceSelectionRevision: number
   // Actions
@@ -140,6 +142,9 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
       ...initialState,
       restoreRevision: 0,
       sourceSelectionRevision: 0,
+      serverChatSelectionIntent: null,
+      requestServerChatSelection: (chatId) =>
+        set({ serverChatSelectionIntent: { chatId } }),
 
       saveSession: (data) =>
         set((state) => ({
@@ -151,6 +156,7 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
       clearSession: () =>
         set((state) => ({
           ...initialState,
+          serverChatSelectionIntent: null,
           lastUpdated: 0,
           restoreRevision: state.restoreRevision + 1
         })),

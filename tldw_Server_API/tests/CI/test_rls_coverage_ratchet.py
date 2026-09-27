@@ -135,6 +135,7 @@ def test_a_policy_with_enabled_rls_is_coverage():
     report = scan_source([_write(
         "CREATE TABLE thing (id INT, user_id TEXT);\n"
         "ALTER TABLE thing ENABLE ROW LEVEL SECURITY;\n"
+        "ALTER TABLE thing FORCE ROW LEVEL SECURITY;\n"
         "CREATE POLICY thing_iso ON thing USING (true);\n"
     )])
 
@@ -208,3 +209,12 @@ class TestExemptions:
         )
         regressions, _ = compare(report, frozenset(), {"share_tokens": "x"})
         assert regressions == frozenset({"some_new_table"})
+
+
+def test_policy_and_enable_without_force_is_not_owner_safe_coverage():
+    report = scan_source([_write(
+        "CREATE TABLE owner_bound (id INT, user_id TEXT);\n"
+        "CREATE POLICY owner_iso ON owner_bound USING (true);\n"
+        "ALTER TABLE owner_bound ENABLE ROW LEVEL SECURITY;\n"
+    )])
+    assert "owner_bound" in report.uncovered  # nosec B101 - regression assertion

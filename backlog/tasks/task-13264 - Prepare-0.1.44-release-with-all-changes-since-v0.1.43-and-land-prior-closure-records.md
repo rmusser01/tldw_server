@@ -1,13 +1,17 @@
 ---
 id: TASK-13264
-title: Prepare 0.1.44 release with all changes since v0.1.43 and land prior closure
+title: >-
+  Prepare 0.1.44 release with all changes since v0.1.43 and land prior closure
   records
 status: In Progress
-created_date: 2026-09-27 15:16
-priority: high
-updated_date: 2026-09-27 15:32
+assignee: []
+created_date: '2026-09-27 15:16'
+updated_date: '2026-09-27 15:59'
+labels: []
+dependencies: []
 references:
-- https://github.com/rmusser01/tldw_server/pull/3027
+  - 'https://github.com/rmusser01/tldw_server/pull/3027'
+priority: high
 ---
 
 ## Description
@@ -33,6 +37,7 @@ Docs/superpowers/plans/2026-09-27-release-0.1.44-plan.md
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Frozen range verified: 258 commits and 34 first-parent merged PRs since v0.1.43, including synchronization PR2971. Closure commit62a2b70e carried as6414a4a830. Candidate proposes release date2026-09-27 and Countdown2028-09-27T12:00:00Z; final legal/publication approval pending.
 
@@ -41,10 +46,21 @@ Protected manifest SHA-256: `fcc17101e2303e612b8ab9d7824a47bc937eea2a1f216e6e2dc
 Candidate contracts: 89 passed (four warnings), including strict MkDocs and protected-source checkout equality. CI-matching OpenAPI fingerprint passes. Local 0.1.44 wheel/sdist pass Twine and backend-only contents checks; final README metadata refresh is being rebuilt. Ruff, compilation and whitespace checks pass. Bandit main.py has zero findings/errors; licensing tests retain 82 baseline B101 assertion findings, unchanged severity/type counts. Main publication, new PR-specific summary/waiver and proposed legal-date approval remain pending. Full UAT remains separately tracked.
 Final corrected README/docs/licensing matrix: 33 passed, four warnings; strict MkDocs and protected source equality pass. Final rebuilt 0.1.44 wheel and sdist pass Twine and backend-only contents verification. Independent release preparation review requested. Candidate remains unpublished.
 Draft release PR3027: https://github.com/rmusser01/tldw_server/pull/3027 . Candidate commit 10ca6d2570. Independent reviewer found no preparation blockers: exact 258-commit/34-PR inventory, 7,370 protected-file hashes/path set and source equality, prior grants immutable, closure records intact, PR2978 tree equal approved head, versions/docs aligned, migration prerequisites/native-fork limits explicit. This review covers release preparation and closure, not a new full audit of all merged features. Required remote CI remains pending. Final merge/publication and legal dates need approval; this PR requires a human-owned summary or explicit waiver. Closure records land in main with this release and in dev with subsequent approved synchronization.
+
+MCP portability failure reproduced locally and in installed CI artifacts. Existing TASK-13264 Stage 3 covers the fix. Broader verification also exposed two stale license-first workflow contract expectations from the same merged ordering change; update them to enforce the new wait gate and absent redundant workflow_run triggers. Root-venv exec-worker checks cannot import the uninstalled standalone package in isolated mode, so verify the full protocols using clean installed artifacts.
+Release CI blocker reproduced: MCP portable installed wheel/sdist suites fail only test_rc_workflow_runs_installed_stdio_contracts_on_linux_and_windows. It asserts needs == admission, but merged license-first ordering now correctly requires [admission, await_license]. Linux wheel/sdist evidence each: 380 passed, one stale contract failed; Windows each: 374 passed, six platform skips, one same stale contract failed. Local selected test reproduces the exact assertion. Fix plan: require both dependencies and the reusable licensing wait gate, retain platform matrix and protocol assertions, rerun protocol/workflow and installed-artifact checks, compare scoped Bandit baseline, then push to PR3027. No production code or protected frontend changes are needed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+CI repair validated: generic licensing contracts plus MCP workflow contract, 15 passed. Clean portable-gate wheel and sdist each 381 protocol tests passed; both official SDK stdio smokes passed. Root shared environment has a legacy installed MCP package lacking protocol_validation in isolated mode, so direct root exec-worker failures are environmental; clean installed protocol suites cover those tests successfully. Generic contract now enforces both reusable gates, absent duplicate triggers, original dependencies/immutable checkouts, and the backend negative-verdict first-step exit before checkout. Bandit finding type/severity/confidence baselines unchanged: stdio 132/132, generic 168/168, no errors. Ruff and whitespace checks pass. Protected source unchanged.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 
