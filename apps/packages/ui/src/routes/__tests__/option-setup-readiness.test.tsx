@@ -24,12 +24,6 @@ vi.mock("~/components/Layouts/Layout", () => ({
   )
 }))
 
-vi.mock("@/components/Common/PageAssistLoader", () => ({
-  PageAssistLoader: ({ label }: { label: string }) => (
-    <div data-testid="page-assist-loader">{label}</div>
-  )
-}))
-
 vi.mock("@/components/Option/Onboarding/UnifiedSetupWizard", () => ({
   UnifiedSetupWizard: () => (
     <section data-testid="unified-setup-shell">
@@ -418,10 +412,146 @@ describe("OptionSetup readiness route", () => {
     expect(headings).toHaveLength(1)
     expect(headings[0]).toHaveTextContent("Setup")
     expect(
-      screen.getByRole("heading", { level: 2, name: "Setup operator recovery" })
+      screen.getByRole("dialog", { name: "Loading setup..." })
     ).toBeInTheDocument()
-    expect(screen.getByTestId("page-assist-loader")).toBeInTheDocument()
+    expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { level: 2, name: "Setup operator recovery" })
+    ).not.toBeInTheDocument()
     expect(screen.queryByTestId("unified-setup-shell")).not.toBeInTheDocument()
+  })
+
+  it.each([
+    {
+      pending: "metadata",
+      state: firstRunState("not_started"),
+      metadata: null
+    },
+    { pending: "state", state: null, metadata: firstRunMetadata() },
+    {
+      pending: "metadata for completed setup",
+      state: firstRunState("completed"),
+      metadata: null
+    }
+  ])(
+    "keeps manual recovery hidden while $pending is loading",
+    ({ state, metadata }) => {
+      mocks.useSetupOnboarding.mockReturnValue(
+        setupReturn({ state, metadata, loading: true })
+      )
+
+      renderRoute()
+
+      expect(
+        screen.getByRole("dialog", { name: "Loading setup..." })
+      ).toBeInTheDocument()
+      expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "Test connection" })
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "Return home" })
+      ).not.toBeInTheDocument()
+    }
+  )
+
+  it("waits for metadata after state arrives before showing setup choices", () => {
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({ state: null, metadata: null, loading: true })
+    )
+    const view = renderRoute()
+
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: firstRunState("not_started"),
+        metadata: null,
+        loading: true
+      })
+    )
+    view.rerender(
+      <MemoryRouter>
+        <OptionSetup />
+      </MemoryRouter>
+    )
+
+    expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("dialog", { name: "Loading setup..." })
+    ).toBeInTheDocument()
+
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: firstRunState("not_started"),
+        metadata: firstRunMetadata()
+      })
+    )
+    view.rerender(
+      <MemoryRouter>
+        <OptionSetup />
+      </MemoryRouter>
+    )
+
+    expect(
+      screen.queryByRole("dialog", { name: "Loading setup..." })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Set up in WebUI" })
+    ).toBeEnabled()
+    expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument()
+  })
+
+  it("exposes failed-load recovery after the remaining initial request finishes", () => {
+    const error = new Error("Setup state failed")
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({ state: null, metadata: null, loading: true, error })
+    )
+    const view = renderRoute()
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument()
+
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: null,
+        metadata: firstRunMetadata(),
+        loading: false,
+        error
+      })
+    )
+    view.rerender(
+      <MemoryRouter>
+        <OptionSetup />
+      </MemoryRouter>
+    )
+
+    expect(
+      screen.queryByRole("dialog", { name: "Loading setup..." })
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole("alert")).toHaveTextContent("Setup state failed")
+    expect(screen.getByLabelText("API Key")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Test connection" })
+    ).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Return home" })).toBeEnabled()
+  })
+
+  it("preserves setup choices during a refresh with complete existing readiness", () => {
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: firstRunState("not_started"),
+        metadata: firstRunMetadata(),
+        loading: true
+      })
+    )
+
+    renderRoute()
+
+    expect(
+      screen.getByRole("button", { name: "Set up in WebUI" })
+    ).toBeEnabled()
+    expect(
+      screen.queryByRole("dialog", { name: "Loading setup..." })
+    ).not.toBeInTheDocument()
   })
 
   it("shows a self-host connection path before operator recovery", () => {

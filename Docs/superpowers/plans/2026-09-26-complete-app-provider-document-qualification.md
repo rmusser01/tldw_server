@@ -150,3 +150,13 @@ A separate setup-loading defect has two failing read-only diagnostic cases
 (18 existing cases pass): incomplete initial state/metadata exposes the manual
 API-key form. The proposed correction is pending user approval and has not been
 implemented. Existing browser acceptance checks remain unchanged.
+
+The user subsequently approved that bounded loading correction, tracked as
+TASK-13376.9. The route will retain its loader while either initial readiness
+value is missing and loading remains active, without exposing manual connection,
+operator recovery or a premature load error. Once loading finishes, existing
+missing-data/error recovery remains available; refreshes with both existing
+values retain their current usable surface. Route tests first reproduce the
+initial/partial-state and failure transition; then a minimal rendering guard is
+verified with the onboarding-hook and setup-choice suites and independent review.
+Browser acceptance checks and native qualification requirements remain unchanged.

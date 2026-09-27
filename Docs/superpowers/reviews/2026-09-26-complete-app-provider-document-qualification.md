@@ -307,3 +307,30 @@ This final evidence update changes only Markdown documentation and Backlog task
 records. `git diff --check` passed; there is no new Python scope for Bandit or
 behavior change requiring another regression run. The production verification
 and independent review recorded above still apply to the tested source commit.
+
+## Approved initial-loading correction (TASK-13376.9)
+
+The user approved the separate bounded setup-loading correction. The route now
+keeps its existing loader active while either initial state or metadata is
+missing and loading remains in progress. Its manual connection form, operator
+recovery and premature load-error alert are withheld during that interval.
+Once loading finishes, existing missing-data/error recovery is available again.
+Refreshes with both existing values keep their existing usable surface. No hook
+fetching, authentication, setup-choice rules or browser acceptance checks changed.
+
+Regression tests first failed 6 / passed 18, then the route, onboarding-hook and
+setup-choice suites passed all 60 tests. Tests now use the real loader's
+accessible dialog and cover partial readiness, state arriving before metadata,
+cached completed state, delayed failure recovery and refresh with complete data.
+An independent read-only reviewer found no Critical, Important or Minor issue
+and independently passed all 24 route tests. Node's existing experimental
+localStorage warning remains an environment warning, not a clean-output claim.
+
+ESLint applied from the workspace parent to both touched shared files and
+returned zero rule findings; its Next pages-directory configuration notice was
+recorded. The initial invocation from the frontend subdirectory ignored files
+outside its base path and is not counted as lint verification. New test regions
+match the shared code style; unrelated pre-existing whole-file formatting
+differences remain. Bandit is not applicable to this TypeScript-only production
+change. Fresh signed-candidate browser qualification remains pending; old native
+failure evidence and full product gates remain open.

@@ -45,7 +45,7 @@ const OptionSetup = () => {
   const showWizard =
     setupEntryMode === "webui" && isMutableWebUiSetupState(state)
   const shouldShowChoice = setupChoiceRequired && !showWizard
-  const showLoader = loading && !state
+  const showLoader = loading && (!state || !metadata)
   const showRouteHeading = showLoader || (!shouldShowChoice && !showWizard)
   const routeHeading = t("setupRoute.heading", "Setup")
   const setupErrorMessage = setupError
@@ -78,7 +78,7 @@ const OptionSetup = () => {
           />
         </div>
       ) : null}
-      {setupErrorMessage ? (
+      {!showLoader && setupErrorMessage ? (
         <p
           className="mx-auto mb-4 w-full max-w-3xl rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger"
           role="alert"
@@ -86,7 +86,7 @@ const OptionSetup = () => {
           {setupErrorMessage}
         </p>
       ) : null}
-      {!shouldShowChoice && !showWizard ? (
+      {!showLoader && !shouldShowChoice && !showWizard ? (
         <section className="mx-auto mb-4 w-full max-w-3xl rounded-lg border border-border bg-surface p-4 text-text shadow-sm">
           <div className="flex flex-col gap-4">
             <div>
@@ -213,7 +213,7 @@ const OptionSetup = () => {
           </div>
         </section>
       ) : null}
-      {!shouldShowChoice && !showWizard ? (
+      {!showLoader && !shouldShowChoice && !showWizard ? (
         <SetupRequiredPanel
           className="mx-auto mb-4 w-full max-w-3xl"
           title={t("setupRoute.recoveryTitle", "Setup operator recovery")}
