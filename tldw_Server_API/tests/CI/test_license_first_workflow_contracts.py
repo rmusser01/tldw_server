@@ -175,6 +175,10 @@ DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | {
     ("frontend-required.yml", "frontend-required"),
     ("security-required.yml", "security-required"),
 }
+GATE_JOBS = {"admission", "await_license"}
+# Required checks that must report red (not skip) on a negative license verdict.
+# backend-required is the pilot; extend as the pattern rolls out to the others.
+REPORT_RED_JOBS = {("backend-required.yml", "backend-required")}
 NON_ADMITTED_ROOT_JOBS = {
     ("ci.yml", "preflight-python-311"),
 }
@@ -327,9 +331,14 @@ def test_ordinary_pr_workflow_inventory_and_direct_triggers_are_frozen() -> None
 
 def test_all_ordinary_workflows_call_exact_inert_admission_gate() -> None:
     for name, (data, _) in _load_ordinary_workflows().items():
-        assert _trigger(data)["workflow_run"] == {
-            "workflows": ["Frontend License Gate Audit"],
-            "types": ["completed"],
+        # The workflow_run re-run was dropped (6dc0d9d14e): its check runs attach to
+        # the default branch SHA and can never satisfy a PR's required checks. The
+        # pull_request path now waits on the audit verdict via await_license.
+        assert "workflow_run" not in _trigger(data), name
+        assert data["jobs"]["await_license"] == {
+            "if": "github.event_name == 'pull_request'",
+            "uses": "./.github/workflows/license-first-await.yml",
+            "permissions": {"contents": "read", "statuses": "read"},
         }, name
 
         admission = data["jobs"]["admission"]
@@ -356,10 +365,41 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
             needs.admission.result == 'success' &&
             needs.admission.outputs.should_run == 'true'
           ) ||
-          github.event_name != 'workflow_run'
+          (
+            github.event_name != 'workflow_run' &&
+            (
+              needs.await_license.result == 'skipped' ||
+              needs.await_license.outputs.license_passed == 'true'
+            )
+          )
         )
         """
     )
+    license_negative = (
+        "github.event_name != 'workflow_run' && "
+        "needs.await_license.result != 'skipped' && "
+        "needs.await_license.outputs.license_passed != 'true'"
+    )
+    report_red_clause = f"""
+        always() && !cancelled() &&
+        (
+          (
+            github.event_name == 'workflow_run' &&
+            needs.admission.result == 'success' &&
+            needs.admission.outputs.should_run == 'true' &&
+            needs.changes.result == 'success'
+          ) ||
+          (
+            github.event_name != 'workflow_run' &&
+            (
+              needs.await_license.result == 'skipped' ||
+              needs.await_license.outputs.license_passed == 'true'
+            ) &&
+            needs.changes.result == 'success'
+          ) ||
+          ({license_negative})
+        )
+        """
     event_ref = (
         "${{ github.event.workflow_run.pull_requests[0].head.sha || "
         "github.event.pull_request.head.sha || github.sha }}"
@@ -397,12 +437,15 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
 
     for name, (data, _) in _load_ordinary_workflows().items():
         jobs = data["jobs"]
-        assert tuple(job_name for job_name in jobs if job_name != "admission") == ORIGINAL_JOB_NAMES[name]
+        assert tuple(job_name for job_name in jobs if job_name not in GATE_JOBS) == ORIGINAL_JOB_NAMES[name]
         for job_name in ORIGINAL_JOB_NAMES[name]:
             job = jobs[job_name]
             needs = _needs(job)
             original_needs = ORIGINAL_DEPENDENCIES.get((name, job_name), ())
-            assert tuple(dependency for dependency in needs if dependency != "admission") == original_needs
+            assert tuple(dependency for dependency in needs if dependency not in GATE_JOBS) == original_needs
+            # The two gates travel together: a job that honours admission must also
+            # wait for the license verdict, or the pull_request path runs it unordered.
+            assert ("admission" in needs) == ("await_license" in needs), (name, job_name)
 
             root = not original_needs
             directly_guarded = (name, job_name) in DIRECT_ADMISSION_JOBS
@@ -413,6 +456,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     assert job.get("if") is None, (name, job_name)
                     continue
                 assert needs.count("admission") == 1, (name, job_name)
+                assert needs.count("await_license") == 1, (name, job_name)
                 extra_condition = None
                 if name == "frontend-e2e-tiers.yml":
                     extra_condition = frontend_conditions[job_name]
@@ -435,6 +479,13 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 expected_condition = admission_clause
                 if extra_condition:
                     expected_condition += f" && ({extra_condition})"
+                if (name, job_name) in REPORT_RED_JOBS:
+                    # 121173ff3d: a negative verdict must reach a failing first step so
+                    # the required check reports red instead of skipping to green.
+                    expected_condition = report_red_clause
+                    first_step = job["steps"][0]
+                    assert _normalized(first_step["if"]) == _normalized(license_negative), (name, job_name)
+                    assert "exit 1" in first_step["run"], (name, job_name)
                 assert _normalized(job.get("if")) == _normalized(expected_condition), (name, job_name)
             else:
                 assert "admission" not in needs, (name, job_name)

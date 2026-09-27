@@ -710,7 +710,13 @@ def test_full_suite_summaries_follow_backend_path_filter() -> None:
     needs.admission.result == 'success' &&
     needs.admission.outputs.should_run == 'true'
   ) ||
-  github.event_name != 'workflow_run'
+  (
+    github.event_name != 'workflow_run' &&
+    (
+      needs.await_license.result == 'skipped' ||
+      needs.await_license.outputs.license_passed == 'true'
+    )
+  )
 ) && (
   (github.event_name != 'pull_request' &&
    github.event_name != 'workflow_run') ||
