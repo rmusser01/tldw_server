@@ -1,6 +1,127 @@
 # PR 3016 VN Durability Review Implementation Plan
 
+## Current Review Wave: Tasks55-58
+
+FINAL local independent SPEC/QUALITY/changed-contract PASS55-58/FeynmanCLOSED.
+New task-55-r1-review.md/own342 fullmatch; original323 remains322of323 qualifying
+ONLY postfreeze proof, originalreport/manifest/currentproof preserved. R1 corrects
+attribution via separate frozen8; R2 metadata qualified without source changes.
+Producer31/171/64/Main27 fullymatch; all test/scanner/reviewer sessions CLOSED.
+Applicable explicit11file hooksPassed/no-fileSkippedNOTpasses/deprecatedwarnings
+retained. Normal scoped commit/push next; no rebase while actualdev unchanged.
+Task59 CIfix approval/bodyapproval UNANSWERED/no source59edit/bodymutation.
+AC5/replies/new exact-head review/requiredCI/merge remain pending.
+
+Independent executable SPEC/changed-contract PASS for55-58; sole evidence QUALITY
+T5558-R1 accepted: original RED17typed+1queue fixture+1missingcursor, not18typed.
+Separate task-55-quality-correction.md/freeze8 preserves original report31 and
+all source bytes; scoped same-reviewer re-review pending/no test/scanner rerun.
+Main final current-byte checks separate3/5/1passed, XML0.303/20.055/3.354,
+6/16/6warnings, overlap NOTsum; eight-file Ruffempty/Banditexact1baselineB608,
+errors[]onlyB101excluded/exit1 NOTsecurityclean. No commit/push until approval.
+
+Task57 Main LOCAL COMPLETE after Carson model-capacity stop; no redispatch.
+Five target unit tests now tiered/documented/behavioral, eight other definitions
+and surrounding AST unchanged. Final native six:6pass0fail/errors/skips26warnings
+45.64/XML45.618 (SQLite1/required official PG5). Prior24unit pass predates final
+lookup doubles; final2lookup pass8warnings9.12, counts overlap/not summed.
+Scoped Ruffempty/Banditbaseline=final0errors[]onlyB101excluded. Mainaudit2649old
+artifacts/six unchanged production/sharedinputs/docs/types/tiers/compile verified.
+Original final audit failed on unrelated new stash shifting indexes; preserved,
+both required VN stash OIDs and four exact backups verified separately; original
+empty backup-prefix query gets no verification credit. New report/freeze171
+verified; Feynman independent55-58 approval pending. Task59 approval unanswered.
+
+New CI blocker/Task59 diagnosis: exact45dd JobsSQLite job108568580853 failed
+1278pass/1fail/4skip/577deselect/4193warnings1061.04s; raw log retained.
+Nested bad-bridge negative control has3setup errors under nativepytest9 because
+async autouse fixtures have no handling plugin, not its intended1pass2assertfails.
+Local copied probe with PytestRemovedIn9Warning promoted to error reproduces3
+setup errors under8.4; initial outside-repo marker config collection error was
+corrected with explicit existing pyproject config, no pass credit. Shared helper
+already sets asyncio_mode=auto. Proposed change: explicit pytest_asyncio.plugin
+ONLY in this nested probe, retain both negative assertion messages and no PG I/O.
+Explicit async approval requested/UNANSWERED; no Task59 repo source edit until
+approval. Production/shared fixtures/workflows/config remain unchanged.
+
+Exact45dd full review completed formal5329209644/terminal5853545759 at06:52Z;
+busy5853514378 freshly404. Fresh103reviews/two pages,87threads/6newunresolved,
+all nested pages exhausted/50comments. Tasks1-54 remain frozen/approved/CLOSED.
+Actualdev a6 unchanged/no rebase; AC5 reopened/AC6 pending/body approval unanswered.
+
+### Stage 1: Bound New Findings
+**Goal:** Verify six comments against current public behavior and approved recovery.
+**Success Criteria:** No unsafe losing-attempt deletion or new recovery promise.
+**Tests:** Public native lease takeover, registry identity, replay and quota outcomes.
+**Status:** Complete
+
+Task55/4114403284: use existing central BadRequestError for retry validation;
+it inherits ValueError, preserving deliberate existing catchers and messages.
+Task56/4114403286: central VN cursor exception inheriting RuntimeError; retain
+constant stalled code, original-frame privacy and native error propagation.
+Task57/4114403290/3291/3294: five PR-added AuthNZ tests gain precise unit tiers,
+typed comprehensive docs and behavioral assertions instead of SQL spelling/order.
+Use existing public repository/native fixture contracts; do not weaken quota,
+owner/feature isolation, canonical-reference or wrong-backend sensitivity.
+Task58/4114403297: investigate registration after lease loss through public
+takeover/replay. Existing replay discovers owned canonical references before
+adapter/saver; native registration is source-idempotent. No production cleanup
+change unless actual native behavior proves a gap within approved recovery.
+
+Task58 LOCALCOMPLETE/refutation/nativeSQLite2cases: successor reuses exact item/file,
+one physical18byte target and one user/org/team charge, no successor adapter/saver.
+Stale/foreign/discovery-revoked authority preserves hidden state; approved sibling
+and final replay stable. Copied discovery-omission control intentionally fails
+regeneration assertion yet native registration still onefile/onecharge. No
+production cleanup change. Initial missing sibling width/height fixture failures
+NOTproductRED; final2pass4warnings6.38/XML5.827. New64freeze verified/RawlsCLOSED;
+independent review pending. Existing nonterminal preservation contract retained.
+
+### Stage 2: Scoped Implementation
+**Goal:** Minimal typed errors and behavior-sensitive test corrections.
+**Success Criteria:** Jobs retry SQL/policy/accounting unchanged; shared fixtures,
+configuration, worker/storage/AuthNZ production unchanged absent a recorded ruling.
+**Tests:** Focused RED/GREEN for changed contracts and bounded public/native controls;
+scoped Ruff/Bandit baseline, compile/docs/types/tiers; no broad-suite repetition.
+**Status:** Complete
+
+### Stage 3: Independent Review And Integration
+**Goal:** Fresh independent SPEC then QUALITY per task/final changed contract.
+**Success Criteria:** Frozen evidence preserved with only exact superseded live
+paths qualified; normal scoped commit/push after approval; individual exact replies.
+**Tests:** Bounded controller verification, explicit applicable hooks, newest exact
+head full Qodo and seven required contexts before authorized normal merge.
+**Status:** In Progress
+
+Ruling: preserve nonterminal registered bytes while verifying takeover reuse --
+the approved design explicitly requires it and native source registration is
+idempotent -- a mistaken ruling costs a bounded test/contract correction, never
+speculative deletion of bytes needed by an authoritative successor.
+
 ## Current Review Wave: Tasks49-54
+
+LATEST INTEGRATION: normal11filecommit177b9a10b74361a80f335f098c56a6433462524d,
+preservationcheckednormal25commitrebase and exact9fdelease push/GitHubverified
+45dd1e96dd6884bc621d7f662f2b19a27f3e5f54. Actualdev advanced again toa6e51f60d532e33d20f426f636edca2d049444fd;
+staled5rebase neverexecuted. Threebasepaths/zerooverlap68owned/all25patchesequal/
+all68fullrawdiffs+sourcebytesidentical. Fourthbackupbefore-dev-d5c465-177b9a10
+retains177b/allolderrefs/bothappliedstashes intact. Postrebase3pass0failerrorsskips
+6warnings5.46/XML3time4.606/overlapNOTsum. NormalcommitNOhookoutput/no commitstage
+executionclaim/no bypass; explicitapplicablehooksPassed/no-fileSkippedNOTpasses/
+deprecatedwarnings/inheritedpackinggcnoticesretained/nomanualcleanup. Alllocal
+Tasks1-54 COMPLETE/frozen/independentlyapproved/allneededagents+sessionsCLOSED.
+Newintegration25/R117/review32/currentandqualifiedolderhashesverified.
+Eightindividualtested/reasonedreplies exactbody/linkageverified/alltargetthreads
+resolved; fresh102reviews(bothpages)/81threads0unresolved/allnestedpagesexhausted.
+ONEfullEXACT45ddrequest5853512979 at06:48:22Z PENDING/busy5853514378 at06:48:34Z,
+livebodyinspected/50conversationcomments. Push-summary0bugs0rules66historical
+omissions/current45footer NOTfullcompletion. Exact45dd54actualchecks33queued/
+21completed(1cancelled1neutral19skipped)/no actionablefailure/ALL7requiredcontexts
+ABSENTincltrustedlicensecommitstatus; CodeRabbitsuccessonly55017563662/reviewskipped
+NOTrequiredpass. OPEN/BLOCKED/notmerged/no mergeattempt/AC5checkedAC6pending.
+BodyVerificationapprovalunanswered/no mutation/bypass/no tracking-onlypush.
+See task-49-54-integration.md and new task4954-integration-evidence/SHA256SUMS25.
+Historical wave progression below is qualified, not the current pending head.
 
 At05:41UTC the authorized post-backoff conversation read succeeded: one valid
 page/48comments/exit0. The two historical403 reads remain qualified failures,

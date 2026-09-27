@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import LegacyActivityReader
-from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
+from tldw_Server_API.app.core.exceptions import VNAssetGenerationError, VNLegacyActivityCursorError
 
 VN_ASSETS_DOMAIN = "vn_assets"
 VN_ASSET_ENQUEUE_BATCH_JOB_TYPE = "vn_asset_enqueue_batch"
@@ -476,6 +476,10 @@ def build_legacy_activity_reader(jobs_manager: Any) -> LegacyActivityReader:
     The optional finishing ID/lease excludes only one caller's SDK handoff,
     not its replacement attempt or any live sibling. Published provenance
     settles only the exact current delivery, never unknown historical work.
+
+    Raises:
+        VNLegacyActivityCursorError: A full page repeats its prior cursor.
+        Native Jobs read failures propagate unchanged to display reconciliation.
     """
     def read(
         pack_id: int, slot_id: int, user_id: int, batches: Mapping[int, str],
@@ -535,7 +539,7 @@ def build_legacy_activity_reader(jobs_manager: Any) -> LegacyActivityReader:
                         "before_id": int(last["id"]),
                     }
                     if next_cursor == cursor:
-                        raise RuntimeError("vn_asset_legacy_jobs_cursor_stalled")
+                        raise VNLegacyActivityCursorError("vn_asset_legacy_jobs_cursor_stalled")
                     cursor = next_cursor
         return False, False
 

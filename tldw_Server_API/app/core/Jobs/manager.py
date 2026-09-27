@@ -4004,22 +4004,26 @@ class JobManager:
         renew only the bounded attempt budget. Queued/processing concurrent
         calls replay without consuming quota or emitting another event.
         Rejections, cancellations and bookkeeping errors make no transition.
+
+        Raises:
+            BadRequestError: Invalid identity/payload or facade admission policy;
+                remains compatible with callers catching ValueError.
         """
         if isinstance(job_id, bool) or not isinstance(job_id, int) or job_id <= 0:
-            raise ValueError("Jobs retry requires a positive job ID")
+            raise BadRequestError("Jobs retry requires a positive job ID")
         for value in (owner_user_id, expected_uuid, domain, queue, job_type, idempotency_key):
             if not isinstance(value, str) or not value.strip():
-                raise ValueError("Jobs retry identity must be nonempty")
+                raise BadRequestError("Jobs retry identity must be nonempty")
         if not isinstance(expected_payload, dict):
-            raise ValueError("Jobs retry payload must be an object")
+            raise BadRequestError("Jobs retry payload must be an object")
         if domain != "vn_assets" or job_type != "vn_asset_enqueue_batch":
-            raise ValueError("Jobs explicit retry requires a VN receipt parent")
+            raise BadRequestError("Jobs explicit retry requires a VN receipt parent")
         if (
             set(expected_payload) != {"pack_id", "batch_id", "user_id"}
             or any(type(value) is not int or value <= 0 for value in expected_payload.values())
             or str(expected_payload["user_id"]) != owner_user_id
         ):
-            raise ValueError("Jobs retry requires an exact owned VN parent payload")
+            raise BadRequestError("Jobs retry requires an exact owned VN parent payload")
         command = CreateJobCommand(
             domain=domain, queue=queue, job_type=job_type, owner_user_id=owner_user_id,
             payload=expected_payload, idempotency_key=idempotency_key,
@@ -4028,12 +4032,12 @@ class JobManager:
         def check_policy() -> None:
             """Reuse facade admission policy without rewriting immutable payload."""
             if queue not in self._get_allowed_queues(domain):
-                raise ValueError("Jobs retry queue is not allowed")
+                raise BadRequestError("Jobs retry queue is not allowed")
             allowed_types = []
             for variable in ("JOBS_ALLOWED_JOB_TYPES", f"JOBS_ALLOWED_JOB_TYPES_{domain.upper()}"):
                 allowed_types.extend(value.strip() for value in os.getenv(variable, "").split(",") if value.strip())
             if allowed_types and job_type not in allowed_types:
-                raise ValueError("Jobs retry type is not allowed")
+                raise BadRequestError("Jobs retry type is not allowed")
             if owner_user_id and _fair_share_enabled():
                 scheduler = _get_fair_share()
                 if not scheduler.can_submit(owner_user_id, self._count_active_jobs_for_user(owner_user_id)):

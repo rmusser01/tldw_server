@@ -78,6 +78,14 @@ class JobsRetryAdmissionIndexError(RuntimeError):
     """
 
 
+class VNLegacyActivityCursorError(RuntimeError):
+    """A stalled read-only Jobs cursor during VN legacy display reconciliation.
+
+    Retains RuntimeError compatibility and the constant safe cursor error code.
+    Native Jobs/database read failures are not wrapped in this domain type.
+    """
+
+
 class LegacyDisplayReconciliationError(RuntimeError):
     """Safe VN display rollback error, not a generation or SDK retry outcome.
 

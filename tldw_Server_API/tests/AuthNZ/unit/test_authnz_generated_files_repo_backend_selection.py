@@ -167,34 +167,68 @@ async def test_create_file_postgres_backend_selection_uses_fetchrow():
     assert len(params) >= 18
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_source_ref_lookup_scopes_sqlite_to_owner_and_feature() -> None:
-    conn = _SqliteConnWithFetchrowTrap()
+    """Return the owned SQLite lookup result, never another requested scope.
+
+    Args:
+        None. The connection double supplies distinct owner/feature responses.
+
+    Returns:
+        None. Assert public row normalization, scope forwarding and misses;
+        native companion coverage proves the database's filtering semantics.
+    """
+    conn = _ScopedSqliteLookup()
     repo = AuthnzGeneratedFilesRepo(db_pool=_PoolStub(conn, postgres=False))
 
     record = await repo.get_file_by_source_ref(
         user_id=5, source_feature="vn_assets", source_ref="vn_asset_item:4"
     )
 
-    assert record["id"] == 11
-    query, params = conn.execute_calls[-1]
-    assert "user_id = ? AND source_feature = ? AND source_ref = ?" in query
-    assert params == (5, "vn_assets", "vn_asset_item:4")
+    assert record == {"id": 11, "user_id": 5, "source_feature": "vn_assets",
+                      "source_ref": "vn_asset_item:4", "is_deleted": False}
+    assert await repo.get_file_by_source_ref(
+        user_id=6, source_feature="vn_assets", source_ref="vn_asset_item:4",
+    ) is None
+    assert await repo.get_file_by_source_ref(
+        user_id=5, source_feature="image_gen", source_ref="vn_asset_item:4",
+    ) is None
+    assert await repo.get_file_by_source_ref(
+        user_id=5, source_feature="vn_assets", source_ref="vn_asset_item:5",
+    ) is None
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_source_ref_lookup_scopes_postgres_to_owner_and_feature() -> None:
-    conn = _PostgresConnWithSqliteTrap()
+    """Normalize an owned PostgreSQL lookup and preserve requested scope misses.
+
+    Args:
+        None. The PostgreSQL double rejects SQLite connection operations.
+
+    Returns:
+        None. Assert public owner/feature/ref responses without SQL spelling;
+        native companion coverage proves actual database isolation.
+    """
+    conn = _ScopedPostgresLookup()
     repo = AuthnzGeneratedFilesRepo(db_pool=_PoolStub(conn, postgres=True))
 
     record = await repo.get_file_by_source_ref(
         user_id=5, source_feature="vn_assets", source_ref="vn_asset_item:4"
     )
 
-    assert record["id"] == 9
-    query, params = conn.fetchrow_calls[-1]
-    assert "user_id = $1 AND source_feature = $2 AND source_ref = $3" in query
-    assert params == (5, "vn_assets", "vn_asset_item:4")
+    assert record == {"id": 9, "user_id": 5, "source_feature": "vn_assets",
+                      "source_ref": "vn_asset_item:4", "is_deleted": False}
+    assert await repo.get_file_by_source_ref(
+        user_id=6, source_feature="vn_assets", source_ref="vn_asset_item:4",
+    ) is None
+    assert await repo.get_file_by_source_ref(
+        user_id=5, source_feature="image_gen", source_ref="vn_asset_item:4",
+    ) is None
+    assert await repo.get_file_by_source_ref(
+        user_id=5, source_feature="vn_assets", source_ref="vn_asset_item:5",
+    ) is None
 
 
 def test_generated_files_repo_exposes_stt_audio_constants() -> None:
@@ -204,24 +238,37 @@ def test_generated_files_repo_exposes_stt_audio_constants() -> None:
     assert SOURCE_FEATURE_STT in VALID_SOURCE_FEATURES
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("postgres", [False, True])
 async def test_vn_source_registration_reuses_live_record_in_transaction(postgres: bool) -> None:
+    """Replay the live row's normalized identity rather than candidate metadata.
+
+    Args:
+        postgres: Select the PostgreSQL fetchrow or SQLite execute trap double.
+
+    Returns:
+        None. Assert the public replay result equals the current live lookup;
+        native companion tests prove persistence and transaction exclusivity.
+    """
     conn = _PostgresConnWithSqliteTrap() if postgres else _SqliteConnWithFetchrowTrap()
     repo = AuthnzGeneratedFilesRepo(db_pool=_PoolStub(conn, postgres=postgres))
 
+    current = await repo.get_file_by_source_ref(
+        user_id=5, source_feature="vn_assets", source_ref="vn_asset_item:4",
+    )
+    assert current is not None
     record = await repo.create_file(
         user_id=5, filename="loser.png", storage_path="vn_assets/loser.png",
         file_category="image", source_feature="vn_assets", source_ref="vn_asset_item:4",
     )
 
-    assert record["_idempotent_replay"] is True
-    calls = conn.fetchrow_calls if postgres else conn.execute_calls
-    assert all("insert into generated_files" not in query.lower() for query, _params in calls)
-    if postgres:
-        assert "pg_advisory_xact_lock" in calls[0][0]
+    assert record == {**current, "_idempotent_replay": True}
+    assert record["id"] == (9 if postgres else 11)
+    assert record["user_id"] == 5
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("postgres", [False, True])
 @pytest.mark.parametrize("source_feature,source_ref", [
@@ -237,6 +284,17 @@ async def test_vn_source_registration_reuses_live_record_in_transaction(postgres
 async def test_only_canonical_vn_item_refs_are_idempotent(
     postgres: bool, source_feature: str, source_ref: str,
 ) -> None:
+    """Keep malformed or non-VN references on the ordinary registration path.
+
+    Args:
+        postgres: Select the PostgreSQL or SQLite backend connection double.
+        source_feature: Feature owning the reference, including a non-VN control.
+        source_ref: Empty, malformed, nonpositive, padded or suffixed item ref.
+
+    Returns:
+        None. Assert a normalized new-record result without a replay marker;
+        native companion tests prove two distinct persisted registrations.
+    """
     conn = _PostgresConnWithSqliteTrap() if postgres else _SqliteConnWithFetchrowTrap()
     repo = AuthnzGeneratedFilesRepo(db_pool=_PoolStub(conn, postgres=postgres))
 
@@ -246,22 +304,62 @@ async def test_only_canonical_vn_item_refs_are_idempotent(
     )
 
     assert not record.get("_idempotent_replay", False)
-    calls = conn.fetchrow_calls if postgres else conn.execute_calls
-    assert any("insert into generated_files" in query.lower() for query, _params in calls)
+    assert record["id"] == (9 if postgres else 11)
+    assert record["user_id"] == 5
+    assert record["tags"] == (["beta"] if postgres else ["alpha"])
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_postgres_vn_admission_locks_all_quota_scopes_on_the_bound_connection() -> None:
+    """Keep PostgreSQL admission and public reads usable on the bound repository.
+
+    Args:
+        None. The connection double rejects SQLite methods on PostgreSQL.
+
+    Returns:
+        None. Assert the normalized public row remains available after quota
+        admission; native companion tests prove all three locks and release.
+    """
     conn = _PostgresConnWithSqliteTrap()
     repo = AuthnzGeneratedFilesRepo(db_pool=_PoolStub(conn, postgres=True))
 
     async with repo.vn_item_transaction(user_id=5, source_ref="vn_asset_item:42") as bound_repo:
         await bound_repo.lock_quota_scopes(user_id=5, org_id=51, team_id=52)
+        record = await bound_repo.get_file_by_id(9)
 
-    calls = conn.fetchrow_calls
-    assert "pg_advisory_xact_lock" in calls[0][0]
-    assert [(" ".join(query.split()), params) for query, params in calls[1:]] == [
-        ("SELECT id FROM users WHERE id = $1 FOR UPDATE", (5,)),
-        ("SELECT id FROM storage_quotas WHERE org_id = $1 FOR UPDATE", (51,)),
-        ("SELECT id FROM storage_quotas WHERE team_id = $1 FOR UPDATE", (52,)),
-    ]
+    assert record == {"id": 9, "uuid": "uuid-2", "user_id": 5, "tags": ["beta"],
+                      "is_transient": False, "is_deleted": False}
+
+
+class _ScopedSqliteLookup(_SqliteConnWithFetchrowTrap):
+    """Supply scope-specific rows without interpreting SQL or weakening the trap."""
+
+    async def execute(self, _query: str, params: Any) -> _SqliteCursor:
+        """Return the requested scope response; native tests verify SQL filtering."""
+        return _SqliteCursor(
+            row=(11, 5, "vn_assets", "vn_asset_item:4", 0)
+            if tuple(params) == (5, "vn_assets", "vn_asset_item:4") else None,
+            description=[("id",), ("user_id",), ("source_feature",),
+                         ("source_ref",), ("is_deleted",)],
+        )
+
+
+class _ScopedPostgresLookup:
+    """Supply PostgreSQL scope responses while retaining wrong-backend traps."""
+
+    def __init__(self) -> None:
+        """Reuse the original PostgreSQL method and placeholder traps."""
+        self._trap = _PostgresConnWithSqliteTrap()
+
+    async def execute(self, *args: Any, **kwargs: Any) -> Any:
+        """Reject SQLite execution through the unchanged original trap."""
+        return await self._trap.execute(*args, **kwargs)
+
+    async def fetchrow(self, query: str, *params: Any) -> dict[str, Any] | None:
+        """Return the requested scope's driver-shaped row, not a SQL-parser fake."""
+        await self._trap.fetchrow(query, *params)
+        if params != (5, "vn_assets", "vn_asset_item:4"):
+            return None
+        return {"id": "9", "user_id": "5", "source_feature": "vn_assets",
+                "source_ref": "vn_asset_item:4", "is_deleted": False}
