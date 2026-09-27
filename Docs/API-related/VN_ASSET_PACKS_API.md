@@ -225,6 +225,10 @@ not the path itself. A changed path or mode fails with
 Start generation to use the new configuration. The referenced file's contents
 are not copied or pinned.
 
+If fanout confirms that every selected slot has zero variants, the accepted
+batch completes without child jobs. Empty batches do not block later lazy-depth
+generation, and replay does not reopen them.
+
 Status response:
 
 ```json

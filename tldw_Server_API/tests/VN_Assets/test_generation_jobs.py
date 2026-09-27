@@ -1895,6 +1895,76 @@ async def test_zero_variant_full_batch_preserves_active_lazy_depth_outcome(
     assert service.repo.get_slot(background.id)["latest_generation_batch_id"] == full_batch["id"]
 
 
+@pytest.mark.parametrize("explicit_slot", [False, True])
+@pytest.mark.parametrize("lost_parent_response", [False, True])
+@pytest.mark.parametrize("legacy_recipe", [False, True])
+def test_zero_work_fanout_completes_and_allows_later_lazy_depth(
+    service: VNAssetPackService,
+    character_id: int,
+    fake_jobs: FakeJobs,
+    monkeypatch: pytest.MonkeyPatch,
+    explicit_slot: bool,
+    lost_parent_response: bool,
+    legacy_recipe: bool,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    pack = service.create_pack(VNAssetPackCreate(title="Empty fanout", primary_character_id=character_id))
+    background = service.create_slot(
+        pack.id, VNAssetSlotCreate(asset_type="background", slot_key="background.interior", variant_count=0),
+    )
+    depth = service.create_slot(
+        pack.id, VNAssetSlotCreate(
+            asset_type="depth_companion", slot_key="depth.interior", variant_count=0,
+            required_for_runtime=False, depends_on_slot_id=background.id,
+        ),
+    )
+    request = VNAssetGenerationRequest(slot_ids=[depth.id] if explicit_slot else [])
+    if lost_parent_response:
+        create_job = fake_jobs.create_job
+
+        def persist_then_fail(**kwargs: Any) -> dict[str, Any]:
+            create_job(**kwargs)
+            raise RuntimeError("parent response lost")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(fake_jobs, "create_job", persist_then_fail)
+            with pytest.raises(RuntimeError, match="parent response lost"):
+                service.start_generation(pack.id, request)
+    else:
+        service.start_generation(pack.id, request)
+    parent = fake_jobs.created[-1]
+    batch_id = parent["payload"]["batch_id"]
+    if legacy_recipe:
+        service.repo.update_batch(batch_id, {"recipe_json": None})
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=fake_jobs, image_registry=FakeImageRegistry(FakeImageAdapter()),
+    )
+
+    result = worker.handle_enqueue_batch(parent["payload"])
+
+    assert result["status"] == "completed"
+    assert result["planned_count"] == 0
+    assert result["enqueued_count"] == 0
+    batch = service.repo.get_batch(batch_id)
+    assert batch["completed_at"] is not None
+    assert batch["enqueue_error"] is None
+    assert len(fake_jobs.created) == 1
+    assert service.get_generation_status(pack.id).status == "completed"
+    worker.handle_enqueue_batch(parent["payload"])
+    assert service.repo.get_batch(batch_id)["completed_at"] == batch["completed_at"]
+    assert len(fake_jobs.created) == 1
+
+    item = service.repo.create_item(pack_id=pack.id, slot_id=background.id, review_status="draft")
+    service.review_item_for_pack(
+        pack.id, int(item["id"]), VNAssetReviewRequest(review_status="approved", preferred=True),
+    )
+    lazy_batch = service.repo.get_batch(fake_jobs.created[-1]["payload"]["batch_id"])
+    assert lazy_batch["id"] != batch_id
+    assert lazy_batch["planned_count"] == 1
+    assert json.loads(lazy_batch["options_json"])["slot_ids"] == [depth.id]
+
+
 def test_lazy_depth_generation_does_not_duplicate_active_depth_batch(
     service: VNAssetPackService,
     character_id: int,

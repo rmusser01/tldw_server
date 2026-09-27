@@ -1887,7 +1887,7 @@ class VNAssetPacksRepository:
                    SET status = 'completed', completed_at = COALESCE(completed_at, CURRENT_TIMESTAMP),
                        updated_at = CURRENT_TIMESTAMP
                    WHERE id = ? AND status = 'enqueued' AND failed_count = 0
-                     AND planned_count > 0 AND completed_count >= planned_count""",
+                     AND planned_count >= 0 AND completed_count >= planned_count""",
                 (batch_id,),
             )
         batch = self.get_batch(batch_id)

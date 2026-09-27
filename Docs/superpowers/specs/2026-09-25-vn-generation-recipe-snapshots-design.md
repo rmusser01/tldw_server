@@ -126,6 +126,9 @@ active source work, a genuine enqueue rejection remains retryable.
 Accepting a queued batch claims slot outcome ownership only for recorded slots
 with planned variants. Zero-variant lazy-depth entries remain in the recipe,
 but cannot replace an active depth batch's ownership or suppress its outcome.
+After fanout establishes an authoritative zero-variant plan, the batch completes
+without waiting for nonexistent children. Empty generation preserves normal
+and legacy replay behavior and does not block later lazy-depth scheduling.
 
 ## Verification
 
