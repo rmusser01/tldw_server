@@ -4,7 +4,7 @@ title: Implement Chat Macros v1.1 authoring and output profiles
 status: In Progress
 assignee: []
 created_date: '2026-08-24 04:15'
-updated_date: '2026-09-26 21:46'
+updated_date: '2026-09-27 02:31'
 labels:
   - chat-macros
   - frontend
@@ -83,6 +83,8 @@ Fingerprint correction verification: regenerated OpenAPI JSON+TypeScript using C
 2026-09-26 11:30 UTC: dev advanced to a2826f103f via PR3017 (VZ failure-drill tests and tooling). Rebased all 26 commits cleanly; range-diff confirms all patch-equivalent and apps, backend application, and Helper_Scripts trees unchanged. Fresh CI-matched OpenAPI contract check and full PR diff whitespace check pass. Previous head had six required gates successful with frontend-required queued, no failures or new Qodo findings. Publishing rebase with exact lease against 3b49e85220; fresh required CI remains the merge gate.
 
 2026-09-26 21:45 UTC: dev advanced to f5fa1f3a41 via PR3006 (sync blob-upload expiry). Rebased all 27 prior PR commits cleanly; range-diff confirms all patch-equivalent. Chat Macros and frontend unchanged. Fresh CI-matched OpenAPI contract check and full PR diff whitespace check pass. No new Qodo comments/findings. Prior head had only frontend-required running; all other required gates passed. Publish with exact lease against89f54f2893 and await fresh required CI; do not bypass merge policy.
+
+2026-09-27 02:30 UTC: rebased cleanly onto dev f94375c26e (PR2997 MCP filesystem/test-tooling fixes). All28 prior commits patch-equivalent by range-diff; frontend and Chat Macros files unchanged. Fresh CI-matched OpenAPI contract and full PR whitespace checks pass. No new Qodo findings or comments. Publish with exact lease against0b045e71f7; required CI remains pending. No new application changes or additional security scan scope from this rebase.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
