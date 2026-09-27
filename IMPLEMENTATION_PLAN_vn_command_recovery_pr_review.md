@@ -14,6 +14,26 @@ expected-head lease on publication. Exclude local preview link and archive13379.
 frontend typecheck, scoped lint, diff checks; unchanged VN Python Bandit baseline.
 **Status**: Complete
 
+Final merge audit found dev advanced to
+`3c9d97c56b29abc4c0396274b9560859aee06959` through independently merged core
+PR #3011 (611 files, including AuthNZ, DB, frontend and CI changes). Clean tracked
+checkout and owned remote `5aeaa11ae02250d0d99e997b70f5d7b3727594be` were
+verified before the conflict-free rebase. Final completed-rebase range-diff
+preserves all 23 prior patches unchanged. Fresh 215 VN/fetch/shared-auth tests
+pass (31.64s, one worker); all 393 VN backend tests pass (282.81s, 13 warnings,
+normal exit 0), using the main environment, existing temporary CI overlay and
+approved DB temp root. Typecheck, both scoped lint commands, backend compilation
+and diff checks pass. Unchanged VN Python Bandit reports zero findings/errors
+over 9064 lines; it does not scan TypeScript. Backend, workflows, unrelated tasks
+and shared TldwAuth remain equal to the new base. No tests skipped, limits
+weakened or environments changed. Publication must protect the full owned 5ae
+remote head with an explicit lease. Its seven required gates and complete hosted
+reviews passed before this base advance; CodeRabbit explicitly withdrew its
+readable-command discard suggestion after the source/design disposition. Those
+results are historical, not qualification of this new base/head. The additional
+commit records only TASK-13385 and this plan; new complete reviews, exact-head CI
+and verified normal merge remain pending. Stage 2/3 remain In Progress.
+
 Dev advanced to `df1fcc7a52306f400b843c8b0ea0bc90d0396056` through independently
 merged Persona PR #2817. Its 95-file integration includes shared UI, ChaChaNotes
 SQLite V73/PostgreSQL V77 migrations, Persona schemas and fingerprint, published
