@@ -131,6 +131,8 @@ Final focused integration passed **1095 tests, four existing macOS Bash >=4 skip
 
 ### Remaining Stage 2 Scope
 
+The [current-dev executable Stage 2C plan](2026-09-27-persona-workspace-strict-startup-implementation-plan.md) is the detailed execution contract. Requester-approved follow-up amendments add idle outermost startup/replay ownership and post-commit responses, strict-only Unicode/byte/body bounds, immutable database-owner admission and typed resolver-error translation. Session preparation/preview/complete-v2 remain global-only, with deliberate Workspace rejection tests; supported Workspace Persona generation uses ordinary scoped chat. No Workspace-session support or Stage 2D completion is claimed. TASK-13245.7 must be repaired before lifecycle qualification, and a separate execution task is still required before runtime edits.
+
 **Files:**
 - Modify `tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py` and `tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py`.
 - Modify `tldw_Server_API/app/api/v1/schemas/workspace_schemas.py`, `chat_session_schemas.py`, and `chat_conversation_schemas.py` in the same schemas directory.

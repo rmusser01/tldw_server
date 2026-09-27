@@ -4,7 +4,7 @@ title: Persist Workspace Persona opt-out and conversation provenance
 status: In Progress
 assignee: []
 created_date: '2026-09-13 18:15'
-updated_date: '2026-09-27 15:57'
+updated_date: '2026-09-27 17:31'
 labels:
   - persona
   - workspaces
@@ -51,6 +51,8 @@ Requester-requested second design review completed in TASK-13245.1/PR #2958. Ver
 2026-09-27: continued after normal integrated PR2963 merge. Created planning child TASK-13245.6 for Stage2C on latest audited server base 9668e1454b0b28b7a4de13e1a35496fa0b368c42 with native H1/H2. New design/plan explicitly requires receipt RLS in shared PostgreSQL, endpoint Persona guard before routing/credentials, deadlock-safe FK/replay locks and closure-fenced receipt-bound restore/Sync resurrection before route activation. Planning review/baseline underway; no runtime edits. Corrected stale completed Stage2A child TASK-13245.2 to Done based on integrated merge. Parent remains In Progress; Stage2C/2D and broader tool-profile/provisioning/Research work remain open.
 
 2026-09-27 Stage 2C planning child TASK-13245.6 complete: current-dev source-backed refresh and five-stage plan independently reviewed; requester review required before runtime execution. Fresh unmodified official SQLite/live-PG baseline: 490 passed, one failed, one known SQLite parametrization skip, six warnings. Native PostgreSQL cascade retry leaks its enumeration read transaction after child failure; exact causal diagnostic recorded and separate prerequisite TASK-13245.7 filed To Do, not hidden or claimed fixed. Persona prompt/memory fixtures pass without modification. Canonical docs updated; no app/test/workflow diff against audited dev9668. Stage 2C/2D, profile/provisioning and Research adoption remain open; no broader parity certification.
+
+Requester-approved TASK-13245.6 follow-up planning amendments cover strict transaction ownership/post-commit responses, backend-safe bounded text/body, immutable-owner admission and typed unavailable translation. Session preparation/preview/complete-v2 explicitly remain global-only; no Workspace session parity is claimed. Current refresh/executable plan and canonical documents carry the constraints and test gates; no Stage 2C runtime implementation in this amendment. TASK-13245.7 remains prerequisite; Stage 2C/2D and broader parity work remain open.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

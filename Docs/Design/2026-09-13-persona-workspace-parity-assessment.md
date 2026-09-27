@@ -2,6 +2,8 @@
 
 Status: Original assessment complete. Stage 1 and Stage 2A/2B delivered through merged PR #2963 on 2026-09-27. Stage 2C planning refresh is complete under TASK-13245.6, awaiting requester review before execution; Stage 2D and Stages 3-5 remain open. The original pinned matrix below is historical, not a fresh cross-client parity claim. Proposed later-stage decisions require their scoped review gates.
 
+Requester-approved review amendments are recorded in the [Stage 2C refresh](2026-09-27-persona-workspace-strict-startup-refresh.md): explicit startup transaction ownership/commit boundaries, bounded backend-safe input, immutable-owner admission and typed unavailable-error translation. Session preparation/preview/complete-v2 remain global-only; no Workspace-session parity claim follows. All Stage 2C runtime stages remain Not Started and TASK-13245.7 remains a prerequisite.
+
 Tracking: [#2950](https://github.com/rmusser01/tldw_server/issues/2950), TASK-13243. Predecessor [#1911](https://github.com/rmusser01/tldw_server/issues/1911) remains closed for completed V1 scope.
 
 Contract: [Workspace Assistant Defaults PRD](../Product/Workspace_Persona_Defaults_PRD.md).
