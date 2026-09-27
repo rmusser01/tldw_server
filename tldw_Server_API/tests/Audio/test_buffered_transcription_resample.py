@@ -131,6 +131,26 @@ def test_empty_audio_does_not_raise(no_librosa: None) -> None:
     assert len(resampled) == 0
 
 
+def test_empty_audio_does_not_raise_without_scipy_either(
+    no_librosa: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The linear-interpolation leg cannot interpolate zero samples: np.interp raises."""
+    monkeypatch.setitem(sys.modules, "scipy", None)
+
+    resampled = _transcriber()._resample(np.array([], dtype=np.float32), 48_000, 16_000)
+
+    assert len(resampled) == 0
+
+
+@pytest.mark.parametrize(("orig_sr", "target_sr"), [(-48_000, 16_000), (0, 16_000), (48_000, 0)])
+def test_a_non_positive_rate_is_rejected(no_librosa: None, orig_sr: int, target_sr: int) -> None:
+    """A bad rate must fail loudly, not come back as one sample the caller labels 16 kHz."""
+    audio = np.zeros(1_000, dtype=np.float32)
+
+    with pytest.raises(ValueError, match="sample rate"):
+        _transcriber()._resample(audio, orig_sr, target_sr)
+
+
 def test_librosa_is_still_preferred_when_available(monkeypatch: pytest.MonkeyPatch) -> None:
     """Control: the fallback must not displace librosa where it is installed.
 
@@ -140,8 +160,11 @@ def test_librosa_is_still_preferred_when_available(monkeypatch: pytest.MonkeyPat
     calls: list[tuple[int, int]] = []
 
     class _FakeLibrosa:
+        """Stands in for librosa and records each resample call."""
+
         @staticmethod
-        def resample(audio, *, orig_sr, target_sr):
+        def resample(audio: np.ndarray, *, orig_sr: int, target_sr: int) -> np.ndarray:
+            """Record the rates and return a zero buffer of the resampled length."""
             calls.append((orig_sr, target_sr))
             return np.zeros(len(audio) * target_sr // orig_sr, dtype=np.float32)
 

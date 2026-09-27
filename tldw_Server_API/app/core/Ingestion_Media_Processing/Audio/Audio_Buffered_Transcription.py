@@ -547,7 +547,9 @@ class BufferedTranscriber:
         that module in eagerly drags heavy optional dependencies into every import of
         this one.
         """
-        if orig_sr == target_sr:
+        if orig_sr <= 0 or target_sr <= 0:
+            raise ValueError(f"sample rate must be positive, got {orig_sr} Hz -> {target_sr} Hz")
+        if orig_sr == target_sr or len(audio) == 0:
             return np.asarray(audio, dtype=np.float32)
         try:
             import librosa
