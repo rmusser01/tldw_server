@@ -688,6 +688,104 @@ describe('VNAssetsWorkbench', () => {
     await act(async () => { resolveStart({ status: 'queued' }); });
   });
 
+  it.each(['focus', 'pageshow'].flatMap((event) =>
+    ['success', 'failure'].flatMap((outcome) =>
+      ['processing', 'failed'].map((status) => ({ event, outcome, status }))),
+  ))('keeps an unresolved Cancel guarded across same-account $event with $status until $outcome', async ({ event, outcome, status }) => {
+    existingFailedPack();
+    mocks.getVNAssetGeneration.mockResolvedValue({ status: 'processing', batch_id: 41 });
+    let resolveCancel!: (value: unknown) => void;
+    let rejectCancel!: (reason: Error) => void;
+    mocks.cancelVNAssetGeneration.mockImplementationOnce(() => new Promise((resolve, reject) => {
+      resolveCancel = resolve;
+      rejectCancel = reject;
+    }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    const cancel = await screen.findByRole('button', { name: 'Cancel' });
+    await waitFor(() => expect(cancel).toBeEnabled());
+    await user.click(cancel);
+    await waitFor(() => expect(mocks.cancelVNAssetGeneration).toHaveBeenCalledTimes(1));
+    mocks.getVNAssetGeneration.mockResolvedValue({ status, batch_id: 41 });
+    act(() => window.dispatchEvent(new Event(event)));
+    await waitFor(() => expect(mocks.profile).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(mocks.getVNAssetGeneration).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+    expect(mocks.cancelVNAssetGeneration).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      if (outcome === 'success') resolveCancel({ status: 'cancelled', batch_id: 41 });
+      else rejectCancel(new Error('Old cancel response'));
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: status === 'failed' ? 'Start generation' : 'Cancel' })).toBeEnabled());
+    expect(screen.getByLabelText('Generation status')).toHaveTextContent(status);
+    expect(screen.queryByText('Old cancel response')).not.toBeInTheDocument();
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.cancelVNAssetGeneration).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['success', 'failure'])('releases an old-account Cancel guard without unlocking new work on late %s', async (outcome) => {
+    existingFailedPack();
+    mocks.getVNAssetGeneration.mockResolvedValue({ status: 'processing', batch_id: 41 });
+    let resolveCancel!: (value: unknown) => void;
+    let rejectCancel!: (reason: Error) => void;
+    let resolveStart!: (value: unknown) => void;
+    mocks.cancelVNAssetGeneration.mockImplementationOnce(() => new Promise((resolve, reject) => {
+      resolveCancel = resolve;
+      rejectCancel = reject;
+    }));
+    mocks.startVNAssetGeneration.mockImplementationOnce(() => new Promise((resolve) => { resolveStart = resolve; }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    const cancel = await screen.findByRole('button', { name: 'Cancel' });
+    await waitFor(() => expect(cancel).toBeEnabled());
+    await user.click(cancel);
+    await waitFor(() => expect(mocks.cancelVNAssetGeneration).toHaveBeenCalledTimes(1));
+    mocks.profile.mockResolvedValue({ user: { id: 2, is_active: true } });
+    mocks.getVNAssetGeneration.mockResolvedValue({ status: 'failed', batch_id: 42 });
+    act(() => window.dispatchEvent(new CustomEvent('tldw:auth-principal-changed', { detail: { kind: 'switch' } })));
+    const start = screen.getByRole('button', { name: 'Start generation' });
+    await waitFor(() => expect(start).toBeEnabled());
+    await user.click(start);
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      if (outcome === 'success') resolveCancel({ status: 'cancelled', batch_id: 41 });
+      else rejectCancel(new Error('Other account cancel'));
+    });
+    expect(start).toBeDisabled();
+    expect(screen.getByLabelText('Generation status')).toHaveTextContent('failed');
+    expect(screen.queryByText('Other account cancel')).not.toBeInTheDocument();
+    expect(mocks.cancelVNAssetGeneration).toHaveBeenCalledTimes(1);
+    await act(async () => resolveStart({ status: 'queued', batch_id: 43 }));
+    expect(screen.getByLabelText('Generation status')).toHaveTextContent('queued');
+  });
+
+  it.each(['start', 'cancel'])('does not send %s after a handled credential transition immediately following verification', async (kind) => {
+    existingFailedPack();
+    mocks.getVNAssetGeneration.mockResolvedValue({ status: kind === 'cancel' ? 'processing' : 'failed', batch_id: 41 });
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    const button = await screen.findByRole('button', { name: kind === 'cancel' ? 'Cancel' : 'Start generation' });
+    await waitFor(() => expect(button).toBeEnabled());
+    mocks.profile.mockImplementationOnce(() => Promise.resolve({ user: { id: 1, is_active: true } }).then((principal) => {
+      queueMicrotask(() => queueMicrotask(() => queueMicrotask(() => {
+        mocks.profile.mockResolvedValue({ user: { id: 2, is_active: true } });
+        window.dispatchEvent(new CustomEvent('tldw:auth-credentials-changed', { detail: { authenticated: true } }));
+      })));
+      return principal;
+    }));
+    await user.click(button);
+    await waitFor(() => expect(mocks.profile).toHaveBeenCalledTimes(3));
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+    expect(sessionStorage.length).toBe(0);
+  });
+
   it('allows another pack to start without an old pending command clearing its lock', async () => {
     existingFailedPack();
     mocks.listVNAssetPacks.mockResolvedValue([

@@ -174,6 +174,29 @@ advisories and shared environments are unchanged. CodeRabbit's complete 428cddc
 full review finished at 20:03:45 UTC with exact-head reviewed coverage and no
 actionable defect; it does not qualify this new scoped follow-up.
 
+CodeRabbit's complete 40c6d full review finished at 20:17:41 UTC with explicit
+exact-head reviewed coverage and no established merge blocker. Its cancellation
+inference nevertheless yielded a concrete scoped regression: focus/pageshow
+cleared an unresolved Cancel guard, enabling another Cancel or a new Start.
+Eight rendered event/status/outcome cases failed before fixing (1.58s); two
+authority-boundary controls passed. Initial tests used an incorrect accessible
+name and timed out; only the corrected behavioral failures establish the bug.
+The existing guard now stores token and command kind, preserving only Cancel
+through non-account revalidation and clearing all on authority boundaries.
+Matching-token completion releases the guard without applying stale results.
+
+A controlled queued credential transition after verification exposed a narrower
+Cancel-only pre-send fencing gap (1 failed Cancel, 1 passed Start, 0.296s).
+Cancel now checks the current capture immediately before POST; Start/Retry
+already use that check through remember. Supported same-tab credential mutation
+paths synchronously invalidate captures, and transport header/fetch construction
+has no intervening await. This is not evidence of cross-account backend execution
+or a guarantee for unnotified or cross-tab credential changes. No durable Cancel
+replay or server cancellation reconciliation is added. Fifteen focused checks
+pass (3.18s); all 174 VN/fetch/shared-auth tests pass (32.69s), typecheck and both
+scoped lint commands pass. Fresh unchanged VN Python Bandit remains clear over
+9064 lines, not a TypeScript scan. Complete new-head reviews and CI remain gates.
+
 ## Stage 3: Gated Merge
 
 **Goal**: Merge normally only after current-head review and live dev gates pass.
