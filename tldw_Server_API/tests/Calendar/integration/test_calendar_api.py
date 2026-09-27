@@ -21,6 +21,7 @@ from httpx import ASGITransport, AsyncClient
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas import ScheduledTask
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Calendar.calendar_service import CalendarService
 from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -120,14 +121,14 @@ def test_manual_sync_invalid_window_creates_no_job_or_audit(
     client, db, _reminders = calendar_api_client
     _calendar, item = _create_provider_item(db)
     manager = client.jobs_manager  # type: ignore[attr-defined]
-    original = manager.create_job
-    calls: list[dict[str, Any]] = []
+    original = manager.admit_idempotent_operation
+    calls: list[Any] = []
 
-    def create_job(**kwargs: Any) -> Any:
-        calls.append(kwargs)
-        return original(**kwargs)
+    def create_job(command: Any) -> Any:
+        calls.append(command)
+        return original(command)
 
-    monkeypatch.setattr(manager, "create_job", create_job)
+    monkeypatch.setattr(manager, "admit_idempotent_operation", create_job)
     result = client.post(f"/api/v1/calendar/external/bindings/{item.external_binding_id}/sync", json=window)
     assert result.status_code in {400, 422}, result.text
     assert calls == []
@@ -1648,6 +1649,35 @@ def test_trigger_external_calendar_sync_queues_calendar_job(
     assert "secret_ref" not in json.dumps(job["payload"])
 
 
+def test_manual_sync_delegates_validated_input_to_typed_core_use_case(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HTTP must delegate ownership, window policy and admission to Calendar core."""
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import CalendarSyncJobResponse
+
+    client, db, _reminders = calendar_api_client
+    _calendar, item = _create_provider_item(db)
+    calls: list[dict[str, Any]] = []
+
+    def core(self: Any, **kwargs: Any) -> CalendarSyncJobResponse:
+        calls.append(kwargs)
+        return CalendarSyncJobResponse(item.external_binding_id, 42, True, "queued", "admission-test")
+
+    def route_owned_read(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("HTTP performed a core-owned binding read before delegation")
+
+    monkeypatch.setattr(CalendarService, "trigger_binding_sync", core, raising=False)
+    monkeypatch.setattr(db, "get_external_binding", route_owned_read)
+    response = client.post(f"/api/v1/calendar/external/bindings/{item.external_binding_id}/sync", json={
+        "window_start": "2026-06-01T00:00:00Z", "window_end": "2026-06-08T00:00:00Z", "reason": "manual",
+    })
+    assert response.status_code == 200, response.text
+    assert calls == [{"actor_user_id": 1, "binding_id": item.external_binding_id,
+                      "window_start": "2026-06-01T00:00:00Z", "window_end": "2026-06-08T00:00:00Z", "reason": "manual"}]
+    assert response.json()["job_id"] == 42
+
+
 def test_manual_sync_ownership_and_admission_io_run_on_one_request_worker(
     calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
     monkeypatch: pytest.MonkeyPatch,
@@ -1666,7 +1696,7 @@ def test_manual_sync_ownership_and_admission_io_run_on_one_request_worker(
     client.app.dependency_overrides[get_request_user] = owner
     for repository, names in [
         (db, ["get_external_binding", "get_external_account", "record_sync_event"]),
-        (manager, ["list_jobs", "create_job"]),
+        (manager, ["list_jobs", "admit_idempotent_operation"]),
     ]:
         for name in names:
             original = getattr(repository, name)
@@ -1680,12 +1710,31 @@ def test_manual_sync_ownership_and_admission_io_run_on_one_request_worker(
     response = client.post(f"/api/v1/calendar/external/bindings/{item.external_binding_id}/sync")
     assert response.status_code == 200, response.text
     assert {name for name, _ in calls} == {
-        "get_external_binding", "get_external_account", "list_jobs", "create_job", "record_sync_event",
+        "get_external_binding", "get_external_account", "list_jobs", "admit_idempotent_operation", "record_sync_event",
     }
     assert loop_threads and {thread for _, thread in calls}.isdisjoint(loop_threads)
     assert len({thread for _, thread in calls}) == 1
     assert manager.count_jobs(domain="calendar") == 1
     assert len(db.list_sync_events(binding_id=item.external_binding_id)) == 1
+
+
+def test_manual_sync_maps_unavailable_job_authority_to_generic_domain_error(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unavailable admission fails closed without exposing internal authority details."""
+    from tldw_Server_API.app.core.Calendar.errors import CalendarSyncError
+
+    client, db, _reminders = calendar_api_client
+    _calendar, item = _create_provider_item(db)
+
+    def unavailable(self: Any, **kwargs: Any) -> Any:
+        raise CalendarSyncError("sensitive internal Job correlation")
+
+    monkeypatch.setattr(CalendarService, "trigger_binding_sync", unavailable)
+    response = client.post(f"/api/v1/calendar/external/bindings/{item.external_binding_id}/sync")
+    assert response.status_code == 500
+    assert response.json() == {"detail": {"code": "calendar_error", "message": "Calendar request failed"}}
 
 
 @pytest.mark.asyncio
@@ -1720,7 +1769,7 @@ async def test_manual_sync_cancellation_drains_queue_audit_and_preserves_failure
         return original_shield(awaitable)
 
     def blocked_audit(*args: Any, **kwargs: Any) -> Any:
-        """Hold the actual audit boundary after the real Jobs insert has committed."""
+        """Hold the actual audit boundary before any runnable Jobs insert."""
         audit_threads.append(threading.get_ident())
         loop.call_soon_threadsafe(audit_started.set)
         try:
@@ -1785,7 +1834,7 @@ async def test_manual_sync_cancellation_drains_queue_audit_and_preserves_failure
     else:
         assert scopes[0].cancelled_caught
     assert cancellations[0].__cause__ is (failure if fail_audit else None)
-    assert manager.count_jobs(domain="calendar") == 1
+    assert manager.count_jobs(domain="calendar") == (0 if fail_audit else 1)
     audits = db.list_sync_events(binding_id=item.external_binding_id)
     assert len(audits) == (0 if fail_audit else 1)
     assert db._transaction_connection.get() is None
@@ -1797,38 +1846,37 @@ async def test_manual_sync_waiting_for_scheduler_admission_is_offloop_and_draine
     calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
     monkeypatch: pytest.MonkeyPatch, cancellation_kind: str,
 ) -> None:
-    """An HTTP trigger contending on the scheduler's binding lock stays cancellable until drained."""
+    """An HTTP trigger waiting on a durable writer remains off-loop and drains on cancellation."""
     from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
     from tldw_Server_API.app.services.calendar_sync_scheduler import queue_due_calendar_sync_jobs
 
     client, db, _reminders = calendar_api_client
     _calendar, item = _create_provider_item(db)
     manager = client.jobs_manager  # type: ignore[attr-defined]
+    scheduler_db = CalendarDatabase(db_path=db.db_path)
     scheduler_jobs = JobManager(manager.db_path)
     loop = asyncio.get_running_loop()
     empty_lookup = asyncio.Event()
     manual_started = asyncio.Event()
     release = threading.Event()
     scopes: list[CancelScope] = []
-    original_lookup = worker._active_job_for_binding
+    original_audit = scheduler_db.record_sync_event
     original_queue = worker.queue_calendar_binding_sync
 
-    def pause_scheduler(**kwargs: Any) -> dict[str, Any] | None:
-        existing = original_lookup(**kwargs)
-        if kwargs["job_manager"] is scheduler_jobs and existing is None:
-            loop.call_soon_threadsafe(empty_lookup.set)
-            if not release.wait(3):
-                raise TimeoutError("Scheduler admission was not released")
-        return existing
+    def pause_scheduler(**kwargs: Any) -> Any:
+        loop.call_soon_threadsafe(empty_lookup.set)
+        if not release.wait(3):
+            raise TimeoutError("Scheduler admission was not released")
+        return original_audit(**kwargs)
 
     def trace_manual(**kwargs: Any) -> Any:
         if kwargs["job_manager"] is manager:
             loop.call_soon_threadsafe(manual_started.set)
         return original_queue(**kwargs)
 
-    monkeypatch.setattr(worker, "_active_job_for_binding", pause_scheduler)
+    monkeypatch.setattr(scheduler_db, "record_sync_event", pause_scheduler)
     monkeypatch.setattr(worker, "queue_calendar_binding_sync", trace_manual)
-    scheduled = asyncio.create_task(queue_due_calendar_sync_jobs(db=db, job_manager=scheduler_jobs))
+    scheduled = asyncio.create_task(queue_due_calendar_sync_jobs(db=scheduler_db, job_manager=scheduler_jobs))
     watchdog = threading.Timer(1, release.set)
     task: asyncio.Task[Any] | None = None
     async with AsyncClient(transport=ASGITransport(app=client.app), base_url="http://test") as api:
@@ -1861,8 +1909,8 @@ async def test_manual_sync_waiting_for_scheduler_admission_is_offloop_and_draine
                 watchdog.join()
 
     assert scheduler_blocked, "Waiting for admission blocked the HTTP event loop"
-    assert not abandoned, "Cancellation abandoned a manual admission waiting on the binding lock"
-    assert len(outcomes[0]) == 1 and outcomes[0][0].queued
+    assert not abandoned, "Cancellation abandoned a manual admission waiting on the durable transaction"
+    assert len(outcomes[0]) == 1
     if cancellation_kind == "native":
         assert isinstance(outcomes[1], asyncio.CancelledError)
     else:
@@ -1870,8 +1918,12 @@ async def test_manual_sync_waiting_for_scheduler_admission_is_offloop_and_draine
     jobs = manager.list_jobs(domain="calendar")
     audits = db.list_sync_events(binding_id=item.external_binding_id)
     assert len(jobs) == len(audits) == 1
+    assert outcomes[0][0].job_id == jobs[0]["id"]
     assert jobs[0]["payload"]["reason"] == "scheduled"
-    assert json.loads(audits[0].metadata_json) == {"job_id": jobs[0]["id"], "reason": "scheduled"}
+    assert json.loads(audits[0].metadata_json) == {
+        "admission_id": db.get_sync_admission(item.external_binding_id).admission_id,
+        "job_id": jobs[0]["id"], "reason": "scheduled",
+    }
     assert db._transaction_connection.get() is None
 
 

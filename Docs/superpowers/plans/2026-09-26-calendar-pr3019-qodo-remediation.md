@@ -116,6 +116,61 @@ Review 5327879344 completed at 22:54:51Z and posted eight new inline candidates.
 4. **Frontend validation and coverage (Complete):** Projection URLs use the established safe-URL helper; local field-level schedule validation retains drafts without API calls. Thirteen initial regressions failed before fixes. Scoped review then reproduced due-only display fallback, hidden kind-switch draft and Honolulu test assumptions: three drawer cases, four persisted provenance cases and one Honolulu case failed before their respective fixes. Authorized view metadata now distinguishes canonical nullable item_start_at from a due-derived display timestamp; active-kind serialization preserves actual start-only todos and drops hidden event drafts. Full French/Europe-Paris frontend 125, Honolulu temporal 13 and TypeScript pass. Scoped ESLint has zero errors and three unchanged baseline warnings. Independent narrow review approved 12 probes, nine drawer cases, two Honolulu cases and scoped TypeScript; reviewer is closed. Direct filters/ownership coverage passes; same-day events already render in both views on unchanged production code, supporting a reasoned disposition rather than a false fix.
 5. **Integration and publication (In Progress):** Final full Calendar backend: 530 passed with 13 warnings and no failures. Frontend 125 French/Europe-Paris, Honolulu temporal 13 and TypeScript pass. Ruff, scoped ESLint (zero errors, three unchanged warnings), diff checks and shard guard (4810 files, zero newly uncovered) pass; Bandit reports zero findings/errors in all six changed backend source files. Independent rate, frontend and temporal/admission reviewers approve; all agents and sessions are closed. Commit with normal hooks, publish and reply individually to all eight findings, including the baseline-verified same-day disposition. Then request one full review on the exact new head. Hosted required CI, live CalDAV smoke and human-owned rationale remain merge gates; Stage 4 and TASK-13356 remain In Progress until actual normal merge.
 
+### Wave9: Durable Sync Admission (Approved 2026-09-27)
+
+**Spec:** `Docs/superpowers/specs/2026-09-27-calendar-sync-admission-design.md`.
+**Goal:** Fix the three exact-c87 findings without changing provider or UI scope.
+**Status:** In Progress
+
+1. **Atomic reservation and audit (Complete).** Modify
+   `core/DB_Management/Calendar_DB.py` with a typed admission row, binding-unique
+   reservation, conditional Job attachment/release and bounded pending lookup.
+   Keep SQL in the repository. Add failing tests in
+   `tests/Calendar/unit/test_calendar_sync_worker.py` for audit failure leaving
+   zero runnable Jobs, dispatch failure retaining one recoverable audit, and
+   simultaneous processes creating exactly one Job/audit. Run those exact tests
+   before changing worker admission; implement and rerun them.
+2. **Dispatch and lifecycle (Complete).** Replace worker process-local locking
+   with committed reservation plus stable idempotent Jobs dispatch. Use exact
+   scoped live/archive lookup and conditional release only for terminal states.
+   Replace the capped legacy lookup with existing keyset pagination. Scheduler
+   recovers pending admissions before ordinary due scans, including manual-only
+   bindings. Red/green tests cover old Jobs beyond 100, post-dispatch crash,
+   processing/delayed retries, archive/missing Job behavior, same-window terminal
+   resubmission, tenant scope and unrelated bindings during blocked dispatch.
+   Independent review reproduced stale-dispatch resurrection after terminal
+   pruning, status-separated legacy retry omission, and completed manual-only
+   recovery resubmission. Three controller regressions RED then GREEN using the
+   existing Jobs durable receipt API, status-independent keyset traversal and
+   exact recovery distinct from fresh triggers. Receipt commands explicitly use
+   priority 5 to preserve the Jobs 1..10 contract; initial default-100 failures
+   were corrected before final integration. Final independent review approved
+   the exact source hashes and six race/encryption/authority/fairness probe groups.
+3. **Typed core trigger (Complete).** Add
+   `CalendarService.trigger_binding_sync(...)->CalendarSyncJobResponse` and type
+   `queue_binding_sync`. Move configured-window resolution and ownership into
+   core; endpoint delegates through `_run_db_phase` with validated fields.
+   Add an endpoint delegation regression and preserve aware ISO <=64-character,
+   positive UTC <=7400-day validation and native/AnyIO cancellation regressions.
+4. **Verification and publication (In Progress).** Current-dev rebase completed
+   without conflicts onto `718c191082f1d6372fb6fe000ac763dcc07ffcbd`; local rebased
+   head `1509d98dd7504d946dcb001c5a00d7a4034452e1`, published c87 unchanged. Run
+   full Calendar backend, current frontend/TypeScript and migration boundaries,
+   Ruff, touched-source Bandit, shard guard, diff and normal pre-commit. Obtain
+   fresh independent scoped review, fix findings with TDD, commit/publish only
+   verified work with an explicit remote-head lease. Reply individually with
+   evidence and verify thread resolution; request exactly one full new-head
+   review. Required CI, latest dev, provider smoke and human rationale still gate
+   normal merge. Never publish an intermediate tracking-only review head.
+   Final current-base verification: 558 Calendar backend tests (13 warnings),
+   68 existing SQLite Jobs receipt/prune tests (2 warnings), 18 Calendar migration
+   unit tests (38 warnings), 13 Honolulu temporal tests, TypeScript, Ruff, diff,
+   normal 11-file pre-commit and shard guard (4829 files, zero newly uncovered)
+   pass. Bandit reports zero findings/errors in five changed backend sources.
+   Prior current-frontend French/Europe-Paris run passed 125 tests on dev9668;
+   subsequent dev718c changes have no frontend overlap. Bacon independent final
+   scoped review approved and closed; no live PostgreSQL success is claimed.
+
 ## Decisions and Evidence
 
 - 2026-09-26: Rebase onto dev `59bd584503` completed; original three commits unchanged by range-diff. Published head `6602a4c5956e99be6ed5d11fef879102d4732a36`.

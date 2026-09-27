@@ -53,7 +53,7 @@ def _binding(db: CalendarDatabase) -> ExternalCalendarBindingRow:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("delayed_operation", [
-    "calendar_init", "jobs_init", "scan", "account", "create_job", "audit",
+    "calendar_init", "jobs_init", "scan", "account", "admit_idempotent_operation", "audit",
 ])
 async def test_scheduler_heartbeat_runs_during_complete_synchronous_phase(
     calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
@@ -112,7 +112,7 @@ async def test_scheduler_heartbeat_runs_during_complete_synchronous_phase(
         (CalendarDatabase, "list_sync_enabled_bindings_due_for_scan", "scan"),
         (CalendarDatabase, "get_external_account", "account"),
         (CalendarDatabase, "record_sync_event", "audit"),
-        (JobManager, "create_job", "create_job"),
+        (JobManager, "admit_idempotent_operation", "admit_idempotent_operation"),
     ]:
         monkeypatch.setattr(target, method, trace(label, getattr(target, method)))
     monkeypatch.setattr(CalendarDatabase, "transaction", transaction)
@@ -132,7 +132,7 @@ async def test_scheduler_heartbeat_runs_during_complete_synchronous_phase(
     assert {thread_id for _, thread_id in calls} != {loop_thread}
     assert len({thread_id for _, thread_id in calls}) == 1
     assert {label for label, _ in calls} >= {
-        "calendar_init", "jobs_init", "scan", "account", "create_job", "audit",
+        "calendar_init", "jobs_init", "scan", "account", "admit_idempotent_operation", "audit",
         "transaction_enter", "transaction_exit",
     }
     assert queued[0].binding_id == binding.id
@@ -198,7 +198,7 @@ async def test_scheduler_cancellation_drains_owner_thread_without_hot_retry_or_o
             transaction_calls.append(("exit", threading.get_ident()))
 
     def audit(**kwargs: Any) -> Any:
-        """Pause with a real uncommitted audit and a job already persisted."""
+        """Pause with a real uncommitted audit before runnable Jobs dispatch."""
         try:
             with calendar_db.transaction():
                 result = original_audit(**kwargs)

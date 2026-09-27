@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import gc
 import json
+import multiprocessing
 import threading
-import weakref
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -18,7 +17,12 @@ import pytest
 from anyio import CancelScope
 
 from tldw_Server_API.app.core.Calendar.calendar_service import CalendarService
-from tldw_Server_API.app.core.Calendar.errors import CalendarNotFound, CalendarValidationError
+from tldw_Server_API.app.core.Calendar.errors import (
+    CalendarNotFound,
+    CalendarPermissionDenied,
+    CalendarSyncError,
+    CalendarValidationError,
+)
 from tldw_Server_API.app.core.Calendar.providers.caldav import CalDavEvent
 from tldw_Server_API.app.core.Calendar.secret_store import CalendarSecretStore
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
@@ -964,9 +968,8 @@ def test_queue_binding_sync_creates_sanitized_jobs_payload(
     assert job["queue"] == "default"
     assert job["job_type"] == "calendar_sync"
     assert job["owner_user_id"] == "1"
-    assert job["idempotency_key"] == (
-        f"calendar:sync:binding:{fixture.binding_id}:2026-06-01T00:00:00+00:00:2026-06-08T00:00:00+00:00:manual"
-    )
+    assert job["batch_group"] == f"calendar:sync:binding:{fixture.binding_id}"
+    assert response.idempotency_key.startswith("calendar:sync:admission:")
     assert job["payload"] == {
         "binding_id": fixture.binding_id,
         "window_start": "2026-06-01T00:00:00+00:00",
@@ -1005,6 +1008,494 @@ def test_queue_binding_sync_reuses_active_binding_job(
     assert jobs_manager.count_jobs(domain="calendar", queue="default", job_type="calendar_sync") == 1
 
 
+def _queue_admission(service: CalendarService, binding_id: int, reason: str = "manual") -> Any:
+    """Submit a fixed canonical window through the real service."""
+    return service.queue_binding_sync(
+        actor_user_id=1, binding_id=binding_id, reason=reason,
+        window_start="2026-06-01T00:00:00+00:00", window_end="2026-06-08T00:00:00+00:00",
+    )
+
+
+def test_durable_admission_audit_failure_creates_no_runnable_job(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed Calendar audit cannot leave runnable work in the separate Jobs store."""
+    fixture = _create_sync_fixture(calendar_db)
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+
+    def fail(**kwargs: Any) -> Any:
+        raise RuntimeError("queued audit failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(calendar_db, "record_sync_event", fail)
+        with pytest.raises(RuntimeError, match="queued audit failed"):
+            _queue_admission(service, fixture.binding_id)
+    assert jobs_manager.count_jobs(domain="calendar") == 0
+    assert calendar_db.list_sync_events(binding_id=fixture.binding_id) == []
+    assert _queue_admission(service, fixture.binding_id).queued
+    assert len(calendar_db.list_sync_events(binding_id=fixture.binding_id)) == 1
+
+
+def test_durable_admission_dispatch_failure_retains_audit_and_recovers_identity(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dispatch failure retains one committed intent that retry dispatches exactly once."""
+    fixture = _create_sync_fixture(calendar_db)
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+    def fail(command: Any) -> Any:
+        raise RuntimeError("Jobs unavailable")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(jobs_manager, "admit_idempotent_operation", fail)
+        with pytest.raises(RuntimeError, match="Jobs unavailable"):
+            _queue_admission(service, fixture.binding_id)
+    assert len(calendar_db.list_sync_events(binding_id=fixture.binding_id)) == 1
+    pending = calendar_db.get_sync_admission(fixture.binding_id)
+    assert pending is not None and pending.job_id is None
+    reopened = CalendarService(db=CalendarDatabase(calendar_db.db_path), job_manager=JobManager(jobs_manager.db_path))
+    recovered = _queue_admission(reopened, fixture.binding_id, "scheduled")
+    assert recovered.idempotency_key == pending.idempotency_key
+    assert recovered.queued
+    assert jobs_manager.count_jobs(domain="calendar") == 1
+    assert len(calendar_db.list_sync_events(binding_id=fixture.binding_id)) == 1
+
+
+@pytest.mark.parametrize("newer_status", ["queued", "cancelled"])
+def test_durable_admission_finds_legacy_active_work_behind_newer_jobs(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, newer_status: str,
+) -> None:
+    """The authoritative legacy scan must not stop at the newest hundred jobs."""
+    fixture = _create_sync_fixture(calendar_db)
+    legacy = jobs_manager.create_job(
+        domain="calendar", queue="default", job_type="calendar_sync", owner_user_id="1",
+        payload={"binding_id": fixture.binding_id}, idempotency_key="legacy-active-calendar",
+    )
+    for index in range(101):
+        newer = jobs_manager.create_job(
+            domain="calendar", queue="default", job_type="calendar_sync", owner_user_id="1",
+            payload={"binding_id": 999}, idempotency_key=f"unrelated-{index}",
+        )
+        if newer_status == "cancelled":
+            assert jobs_manager.cancel_job(newer["id"])
+    response = _queue_admission(CalendarService(db=calendar_db, job_manager=jobs_manager), fixture.binding_id)
+    assert response.job_id == legacy["id"]
+    assert not response.queued
+    assert calendar_db.list_sync_events(binding_id=fixture.binding_id) == []
+
+
+def test_durable_admission_decodes_encrypted_dispatch_and_receipt_replay(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Encrypted Jobs envelopes use canonical reads before binding correlation."""
+    monkeypatch.setenv("JOBS_ENCRYPT_CALENDAR", "true")
+    monkeypatch.setenv("WORKFLOWS_ARTIFACT_ENC_KEY", base64.b64encode(b"c" * 32).decode("ascii"))
+    fixture = _create_sync_fixture(calendar_db)
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+    original = jobs_manager.admit_idempotent_operation
+    envelopes = []
+
+    def dispatch(command: Any) -> Any:
+        result = original(command)
+        envelopes.append(result.job["payload"])
+        return result
+
+    monkeypatch.setattr(jobs_manager, "admit_idempotent_operation", dispatch)
+
+    def crash(*args: Any) -> Any:
+        raise RuntimeError("encrypted dispatch crash")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(calendar_db, "attach_sync_admission_job", crash)
+        with pytest.raises(RuntimeError, match="encrypted dispatch crash"):
+            _queue_admission(service, fixture.binding_id)
+    assert "_encrypted" in envelopes[0]
+    first = _queue_admission(service, fixture.binding_id)
+    second = _queue_admission(service, fixture.binding_id)
+    assert second.job_id == first.job_id and not second.queued
+    assert jobs_manager.get_job(first.job_id)["payload"]["binding_id"] == fixture.binding_id
+    assert len(calendar_db.list_sync_events(binding_id=fixture.binding_id)) == 1
+
+
+def test_durable_admission_pending_receipt_with_missing_job_fails_closed(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A committed receipt without readable Jobs authority must not dispatch again."""
+    fixture = _create_sync_fixture(calendar_db)
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+
+    def crash(*args: Any) -> Any:
+        raise RuntimeError("post-dispatch crash")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(calendar_db, "attach_sync_admission_job", crash)
+        with pytest.raises(RuntimeError, match="post-dispatch crash"):
+            _queue_admission(service, fixture.binding_id)
+    pending = calendar_db.get_sync_admission(fixture.binding_id)
+    monkeypatch.setattr(jobs_manager, "get_job_or_archived_by_uuid", lambda *args, **kwargs: None)
+    monkeypatch.setattr(jobs_manager, "admit_idempotent_operation", lambda *args: pytest.fail("Receipt replay redispatched"))
+    with pytest.raises(CalendarSyncError, match="unavailable"):
+        _queue_admission(service, fixture.binding_id)
+    assert calendar_db.get_sync_admission(fixture.binding_id) == pending
+    assert jobs_manager.count_jobs(domain="calendar") == 1
+
+
+def test_durable_admission_upgrades_existing_calendar_database(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager,
+) -> None:
+    """An existing database gains admission storage without changing saved binding state."""
+    fixture = _create_sync_fixture(calendar_db)
+    binding = calendar_db.get_external_binding(fixture.binding_id)
+    with calendar_db.connection() as connection:
+        connection.execute("DROP TABLE calendar_sync_admissions")
+        connection.commit()
+    reopened = CalendarDatabase(calendar_db.db_path)
+    assert reopened.get_external_binding(fixture.binding_id) == binding
+    result = _queue_admission(CalendarService(db=reopened, job_manager=jobs_manager), fixture.binding_id)
+    assert result.queued and reopened.get_sync_admission(fixture.binding_id).job_id == result.job_id
+
+
+def _independent_admission_process(calendar_path: str, jobs_path: str, binding_id: int, barrier: Any, output: Any) -> None:
+    """Synchronize independent empty legacy reads, retaining real database writes."""
+    from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
+
+    original = worker._active_job_for_binding
+    first_lookup = True
+
+    def synchronized_lookup(**kwargs: Any) -> Any:
+        nonlocal first_lookup
+        existing = original(**kwargs)
+        if first_lookup:
+            first_lookup = False
+            barrier.wait(timeout=15)
+        return existing
+
+    worker._active_job_for_binding = synchronized_lookup
+    try:
+        response = _queue_admission(
+            CalendarService(db=CalendarDatabase(calendar_path), job_manager=JobManager(jobs_path)), binding_id,
+            f"process-{multiprocessing.current_process().name}",
+        )
+        output.put((response.job_id, response.queued, response.idempotency_key))
+    except Exception as exc:
+        output.put(("error", type(exc).__name__))
+        raise
+
+
+def test_durable_admission_independent_processes_admit_one_job_and_audit(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager,
+) -> None:
+    """Real independent processes with stale empty reads share durable binding authority."""
+    fixture = _create_sync_fixture(calendar_db)
+    context = multiprocessing.get_context("spawn")
+    output = context.Queue()
+    barrier = context.Barrier(2)
+    processes = [context.Process(target=_independent_admission_process, args=(
+        str(calendar_db.db_path), str(jobs_manager.db_path), fixture.binding_id, barrier, output,
+    )) for _ in range(2)]
+    try:
+        for process in processes:
+            process.start()
+        results = [output.get(timeout=30) for _ in processes]
+        for process in processes:
+            process.join(timeout=10)
+        assert [process.exitcode for process in processes] == [0, 0], results
+        assert jobs_manager.count_jobs(domain="calendar") == 1, results
+        assert len(calendar_db.list_sync_events(binding_id=fixture.binding_id)) == 1
+        assert len({result[0] for result in results}) == 1
+        assert sum(result[1] for result in results) == 1
+    finally:
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+        output.close()
+        output.join_thread()
+
+
+def test_durable_admission_terminal_same_window_creates_fresh_job(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager,
+) -> None:
+    """A terminal job cannot permanently suppress a later request for the same window."""
+    fixture = _create_sync_fixture(calendar_db)
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+    first = _queue_admission(service, fixture.binding_id)
+    assert jobs_manager.cancel_job(first.job_id, reason="finished admission")
+    second = _queue_admission(service, fixture.binding_id)
+    assert second.queued and second.job_id != first.job_id
+    assert second.idempotency_key != first.idempotency_key
+    assert len(calendar_db.list_sync_events(binding_id=fixture.binding_id)) == 2
+
+
+@pytest.mark.parametrize("terminal", ["completed", "failed", "cancelled"])
+@pytest.mark.parametrize("archived", [False, True])
+def test_durable_admission_reconciles_terminal_live_and_archived_jobs(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+    terminal: str, archived: bool,
+) -> None:
+    """Only confirmed terminal authority permits another identity for the same window."""
+    fixture = _create_sync_fixture(calendar_db)
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+    first = _queue_admission(service, fixture.binding_id)
+    if terminal == "completed":
+        claimed = jobs_manager.acquire_next_job(domain="calendar", queue="default", worker_id="terminal-test", lease_seconds=60)
+        assert claimed is not None and claimed["id"] == first.job_id
+        assert jobs_manager.complete_job(first.job_id, enforce=False)
+    elif terminal == "failed":
+        claimed = jobs_manager.acquire_next_job(domain="calendar", queue="default", worker_id="terminal-test", lease_seconds=60)
+        assert claimed is not None and claimed["id"] == first.job_id
+        assert jobs_manager.fail_job(first.job_id, error="terminal", retryable=False, enforce=False)
+    else:
+        assert jobs_manager.cancel_job(first.job_id, reason="terminal")
+    if archived:
+        monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+        assert jobs_manager.prune_jobs(statuses=[terminal], older_than_days=0, domain="calendar") == 1
+        assert jobs_manager.get_job(first.job_id) is None
+    second = _queue_admission(service, fixture.binding_id)
+    assert second.queued and second.idempotency_key != first.idempotency_key
+    assert len(calendar_db.list_sync_events(binding_id=fixture.binding_id)) == 2
+
+
+def test_durable_admission_missing_recorded_job_retains_authority(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A temporarily unavailable recorded Job cannot be interpreted as terminal."""
+    fixture = _create_sync_fixture(calendar_db)
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+    first = _queue_admission(service, fixture.binding_id)
+    monkeypatch.setattr(jobs_manager, "get_job_or_archived_by_uuid", lambda *args, **kwargs: None)
+    with pytest.raises(CalendarSyncError, match="unavailable"):
+        _queue_admission(service, fixture.binding_id)
+    assert jobs_manager.count_jobs(domain="calendar") == 1
+    assert calendar_db.get_sync_admission(fixture.binding_id).idempotency_key == first.idempotency_key
+
+
+def test_durable_admission_cannot_be_dispatched_from_another_tenant(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recoverable intent preserves its original tenant and owner authority."""
+    fixture = _create_sync_fixture(calendar_db)
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+    with monkeypatch.context() as patch:
+        def fail(command: Any) -> Any:
+            raise RuntimeError("dispatch")
+        patch.setattr(jobs_manager, "admit_idempotent_operation", fail)
+        with pytest.raises(RuntimeError, match="dispatch"):
+            _queue_admission(service, fixture.binding_id)
+    with pytest.raises(CalendarPermissionDenied):
+        _queue_admission(CalendarService(db=calendar_db, job_manager=jobs_manager, tenant_id="other"), fixture.binding_id)
+    assert jobs_manager.count_jobs(domain="calendar") == 0
+    assert len(calendar_db.list_sync_events(binding_id=fixture.binding_id)) == 1
+
+
+def test_durable_admission_late_correlation_cannot_overwrite_successor(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager,
+) -> None:
+    """A late retry may not attach or release a subsequent binding reservation."""
+    fixture = _create_sync_fixture(calendar_db)
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+    first = _queue_admission(service, fixture.binding_id)
+    old = calendar_db.get_sync_admission(fixture.binding_id)
+    assert jobs_manager.cancel_job(first.job_id)
+    second = _queue_admission(service, fixture.binding_id)
+    assert not calendar_db.attach_sync_admission_job(old.admission_id, first.job_id, old.job_uuid)
+    calendar_db.release_sync_admission(old.admission_id)
+    assert calendar_db.get_sync_admission(fixture.binding_id).job_id == second.job_id
+
+
+def test_durable_admission_audit_write_then_failure_rolls_back_reservation(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A nested audit write must roll back with admission when its readback fails."""
+    fixture = _create_sync_fixture(calendar_db)
+    original = calendar_db.record_sync_event
+
+    def fail_after_write(**kwargs: Any) -> Any:
+        original(**kwargs)
+        raise RuntimeError("audit readback")
+
+    monkeypatch.setattr(calendar_db, "record_sync_event", fail_after_write)
+    with pytest.raises(RuntimeError, match="audit readback"):
+        _queue_admission(CalendarService(db=calendar_db, job_manager=jobs_manager), fixture.binding_id)
+    assert calendar_db.get_sync_admission(fixture.binding_id) is None
+    assert calendar_db.list_sync_events(binding_id=fixture.binding_id) == []
+    assert jobs_manager.count_jobs(domain="calendar") == 0
+
+
+@pytest.mark.asyncio
+async def test_durable_admission_recovery_rotates_past_failing_bindings(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bounded recovery batch cannot starve later bindings behind repeated failures."""
+    from tldw_Server_API.app.services.calendar_sync_scheduler import queue_due_calendar_sync_jobs
+
+    fixtures = [_create_sync_fixture(calendar_db) for _ in range(3)]
+    create = jobs_manager.admit_idempotent_operation
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+    for fixture in fixtures:
+        calendar_db.update_external_binding(fixture.binding_id, {"sync_interval_minutes": None})
+        with monkeypatch.context() as patch:
+            def fail(command: Any) -> Any:
+                raise RuntimeError("dispatch")
+            patch.setattr(jobs_manager, "admit_idempotent_operation", fail)
+            with pytest.raises(RuntimeError, match="dispatch"):
+                _queue_admission(service, fixture.binding_id)
+
+    def fail_first_two(command: Any) -> Any:
+        if command.job.payload["binding_id"] != fixtures[-1].binding_id:
+            raise RuntimeError("persistent dispatch failure")
+        return create(command)
+
+    monkeypatch.setattr(jobs_manager, "admit_idempotent_operation", fail_first_two)
+    recovered = []
+    for _ in range(3):
+        recovered.extend(await queue_due_calendar_sync_jobs(db=calendar_db, job_manager=jobs_manager, limit=1))
+    assert [response.binding_id for response in recovered] == [fixtures[-1].binding_id]
+
+
+@pytest.mark.asyncio
+async def test_durable_admission_scheduler_recovers_manual_only_pending_dispatch(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A manually admitted dispatch crash recovers without enabling periodic polling."""
+    from tldw_Server_API.app.services.calendar_sync_scheduler import queue_due_calendar_sync_jobs
+
+    fixture = _create_sync_fixture(calendar_db)
+    calendar_db.update_external_binding(fixture.binding_id, {"sync_interval_minutes": None})
+
+    def fail(command: Any) -> Any:
+        raise RuntimeError("dispatch crash")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(jobs_manager, "admit_idempotent_operation", fail)
+        with pytest.raises(RuntimeError, match="dispatch crash"):
+            _queue_admission(CalendarService(db=calendar_db, job_manager=jobs_manager), fixture.binding_id)
+    recovered = await queue_due_calendar_sync_jobs(db=calendar_db, job_manager=jobs_manager)
+    assert len(recovered) == 1 and recovered[0].queued
+    assert jobs_manager.count_jobs(domain="calendar") == 1
+    assert calendar_db.get_external_binding(fixture.binding_id).sync_interval_minutes is None
+    assert len(calendar_db.list_sync_events(binding_id=fixture.binding_id)) == 1
+
+
+def test_durable_admission_post_dispatch_crash_recovers_existing_job(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A crash after Jobs commit repairs correlation without another dispatch or audit."""
+    fixture = _create_sync_fixture(calendar_db)
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+
+    def crash(*args: Any) -> Any:
+        raise RuntimeError("post-dispatch crash")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(calendar_db, "attach_sync_admission_job", crash)
+        with pytest.raises(RuntimeError, match="post-dispatch crash"):
+            _queue_admission(service, fixture.binding_id)
+    admission = calendar_db.get_sync_admission(fixture.binding_id)
+    assert admission is not None and admission.job_id is None
+    recovered = _queue_admission(service, fixture.binding_id, "scheduled")
+    assert recovered.idempotency_key == admission.idempotency_key
+    assert jobs_manager.count_jobs(domain="calendar") == 1
+    assert len(calendar_db.list_sync_events(binding_id=fixture.binding_id)) == 1
+
+
+def test_durable_admission_revalidates_account_before_committing_reservation(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Revocation between service lookup and reservation cannot admit runnable work."""
+    fixture = _create_sync_fixture(calendar_db)
+    reserve = calendar_db.reserve_sync_admission
+
+    def revoked(**kwargs: Any) -> Any:
+        calendar_db.revoke_external_account(fixture.account_id)
+        return reserve(**kwargs)
+
+    monkeypatch.setattr(calendar_db, "reserve_sync_admission", revoked)
+    with pytest.raises(CalendarValidationError, match="not active"):
+        _queue_admission(CalendarService(db=calendar_db, job_manager=jobs_manager), fixture.binding_id)
+    assert jobs_manager.count_jobs(domain="calendar") == 0
+    assert calendar_db.get_sync_admission(fixture.binding_id) is None
+
+
+def test_durable_admission_stale_dispatch_cannot_recreate_archived_work(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A delayed dispatcher cannot resurrect an admission retired by another caller."""
+    fixture = _create_sync_fixture(calendar_db)
+    service = CalendarService(db=calendar_db, job_manager=jobs_manager)
+    other_manager = JobManager(jobs_manager.db_path)
+    other = CalendarService(db=calendar_db, job_manager=other_manager)
+    original = jobs_manager.admit_idempotent_operation
+    successor: list[Any] = []
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "1")
+
+    def delayed(command: Any) -> Any:
+        first = _queue_admission(other, fixture.binding_id)
+        assert other_manager.cancel_job(first.job_id)
+        assert other_manager.prune_jobs(statuses=["cancelled"], older_than_days=0, domain="calendar") == 1
+        successor.append(_queue_admission(other, fixture.binding_id))
+        return original(command)
+
+    monkeypatch.setattr(jobs_manager, "admit_idempotent_operation", delayed)
+    stale = _queue_admission(service, fixture.binding_id)
+    queued = jobs_manager.list_jobs(domain="calendar", status="queued")
+    assert len(queued) == 1 and queued[0]["id"] == successor[0].job_id
+    assert not stale.queued
+    assert calendar_db.get_sync_admission(fixture.binding_id).job_id == successor[0].job_id
+
+
+def test_durable_admission_legacy_processing_to_retry_transition_cannot_escape_scan(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A legacy active Job moving between active states stays in the same scan population."""
+    fixture = _create_sync_fixture(calendar_db)
+    legacy = jobs_manager.create_job(domain="calendar", queue="default", job_type="calendar_sync", owner_user_id="1",
+                                     payload=_sync_job(fixture.binding_id)["payload"], idempotency_key="legacy-retry")
+    claimed = jobs_manager.acquire_next_job(domain="calendar", queue="default", worker_id="legacy", lease_seconds=60)
+    assert claimed is not None and claimed["id"] == legacy["id"]
+    original = jobs_manager.list_jobs
+    transitioned = False
+
+    def move_after_scan(**kwargs: Any) -> Any:
+        nonlocal transitioned
+        rows = original(**kwargs)
+        if not transitioned:
+            transitioned = True
+            assert jobs_manager.fail_job(legacy["id"], error="retry", retryable=True, backoff_seconds=60, enforce=False)
+        return rows
+
+    monkeypatch.setattr(jobs_manager, "list_jobs", move_after_scan)
+    response = _queue_admission(CalendarService(db=calendar_db, job_manager=jobs_manager), fixture.binding_id)
+    assert response.job_id == legacy["id"] and not response.queued
+    assert jobs_manager.count_jobs(domain="calendar") == 1
+
+
+@pytest.mark.asyncio
+async def test_durable_admission_recovery_does_not_resubmit_completed_manual_work(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recovery reconciles the admitted identity, not a fresh request after terminal completion."""
+    from tldw_Server_API.app.services.calendar_sync_scheduler import queue_due_calendar_sync_jobs
+
+    fixture = _create_sync_fixture(calendar_db)
+    calendar_db.update_external_binding(fixture.binding_id, {"sync_interval_minutes": None})
+
+    def crash(*args: Any) -> Any:
+        raise RuntimeError("correlation crash")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(calendar_db, "attach_sync_admission_job", crash)
+        with pytest.raises(RuntimeError, match="correlation crash"):
+            _queue_admission(CalendarService(db=calendar_db, job_manager=jobs_manager), fixture.binding_id)
+    claimed = jobs_manager.acquire_next_job(domain="calendar", queue="default", worker_id="recovery", lease_seconds=60)
+    assert claimed is not None
+    assert jobs_manager.complete_job(claimed["id"], enforce=False)
+    await queue_due_calendar_sync_jobs(db=calendar_db, job_manager=jobs_manager)
+    assert jobs_manager.list_jobs(domain="calendar", status="queued") == []
+    assert jobs_manager.count_jobs(domain="calendar") == 1
+    assert len(calendar_db.list_sync_events(binding_id=fixture.binding_id)) == 1
+    assert calendar_db.get_sync_admission(fixture.binding_id) is None
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("different_window", [False, True], ids=["same-window", "different-window"])
 async def test_concurrent_manual_and_scheduled_sync_admit_one_binding_job_and_audit(
@@ -1031,8 +1522,7 @@ async def test_concurrent_manual_and_scheduled_sync_admit_one_binding_job_and_au
         existing = original_lookup(**kwargs)
         if kwargs["job_manager"] is scheduler_jobs and existing is None:
             loop.call_soon_threadsafe(empty_lookup.set)
-            # Before the fix manual admission finishes first. With atomic admission
-            # it must wait for this holder, so bound the pause instead of deadlocking.
+            # The stale pre-reservation scan must not defeat the unique binding insert.
             manual_finished.wait(1)
         return existing
 
@@ -1070,33 +1560,36 @@ async def test_concurrent_manual_and_scheduled_sync_admit_one_binding_job_and_au
     assert {response.job_id for response in responses} == {jobs[0]["id"]}
     assert sorted(response.status for response in responses) == ["already_active", "queued"]
     assert sum(response.queued for response in responses) == 1
-    assert {response.idempotency_key for response in responses} == {jobs[0]["idempotency_key"]}
+    assert {response.idempotency_key for response in responses} == {
+        calendar_db.get_sync_admission(fixture.binding_id).idempotency_key,
+    }
     assert audits[0].event_type == "sync_queued"
     assert json.loads(audits[0].metadata_json) == {
         "job_id": jobs[0]["id"], "reason": jobs[0]["payload"]["reason"],
+        "admission_id": calendar_db.get_sync_admission(fixture.binding_id).admission_id,
     }
     assert "app-secret" not in json.dumps(jobs[0]["payload"])
 
 
 @pytest.mark.asyncio
-async def test_unrelated_binding_admission_progresses_while_first_queue_audit_is_blocked(
+async def test_unrelated_binding_admission_progresses_while_first_jobs_dispatch_is_blocked(
     calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Per-binding admission must not hold a process-wide lock across Jobs or audit I/O."""
+    """Independent bindings must not hold SQLite write authority across Jobs dispatch."""
     first = _create_sync_fixture(calendar_db)
     second = _create_sync_fixture(calendar_db, remote_calendar_url="https://caldav.example.test/second/")
     service = CalendarService(db=calendar_db, job_manager=jobs_manager)
     loop = asyncio.get_running_loop()
     audit_started = asyncio.Event()
     release = threading.Event()
-    original_audit = calendar_db.record_sync_event
+    original_dispatch = jobs_manager.admit_idempotent_operation
 
-    def blocked_audit(**kwargs: Any) -> Any:
-        if kwargs["binding_id"] == first.binding_id:
+    def blocked_dispatch(command: Any) -> Any:
+        if command.job.payload["binding_id"] == first.binding_id:
             loop.call_soon_threadsafe(audit_started.set)
             if not release.wait(5):
                 raise TimeoutError("First binding audit was not released")
-        return original_audit(**kwargs)
+        return original_dispatch(command)
 
     def queue(binding_id: int) -> Any:
         return service.queue_binding_sync(
@@ -1104,7 +1597,7 @@ async def test_unrelated_binding_admission_progresses_while_first_queue_audit_is
             window_start="2026-06-01T00:00:00+00:00", window_end="2026-06-08T00:00:00+00:00",
         )
 
-    monkeypatch.setattr(calendar_db, "record_sync_event", blocked_audit)
+    monkeypatch.setattr(jobs_manager, "admit_idempotent_operation", blocked_dispatch)
     first_task = asyncio.create_task(asyncio.to_thread(queue, first.binding_id))
     second_task: asyncio.Task[Any] | None = None
     try:
@@ -1123,25 +1616,13 @@ async def test_unrelated_binding_admission_progresses_while_first_queue_audit_is
 
 
 @pytest.mark.parametrize("failure_phase", [None, "create", "audit"], ids=["success", "create-failure", "audit-failure"])
-def test_binding_admission_reclaims_idle_locks_and_releases_them_after_failure(
+def test_binding_admission_retains_only_recoverable_state_after_failure(
     calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
     failure_phase: str | None,
 ) -> None:
-    """Completed/failed admissions leave no retained lock and cannot wedge a later caller."""
-    from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
-
+    """Audit rollback and dispatch recovery cannot wedge or duplicate later admission."""
     fixture = _create_sync_fixture(calendar_db)
     service = CalendarService(db=calendar_db, job_manager=jobs_manager)
-    lock_refs: list[weakref.ReferenceType[Any]] = []
-    original_lock = worker._binding_admission_lock
-
-    def observe_lock(*args: Any) -> Any:
-        lock = original_lock(*args)
-        lock_refs.append(weakref.ref(lock))
-        return lock
-
-    monkeypatch.setattr(worker, "_binding_admission_lock", observe_lock)
-
     def queue() -> Any:
         return service.queue_binding_sync(
             actor_user_id=1, binding_id=fixture.binding_id, reason="manual",
@@ -1150,9 +1631,9 @@ def test_binding_admission_reclaims_idle_locks_and_releases_them_after_failure(
 
     if failure_phase is not None:
         repository = jobs_manager if failure_phase == "create" else calendar_db
-        operation_name = "create_job" if failure_phase == "create" else "record_sync_event"
+        operation_name = "admit_idempotent_operation" if failure_phase == "create" else "record_sync_event"
 
-        def fail(**kwargs: Any) -> Any:
+        def fail(*args: Any, **kwargs: Any) -> Any:
             raise RuntimeError("Admission persistence failed")
 
         with monkeypatch.context() as patch:
@@ -1161,15 +1642,10 @@ def test_binding_admission_reclaims_idle_locks_and_releases_them_after_failure(
                 queue()
     else:
         assert queue().queued
-    gc.collect()
-    assert lock_refs and all(reference() is None for reference in lock_refs)
-
     response = queue()
-    assert response.status == ("queued" if failure_phase == "create" else "already_active")
+    assert response.status == ("already_active" if failure_phase is None else "queued")
     assert jobs_manager.count_jobs(domain="calendar") == 1
-    assert len(calendar_db.list_sync_events(binding_id=fixture.binding_id)) == (0 if failure_phase == "audit" else 1)
-    gc.collect()
-    assert all(reference() is None for reference in lock_refs)
+    assert len(calendar_db.list_sync_events(binding_id=fixture.binding_id)) == 1
 
 
 def test_binding_admission_preserves_processing_retry_and_later_window_jobs(
