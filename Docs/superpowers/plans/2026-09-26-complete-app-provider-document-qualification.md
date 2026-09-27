@@ -160,3 +160,18 @@ values retain their current usable surface. Route tests first reproduce the
 initial/partial-state and failure transition; then a minimal rendering guard is
 verified with the onboarding-hook and setup-choice suites and independent review.
 Browser acceptance checks and native qualification requirements remain unchanged.
+
+TASK-13376.9 completed at source `3ef013bd94d389454e0b10b67060f9a95e9089af`:
+60 affected route/hook/choice tests passed after the new cases failed first;
+independent review found no actionable issues and independently passed 24 route
+tests. Scoped lint had no rule findings and the normal managed production WebUI
+build, token synchronization and bundle budgets passed. Bandit is inapplicable
+to this TypeScript-only correction; existing whole-frontend typecheck limitations
+remain. Fresh signed local qualification was blocked by the recurring frozen
+Bun install after resolved/extracted 256. Under the reviewed bound, the verified
+owned Buildx process was stopped after 1090 seconds without output; the pipeline
+exited 130 and removed its registry, retaining recovery evidence and unrelated
+services. No signed candidate or fresh browser/lifecycle result is claimed.
+Native run `36293327915` was In Progress at the final check, with Windows syntax
+passed and Linux candidate builds running. Stage 4 remains In Progress; the
+earlier successful ordinary workflow is specific to `9709d0dcb7`.

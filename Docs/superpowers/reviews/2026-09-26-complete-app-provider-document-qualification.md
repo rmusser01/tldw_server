@@ -332,5 +332,35 @@ recorded. The initial invocation from the frontend subdirectory ignored files
 outside its base path and is not counted as lint verification. New test regions
 match the shared code style; unrelated pre-existing whole-file formatting
 differences remain. Bandit is not applicable to this TypeScript-only production
-change. Fresh signed-candidate browser qualification remains pending; old native
-failure evidence and full product gates remain open.
+change. Old native failure evidence and full product gates remain open.
+
+The correction was committed and pushed as
+`3ef013bd94d389454e0b10b67060f9a95e9089af`. The normal managed production WebUI
+build completed successfully using the existing installed workspace dependencies;
+token synchronization and bundle budgets passed. This build skips whole-frontend
+typechecking under the existing repository configuration and supplies no signed
+candidate or native-platform acceptance evidence. Its output is retained at
+`/private/tmp/task13376-setup-loading-production-build.log`.
+
+Fresh local linux/arm64 candidate qualification on that exact source was blocked
+during the unchanged frozen-lockfile Bun dependency install. The last progress
+was `Resolved, downloaded and extracted [256]`; after 1090 seconds without log
+progress, only the revalidated owned Buildx process was sent SIGTERM under the
+previously reviewed 15-minute bound. The pipeline exited 130 and its exit trap
+removed its registry. Both unrelated PostgreSQL services remained running.
+Build output, images, private signing/trust material and workspace are retained
+for recovery at `/private/tmp/task13376-candidate-3ef013bd94`; failed-run public
+artifacts were not repaired. No signed candidate was produced, so fresh lifecycle,
+initial-browser and ordinary workflow checks were not reached. The successful
+ordinary workflow on `9709d0dcb7` remains evidence for that earlier source only.
+No additional retry, dependency/runtime change or diagnostic image substitution
+was attempted. The underlying recurring Bun stall remains unverified.
+
+At the final status check,
+[native run 36293327915](https://github.com/rmusser01/tldw_server/actions/runs/36293327915)
+matched source `3ef013bd94` and was In Progress: Windows helper syntax passed,
+while both Linux provisional candidate jobs were building. These jobs were not
+retried or cancelled; Windows syntax does not qualify a Windows Docker host.
+TASK-13376.9 is complete for its bounded rendering correction, tests and review.
+Parent TASK-13376 and Stage 4 remain In Progress for native/core-format and G12
+requirements. The application is not release-qualified.
