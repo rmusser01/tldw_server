@@ -258,7 +258,11 @@ a new `batch_id` and the original `source_batch_id`. The WebUI uses
 `failed_slot_batch_ids` and `failed_slot_recipe_available` from generation
 status, so a later batch that merely selected the slot cannot replace its
 failure source or hide an older source without a recipe. A different variant count, slot
-selection, or recipe-affecting option is rejected. An old failed batch
+selection, or recipe-affecting option is rejected. A failed batch
+with resumable fanout work still queued or processing returns
+`409 vn_asset_retry_source_active`; wait for the original jobs to finish and
+refresh generation status before Retry. This preserves automatic recovery and
+does not cancel sibling work. An old failed batch
 without a recipe cannot be faithfully retried: the API returns
 `409 vn_asset_recipe_unavailable`; Start generation uses current settings
 instead. `POST /packs/{pack_id}/items/{item_id}/regenerate` also uses current

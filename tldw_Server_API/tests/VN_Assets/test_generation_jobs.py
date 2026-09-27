@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.VN_Assets.jobs import (
     enqueue_batch_idempotency_key,
     generate_variant_idempotency_key,
     vn_asset_generation_jobs_queue,
+    vn_asset_jobs_queue,
 )
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 
@@ -391,6 +392,100 @@ def test_parent_retry_resumes_partial_fanout_after_transient_enqueue_failure(
     assert resumed["enqueued_count"] == status.planned_count
     assert service.repo.get_batch(status.batch_id)["enqueue_error"] is None
     assert len(child_jobs.created) == status.planned_count
+
+
+@pytest.mark.parametrize("processing", [False, True])
+@pytest.mark.parametrize("lost_response", [False, True])
+@pytest.mark.parametrize("active_child", [False, True])
+def test_retry_api_rejects_active_source_fanout_without_cancelling_it(
+    service: VNAssetPackService,
+    character_id: int,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    processing: bool,
+    lost_response: bool,
+    active_child: bool,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    jobs = JobManager(db_path=tmp_path / "retry-source-jobs.db")
+    pack = service.create_pack(VNAssetPackCreate(title="Resumable source", primary_character_id=character_id))
+    slot = service.create_slot(pack.id, VNAssetSlotCreate(
+        asset_type="sprite", slot_key="sprite.primary", variant_count=2 if active_child else 1,
+    ))
+    registry = FakeImageRegistry(FakeImageAdapter())
+    worker = VNAssetGenerationWorker(repo=service.repo, jobs_manager=jobs, image_registry=registry)
+    if lost_response:
+        create_job = jobs.create_job
+
+        def persist_then_fail(**kwargs: Any) -> dict[str, Any]:
+            create_job(**kwargs)
+            raise RuntimeError("parent enqueue response lost")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(jobs, "create_job", persist_then_fail)
+            with pytest.raises(RuntimeError, match="parent enqueue response lost"):
+                service.start_generation(pack.id, jobs_manager=jobs)
+        source = service.repo.list_batches(pack.id)[0]
+        assert source["job_batch_id"] is None
+    else:
+        status = service.start_generation(pack.id, jobs_manager=jobs)
+        with monkeypatch.context() as patch:
+            patch.setattr(registry, "resolve_backend", lambda _requested: None)
+            with pytest.raises(ValueError, match="image_backend_unavailable"):
+                worker.handle_enqueue_batch({"pack_id": pack.id, "batch_id": status.batch_id, "user_id": 1})
+        source = service.repo.get_batch(status.batch_id)
+    parent = jobs.list_jobs(domain="vn_assets", owner_user_id="1")[0]
+    parent_payload = parent["payload"]
+    if active_child:
+        create_job = jobs.create_job
+
+        def reject_second_variant(**kwargs: Any) -> dict[str, Any]:
+            if kwargs.get("payload", {}).get("variant_index") == 1:
+                raise ValueError("child job quota exceeded")
+            return create_job(**kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(jobs, "create_job", reject_second_variant)
+            with pytest.raises(ValueError, match="child job quota exceeded"):
+                worker.handle_enqueue_batch(parent_payload)
+        assert jobs.cancel_job(parent["id"])
+        parent = jobs.list_jobs(domain="vn_assets", owner_user_id="1", job_type="vn_asset_generate_variant")[0]
+    if processing:
+        parent = jobs.acquire_next_job(
+            domain="vn_assets", queue=vn_asset_generation_jobs_queue() if active_child else vn_asset_jobs_queue(),
+            lease_seconds=120, worker_id="source-worker", owner_user_id="1",
+        )
+        assert parent is not None
+    app = FastAPI()
+    app.include_router(vn_assets_router, prefix="/api/v1/vn")
+    app.dependency_overrides[get_request_user] = lambda: User(id=1, username="vn-generator")
+    app.dependency_overrides[vn_assets_endpoint._service] = lambda: service
+    app.dependency_overrides[vn_assets_endpoint._job_manager] = lambda: jobs
+
+    response = TestClient(app).post(
+        f"/api/v1/vn/vn-assets/packs/{pack.id}/slots/{slot.id}/retry",
+        json={"idempotency_key": "active-source-retry", "source_batch_id": source["id"]},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "vn_asset_retry_source_active"
+    assert len(service.repo.list_batches(pack.id)) == 1
+    assert len(jobs.list_jobs(domain="vn_assets", owner_user_id="1")) == (2 if active_child else 1)
+    assert jobs.get_job(parent["id"])["status"] == ("processing" if processing else "queued")
+    if not processing and not active_child:
+        assert jobs.cancel_job(parent["id"])
+        accepted = TestClient(app).post(
+            f"/api/v1/vn/vn-assets/packs/{pack.id}/slots/{slot.id}/retry",
+            json={"idempotency_key": "active-source-retry", "source_batch_id": source["id"]},
+        )
+        assert accepted.status_code == 202
+        assert accepted.json()["source_batch_id"] == source["id"]
+        assert len(service.repo.list_batches(pack.id)) == 2
+    else:
+        resumed = worker.handle_enqueue_batch(parent_payload)
+        assert resumed["enqueued_count"] == (2 if active_child else 1)
+        assert len(service.repo.list_batches(pack.id)) == 1
 
 
 @pytest.mark.asyncio

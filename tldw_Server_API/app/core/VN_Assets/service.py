@@ -47,7 +47,11 @@ from tldw_Server_API.app.core.VN_Assets.constants import (
     SLOT_STATUS_SKIPPED,
     WARNING_DEPTH_UNAVAILABLE,
 )
-from tldw_Server_API.app.core.VN_Assets.jobs import create_enqueue_batch_job
+from tldw_Server_API.app.core.VN_Assets.jobs import (
+    VN_ASSETS_DOMAIN,
+    create_enqueue_batch_job,
+    vn_asset_batch_group,
+)
 from tldw_Server_API.app.core.VN_Assets.manifest import build_manifest as build_core_manifest
 from tldw_Server_API.app.core.VN_Assets.matrix import expand_starter_matrix
 from tldw_Server_API.app.core.VN_Assets.models import (
@@ -762,6 +766,19 @@ class VNAssetPackService:
             except ValueError as exc:
                 raise ValueError("vn_asset_execution_recipe_invalid") from exc
             execution_recipe = {**execution, "slots": [execution_slot]}
+        if source["enqueue_error"] is not None and int(source["failed_count"] or 0) == 0:
+            manager = jobs_manager or self._require_jobs_manager()
+            source_jobs = manager.list_jobs(
+                domain=VN_ASSETS_DOMAIN,
+                owner_user_id=str(owner_user_id),
+                batch_group=vn_asset_batch_group(
+                    user_id=owner_user_id, pack_id=pack_id, batch_id=int(source["id"]),
+                ),
+                # One parent plus one idempotent job per recorded variant, across both queues.
+                limit=1 + sum(int(entry["variant_count"]) for entry in recipe["slots"]),
+            )
+            if any(job["status"] in {"queued", "processing"} for job in source_jobs):
+                raise ValueError("vn_asset_retry_source_active")
         batch = self.repo.create_batch(
             pack_id=pack_id,
             requested_by_user_id=owner_user_id,

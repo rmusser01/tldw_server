@@ -116,6 +116,13 @@ snapshot-unavailable conflict names the recovery action in user terms. The
 existing monitor keeps one Retry per failed slot and binds it to that slot's
 recorded failed batch. No new setup screen is needed.
 
+A resumable fanout failure does not authorize a replacement while its original
+parent or variant jobs are queued or processing. Retry returns a documented
+active-source conflict until those jobs finish, without cancelling sibling
+work. Query the owner-scoped batch group across both queues in one snapshot,
+including a persisted parent whose enqueue response was lost. Once there is no
+active source work, a genuine enqueue rejection remains retryable.
+
 ## Verification
 
 Backend tests edit pack, slot, character, and world-book data after acceptance

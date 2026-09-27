@@ -91,6 +91,7 @@ GENERATION_RECIPE_CONFLICTS = {
     "vn_asset_recipe_invalid": "Original generation settings cannot be read. Start generation to use current settings.",
     "vn_asset_recipe_slot_mismatch": "This slot was not in the selected batch. Refresh generation status and retry the failed slot.",
     "vn_asset_retry_source_unavailable": "No failed generation batch is available for Retry. Refresh generation status or start generation.",
+    "vn_asset_retry_source_active": "Original generation work is still queued or running. Wait for it to finish, then refresh generation status before Retry.",
     "vn_asset_retry_override_conflict": "Retry uses the original settings. Use Regenerate or Start generation for changed settings.",
     "vn_asset_execution_recipe_invalid": "The original backend selection cannot be read. Start generation to use current settings.",
 }
