@@ -1,5 +1,5 @@
 ---
-id: TASK-13360
+id: TASK-13380
 title: >-
   Worktree test runs silently import the main checkout's mcp_unified, not the
   worktree's
