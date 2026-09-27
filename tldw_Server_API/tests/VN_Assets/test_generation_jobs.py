@@ -436,9 +436,13 @@ async def test_parent_fanout_failure_provenance_waits_for_retry_exhaustion(
     status = service.get_generation_status(pack_with_slots.id)
     assert status.status == "failed"
     assert service.repo.get_batch(started.batch_id)["failed_count"] == 0
+    queued_slot_id = None if resolution_failure else next(
+        row["payload"]["slot_id"] for row in fake_jobs.created
+        if row["job_type"] == "vn_asset_generate_variant"
+    )
     for slot in pack_with_slots.slots:
         stored = service.repo.get_slot(slot.id)
-        exhausted = slot.variant_count > 0 and not retry_remaining
+        exhausted = slot.variant_count > 0 and not retry_remaining and slot.id != queued_slot_id
         assert stored["last_failed_batch_id"] == (started.batch_id if exhausted else None)
         assert stored["last_error"] == (error if exhausted else None)
         assert (stored["status"] == "failed") is exhausted
@@ -453,6 +457,119 @@ async def test_parent_fanout_failure_provenance_waits_for_retry_exhaustion(
         assert stored["last_failed_batch_id"] is None
         assert stored["last_error"] is None
         assert stored["status"] != "failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_recipe", [False, True])
+@pytest.mark.parametrize("async_dispatch", [False, True])
+@pytest.mark.parametrize("completion_failure", [False, True])
+async def test_exhausted_fanout_preserves_fully_queued_slot_outcomes(
+    service: VNAssetPackService,
+    character_id: int,
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    legacy_recipe: bool,
+    async_dispatch: bool,
+    completion_failure: bool,
+) -> None:
+    from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
+
+    pack = service.create_pack(VNAssetPackCreate(title="Partial fanout", primary_character_id=character_id))
+    queued_slot = service.create_slot(pack.id, VNAssetSlotCreate(
+        asset_type="sprite", slot_key="sprite.primary", variant_count=2,
+    ))
+    later_slot = service.create_slot(pack.id, VNAssetSlotCreate(
+        asset_type="background", slot_key="background.interior", variant_count=2,
+    ))
+    zero_slot = service.create_slot(pack.id, VNAssetSlotCreate(
+        asset_type="depth_companion", slot_key="depth.interior", variant_count=0,
+        required_for_runtime=False, depends_on_slot_id=later_slot.id,
+    ))
+    jobs = JobManager(db_path=tmp_path / "partial-fanout-jobs.db")
+    started = service.start_generation(pack.id, jobs_manager=jobs)
+    if legacy_recipe:
+        with service.repo.db.transaction() as conn:
+            conn.execute("UPDATE vn_asset_batches SET recipe_json = NULL WHERE id = ?", (started.batch_id,))
+        assert service.repo.get_batch(started.batch_id)["recipe_json"] is None
+    adapter = FakeImageAdapter()
+    worker = VNAssetGenerationWorker(
+        repo=service.repo, jobs_manager=jobs, image_registry=FakeImageRegistry(adapter),
+        backend_gate=FakeGenerationGate(), save_vn_asset_image=RecordingVNSaver(),
+    )
+    create_job = jobs.create_job
+
+    def reject_later_variant(**kwargs: Any) -> dict[str, Any]:
+        payload = kwargs.get("payload", {})
+        if (kwargs.get("job_type") == "vn_asset_generate_variant"
+                and payload.get("slot_id") == later_slot.id and payload.get("variant_index") == 1):
+            raise RuntimeError("later variant enqueue rejected")
+        return create_job(**kwargs)
+
+    def reject_fanout_completion(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("fanout completion unavailable")
+
+    error = "fanout completion unavailable" if completion_failure else "later variant enqueue rejected"
+    with monkeypatch.context() as patch:
+        if completion_failure:
+            patch.setattr(service.repo, "complete_batch_fanout", reject_fanout_completion)
+        else:
+            patch.setattr(jobs, "create_job", reject_later_variant)
+        while True:
+            parent = jobs.acquire_next_job(
+                domain="vn_assets", queue=vn_asset_jobs_queue(), lease_seconds=120,
+                worker_id="partial-fanout-worker", owner_user_id="1",
+            )
+            assert parent is not None
+            with pytest.raises(RuntimeError, match=error):
+                if async_dispatch:
+                    await worker.handle_job_async(parent)
+                else:
+                    worker.handle_job(parent)
+            exhausted = parent["retry_count"] >= parent["max_retries"]
+            if not exhausted:
+                assert service.repo.get_slot(later_slot.id)["last_failed_batch_id"] is None
+            assert jobs.fail_job(
+                parent["id"], error=error, retryable=True, backoff_seconds=0,
+                worker_id="partial-fanout-worker", lease_id=parent["lease_id"],
+            )
+            if exhausted:
+                break
+
+    before_children = service.repo.get_slot(queued_slot.id)
+    completed_children = 0
+    while child := jobs.acquire_next_job(
+        domain="vn_assets", queue=vn_asset_generation_jobs_queue(), lease_seconds=120,
+        worker_id="variant-worker", owner_user_id="1",
+    ):
+        result = await worker.handle_job_async(child)
+        assert result["status"] == "draft_created"
+        assert jobs.complete_job(
+            child["id"], result=result, worker_id="variant-worker", lease_id=child["lease_id"],
+        )
+        completed_children += 1
+
+    assert completed_children == (4 if completion_failure else 3)
+    assert len(service.repo.list_items(pack.id)) == completed_children
+    queued = service.repo.get_slot(queued_slot.id)
+    assert queued["status"] == "reviewing"
+    assert queued["last_error"] is None
+    assert queued["last_failed_batch_id"] is None
+    assert before_children["status"] != "failed"
+    assert before_children["last_failed_batch_id"] is None
+    later = service.repo.get_slot(later_slot.id)
+    assert later["status"] == ("reviewing" if completion_failure else "failed")
+    assert later["last_failed_batch_id"] == (None if completion_failure else started.batch_id)
+    assert later["last_error"] == (None if completion_failure else error)
+    assert service.repo.get_slot(zero_slot.id)["last_failed_batch_id"] is None
+    status = service.get_generation_status(pack.id)
+    assert queued_slot.id not in status.failed_slot_batch_ids
+    assert not status.failed_slot_recipe_available.get(queued_slot.id, False)
+    assert status.failed_slot_recipe_available.get(later_slot.id, False) is (
+        not completion_failure and not legacy_recipe
+    )
+    batch = service.repo.get_batch(started.batch_id)
+    assert batch["completed_count"] == completed_children
+    assert batch["failed_count"] == 0
 
 
 @pytest.mark.parametrize("terminal_status", ["cancelled", "completed", None])

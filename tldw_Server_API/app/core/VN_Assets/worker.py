@@ -130,8 +130,10 @@ class VNAssetGenerationWorker:
             planned_count = sum(int(variant_count_override or slot["variant_count"]) for slot in slots)
 
         enqueued_count = 0
+        fully_enqueued_slot_ids: set[int] = set()
         try:
             for slot in slots:
+                slot_id = int(slot["slot_id"] if batch.get("recipe_json") is not None else slot["id"])
                 slot_variant_count = (
                     int(slot["variant_count"])
                     if batch.get("recipe_json") is not None
@@ -141,12 +143,13 @@ class VNAssetGenerationWorker:
                     create_generate_variant_job(
                         self.jobs_manager,
                         pack_id=pack_id,
-                        slot_id=int(slot["slot_id"] if batch.get("recipe_json") is not None else slot["id"]),
+                        slot_id=slot_id,
                         variant_index=variant_index,
                         batch_id=batch_id,
                         user_id=user_id,
                     )
                     enqueued_count += 1
+                fully_enqueued_slot_ids.add(slot_id)
             batch = self.repo.complete_batch_fanout(
                 batch_id,
                 planned_count=planned_count,
@@ -164,6 +167,8 @@ class VNAssetGenerationWorker:
                     for slot in slots
                     if int(slot["variant_count"] if batch.get("recipe_json") is not None
                            else variant_count_override or slot["variant_count"]) > 0
+                    and int(slot["slot_id"] if batch.get("recipe_json") is not None else slot["id"])
+                    not in fully_enqueued_slot_ids
                 ] if not _job_has_retry_remaining(job) else (),
             )
             raise

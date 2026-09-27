@@ -22,6 +22,14 @@
 **Tests**: VN backend suite, frontend VN tests and typecheck, OpenAPI drift, Ruff, Bandit, and PR checks.
 **Status**: In Progress
 
+### Fully Queued Slot Outcome Follow-Up (2026-09-27 UTC)
+
+- CodeRabbit's completed full review of `f905b56d6f5deba831256708986d92b443f1c8bf` found that exhausted fanout marked fully queued slots failed (`4114472423`). Their child jobs could still persist drafts, but same-batch failure preservation kept status failed and advertised Retry. The prior exhaustion test's expectation for its first, fully queued slot was incorrect; this follow-up corrects it without rewriting earlier verification history.
+- Eight new real JobManager cases failed before the fix: sync/async dispatch, recorded/verified-absent legacy recipes, and partial later-slot enqueue failure or final fanout bookkeeping failure. All persisted the expected drafts but left the fully queued slot failed instead of reviewing. Two corrected existing exhaustion cases also failed; six resolution/retryable controls passed (10 failed, 6 passed in 13.18s).
+- Track a slot only after all its variant enqueue calls return, then exclude it from exhausted fanout failure writes. Incomplete positive-work slots still receive atomic source provenance; execution-resolution errors, retryable attempts, zero-work entries, terminal/new-owner guards and Jobs APIs remain unchanged. When bookkeeping fails after all children exist, no slot is marked failed by the parent.
+- The generation/repository suite passed 143 tests (102.75s), and all 393 VN backend tests passed (197.66s). Compilation, scoped Ruff with documented BLE001/UP035 exclusions, OpenAPI drift and diff checks passed; Bandit returned zero findings/errors. Earlier 37 frontend VN tests and typecheck passed on this unchanged dev base; no frontend or public schema changed. Shared environments, dependency links/policy and unrelated MCP/ADR records remain unchanged.
+- TASK-13378 and Stage 4 remain In Progress until changed-head full review, current required gates and a verified protected normal merge.
+
 ### Exhausted Parent Fanout Provenance Follow-Up (2026-09-27 UTC)
 
 - CodeRabbit discussion `4114415959` identified exhausted parent fanout failures leaving owned slots without failed-source provenance. Four sync/async execution-resolution and partial-child-enqueue cases failed before the fix; seven retryable, terminal-batch and newer-owner controls passed. An initial test invocation used a temporary directory outside the database-approved root and produced setup errors; the approved-root rerun obtained genuine red evidence.
