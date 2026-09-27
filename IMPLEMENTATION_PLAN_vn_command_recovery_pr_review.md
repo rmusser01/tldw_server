@@ -14,6 +14,19 @@ expected-head lease on publication. Exclude local preview link and archive13379.
 frontend typecheck, scoped lint, diff checks; unchanged VN Python Bandit baseline.
 **Status**: Complete
 
+Latest rebase onto `f4b69eabea7a1c72013cbb66275ce4d187e2dd69` inherits PR #3032's
+unrelated license-audit verdict publication fix. Clean tracked local checkout and
+owned remote `8e2df51c6a8cf1c2f7d25fd9f93d003f30d1cc9f` were verified before
+rebasing the scoped epoch fix. Rebase was conflict-free; final range-diff after
+completion confirms all 14 prior patches unchanged. Fresh typecheck, both scoped
+lint commands and unchanged VN Python Bandit pass. The first full test run hit
+six 5000ms timeouts, including existing remount/replay cases (139 passed,
+126.87s); it reported no assertion failures. A bounded rerun of the identical
+145-test suite with one worker passed (54.79s), without changing test timeouts,
+skipping tests or modifying environments. Backend, base workflows, unrelated MCP
+tasks and shared TldwAuth remain byte-identical to latest dev. Publication uses
+an explicit lease protecting the full original owned remote head.
+
 Published 581979a4a87543aedd73ac0f11667c2dc253e73b onto dev
 35d6dd90d4c3b703a753efdbd926e30af4f9eac5 with an explicit lease protecting
 5de2ed11671f593968a86aef24d3be0422488f75. All five prior patches unchanged;
