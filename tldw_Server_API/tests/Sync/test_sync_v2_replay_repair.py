@@ -1,3 +1,5 @@
+"""Sync replay and repair regressions across product and apply-state transactions."""
+
 from __future__ import annotations
 
 import json
@@ -14,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.endpoints import sync as sync_endpoint
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
 from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
 from tldw_Server_API.app.core.DB_Management.chacha.organization_sync_store import (
     NotesOrganizationSyncStore,
@@ -534,6 +537,39 @@ def test_repair_rebuilds_chat_conversation_and_messages(
     assert message["content"] == "Replay this message."
     assert result.applied_count == 2
     assert [item.domain for item in result.domain_results] == ["chat.conversation", "chat.message"]
+
+
+def test_chat_repair_after_product_commit_cannot_resurrect_startup_origin(
+    log_service: SyncV2Service, repair_service: SyncV2Service, sync_store: SyncV2Store,
+    chacha_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Retry after a committed rebinding and failed bookkeeping keeps local origin unknown."""
+    cid = chacha_db.add_conversation(
+        {"id": "conversation-1", "assistant_kind": "persona", "assistant_id": "local"},
+        assistant_startup=AssistantStartup(source="explicit"),
+    )
+    _push(log_service, _conversation_envelope(payload={
+        "title": "Repair chat", "assistant_kind": "persona", "assistant_id": "sync-assistant",
+        "assistant_startup": {"source": "explicit"}, "assistant_startup_json": '{"source":"explicit"}',
+    }))
+
+    def fail_bookkeeping(*args: Any, **kwargs: Any) -> None:
+        """Inject failure after the real product transaction, before Sync head recording."""
+        raise SyncStoreError("injected bookkeeping failure")
+
+    with monkeypatch.context() as failing:
+        failing.setattr(sync_store, "upsert_object_state", fail_bookkeeping)
+        repair_service.repair(user_id="user-1", dataset_id="dataset-1", domains=["chat.conversation"])
+    after_failure = chacha_db.get_conversation_by_id(cid)
+    assert after_failure["assistant_id"] == "sync-assistant"
+    assert after_failure["assistant_startup_json"] is None
+    assert sync_store.get_object_state("dataset-1", "chat.conversation", cid) is None
+    result = repair_service.repair(user_id="user-1", dataset_id="dataset-1", domains=["chat.conversation"])
+    assert result.applied_count == 1
+    assert chacha_db.get_conversation_by_id(cid)["assistant_startup_json"] is None
+    replay = repair_service.repair(user_id="user-1", dataset_id="dataset-1", domains=["chat.conversation"])
+    assert replay.repair_status["status"] == "healthy"
+    assert chacha_db.get_conversation_by_id(cid)["assistant_startup_json"] is None
 
 
 def test_repair_retries_failed_apply_after_projection_issue_is_fixed(

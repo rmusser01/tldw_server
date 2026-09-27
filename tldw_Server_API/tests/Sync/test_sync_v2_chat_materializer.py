@@ -1,9 +1,12 @@
+"""Sync chat materialization and local authority boundary regressions."""
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, encode_assistant_startup
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
@@ -142,6 +145,36 @@ def _push_one(service: SyncV2Service, envelope: SyncEnvelopeCreate):
         device_id="device-1",
         envelopes=[envelope],
     )
+
+
+@pytest.mark.parametrize("key", ["assistant_startup", "assistant_startup_json"])
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("complete_identity", [False, True])
+def test_sync_forged_origin_cannot_create_or_restore_local_authority(
+    sync_service: SyncV2Service, chacha_db: CharactersRAGDB, key: str, existing: bool, complete_identity: bool,
+) -> None:
+    """Only the actual resulting binding decides whether a preexisting origin survives."""
+    origin = AssistantStartup(source="explicit")
+    forged = AssistantStartup(source="workspace_default", workspace_id="remote-forged-origin", workspace_version=777)
+    raw = None
+    if existing:
+        chacha_db.add_conversation(
+            {"id": "conv-1", "assistant_kind": "persona", "assistant_id": "sync-assistant"},
+            assistant_startup=origin,
+        )
+        raw = chacha_db.get_conversation_by_id("conv-1")["assistant_startup_json"]
+    payload = {"title": "Remote", key: forged.model_dump() if key == "assistant_startup" else encode_assistant_startup(forged)}
+    if complete_identity:
+        payload.update(assistant_kind="persona", assistant_id="sync-assistant")
+    result = _push_one(sync_service, _conversation_envelope(payload=payload))
+    assert len(result.accepted) == 1
+    row = chacha_db.get_conversation_by_id("conv-1")
+    assert row["title"] == "Remote"
+    assert row["assistant_startup_json"] == (raw if complete_identity else None)
+    assert row["assistant_id"] == ("sync-assistant" if complete_identity else "sync-v2")
+    replay = _push_one(sync_service, _conversation_envelope(payload=payload))
+    assert not replay.conflicts
+    assert chacha_db.get_conversation_by_id("conv-1")["assistant_startup_json"] == (raw if complete_identity else None)
 
 
 def _push_one_through_materializer_conflict(
@@ -381,6 +414,7 @@ def test_message_metadata_write_failure_is_replayable_without_duplicate_rows(
     chacha_db: CharactersRAGDB,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Metadata failure rolls back the message; retry inserts exactly one complete row."""
     _push_one(sync_service, _conversation_envelope())
 
     monkeypatch.setattr(chacha_db.message_store, "set_message_metadata_extra", lambda *args, **kwargs: False)
@@ -400,7 +434,7 @@ def test_message_metadata_write_failure_is_replayable_without_duplicate_rows(
     )
     assert stored_envelope.apply_status == "failed"
     assert sync_service.store.get_object_state("dataset-1", "chat.message", "msg-1") is None
-    assert chacha_db.get_message_by_id("msg-1") is not None
+    assert chacha_db.get_message_by_id("msg-1") is None
     assert chacha_db.get_message_metadata("msg-1") is None
 
     retry = _push_one(sync_service, _message_envelope())

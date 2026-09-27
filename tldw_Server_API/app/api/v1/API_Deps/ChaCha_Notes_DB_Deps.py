@@ -470,7 +470,9 @@ def _create_and_prepare_db(user_id: int, client_id: str) -> CharactersRAGDB:
     except ChaChaDatabaseCorruptionError:
         logger.error("ChaChaNotes DB corruption preflight failed for user {} ({})", user_id, affected_db)
         raise
-    db_instance = CharactersRAGDB(db_path=str(db_path), client_id=str(client_id))
+    db_instance = CharactersRAGDB(
+        db_path=str(db_path), client_id=str(client_id), owner_user_id=str(user_id),
+    )
     _apply_sqlite_tuning(db_instance)
     from tldw_Server_API.app.core.Visual_Identities.builtin_pixel_migu import ensure_pixel_migu_character
 

@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, field_validator, model_serializer, model_
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
 from tldw_Server_API.app.core.Character_Chat.emote_directives import CharacterEmoteEvent
+from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, reject_assistant_startup_input
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
 
 ALLOWED_CONVERSATION_STATES = ("in-progress", "resolved", "backlog", "non-viable")
@@ -191,6 +192,12 @@ class ChatSessionCreate(BaseModel):
     def _validate_state(cls, value: Optional[str]) -> Optional[str]:
         return _validate_conversation_state(value)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_startup_input(cls, value: Any) -> Any:
+        """Reject caller-authored origin independently of legacy extra fields."""
+        return reject_assistant_startup_input(value)
+
     @model_validator(mode="after")
     def _normalize_assistant_identity(self) -> "ChatSessionCreate":
         has_any_tracked_identity = any(
@@ -265,9 +272,16 @@ class ChatSessionUpdate(BaseModel):
     def _validate_state(cls, value: Optional[str]) -> Optional[str]:
         return _validate_conversation_state(value)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_startup_input(cls, value: Any) -> Any:
+        """Keep local creation provenance out of caller metadata updates."""
+        return reject_assistant_startup_input(value)
+
 
 class ChatSessionListItem(BaseModel):
     """Chat list item without authoritative resume-detail fields."""
+    assistant_startup: AssistantStartup = Field(default_factory=AssistantStartup, json_schema_extra={"readOnly": True})
     id: str = Field(..., description="UUID of the chat session")
     scope_type: Literal["global", "workspace"] = Field(
         "global",
