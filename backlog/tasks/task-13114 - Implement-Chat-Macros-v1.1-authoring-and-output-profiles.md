@@ -1,21 +1,21 @@
 ---
 id: TASK-13114
 title: Implement Chat Macros v1.1 authoring and output profiles
-status: In Progress
+status: Done
 assignee: []
-created_date: '2026-08-24 04:15'
-updated_date: '2026-09-27 09:03'
+created_date: 2026-08-24 04:15
+updated_date: 2026-09-27 09:46
 labels:
-  - chat-macros
-  - frontend
-  - backend
+- chat-macros
+- frontend
+- backend
 dependencies:
-  - TASK-12126
+- TASK-12126
 references:
-  - 'https://github.com/rmusser01/tldw_server/pull/2951'
+- https://github.com/rmusser01/tldw_server/pull/2951
 documentation:
-  - Docs/superpowers/specs/2026-07-03-chat-macros-design.md
-  - Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_authoring.md
+- Docs/superpowers/specs/2026-07-03-chat-macros-design.md
+- Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_authoring.md
 priority: medium
 ---
 
@@ -43,7 +43,6 @@ Detailed TDD plan: Docs/superpowers/plans/IMPLEMENTATION_PLAN_chat_macros_v1_1_a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-08-23 baseline: backend Chat_Macros suite passed 134 tests with 2 warnings. ChatMacrosSettings frontend component suite passed 4 tests. The frontend service suite could not collect in this isolated worktree because wxt/browser was unresolved across the monorepo dependency roots; stop-after-three-attempts rule applied and the plan requires a complete workspace dependency layout before Task 2.
 
@@ -76,7 +75,6 @@ Heading follow-up verified: 16 new validation/legacy-read regressions failed bef
 Root cause confirmed: isolated CI dependency overlay reproduces CI fingerprint7a9fc91443c4cfca4e929fafb9c54cc5daab78d00cea3b1085011a39bc60e83e exactly. Schema diff has no changed paths or Chat Macros schemas; Pydantic2.13.5 combines equivalent OscePatientContext-Input/-Output into OscePatientContext, updating references in three OSCE models. Updating only generated fingerprint (types regenerated locally, gitignored). No backend behavior change or shared-venv modification.
 Fingerprint correction verification: regenerated OpenAPI JSON+TypeScript using CI-matched dependency overlay; a separate fresh exporter --check passes with expected7a9fc914 fingerprint. Package-wide bun run typecheck exits0; git diff --check passes. Only tracked changes are fingerprint and task record, no application code; prior security scan remains applicable.
 2026-09-26 rebased onto dev3f909e133b (ADR inventory documentation update), cleanly. git range-diff shows all24 PR commits patch-equivalent; application/frontend/helper trees are identical to prior da6c9dfa9e. New AGENTS ADR assessment requirement: ADR required:no new ADR; governed by Docs/ADR/003-jobs-vs-scheduler-default.md. This v1.1 authoring/profile UI and validation follow-up retains v1 per-user YAML storage, database records and Jobs ownership; no durable architecture decision changes. Recording same assessment in implementation plan and PR. Rechecking CI-matched OpenAPI contract before publication.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 2026-09-26 follow-up rebase: dev advanced to 59bd584503 (PR2996 MCP sanitizer changes, no Chat Macros overlap). Rebased all25 PR commits cleanly; git range-diff confirms every commit patch-equivalent. Fresh CI-matched OpenAPI contract check passes using /tmp/pr2951-openapi-ci-deps. No new application edits or security findings introduced by this rebase. Publishing with an exact lease against2445e67792; required CI and any new review feedback remain merge gates.
 
@@ -93,16 +91,13 @@ Fingerprint correction verification: regenerated OpenAPI JSON+TypeScript using C
 2026-09-27 08:15 UTC: all CI checks on e43b467b0d passed, but dev advanced to8b25dc729c (PR3013 license-first CI ordering). Rebased all31 prior commits cleanly and patch-equivalently; apps, backend and Helper_Scripts unchanged. Fresh CI-matched OpenAPI contract and full PR whitespace checks pass. No new Qodo feedback. Publish with exact lease againste43b467b0d and await fresh required CI under updated workflows. No new authored application code or additional Bandit scope.
 
 2026-09-27 09:00 UTC: all seven required checks passed on efc1c36f24, but dev advanced to bfa343a608 (PR3015 VN recipe snapshots), creating a generated fingerprint conflict. Rebased all32 commits; range-diff differs only in fingerprint hunks of two historical commits. Macro backend/frontend/test files are unchanged. Regenerated combined fingerprint with CI Pydantic2.13.5: b5210f8ed4c83d9385414965b13f9e04777cdfc2130dddf205420f944f92bb51 (2098 paths/3210 schemas). Compared prior CI schema: no changed paths, only VNAssetGenerationRequest and VNAssetGenerationStatusResponse changed. Fresh exporter --check, regenerated OpenAPI TypeScript, package-wide frontend typecheck, and full PR whitespace check pass. All11 review threads resolved; no new comments. Human Change Summary verified. Publish exact lease against efc1c36f24; fresh CI required. No newly authored Python changes or additional Bandit scope.
-<!-- SECTION:NOTES:END -->
-
+2026-09-27 09:45:59 UTC: PR2951 merged into dev as0727e9ee3278569032d492532d9931cc6a0d5f6b from verified head911b5008d83ab7a1210fcc383571073605586d2f. All seven required checks SUCCESS: frontend, backend, container, coverage, security, E2E and trusted frontend license policy. All11 review threads resolved, Qodo zero outstanding findings, human Change Summary present. No policy bypass. Post-merge task closeout is recorded on the feature branch; automation stopped after completion.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Delivered Chat Macros v1.1 authoring and configurable output profiles on codex/chat-macros-v1-1. Users can create, validate, edit, import, export, clone, enable/disable, and delete user macros while built-ins remain immutable; advanced YAML stays canonical, dirty drafts survive refreshes and tab changes, and imports remain one-shot without losing edits. Output profiles support structured or single responses, ordered sections, custom headings, and branch-output inclusion while preserving unknown future settings. Backend identity, ownership, validation, path, and size protections remain authoritative.
-
-Independent whole-branch review and scoped re-review findings were resolved. Final verification: 97 frontend tests, 146 backend/Jobs tests, Bandit with zero findings across 3,564 LOC, clean diff checks, responsive live browser QA, and no Chat Macros diagnostics within the known package-wide TypeScript baseline.
+Delivered and merged Chat Macros v1.1 authoring and output profiles in PR2951, merge0727e9ee32. Guided and YAML editing, import/export, cloning, validation and deletion reuse per-user YAML and Jobs. Atomic profile-only updates prevent stale settings overwrites; dirty drafts and stale async completions are protected; heading validation and legacy reads are compatible. All original Qodo findings plus heading follow-up addressed and all11 threads resolved. Human-authored Change Summary verified. All seven required checks passed on final head911b5008d8 before merge. Final rebase resolved only generated OpenAPI conflict using CI-matched Pydantic2.13.5; fingerprint b5210f8ed4c8, fresh contract check, generated types and frontend TypeScript pass. Prior backend/frontend regression tests, Bandit zero findings and browser QA are recorded above. Non-blocking follow-ups remain documented; no merge blockers remain.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
