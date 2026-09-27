@@ -383,6 +383,7 @@ class BufferedTranscriber:
         # Resample if needed
         if sample_rate != 16000:
             audio_data = self._resample(audio_data, sample_rate, 16000)
+            sample_rate = 16000
 
         # Precompute file-specific expected/allowed chunk counts
         padding_samples_pre = self.buffer_samples_at_16k - self.chunk_samples_at_16k
@@ -531,28 +532,40 @@ class BufferedTranscriber:
         return ' '.join(merged_texts)
 
     def _resample(self, audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
-        """Return audio AT ``target_sr``, resampling if necessary.
+        """Resample audio to target sample rate.
 
-        Post-condition: the returned array is at ``target_sr``. Both callers relabel
-        ``sample_rate = target_sr`` immediately after calling this, so returning the
-        input unchanged silently mislabels the stream - a 48 kHz buffer declared as
-        16 kHz is fed to the model at 3x speed with every timestamp 3x short.
+        Must always return audio at ``target_sr``. Both callers set
+        ``sample_rate = 16000`` immediately after calling this, unconditionally, so
+        returning the input unchanged does not degrade quality -- it makes the declared
+        rate false. Without librosa, 48 kHz audio was relabelled 16 kHz and the
+        transcriber then read samples 3x too dense: garbage transcript, every timestamp
+        3x short, and HTTP 200 with the warning buried in the logs. See TASK-13304.
 
-        Falls back to linear interpolation when librosa is absent, matching
-        Audio_Transcription_Lib._resample_audio_if_needed, rather than lying.
+        librosa stays the primary path because its resampling is higher quality. The
+        fallback is the one already used by Audio_Transcription_Lib -- scipy polyphase
+        when available, linear interpolation otherwise -- imported lazily because pulling
+        that module in eagerly drags heavy optional dependencies into every import of
+        this one.
         """
-        if orig_sr == target_sr:
-            return audio
+        if orig_sr <= 0 or target_sr <= 0:
+            raise ValueError(f"sample rate must be positive, got {orig_sr} Hz -> {target_sr} Hz")
+        if orig_sr == target_sr or len(audio) == 0:
+            return np.asarray(audio, dtype=np.float32)
         try:
             import librosa
             return librosa.resample(audio, orig_sr=orig_sr, target_sr=target_sr)
         except ImportError:
-            logger.debug("librosa not available; using linear-interpolation resample")
-            ratio = float(target_sr) / float(orig_sr)
-            new_len = max(1, int(round(len(audio) * ratio)))
-            x_old = np.linspace(0.0, 1.0, num=len(audio), endpoint=False)
-            x_new = np.linspace(0.0, 1.0, num=new_len, endpoint=False)
-            return np.interp(x_new, x_old, audio).astype(np.float32, copy=False)
+            from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (
+                _resample_audio_without_librosa,
+            )
+
+            logger.warning(
+                "librosa not available; resampling {} Hz -> {} Hz with the scipy/linear "
+                "fallback instead of returning the audio unchanged",
+                orig_sr,
+                target_sr,
+            )
+            return _resample_audio_without_librosa(audio, orig_sr, target_sr=target_sr)
 
 
 class LCSMergeTranscriber(BufferedTranscriber):
@@ -765,6 +778,7 @@ def transcribe_long_audio(
     if variant == "mlx" and return_structured:
         if sample_rate != 16000:
             audio_data = transcriber._resample(audio_data, sample_rate, 16000)
+            sample_rate = 16000
 
         chunks = transcriber._create_chunks(audio_data)
         total_chunks = len(chunks)
