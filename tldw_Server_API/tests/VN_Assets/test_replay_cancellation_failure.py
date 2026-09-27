@@ -21,7 +21,17 @@ from tldw_Server_API.tests.VN_Assets.test_cancelled_storage_handoff import (
 async def test_replay_cancel_wins_over_drained_operation_failure(
     handoff: SimpleNamespace, cancel_count: int,
 ) -> None:
-    """Cancellation wins after rollback/close; uncancelled native errors still propagate."""
+    """Cancellation wins after rollback/close; uncancelled native errors still propagate.
+
+    Args:
+        handoff: Real file-backed VN/Jobs fixture with a repository and batch payload.
+        cancel_count: Zero expects the native OSError; one requests cancellation once,
+            and two repeats the request. Positive counts expect CancelledError only
+            after transaction rollback, owned connection closure and thread exit.
+
+    Returns:
+        None: Asserts the error/cancellation contract and preserved repository state.
+    """
     repo = handoff.service.repo
     owner = repo.db.get_connection()
     started, release = threading.Event(), threading.Event()

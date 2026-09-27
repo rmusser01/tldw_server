@@ -1,5 +1,48 @@
 # PR 3016 VN Durability Review Implementation Plan
 
+## Current Review Wave: Task 36
+
+**Base head:** 6a3136d993125df7f9fdefe90304437832f7c6c3.
+**Tracking:** TASK-13369. **Live dev:** f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07.
+Fullrequest5851530047 COMPLETED review5328374205 at01:14:40Z/updated01:14:41Z
+and exacthead terminal5851543650 at01:14:43Z; busy5851531155 removed/fresh404.
+One new documentation-only finding4113639733; AC5reopenedAC6pending.
+
+### Stage 1: Explicit Regression Documentation
+**Goal:** Document handoff fixture, zero/native error, once/repeated cancellation
+and None return in the existing immediate test docstring only.
+**Success Criteria:** Complete-module executable AST, signature, tiers and cases
+unchanged; no production bytes changed. Prior frozen artifacts remain intact.
+**Tests:** Sensitive doc-contract RED/GREEN, normalized AST, in-memory compile,
+narrow three-case regression, scoped appropriate security/static baseline.
+**Status:** Complete
+
+### Stage 2: Independent Review And Normal Integration
+**Goal:** Fresh independent changed-doc-contract review; normal scoped commit/push,
+individual evidence reply and one full new-head review.
+**Success Criteria:** No actionable finding; exact review/seven required CI/current
+strict base/human summary gates before normal merge, no tracking-only push.
+**Tests:** Frozen matching-byte review and applicable hooks; no broad repeat.
+**Status:** In Progress
+
+Task36 frozen16 checked0, immediate-doc-contract REDassert/GREENpass, fullmodule
+AST normalized onlytargetdoc identical/production bytes unchanged. Actual3pass
+0failerrorsskips4warnings5.45s/XML3time4.126, not summed with Task35. Test-only
+Bandit0/errors[]onlyB101excluded/Ruffempty/inmemorycompile/diff passes. Ampere
+independent SPEC/QUALITY/final changed-contract PASS/no actionable finding/CLOSED,
+own4 hashes checked0; audits only/no fresh tests or scanners. All needed sessions CLOSED.
+Task35 preserved25of26/9of10 excluding exact superseded live test; Main8 intact,
+not fullold-livemanifest match. No hooks/commitpush/replyresolution/merge yet.
+
+Tasks1-35 locally complete/independently approved/agents and sessions closed.
+Task35 normal six-file commit/FFpush/GitHubverified6a3136d993, new26/reviewer10/
+Main8 checked after commit; both individual replies4113631785/4113631840 resolved.
+Its source test live hash becomes historical after this immediate-doc-only change;
+all old artifacts retained, repository/worker bytes remain unchanged.
+Initial Verification-only update rejected by approval checker for concurrency risk;
+no PR mutation, subsequent outside-boundary proof passed but review advanced before
+retry. Do not use that stale pending-review body candidate. Devf5 unchanged/no rebase.
+
 ## Current Review Wave: Task 35
 
 **Base head:** 40e5eef3d4485991e27a4258c74088c177313767.
