@@ -115,7 +115,10 @@ export function useVNGenerationRecovery(onBoundary: (resetAccount: boolean) => v
     try {
       clearVNCommands();
       void verify();
-    } catch (failure) { report(failure); }
+    } catch (failure) {
+      report(failure);
+      setUnreadable(true);
+    }
   }, [report, verify]);
 
   const deactivate = useCallback(() => {

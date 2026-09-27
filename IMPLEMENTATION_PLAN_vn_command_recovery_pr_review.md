@@ -5,6 +5,7 @@ Requester authorized protected rebases, scoped review fixes and a gated normal
 merge. Preserve the human-written Change summary verbatim and unrelated work.
 
 ## Stage 1: Protected Rebase
+
 **Goal**: Rebase the owned PR branch onto latest dev without changing prior patches.
 **Success Criteria**: Clean tracked checkout and matching remote ownership before
 rebase; conflict-free rebase and all five patches unchanged in range-diff; explicit
@@ -20,6 +21,7 @@ Published 581979a4a87543aedd73ac0f11667c2dc253e73b onto dev
 findings/errors; it does not scan touched TypeScript.
 
 ## Stage 2: Current-Head Review
+
 **Goal**: Address all actionable findings and obtain complete exact-head review.
 **Success Criteria**: Explain Qodo's human-gate finding inline, distinguish design
 approval from merge authorization, preserve requester summary; validate any new
@@ -30,11 +32,21 @@ all review comments/threads checked, scoped regressions and relevant suites.
 
 Qodo completed the exact-head full-diff reassessment at issuecomment-5858115068
 with no production defects and accepted the human-gate clarification. Its minor
-tracking hygiene feedback is being addressed. CodeRabbit full review was
-triggered at issuecomment-5858113221 and remains pending. Any changed head still
-requires complete reassessment.
+tracking hygiene feedback was addressed in 804c0745c0. CodeRabbit completed the
+full review of 804c0745c0 at 17:46:08 UTC with three scoped findings:
+failed discard hides unreadable controls, a retired-plan link, and heading spacing.
+The failed-discard workbench regression failed before the minimal hook fix because
+the warned confirmation checkbox disappeared. With the fix, the journal and
+generation lock survive removal denial, confirmation resets, and explicit retry
+succeeds without generation or cancellation after storage access is restored.
+The retired documentation link was removed through official Backlog mutation;
+heading spacing is corrected here. All 98 VN/frontend fetch-client tests pass
+(8.97s), typecheck and scoped ESLint pass, and unchanged Python VN Bandit has zero
+findings/errors (not a TypeScript scan). Any changed head still requires complete
+reassessment; no backend scope expansion is authorized.
 
 ## Stage 3: Gated Merge
+
 **Goal**: Merge normally only after current-head review and live dev gates pass.
 **Success Criteria**: Fresh head/base/rules/summary check; backend-required,
 security-required, coverage-required, frontend-required, e2e-required,
@@ -44,5 +56,8 @@ this completed plan removed. Preserve checkout and chat; stop own follow-up.
 **Tests**: Live GitHub rules/checks, merge API verification and tracked diff check.
 **Status**: In Progress
 
-Current-head checks and trusted license audit remain queued. No merge attempted;
-all current-head required gates and completed review remain prerequisites.
+Exact 804c0745c0 E2E failed before tests in unchanged AuthNZ bootstrap. Isolated
+30.19.0/30.20.0 SQLGlot comparison reproduces rejection of identical canonical SQL
+because standalone AUTOINCREMENT rendering changed. A separate backend-fix
+decision is pending; shared environments and dependency policy are unchanged.
+No merge attempted; all live current-head gates remain prerequisites.

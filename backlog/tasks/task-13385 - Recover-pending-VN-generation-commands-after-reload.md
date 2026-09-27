@@ -4,7 +4,7 @@ title: Recover pending VN generation commands after reload
 status: In Progress
 assignee: []
 created_date: 2026-09-27 15:25
-updated_date: 2026-09-27 17:31
+updated_date: 2026-09-27 17:57
 labels:
 - vn-assets
 - frontend
@@ -16,7 +16,6 @@ references:
 - https://github.com/rmusser01/tldw_server/pull/3028
 documentation:
 - Docs/Design/VN_PENDING_COMMAND_RECOVERY.md
-- IMPLEMENTATION_PLAN_vn_command_recovery.md
 - IMPLEMENTATION_PLAN_vn_command_recovery_pr_review.md
 priority: high
 ---
@@ -37,6 +36,7 @@ Requester-approved continuation of #2021 after PR #3015 / TASK-13378. Persist un
 
 ## Implementation Notes
 
+<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Inventory across registered worktrees found maximum ID 13384. CLI auto-allocation selected already-used 13379; the newly created duplicate was archived through CLI without altering the unrelated Chat Macros task. Explicit unused ID 13385 is the authoritative VN slice record.
 
@@ -60,12 +60,18 @@ Requester explicitly authorized protected rebase of PR3028 onto latest dev, scop
 
 Fresh verification after rebase onto dev35d6dd90d4c3b703a753efdbd926e30af4f9eac5: all97 VN/frontend real fetch-client tests passed (15.28s), frontend typecheck passed, scoped ESLint zero warnings and diff checks passed. Unrelated MCP tests/task13358/task13380/base workflows match dev byte-for-byte. Bandit unchanged VN Python baseline returned zero findings/errors; it does not scan touched TypeScript. Only scoped design wording distinguishes approved design from human-summary/current-head review/CI merge gates; no production behavior changed. Qodo discussion4116043591 was posted before the human summary, while merge/auto-merge were intentionally disabled. Human summary now published verbatim, explicit gated merge authorization received; reply and exact-new-head hosted reviews will follow protected publication. Task remains In Progress until verified merge.
 Protected rebase published as581979a4a87543aedd73ac0f11667c2dc253e73b with explicit lease on full remote5de2ed11671f593968a86aef24d3be0422488f75; head/base/clean tracked checkout and verbatim human summary reverified. Qodo exact-head full-diff reassessment comment5858115068 found no production defects and accepted the human-gate clarification. It flagged duplicate task final-summary end markers and stale review-plan statuses; synchronize these through official Backlog mutation and own plan edit. CodeRabbit full review trigger5858113221 is running and exact-head CI/license audit pending. No merge attempted. Task remains In Progress.
+CodeRabbit complete exact804c full review finished2026-09-27 17:46:08 with three actionable comments:4116325136 failed discard hides unreadable controls,4116325140 stale retired-plan documentation reference,4116325143 missing blank lines after own-plan headings. Validate scoped failed-discard behavior with a real workbench storage-denial regression before minimal hook fix; preserve fail-closed/no automatic POST/warned explicit retry. Remove only obsolete current documentation reference through official Backlog mutation, preserving historical plan-removal notes. E2E run36337313726 on exact804c failed both macOS108670808875 and Ubuntu108670808888 during unchanged AuthNZ bootstrap before any tests (38 setup errors). Successful prior run36332400363 used SQLGlot30.19.0; failing run uses30.20.0. Isolated temporary installs reproduced actual Users_DB SQLite CREATE guard acceptance True on30.19 and False on30.20: standalone AutoIncrementColumnConstraint renders AUTOINCREMENT versus empty string, so unchanged _bootstrap_simple_constraint_is_canonical rejects. Shared environments/policy/repo backend unchanged. Logs /tmp/vn_3028_e2e_failed.log and current/prior_e2e_job.log. This is deterministic backend compatibility drift, not a transient network failure; no blind rerun or gate bypass. Asked requester whether to approve separate backend compatibility fix or wait, preserving frontend-only PR/human summary.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+Scoped CodeRabbit fixes verified: the real workbench storage-removal-denial regression failed before the hook change because the warned confirmation checkbox disappeared (1 failed, 37 skipped, 1.60s). The minimal discard catch now preserves unreadable=true after reporting the storage error. With storage denied, the original journal and generation lock remain, confirmation resets and the warned discard path stays visible; after storage restoration, a fresh explicit confirmation/discard succeeds without generation or cancellation. All 98 VN/frontend real fetch-client tests passed (8.97s), typecheck passed, scoped ESLint zero warnings, diff checks passed. Bandit unchanged VN Python baseline has zero findings/errors over 6764 LOC; it does not scan TypeScript. Removed only retired implementation-plan documentation reference through official Backlog mutation; preserved historical notes and corrected own review-plan heading spacing. No backend, workflow, dependency or unrelated task changes. Current dev35d and owned remote804c unchanged before publication; exact-new-head hosted reviews and all live gates remain required. SQLGlot compatibility blocker/requester separate-fix decision remains pending; no merge or deterministic-failure rerun attempted.
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented requester-approved tab-scoped pending Start/Retry command recovery. Exact original payload/key survives reload and changed Retry provenance; recovery is explicit with no automatic POST. Verified account/server boundaries and per-command fencing protect stale callbacks; malformed/unavailable storage fails closed. Known VN pre-admission conflicts unlock the pack while ambiguous responses retain recovery. Qualified locally with97passing tests, typecheck, scoped lint, unchanged-backend Bandit baseline and desktop/mobile full-browser smoke with isolated HTTP fixtures. No remaining actionable production review findings in Qodo's complete exact-head reassessment. Current-head CodeRabbit review, hosted CI and verified merge remain pending; integration and live backend/GPU acceptance are not claimed.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

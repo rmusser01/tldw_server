@@ -297,6 +297,33 @@ describe('VNAssetsWorkbench', () => {
     expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
   });
 
+  it('keeps warned discard available after storage refuses to remove unreadable requests', async () => {
+    existingFailedPack();
+    sessionStorage.setItem('tldw:vn-generation:pending:v1', '{');
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await screen.findByText(/Saved generation requests could not be read/);
+    const spy = vi.spyOn(Object.getPrototypeOf(sessionStorage), 'removeItem').mockImplementation(() => { throw new Error('denied'); });
+    await user.click(screen.getByRole('checkbox', { name: /I checked server status/ }));
+    await user.click(screen.getByRole('button', { name: 'Discard unreadable requests' }));
+    await screen.findByText(/Recovery storage is unavailable/);
+    expect(screen.getByRole('checkbox', { name: /I checked server status/ })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Discard unreadable requests' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+    expect(sessionStorage.getItem('tldw:vn-generation:pending:v1')).toBe('{');
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+    spy.mockRestore();
+    await user.click(screen.getByRole('checkbox', { name: /I checked server status/ }));
+    await user.click(screen.getByRole('button', { name: 'Discard unreadable requests' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    expect(sessionStorage.getItem('tldw:vn-generation:pending:v1')).toBeNull();
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+  });
+
   it('does not trust cached identity when profile verification fails', async () => {
     existingFailedPack();
     mocks.profile.mockRejectedValue(new Error('Current server and account could not be verified.'));
