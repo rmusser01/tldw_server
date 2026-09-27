@@ -173,9 +173,34 @@ async def _count_notes(user_id: int) -> int:
     )
 
 
+def _has_workspace_chat_startup_receipts(path: Path) -> bool:
+    """Keep chat erasure compatible with ChaCha databases predating receipts."""
+    if not path.exists():
+        return False
+    return bool(_sqlite_count_sync(
+        path,
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'workspace_chat_startup_receipts'",
+    ))
+
+
 async def _count_chat_messages(user_id: int) -> int:
+    path = DatabasePaths.get_chacha_db_path(user_id)
+    if await asyncio.to_thread(_has_workspace_chat_startup_receipts, path):
+        return await _sqlite_count(
+            path,
+            """
+            SELECT COUNT(1)
+            FROM messages m
+            JOIN conversations c ON m.conversation_id = c.id
+            WHERE (c.client_id = ? OR EXISTS (
+                SELECT 1 FROM workspace_chat_startup_receipts r
+                WHERE r.conversation_id = c.id AND r.owner_user_id = ?
+            )) AND c.deleted = 0 AND m.deleted = 0
+            """,
+            (str(user_id), str(user_id)),
+        )
     return await _sqlite_count(
-        DatabasePaths.get_chacha_db_path(user_id),
+        path,
         """
         SELECT COUNT(1)
         FROM messages m
@@ -467,6 +492,26 @@ async def _erase_media_records(user_id: int) -> int:
 async def _erase_chat_messages(user_id: int) -> int:
     """Hard-delete all chat conversations and messages for a user."""
     path = DatabasePaths.get_chacha_db_path(user_id)
+    if await asyncio.to_thread(_has_workspace_chat_startup_receipts, path):
+        return await asyncio.to_thread(
+            _sqlite_hard_delete_sync,
+            path,
+            [
+                (
+                    "DELETE FROM messages WHERE conversation_id IN ("
+                    "SELECT c.id FROM conversations c WHERE c.client_id = ? OR EXISTS ("
+                    "SELECT 1 FROM workspace_chat_startup_receipts r "
+                    "WHERE r.conversation_id = c.id AND r.owner_user_id = ?))",
+                    (str(user_id), str(user_id)),
+                ),
+                (
+                    "DELETE FROM conversations WHERE client_id = ? OR EXISTS ("
+                    "SELECT 1 FROM workspace_chat_startup_receipts r "
+                    "WHERE r.conversation_id = conversations.id AND r.owner_user_id = ?)",
+                    (str(user_id), str(user_id)),
+                ),
+            ],
+        )
     return await asyncio.to_thread(
         _sqlite_hard_delete_sync,
         path,

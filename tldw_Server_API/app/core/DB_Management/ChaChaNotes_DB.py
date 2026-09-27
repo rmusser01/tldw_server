@@ -685,8 +685,9 @@ RawBackendConnection: TypeAlias = sqlite3.Connection | SupportsRawBackendConnect
 class BackendManagedTransaction:
     """Context manager leveraging the backend's native transaction handling."""
 
-    def __init__(self, db: CharactersRAGDB):
+    def __init__(self, db: CharactersRAGDB, *, preserve_existing: bool = False):
         self._db = db
+        self._preserve_existing = preserve_existing
         self._raw_conn = None
         self._wrapper = None
         self._managed = False
@@ -700,8 +701,15 @@ class BackendManagedTransaction:
         try:
             self._raw_conn = self._db._get_thread_connection()
             self._managed = self._depth == 0
-            self._state.tx_depth = self._depth + 1
             backend = self._db._get_pinned_backend() or self._db.backend
+            if self._preserve_existing:
+                status = getattr(getattr(self._raw_conn, "info", None), "transaction_status", None)
+                self._managed = bool(
+                    self._managed
+                    and getattr(status, "name", None) == "IDLE"
+                    and backend._tx_depth(self._raw_conn) == 0
+                )
+            self._state.tx_depth = self._depth + 1
             self._wrapper = BackendConnectionWrapper(self._db, self._raw_conn, backend)
             return self._wrapper
         except BaseException:
@@ -8624,11 +8632,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise CharactersRAGDBError(f"Execute Many failed: {exc}") from exc  # noqa: TRY003
 
     # --- Transaction Context ---
-    def transaction(self) -> TransactionContextManager | BackendManagedTransaction:
-        """Return a context manager for database transactions."""
+    def transaction(self, *, preserve_existing: bool = False) -> TransactionContextManager | BackendManagedTransaction:
+        """Optionally join driver-open caller work without committing or rolling it back."""
         if self.backend_type == BackendType.SQLITE:
             return TransactionContextManager(self)
-        return BackendManagedTransaction(self)
+        return BackendManagedTransaction(self, preserve_existing=preserve_existing)
 
     # --- Schema Initialization and Migration ---
     @classmethod
@@ -28494,16 +28502,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not hard and workspace["deleted"]:
             raise self._workspace_delete_incomplete(workspace_id)
         deleted_clause = "" if hard else " AND deleted = ?"
-        params: tuple[Any, ...] = (workspace_id, self.client_id)
+        params: tuple[Any, ...] = (workspace_id,)
         if not hard:
             params += (False,)
         residual = conn.execute(
-            "SELECT id FROM conversations WHERE workspace_id = ? AND client_id = ? "  # nosec B608 - only a fixed deleted predicate is appended.
+            "SELECT id FROM conversations WHERE workspace_id = ? "  # nosec B608 - only a fixed deleted predicate is appended.
             "AND scope_type = 'workspace'" + deleted_clause + " "
-            "AND (required_projection_version IS NOT NULL OR native_bundle_json IS NOT NULL "
-            "OR native_creation_operation_kind IS NOT NULL OR native_creation_operation_id IS NOT NULL) "
+            "AND ((client_id = ? AND (required_projection_version IS NOT NULL OR native_bundle_json IS NOT NULL "
+            "OR native_creation_operation_kind IS NOT NULL OR native_creation_operation_id IS NOT NULL)) "
+            "OR EXISTS (SELECT 1 FROM workspace_chat_startup_receipts r "
+            "WHERE r.conversation_id = conversations.id AND r.owner_user_id = ?)) "
             "LIMIT 1",
-            params,
+            (*params, self.client_id, self.owner_user_id),
         ).fetchone()
         if residual is not None:
             raise self._workspace_delete_incomplete(workspace_id)
