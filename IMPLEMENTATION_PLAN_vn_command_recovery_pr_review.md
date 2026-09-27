@@ -296,6 +296,24 @@ Qodo's requested c806 reassessment completed at 21:09:42 UTC with no active
 findings. Neither prior review qualifies the new scoped follow-up; complete
 changed-head reviews and all live CI gates remain pending.
 
+Qodo's explicit review of the rebased 82390fdae8 head found two verification
+races (4117271887 and 4117271890). Four rendered workbench cases failed before
+the fix: an older failed identity check replaced a newer successful check's
+readiness, an older successful check sent a superseded Start, and both late
+success and known-rejection responses erased a saved Start after a concurrent
+identity HTTP 401 (4 failed, 126 skipped, 2.44s run). The hook now lets only the
+latest applicable identity request publish verification state and advances the
+authority epoch on an applicable failure without clearing the saved journal or
+in-flight command ownership. The same four cases pass after the fix; both
+late-response cases also verify that the selected pack's status stays unchanged.
+All 215 VN/fetch/shared-auth tests pass on the final run (44.50s, 11 files, one
+worker); typecheck,
+frontend/shared scoped lint and diff checks pass. CodeRabbit's complete review
+of 82390fdae8 finished at 22:27:29 UTC with exact reviewed coverage and no
+additional actionable scoped finding. Both old-head reviews and CI will be
+superseded by the fix commit; new-head complete reviews and live gates remain
+required. No backend, Persona, Jobs or dependency-policy changes are included.
+
 ## Stage 3: Gated Merge
 
 **Goal**: Merge normally only after current-head review and live dev gates pass.

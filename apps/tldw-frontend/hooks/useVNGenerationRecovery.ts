@@ -18,6 +18,7 @@ export function useVNGenerationRecovery(onBoundary: (resetAccount: boolean) => v
   const [verifiedRevision, setVerifiedRevision] = useState(0);
   const mounted = useRef(false);
   const epoch = useRef(0);
+  const verification = useRef(0);
   const scope = useRef<VNCommandScope | null>(null);
   const lastAuthority = useRef<VNCommandScope | null>(null);
   const records = useRef<VNPendingCommand[]>([]);
@@ -44,10 +45,11 @@ export function useVNGenerationRecovery(onBoundary: (resetAccount: boolean) => v
 
   const verify = useCallback(async (reloadDetails = false): Promise<Capture | null> => {
     let revision = epoch.current;
+    const request = ++verification.current;
     const server = getApiBaseUrl();
     try {
       const principal = await fetchCurrentPrincipal(apiClient.get);
-      if (!mounted.current || revision !== epoch.current || server !== getApiBaseUrl()) return null;
+      if (!mounted.current || revision !== epoch.current || request !== verification.current || server !== getApiBaseUrl()) return null;
       if (principal?.is_active !== true) throw new Error('Current server and account could not be verified.');
       const next = createVNCommandScope(server, principal.id);
       const changed = lastAuthority.current && !sameVNCommandScope(lastAuthority.current, next);
@@ -67,7 +69,9 @@ export function useVNGenerationRecovery(onBoundary: (resetAccount: boolean) => v
       if (reloadDetails) setVerifiedRevision((value) => value + 1);
       return changed ? null : { scope: next, epoch: epoch.current };
     } catch (failure) {
-      if (!mounted.current || revision !== epoch.current) return null;
+      if (!mounted.current || revision !== epoch.current || request !== verification.current) return null;
+      ++epoch.current;
+      scope.current = null;
       setReady(false);
       report(failure);
       return null;

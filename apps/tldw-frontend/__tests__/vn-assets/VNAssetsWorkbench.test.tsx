@@ -388,6 +388,91 @@ describe('VNAssetsWorkbench', () => {
     await act(async () => newResponse({ status: 'queued' }));
   });
 
+  it.each(['failure', 'success'])('ignores an older %s identity result after a newer same-account check', async (outcome) => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+      { id: 8, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
+    ]);
+    let resolveOld!: (value: unknown) => void;
+    let rejectOld!: (reason: Error) => void;
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    mocks.profile.mockImplementationOnce(() => new Promise((resolve, reject) => {
+      resolveOld = resolve;
+      rejectOld = reject;
+    }));
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await waitFor(() => expect(mocks.profile).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByText('Moon Archive'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    mocks.startVNAssetGeneration.mockRejectedValueOnce(Object.assign(new Error('Original settings unavailable'), {
+      status: 409, errorCode: 'vn_asset_execution_recipe_invalid',
+    }));
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await screen.findByText('Original settings unavailable');
+    expect(mocks.startVNAssetGeneration.mock.calls.map(([packId]) => packId)).toEqual([8]);
+
+    await act(async () => {
+      if (outcome === 'success') resolveOld({ user: { id: 1, is_active: true } });
+      else rejectOld(new Error('Older identity check failed'));
+    });
+    expect(mocks.startVNAssetGeneration.mock.calls.map(([packId]) => packId)).toEqual([8]);
+    expect(screen.queryByText('Older identity check failed')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled();
+  });
+
+  it.each(['success', 'rejection'])('keeps an in-flight Start recoverable after identity HTTP 401 and late %s', async (outcome) => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+      { id: 8, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
+    ]);
+    let resolveFirst!: (value: unknown) => void;
+    let rejectFirst!: (reason: Error) => void;
+    mocks.startVNAssetGeneration.mockImplementationOnce(() => new Promise((resolve, reject) => {
+      resolveFirst = resolve;
+      rejectFirst = reject;
+    }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1));
+    const original = [...mocks.startVNAssetGeneration.mock.calls[0]];
+    const saved = sessionStorage.getItem('tldw:vn-generation:pending:v1');
+    expect(saved).not.toBeNull();
+
+    await user.click(screen.getByText('Moon Archive'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    mocks.profile.mockRejectedValueOnce(Object.assign(new Error('Session expired'), { status: 401 }));
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await screen.findByText('Session expired');
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+    expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByText('Orbital Library'));
+
+    await act(async () => {
+      if (outcome === 'success') resolveFirst({ status: 'queued', batch_id: 41 });
+      else rejectFirst(Object.assign(new Error('Late request rejected'), {
+        status: 409, errorCode: 'vn_asset_execution_recipe_invalid',
+      }));
+    });
+    expect(sessionStorage.getItem('tldw:vn-generation:pending:v1')).toBe(saved);
+    expect(screen.getByLabelText('Generation status')).not.toHaveTextContent('queued');
+    expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('button', { name: 'Retry recovery check' }));
+    const recover = await screen.findByRole('button', { name: 'Recover pending request' });
+    await waitFor(() => expect(recover).toBeEnabled());
+    await user.click(recover);
+    await waitFor(() => expect(mocks.startVNAssetGeneration.mock.calls[1]).toEqual(original));
+    await waitFor(() => expect(sessionStorage.length).toBe(0));
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+  });
+
   it('writes the complete Retry request before the network can accept it', async () => {
     existingFailedPack();
     const user = userEvent.setup();
