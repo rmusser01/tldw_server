@@ -154,7 +154,34 @@ const tldwClientState = vi.hoisted(() => ({
   getCharacter: vi.fn(async (id: string | number) => ({
     id,
     name: "Route Character"
-  }))
+  })),
+  // Playground hydrates saved transcripts through the H1 history-selection
+  // capture endpoint; answer it from the same server transcript fixture.
+  captureHistorySelection: vi.fn(async (chatId: string, request: { view: Record<string, unknown>; purpose: "send" | "fork" }) => {
+    const { resolveHistorySelection } = await import("@/utils/history-selection")
+    const listed = await tldwClientState.listChatMessages(chatId, { limit: 1000, offset: 0 }) as Array<{ id: string; role: string; content: string; version?: number }>
+    const view = { ...request.view, owner_key: "native-owner" } as never
+    const nodes = listed.map((row, index) => ({ id: String(row.id), revision: String(row.version ?? 1), role: row.role, parent_id: index ? String(listed[index - 1].id) : null, settled: true }))
+    const snapshot = { version: 1 as const, owner_key: "native-owner", conversation_id: chatId, fences: { conversation: "1", history: "1", settings: "1" }, nodes, source_digest: "source", storage_context_digest: "storage", interpretation_status: { kind: "parent_graph_v1" as const } }
+    const resolved = resolveHistorySelection(snapshot, view, request.purpose, "")
+    if (resolved.status !== "ready") return { status: resolved.status, code: resolved.code, snapshot, view }
+    const text = new Map(listed.map(row => [String(row.id), row.content]))
+    return { status: "captured", snapshot, view, rows: resolved.rows, purpose: request.purpose, storage_context_digest: "storage", selected_content: resolved.rows.map(row => ({ id: row.id, revision: row.revision, message: text.get(row.id) ?? "", images: [] })) }
+  })
+}))
+
+// jsdom has no IndexedDB; keep the per-profile H1 bookmark state in memory.
+vi.mock("@/db/dexie/history-selection", async importOriginal => ({
+  ...await importOriginal<typeof import("@/db/dexie/history-selection")>(),
+  ensureLocalProfileId: async () => "profile",
+  loadHistoryBookmark: async () => null,
+  saveHistoryBookmark: async () => undefined,
+  loadHistoryTurnRecoveries: async () => []
+}))
+vi.mock("@/db/dexie/fork-operations", async importOriginal => ({
+  ...await importOriginal<typeof import("@/db/dexie/fork-operations")>(),
+  findForkCandidate: async () => null,
+  loadForkOperations: async () => []
 }))
 
 
@@ -222,7 +249,8 @@ vi.mock("@/services/tldw-server", async (importOriginal) => {
   }
 })
 
-vi.mock("@/db/dexie/helpers", () => ({
+vi.mock("@/db/dexie/helpers", async () => ({
+  formatSelectedHistory: (await vi.importActual<typeof import("@/db/dexie/helpers")>("@/db/dexie/helpers")).formatSelectedHistory,
   generateID: () => "owned-message",
   formatToChatHistory: vi.fn(),
   formatToMessage: vi.fn(),
