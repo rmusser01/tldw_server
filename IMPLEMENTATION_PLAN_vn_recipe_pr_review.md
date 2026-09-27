@@ -22,6 +22,13 @@
 **Tests**: VN backend suite, frontend VN tests and typecheck, OpenAPI drift, Ruff, Bandit, and PR checks.
 **Status**: In Progress
 
+### License-First CI Base Rebase (2026-09-27 UTC)
+
+- Dev advanced from `a6e51f60d532e33d20f426f636edca2d049444fd` to `8b25dc729cec12d4e7c3b28b575b70812ecc772e` via PR #3013, changing only 29 CI workflows for license-first ordering. Confirmed a clean owned local/remote head `8c86ba5c730df8dc53dd0330651e180c9ff7bfa8` before the conflict-free rebase; range-diff confirms all 20 prior patches unchanged. VN runtime, tests, frontend, docs and task records were byte-identical before these tracking notes.
+- Both prior-head Qodo and CodeRabbit complete full reviews are clear. CodeRabbit's requested full review finished at 07:48:38 UTC (`5853894556`), and its sticky comment explicitly covers the exact head as reviewed with no open defects. Repeated retained architecture text adds no concrete evidence beyond the previously withdrawn history/output coordination inferences; do not expand this approved replay slice into unrelated policy or exactly-once work.
+- Fresh verification on the new base passed: all 393 VN backend tests (208.01s), 37 frontend VN tests, frontend typecheck, OpenAPI drift, compilation, scoped Ruff with documented BLE001/UP035 exclusions and diff checks. Bandit returned zero findings/errors. The temporary missing shared-UI dependency link was removed after frontend verification; existing links, shared environments, dependency policy and unrelated MCP/ADR records remain unchanged.
+- Publish only with an explicit lease protecting the full prior remote head, obtain changed-head complete reviews and all current required gates, and merge normally with exact-head protection. TASK-13378 and Stage 4 remain In Progress.
+
 ### Fully Queued Slot Outcome Follow-Up (2026-09-27 UTC)
 
 - CodeRabbit's completed full review of `f905b56d6f5deba831256708986d92b443f1c8bf` found that exhausted fanout marked fully queued slots failed (`4114472423`). Their child jobs could still persist drafts, but same-batch failure preservation kept status failed and advertised Retry. The prior exhaustion test's expectation for its first, fully queued slot was incorrect; this follow-up corrects it without rewriting earlier verification history.
