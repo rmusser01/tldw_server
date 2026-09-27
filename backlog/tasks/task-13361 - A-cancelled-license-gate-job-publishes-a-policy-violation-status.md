@@ -4,7 +4,7 @@ title: A cancelled license-gate job publishes a policy-violation status
 status: In Progress
 assignee: []
 created_date: '2026-09-23 17:13'
-updated_date: '2026-09-27 19:02'
+updated_date: '2026-09-27 19:38'
 labels:
   - ci
   - security
@@ -111,6 +111,8 @@ load in TASK-13359 this will keep recurring.
 Fixed on chore/close-fixed-review-tasks (#3029): the publish step is if: "!cancelled()". A cancelled run leaves the pending status from the job's first step, which stays fail-closed. A policy violation or a crashed evaluate step is a failure, not a cancellation, so it still publishes failure (ACs 2 and 3). Pinned in test_frontend_license_gate_workflow.py. AC #4 (cancel a live run and observe the status) can only be done after merge, so the task stays In Progress until then.
 
 CORRECTION 2026-09-27: the !cancelled() fix from #3029 does NOT work, and AC #1 was checked wrongly. Verified live on PR #3031: run 36342617339 was cancelled during Checkout after the pending status posted, and the publisher still ran and posted failure. Run 36342606942, cancelled by this workflow's own cancel-in-progress, did the same. The cancelled step left cancelled() false for the following steps. Replaced on fix/license-gate-publish-on-verdict: the publisher is now gated on always() && steps.evaluate.outcome in {success, failure}, so it publishes only when a verdict exists. always() is needed so a genuine violation (evaluate failed) is not skipped by the implicit success(). A checkout failure now also leaves pending, which stays fail-closed. AC #1 and AC #4 are to be re-verified live after merge.
+
+Follow-up from Qodo on #3032, declined there with reasons: a run superseded by cancel-in-progress but cancelled only after evaluate completes can still publish its verdict over the newer run's status. Pre-existing (always() had it too) and low impact, since superseding runs evaluate the same head SHA under a base-qualified context. A real guard means a latest-run check inside the hash-pinned publish body, which is a deliberate trusted-gate change for its own PR.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
