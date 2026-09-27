@@ -224,6 +224,14 @@ The [current-dev executable Stage 2C plan](2026-09-27-persona-workspace-strict-s
 - [ ] Confirm ordinary global chat, Chat Workspace, temporary chats, and explicit Character selection retain behavior. Shared-recipient Research chat stays governed by #2737 and is not enabled by this stage.
 - [ ] Run focused Vitest suites and backend tests, then browser UAT for the affected surface. Record fresh Chatbook/server SHAs and compare the same cases on both. Update the PRD and #2950 with actual evidence; keep any unresolved parity row open, including Stage 3/4 dependencies.
 
+## Cascade Repair Verification
+
+TASK-13245.7 is locally complete in commit `e1d05ddca0` on `codex/persona-workspace-cascade-retry` (base dev `35d6dd90d4`). The hard and soft cascade enumeration and soft message-page reads now finish their own PostgreSQL transactions before independent child deletion. Caller transaction rejection and caller settlement, committed native admission closure and residual checks remain unchanged. The repair's task-specific plan is retained in that commit and retired from the active tree after closeout; ADR-050 governs the existing lifecycle.
+
+Fresh verification across 15 affected files: **714 passed, four SQLite-only PostgreSQL driver-case skips, no failures**. Expanded integration passed 633 cases and final lifecycle passed 81 with four known skips. Original failure and multi-page image/partial-progress regression have exact RED/GREEN evidence; an independent observer sees 100 earlier message deletions and closure committed before retry. Ruff, compilation, whitespace and production Bandit pass; test-only B101 assertions are the sole scan findings. Independent review found no production issue, and its coverage gap was addressed. Detailed evidence and logs are in TASK-13245.7 and the [strict-startup refresh](../../Design/2026-09-27-persona-workspace-strict-startup-refresh.md).
+
+This prerequisite repair is not published/merged or certified by hosted CI. Parent TASK-13245 remains In Progress. Stage 2C strict startup/receipts/send-time admission, Stage 2D and broader parity work remain open; a separate execution task is required before strict runtime changes.
+
 ## Verification And Review Checklist
 
 - [x] Before Stage 1, reproduce the recorded 32-pass/1-fail baseline and repair the historical migration fixture without suppressing its assertion.

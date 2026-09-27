@@ -4,7 +4,7 @@ title: Persist Workspace Persona opt-out and conversation provenance
 status: In Progress
 assignee: []
 created_date: '2026-09-13 18:15'
-updated_date: '2026-09-27 17:31'
+updated_date: '2026-09-27 18:17'
 labels:
   - persona
   - workspaces
@@ -53,6 +53,8 @@ Requester-requested second design review completed in TASK-13245.1/PR #2958. Ver
 2026-09-27 Stage 2C planning child TASK-13245.6 complete: current-dev source-backed refresh and five-stage plan independently reviewed; requester review required before runtime execution. Fresh unmodified official SQLite/live-PG baseline: 490 passed, one failed, one known SQLite parametrization skip, six warnings. Native PostgreSQL cascade retry leaks its enumeration read transaction after child failure; exact causal diagnostic recorded and separate prerequisite TASK-13245.7 filed To Do, not hidden or claimed fixed. Persona prompt/memory fixtures pass without modification. Canonical docs updated; no app/test/workflow diff against audited dev9668. Stage 2C/2D, profile/provisioning and Research adoption remain open; no broader parity certification.
 
 Requester-approved TASK-13245.6 follow-up planning amendments cover strict transaction ownership/post-commit responses, backend-safe bounded text/body, immutable-owner admission and typed unavailable translation. Session preparation/preview/complete-v2 explicitly remain global-only; no Workspace session parity is claimed. Current refresh/executable plan and canonical documents carry the constraints and test gates; no Stage 2C runtime implementation in this amendment. TASK-13245.7 remains prerequisite; Stage 2C/2D and broader parity work remain open.
+
+TASK-13245.7 local prerequisite repair Done in e1d05ddca0 (codex/persona-workspace-cascade-retry, dev35d6dd90d4 base). Hard/soft cascade enumeration and message-page reads now settle their own PostgreSQL transactions; outermost guard, caller work and admission closure unchanged. Final affected verification 714 passes/four SQLite-only driver skips/no failures across 15 files, official isolated SQLite/livePG. Multi-page image failure confirms earlier deletes durable and immediate retry; independent review gap closed, Ruff/compile/scoped Bandit pass. Repair is local, not a hosted CI or merged delivery. Completed task plan retained in implementation commit and retired from active tree. Parent remains In Progress; Stage2C strict receipts/admission, Stage2D and broader profile/provisioning/Research work remain open; create separate execution task before strict runtime edits.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
