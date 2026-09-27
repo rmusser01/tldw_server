@@ -5,7 +5,9 @@ title: Prepare 0.1.44 release with all changes since v0.1.43 and land prior clos
 status: In Progress
 created_date: 2026-09-27 15:16
 priority: high
-updated_date: 2026-09-27 15:31
+updated_date: 2026-09-27 15:32
+references:
+- https://github.com/rmusser01/tldw_server/pull/3027
 ---
 
 ## Description
@@ -20,7 +22,7 @@ User authorized both remaining workstream items and preparation of a new release
 - [x] #2 Exhaustive change inventory from v0.1.43 to frozen dev
 - [x] #3 0.1.44 metadata, notes and protected-source licensing records consistent
 - [x] #4 Required focused checks and packaging verification pass
-- [ ] #5 Release PR and remaining publication approval gates documented
+- [x] #5 Release PR and remaining publication approval gates documented
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -38,6 +40,7 @@ Protected source: `9668e1454b0b28b7a4de13e1a35496fa0b368c42`.
 Protected manifest SHA-256: `fcc17101e2303e612b8ab9d7824a47bc937eea2a1f216e6e2dcb1b0f53ba9b30`.
 Candidate contracts: 89 passed (four warnings), including strict MkDocs and protected-source checkout equality. CI-matching OpenAPI fingerprint passes. Local 0.1.44 wheel/sdist pass Twine and backend-only contents checks; final README metadata refresh is being rebuilt. Ruff, compilation and whitespace checks pass. Bandit main.py has zero findings/errors; licensing tests retain 82 baseline B101 assertion findings, unchanged severity/type counts. Main publication, new PR-specific summary/waiver and proposed legal-date approval remain pending. Full UAT remains separately tracked.
 Final corrected README/docs/licensing matrix: 33 passed, four warnings; strict MkDocs and protected source equality pass. Final rebuilt 0.1.44 wheel and sdist pass Twine and backend-only contents verification. Independent release preparation review requested. Candidate remains unpublished.
+Draft release PR3027: https://github.com/rmusser01/tldw_server/pull/3027 . Candidate commit 10ca6d2570. Independent reviewer found no preparation blockers: exact 258-commit/34-PR inventory, 7,370 protected-file hashes/path set and source equality, prior grants immutable, closure records intact, PR2978 tree equal approved head, versions/docs aligned, migration prerequisites/native-fork limits explicit. This review covers release preparation and closure, not a new full audit of all merged features. Required remote CI remains pending. Final merge/publication and legal dates need approval; this PR requires a human-owned summary or explicit waiver. Closure records land in main with this release and in dev with subsequent approved synchronization.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
