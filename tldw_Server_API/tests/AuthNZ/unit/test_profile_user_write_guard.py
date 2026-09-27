@@ -584,8 +584,6 @@ def test_profile_anchor_ddl_requires_one_shot_capability(statement: str) -> None
         )
 
 
-
-
 def test_the_sqlite_users_bootstrap_is_canonical() -> None:
     """The exact DDL Users_DB runs on SQLite must pass the guard.
 
@@ -607,6 +605,96 @@ def test_the_sqlite_users_bootstrap_rejects_autoincrement_off_the_id_column() ->
     )
     assert moved != _SQLITE_USERS_BOOTSTRAP
     assert not _is_canonical_users_bootstrap_sql(moved, backend="sqlite")
+
+
+@pytest.fixture
+def canonical_sqlite_users_bootstrap() -> str:
+    return _SQLITE_USERS_BOOTSTRAP
+
+
+def test_sqlite_users_bootstrap_requires_exact_one_shot_capability(
+    canonical_sqlite_users_bootstrap: str,
+) -> None:
+    connection = object()
+    statement = canonical_sqlite_users_bootstrap
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            statement,
+            backend="sqlite",
+            connection_identity=connection,
+            operation="execute",
+        )
+
+    capability = _mint_profile_user_sql(
+        statement,
+        backend="sqlite",
+        connection_identity=connection,
+        operation="create",
+        columns=(),
+    )
+    try:
+        with pytest.raises(ProfileUserWriteRejected):
+            _guard_sql(
+                capability,
+                backend="sqlite",
+                connection_identity=object(),
+                operation="execute",
+            )
+        # A boundary mismatch consumes the receipt; success needs a fresh one.
+        capability = _mint_profile_user_sql(
+            statement,
+            backend="sqlite",
+            connection_identity=connection,
+            operation="create",
+            columns=(),
+        )
+        assert (
+            _guard_sql(
+                capability,
+                backend="sqlite",
+                connection_identity=connection,
+                operation="execute",
+            )
+            == statement
+        )
+        with pytest.raises(ProfileUserWriteRejected):
+            _guard_sql(
+                capability,
+                backend="sqlite",
+                connection_identity=connection,
+                operation="execute",
+            )
+    finally:
+        _revoke_profile_user_sql(capability)
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement"),
+    [
+        ("INTEGER PRIMARY KEY AUTOINCREMENT", "TEXT PRIMARY KEY AUTOINCREMENT"),
+        ("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER AUTOINCREMENT"),
+        ("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER PRIMARY KEY"),
+        ("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER PRIMARY KEY DESC AUTOINCREMENT"),
+        ("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER PRIMARY KEY AUTOINCREMENT AUTOINCREMENT"),
+        ("username TEXT UNIQUE NOT NULL", "username TEXT UNIQUE NOT NULL AUTOINCREMENT"),
+        ("main.users", "temp.users"),
+        ("is_superuser INTEGER NOT NULL DEFAULT 0", "is_superuser INTEGER NOT NULL DEFAULT 1"),
+        ("ON DELETE SET NULL", "ON DELETE CASCADE"),
+    ],
+)
+def test_sqlite_users_bootstrap_rejects_noncanonical_contracts(
+    canonical_sqlite_users_bootstrap: str,
+    original: str,
+    replacement: str,
+) -> None:
+    with pytest.raises(ProfileUserWriteRejected):
+        _mint_profile_user_sql(
+            canonical_sqlite_users_bootstrap.replace(original, replacement, 1),
+            backend="sqlite",
+            connection_identity=object(),
+            operation="create",
+            columns=(),
+        )
 
 
 def test_users_bootstrap_requires_exact_one_shot_capability() -> None:

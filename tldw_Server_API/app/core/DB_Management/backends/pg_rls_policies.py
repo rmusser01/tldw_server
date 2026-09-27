@@ -1004,6 +1004,36 @@ def build_chacha_rls_sql() -> list[str]:
         $native_chat_rls$;
     """)
     add("""
+        DO $persona_companion_rls$
+        BEGIN
+          IF to_regclass('persona_buddy_preferences') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE persona_buddy_preferences ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE persona_buddy_preferences FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS persona_buddy_preferences_owner ON persona_buddy_preferences';
+          EXECUTE $policy$
+            CREATE POLICY persona_buddy_preferences_owner ON persona_buddy_preferences
+            USING (user_id = current_setting('app.current_user_id', true))
+            WITH CHECK (user_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $persona_companion_rls$;
+    """)
+    add("""
+        DO $persona_companion_rls$
+        BEGIN
+          IF to_regclass('persona_visual_pack_reviews') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE persona_visual_pack_reviews ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE persona_visual_pack_reviews FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS persona_visual_pack_reviews_owner ON persona_visual_pack_reviews';
+          EXECUTE $policy$
+            CREATE POLICY persona_visual_pack_reviews_owner ON persona_visual_pack_reviews
+            USING (user_id = current_setting('app.current_user_id', true))
+            WITH CHECK (user_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $persona_companion_rls$;
+    """)
+    add("""
         DO $history_projection_rls$
         BEGIN
           IF to_regclass('conversation_history_projections') IS NULL THEN RETURN; END IF;

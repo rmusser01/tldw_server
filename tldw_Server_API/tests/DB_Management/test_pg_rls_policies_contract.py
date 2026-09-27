@@ -462,6 +462,18 @@ def test_chacha_note_task_graph_rls_checks_scope_and_owned_parents_for_reads_and
         assert read_state_policy.count(clause) == 2
 
 
+@pytest.mark.parametrize("table", ["persona_buddy_preferences", "persona_visual_pack_reviews"])
+def test_companion_owner_policy_protects_reads_and_writes(table: str) -> None:
+    """The canonical installer must protect both new companion ownership tables."""
+    sql = "\n".join(build_chacha_rls_sql())
+    assert f"to_regclass('{table}')" in sql
+    assert f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY" in sql
+    assert f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY" in sql
+    policy = sql.split(f"CREATE POLICY {table}_owner ON {table}", 1)[1].split("$policy$", 1)[0]
+    assert "USING (user_id = current_setting('app.current_user_id', true))" in policy
+    assert "WITH CHECK (user_id = current_setting('app.current_user_id', true))" in policy
+
+
 def test_chacha_rls_includes_source_review_read_and_write_policies():
     sql = "\n".join(build_chacha_rls_sql())
 
