@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-22 04:44'
-updated_date: '2026-09-23 14:42'
+updated_date: '2026-09-27 17:32'
 labels:
   - bug
   - mcp
@@ -118,6 +118,8 @@ FAILED/ERROR lists. Zero regressions. The pre-existing set is concentrated in
 test_slides_module_standalone_html.py (29) and test_runtime_package_boundary.py (10); the one
 hit in a module this change touches, test_filesystem_glob_marks_file_size_unavailable,
 monkeypatches Path.stat and is unrelated to sanitization.
+
+Re-checked on dev 2026-09-27: ACs 1-5 are in place (#2980, #2996). Stays open for AC #6, the unreachable exemption table in filesystem_module, which needs tool_name threaded through sanitize_input as recorded above.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

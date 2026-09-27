@@ -3,10 +3,10 @@ id: TASK-13298
 title: >-
   Sync pull advances the cursor past withheld envelopes on the default client
   path
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:51'
-updated_date: '2026-09-22 19:34'
+updated_date: '2026-09-27 17:32'
 labels:
   - bug
   - sync
@@ -65,6 +65,8 @@ The scan now ends at the blocker instead of filtering around it, matching how _s
 AC #2 not taken literally: the two paths were not merged into a shared helper. The versioned scan additionally carries restore_barrier and per-stream watermarks, so a common helper would have to take both, and the structural parity that actually matters -- neither scan emits envelopes at or past the blocker -- is now present in both. Extracting the helper is a refactor with its own blast radius, not part of a data-loss fix.
 
 Verification: tldw_Server_API/tests/Sync/test_sync_v2_service.py 166 passed (was 165 + the new test), including test_versioned_pull_does_not_advance_past_unresolved_conflict (AC #4) and the pagination-progress guard. ruff clean.
+
+Closed 2026-09-27, re-verified on dev. AC #2 stays unchecked on purpose: declined for the reason recorded above, not left undone.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

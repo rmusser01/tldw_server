@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-22 04:45'
-updated_date: '2026-09-22 20:05'
+updated_date: '2026-09-27 17:32'
 labels:
   - bug
   - ingestion
@@ -79,6 +79,8 @@ That is the honest shape of this whole task: the cleanup was riding on the bug. 
 3. MCP_unified/server.py: deregistration reordered ahead of 'await stream.stop()' on the same reasoning. Stated honestly -- I wrote a test (tests/MCP_unified/test_mcp_ws_connection_release_on_cancel.py) expecting it to reproduce a leak and it passed with BOTH orderings, because an ordinary disconnect arrives as WebSocketDisconnect and the finally runs to completion; the cancelled path was not reachable from TestClient. The reorder is kept as free hardening, not as a fix for a reproduced defect, and both the code comment and the test docstring say so. The test is retained for its own sake: it is the first coverage asserting that registry and the per-IP counter drain at all.
 
 4. A fourth candidate in Audio_Streaming_Unified.py was changed and then reverted, for the same reason -- no failing case could be constructed, and unlike the MCP reorder the change added nesting and re-introduced local CancelledError suppression, which is the opposite of this task's point.
+
+Re-checked on dev 2026-09-27: the CancelledError fix and its AST ratchet are in place (#2982). Stays open for AC #4 (HTTPException in the tuple), deferred as recorded above.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
