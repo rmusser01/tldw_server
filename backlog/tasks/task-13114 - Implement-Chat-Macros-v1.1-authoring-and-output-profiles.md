@@ -4,7 +4,7 @@ title: Implement Chat Macros v1.1 authoring and output profiles
 status: In Progress
 assignee: []
 created_date: '2026-08-24 04:15'
-updated_date: '2026-09-27 08:16'
+updated_date: '2026-09-27 09:03'
 labels:
   - chat-macros
   - frontend
@@ -91,6 +91,8 @@ Fingerprint correction verification: regenerated OpenAPI JSON+TypeScript using C
 2026-09-27 07:00 UTC: rebased cleanly onto dev a6e51f60d5 (PR3007 canonical MCP package license and boundary-test correction). All30 prior PR commits patch-equivalent by range-diff; frontend and Chat Macros unchanged. Fresh CI-matched OpenAPI contract and full PR whitespace checks pass. No new Qodo feedback. Previous head had no CI failures but was BEHIND. Publish with exact lease against7870dde81b; fresh required CI remains pending. No new authored application code or additional Bandit scope.
 
 2026-09-27 08:15 UTC: all CI checks on e43b467b0d passed, but dev advanced to8b25dc729c (PR3013 license-first CI ordering). Rebased all31 prior commits cleanly and patch-equivalently; apps, backend and Helper_Scripts unchanged. Fresh CI-matched OpenAPI contract and full PR whitespace checks pass. No new Qodo feedback. Publish with exact lease againste43b467b0d and await fresh required CI under updated workflows. No new authored application code or additional Bandit scope.
+
+2026-09-27 09:00 UTC: all seven required checks passed on efc1c36f24, but dev advanced to bfa343a608 (PR3015 VN recipe snapshots), creating a generated fingerprint conflict. Rebased all32 commits; range-diff differs only in fingerprint hunks of two historical commits. Macro backend/frontend/test files are unchanged. Regenerated combined fingerprint with CI Pydantic2.13.5: b5210f8ed4c83d9385414965b13f9e04777cdfc2130dddf205420f944f92bb51 (2098 paths/3210 schemas). Compared prior CI schema: no changed paths, only VNAssetGenerationRequest and VNAssetGenerationStatusResponse changed. Fresh exporter --check, regenerated OpenAPI TypeScript, package-wide frontend typecheck, and full PR whitespace check pass. All11 review threads resolved; no new comments. Human Change Summary verified. Publish exact lease against efc1c36f24; fresh CI required. No newly authored Python changes or additional Bandit scope.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
