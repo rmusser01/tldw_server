@@ -2840,7 +2840,11 @@ def test_generation_api_recovers_unfinished_response_receipt(
     fake_jobs: FakeJobs,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The API recovers a committed batch after its receipt response is lost."""
+    """Recover the original batch when public receipt completion fails pre-ack."""
+    import json
+
+    from tldw_Server_API.app.core.DB_Management.VNAssetPacks_DB import VNAssetPacksRepository
+
     service = VNAssetPackService(chacha_db, owner_user_id=1, jobs_manager=fake_jobs)
     pack = service.create_pack(VNAssetPackCreate(title="Receipt Pack", primary_character_id=character_id))
     service.apply_matrix(pack.id, "starter", {"variant_count": 1})
@@ -2858,24 +2862,72 @@ def test_generation_api_recovers_unfinished_response_receipt(
     app.dependency_overrides[get_request_user] = override_user
     app.dependency_overrides[get_chacha_db_for_user] = override_chacha_db
     app.dependency_overrides[vn_assets_endpoint._job_manager] = lambda: fake_jobs
-    original_record = vn_assets_endpoint._record_idempotency_response
+    original_complete = VNAssetPacksRepository.complete_idempotency_record
+    completion_calls: list[dict[str, Any]] = []
 
-    def lost_response(*_args: Any, **_kwargs: Any) -> None:
-        """Lose the HTTP receipt response after the batch has committed."""
-        raise RuntimeError("response lost after batch commit")
+    def interrupted_completion(
+        repo: VNAssetPacksRepository,
+        *,
+        owner_user_id: int,
+        scope: str,
+        resource_id: str,
+        idempotency_key: str,
+        payload_hash: str,
+        response: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Fail before acknowledgement once, then forward unchanged store arguments."""
+        arguments = {
+            "owner_user_id": owner_user_id, "scope": scope, "resource_id": resource_id,
+            "idempotency_key": idempotency_key, "payload_hash": payload_hash, "response": response,
+        }
+        completion_calls.append(arguments)
+        if len(completion_calls) == 1:
+            raise sqlite3.OperationalError("receipt completion unavailable")
+        return original_complete(repo, **arguments)
 
-    monkeypatch.setattr(vn_assets_endpoint, "_record_idempotency_response", lost_response)
+    monkeypatch.setattr(VNAssetPacksRepository, "complete_idempotency_record", interrupted_completion)
     client = TestClient(app, raise_server_exceptions=False)
     payload = {"idempotency_key": "recover-receipt-1"}
-    first = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/generate", json=payload)
-    monkeypatch.setattr(vn_assets_endpoint, "_record_idempotency_response", original_record)
-    second = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/generate", json=payload)
+    receipt_identity = {
+        "owner_user_id": 1, "scope": "vn_asset_generate", "resource_id": f"pack:{pack.id}",
+        "idempotency_key": payload["idempotency_key"],
+    }
+    with client:
+        first = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/generate", json=payload)
+        assert first.status_code == 500
+        assert first.text == "Internal Server Error"
+        pending = service.repo.get_idempotency_record(**receipt_identity)
+        assert pending is not None
+        assert pending["status"] == "in_progress"
+        assert json.loads(pending["response_json"]) == {}
+        original_batch_id = pending["batch_id"]
+        original_batch = service.repo.get_batch(original_batch_id)
+        assert original_batch is not None
+        assert original_batch["status"] == "queued"
+        assert len(service.repo.list_batches(pack.id)) == 1
+        assert len(fake_jobs.created) == 1
+        original_parent_id = fake_jobs.created[0]["id"]
+        assert original_batch["job_batch_id"] == str(original_parent_id)
+        assert completion_calls == [{
+            **receipt_identity, "payload_hash": pending["payload_hash"],
+            "response": service.get_generation_status(pack.id).model_dump(mode="json"),
+        }]
+        second = client.post(f"/api/v1/vn/vn-assets/packs/{pack.id}/generate", json=payload)
 
-    assert first.status_code == 500
     assert second.status_code == 202
-    assert second.json()["batch_id"] == service.repo.list_batches(pack.id)[0]["id"]
+    assert second.json()["batch_id"] == original_batch_id
+    assert second.json()["job_batch_id"] == str(original_parent_id)
     assert len(service.repo.list_batches(pack.id)) == 1
     assert len(fake_jobs.created) == 1
+    assert fake_jobs.created[0]["id"] == original_parent_id
+    assert completion_calls == [completion_calls[0], completion_calls[0]]
+    completed = service.repo.get_idempotency_record(**receipt_identity)
+    assert completed is not None
+    assert completed["id"] == pending["id"]
+    assert completed["batch_id"] == original_batch_id
+    assert completed["status"] == "completed"
+    assert json.loads(completed["response_json"]) == second.json()
+    assert completed["payload_hash"] == pending["payload_hash"]
 
 
 @pytest.mark.integration

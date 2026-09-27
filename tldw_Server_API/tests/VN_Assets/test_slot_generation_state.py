@@ -1539,20 +1539,21 @@ async def test_parallel_variants_remain_generating_until_both_finish(
 
 
 @pytest.mark.asyncio
-async def test_generating_admission_checks_real_jobs_after_write_lock(
+async def test_generating_admission_checks_real_jobs_after_authority_snapshot(
     service: VNAssetPackService,
     pack_with_slots: SimpleNamespace,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A Jobs cancellation at the VN lock boundary must prevent visible admission."""
-    from tldw_Server_API.app.core.DB_Management import VNAssetPacks_DB as db_module
-
+    """Lease loss after the initial claim must block admission, not just the adapter."""
     pack = pack_with_slots
     slot_id = pack.slots[0].id
     batch = _batch(service, pack)
-    service.repo.create_item(pack_id=pack.id, slot_id=slot_id, review_status="approved")
-    service.repo.update_slot(slot_id, {"status": "approved"})
+    approved_item = service.repo.create_item(pack_id=pack.id, slot_id=slot_id, review_status="approved")
+    service.repo.update_slot(slot_id, {"status": "approved", "last_error": "keep diagnostics"})
+    approved_slot = service.repo.get_slot(slot_id)
+    original_batch = service.repo.get_batch(batch)
+    original_recipe = service.repo.get_batch_recipe(batch, slot_id, 0)
     jobs = JobManager(db_path=tmp_path / "admission-jobs.db")
     jobs.create_job(
         domain="vn_assets",
@@ -1569,32 +1570,55 @@ async def test_generating_admission_checks_real_jobs_after_write_lock(
     )
     assert job is not None
     ready_for_admission = False
-    original_lock = db_module._lock_variant
+    original_read = jobs.get_job
+    claimed_outcome: dict[str, Any] = {}
+    authority_snapshots: list[dict[str, Any]] = []
 
-    def lock_then_cancel(conn: Any, batch_id: int, slot_id: int, variant_index: int) -> None:
-        """Revoke the real Jobs lease after acquiring the VN write lock."""
-        original_lock(conn, batch_id, slot_id, variant_index)
+    def read_then_cancel(job_id: int, *, owner_user_id: str | None = None) -> dict[str, Any] | None:
+        """Observe native authority, cancel once, then return its fresh native row."""
+        nonlocal ready_for_admission
+        current = original_read(job_id, owner_user_id=owner_user_id)
         if ready_for_admission:
-            assert jobs.cancel_job(int(job["id"]))
+            ready_for_admission = False
+            assert job_id == int(job["id"]) and owner_user_id == "1"
+            assert current is not None
+            assert current["status"] == "processing"
+            assert current["lease_id"] == job["lease_id"]
+            assert current["cancel_requested_at"] is None
+            authority_snapshots.append(current)
+            assert jobs.cancel_job(job_id)
+            current = original_read(job_id, owner_user_id=owner_user_id)
+            assert current is not None and current["status"] == "cancelled"
+            assert current["cancelled_at"] is not None and current["lease_id"] is None
+            authority_snapshots.append(current)
+        return current
 
     class BoundaryRegistry(FakeImageRegistry):
         """Arm cancellation after the initial claim admission has succeeded."""
 
         def resolve_backend(self, requested: str | None) -> str | None:
+            """Arm only once the real initial claim and hidden reservation exist."""
             nonlocal ready_for_admission
+            outcome = service.repo.get_variant_outcome(batch, slot_id, 0)
+            assert outcome is not None and outcome["outcome_status"] == "planned"
+            assert outcome["claim_lease_id"] == job["lease_id"]
+            assert outcome["claim_token"]
+            assert service.repo.get_item(outcome["item_id"])["review_status"] == "hidden"
+            claimed_outcome.update(outcome)
             ready_for_admission = True
             return super().resolve_backend(requested)
 
-    monkeypatch.setattr(db_module, "_lock_variant", lock_then_cancel)
+    monkeypatch.setattr(jobs, "get_job", read_then_cancel)
     adapter = FakeImageAdapter()
+    saver = RecordingVNSaver()
     worker = VNAssetGenerationWorker(
         repo=service.repo,
         jobs_manager=jobs,
         image_registry=BoundaryRegistry(adapter),
         backend_gate=FakeGenerationGate(),
-        save_vn_asset_image=RecordingVNSaver(),
+        save_vn_asset_image=saver,
     )
-    with pytest.raises(VNAssetGenerationError, match="vn_asset_job_lease_lost"):
+    with pytest.raises(VNAssetGenerationError, match="vn_asset_job_lease_lost") as error:
         await worker.handle_generate_variant(
             {
                 "pack_id": pack.id,
@@ -1606,9 +1630,19 @@ async def test_generating_admission_checks_real_jobs_after_write_lock(
             job=job,
         )
 
-    assert service.repo.get_slot(slot_id)["status"] == "approved"
+    assert error.value.retryable is True
+    assert len(authority_snapshots) == 2
+    assert original_read(int(job["id"]), owner_user_id="1") == authority_snapshots[1]
+    assert service.repo.get_slot(slot_id) == approved_slot
+    assert service.repo.get_item(approved_item["id"]) == approved_item
     assert adapter.requests == []
-    assert service.repo.get_variant_outcome(batch, slot_id, 0)["outcome_status"] == "planned"
+    assert saver.calls == []
+    assert service.repo.get_variant_outcome(batch, slot_id, 0) == claimed_outcome
+    assert service.repo.get_batch_recipe(batch, slot_id, 0) == original_recipe
+    hidden_item = service.repo.get_item(claimed_outcome["item_id"])
+    assert hidden_item["review_status"] == "hidden"
+    assert hidden_item["generated_file_id"] is None and hidden_item["storage_ref"] is None
+    assert service.repo.get_batch(batch) == original_batch
 
 
 @pytest.mark.parametrize("kind", ["completed", "failed", "cancelled"])

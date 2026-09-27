@@ -192,7 +192,8 @@ export default function VNAssetsWorkbench() {
         generationKeys.current.delete(`${pack.owner_user_id ?? 'unknown'}:${pack.id}:${pending.slotId ?? 'start'}`);
       }
       if (selectedPackIdRef.current === pack.id) {
-        setError(recoveryError instanceof Error ? recoveryError.message : 'Could not reconcile the pending generation request.');
+        setError(recoveryError instanceof Error ? recoveryError.message
+          : `Could not reconcile the pending generation request (pack ${pack.id}, kind ${pending.kind}${pending.kind === 'retry' && typeof pending.slotId === 'number' && Number.isSafeInteger(pending.slotId) && pending.slotId > 0 ? `, slot ${pending.slotId}` : ''}).`);
       }
     } finally {
       finishGenerationCommand(pack.id);

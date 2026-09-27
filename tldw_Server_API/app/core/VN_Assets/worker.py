@@ -189,7 +189,9 @@ class VNAssetGenerationWorker:
         if recipe_version not in (0, 1):
             raise VNAssetGenerationError("vn_asset_recipe_version_unsupported", batch_id=batch_id)
         if recipe_version == 1 and batch["status"] == "cancelled":
-            batch = self.repo.cancel_batch(batch_id) or batch
+            batch = await self.repo.run_worker_replay_operation(
+                partial(self.repo.cancel_batch, batch_id)
+            ) or batch
         outcome = await self.repo.get_variant_outcome_async(batch_id, slot_id, variant_index) if recipe_version == 1 else None
         if outcome is not None and outcome["outcome_status"] == "completed":
             replay = await self._replay_variant(
@@ -221,7 +223,9 @@ class VNAssetGenerationWorker:
         recipe: Mapping[str, Any] | None = None
         character: Mapping[str, Any] | None = None
         if recipe_version == 1:
-            recipe = self.repo.get_batch_recipe(batch_id, slot_id, variant_index)
+            recipe = await self.repo.run_worker_replay_operation(
+                partial(self.repo.get_batch_recipe, batch_id, slot_id, variant_index)
+            )
             if recipe is None:
                 await self.repo.fail_batch_integrity_async(batch_id, error="vn_asset_recipe_not_found")
                 raise VNAssetGenerationError(
@@ -237,7 +241,9 @@ class VNAssetGenerationWorker:
         claimed_item: Mapping[str, Any] | None = None
         if recipe_version == 1:
             if job is not None:
-                self._require_current_job_lease(job, user_id=user_id)
+                await self.repo.run_worker_replay_operation(
+                    partial(self._require_current_job_lease, job, user_id=user_id)
+                )
             else:
                 lease_id = "inline"
             if outcome is not None and outcome["outcome_status"] == "failed":
@@ -286,7 +292,9 @@ class VNAssetGenerationWorker:
         try:
             if outcome is not None and outcome.get("item_id") is not None:
                 if job is not None:
-                    self._require_current_job_lease(job, user_id=user_id)
+                    await self.repo.run_worker_replay_operation(
+                        partial(self._require_current_job_lease, job, user_id=user_id)
+                    )
                 replay = await self._replay_variant(
                     batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
                     user_id=user_id, pack_id=pack_id, attempt_token=attempt_token, job=job,
@@ -923,12 +931,16 @@ class VNAssetGenerationWorker:
             if generation_result is None:
                 raise VNAssetGenerationError("image_adapter_unavailable", batch_id=batch_id, slot_id=slot_id)
             if job is not None and attempt_token is not None:
-                self._require_current_job_lease(job, user_id=user_id)
+                await self.repo.run_worker_replay_operation(
+                    partial(self._require_current_job_lease, job, user_id=user_id)
+                )
             image = await asyncio.to_thread(generation_result.generate, request)
 
         if attempt_token is not None:
             if job is not None:
-                self._require_current_job_lease(job, user_id=user_id)
+                await self.repo.run_worker_replay_operation(
+                    partial(self._require_current_job_lease, job, user_id=user_id)
+                )
             outcome = await self.repo.get_variant_outcome_async(batch_id, slot_id, variant_index)
             current_batch = await self.repo.run_worker_replay_operation(partial(self.repo.get_batch, batch_id))
             if current_batch is None or _is_terminal_batch_status(current_batch["status"]):
@@ -1004,7 +1016,9 @@ class VNAssetGenerationWorker:
                 )
             )
             if attempt_token is not None and job is not None:
-                self._require_current_job_lease(job, user_id=user_id)
+                await self.repo.run_worker_replay_operation(
+                    partial(self._require_current_job_lease, job, user_id=user_id)
+                )
             item = self.repo.update_item_storage(
                 item_id,
                 generated_file_id=_positive_int(file_record.get("id")),
@@ -1043,7 +1057,9 @@ class VNAssetGenerationWorker:
         if int(batch.get("recipe_version") or 0) == 1:
             try:
                 if job is not None:
-                    self._require_current_job_lease(job, user_id=user_id)
+                    await self.repo.run_worker_replay_operation(
+                        partial(self._require_current_job_lease, job, user_id=user_id)
+                    )
                 item = self.repo.complete_variant(
                     batch_id=batch_id, slot_id=slot_id,
                     variant_index=variant_index, item_id=item_id,

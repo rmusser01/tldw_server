@@ -1,6 +1,164 @@
 # PR 3016 VN Durability Review Implementation Plan
 
-## Current Review Wave: Tasks44-48
+## Current Review Wave: Tasks49-54
+
+At05:41UTC the authorized post-backoff conversation read succeeded: one valid
+page/48comments/exit0. The two historical403 reads remain qualified failures,
+not product, CI or Qodo failures. Full exact9fde request5852640112 completed
+formal5328875806 at04:55:30Z and terminal5852772786 at04:55:35Z, both exacthead.
+No busy acknowledgement was observed during the blocked interval. Fresh94reviews,
+81threads/8newunresolved/48comments/all outer+nested pages exhausted. Summary
+0bugs0rules66historicalomissions does not override eight actual inline findings.
+Tasks1-48 remain frozen/independently approved/CLOSED. Actual dev subsequently
+advanced to d5c46570e0bde1e841ead60585f41a0758947563; one license workflow path
+has zero overlap with68 owned paths. Normal preservation-checked rebase pending.
+
+### Stage 1: Bound New Findings
+**Goal:** Verify eight new comments against existing approved contracts.
+**Success Criteria:** No new Jobs authority, API, privacy, archive or async fallback
+promise; private test seams replaced without losing negative sensitivity.
+**Tests:** Native public outcomes and off-loop/thread-owned observations.
+**Status:** Complete
+
+Task49:4114136783 conflicts with the approved frames-only logging policy. Preserve
+safe diagnostics and verify original wrapped frames/type plus no raw secrets;
+no logger.exception/raw traceback or production change without new approval.
+Task50:4114136792/795/796, await complete recipe read, standalone lease reads and
+cancelled-batch reconciliation through existing run_worker_replay_operation.
+Keep transaction-local authority callbacks synchronous inside already-owned work.
+Task51:4114136798, service.list_items uses existing item_is_unpublished predicate;
+legacy unlinked/completed items remain visible, all non-completed recipes hidden.
+Task52:4114136782, non-Error browser recovery fallback identifies operation, pack,
+kind and optional slot; no key, payload or raw rejection disclosure.
+Task53:4114136785, replace private receipt helper patch with supported shared/public
+failure seam while preserving interrupted receipt, original batch and sole Job.
+Task54:4114136790, replace private lock patch with supported Jobs/worker admission
+seam retaining actual lease-loss, no adapter/publication/slot/outcome mutation.
+
+### Stage 2: Scoped Implementation
+**Goal:** Minimal production corrections and behavior-sensitive regressions.
+**Success Criteria:** Preserve original arguments, JSON materialization, connection
+ownership/drained cancellation/native errors and memory/active-caller fallbacks.
+**Tests:** Bounded RED/GREEN per change, scoped Bandit baseline/static/types/docs/
+single tiers; no broad suite or completed-agent redispatch.
+**Status:** Complete
+
+Planck final review found soleT4954-R1/P2: accepted start receipts may carry an
+unvalidated extra slotId, rendered by the new diagnostic fallback. Main fixes only
+the Workbench diagnostic: append slot context for positive-safe-integer RETRY only,
+never start. Reader/receipt/key/dispatch/Error branch unchanged. Actual stored-start
+string/object regression RED/GREEN and scoped re-review required. Original125entry
+ISSUES review/47producer/Main31 freezes intact, two live sources explicitly superseded.
+
+R1 final local verification: actual2privacyRED failures; initial postguard2downstream
+status-fixture assertion failures preserved/notGREEN; corrected only the public
+postprivacy status mock. Final2pass50filter-skips and one boundedWorkbench52pass
+zero failures/errors/skips. OwnedTS/scopedESLint0/Node+expectedstorage warnings
+retained/BanditN/A. New17entryfreeze verified; original45of47/Main29of31/reviewer
+123of125 exclude ONLYexact2superseded liveWorkbench paths. Otherproducer25/67/50/49
+and2055oldimmutableartifacts match. Planck scopedR1/finaldisposition re-review active.
+
+FINAL local disposition: Planck scopedR1 SPEC/QUALITY/final changed-contract PASS,
+T4954-R1 addressed/no actionable findings;49/50/51/53/54 priorPASS retained.
+Reviewer32entryfreeze independently checked; audits ONLY/no fresh regressions or
+scans. OriginalISSUES125 intact/qualified123of125 exactlive-source supersession.
+All producers/reviewer CLOSED/all needed commands CLOSED. Applicable postR1
+11filehooks passed/no-fileSkippedNOTpasses/deprecated warnings retained. Final
+R117/review32/currentproducer25/67/45of47/50/49/Main29of31 and2055immutablematch.
+Old latest source entries qualified only by enumerated superseded paths. Current
+actualdevd5 unchanged; normal scopedcommit and preservation25commitrebase next.
+
+Main owns Task49/50 worker.py and one NEW test module only. Disjoint implementers
+own service.py/NEW visibility tests(51), Workbench/source+test(52), only existing
+generation_jobs test(53), only existing slot_generation_state test(54). No shared
+fixture/config/native SQL/Jobs manager changes. Fresh independent task/final
+changed-contract review follows frozen producer evidence. All old freezes remain
+intact; intentionally superseded live sources explicitly excluded from old hashes.
+
+49/50 LOCALverified/frozen25, Maincommandsclosed: unchanged safe diagnostic1pass;
+50actual19REDfail/19GREENpass/boundedcover39pass6warnings57.35(XML56.421), overlap
+not sum.8wrappers/whole normalized worker AST otherwise identical/Bandit0errors[]
+onlyB101excluded/Ruff1unchangedBLE001 notclean. 52BooleCLOSED/frozen47/RED3fail3parity
+pass/GREEN6/cover50/ownedTS+ESLint0;53BeauvoirCLOSED/frozen50/copiedreceiptmutant
+RED409!=202/4nativecontrols pass/sixbaselineB106;54HookeCLOSED/frozen49/publicJobs
+admission seam/copiedvalidator-omissionRED/native6controls/3baselinefindings.
+All counts qualified/overlap not sum/reports preserve harness failures. 51Carver
+CLOSED/frozen67:RED9fail19controls/GREEN28/adjacent5once, native repo already
+filters steady-state/public broader candidate-boundary sensitivity qualified.
+All producers CLOSED/frozen238entries verified. Planck independent SPEC/QUALITY
+per49-54 and final changed-contract review ACTIVE, not yet approved.
+
+### Stage 3: Independent Review And Integration
+**Goal:** Approved scoped bytes, normal commit/push and exact-head external gates.
+**Success Criteria:** Individual verified replies/resolutions; full new-head Qodo,
+all seven required contexts PASS, current strict actualdev/human gate before merge.
+**Tests:** Controller narrow final regressions and byte/evidence preservation.
+**Status:** In Progress
+
+Main final integrated46backendpassed0failerrorsskips6warnings61.28/XML60.712 and
+frontend6pass44filter-skips2.51s/XML1.036053541, overlap not summed. Combined scoped
+Bandit9exactbaseline synthetic test findings/errors[]/onlyB101excluded (8B106+1B105),
+Ruff2baseline productionBLE001 notclean/inmemorycompile/diff0. Producer238 plus
+2055original immutable artifacts match; old live sources qualified by exact paths.
+Controller schema/line-prefix comparison/header-typo audit errors corrected and
+qualified, not product failures. Normal hooks/review/commit/push/external gates pending.
+
+Actual dev nowd5c46570e0bde1e841ead60585f41a0758947563 throughlicense-gateclone-depth
+PR3004:1workflowpath/zero overlap with68ownedpaths. Normal scopedapprovedcommit
+then preservation-checked rebase pending; do not rebase prematurely during review.
+Applicable11-file explicit hooks passed/no-fileSkippedNOTpasses/deprecatedstages
+retained; posthookproducer238/Main31/2055original artifacts match. Currentlivehuman
+Change summary VERBATIM/Cubic9fdefooter preserved/Verificationbodyapprovalunanswered.
+
+Exact9fde CI now66actualruns23queued8inprogress35completed(14success19skipped,
+1neutral1cancelled). Newest backend/security/coverage/e2e-required queued; frontend,
+container-build-check and trusted-license absent. Only CodeRabbit status success/
+reviewskipped, not required pass. No actionable CI failure or merge attempt.
+AC5reopened/AC6pending. Verification body approval unanswered; no PATCH/bypass.
+
+Ruling: These are bounded corrections to already-approved durability/privacy and
+public visibility, not new architecture. Reuse native owned boundaries and existing
+predicate; reject raw diagnostic disclosure. Cost if wrong: bounded behavioral
+rework, not relaxed Jobs fences or changed approvals/counters.
+
+## Historical Review Wave: Tasks44-48
+
+External read block AFTER successful push/replies/resolutions/request/CI reads:
+conversation metadata REST failed403 rate-limit at04:36:30Z and one retry04:37:19Z.
+Dedicated rate_limit20004:36:52Z reports core5000remaining/0used/reset05:36:52Z,
+inconsistent with blocked read; actual cause/reset UNKNOWN. Both pipefail exit5/
+invalid error-body jq failures earn no metadata/CI/review credit. Stop retries;
+conservative backoff until at least05:37UTC, then one read-only attempt/third-failure
+reassessment if still blocked. Request5852640112 remains PENDING/no new ack proven;
+do not duplicate or classify API403 as terminal review service failure. New note
+task4448-github-read-block.md preserves the qualified diagnostics; original freezes
+intact. Automation ACTIVE/backoff; no merge or tracking-only push/body bypass.
+
+CURRENT normal11-file commit/FF push/GitHub head9fde4f59464b19ac4c6220ca57d2f2003a0ae660.
+All Tasks1-48 LOCAL COMPLETE/frozen/independently approved/all needed agents/tests/
+hooks/commit/push sessions CLOSED. Normal commit emitted no hook output; no
+commit-stage execution claim/no bypass. Inherited packing/gc notices retained,
+no manual cleanup. Postcommit265producer/controller16/reviewer24/original2055
+and source hashes match; all three backups/both applied retained stashes intact.
+
+Six individual replies4114080644/846/1012/1056/1105/1154 exact bodies verified;
+all six target threads resolved through verified mutation responses. Fresh93
+reviews73threads0unresolved/all outer/nestedpages exhausted; six human COMMENTED
+objects are replies, not a full Qodo review. Current47conversationcomments include
+ONE full exact9fde request5852640112 at2026-09-27T04:31:55Z PENDING; no busy/terminal
+acknowledgement observed yet. Do not duplicate. Edited summary04:32:46Z0bugs0rules
+58historicalomissions/exact9fdefooter is NOT full completion. Old9239 full review
+now historical. New edited CodeRabbit skipped-review notice inspected/nonactionable.
+
+Exact new-head54actual checkruns33queued21completed(1cancelled1neutral19skipped),
+all seven required contexts ABSENT, including trusted-license commit status.
+Paginated statuses CodeRabbit55014927759success/reviewskipped only is NOTrequired
+pass; actualpages1each/pipefail0/newest percontext/id/no actionablefailure.
+Actual protected dev checked this wave f943 unchanged/no rebase. OPEN/BLOCKED/
+mergedAtnull/no mergeattempt; AC5checkedAC6pending. Human paragraph VERBATIM/current
+Cubic9fde footer preserved; Verification40e5 remains stale/approval unanswered/
+no body mutation or bypass. Only owned integration notes dirty after this push;
+no tracking-only push invalidating the exact-head review.
 
 Tasks1-48 now LOCAL COMPLETE/frozen/independently APPROVED. Halley fresh SPEC,
 QUALITY and final changed-contract PASS for each44/45/46/47/48/no actionable

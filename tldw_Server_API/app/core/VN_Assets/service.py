@@ -380,11 +380,13 @@ class VNAssetPackService:
             raise ValueError("slot_has_dependents") from exc
 
     def list_items(self, pack_id: int) -> list[VNAssetItemResponse]:
+        """List published candidates while preserving legacy hidden-item visibility."""
         self._require_pack(pack_id)
         return [
             self._item_response(row)
             for row in self.repo.list_items(pack_id)
-            if row["review_status"] != "hidden" or row["generated_file_id"] is not None
+            if not self.repo.item_is_unpublished(int(row["id"]))
+            and (row["review_status"] != "hidden" or row["generated_file_id"] is not None)
         ]
 
     def get_item_for_pack(self, pack_id: int, item_id: int) -> VNAssetItemResponse:
