@@ -4,7 +4,7 @@ Published release notes entry point.
 
 ## 0.1.44 - 2026-09-27 (candidate)
 
-Includes the complete frozen development range since v0.1.43: 258 commits across 34 merged PRs. [Complete inventory](https://github.com/rmusser01/tldw_server/blob/main/Docs/Development/releases/0.1.44-change-inventory.md).
+Includes the complete frozen development range since v0.1.43: 272 commits across 37 merged PRs. [Complete inventory](https://github.com/rmusser01/tldw_server/blob/main/Docs/Development/releases/0.1.44-change-inventory.md).
 
 
 
@@ -25,6 +25,8 @@ Includes the complete frozen development range since v0.1.43: 258 commits across
 - **Core reliability** — Correct share-link signing/error handling, PostgreSQL Notes slides candidates, duplicate RAG metric counting, MCP tab/carriage-return preservation, UTC timestamp interpretation, MLX cache ownership and other independently reproduced core defects (#2980).
 - **Cancellation, OCR and Sync** — Propagate cancellation, preserve OCR input until consumed, keep withheld Sync envelopes reachable, and expire abandoned blob uploads so quota is released (#2982, #3006).
 - **MCP and integration** — Remove ineffective SQL denylist filtering while retaining parameterized-query boundaries; fix MCP test failures and media auth import boundaries; remove production branching on pytest environment state (#2996, #2997, #3012, #2983).
+
+- **Audio resampling and MCP tests** — Buffered audio without librosa now actually resamples through the existing scipy/linear fallback; invalid rates are rejected and empty audio is retained (#3024). MCP assertions, workspace checks and optional-parser requirements are corrected (#3025). Chat NetworkError status/retry translation remains a separately tracked known defect (TASK-13381, #3026).
 
 ### Upgrade requirements and limits
 

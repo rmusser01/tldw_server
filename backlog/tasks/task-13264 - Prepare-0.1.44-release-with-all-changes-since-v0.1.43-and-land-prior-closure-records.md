@@ -6,7 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-09-27 15:16'
-updated_date: '2026-09-27 16:50'
+updated_date: '2026-09-27 17:16'
 labels: []
 dependencies: []
 references:
@@ -54,6 +54,12 @@ Release CI blocker reproduced: MCP portable installed wheel/sdist suites fail on
 CI repair validated: generic licensing contracts plus MCP workflow contract, 15 passed. Clean portable-gate wheel and sdist each 381 protocol tests passed; both official SDK stdio smokes passed. Root shared environment has a legacy installed MCP package lacking protocol_validation in isolated mode, so direct root exec-worker failures are environmental; clean installed protocol suites cover those tests successfully. Generic contract now enforces both reusable gates, absent duplicate triggers, original dependencies/immutable checkouts, and the backend negative-verdict first-step exit before checkout. Bandit finding type/severity/confidence baselines unchanged: stdio 132/132, generic 168/168, no errors. Ruff and whitespace checks pass. Protected source unchanged.
 
 Reviewed candidate repairs committed at3d6cbf2757a320b3286a1d14e1e755c288e70ab3. Protected-source manifest refreshed over7370 files. Rebuilt wheel/sdist pass Twine and backend-only boundary checks;114 frontend controller/selector/store/macro tests and16 VN tests pass, with2 Chromium account qualifications. Final remote CI remains pending.
+
+Final scope check found dev advanced14 commits/3 merged PRs after initial freeze: PR3026 Chat NetworkError tracking, PR3024 real buffered-audio resampling fallback, PR3025 MCP test assertion/parser corrections. Authorized release scope covers merged work, so refresh development snapshot to35d6dd90d4c3b703a753efdbd926e30af4f9eac5 and inventory272commits/37PRs. These additions touch backend/tests/backlog only; protected-source authority3d6cbf2757 and its7370-file manifest remain valid. Revalidate audio/MCP, release contracts and packages before final push.
+
+Final development snapshot: 35d6dd90d4c3b703a753efdbd926e30af4f9eac5 (272commits/37mergedPRs sincev0.1.43). PR3024/3025/3026 included; protected source/digest unchanged. Updated exhaustive inventory and release notes. Known Chat NetworkError, local FastAPI pin and worktree editable-install hazards remain tracked upstream; do not claim they were fixed.
+
+Final refreshed dev35d6dd90 includes272commits37PRs; merged audio11passes, MCP280passes2skips. Parser30.20 CI-only bootstrap defect repaired structurally; both parser versions183boundarypasses, parser30 bootstrap34passes and criticalE2E18passes277mode/environment skips. Rebuilt0.1.44 wheel/sdist pass Twine/backend-only checks, strictMkDocs passes, all66final source/docs contracts pass; protectedsource3d6cbf remains unchanged. Final merge commit push and remote CI next; release/date/PR-specific human-summary gate pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

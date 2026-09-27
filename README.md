@@ -158,7 +158,7 @@ Current release line:
 - Chat Macros v1.1 authoring/output profiles, local Workspace Persona provenance and owner-validated Chat history selection.
 - Reproducible VN failed-slot recipes; native-fork projection/storage groundwork (public native forks are not enabled yet).
 - PostgreSQL tenant isolation, authenticated diagnostic access, core reliability, Sync/OCR/cancellation and post-0.1.43 review repairs.
-- All 258 commits and 34 merged PRs are listed in the [change inventory](Docs/Development/releases/0.1.44-change-inventory.md).
+- All 272 commits and 37 merged PRs are listed in the [change inventory](Docs/Development/releases/0.1.44-change-inventory.md).
 - Back up and drain all database writers before migrating. PostgreSQL needs a dedicated NOSUPERUSER/NOBYPASSRLS application role that does not own content tables. Mixed-version rolling upgrades and old-binary rollback are unsupported.
 - See [release notes](Docs/Published/RELEASE_NOTES.md) and the [release plan](Docs/superpowers/plans/2026-09-27-release-0.1.44-plan.md) for migration details, limits and pending final release/date approval.
 

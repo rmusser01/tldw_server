@@ -19,8 +19,8 @@ and this project adheres to Some kind of Versioning
 
 ## [0.1.44] - 2026-09-27
 
-> Draft release candidate. Includes all 258 commits and 34 merged PRs
-> after `v0.1.43` through `9668e1454b0b28b7a4de13e1a35496fa0b368c42` (PR #3002),
+> Draft release candidate. Includes all 272 commits and 37 merged PRs
+> after `v0.1.43` through `35d6dd90d4c3b703a753efdbd926e30af4f9eac5` (PR #3025),
 > plus the prior closure records. See the [complete change inventory](Docs/Development/releases/0.1.44-change-inventory.md)
 > and [release plan](Docs/superpowers/plans/2026-09-27-release-0.1.44-plan.md).
 
@@ -45,12 +45,15 @@ and this project adheres to Some kind of Versioning
 - **Cancellation, OCR and Sync** — Propagate cancellation, preserve OCR input until consumed, keep withheld Sync envelopes reachable, and expire abandoned blob uploads so quota is released (#2982, #3006).
 - **MCP and integration** — Remove ineffective SQL denylist filtering while retaining parameterized-query boundaries; fix MCP test failures and media auth import boundaries; remove production branching on pytest environment state (#2996, #2997, #3012, #2983).
 
+- **Audio resampling and MCP tests** — Actually resample buffered audio through the existing fallback when librosa is unavailable; correct MCP assertions and parser requirements (#3024, #3025).
+- **SQLite bootstrap compatibility** — Validate the canonical AUTOINCREMENT constraint structurally so sqlglot 30.20.0 can initialize the users database; retain the guard’s schema and write boundaries.
+
 ### Upgrade requirements and limits
 
+- Chat NetworkError status/retry translation remains a separately tracked known defect (#3026, TASK-13381).
 - Back up persistent data and **drain all API, worker and direct database writers** before registered per-user schema migrations. Restart only compatible binaries. Mixed-version rolling upgrades and data-preserving rollback to old binaries are unsupported (#2963, #2968, #3002).
 - PostgreSQL application credentials must use a **NOSUPERUSER, NOBYPASSRLS role that does not own content tables**; migrations still run as the owner. Existing deployments using a privileged application role will fail startup until corrected. Existing pgvector tables require owner-prefixed migration to be listed; previously issued ownerless Chatbook signed URLs stop verifying (#2985).
 - Native fork storage/projection is preparatory; later fork recovery/synchronization remains separate. Broader UAT and certification are separately tracked; targeted regressions do not establish a fresh full-matrix pass. See [#2963](https://github.com/rmusser01/tldw_server/pull/2963), [#2985](https://github.com/rmusser01/tldw_server/pull/2985), and [#3002](https://github.com/rmusser01/tldw_server/pull/3002) for migration/compatibility details.
-
 
 ## [0.1.43] - 2026-09-20
 
