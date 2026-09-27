@@ -353,6 +353,29 @@ describe('VNAssetsWorkbench', () => {
     expect(mocks.profile.mock.calls.map(([path]) => path)).toEqual(['/users/me/profile', '/auth/me', '/users/me/profile', '/auth/me']);
   });
 
+  it.each(['profile', 'legacy'].flatMap((endpoint) =>
+    ['false', 1, {}, [], false, undefined].map((isActive) => ({ endpoint, isActive })),
+  ))('requires boolean active status from $endpoint identity: $isActive', async ({ endpoint, isActive }) => {
+    existingFailedPack();
+    mocks.profile.mockImplementation(async (path) => {
+      if (path === '/users/me/profile') {
+        if (endpoint === 'legacy') throw Object.assign(new Error('User not found'), { status: 404 });
+        return { user: { id: 1, is_active: isActive } };
+      }
+      return { id: 1, is_active: isActive };
+    });
+    const user = userEvent.setup();
+    await act(async () => { render(<VNAssetsWorkbench />); });
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+    expect(screen.getByText('Current server and account could not be verified.')).toBeInTheDocument();
+    mocks.profile.mockResolvedValue({ user: { id: 1, is_active: true } });
+    await user.click(screen.getByRole('button', { name: 'Retry recovery check' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+  });
+
   it.each([401, 403, 429, 500])('does not bypass a profile HTTP %s failure through the legacy identity endpoint', async (status) => {
     existingFailedPack();
     mocks.profile.mockImplementation(async (path) => {

@@ -10,7 +10,7 @@ merge. Preserve the human-written Change summary verbatim and unrelated work.
 **Success Criteria**: Clean tracked checkout and matching remote ownership before
 rebase; conflict-free rebase and all prior patches unchanged in range-diff; explicit
 expected-head lease on publication. Exclude local preview link and archive13379.
-**Tests**: Range-diff, unrelated base-file equality, 116 VN/fetch/shared-auth tests,
+**Tests**: Range-diff, unrelated base-file equality, 128 VN/fetch/shared-auth tests,
 frontend typecheck, scoped lint, diff checks; unchanged VN Python Bandit baseline.
 **Status**: Complete
 
@@ -33,6 +33,13 @@ startup-DDL acceptance and off-id AUTOINCREMENT rejection checks also exited 0.
 The unchanged VN Python Bandit
 baseline has zero findings/errors over 9064 lines and does not scan TypeScript.
 Publication uses an explicit lease on the full original owned head.
+
+Dev subsequently advanced to `f4bcc9bd70b12e2aae71d1633bff0053946d0314`
+through PR #3029's unrelated license cancellation, workflow-test and task updates.
+Clean owned `d8b62eeea93129a7f0f92b29f6f3fac62b204077` was rebased without
+conflicts; all eleven prior patches are unchanged in range-diff. No base backend,
+workflow, unrelated task or shared auth-service files are modified. Publication
+must protect that full expected remote head with an explicit lease.
 
 ## Stage 2: Current-Head Review
 
@@ -84,6 +91,22 @@ CodeRabbit discussion 4116478050 flagged the final summary's outdated 97-test
 checkpoint. Official Backlog mutation updates it to the latest 116 passing tests
 and makes new rebased-head reviews explicitly pending. Historical test/review
 evidence is retained, including Qodo's completed 98be158e87 reassessment.
+
+Qodo's completed d8b62 deep reassessment found malformed truthy account status
+passing verification (discussion 4116528569). Twelve rendered workbench cases
+cover profile and legacy identity responses. Before the strict boolean guard,
+eight malformed truthy cases enabled Start incorrectly; four false/missing
+controls passed (2.65s). The guard now requires `is_active === true` before scope
+creation. Valid fresh verification unlocks controls without automatic generation.
+All 128 VN/fetch/shared-auth tests pass (14.56s), typecheck and both scoped lint
+commands pass. Unchanged VN Python Bandit remains clear, not a TypeScript scan.
+
+CodeRabbit's completed d8b62 full review recorded no actionable comments. Its
+inferred crash-between-admission-and-idempotency-response limitation needs server
+reconciliation outside this frontend slice. Valid ambiguous commands remain
+locked with their original key; warned discard is only offered for unreadable
+storage. This is not an exactly-once or definitive server-outcome guarantee.
+Complete review and CI on the newly published base/head remain required.
 
 ## Stage 3: Gated Merge
 

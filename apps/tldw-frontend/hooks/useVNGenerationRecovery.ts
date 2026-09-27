@@ -42,7 +42,7 @@ export function useVNGenerationRecovery(onBoundary: (resetAccount: boolean) => v
     try {
       const principal = await fetchCurrentPrincipal(apiClient.get);
       if (!mounted.current || revision !== epoch.current || server !== getApiBaseUrl()) return null;
-      if (!principal?.is_active) throw new Error('Current server and account could not be verified.');
+      if (principal?.is_active !== true) throw new Error('Current server and account could not be verified.');
       const next = createVNCommandScope(server, principal.id);
       const changed = lastAuthority.current && !sameVNCommandScope(lastAuthority.current, next);
       if (changed) {
