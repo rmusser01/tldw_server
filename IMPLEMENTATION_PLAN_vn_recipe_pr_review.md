@@ -71,3 +71,11 @@
 - All eight new regressions failed before the fix: four real Retry API cases returned 202 instead of the documented 409, and four loader cases accepted non-integer versions. Require an exact integer version in both loaders before comparing to the supported version, preserving valid snapshots and existing error codes.
 - Fresh verification: the focused 26-test run and all 344 VN backend tests passed (181.62s full run). Scoped Ruff with documented exclusions, compilation, OpenAPI drift, and diff checks passed; Bandit returned zero findings/errors. The 37 frontend VN tests and typecheck from this same dev rebase remain applicable because no frontend or public schema changed.
 - Confirmed owned remote head `8c2811e37b3ade6663f114f7cf462d4268f32dbf` and unchanged dev `f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07` before publishing. Reply in the inline review thread and obtain current-head re-review; Stage 4 remains In Progress until all required checks and the normal merge complete.
+
+### MCP-Base Rebase Verification (2026-09-27 UTC)
+
+- Confirmed a clean owned worktree and remote head `674d13d1458554e07e74b80ea615d74705c1cac1` before rebasing onto dev `f94375c26e457be1f7752f20c9f11102f2503e42`. The base advance contains unrelated MCP filesystem/test helpers and task records; no VN runtime ownership overlap was found.
+- Rebase completed without conflicts. `git range-diff` confirms all ten prior PR patches unchanged.
+- Fresh verification: all 344 VN backend tests passed (304.95s) using the CI-aligned temporary overlay; 37 frontend VN tests, frontend typecheck, compilation, OpenAPI drift, scoped Ruff with documented BLE001/UP035 exclusions, and diff checks passed. Bandit returned zero findings/errors. The temporary shared-UI dependency link was removed.
+- The new base introduces an unrelated MCP task also using TASK-13358. Both task files are preserved unchanged. Backlog's CLI has no supported renumber command; requester approval was requested for manually renumbering only the VN record and its references. Do not write to the ambiguous task ID or merge until tracking ownership is resolved.
+- Prior-head Qodo and CodeRabbit reviews were clear, but the rebased head requires fresh review and all current dev gates. Publish only with an explicit lease protecting the verified owned remote head. Stage 4 remains In Progress.
