@@ -614,7 +614,12 @@ def test_postgres_sync_read_holds_lock_until_replacement_commits(
     def pause_after_sync_read(query: str, *args: Any, **kwargs: Any) -> Any:
         """Pause after the real locking read, before the real replacement UPDATE."""
         result = execute(query, *args, **kwargs)
-        if "assistant_startup_json FROM conversations WHERE id" in query and not read_finished.is_set():
+        if (
+            "assistant_startup_json" in query
+            and "FROM conversations WHERE id" in query
+            and query.endswith(" FOR UPDATE")
+            and not read_finished.is_set()
+        ):
             read_finished.set()
             assert release_read.wait(15), "Sync read was not released"
         return result

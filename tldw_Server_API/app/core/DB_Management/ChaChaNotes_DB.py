@@ -752,8 +752,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 71  # Immutable history projections after Persona startup provenance
-    _POSTGRES_SCHEMA_VERSION = 75
+    _CURRENT_SCHEMA_VERSION = 72  # Native fork storage after Persona and history projections
+    _POSTGRES_SCHEMA_VERSION = 76
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -7633,6 +7633,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.core.DB_Management.chacha.moodboard_sync_store import (
             MoodboardSyncStore,
         )
+        from tldw_Server_API.app.core.DB_Management.chacha.native_chat_asset_store import NativeChatAssetStore
+        from tldw_Server_API.app.core.DB_Management.chacha.native_fork_store import NativeForkStore
         from tldw_Server_API.app.core.DB_Management.chacha.note_attachment_store import (
             NoteAttachmentStore,
         )
@@ -7654,6 +7656,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         self.character_store = CharacterStore(self)
         self.conversation_store = ConversationStore(self)
+        self.native_forks = NativeForkStore(self)
+        self.native_assets = NativeChatAssetStore(self)
         self.conversation_resume_store = ConversationResumeStore(self)
         self.message_store = MessageStore(self)
         self.note_store = NoteStore(self)
@@ -8640,6 +8644,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (68, "_migrate_from_v68_to_v69"),
             (69, "_migrate_from_v69_to_v70"),
             (70, "_migrate_from_v70_to_v71"),
+            (71, "_migrate_from_v71_to_v72"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17764,6 +17769,64 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_db_version(conn) != 71:
             raise SchemaError("History projection migration V70->V71 failed version verification.")  # noqa: TRY003
 
+    def _native_fork_schema_is_installed(self, conn: Any) -> bool:
+        """Recognize the published H2 catalog without replacing durable receipts.
+
+        H2 previously used the same version numbers as dev's Persona migration.
+        A complete native catalog is retained; a partial catalog needs explicit
+        repair instead of silently marking missing storage as migrated.
+        """
+        from tldw_Server_API.app.core.DB_Management.chacha.native_fork_schema import NATIVE_CHAT_TABLES
+
+        present_tables = {
+            table for table in NATIVE_CHAT_TABLES if self.backend.table_exists(table, connection=conn)
+        }
+        required_columns = {
+            "workspaces": {"native_chat_admission_closed"},
+            "conversations": {
+                "required_projection_version", "native_creation_operation_kind",
+                "native_creation_operation_id", "native_bundle_json",
+            },
+        }
+        present_columns = {
+            table: required & {column["name"] for column in self.backend.get_table_info(table, connection=conn)}
+            for table, required in required_columns.items()
+        }
+        if not present_tables and not any(present_columns.values()):
+            return False
+        if present_tables != set(NATIVE_CHAT_TABLES) or present_columns != required_columns:
+            raise SchemaError("Incomplete native fork schema; manual repair is required.")  # noqa: TRY003
+        return True
+
+    def _migrate_from_v71_to_v72(self, conn: sqlite3.Connection) -> None:
+        """Install durable native fork receipts and asset ownership in one transaction."""
+        from tldw_Server_API.app.core.DB_Management.chacha.native_fork_schema import native_fork_schema_statements
+
+        if not self._native_fork_schema_is_installed(conn):
+            for statement in native_fork_schema_statements(postgres=False):
+                conn.execute(statement)
+        conn.execute(
+            "UPDATE db_schema_version SET version = 72 WHERE schema_name = ? AND version = 71",
+            (self._SCHEMA_NAME,),
+        )
+        if self._get_db_version(conn) != 72:
+            raise SchemaError("Native fork migration V71->V72 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v75_to_v76_postgres(self, conn: Any) -> None:
+        """Install native fork storage and direct-owner RLS with the version bump."""
+        from tldw_Server_API.app.core.DB_Management.chacha.native_fork_schema import native_fork_schema_statements
+
+        if not self._native_fork_schema_is_installed(conn):
+            for statement in native_fork_schema_statements(postgres=True):
+                self.backend.execute(statement, connection=conn)
+        self._ensure_chacha_rls_postgres(conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 75",
+            (76, self._SCHEMA_NAME), connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 76:
+            raise SchemaError("Native fork PostgreSQL migration V75->V76 failed version verification.")  # noqa: TRY003
+
     def _migrate_from_v74_to_v75_postgres(self, conn: Any) -> None:
         """Create the PostgreSQL projection store and protected nullable provenance."""
         statements = (
@@ -20892,6 +20955,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     if target_version >= 71 and current_db_version == 70:
                         self._migrate_from_v70_to_v71(conn)
                         current_db_version = self._get_db_version(conn)
+                    if target_version >= 72 and current_db_version == 71:
+                        self._migrate_from_v71_to_v72(conn)
+                        current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
                     conn.execute("CREATE INDEX IF NOT EXISTS idx_flashcards_created_at ON flashcards(created_at)")
@@ -21353,6 +21419,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 71 and current_db_version == 70:
                     self._migrate_from_v70_to_v71(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 72 and current_db_version == 71:
+                    self._migrate_from_v71_to_v72(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -25204,7 +25273,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -25219,6 +25288,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_version = 74
                 if target_version >= 75 and current_version < 75:
                     self._migrate_from_v74_to_v75_postgres(conn)
+                    current_version = 75
+                if target_version >= 76 and current_version < 76:
+                    self._migrate_from_v75_to_v76_postgres(conn)
+                    current_version = 76
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend))
                 self._postgres_schema_is_current(conn)
@@ -25650,6 +25723,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v74_to_v75_postgres(conn)
                 self._runtime_schema_version = 75
                 current_version = 75
+
+            if target_version >= 76 and current_version < 76:
+                self._migrate_from_v75_to_v76_postgres(conn)
+                self._runtime_schema_version = 76
+                current_version = 76
 
             if current_version < target_version:
                 logger.warning(
@@ -28156,6 +28234,99 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
         return self.get_workspace(workspace_id)  # type: ignore[return-value]
 
+    def _require_outermost_workspace_delete(self, workspace_id: str) -> None:
+        """A staged delete must be able to commit admission closure on its own."""
+        if self.backend_type == BackendType.SQLITE:
+            nested = bool(self.get_connection().in_transaction)
+        else:
+            connection = self.get_connection()
+            raw = connection._connection
+            transaction_status = getattr(getattr(raw, "info", None), "transaction_status", None)
+            nested = bool(
+                getattr(self._connection_state(), "tx_depth", 0)
+                or connection._backend._tx_depth(raw)
+                or getattr(transaction_status, "name", None) != "IDLE"
+            )
+        if nested:
+            raise ConflictError(  # noqa: TRY003
+                "Workspace deletion requires an outermost transaction boundary.",
+                entity="workspaces",
+                entity_id=workspace_id,
+            )
+
+    def _lock_native_workspace_delete(self, conn: Any, workspace_id: str) -> Any:
+        """Lock only the owned, ordinary workspace during a lifecycle transition."""
+        lock = " FOR UPDATE" if self.backend_type == BackendType.POSTGRESQL else ""
+        return conn.execute(
+            "SELECT version, deleted, native_chat_admission_closed FROM workspaces "
+            "WHERE id = ? AND client_id = ? AND system_operation_state IS NULL" + lock,  # nosec B608 - lock is a fixed backend-only suffix.
+            (workspace_id, self.client_id),
+        ).fetchone()
+
+    def _begin_native_workspace_delete(
+        self, workspace_id: str, *, expected_version: int | None, hard: bool
+    ) -> bool:
+        """Durably fence new native admissions before enumerating conversations."""
+        self._require_outermost_workspace_delete(workspace_id)
+        with self.transaction() as conn:
+            workspace = self._lock_native_workspace_delete(conn, workspace_id)
+            if workspace is None and hard:
+                return False
+            if workspace is None or (not hard and workspace["deleted"]):
+                raise ConflictError(  # noqa: TRY003
+                    f"Workspace '{workspace_id}' not found.", entity="workspaces", entity_id=workspace_id
+                )
+            if expected_version is not None and workspace["version"] != expected_version:
+                raise ConflictError(  # noqa: TRY003
+                    f"Workspace '{workspace_id}' version mismatch.", entity="workspaces", entity_id=workspace_id
+                )
+            if not workspace["native_chat_admission_closed"]:
+                conn.execute(
+                    "UPDATE workspaces SET native_chat_admission_closed = ? "
+                    "WHERE id = ? AND client_id = ?",
+                    (True, workspace_id, self.client_id),
+                )
+        return True
+
+    def _finish_native_workspace_delete(
+        self, conn: Any, workspace_id: str, *, expected_version: int | None, hard: bool, now: str | None = None
+    ) -> None:
+        """Stop a final transition if a protected scoped chat escaped the cascade."""
+        workspace = self._lock_native_workspace_delete(conn, workspace_id)
+        if workspace is None or not workspace["native_chat_admission_closed"]:
+            raise self._workspace_delete_incomplete(workspace_id)
+        if expected_version is not None and workspace["version"] != expected_version:
+            raise self._workspace_delete_incomplete(workspace_id)
+        if not hard and workspace["deleted"]:
+            raise self._workspace_delete_incomplete(workspace_id)
+        deleted_clause = "" if hard else " AND deleted = ?"
+        params: tuple[Any, ...] = (workspace_id, self.client_id)
+        if not hard:
+            params += (False,)
+        residual = conn.execute(
+            "SELECT id FROM conversations WHERE workspace_id = ? AND client_id = ? "  # nosec B608 - only a fixed deleted predicate is appended.
+            "AND scope_type = 'workspace'" + deleted_clause + " "
+            "AND (required_projection_version IS NOT NULL OR native_bundle_json IS NOT NULL "
+            "OR native_creation_operation_kind IS NOT NULL OR native_creation_operation_id IS NOT NULL) "
+            "LIMIT 1",
+            params,
+        ).fetchone()
+        if residual is not None:
+            raise self._workspace_delete_incomplete(workspace_id)
+        if not hard:
+            cursor = conn.execute(
+                "UPDATE workspaces SET deleted = 1, last_modified = ?, version = ? "
+                "WHERE id = ? AND client_id = ? AND version = ? AND native_chat_admission_closed = ?",
+                (now, expected_version + 1, workspace_id, self.client_id, expected_version, True),
+            )
+            if cursor.rowcount == 0:
+                raise self._workspace_delete_incomplete(workspace_id)
+
+    @staticmethod
+    def _workspace_delete_incomplete(workspace_id: str) -> ConflictError:
+        """Return the retryable conflict for a fenced but unfinished cascade."""
+        return ConflictError("workspace_delete_incomplete", entity="workspaces", entity_id=workspace_id)
+
     def delete_workspace(
         self,
         workspace_id: str,
@@ -28169,20 +28340,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         Raises:
             ConflictError: If not found or version mismatch.
         """
-        existing = self.get_workspace(workspace_id)
-        if existing is None:
-            raise ConflictError(  # noqa: TRY003
-                f"Workspace '{workspace_id}' not found.",
-                entity="workspaces",
-                entity_id=workspace_id,
-            )
-        if existing["version"] != expected_version:
-            raise ConflictError(  # noqa: TRY003
-                f"Workspace '{workspace_id}' version mismatch.",
-                entity="workspaces",
-                entity_id=workspace_id,
-            )
+        self._begin_native_workspace_delete(workspace_id, expected_version=expected_version, hard=False)
 
+        try:
+            return self._cascade_and_finish_soft_workspace_delete(workspace_id, expected_version)
+        except Exception as exc:
+            raise self._workspace_delete_incomplete(workspace_id) from exc
+
+    def _cascade_and_finish_soft_workspace_delete(self, workspace_id: str, expected_version: int) -> bool:
+        """Run the existing per-chat cascade after durable admission closure."""
         conversations = self.execute_query(
             "SELECT id, version FROM conversations WHERE workspace_id = ? AND scope_type = ? AND deleted = 0",
             (workspace_id, "workspace"),
@@ -28229,20 +28395,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 "WHERE workspace_id = ? AND deleted = 0",
                 (now, self.client_id, workspace_id),
             )
-            cursor = conn.execute(
-                "UPDATE workspaces SET deleted = 1, last_modified = ?, version = ? WHERE id = ? AND version = ?",
-                (now, expected_version + 1, workspace_id, expected_version),
+            self._finish_native_workspace_delete(
+                conn, workspace_id, expected_version=expected_version, hard=False, now=now
             )
-            if cursor.rowcount == 0:
-                raise ConflictError(  # noqa: TRY003
-                    f"Workspace '{workspace_id}' concurrent delete detected.",
-                    entity="workspaces",
-                    entity_id=workspace_id,
-                )
         return True
 
     def hard_delete_workspace(self, workspace_id: str) -> None:
         """Permanently delete a workspace row. FK CASCADE handles sub-resources."""
+        if not self._begin_native_workspace_delete(workspace_id, expected_version=None, hard=True):
+            return
+        try:
+            self._cascade_and_finish_hard_workspace_delete(workspace_id)
+        except Exception as exc:
+            raise self._workspace_delete_incomplete(workspace_id) from exc
+
+    def _cascade_and_finish_hard_workspace_delete(self, workspace_id: str) -> None:
+        """Purge scoped chats before deleting their workspace row."""
         conversations = self.execute_query(
             "SELECT id FROM conversations WHERE workspace_id = ? AND scope_type = ?",
             (workspace_id, "workspace"),
@@ -28251,9 +28419,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conversation_id = conversation["id"] if isinstance(conversation, dict) else conversation[0]
             self.hard_delete_conversation(str(conversation_id))
         with self.transaction() as conn:
+            self._finish_native_workspace_delete(conn, workspace_id, expected_version=None, hard=True)
             conn.execute("DELETE FROM workspace_resource_memberships WHERE workspace_id = ?", (workspace_id,))
             conn.execute("DELETE FROM workspace_project_roots WHERE workspace_id = ?", (workspace_id,))
-            conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
+            conn.execute("DELETE FROM workspaces WHERE id = ? AND client_id = ?", (workspace_id, self.client_id))
 
     @staticmethod
     def _normalize_workspace_source_saved_view_name(name: str) -> tuple[str, str]:

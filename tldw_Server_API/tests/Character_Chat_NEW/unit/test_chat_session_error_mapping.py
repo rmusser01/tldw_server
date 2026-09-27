@@ -18,19 +18,18 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     CharacterChatStreamPersistRequest,
     ChatSessionUpdate,
 )
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import PromptCostGuardrailConfig
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
     ConflictError,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
-from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import PromptCostGuardrailConfig
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
-
 
 pytestmark = pytest.mark.unit
 
@@ -2380,6 +2379,33 @@ async def test_restore_chat_session_maps_conflict_error_to_409() -> None:
 
 
 @pytest.mark.asyncio
+async def test_already_active_restore_checks_protected_workspace_lifecycle() -> None:
+    class ActiveRestoreDb(_BrokenChatSessionDb):
+        def restore_conversation(self, *args: Any, require_already_active: bool = False, **kwargs: Any) -> None:
+            if require_already_active:
+                raise self.exc
+
+        def get_roleplay_resume_state(self, chat_id: str) -> dict[str, Any]:
+            return {}
+
+        def get_character_card_by_id(self, character_id: int) -> dict[str, Any]:
+            return {"id": character_id, "name": "Assistant"}
+
+    db = ActiveRestoreDb(ConflictError("workspace_native_unavailable"), deleted=False)
+    with pytest.raises(HTTPException) as exc_info:
+        await character_chat_sessions.restore_chat_session(
+            chat_id="chat-1",
+            expected_version=1,
+            scope_type=None,
+            workspace_id=None,
+            db=db,
+            current_user=_test_user(),
+        )
+    assert exc_info.value.status_code == status.HTTP_409_CONFLICT
+    assert exc_info.value.detail == "workspace_native_unavailable"
+
+
+@pytest.mark.asyncio
 async def test_complete_v2_maps_db_error_to_sanitized_500() -> None:
     db = _BrokenChatSessionDb(CharactersRAGDBError("sqlite completion exploded"), raise_on_get=True)
 
@@ -2632,6 +2658,7 @@ async def test_persist_streamed_assistant_message_maps_db_error_to_sanitized_500
 
     with pytest.raises(HTTPException) as exc_info:
         await character_chat_sessions.persist_streamed_assistant_message(
+            request=SimpleNamespace(state=SimpleNamespace()),
             chat_id="chat-1",
             body=CharacterChatStreamPersistRequest(assistant_content="hello"),
             db=db,
@@ -2648,6 +2675,7 @@ async def test_persist_streamed_assistant_message_maps_conflict_error_to_409() -
 
     with pytest.raises(HTTPException) as exc_info:
         await character_chat_sessions.persist_streamed_assistant_message(
+            request=SimpleNamespace(state=SimpleNamespace()),
             chat_id="chat-1",
             body=CharacterChatStreamPersistRequest(assistant_content="hello"),
             db=db,
