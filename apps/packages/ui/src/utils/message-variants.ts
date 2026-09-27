@@ -25,7 +25,7 @@ const isDuplicateVariant = (a: MessageVariant, b: MessageVariant): boolean => {
   const aServer = normalizeId(a.serverMessageId)
   const bServer = normalizeId(b.serverMessageId)
   if (aServer && bServer && aServer === bServer) return true
-  if (a.message && b.message && a.message === b.message) return true
+  if (!aId && !bId && !aServer && !bServer && a.message && b.message && a.message === b.message) return true
   return false
 }
 

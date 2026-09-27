@@ -93,6 +93,8 @@ type Props = {
   createdAt?: number | string
   metadataExtra?: MessageMetadataExtra
   onDelete?: () => void
+  editMode?: boolean
+  onEditModeChange?: (editing: boolean) => void
 }
 
 export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
@@ -103,7 +105,9 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
   const [userDisplayName] = useStorage("chatUserDisplayName", "")
   const [isBtnPressed, setIsBtnPressed] = React.useState(false)
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-  const [editMode, setEditMode] = React.useState(false)
+  const [localEditMode, setLocalEditMode] = React.useState(false)
+  const editMode = props.editMode ?? localEditMode
+  const setEditMode = props.onEditModeChange ?? setLocalEditMode
   const { t } = useTranslation(["common", "playground"])
   const { cancel, isSpeaking, speak } = useTTS()
   const uiMode = useUiModeStore((state) => state.mode)
@@ -157,17 +161,17 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
         setEditMode(true)
       }
     },
-    [props.isBot, props.messageId, props.serverMessageId]
+    [props.isBot, props.messageId, props.serverMessageId, setEditMode]
   )
 
   React.useEffect(() => {
-    if (typeof window === "undefined") return
+    if (typeof window === "undefined" || props.onEditModeChange) return
 
     window.addEventListener(EDIT_MESSAGE_EVENT, handleEditMessage)
     return () => {
       window.removeEventListener(EDIT_MESSAGE_EVENT, handleEditMessage)
     }
-  }, [handleEditMessage])
+  }, [handleEditMessage, props.onEditModeChange])
 
   const messageTimestamp = React.useMemo(() => {
     const raw = props.createdAt
@@ -299,11 +303,11 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
       {editMode && (
         <div
           dir="auto"
-          className={`message-bubble ${bubbleToneClass} shadow-sm rounded-3xl prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 border max-w-[calc(100%-1.75rem)] px-4 py-3 rounded-br-lg ${userTextClass} ${
+          className={`message-bubble w-full min-w-0 ${bubbleToneClass} shadow-sm rounded-3xl prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 border max-w-[calc(100%-1.75rem)] px-4 py-3 rounded-br-lg ${userTextClass} ${
             props.message_type && !editMode ? "italic" : ""
           }`}
           style={messageBubbleStyle}>
-          <div className="w-screen max-w-[100%]">
+          <div className="w-full min-w-0">
             <EditMessageForm
               value={props.message}
               onSumbit={props.onEditFormSubmit}

@@ -1,5 +1,6 @@
 import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import React from "react"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import type { Message } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { acknowledgePromotedChatMessage, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
@@ -71,6 +72,7 @@ export interface UsePlaygroundPersistenceDeps {
 // ---------------------------------------------------------------------------
 
 export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
+  const selection = useHistorySelectionContext()
   const {
     isFireFoxPrivateMode,
     isConnectionReady,
@@ -246,7 +248,13 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
   )
 
   const handleSaveChatToServer = React.useCallback(async () => {
-    if (serverSaveInFlightRef.current) return
+    const isUnownedDraft = () => {
+      const current = selection?.getCurrent()
+      return !current || (current.status === "idle" && !current.owner && !current.view)
+    }
+    if (serverSaveInFlightRef.current || !isUnownedDraft()) return
+    const selectionCurrent = selection?.fence() || (() => true)
+    const canContinue = () => selectionCurrent() && isUnownedDraft()
     serverSaveInFlightRef.current = true
     const controller = new AbortController()
     activeSaveControllerRef.current = controller
@@ -259,6 +267,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
       const current = latestDepsRef.current
       return (
         !controller.signal.aborted &&
+        canContinue() &&
         !requestSnapshot?.scopeSignal.aborted &&
         !current.temporaryChat &&
         current.historyId === capturedHistoryId &&
@@ -529,6 +538,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
       serverSaveInFlightRef.current = false
     }
   }, [
+    selection,
     invalidateServerChatHistory,
     isConnectionReady,
     notificationApi,

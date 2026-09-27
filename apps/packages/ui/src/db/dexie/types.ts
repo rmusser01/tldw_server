@@ -1,3 +1,4 @@
+import type { HistoryAdmissionV1, HistoryViewSelectionV1, LegacyHistoryProjectionConfirmV1 } from "@/types/history-selection";
 import { ChatDocuments } from '@/models/ChatTypes';
 import type { DiscoSkillComment } from '@/types/disco-skills';
 
@@ -7,20 +8,26 @@ export type HistoryInfo = {
   id: string;
   title: string;
   is_rag: boolean;
-  message_source?: 'copilot' | 'web-ui' | 'branch' | 'server';
+  message_source?: "copilot" | "web-ui" | "branch" | "server";
   is_pinned?: boolean;
   createdAt: number;
   doc_id?: string;
   last_used_prompt?: LastUsedModelType;
   model_id?: string;
   server_chat_id?: string;
-  // Optional data-only association. Legacy histories are adopted only by a verified session.
   server_scope_key?: string;
+  local_owner_key?: string;
+  // External settings writers register before writing; abandoned tokens block fork certification.
+  local_settings_guard?: {
+    revision: string;
+    pending: string[];
+    initialized?: boolean;
+  };
   // Timeline/branching fields (server-compatible with ChaChaDB)
-  root_id?: string;                    // All forks share same root_id
-  parent_conversation_id?: string;     // Parent in fork tree
-  forked_from_message_id?: string;     // Message that spawned this fork
-  character_id?: number;               // Associated character/assistant
+  root_id?: string; // All forks share same root_id
+  parent_conversation_id?: string; // Parent in fork tree
+  forked_from_message_id?: string; // Message that spawned this fork
+  character_id?: number; // Associated character/assistant
 };
 
 export type WebSearch = {
@@ -121,12 +128,16 @@ export type SessionFiles = {
 };
 
 export type Message = {
+  history_admission?: HistoryAdmissionV1;
+  history_provenance?: { version: 1; owner_key: string; projection_id: string | null };
+  history_settlement?: { input_message_id: string; selection_digest: string; result_revision: string };
   id: string;
   history_id: string;
   name: string;
   role: string;
   content: string;
   images?: string[];
+  image?: string; // Historical singular inline image; selection normalizes to images.
   sources?: string[];
   search?: WebSearch;
   createdAt: number;
@@ -252,7 +263,40 @@ export type Prompt = {
   serverParentVersionId?: number | null; // Server's parent_version_id
 };
 
+export type HistoryBookmarkScope = { profile_id: string; client_session_id: string };
+/** Recovery text is never a message, selected history, or persisted write capability. */
+export type HistoryTurnRecovery = {
+  operation_id: string;
+  origin_view: HistoryViewSelectionV1;
+  selection_digest: string;
+  request_context_digest: string;
+  owner_key: string;
+  conversation_id: string;
+  created_at: number;
+  input_text: string;
+  input_images: string[];
+  result_text: string;
+  state: "dispatching" | "unknown" | "accepted_unsent" | "generated_unsaved";
+  admission?: import("@/types/history-selection").HistoryAdmissionReferenceV1;
+} & (
+  | { persistence?: "client"; input_id: string; assistant_id: string }
+  | { persistence: "server"; input_id?: string; assistant_id?: string }
+);
+
+export type HistoryBookmark = HistoryBookmarkScope & {
+  pending_turns?: Record<string, HistoryTurnRecovery>
+  history_turn_outcomes?: Record<string, "completed" | "dismissed">
+  owner_key: string
+  conversation_id: string
+  view: HistoryViewSelectionV1
+  pending_view_session_id?: string
+  // Only explicit false proves no attempt started; missing legacy state is unknown.
+  pending_dispatch_started?: boolean
+  pending_confirmation?: LegacyHistoryProjectionConfirmV1
+}
+
 export type UserSettings = {
+  history_profile_id?: string;
   id: string;
   user_id: string;
 };
@@ -563,4 +607,23 @@ export type TtsClip = {
   serverChatId?: string | null
   messageId?: string | null
   serverMessageId?: string | null
+}
+
+/** Credential-free namespace of a fork; workspace is independent of authenticated owner. */
+export type ForkOperationContext = {
+  readonly kind: "local" | "native" | "temporary"
+  readonly scope: import("@/types/chat-scope").ChatScope
+}
+export type ForkOperation = {
+  readonly owner_key: string
+  readonly operation_id: string
+  readonly conversation_id: string
+  readonly source_key: string
+  readonly context: ForkOperationContext
+  readonly request: import("@/types/history-selection").ForkRequestV1
+  active_intent?: string
+  state: "prepared" | "dispatching" | "unknown" | "partial" | "completed" | "rejected"
+  candidate_child_id?: string
+  candidate_key?: string
+  result?: import("@/types/history-selection").ForkResultV1
 }

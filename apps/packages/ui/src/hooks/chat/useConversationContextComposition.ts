@@ -22,8 +22,8 @@ export type ConversationContextCompositionStatus =
   | "error"
 
 export type ConversationContextSendOverrides = {
-  historyForModel: ChatHistory
-  messageForModel: string
+  historyForModel?: ChatHistory
+  messageForModel?: string
 }
 
 export type ConversationContextSendComposition = {
@@ -70,6 +70,16 @@ export const buildConversationContextSendOverrides = ({
       role: "system" as const,
       content: message.content
     }))
+
+  const hasOptionalContext =
+    composition.selection.worldBookIds.length > 0 ||
+    composition.selection.dictionaryIds.length > 0 ||
+    composition.pieces.some(piece => piece.kind === "worldbook" || piece.kind === "dictionary")
+  if (
+    composition.readiness === "ready" && !hasOptionalContext &&
+    contextMessages.length === 0 &&
+    composition.transformedInputText === composition.inputText
+  ) return {}
 
   return {
     historyForModel: [...history, ...contextMessages],

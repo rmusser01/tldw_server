@@ -74,4 +74,3 @@ export const normalizeStudyPackIntent = (value: unknown): StudyPackIntent | null
     sourceItems
   }
 }
-

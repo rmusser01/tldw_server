@@ -1,3 +1,4 @@
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { Input, InputNumber, Popover, Radio, Select, Switch, Tooltip, Upload } from "antd"
 import { useQuery } from "@tanstack/react-query"
 import {
@@ -463,13 +464,14 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
       }),
     [selectedAssistant, selectedCharacterId]
   )
-  const fullAppButtonLabel = rolePlayActive
+  const historySelection = useHistorySelectionContext()
+  const fullAppButtonLabel = historySelection ? t("playground:historySelection.expand", "Expand in full page") : rolePlayActive
     ? t(
         "sidepanel:controlRow.openCharacterChatInFullUI",
         "Open Character Chat in full app"
       )
     : t("sidepanel:controlRow.openInFullUI", "Open full app")
-  const fullAppHandoffDescription = rolePlayActive
+  const fullAppHandoffDescription = historySelection ? t("playground:historySelection.expandDescription", "Opens this selected history in the extension full page. Active streaming stays in this panel.") : rolePlayActive
     ? t(
         "sidepanel:controlRow.openRolePlayFullAppDescription",
         "Opens /chat in a new tab with the active role-play route. Use Continue in WebUI to carry a draft or page context."
@@ -571,7 +573,8 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
     return openFallback(routePath)
   }, [])
 
-  const openFullApp = () => {
+  const openFullApp = async () => {
+    if (historySelection) { const route = await historySelection.prepareExpansionPath(); if (route) void openFullAppPath(route); return }
     if (onOpenChatInWebUi) {
       Promise.resolve(onOpenChatInWebUi())
         .catch((error) => {

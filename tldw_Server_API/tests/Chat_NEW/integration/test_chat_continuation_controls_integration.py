@@ -132,3 +132,110 @@ def test_append_continuation_non_tip_returns_409(
         assert "Append continuation requires" in str(detail)
     finally:
         credentialed_test_client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
+
+
+@pytest.mark.parametrize("case", ["no_skills", "stale", "unsupported_skills"])
+def test_versioned_completion_never_discovers_mutable_skills(
+    credentialed_test_client,
+    populated_chacha_db,
+    auth_headers,
+    monkeypatch,
+    tmp_path,
+    case,
+):
+    from tldw_Server_API.app.api.v1.endpoints import chat as endpoint
+    from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
+    from tldw_Server_API.app.core.Skills.skills_service import SkillsService
+
+    client, db = credentialed_test_client, populated_chacha_db
+    client.app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    try:
+        cid = db.add_conversation({"character_id": None, "client_id": "1", "title": "Read-only skill fence"})
+        captured = client.post(
+            f"/api/v1/chat/conversations/{cid}/history/selection",
+            headers=auth_headers,
+            json={
+                "purpose": "send",
+                "view": {
+                    "view_session_id": "skills",
+                    "conversation_id": cid,
+                    "interpretation": {"kind": "parent_graph_v1"},
+                    "cursor": {"kind": "empty"},
+                    "selection_revision": 1,
+                },
+            },
+        ).json()
+        selection = resolve_history_selection(captured["snapshot"], captured["view"], "send", "skills-lease")[
+            "selection"
+        ]
+        if case == "stale":
+            db.upsert_conversation_settings(cid, {"model": "changed"})
+        if case == "unsupported_skills":
+            installed = tmp_path / "skills" / "visible"
+            installed.mkdir(parents=True)
+            (installed / "SKILL.md").write_text("---\nname: visible\n---\nInstructions")
+            recovery = tmp_path / "skills" / ".replacing-preserved.v1"
+            recovery.mkdir()
+            (recovery / "marker").write_text("must remain unchanged")
+        before_files = {
+            str(p.relative_to(tmp_path)): p.read_bytes() for p in (tmp_path / "skills").rglob("*") if p.is_file()
+        }
+        before_settings = db.get_conversation_settings(cid)
+        with db.transaction() as conn:
+            before_registry = db.backend.table_exists("skill_registry", connection=conn)
+        constructions = []
+
+        def forbid_service(*args, **kwargs):
+            constructions.append(True)
+            raise AssertionError("Versioned endpoint must never construct SkillsService")
+
+        monkeypatch.setattr(SkillsService, "__init__", forbid_service)
+        monkeypatch.setattr(endpoint.DatabasePaths, "get_user_base_directory", lambda *_: tmp_path)
+        seen_tools = []
+        original_builder = endpoint._build_context_and_messages_compat
+
+        async def record_tools(**kwargs):
+            seen_tools.extend(kwargs["request_data"].tools or [])
+            return await original_builder(**kwargs)
+
+        monkeypatch.setattr(endpoint, "_build_context_and_messages_compat", record_tools)
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "explicit_tool",
+                    "description": "explicit",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
+        response = client.post(
+            "/api/v1/chat/completions",
+            headers=auth_headers,
+            json={
+                "model": "gpt-4o-mini",
+                "conversation_id": cid,
+                "save_to_db": True,
+                "messages": [{"role": "user", "content": "hello"}],
+                "tools": tools,
+                "tldw_history_selection_v1": selection,
+            },
+        )
+        assert constructions == []
+        assert response.status_code == (200 if case == "no_skills" else 409), response.text
+        if case == "no_skills":
+            normalized = [
+                item.model_dump(exclude_none=True) if hasattr(item, "model_dump") else item for item in seen_tools
+            ]
+            assert normalized == tools
+            assert not (tmp_path / "skills").exists()
+        else:
+            assert db.count_messages_for_conversation(cid) == 0
+        assert db.get_conversation_settings(cid) == before_settings
+        assert {
+            str(p.relative_to(tmp_path)): p.read_bytes() for p in (tmp_path / "skills").rglob("*") if p.is_file()
+        } == before_files
+        with db.transaction() as conn:
+            assert db.backend.table_exists("skill_registry", connection=conn) is before_registry
+    finally:
+        client.app.dependency_overrides.pop(get_chacha_db_for_user, None)

@@ -752,8 +752,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 70  # Schema v70 persists local conversation startup provenance
-    _POSTGRES_SCHEMA_VERSION = 74
+    _CURRENT_SCHEMA_VERSION = 71  # Immutable history projections after Persona startup provenance
+    _POSTGRES_SCHEMA_VERSION = 75
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -8639,6 +8639,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (67, "_migrate_from_v67_to_v68"),
             (68, "_migrate_from_v68_to_v69"),
             (69, "_migrate_from_v69_to_v70"),
+            (70, "_migrate_from_v70_to_v71"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17720,6 +17721,71 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             connection=conn,
         )
 
+    _HISTORY_PROJECTIONS_SCHEMA_SQL = """
+        CREATE TABLE IF NOT EXISTS conversation_history_projections (
+            projection_id TEXT NOT NULL,
+            conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+            client_id TEXT NOT NULL,
+            owner_key TEXT NOT NULL,
+            interpretation_version INTEGER NOT NULL CHECK (interpretation_version = 1),
+            source_digest TEXT NOT NULL,
+            history_fence TEXT NOT NULL,
+            source_members_json TEXT NOT NULL,
+            ordered_path_ids_json TEXT NOT NULL,
+            confirmation_json TEXT NOT NULL,
+            projection_digest TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (client_id, owner_key, conversation_id, projection_id)
+        )
+    """
+
+    def _migrate_from_v70_to_v71(self, conn: sqlite3.Connection) -> None:
+        """Preserve legacy rows; only specialized admission may set protected provenance."""
+        keyword_columns = {row[1] for row in conn.execute("PRAGMA table_info(keywords)")}
+        if "merged_into_sync_id" not in keyword_columns:
+            conn.execute(
+                "ALTER TABLE keywords ADD COLUMN merged_into_sync_id TEXT "
+                "CONSTRAINT keyword_merge_tombstone CHECK (merged_into_sync_id IS NULL "
+                "OR (deleted = 1 AND merged_into_sync_id <> sync_id))"
+            )
+        conn.execute(self._HISTORY_PROJECTIONS_SCHEMA_SQL)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+        if "history_admission_json" not in columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN history_admission_json TEXT")
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS history_projection_immutable
+            BEFORE UPDATE ON conversation_history_projections
+            BEGIN SELECT RAISE(ABORT, 'History projections are immutable'); END
+        """)
+        conn.execute(
+            "UPDATE db_schema_version SET version = 71 WHERE schema_name = ? AND version = 70",
+            (self._SCHEMA_NAME,),
+        )
+        if self._get_db_version(conn) != 71:
+            raise SchemaError("History projection migration V70->V71 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v74_to_v75_postgres(self, conn: Any) -> None:
+        """Create the PostgreSQL projection store and protected nullable provenance."""
+        statements = (
+            self._HISTORY_PROJECTIONS_SCHEMA_SQL,
+            "ALTER TABLE messages ADD COLUMN IF NOT EXISTS history_admission_json TEXT",
+            """CREATE OR REPLACE FUNCTION history_projection_immutable() RETURNS TRIGGER AS $$
+               BEGIN RAISE EXCEPTION 'History projections are immutable'; END;
+               $$ LANGUAGE plpgsql""",
+            "DROP TRIGGER IF EXISTS history_projection_immutable ON conversation_history_projections",
+            "CREATE TRIGGER history_projection_immutable BEFORE UPDATE ON conversation_history_projections "
+            "FOR EACH ROW EXECUTE FUNCTION history_projection_immutable()",
+        )
+        for statement in statements:
+            self.backend.execute(statement, connection=conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 74",
+            (75, self._SCHEMA_NAME), connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 75:
+            raise SchemaError("History projection PostgreSQL migration V74->V75 failed version verification.")  # noqa: TRY003
+        self._ensure_chacha_rls_postgres(conn)
+
     def _migrate_from_v66_to_v67(self, conn: sqlite3.Connection) -> None:
         """Add OSCE quiz activity metadata, stations, and practice attempts."""
         for statement in split_sql_statements(self._MIGRATION_SQL_V66_TO_V67):
@@ -20485,6 +20551,24 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return
         with TransactionContextManager(self):
             current_db_version = self._get_db_version(conn)
+            # Earlier H1/H2 branches used Persona's version numbers for history.
+            # Repair their marker only when the actual catalog proves that lineage.
+            if (
+                current_db_version in (68, 69, 70)
+                and self.backend.table_exists("conversation_history_projections", connection=conn)
+                and "assistant_defaults_explicit_none" not in {
+                    column[1] for column in conn.execute("PRAGMA table_info(workspaces)")
+                }
+            ):
+                current_db_version = (
+                    68 if "merged_into_sync_id" in {
+                        column[1] for column in conn.execute("PRAGMA table_info(keywords)")
+                    } else 67
+                )
+                conn.execute(
+                    "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
+                    (current_db_version, self._SCHEMA_NAME),
+                )
             while current_db_version < target_version:
                 current_db_version = self._run_sqlite_linear_migration_step(
                     conn,
@@ -20804,6 +20888,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         current_db_version = self._get_db_version(conn)
                     if target_version >= 70 and current_db_version == 69:
                         self._migrate_from_v69_to_v70(conn)
+                        current_db_version = self._get_db_version(conn)
+                    if target_version >= 71 and current_db_version == 70:
+                        self._migrate_from_v70_to_v71(conn)
                         current_db_version = self._get_db_version(conn)
                 # Ensure helpful indexes that may have been introduced post-creation
                 try:
@@ -21263,6 +21350,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     current_db_version = self._get_db_version(conn)
                 if target_version >= 70 and current_db_version == 69:
                     self._migrate_from_v69_to_v70(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 71 and current_db_version == 70:
+                    self._migrate_from_v70_to_v71(conn)
                     current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
@@ -25089,11 +25179,48 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise SchemaError(  # noqa: TRY003
                     f"Database schema version ({current_version}) is newer than supported by code ({target_version})."
                 )
-            if current_version == 71 and target_version == 72:
-                # v71 already reconciled the schema. Upgrade only the Study sync
-                # triggers under the shared migration lock and transaction.
-                self._ensure_study_pack_sync_triggers_postgres(conn)
+            # H1 previously published v68 for history projections, while dev
+            # published v68 for owner-scoped character names. Inspect the actual
+            # catalog under the migration lock before replaying the missing step.
+            if current_version == 68 and backend.table_exists("conversation_history_projections", connection=conn):
+                legacy_character_names = backend.execute(
+                    "SELECT EXISTS (SELECT 1 FROM pg_constraint c "
+                    "JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1] "
+                    "WHERE c.conrelid = 'character_cards'::regclass AND c.contype = 'u' "
+                    "AND cardinality(c.conkey) = 1 AND a.attname = 'name')",
+                    connection=conn,
+                ).scalar
+                if legacy_character_names:
+                    self._set_schema_version_postgres(conn, 67)
+                    current_version = 67
+
+            if (
+                current_version in (73, 74)
+                and backend.table_exists("conversation_history_projections", connection=conn)
+                and "assistant_defaults_explicit_none" not in {
+                    column["name"] for column in backend.get_table_info("workspaces", connection=conn)
+                }
+            ):
                 self._set_schema_version_postgres(conn, 72)
+                current_version = 72
+
+            if current_version in (71, 72, 73, 74) and target_version >= 72:
+                # Completed dev schemas need only the new migrations, avoiding
+                # replay of the earlier schema reconciliation and its DDL.
+                if current_version == 71:
+                    self._ensure_study_pack_sync_triggers_postgres(conn)
+                    self._set_schema_version_postgres(conn, 72)
+                    current_version = 72
+                if target_version >= 73 and current_version < 73:
+                    self._migrate_from_v72_to_v73_postgres(conn)
+                    current_version = 73
+                if target_version >= 74 and current_version < 74:
+                    self._migrate_from_v73_to_v74_postgres(conn)
+                    current_version = 74
+                if target_version >= 75 and current_version < 75:
+                    self._migrate_from_v74_to_v75_postgres(conn)
+                if target_version >= 74:
+                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend))
                 self._postgres_schema_is_current(conn)
                 return
 
@@ -25518,6 +25645,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v73_to_v74_postgres(conn)
                 self._runtime_schema_version = 74
                 current_version = 74
+
+            if target_version >= 75 and current_version < 75:
+                self._migrate_from_v74_to_v75_postgres(conn)
+                self._runtime_schema_version = 75
+                current_version = 75
 
             if current_version < target_version:
                 logger.warning(
@@ -26308,6 +26440,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     # ----------------------
     # Skill registry
     # ----------------------
+    def history_skills_may_be_visible(self) -> bool:
+        """Read potential model-visible registry state without creating/syncing tables."""
+        with self.transaction() as conn:
+            if not self.backend.table_exists("skill_registry", connection=conn):
+                return False
+            row = conn.execute(
+                "SELECT 1 FROM skill_registry WHERE deleted = FALSE "
+                "AND user_invocable = TRUE AND disable_model_invocation = FALSE LIMIT 1"
+            ).fetchone()
+            return row is not None
+
     def _ensure_skill_registry_table(self) -> None:
         """Ensure the skill_registry table exists for the active backend."""
         if self.backend_type == BackendType.SQLITE:
@@ -45242,6 +45385,13 @@ for _message_store_method in (
     "add_message",
     "lock_message_for_edit",
     "lock_message_metadata_for_edit",
+    "get_conversation_history_snapshot",
+    "get_conversation_history_selected_content",
+    "confirm_legacy_history_projection",
+    "validate_history_selection",
+    "append_selected_history_input",
+    "append_selected_history_inputs",
+    "settle_history_admission",
     "append_message_from_sync",
     "tombstone_message_from_sync",
     "get_messages_by_sync_stable_id",

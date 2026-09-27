@@ -83,13 +83,19 @@ describe("plasmo storage web shim", () => {
 
     await session.set("tldwManualSessionApiKey", { apiKey: "secret" })
 
-    expect(sessionStorage.getItem("tldwManualSessionApiKey")).toContain("secret")
+    expect(sessionStorage.getItem("tldwManualSessionApiKey")).toContain(
+      "secret"
+    )
     expect(localStorage.getItem("tldwManualSessionApiKey")).toBeNull()
-    expect(localStorage.getItem("plasmo-session:tldwManualSessionApiKey")).toBeNull()
+    expect(
+      localStorage.getItem("plasmo-session:tldwManualSessionApiKey")
+    ).toBeNull()
   })
 
   it("keeps session keys in shared memory when native session storage is unavailable", async () => {
-    vi.spyOn(window, "sessionStorage", "get").mockReturnValue(undefined as never)
+    vi.spyOn(window, "sessionStorage", "get").mockReturnValue(
+      undefined as never
+    )
     const local = new Storage({ area: "local" })
     const session = new Storage({ area: "session" })
 
@@ -98,11 +104,40 @@ describe("plasmo storage web shim", () => {
 
     expect(await local.get("shared")).toBe("local-value")
     expect(await session.get("shared")).toBe("session-value")
-    expect(await new Storage({ area: "session" }).get("shared")).toBe("session-value")
+    expect(await new Storage({ area: "session" }).get("shared")).toBe(
+      "session-value"
+    )
     expect(localStorage.getItem("shared")).toContain("local-value")
     expect(localStorage.getItem("plasmo-session:shared")).toBeNull()
     expect(JSON.stringify(localStorage)).not.toContain("session-value")
 
     await session.remove("shared")
+  })
+})
+
+describe("persistent backend certification compatibility", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
+  it("keeps ordinary fallback get/set usable without certifying persistence", async () => {
+    const getter = vi
+      .spyOn(window, "localStorage", "get")
+      .mockImplementation(() => {
+        throw new Error("denied")
+      })
+    const fallback = new Storage({ area: "local" })
+    await fallback.set("ordinary", 42)
+    getter.mockRestore()
+    expect(await fallback.get("ordinary")).toBe(42)
+    expect(fallback.hasPersistentBackend).toBe(false)
+    expect(new Storage({ area: "local" }).hasPersistentBackend).toBe(true)
+  })
+  it("keeps SSR construction and memory storage usable", async () => {
+    vi.stubGlobal("window", undefined)
+    const storage = new Storage()
+    await storage.set("ordinary", 42)
+    expect(await storage.get("ordinary")).toBe(42)
+    expect(storage.hasPersistentBackend).toBe(false)
   })
 })

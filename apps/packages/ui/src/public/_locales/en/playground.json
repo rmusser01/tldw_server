@@ -3347,27 +3347,6 @@
   "documentProcessing_ingestMissingMediaId": {
     "message": "Ingest completed without a media id."
   },
-  "actor_preset.sliceOfLife": {
-    "message": "Slice of life"
-  },
-  "actor_preset.dungeonCrawl": {
-    "message": "Dungeon crawl"
-  },
-  "actor_preset.romance": {
-    "message": "Romance"
-  },
-  "actor_preset.workSession": {
-    "message": "Work session"
-  },
-  "actor_templateMode.merge": {
-    "message": "Merge with templates"
-  },
-  "actor_templateMode.override": {
-    "message": "Override templates"
-  },
-  "actor_templateMode.ignore": {
-    "message": "Ignore when templates active"
-  },
   "actor_preset_sliceOfLife": {
     "message": "Slice of life"
   },
@@ -3388,5 +3367,203 @@
   },
   "actor_templateMode_ignore": {
     "message": "Ignore when templates active"
+  },
+  "composer_rolePlaySaveError": {
+    "message": "Scene settings could not be saved. Your draft is still here; retry Apply."
+  },
+  "composer_rolePlayApplyError": {
+    "message": "Settings could not be applied. Your draft is still here; retry Apply."
+  },
+  "composer_rolePlayRestoreError": {
+    "message": "Settings could not be applied, and the previous scene could not be restored. Keep this drawer open and retry Apply."
+  },
+  "historySelection_region": {
+    "message": "Conversation history selection"
+  },
+  "historySelection_loading": {
+    "message": "Loading selected history"
+  },
+  "historySelection_pending": {
+    "message": "History confirmation pending"
+  },
+  "historySelection_pendingMessage": {
+    "message": "The original choices are retained. Check the same confirmation before creating another interpretation."
+  },
+  "historySelection_checkConfirmation": {
+    "message": "Check original confirmation"
+  },
+  "historySelection_changed": {
+    "message": "Conversation history changed"
+  },
+  "historySelection_changedMessage": {
+    "message": "Your choices are retained. Refresh the source, then review missing messages or choose a new boundary."
+  },
+  "historySelection_reason": {
+    "message": "Reason"
+  },
+  "historySelection_refresh": {
+    "message": "Refresh history"
+  },
+  "historySelection_unavailable": {
+    "message": "Selected history unavailable"
+  },
+  "historySelection_unavailableMessage": {
+    "message": "You can still read this conversation. A supported, verified history owner is required to continue from a selection."
+  },
+  "historySelection_bind": {
+    "message": "Connect this conversation"
+  },
+  "historySelection_review": {
+    "message": "Review conversation history"
+  },
+  "historySelection_empty": {
+    "message": "Use no prior messages"
+  },
+  "historySelection_expand": {
+    "message": "Expand in full page"
+  },
+  "historySelection_counts": {
+    "message": "Complete source / included path"
+  },
+  "historySelection_instructions": {
+    "message": "Include messages in the order to use. Omitted messages remain alternatives. Arrow keys browse rows; Alt + arrow keys reorder included messages."
+  },
+  "historySelection_source": {
+    "message": "Complete source messages"
+  },
+  "historySelection_imageOnly": {
+    "message": "Image or attachment only"
+  },
+  "historySelection_emptyMessage": {
+    "message": "Empty message"
+  },
+  "historySelection_include": {
+    "message": "Include"
+  },
+  "historySelection_omitted": {
+    "message": "Omitted alternative"
+  },
+  "historySelection_position": {
+    "message": "Path position"
+  },
+  "historySelection_up": {
+    "message": "Move earlier"
+  },
+  "historySelection_down": {
+    "message": "Move later"
+  },
+  "historySelection_chooseBoundary": {
+    "message": "Continue after this message"
+  },
+  "historySelection_beforeFirst": {
+    "message": "Before first included message"
+  },
+  "historySelection_throughLast": {
+    "message": "Through last included message"
+  },
+  "historySelection_confirmEffect": {
+    "message": "Confirm creates a saved interpretation of this complete source. It does not delete omitted alternatives."
+  },
+  "historySelection_confirm": {
+    "message": "Confirm selected history"
+  },
+  "historySelection_cancel": {
+    "message": "Cancel review"
+  },
+  "historySelection_expandDescription": {
+    "message": "Opens this selected history in the extension full page. Active streaming stays in this panel."
+  },
+  "historySelection_recoveryTitle": {
+    "message": "Turn needs review"
+  },
+  "historySelection_recoveryMessage": {
+    "message": "The original send outcome is retained separately from history. It will not be sent again automatically."
+  },
+  "historySelection_inspectRecovery": {
+    "message": "Inspect original input and result"
+  },
+  "historySelection_copyRecovery": {
+    "message": "Copy recovered text"
+  },
+  "historySelection_dismissRecovery": {
+    "message": "Dismiss recovery"
+  },
+  "historySelection_recoveryLoadError": {
+    "message": "Could not load retained send outcomes. Refresh history to try again."
+  },
+  "historySelection_recoveryState_dispatching": {
+    "message": "Send outcome pending or unknown"
+  },
+  "historySelection_recoveryState_unknown": {
+    "message": "User admission outcome unknown"
+  },
+  "historySelection_recoveryState_accepted_unsent": {
+    "message": "User input accepted; response not saved"
+  },
+  "historySelection_recoveryState_generated_unsaved": {
+    "message": "Generated response needs review"
+  },
+  "historySelection_recoveryState_accepted_response_unknown": {
+    "message": "User input accepted; response outcome unknown"
+  },
+  "historySelection_forkLoadError": {
+    "message": "Could not load retained fork outcomes."
+  },
+  "historySelection_forkInspect": {
+    "message": "Inspect copy"
+  },
+  "historySelection_forkAllowNew": {
+    "message": "Allow a new fork action"
+  },
+  "historySelection_forkNewExplanation": {
+    "message": "Allowing a new action permits a separate copy and keeps this result. It does not retry this operation."
+  },
+  "historySelection_forkStates_prepared_title": {
+    "message": "Fork prepared"
+  },
+  "historySelection_forkStates_prepared_message": {
+    "message": "This fork has not been sent. The app will not start another attempt automatically."
+  },
+  "historySelection_forkStates_dispatching_title": {
+    "message": "Fork in progress"
+  },
+  "historySelection_forkStates_dispatching_message": {
+    "message": "The copy outcome is not confirmed yet. The app will not start another attempt automatically. A connection failure may have left multiple server copies; inspect the server before starting a new copy."
+  },
+  "historySelection_forkStates_unknown_title": {
+    "message": "Fork status unknown"
+  },
+  "historySelection_forkStates_unknown_message": {
+    "message": "A copy may have been created, but its outcome could not be confirmed. The app will not start another attempt automatically. A connection failure may have left multiple server copies; inspect the server before starting a new copy."
+  },
+  "historySelection_forkStates_partial_title": {
+    "message": "Fork incomplete"
+  },
+  "historySelection_forkStates_partial_message": {
+    "message": "A copy was created. Some content may be missing because copying could not be confirmed as complete. The app will not start another attempt automatically. A connection failure may have left multiple server copies; inspect the server before starting a new copy."
+  },
+  "historySelection_forkStates_completed_title": {
+    "message": "Fork saved"
+  },
+  "historySelection_forkStates_completed_message": {
+    "message": "The selected supported content was copied. You can inspect the saved copy."
+  },
+  "historySelection_forkStates_rejected_title": {
+    "message": "Fork not started"
+  },
+  "historySelection_forkStates_rejected_message": {
+    "message": "No copy was created by this operation. Review the details before starting a new fork."
+  },
+  "historySelection_forkDetails": {
+    "message": "Operation details"
+  },
+  "historySelection_copyOpenFailed": {
+    "message": "Copy saved; opening failed"
+  },
+  "historySelection_copyRecordFailed": {
+    "message": "Copy saved; recovery record update failed"
+  },
+  "historySelection_copyRecordFailedDetail": {
+    "message": "Saved copy: {{childId}}. Its recovery record could not be updated. Reason: {{code}}"
   }
 }

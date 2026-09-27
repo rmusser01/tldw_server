@@ -1331,6 +1331,7 @@ class StreamingResponseHandler:
         self.tool_call_order: list[int] = []
         self.function_call_accumulator: Optional[dict[str, Any]] = None
         self.saved_message_id: Optional[str] = None
+        self.history_persistence_ack = False
         self.system_message_id: Optional[str] = None
         self.user_message_id: Optional[str] = None
         self.continuation_metadata: Optional[dict[str, Any]] = None
@@ -1340,6 +1341,19 @@ class StreamingResponseHandler:
     def _attach_stream_metadata(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             return payload
+        if self.history_persistence_ack:
+            # These fields are owned by admission/settlement, never by the provider.
+            payload.pop("tldw_history_admission_v1", None)
+            payload.pop("tldw_message_id", None)
+            payload.pop("tldw_user_message_id", None)
+            payload.pop("tldw_conversation_id", None)
+            if self.user_message_id:
+                payload["tldw_user_message_id"] = self.user_message_id
+            if self.conversation_id:
+                payload["tldw_conversation_id"] = self.conversation_id
+            if self.saved_message_id:
+                payload["tldw_message_id"] = self.saved_message_id
+                payload["tldw_conversation_id"] = self.conversation_id
         if not CHAT_STREAM_INCLUDE_METADATA:
             return payload
         if self.conversation_id:
@@ -2296,6 +2310,7 @@ async def create_streaming_response_with_timeout(
     text_transform: Optional[callable] = None,
     system_message_id: Optional[str] = None,
     continuation_metadata: Optional[dict[str, Any]] = None,
+    history_persistence_ack: bool = False,
     user_message_id: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """
@@ -2313,6 +2328,7 @@ async def create_streaming_response_with_timeout(
         user_message_id: Optional persisted user message acknowledgement
         system_message_id: Optional system message ID to echo in stream_end payload
         continuation_metadata: Optional continuation metadata to attach to stream payloads
+        history_persistence_ack: Reserve native owner fields and emit saved IDs independently of optional metadata
 
     Yields:
         SSE formatted messages
@@ -2325,6 +2341,7 @@ async def create_streaming_response_with_timeout(
         text_transform=text_transform,
     )
     handler.system_message_id = system_message_id
+    handler.history_persistence_ack = history_persistence_ack
     handler.user_message_id = user_message_id
     if isinstance(continuation_metadata, dict) and continuation_metadata:
         handler.continuation_metadata = dict(continuation_metadata)
