@@ -9,10 +9,21 @@ September 26 continuation: the requester now explicitly authorizes merge after a
 - [x] Preserve both original recovery refs and create `codex/persona-ambient-stage1-pre-20260926-2130` before rebasing. The additional ref retains `c66a85f37e4074d5166eaa894124c26856033e15`.
 - [x] Rebase onto the fetched dev tip and inspect range-diff for unintended implementation changes. Both implementation patches are identical; the two generated-doc corrections were already present upstream and were absorbed into dev.
 - [x] Re-run the Persona backend/UI matrices, full Docs suite, API drift check with the existing CI overlay, scoped compilation, boundary checks, and Bandit. Fresh results: 382 backend passes / 3 fixture-reported PostgreSQL skips; 292 Node 20 UI passes; 212 Docs passes including strict MkDocs; API fingerprint, compilation, public/private boundary and diff checks pass. Bandit: zero findings/errors in relative ignored `bandit_persona_dev2.json`. ESLint: zero errors, one existing warning; full UI typecheck retains its documented pre-existing dev errors.
-- [ ] Commit verification tracking, perform post-commit documentation checks, and publish with a fresh exact remote lease.
+- [x] Commit verification tracking, perform post-commit documentation checks, and publish with a fresh exact remote lease. Published `9b431970c673e430cae4ad029a5de4287635a7bc`; both post-commit Docs checks pass. Qodo's summary explicitly marks this new head and reports zero open bugs, rule violations and skill insights. Remote CI/policy gates are still queued; publication/review monitoring notes stay local so they do not invalidate the tested remote head.
 - [ ] Verify new-head Qodo closure and all seven required remote gates before the human-owned rationale and merge-protection checks.
 
 **ADR check**: ADR required: no; this refresh changes history and integration baseline, not durable architecture. ADR-004, ADR-006, and ADR-020 continue to govern. Merge remains blocked until the requester supplies an owned what/why Change summary.
+
+### Additional dev advance, September 27 at 02:14 UTC
+
+`dev` advanced to `f94375c26e457be1f7752f20c9f11102f2503e42` through MCP CI-triage PR #2997. The upstream diff touches MCP filesystem handling, standalone-build test guards, and unrelated Backlog records, with no overlap in Persona implementation, UI, schemas, or documentation. Refresh from published `9b431970c673e430cae4ad029a5de4287635a7bc`; preserve the three existing recovery refs and the two local monitoring records.
+
+- [x] Create an additional recovery ref, safely preserve local monitoring notes, and rebase onto the fetched dev tip. `codex/persona-ambient-stage1-pre-20260927-0214` retains `9b431970c673e430cae4ad029a5de4287635a7bc`; the scoped stash was restored. All seven replayed patches are identical according to range-diff.
+- [x] Verify the original implementation patches are unchanged and re-run the scoped backend/UI/Docs, API drift, compilation, boundary, lint, and Bandit checks. Fresh results: 382 backend passes / 3 fixture-reported PostgreSQL skips (385.37s); 292 focused Node 20 UI passes in 22 files (27.32s); 212 Docs passes including strict MkDocs (71.71s). CI-overlay API fingerprint, scoped compilation, public/private docs boundary and diff checks pass. Bandit scans all 16 touched backend files with zero findings/errors in relative ignored `bandit_persona_dev3.json`. Whole-PR UI ESLint has zero errors and 64 warnings in unchanged files; this is broader than the earlier one-warning repair scope. Existing unrelated full UI typecheck errors remain documented.
+- [ ] Commit verified tracking, run final post-commit Docs checks, and publish with a fresh exact remote lease.
+- [ ] Require explicit new-head Qodo closure and all seven exact-head gates; then enforce the human-written rationale and normal merge protections.
+
+**ADR check**: ADR required: no; this is an integration-baseline refresh with unchanged Persona contracts. ADR-004, ADR-006, and ADR-020 still govern. This does not authorize modifying upstream MCP policies or waiving repository gates.
 
 ## Stage 1: Review the current PR and integration surface
 **Goal**: Identify the exact PR commit range, current `origin/dev`, Qodo findings, and overlapping Persona files.
