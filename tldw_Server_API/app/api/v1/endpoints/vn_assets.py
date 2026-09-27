@@ -157,6 +157,38 @@ async def _run_generation_operation(
     return VNAssetGenerationStatusResponse.model_validate(response)
 
 
+async def _run_generation_receipt_operation(
+    service: VNAssetPackService,
+    operation: Callable[[], BaseModel | None],
+) -> VNAssetGenerationStatusResponse | None:
+    """Await one complete generation receipt phase with owned resources.
+
+    Args:
+        service: Initialized repository; schema setup remains caller-owned.
+        operation: Existing synchronous claim/recovery, completion or release
+            helper, including its original HTTP mapping and acknowledgement seam.
+
+    Returns:
+        A caller-reconstructed replay response, or None for claim/write completion.
+        The operation serializes any replay model on its owning thread; only a
+        plain dict/None crosses the repository boundary.
+
+    Raises:
+        Native helper errors unchanged unless caller cancellation was observed.
+        Cancellation drains the exact operation and owned close before propagation;
+        it does not release a committed linked receipt. Private-memory and active
+        caller transactions retain the synchronous owner-thread fallback, not a
+        universally asynchronous database guarantee.
+    """
+    def materialize_receipt() -> dict[str, Any] | None:
+        """Finish the existing helper and detach its response on the owning thread."""
+        response = operation()
+        return response.model_dump(mode="json") if response is not None else None
+
+    response = await service.repo.run_worker_replay_operation(materialize_receipt)
+    return VNAssetGenerationStatusResponse.model_validate(response) if response is not None else None
+
+
 def _cleanup_blocker_provider(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> VNAssetCleanupBlockerProvider:
@@ -1898,14 +1930,15 @@ async def start_generation(
         "idempotency_key": idempotency_key,
         "payload_hash": payload_hash,
     }
-    replay = _claim_or_replay_idempotency(
+    replay = await _run_generation_receipt_operation(service, partial(
+        _claim_or_replay_idempotency,
         service,
         owner_user_id=owner_user_id,
         **receipt,
         response_model=VNAssetGenerationStatusResponse,
         generation_pack_id=pack_id,
         jobs_manager=jobs_manager,
-    )
+    ))
     if replay is not None:
         return replay
     try:
@@ -1918,24 +1951,27 @@ async def start_generation(
             idempotency_receipt=receipt,
         ))
     except ValueError as exc:
-        _release_idempotency_claim(
+        await _run_generation_receipt_operation(service, partial(
+            _release_idempotency_claim,
             service,
             owner_user_id=owner_user_id,
             scope="vn_asset_generate",
             resource_id=f"pack:{pack_id}",
             idempotency_key=idempotency_key,
-        )
+        ))
         raise _handle_value_error(exc) from exc
     except Exception:
-        _release_idempotency_claim(
+        await _run_generation_receipt_operation(service, partial(
+            _release_idempotency_claim,
             service,
             owner_user_id=owner_user_id,
             scope="vn_asset_generate",
             resource_id=f"pack:{pack_id}",
             idempotency_key=idempotency_key,
-        )
+        ))
         raise
-    _record_idempotency_response(
+    await _run_generation_receipt_operation(service, partial(
+        _record_idempotency_response,
         service,
         owner_user_id=owner_user_id,
         scope="vn_asset_generate",
@@ -1943,7 +1979,7 @@ async def start_generation(
         idempotency_key=idempotency_key,
         payload_hash=payload_hash,
         response=response,
-    )
+    ))
     return response
 
 
@@ -1999,14 +2035,15 @@ async def retry_slot_generation(
         "idempotency_key": idempotency_key,
         "payload_hash": payload_hash,
     }
-    replay = _claim_or_replay_idempotency(
+    replay = await _run_generation_receipt_operation(service, partial(
+        _claim_or_replay_idempotency,
         service,
         owner_user_id=owner_user_id,
         **receipt,
         response_model=VNAssetGenerationStatusResponse,
         generation_pack_id=pack_id,
         jobs_manager=jobs_manager,
-    )
+    ))
     if replay is not None:
         return replay
     try:
@@ -2020,24 +2057,27 @@ async def retry_slot_generation(
             idempotency_receipt=receipt,
         ))
     except ValueError as exc:
-        _release_idempotency_claim(
+        await _run_generation_receipt_operation(service, partial(
+            _release_idempotency_claim,
             service,
             owner_user_id=owner_user_id,
             scope="vn_asset_slot_retry",
             resource_id=f"pack:{pack_id}:slot:{slot_id}",
             idempotency_key=idempotency_key,
-        )
+        ))
         raise _handle_value_error(exc) from exc
     except Exception:
-        _release_idempotency_claim(
+        await _run_generation_receipt_operation(service, partial(
+            _release_idempotency_claim,
             service,
             owner_user_id=owner_user_id,
             scope="vn_asset_slot_retry",
             resource_id=f"pack:{pack_id}:slot:{slot_id}",
             idempotency_key=idempotency_key,
-        )
+        ))
         raise
-    _record_idempotency_response(
+    await _run_generation_receipt_operation(service, partial(
+        _record_idempotency_response,
         service,
         owner_user_id=owner_user_id,
         scope="vn_asset_slot_retry",
@@ -2045,7 +2085,7 @@ async def retry_slot_generation(
         idempotency_key=idempotency_key,
         payload_hash=payload_hash,
         response=response,
-    )
+    ))
     return response
 
 
@@ -2078,14 +2118,15 @@ async def regenerate_item(
         "idempotency_key": idempotency_key,
         "payload_hash": payload_hash,
     }
-    replay = _claim_or_replay_idempotency(
+    replay = await _run_generation_receipt_operation(service, partial(
+        _claim_or_replay_idempotency,
         service,
         owner_user_id=owner_user_id,
         **receipt,
         response_model=VNAssetGenerationStatusResponse,
         generation_pack_id=pack_id,
         jobs_manager=jobs_manager,
-    )
+    ))
     if replay is not None:
         return replay
     try:
@@ -2099,24 +2140,27 @@ async def regenerate_item(
             idempotency_receipt=receipt,
         ))
     except ValueError as exc:
-        _release_idempotency_claim(
+        await _run_generation_receipt_operation(service, partial(
+            _release_idempotency_claim,
             service,
             owner_user_id=owner_user_id,
             scope="vn_asset_item_regenerate",
             resource_id=f"pack:{pack_id}:item:{item_id}",
             idempotency_key=idempotency_key,
-        )
+        ))
         raise _handle_value_error(exc) from exc
     except Exception:
-        _release_idempotency_claim(
+        await _run_generation_receipt_operation(service, partial(
+            _release_idempotency_claim,
             service,
             owner_user_id=owner_user_id,
             scope="vn_asset_item_regenerate",
             resource_id=f"pack:{pack_id}:item:{item_id}",
             idempotency_key=idempotency_key,
-        )
+        ))
         raise
-    _record_idempotency_response(
+    await _run_generation_receipt_operation(service, partial(
+        _record_idempotency_response,
         service,
         owner_user_id=owner_user_id,
         scope="vn_asset_item_regenerate",
@@ -2124,5 +2168,5 @@ async def regenerate_item(
         idempotency_key=idempotency_key,
         payload_hash=payload_hash,
         response=response,
-    )
+    ))
     return response

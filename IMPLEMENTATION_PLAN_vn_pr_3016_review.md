@@ -1,6 +1,148 @@
 # PR 3016 VN Durability Review Implementation Plan
 
+## Current Review Wave: Tasks44-48
+
+Tasks1-48 now LOCAL COMPLETE/frozen/independently APPROVED. Halley fresh SPEC,
+QUALITY and final changed-contract PASS for each44/45/46/47/48/no actionable
+findings/CLOSED/all reviewer commands closed. Source/controlflow/AST/compile/XML/
+JSON/hash audits ONLY, no fresh reviewer regressions/scanners. Own24-entry freeze,
+producer265/controller16/original2055 artifacts verified, five before sources
+match starting HEAD/eight final sources match freeze. Review harness read/glob/
+JSON-count corrections explicitly qualified in the new report; originals intact.
+Normal11-file scoped commit/FF push/six evidence replies/newhead full review/7CI
+and current strict dev/human gate remain; AC5/6 pending/no merge/body action.
+
+All five producers LOCAL COMPLETE/frozen; Einstein46/Turing47/Euler48 CLOSED/all
+needed producer test/scanner sessions closed. Main44/45 final affected27 passed,
+6 warnings21.90s/XML21.250; producer29/85/108/43 current entries all match.
+Task46 final43 pass6warnings41.03s/XML40.570 and separate six existing/one HTTP400
+controls overlap/not summed. Task47 before/after narrowSQLite4/required official
+PG4 per run, no skips; copied-helper negative asserted/native control passed.
+Task48 native3 and display mutation are behavioral, not old counter-interleave.
+Main integrated final7 pass0fail/errors/skips6warnings6.26s/XML5.587; eight-file
+Bandit0/errors[] onlyB101excluded; Ruff one exact baseline workerBLE001/notclean.
+2055 original frozen artifacts still match. Old latest manifests now qualified
+29/30,90/91,46/47,13/16,R1 13/15,cover4/6; exclude only exact intentionally
+superseded live source entries, never refresh or claim those old hashes match.
+Halley fresh independent44-48 SPEC/QUALITY/final review ACTIVE; no merge-ready
+claim, hooks/commit/push/replies/newhead full review still pending. Actual dev
+checked this wave f943 unchanged/no rebase. AC5/6 remain pending; body approval untouched.
+
+Normal explicit11-file pre-commit exit0: applicable checks Passed; no-file YAML,
+TOML, wizard Ruff/black Skipped NOTpasses; deprecated stage warnings retained.
+Post-hook audit verifies all265producer entries, original2055artifacts and final
+source hashes still match. Hook12650 CLOSED/no hook changes to source. Fresh
+independent review remains ACTIVE; no commit-stage execution or approval claim.
+
+Main44-45 locally implemented: final sensitive44 RED4 failures/5 controls passed,
+45 RED10 failures, then combined19 passed/6 retained warnings in14.39s. Earlier44
+missing storage-update arguments were a setup failure, corrected before final
+RED; all originals retained. Guarded cleanup also runs at rejected publication
+because a cancelled Job may never redeliver; the exact terminal/hidden/current
+ownership admission still protects nonterminal and visible files. The empty-list
+control now supplies pack_id (previous slot_id happened to match fixture IDs).
+Final matching controls/statics/freeze and fresh independent review pending.
+Task48 producer frozen43 entries/agent CLOSED: supported saver/adapter barriers,
+native3 passes and sensitive display mutant. It does not reproduce the historical
+counter instruction interleave; old native RED remains retained historical proof.
+Task46/47 assigned agents still active; do not duplicate their work.
+
+Full exact9239 request5852354146 completed formal5328735609 at03:48:47Z,
+terminal5852405781 at03:48:53Z exacthead; busy5852355101 removed/fresh404.
+Six new4113997225/7229/7234/7236/7239/7242;87reviews73threads6unresolved/all pages
+exhausted. Tasks1-43 remain frozen/approved/closed. AC5 reopened/AC6 pending.
+
+### Stage 1: Bound Contracts
+**Goal:** Preserve cancelled hidden-file cleanup, owned-thread receipt/worker
+boundaries and behavioral race tests without extending external guarantees.
+**Success Criteria:** Exact owner/recipe/current-registration admission; no
+published/approved or foreign file deletion; ledger/counters and Jobs authority
+unchanged; complete owned operations with documented fallback/cancel draining.
+**Tests:** Sensitive public/native RED, preservation controls, original byte/quota
+and slot/counter assertions using supported injected/public boundaries.
+**Status:** Complete
+
+### Stage 2: Minimal Corrections
+**Goal:** Task44 admits and detaches only the exact matching hidden attached item
+after terminal cancellation under variant admission, keeping existing ref guards,
+discoverable registration and unlink-before-quota-aware-unregister order. Task45
+offloads post-model batch read and complete version-specific failure bookkeeping.
+Task46 offloads only generation/retry/regenerate receipt claim/recovery/completion/
+release through the existing boundary, preserving sync helpers for other routes.
+Task47 replaces the private save-helper registration race hook. Task48 replaces
+source parsing/line tracing in inline overlap coverage with supported barriers.
+**Success Criteria:** Small owned changes, no Jobs/config/shared-fixture edits,
+no queue/lease/archival/janitor/distributed transaction or universal-async promise.
+**Tests:** Bounded sensitive RED/GREEN and independent mutation controls, immediate
+docs/types/one tier, compile/diff and scoped Bandit baseline; no broad repeats.
+**Status:** Complete
+
+### Stage 3: Review And Integration
+**Goal:** Fresh independent SPEC/QUALITY/final changed-contract approval, normal
+scoped hooks/commit/push, six individual tested replies and one full new-head review.
+**Success Criteria:** All seven required actual CI passes, safe strict dev and
+unchanged requester-authored summary before authorized normal merge.
+**Tests:** Frozen matching source/evidence and limited final affected controls.
+**Status:** In Progress
+
+Preflight ownership: Main owns coupled44-45 worker/repository and new tests;
+46 owns endpoint/new receipt test,47 owns AuthNZ registration test only,48 owns
+inline overlap test only. Main owns tracking/design/ledger; fresh reviewer follows
+frozen inputs. Agent reads of concurrently changed sources are not preservation
+failures or permission to freeze other owners' live bytes.
+
+Ruling: Terminal attached cleanup must first verify exact owned current registry,
+then atomically clear only its hidden cancelled recipe attachment and reject other
+references. Cost if wrong: lost unpublished recovery bytes; published/approved,
+foreign, mismatched and nonterminal state must therefore remain guarded. Keep
+source-ref discoverability until physical unlink/quota-aware removal succeeds.
+Ruling: Offload complete receipt/failure operations rather than move individual
+queries across threads; preserve response/status/idempotency/cancellation/error
+contracts. Cost if wrong: changed receipt recovery or authority ordering, requiring
+real cancellation/native-error/commit/replay controls before integration.
+
+| Tasks | Shared Boundary | Preflight Ruling |
+| --- | --- | --- |
+| 44 / 45 | worker.py and repository | One local owner; complete cleanup and failure operations reviewed together. |
+| 44-45 / 46 | Existing owning-thread API | No helper changes; independent source writes, audit exact supplied arguments. |
+| 44-45 / 47 | Storage registration semantics | Test-only public injection; no production storage edit or accounting promise. |
+| 44-45 / 48 | Inline display and Lock | Test-only supported barriers; preserve real public outcomes, no new production hook. |
+| 44 | Terminal detach admission | Guard exact hidden/owned/current identity and all other refs; preserve counters/ledger. |
+| 45 | Post-model read / failure | Await complete operation, preserve Jobs fences/native failures/cancellation draining. |
+| 46 | Generation receipt phases | Three routes only; other synchronous helper users unchanged. |
+| 47 | Missing-winner race | Real registration/quota/files via supported injected public boundary. |
+| 48 | Sibling overlap | No production AST/line dependence; real state/bytes/counters and sensitive controls. |
+
 ## Current Review Wave: Tasks40-43
+
+Current normal twelve-file commit/FF-push/GitHub head:
+9239c00850995ba7229250e61353c1a8695f81ac. Tasks1-43 LOCAL COMPLETE/frozen/
+independently approved; all needed agents/tests/statics/hooks/commit/push sessions
+closed. Commit emitted no hook output, so no commit-stage execution claim/no
+bypass. Inherited packing/gc notices retained; no manual cleanup. Post-push
+producer30/91/R1 15/cover6/scoped-review5/original ISSUES7 match; qualified43
+46of47/Main15of16 exclude exactly superseded live repository only. All three
+backups and both already-applied retained stashes verified intact.
+
+Five tested replies4113976625/4113976677/4113976735/4113976784/4113976830 exact bodies
+verified. Target threads were already resolved on push and remain resolved after
+replies. Fresh86reviews67threads0unresolved44conversationcomments/all outer and
+nested pages exhausted; new human COMMENTED reviews are our replies, not full
+Qodo. One full exact-head request5852354146 at2026-09-27T03:39:09Z is PENDING,
+busy5852355101 at03:39:20Z live body inspected; current46comments include both.
+Do not duplicate. Push-summary03:36:57Z0bugs0rules52historicalomissions/exact9239
+footer is not full completion. Prior1db full review is historical after this push.
+
+Exact54 actual checks33queued21completed(1cancelled1neutral19skipped); all seven
+required contexts absent including trusted-license commit status. CodeRabbit
+status55013891096success/reviewskipped only is not a required pass. Actual pages1
+each/pipefail exit0/newest context/id/no actionable CI failure. Initial read-only
+jq context-selector failure corrected, not a CI outcome/zeroCI. Actual protected
+dev fresh03:40Zf943 unchanged/no rebase. OPEN/BLOCKED/mergedAtnull/no merge attempt;
+AC5checkedAC6pending. Human paragraph VERBATIM/current Cubic9239footer preserved.
+Stale Verification40e5 and prior body PATCH approval rejection/unanswered approval
+remain untouched, no bypass. Only owned integration records dirty after push;
+no tracking-only push invalidating exact-head review.
 
 Normal explicit12-file pre-commit completed exit0. Applicable checks Passed;
 no-file yaml/toml/wizardRuff/black Skipped, not passes; deprecated-stage warnings

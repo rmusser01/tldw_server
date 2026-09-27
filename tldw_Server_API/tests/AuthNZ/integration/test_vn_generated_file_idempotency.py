@@ -84,6 +84,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError
 from tldw_Server_API.app.core.AuthNZ.initialize import setup_database, bootstrap_single_user_profile
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import AuthnzGeneratedFilesRepo
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import AuthnzStorageQuotasRepo
@@ -222,24 +223,61 @@ async def main() -> None:
                     result[target] = 'accepted'
             result['unchanged'] = await snapshot() == before
         elif case == 'missing_race':
-            original = helpers._save_file
-            async def register_missing_winner(*args: Any, **kwargs: Any) -> Path:
-                """Register missing winner bytes after saving the replacement file."""
-                candidate = await original(*args, **kwargs)
-                await service.register_generated_file(
-                    user_id=owner, filename='missing.png', storage_path='vn_assets/missing.png',
+            original = StorageQuotaService.register_generated_file
+            candidate: Path | None = None
+            winner: dict[str, Any] | None = None
+            winner_state: dict[str, object] | None = None
+            async def register_missing_winner(
+                self: StorageQuotaService, **kwargs: Any,
+            ) -> dict[str, Any]:
+                """Commit a missing winner at public registration after real candidate storage."""
+                nonlocal candidate, winner, winner_state
+                candidate = outputs / kwargs['storage_path']
+                assert candidate.read_bytes() == b'image'
+                winner = await original(
+                    self, user_id=owner, filename='missing.png', storage_path='vn_assets/missing.png',
                     file_category='image', source_feature='vn_assets', source_ref='vn_asset_item:42',
                     file_size_bytes=5, org_id=51, team_id=52,
                 )
-                return candidate
-            with patch.object(helpers, '_save_file', register_missing_winner):
+                winner_state = await snapshot()
+                return await original(self, **kwargs)
+            with patch.object(StorageQuotaService, 'register_generated_file', register_missing_winner):
                 try:
                     await save()
-                except Exception:
+                except StorageError:
                     result['rejected'] = True
                 else:
                     result['rejected'] = False
-            result['replacement_preserved'] = len(list(outputs.rglob('*.png'))) == 1
+            assert candidate is not None and winner is not None and winner_state is not None
+            current = await repo.get_file_by_source_ref(
+                user_id=owner, source_feature='vn_assets', source_ref='vn_asset_item:42',
+            )
+            final = await snapshot()
+            try:
+                await service.get_vn_generated_file(user_id=owner, source_ref='vn_asset_item:42')
+            except StorageError:
+                result['missing_winner_rejected'] = True
+            else:
+                result['missing_winner_rejected'] = False
+            result.update(
+                live=final['live'],
+                winner_identity_preserved=(
+                    current is not None and current['id'] == winner['id']
+                    and current['user_id'] == owner and current['org_id'] == 51 and current['team_id'] == 52
+                    and current['source_feature'] == 'vn_assets' and current['source_ref'] == 'vn_asset_item:42'
+                    and current['filename'] == 'missing.png' and current['storage_path'] == 'vn_assets/missing.png'
+                    and current['file_size_bytes'] == 5 and not current['is_deleted']
+                ),
+                winner_charged_once=winner_state['usage'] == [5 / 1048576] * 3,
+                version_advanced=winner_state['version'] > baseline['version'],
+                loser_rolled_back=final == winner_state,
+                missing_winner_bytes=not (outputs / winner['storage_path']).exists(),
+                candidate_unregistered=await repo.get_live_file_by_storage_path(
+                    user_id=owner, storage_path=str(candidate.relative_to(outputs)),
+                ) is None,
+                replacement_preserved=candidate.is_file() and candidate.read_bytes() == b'image',
+                files=len(list(outputs.rglob('*.png'))),
+            )
         elif case == 'missing_record':
             original = AuthnzGeneratedFilesRepo.create_file
             async def lose_created_record(self: AuthnzGeneratedFilesRepo, **kwargs: Any) -> dict[str, object]:
@@ -371,8 +409,12 @@ def test_vn_registration_error_never_unlinks_committed_live_bytes(
 def test_vn_missing_replay_bytes_never_discard_a_replacement_write(
     tmp_path: Path, request: pytest.FixtureRequest, backend: str,
 ) -> None:
+    """Reject a missing competing winner without charging or deleting candidate bytes."""
     assert _storage_result(tmp_path, request, backend, "missing_race") == {
-        "rejected": True, "replacement_preserved": True,
+        "rejected": True, "missing_winner_rejected": True, "live": 1,
+        "winner_identity_preserved": True, "winner_charged_once": True,
+        "version_advanced": True, "loser_rolled_back": True, "missing_winner_bytes": True,
+        "candidate_unregistered": True, "replacement_preserved": True, "files": 1,
     }
 
 

@@ -1772,11 +1772,13 @@ class VNAssetPacksRepository:
         self, *, batch_id: int, slot_id: int, variant_index: int,
         pack_id: int, user_id: int, generated_file_id: int | None = None,
     ) -> dict[str, Any] | None:
-        """Admit cleanup of a hidden, unattached reservation in a cancelled V1 batch.
+        """Admit cleanup of an exact hidden reservation in a cancelled V1 batch.
 
         Verify owner/pack/recipe identity and, when supplied, reject every item
-        reference to the file. The VN write admission serializes observation
-        with cancellation/attachment; no registration, item or ledger is removed.
+        reference from another item to the file. Without a file ID, only discover
+        the reservation; with its exact current file ID, detach the unpublished
+        attachment under variant write admission. Registration, item, recipe and
+        counters remain discoverable; no ledger or accounting row is removed.
         This is not a distributed transaction with storage. Native errors propagate.
         """
         self._ensure_schema_initialized()
@@ -1793,15 +1795,29 @@ class VNAssetPacksRepository:
                   AND batch.pack_id = ? AND batch.requested_by_user_id = ?
                   AND item.pack_id = batch.pack_id AND item.slot_id = recipe.slot_id
                   AND pack.owner_user_id = ? AND item.review_status = 'hidden'
-                  AND item.generated_file_id IS NULL
+                  AND (? IS NULL OR item.generated_file_id IS NULL OR item.generated_file_id = ?)
                   AND (? IS NULL OR NOT EXISTS (
-                      SELECT 1 FROM vn_asset_items WHERE generated_file_id = ?
+                      SELECT 1 FROM vn_asset_items
+                      WHERE generated_file_id = ? AND id != item.id
                   ))""",
                 (batch_id, slot_id, variant_index, pack_id, user_id, user_id,
+                 generated_file_id, generated_file_id,
                  generated_file_id, generated_file_id),
             )) as cursor:
                 row = cursor.fetchone()
-            return dict(row) if row is not None else None
+            if row is None:
+                return None
+            item = dict(row)
+            if generated_file_id is not None and item["generated_file_id"] is not None:
+                with closing(conn.execute(
+                    """UPDATE vn_asset_items SET generated_file_id = NULL, storage_ref = NULL
+                    WHERE id = ? AND generated_file_id = ?""",
+                    (item["id"], generated_file_id),
+                )):
+                    pass
+                item["generated_file_id"] = None
+                item["storage_ref"] = None
+            return item
 
     def update_item_review(
         self,

@@ -314,11 +314,12 @@ class VNAssetGenerationWorker:
             if (not reconciling or definitive_replay_failure) and not (
                 isinstance(exc, VNAssetGenerationError) and exc.retryable
             ):
-                self._record_generation_failure(
+                await self.repo.run_worker_replay_operation(partial(
+                    self._record_generation_failure,
                     batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
                     error=str(exc), attempt_token=attempt_token,
                     job=job, user_id=user_id,
-                )
+                ))
             raise
         finally:
             if recipe_version == 0:
@@ -929,7 +930,7 @@ class VNAssetGenerationWorker:
             if job is not None:
                 self._require_current_job_lease(job, user_id=user_id)
             outcome = await self.repo.get_variant_outcome_async(batch_id, slot_id, variant_index)
-            current_batch = self.repo.get_batch(batch_id)
+            current_batch = await self.repo.run_worker_replay_operation(partial(self.repo.get_batch, batch_id))
             if current_batch is None or _is_terminal_batch_status(current_batch["status"]):
                 raise VNAssetGenerationError("vn_asset_batch_terminal", retryable=True, batch_id=batch_id)
             if outcome is None or outcome.get("claim_token") != attempt_token:
@@ -1050,6 +1051,10 @@ class VNAssetGenerationWorker:
                     validate_authority=(lambda: self._require_current_job_lease(job, user_id=user_id)) if job else None,
                 )
             except VNAssetGenerationError:
+                await self._cleanup_cancelled_variant_storage(
+                    batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
+                    user_id=user_id, pack_id=pack_id, file_record=file_record,
+                )
                 raise
             except Exception as exc:
                 raise VNAssetGenerationError(
@@ -1075,6 +1080,8 @@ class VNAssetGenerationWorker:
         """Release only an owned unreferenced file orphaned by terminal cancellation.
 
         Recheck the current registry and VN admission before quota-aware removal.
+        Detach only the exact owned hidden terminal attachment under variant
+        write admission; an interrupted acknowledgement is recoverable by source.
         Lease takeover/requested cancellation without a terminal VN outcome stays
         recoverable. Referenced/foreign files and ledger/counters are unchanged.
         Keep registration/charge until unlink succeeds so terminal redelivery can
@@ -1159,6 +1166,9 @@ class VNAssetGenerationWorker:
         user_id: int | None = None,
     ) -> None:
         """Record failure through the version-specific persistence boundary.
+
+        The asynchronous delivery handler runs this complete operation through
+        the existing owning-thread boundary, including batch read/reconciliation.
 
         Args:
             batch_id: Batch whose persisted recipe version selects the transition.
