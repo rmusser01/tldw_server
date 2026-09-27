@@ -7,10 +7,10 @@ import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+from tldw_Server_API.app.core.Calendar.calendar_service import CalendarService
 from tldw_Server_API.app.core.Calendar.calendar_sync_worker import (
     CalendarSyncJobResponse,
     _run_db_phase,
-    queue_calendar_binding_sync,
 )
 from tldw_Server_API.app.core.Calendar.errors import CalendarError
 from tldw_Server_API.app.core.Calendar.provider_operations import log_calendar_failure
@@ -88,18 +88,28 @@ def _queue_due_calendar_sync_jobs(
     jobs = job_manager or JobManager()
     scan_at = now or datetime.now(timezone.utc)
     queued: list[CalendarSyncJobResponse] = []
+    recovered: set[int] = set()
+    for admission in calendar_db.take_pending_sync_admissions(limit=limit):
+        try:
+            response = CalendarService(
+                db=calendar_db, job_manager=jobs, tenant_id=admission.tenant_id,
+            ).recover_sync_admission(admission)
+            if response is not None:
+                queued.append(response)
+                recovered.add(admission.binding_id)
+        except (CalendarError, *_SCHEDULER_GUARD_EXCEPTIONS) as exc:
+            log_calendar_failure("recover_admission", exc, binding_id=admission.binding_id)
     for binding in calendar_db.list_sync_enabled_bindings_due_for_scan(
         now_iso=scan_at.isoformat(),
         limit=limit,
     ):
+        if binding.id in recovered:
+            continue
         try:
             account = calendar_db.get_external_account(binding.account_id)
             queued.append(
-                queue_calendar_binding_sync(
-                    db=calendar_db,
-                    job_manager=jobs,
+                CalendarService(db=calendar_db, job_manager=jobs, tenant_id=account.tenant_id).queue_binding_sync(
                     actor_user_id=account.user_id,
-                    tenant_id=account.tenant_id,
                     binding_id=binding.id,
                     reason="scheduled",
                     window_start=(scan_at - timedelta(days=int(binding.lookback_days))).isoformat(),

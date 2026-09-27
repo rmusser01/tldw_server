@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, is_dataclass
-from datetime import datetime, timedelta, timezone
+from functools import partial
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query, status
@@ -72,6 +72,7 @@ from tldw_Server_API.app.core.Calendar.errors import (
     CalendarNotFound,
     CalendarPermissionDenied,
     CalendarReadOnlyError,
+    CalendarSyncError,
     CalendarValidationError,
 )
 from tldw_Server_API.app.core.Calendar.provider_operations import call_provider, resolve_caldav_credentials
@@ -230,23 +231,6 @@ def _provider_result_dict(result: Any) -> dict[str, Any]:
     if hasattr(result, "model_dump"):
         return result.model_dump()
     return dict(result)
-
-
-def _sync_window_for_binding(
-    binding: Any,
-    payload: CalendarSyncTriggerRequest | None,
-) -> tuple[str, str, str]:
-    """Resolve explicit or configured bounded scan windows and their trigger reason."""
-    now = datetime.now(timezone.utc)
-    default_start = (now - timedelta(days=int(binding.lookback_days))).isoformat()
-    default_end = (now + timedelta(days=int(binding.lookahead_days))).isoformat()
-    if payload is None:
-        return default_start, default_end, "manual"
-    return (
-        payload.window_start or default_start,
-        payload.window_end or default_end,
-        payload.reason,
-    )
 
 
 def _external_account_metadata(payload: ExternalCalendarAccountCreateRequest) -> dict[str, Any] | None:
@@ -1273,28 +1257,17 @@ async def trigger_external_calendar_sync(
     job_manager: JobManager = Depends(get_calendar_job_manager),
 ) -> CalendarSyncTriggerResponse:
     """Enqueue secret-free sync work off-loop, draining admission and audits before cancellation."""
-    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import CalendarSyncJobResponse, _run_db_phase
-
-    def _queue_sync() -> CalendarSyncJobResponse:
-        """Keep ownership reads, window validation, and binding admission on one DB thread."""
-        _assert_external_binding_owner(db, binding_id=binding_id, current_user=current_user)
-        binding = db.get_external_binding(binding_id)
-        window_start, window_end, reason = _sync_window_for_binding(binding, payload)
-        return CalendarService(
-            db=db,
-            tenant_id=_tenant_id(current_user),
-            job_manager=job_manager,
-        ).queue_binding_sync(
-            actor_user_id=_user_id(current_user),
-            binding_id=binding_id,
-            reason=reason,
-            window_start=window_start,
-            window_end=window_end,
-        )
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import _run_db_phase
 
     try:
-        queued = await _run_db_phase(_queue_sync)
-    except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        queued = await _run_db_phase(partial(
+            CalendarService(db=db, tenant_id=_tenant_id(current_user), job_manager=job_manager).trigger_binding_sync,
+            actor_user_id=_user_id(current_user), binding_id=binding_id,
+            reason=payload.reason if payload else "manual",
+            window_start=payload.window_start if payload else None,
+            window_end=payload.window_end if payload else None,
+        ))
+    except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError, CalendarSyncError) as exc:
         raise _map_calendar_error(exc) from exc
     return CalendarSyncTriggerResponse(
         binding_id=binding_id,

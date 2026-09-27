@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from datetime import timezone as utc_timezone
-from typing import Any, get_args
+from typing import TYPE_CHECKING, Any, get_args
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dateutil import parser as date_parser
@@ -33,10 +34,30 @@ from tldw_Server_API.app.core.DB_Management.Calendar_DB import (
     CalendarLinkRow,
     CalendarMembershipRow,
     CalendarRow,
+    CalendarSyncAdmissionRow,
 )
 
 _VALID_ROLES = set(get_args(CalendarRole))
 _VALID_PRINCIPAL_TYPES = {"user", "org_role"}
+
+
+def _canonical_sync_window(window_start: str, window_end: str) -> tuple[str, str]:
+    """Validate bounded aware ISO windows before fresh dispatch or recovery."""
+    try:
+        if not all(isinstance(value, str) and 1 <= len(value) <= 64 for value in (window_start, window_end)):
+            raise ValueError("Invalid boundary length")
+        start, end = (datetime.fromisoformat(value.replace("Z", "+00:00")) for value in (window_start, window_end))
+        if start.utcoffset() is None or end.utcoffset() is None:
+            raise ValueError("Sync boundaries must have offsets")
+        start, end = start.astimezone(utc_timezone.utc), end.astimezone(utc_timezone.utc)
+        if not timedelta(0) < end - start <= timedelta(days=7400):
+            raise ValueError("Sync window is outside policy bounds")
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise CalendarValidationError("Sync window must contain aware ISO timestamps with a positive span up to 7400 days") from exc
+    return start.isoformat(), end.isoformat()
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import CalendarSyncJobResponse
 
 
 class CalendarService:
@@ -433,6 +454,23 @@ class CalendarService:
             copied_from_item_id=source.id,
         )
 
+    def trigger_binding_sync(
+        self, *, actor_user_id: int, binding_id: int, window_start: str | None = None,
+        window_end: str | None = None, reason: str = "manual",
+    ) -> CalendarSyncJobResponse:
+        """Own manual sync authorization, configured defaults, and typed admission."""
+        from tldw_Server_API.app.core.Calendar.calendar_sync_worker import _assert_account_scope
+
+        binding = self.db.get_external_binding(binding_id)
+        account = self.db.get_external_account(binding.account_id)
+        _assert_account_scope(account, actor_user_id=actor_user_id, tenant_id=self.tenant_id)
+        now = datetime.now(utc_timezone.utc)
+        return self.queue_binding_sync(
+            actor_user_id=actor_user_id, binding_id=binding_id, reason=reason,
+            window_start=window_start or (now - timedelta(days=binding.lookback_days)).isoformat(),
+            window_end=window_end or (now + timedelta(days=binding.lookahead_days)).isoformat(),
+        )
+
     def queue_binding_sync(
         self,
         *,
@@ -441,7 +479,7 @@ class CalendarService:
         reason: str,
         window_start: str,
         window_end: str,
-    ) -> Any:
+    ) -> CalendarSyncJobResponse:
         """Queue an authorized sync with aware ISO boundaries normalized to UTC.
 
         Raises CalendarValidationError before queue or audit writes for malformed,
@@ -449,18 +487,7 @@ class CalendarService:
         """
         if self.job_manager is None:
             raise CalendarValidationError("Calendar sync job manager is not configured")
-        try:
-            if not all(isinstance(value, str) and 1 <= len(value) <= 64 for value in (window_start, window_end)):
-                raise ValueError("Invalid boundary length")
-            start, end = (datetime.fromisoformat(value.replace("Z", "+00:00")) for value in (window_start, window_end))
-            if start.utcoffset() is None or end.utcoffset() is None:
-                raise ValueError("Sync boundaries must have offsets")
-            start, end = start.astimezone(utc_timezone.utc), end.astimezone(utc_timezone.utc)
-            if not timedelta(0) < end - start <= timedelta(days=7400):
-                raise ValueError("Sync window is outside policy bounds")
-        except (ValueError, TypeError, OverflowError) as exc:
-            raise CalendarValidationError("Sync window must contain aware ISO timestamps with a positive span up to 7400 days") from exc
-        window_start, window_end = start.isoformat(), end.isoformat()
+        window_start, window_end = _canonical_sync_window(window_start, window_end)
         from tldw_Server_API.app.core.Calendar.calendar_sync_worker import queue_calendar_binding_sync
 
         return queue_calendar_binding_sync(
@@ -473,6 +500,18 @@ class CalendarService:
             window_start=window_start,
             window_end=window_end,
         )
+
+    def recover_sync_admission(self, admission: CalendarSyncAdmissionRow) -> CalendarSyncJobResponse | None:
+        """Recover one validated scoped intent without admitting successor work."""
+        if self.job_manager is None:
+            raise CalendarValidationError("Calendar sync job manager is not configured")
+        if admission.tenant_id != self.tenant_id:
+            raise CalendarPermissionDenied("Calendar sync admission is outside the current tenant scope")
+        payload = json.loads(admission.payload_json)
+        _canonical_sync_window(payload["window_start"], payload["window_end"])
+        from tldw_Server_API.app.core.Calendar.calendar_sync_worker import recover_calendar_sync_admission
+
+        return recover_calendar_sync_admission(db=self.db, job_manager=self.job_manager, admission=admission)
 
     def _can_read_calendar(self, actor_user_id: int, calendar_id: int) -> bool:
         try:

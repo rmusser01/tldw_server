@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Calendar.constants import (
 from tldw_Server_API.app.core.Calendar.errors import (
     CalendarItemNotFound,
     CalendarNotFound,
+    CalendarPermissionDenied,
     CalendarReadOnlyError,
     CalendarSyncError,
     CalendarValidationError,
@@ -246,6 +247,22 @@ class CalendarSyncEventRow:
     error_message: str | None
     metadata_json: str | None
     created_at: str
+
+
+@dataclass(frozen=True)
+class CalendarSyncAdmissionRow:
+    """Current durable binding reservation and recoverable Jobs correlation."""
+
+    binding_id: int
+    admission_id: str
+    tenant_id: str
+    owner_user_id: int
+    idempotency_key: str
+    payload_json: str
+    job_id: int | None
+    job_uuid: str | None
+    audit_id: int | None
+    recovery_attempted_at: str = ""
 
 
 class CalendarSecretStore:
@@ -713,6 +730,21 @@ class CalendarDatabase:
                     ON calendar_sync_events(binding_id, created_at);
                 CREATE INDEX IF NOT EXISTS idx_calendar_sync_events_account_created
                     ON calendar_sync_events(account_id, created_at);
+
+                CREATE TABLE IF NOT EXISTS calendar_sync_admissions (
+                    binding_id INTEGER PRIMARY KEY REFERENCES external_calendar_bindings(id) ON DELETE CASCADE,
+                    admission_id TEXT NOT NULL UNIQUE,
+                    tenant_id TEXT NOT NULL,
+                    owner_user_id INTEGER NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    job_id INTEGER,
+                    job_uuid TEXT,
+                    audit_id INTEGER REFERENCES calendar_sync_events(id),
+                    recovery_attempted_at TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_calendar_sync_admissions_pending
+                    ON calendar_sync_admissions(recovery_attempted_at, binding_id) WHERE job_id IS NULL;
 
                 CREATE TABLE IF NOT EXISTS calendar_external_account_secrets (
                     secret_ref TEXT PRIMARY KEY,
@@ -2187,6 +2219,86 @@ class CalendarDatabase:
         if last_error is not _UNSET:
             patch["last_error"] = last_error
         return self.update_external_binding(binding_id, patch)
+
+    def get_sync_admission(self, binding_id: int) -> CalendarSyncAdmissionRow | None:
+        """Read the current binding reservation without imposing an age cutoff."""
+        with self.connection() as conn:
+            row = conn.execute("SELECT * FROM calendar_sync_admissions WHERE binding_id = ?", (binding_id,)).fetchone()
+        return CalendarSyncAdmissionRow(**dict(row)) if row is not None else None
+
+    def reserve_sync_admission(
+        self, *, binding_id: int, admission_id: str, tenant_id: str, owner_user_id: int,
+        idempotency_key: str, payload: dict[str, Any], legacy_job: dict[str, Any] | None = None,
+    ) -> CalendarSyncAdmissionRow:
+        """Atomically reserve a binding and audit new work before runnable Jobs dispatch.
+
+        The unique binding insert acquires SQLite write authority before any reads.
+        A losing independent caller reads the winner after its transaction commits.
+        Legacy adoption does not add a duplicate queue audit.
+        """
+        with self.transaction() as conn:
+            inserted = conn.execute(
+                """INSERT INTO calendar_sync_admissions
+                   (binding_id, admission_id, tenant_id, owner_user_id, idempotency_key, payload_json, job_id, job_uuid)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(binding_id) DO NOTHING""",
+                (binding_id, admission_id, tenant_id, owner_user_id, idempotency_key, json.dumps(payload),
+                 int(legacy_job["id"]) if legacy_job else None, str(legacy_job.get("uuid") or "") if legacy_job else None),
+            ).rowcount
+            binding = self._get_external_binding_row(conn, binding_id)
+            account = self._get_external_account_row(conn, binding.account_id)
+            if account.tenant_id != tenant_id or account.user_id != int(owner_user_id):
+                raise CalendarPermissionDenied("External calendar account is outside the current user scope")
+            self._validate_external_account_active(account)
+            if not binding.sync_enabled or binding.disabled_at:
+                raise CalendarValidationError("External calendar binding is not enabled for sync")
+            if inserted and legacy_job is None:
+                audit = self.record_sync_event(
+                    binding_id=binding_id, event_type="sync_queued", status="queued",
+                    metadata_json={"admission_id": admission_id, "reason": payload["reason"]},
+                )
+                conn.execute("UPDATE calendar_sync_admissions SET audit_id = ? WHERE binding_id = ?", (audit.id, binding_id))
+            row = conn.execute("SELECT * FROM calendar_sync_admissions WHERE binding_id = ?", (binding_id,)).fetchone()
+            return CalendarSyncAdmissionRow(**dict(row))
+
+    def attach_sync_admission_job(self, admission_id: str, job_id: int, job_uuid: str) -> bool:
+        """Correlate one dispatched Job and its audit, without overwriting a successor.
+
+        Return True only to the first caller recording this Job; concurrent
+        idempotent dispatchers then report already_active instead of queued.
+        """
+        with self.transaction() as conn:
+            attached = conn.execute(
+                "UPDATE calendar_sync_admissions SET job_id = ?, job_uuid = ? WHERE admission_id = ? AND job_id IS NULL",
+                (job_id, job_uuid, admission_id),
+            ).rowcount
+            if attached:
+                row = conn.execute("SELECT * FROM calendar_sync_admissions WHERE admission_id = ?", (admission_id,)).fetchone()
+                payload = json.loads(row["payload_json"])
+                conn.execute("UPDATE calendar_sync_events SET metadata_json = ? WHERE id = ?", (
+                    json.dumps({"admission_id": admission_id, "job_id": job_id, "reason": payload["reason"]}), row["audit_id"],
+                ))
+            return bool(attached)
+
+    def release_sync_admission(self, admission_id: str) -> None:
+        """Release only the exact reservation whose Job was confirmed terminal."""
+        with self.transaction() as conn:
+            conn.execute("DELETE FROM calendar_sync_admissions WHERE admission_id = ?", (admission_id,))
+
+    def take_pending_sync_admissions(self, *, limit: int = 100) -> list[CalendarSyncAdmissionRow]:
+        """Rotate bounded recovery attempts so failures cannot starve other bindings.
+
+        This is scheduling order, not an exclusive dispatch lease. Stable Jobs
+        idempotency remains authoritative if independent recovery scans overlap.
+        """
+        with self.transaction() as conn:
+            rows = conn.execute(
+                """UPDATE calendar_sync_admissions SET recovery_attempted_at = ?
+                   WHERE binding_id IN (
+                       SELECT binding_id FROM calendar_sync_admissions WHERE job_id IS NULL
+                       ORDER BY recovery_attempted_at, binding_id LIMIT ?
+                   ) RETURNING *""", (_utcnow_iso(), max(0, int(limit))),
+            ).fetchall()
+        return [CalendarSyncAdmissionRow(**dict(row)) for row in rows]
 
     def record_sync_event(
         self,
