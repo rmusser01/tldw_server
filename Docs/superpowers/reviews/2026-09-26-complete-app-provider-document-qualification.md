@@ -503,3 +503,133 @@ syntax succeeded, arm64 ended cancelled and the combined-platform gate skipped.
 This task did not cancel or retry it. Fresh actual production-build and signed
 candidate qualification are next on the committed correction; no successful
 build, repaired internal Puppeteer wait or release gate is claimed yet.
+
+
+## Exact-source build and native qualification after the approved correction
+
+Production source `41e3b9bc0598071034f250702ccc71a7b862a7e3` completed the
+ordinary local linux/arm64 candidate pipeline with exit 0 in 2055 seconds.
+Frozen installation reported 3665 packages in 57.06 seconds (Docker RUN 58.6
+seconds); the managed WebUI build took 104.3 seconds and passed bundle budgets.
+Built-backend checks, all 13 lifecycle checks and all 38 initial-browser checks
+passed. Independent verification checked the source, signature, eight bundled
+file hashes and paired component inventory. The local manifest SHA256 is
+`905624706bf9e900fed12038af86af1161dc34693422e9203eb33ccd973844ff`;
+archive SHA256 is
+`61da6324d0ea8e88fab4615ed41ef41df0cdf37d390e500c87ec5a03165495b0`.
+Private evidence is retained at
+`/private/tmp/task13376-puppeteer-candidate-41e3b9bc05`. Every baseline Docker
+container, image and volume was preserved; owned fixture/registry cleanup
+passed, the quiet-build guard was unused, and the generated signing key was
+removed by the existing pipeline.
+
+[Native CI run 36328715529](https://github.com/rmusser01/tldw_server/actions/runs/36328715529)
+completed successfully on that exact source. Native Linux amd64 and arm64 each
+passed 13 lifecycle and 38 initial-browser checks, including
+`manual_master_key_absent_2`; Windows helper syntax and the combined platform
+job also passed. Independently downloaded artifact ZIP hashes match GitHub's
+published hashes. Both signatures, eight bundled file hashes, paired inventory,
+archive hashes and all ten archived file contents verified. The native manifests
+are `574dfba778f208020aeb2b074b2e0c7cef28e65cee7624ac9a53c671dab5390c`
+(amd64) and `f16c9ce132d0203fd8b50602c0cd807a774426437dfc4da5d6a8c276352d326c`
+(arm64). Their private verified summaries are retained in
+`/private/tmp/task13376-native-41e3b9bc05-amd64` and
+`/private/tmp/task13376-native-41e3b9bc05-arm64`.
+
+These are initial-wizard checks: G2/G4/G10 are true only within that scope,
+`planned_setup_complete=false`, `full_product_qualification=false`, and G12 is
+false. The unchanged promotion verifier correctly refuses promotion; its
+“Candidate qualification failed” message denotes that refusal, while the
+pipeline itself exited 0. Native Windows Docker host execution, the complete
+native/core-format matrix and broader release gates remain open. The pending
+Puppeteer script's internal wait remains unproven; the approved change removes
+its unused automatic browser download from the production Docker install.
+A separate fresh ordinary provider/document/restart run is required on this
+source; older `9709d0dcb7` evidence is not relabelled.
+
+
+## Fresh ordinary WebUI workflow on source 41e3b9bc05
+
+The exact locally signed archive above was extracted into fresh private state
+at `/private/tmp/task13376-workflow-41e3b9bc05/bundle`, outside the checkout.
+The signed helper started it on `http://127.0.0.1:19085`; each seeded OCI digest
+matched the unchanged signed manifest. A separate owned backend-image container
+ran the repository mock provider on the instance's private network. Test
+credentials were a disposable placeholder; no real provider credential was used.
+The browser was an isolated headless Chrome session controlled by Playwright
+CLI. Its recorded user-agent reports `HeadlessChrome/153.0.0.0`; the full
+installed patch version was not captured.
+
+Replay through ordinary visible controls:
+
+1. Open the signed helper's URL, choose Resume setup → Set up in WebUI → Solo,
+   Docker, and acknowledge the local access/provider-secret notice.
+2. Select Custom OpenAI-compatible, enter the fixture URL
+   `http://qualification-provider:18995/v1`, disposable `sk-mock-key` and model
+   `gpt-4`; validate, save, then continue with existing ingestion defaults.
+   Defer audio, RAG and storage; skip optional MCP. Send test chat.
+3. On Home choose File → Add source → Browse files, select the harmless
+   `/private/tmp/task13376-first-document.md`, and Use defaults & process.
+   The result was 1 succeeded, 0 failed, with 5 seconds of UI elapsed time.
+4. Open Media, search `cobaltparcel13376` in Full-text mode, select the single
+   result, then Chat with this media and Send. Exact content and the deterministic
+   mock response appeared; the selected provider reported Healthy.
+5. Run the signed stop/start helpers. All three application containers were
+   recreated, preserving the named data/config volumes. The owned mock was
+   disconnected before stop and reconnected after startup. Search the same
+   marker and send a distinct `Post-restart verification 41e3` chat. Both passed
+   without re-entering provider fields, a backend master key or server URL wiring.
+
+The bounded provider/Markdown/lexical-search/application-chat/restart checks
+passed. This does not verify vector retrieval, commercial providers, answer
+quality or other core formats. The upload's additional Search in Knowledge
+shortcut exposed the separate failure below, so the fresh ordinary evidence
+conservatively retains `passed=false`, `planned_setup_complete=false`,
+`full_product_qualification=false` and G12=false. Required-check results remain
+recorded separately rather than discarding their evidence or waiving the error.
+Earlier `9709d0dcb7` results remain specific to that candidate.
+
+Screenshots, snapshots, actual network statuses, controlled diagnostic and
+`workflow-evidence.json` are retained in the private workflow directory.
+The owned browser, application, mock and registry containers were closed/removed
+through their recorded identities. Every baseline image/container/volume and
+both unrelated running PostgreSQL services were preserved. Named data/config
+volumes, instance state, images and all prior evidence remain; signed bundle
+file hashes are unchanged. The file chooser did not repeat its earlier long
+control delay; clicking the visible File label worked after the automation's
+attempt to click its visually hidden radio input timed out. Tooling command
+syntax corrections are distinct from application outcomes.
+
+## Review checkpoint: Knowledge history rejects a valid cookie session
+
+Observed trigger: follow the successful upload's Search in Knowledge action.
+`GET /api/v1/chat/conversations?order_by=recency&limit=50&keywords=__knowledge_QA__`
+returns 401 with `Authentication required`; the page presents empty QA history.
+It reproduces after reload and after the signed restart. The same browser
+cookie jar receives 200 from `/api/v1/users/me/profile` and 401 from history;
+ordinary Media and chat requests also return 200. This is an application auth
+failure, not evidence of an expired overall session.
+
+Source inspection identifies a dependency-order defect. The conversations list
+runs `TokenScopeGuard` before `get_request_user` can resolve its cookie session.
+Its preceding RBAC rate dependency returns early without a user id. In
+`require_token_scope`, the existing admin check resolves a missing principal only
+when an Authorization credential is present; a headerless cookie request falls
+through to the header-key requirement and fails 401. A private controlled
+fixture reproduces 401 with zero canonical resolver calls; giving the same
+verified admin principal to the existing request context passes. That fixture
+isolates guard ordering and does not stand in for real cookie validation.
+
+Prepared bounded correction, pending requester approval: within the existing
+admin-check branch, resolve a missing principal through the canonical
+cookie-aware resolver before applying the existing explicit admin role/permission
+claim check. Keep missing/invalid/revoked sessions rejected, explicit-header
+precedence, JWT/API-key scopes and quotas, `allow_admin_bypass=false`, and the
+rejection of a bare legacy `is_admin` boolean. Do not add a headerless-session
+bypass or relax endpoint permissions. Tests must cover valid cookie admin,
+missing/invalid/revoked cookies, explicit header precedence, non-admin and
+bypass-disabled cases plus existing JWT/API-key scope behavior. Then repeat
+actual signed-candidate Knowledge history with the ordinary workflow.
+No production/test auth code has been changed at this checkpoint. This changes
+a shared authentication guard beyond the approved Docker install flag and
+requires the requester's review before implementation.

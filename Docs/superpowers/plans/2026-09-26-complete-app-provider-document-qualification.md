@@ -200,3 +200,26 @@ unproven. A prepared Docker-only skip-download proposal awaits requester review
 and remains unapplied. No second install/candidate retry or CI cancellation.
 Both existing native runs still have arm64 building with amd64 and Windows syntax
 passed. The broader workflow/latest-source and release gates remain open.
+
+
+TASK-13376.12 completed the approved command-local Docker Puppeteer skip at
+clean source `41e3b9bc0598071034f250702ccc71a7b862a7e3`. Local production install
+completed in 57.06 seconds; the pipeline passed built-backend checks, 13 lifecycle
+and 38 initial-browser checks. Native run 36328715529 succeeded on amd64 and
+arm64 with the same 13/38 checks each; Windows helper syntax and combined platform
+job passed. Independently verified signatures, file/archive hashes and paired
+inventory are recorded in the acceptance review. Linux initial-browser blockers
+are cleared on this source; native Windows Docker host execution and the full
+native/core-format/G12 matrix remain separate gates.
+
+A new fresh signed ordinary WebUI run on this source passed provider validation,
+save, wizard chat, Markdown upload (1 succeeded/0 failed, 5 seconds UI elapsed),
+lexical content search, application chat and signed container recreation.
+Post-restart search and a distinct new chat passed without re-entering settings;
+provider stayed Healthy. Owned cleanup preserved baseline resources and named
+instance volumes. The upload's additional Search in Knowledge action exposed a
+reproducible 401 on QA history despite a valid cookie session. Private controlled
+and actual-browser evidence isolates a token-guard auth-order defect. The prepared
+canonical-principal resolution correction awaits review/approval; no auth code
+changed. New ordinary evidence conservatively remains passed=false and planned
+setup false because of the observed application error. Stage 4 remains In Progress.

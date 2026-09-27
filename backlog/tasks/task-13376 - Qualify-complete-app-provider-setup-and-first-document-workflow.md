@@ -4,7 +4,7 @@ title: Qualify complete-app provider setup and first-document workflow
 status: In Progress
 assignee: []
 created_date: '2026-09-26 16:38'
-updated_date: '2026-09-27 05:25'
+updated_date: '2026-09-27 16:16'
 labels:
   - distribution
   - qualification
@@ -72,6 +72,12 @@ Loading correction committed/pushed as 3ef013bd94d389454e0b10b67060f9a95e9089af.
 Completed the bounded retained-evidence diagnostic, not a Bun fix. Install passed85.08s without reproducing the stall; successful-run Puppeteer/canvas identity is now known and private evidence survives timeout fixtures. Scoped cleanup verified. Native amd64 loading fix independently passes13 lifecycle/38 browser checks; arm64 and full native/core-format/G12 gates remain open. Exact evidence/hashes and qualification limits are recorded in the acceptance review; parent remains In Progress.
 
 TASK13376.11 completed one private BuildKit diagnostic: reproduced resolved256/no-progress, install exit124 at300s, Buildx1 at303s. Retained966records identify Puppeteer24.36.0 node install.mjs executing Bun as pending child, static CPU/I/O232-299s; internal cause remains unknown. Baseline Docker resources retained. Prepared Docker-only PUPPETEER_SKIP_DOWNLOAD RUN proposal awaits requester review and remains unapplied. Source3ef nativeamd64 passes; nativearm64 stillbuilding. No additionalcandidate retry/CIcancel/push/release. Broader qualification Stage4 remainsInProgress.
+
+Approved Docker-only correction completed at source 41e3b9bc0598071034f250702ccc71a7b862a7e3. Local production install 57.06 seconds; built-backend checks and 13 lifecycle / 38 initial-browser checks passed. Native CI 36328715529 completed success on both Linux architectures with the same 13/38 checks each; Windows syntax and combined platform job passed. Independent source, signatures, artifact ZIP/file/archive hashes and paired inventory verified. Child TASK-13376.12 is Done. Initial-wizard scope and full release gates remain distinct.
+
+Fresh signed ordinary WebUI run on that exact source passed provider validation/save/wizard chat, Markdown upload (1 succeeded, 0 failed, 5 seconds UI elapsed), Media full-text search, application chat, signed stop/start with all three containers recreated, retained-content search and a distinct new chat without re-entering settings. Provider remained Healthy; no manual backend key or server wiring. Evidence retained at /private/tmp/task13376-workflow-41e3b9bc05/workflow-evidence.json. Browser is isolated headless Chrome; user-agent reports 153.0.0.0, full patch version not captured. Owned browser/app/mock/registry cleanup verified; baseline resources, unrelated running PostgreSQL services, named data/config volumes, state/images/prior evidence retained.
+
+Additional upload Search in Knowledge action reproducibly returns 401 Authentication required on QA history. Same browser-cookie profile request returns 200, history 401. Source and a controlled diagnostic identify TokenScopeGuard resolving missing admin principal only with Authorization present, before the later cookie-aware user dependency runs. Proposed bounded canonical-principal resolution in its existing admin check is prepared in the acceptance review and awaits requester approval; no auth code changed. New ordinary evidence conservatively has bounded_required_workflow_passed=true but passed=false/planned_setup_complete=false/full_product_qualification=false/G12=false. Parent stays In Progress for this observed error, native Windows Docker host and full native/core-format/release gates. No release, promotion or merge.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
