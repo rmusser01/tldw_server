@@ -377,8 +377,18 @@ def _sdist_project_members(sdist_members: set[str]) -> set[str]:
 def standalone_distributions(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> tuple[Path, Path]:
-    """Build standalone artifacts once for distribution metadata tests."""
+    """Build standalone artifacts once for distribution metadata tests.
 
+    The same environment guard the one direct caller of the build already used. Without
+    it, every test depending on this fixture ERRORed rather than skipped whenever the
+    build-system requirements were unresolvable -- e.g. a venv where setuptools is
+    importable but has no dist-info metadata, which makes `python -m build` fail with
+    "Backend 'setuptools.build_meta' is not available" under the PIP_NO_INDEX=1 and
+    --no-build-isolation this smoke uses. An unrunnable environment must skip; only a
+    real regression should fail. See TASK-13291.
+    """
+
+    _require_offline_build_tools()
     return _build_standalone_distributions(
         tmp_path_factory.mktemp("mcp_unified_distribution")
     )

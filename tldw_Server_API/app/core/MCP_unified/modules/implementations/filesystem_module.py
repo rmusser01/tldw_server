@@ -1718,6 +1718,32 @@ class FilesystemModule(BaseModule):
         limit: int,
         walk_entry_limit: int,
     ) -> dict[str, Any]:
+        """Walk ``base`` and return the entries matching ``pattern`` for ``fs.glob``.
+
+        Args:
+            workspace_root: Root that returned paths are made relative to.
+            base: Directory to walk; must exist and be a directory.
+            pattern: Portable glob matched against workspace-relative paths.
+            include_hidden: Include dot-files and dot-directories.
+            include_files: Include regular files.
+            include_directories: Include directories.
+            follow_symlinks: Descend into symlinked directories.
+            case_sensitive: Match ``pattern`` case-sensitively.
+            respect_gitignore: Skip paths ignored by the workspace's ignore rules.
+            sort_by: ``"path"`` for path order; otherwise newest-modified first.
+            limit: Maximum number of matches returned.
+            walk_entry_limit: Maximum entries visited before the walk is truncated.
+
+        Returns:
+            ``{"base_path", "pattern", "matches", "truncated", "remaining_count",
+            "eval"}``. Each match is ``{"path", "type"}`` plus ``"size"`` for files; an
+            entry whose metadata cannot be read is still listed, with ``"size": None``
+            and ``"size_unavailable": True``, rather than failing the whole glob.
+
+        Raises:
+            FileNotFoundError: ``base`` does not exist.
+            NotADirectoryError: ``base`` is not a directory.
+        """
         if not base.exists():
             raise FileNotFoundError(f"path not found: {base}")
         if not base.is_dir():
@@ -1777,7 +1803,22 @@ class FilesystemModule(BaseModule):
                     is_directory=candidate_kind == "directory",
                 ):
                     continue
-                is_symlink = candidate.is_symlink()
+                try:
+                    is_symlink = candidate.is_symlink()
+                except OSError as exc:
+                    # An entry whose metadata cannot be read must still be listed. On
+                    # 3.12 Path.is_symlink() goes through Path.stat(follow_symlinks=
+                    # False), the same call the size block below already tolerates -- so
+                    # leaving this one bare made fs.glob raise for the whole pattern
+                    # instead of marking one entry size_unavailable. Fall back to the
+                    # kind os.walk already reported. See TASK-13291.
+                    logger.debug(
+                        "Unable to determine fs.glob symlink status for workspace path "
+                        "{}; using the walk-reported kind: {}",
+                        rel_path,
+                        exc.__class__.__name__,
+                    )
+                    is_symlink = False
                 if is_symlink:
                     candidate_type = "symlink"
                 else:
