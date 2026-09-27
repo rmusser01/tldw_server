@@ -71,6 +71,10 @@ TWO CLAIMS IN THE DESCRIPTION NEED QUALIFYING.
 1. 'The two have different POST paths (dedicated client vs default transport), so any defect introduced into the production path is undetectable by CI.' The paths converge: _RetrySession.post and _SessionShim.post both end at http_client.fetch(method="POST", ...) and from there at the same _get_transport_adapter("httpx").request(). The only difference is that _RetrySession passes client=<create_client() instance> and the shim does not. For streaming they are identical, because the shim delegates to _RetrySession. So the risk was never divergent behaviour; it is that _SessionShim was never constructed under test, so a future edit to it is unobserved. That is still worth fixing, and is what makes removing the branch safe.
 2. 'An operator ... hits an unhandled RuntimeError on every chat call.' The RuntimeError is deliberate and documented -- openai_adapter.py carries the comment 'If disabled explicitly, raise clear error rather than falling back'. The defect is that the switch could not be exercised by any test, not that the error is unhandled. The new test asserts that documented behaviour, which is what AC #4 asked for.
 Verification: LLM_Adapters + LLM_Calls on this branch = 18 failed / 1230 passed. Baseline on origin/dev by detached checkout = 18 failed / 1195 passed, the identical 18 failures (all local adapters -- ollama, vllm, llamacpp, ooba, tabbyapi, aphrodite, local-llm -- none of which import any file changed here). Delta is +35 passing, exactly the new tests. Zero regressions. Adding tests/lint to the run gives 19 failed / 1242 passed; the extra is test_endpoint_auth_deps_import_boundary, also confirmed failing on a clean tree. ruff clean on all seven touched files.
+
+
+Notes from the other branch (merged 2026-09-27):
+Re-verified on dev 2026-09-27: no PYTEST_CURRENT_TEST branch in chat_calls.py or any provider adapter (#2983). All ACs met.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

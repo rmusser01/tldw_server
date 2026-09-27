@@ -87,6 +87,10 @@ That is the honest shape of this whole task: the cleanup was riding on the bug. 
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
+
+
+Notes from the other branch (merged 2026-09-27):
+Re-checked on dev 2026-09-27: the CancelledError fix and its AST ratchet are in place (#2982). Stays open for AC #4 (HTTPException in the tuple), deferred as recorded above.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

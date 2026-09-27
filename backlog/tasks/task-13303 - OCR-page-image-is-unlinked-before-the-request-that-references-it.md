@@ -64,6 +64,10 @@ Fix (AC #2, #3): both backends now mirror nemotron_parse.py -- delete=False, pat
 AC #4 declined, with a counterexample rather than as scope-trimming. 'Zero extracted pages reports failure' would fail correct runs. _ocr_pdf_pages only increments ocr_pages inside the as_completed loop (PDF_Processing_Lib.py:1672), and per_page_check skips OCR entirely for pages that already carry text, filling text_by_index from pre_text without entering futures (:1601-:1616). A text-bearing PDF processed with per_page_check=True therefore yields ocr_pages == 0 alongside a full ocr_text -- a successful run. A genuinely blank scan is also a legitimate zero.
 The signal the AC was reaching for is empty *text*, not zero pages, and the caller already reports it: PDF_Processing_Lib.py:878 appends the warning 'OCR produced no text' when ocr_text is blank, and analysis_details.ocr.ocr_pages carries the count. So the run was never fully silent; what was silent is now moot, since the temp-file defect that made every page empty is closed. Promoting an all-empty OCR from warning to hard failure is a policy change across every backend and every blank-page PDF, and belongs in its own task if wanted.
 Verification: the new file 12 passed; existing OCR tests (test_ocr_backend_dots.py, test_ocr_adapter.py, test_ocr_runtime_auto_selection.py, test_ocr_types.py) 19 passed 1 skipped. ruff clean. Bandit not installed in this environment (python -m bandit -> No module named bandit), so DoD #4 is a documented skip.
+
+
+Notes from the other branch (merged 2026-09-27):
+Closed 2026-09-27, re-verified on dev. AC #4 stays unchecked on purpose: declined with the counterexample recorded above.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

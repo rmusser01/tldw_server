@@ -103,7 +103,7 @@ jobs:
           verdict=success
 
       - name: Publish trusted policy result
-        if: always()
+        if: "!cancelled()"
         shell: bash
         env:
           VERDICT: ${{ steps.evaluate.outputs.verdict }}

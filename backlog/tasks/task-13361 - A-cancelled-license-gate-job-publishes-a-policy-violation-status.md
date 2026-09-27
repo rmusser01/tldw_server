@@ -1,10 +1,10 @@
 ---
 id: TASK-13361
 title: A cancelled license-gate job publishes a policy-violation status
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-23 17:13'
-updated_date: '2026-09-23 17:15'
+updated_date: '2026-09-27 17:32'
 labels:
   - ci
   - security
@@ -60,9 +60,9 @@ status.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A cancelled license-gate job leaves the trusted-policy status pending, not failure
-- [ ] #2 A genuine policy violation still publishes failure
-- [ ] #3 A crashed evaluation step still publishes failure
+- [x] #1 A cancelled license-gate job leaves the trusted-policy status pending, not failure
+- [x] #2 A genuine policy violation still publishes failure
+- [x] #3 A crashed evaluation step still publishes failure
 - [ ] #4 Verified by cancelling a run deliberately and observing the resulting commit status
 <!-- AC:END -->
 
@@ -107,6 +107,8 @@ THIRD OCCURRENCE of this cancellation pattern today, so it is not a one-off: pre
 PR #2996 (10-minute timeout, cancelled in checkout), and on PR #3000 both the license audit
 (5-minute) and pre-commit. All three died inside actions/checkout. Under the duplicate-run
 load in TASK-13359 this will keep recurring.
+
+Fixed on chore/close-fixed-review-tasks (#3029): the publish step is if: "!cancelled()". A cancelled run leaves the pending status from the job's first step, which stays fail-closed. A policy violation or a crashed evaluate step is a failure, not a cancellation, so it still publishes failure (ACs 2 and 3). Pinned in test_frontend_license_gate_workflow.py. AC #4 (cancel a live run and observe the status) can only be done after merge, so the task stays In Progress until then.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

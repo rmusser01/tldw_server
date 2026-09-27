@@ -71,7 +71,7 @@ def assert_exact_step_structure(steps: list[dict[str, Any]]) -> None:
         {"name", "if", "shell", "env", "run"},
     ]
     assert [step.get("shell") for step in steps] == ["bash", None, "bash", "bash"]
-    assert steps[3]["if"] == "always()"
+    assert steps[3]["if"] == "!cancelled()"
     assert steps[3]["env"] == {"VERDICT": "${{ steps.evaluate.outputs.verdict }}"}
 
 
@@ -326,12 +326,24 @@ def test_evaluator_contract_rejects_common_validation_after_owner_branch() -> No
         assert_common_validations_precede_owner(mutated)
 
 
+def test_a_cancelled_run_leaves_the_pending_status_in_place() -> None:
+    """A cancelled job must not publish a policy failure it never evaluated (TASK-13361).
+
+    Skipping the publisher on cancellation stays fail-closed: the first step already posted
+    pending, and pending never satisfies the required check. A failed or crashed evaluation
+    is not a cancellation, so it still reaches the publisher and posts failure.
+    """
+    steps = load_yaml(WORKFLOW_PATH)["jobs"][JOB_ID]["steps"]
+    publisher = next(step for step in steps if step.get("name") == "Publish trusted policy result")
+
+    assert publisher["if"] == "!cancelled()"
+
+
 def test_workflow_publishes_success_only_for_an_explicit_success_verdict() -> None:
     steps = load_yaml(WORKFLOW_PATH)["jobs"][JOB_ID]["steps"]
     publisher = next(step for step in steps if step.get("name") == "Publish trusted policy result")
     script = publisher["run"]
 
-    assert publisher["if"] == "always()"
     assert publisher["env"] == {"VERDICT": "${{ steps.evaluate.outputs.verdict }}"}
     assert "state=failure" in script
     assert script.count("state=success") == 1

@@ -113,6 +113,10 @@ VERIFICATION
   with `AttributeError: '_IncludedRouter' object has no attribute 'path'` and is an artefact of
   this venv running FastAPI 0.141.1 against a pyproject pin of >=0.136.3,<0.137.0 -- see
   TASK-13382. Unrelated to resampling.
+
+
+Notes from the other branch (merged 2026-09-27):
+Closed 2026-09-27 after #3024 merged. ACs amended to the implemented contract: the original #2/#3/#5 assumed a raise-and-surface fix, but _resample now actually resamples, so there is no failure left to signal or surface. Old #4 ('the other two') is checked because the survey above found only one fail-open resampler. Qodo follow-up on #3024 added the rate and empty-input guards (new #4), with 11 tests.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
