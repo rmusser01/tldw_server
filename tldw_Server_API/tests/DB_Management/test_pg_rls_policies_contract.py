@@ -1,3 +1,5 @@
+"""PostgreSQL policy sets are canonical, transactional and tenant-bound."""
+
 import contextlib
 from types import SimpleNamespace
 
@@ -10,6 +12,20 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
     ensure_chacha_rls,
     ensure_prompt_studio_rls,
 )
+
+
+def test_workspace_startup_rls_is_guarded_owner_only_and_forced() -> None:
+    """Deleted parents cannot hide lifetime capacity or allow another owner's replay."""
+    assert hasattr(rls_module, "build_workspace_chat_startup_rls_sql")
+    statements = rls_module.build_workspace_chat_startup_rls_sql()
+    policy = " ".join("\n".join(statements).split())
+    assert "to_regclass('workspace_chat_startup_receipts')" in policy
+    assert "workspace_chat_startup_receipts ENABLE ROW LEVEL SECURITY" in policy
+    assert "workspace_chat_startup_receipts FORCE ROW LEVEL SECURITY" in policy
+    assert "USING (owner_user_id = current_setting('app.current_user_id', true))" in policy
+    assert "WITH CHECK (owner_user_id = current_setting('app.current_user_id', true))" in policy
+    assert "EXISTS" not in policy.replace("IF EXISTS", "")
+    assert all("\n".join(build_chacha_rls_sql()).count(statement) == 1 for statement in statements)
 
 
 class _FailingCursor:
