@@ -48,6 +48,14 @@ export default function GenerationMonitor({
   const canStartGeneration = slots.length > 0 && !generationActive && !busy;
   const canCancelGeneration = generationActive && !busy;
   const failedSlots = slots.filter((slot) => slot.status === 'failed' || slot.last_error);
+  const legacyRetryUnavailable = (slotId: number): boolean => {
+    const sourceAvailable = generation?.failed_slot_recipe_available?.[slotId];
+    if (sourceAvailable !== undefined) return !sourceAvailable;
+    if (generation?.recipe_available !== false) return false;
+    const sourceBatchId = generation.failed_slot_batch_ids?.[slotId];
+    return sourceBatchId === generation.batch_id ||
+      (sourceBatchId == null && generation.selected_slot_ids?.includes(slotId) === true);
+  };
 
   return (
     <section className="rounded-md border border-border bg-surface p-4">
@@ -132,7 +140,11 @@ export default function GenerationMonitor({
               <div className="min-w-0">
                 <p className="break-words font-medium">{slot.slot_key}</p>
                 <p className="mt-1 text-text-muted">
-                  {slot.last_error === 'image_backend_unavailable' || slot.last_error === 'image_adapter_unavailable'
+                  {legacyRetryUnavailable(slot.id)
+                    ? 'Original settings unavailable. Start generation to use current settings.'
+                    : slot.last_error === 'vn_asset_local_model_changed'
+                      ? 'Local model configuration changed. Restore it to retry, or start generation with current settings.'
+                    : slot.last_error === 'image_backend_unavailable' || slot.last_error === 'image_adapter_unavailable'
                     ? 'Image backend unavailable. Check its configuration before retrying.'
                     : slot.last_error === 'vn_asset_backend_busy'
                       ? 'Image backend busy. Retry when capacity is available.'
@@ -141,7 +153,8 @@ export default function GenerationMonitor({
               </div>
               {onRetrySlot && (
                 <Button aria-label={`Retry ${slot.slot_key}`} className="shrink-0 gap-2"
-                  disabled={generationActive || busy} loading={retryingSlotId === slot.id}
+                  disabled={generationActive || busy || legacyRetryUnavailable(slot.id)}
+                  loading={retryingSlotId === slot.id}
                   onClick={() => onRetrySlot(slot.id)} size="sm" variant="secondary">
                   <RotateCcw aria-hidden className="h-4 w-4" /> Retry
                 </Button>
