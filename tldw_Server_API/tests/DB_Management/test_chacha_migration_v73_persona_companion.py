@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements
 
 
 pytestmark = pytest.mark.unit
@@ -102,3 +103,63 @@ def test_v73_migrates_prior_dev_and_enforces_companion_constraints(
             )
     finally:
         migrated.close_connection()
+
+
+def test_published_companion_v69_lineage_preserves_preferences_and_reopens(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The old PR's v69 catalog is not dev's Persona opt-out v69 catalog."""
+    db_path = tmp_path / "published_companion.sqlite"
+    _seed_database(db_path, monkeypatch, 68)
+    with sqlite3.connect(db_path) as conn:
+        # Reconstruct the published PR catalog: companion DDL after dev v68,
+        # not the newer workspace opt-out/provenance/history/native lineage.
+        for statement in split_sql_statements(CharactersRAGDB._MIGRATION_SQL_V72_TO_V73_PERSONA_COMPANION):
+            if not statement.lstrip().startswith("UPDATE db_schema_version"):
+                conn.execute(statement)
+        conn.execute("UPDATE db_schema_version SET version = 69")
+        conn.execute(
+            "INSERT INTO persona_buddy_preferences VALUES (?, ?, ?, ?, ?)",
+            ("legacy-owner", "roaming", 4, "2026-08-23T00:00:00Z", "2026-08-23T00:00:00Z"),
+        )
+    for _ in range(2):
+        db = CharactersRAGDB(db_path, "legacy-owner")
+        try:
+            conn = db.get_connection()
+            assert db._get_db_version(conn) == 73
+            assert tuple(conn.execute(
+                "SELECT ambient_mode, version FROM persona_buddy_preferences WHERE user_id = ?",
+                ("legacy-owner",),
+            ).fetchone()) == ("roaming", 4)
+            assert "assistant_defaults_explicit_none" in {
+                row["name"] for row in conn.execute("PRAGMA table_info(workspaces)")
+            }
+            assert "native_chat_operations" in db._sqlite_table_names(conn)
+        finally:
+            db.close_connection()
+
+
+def test_companion_upgrade_failure_rolls_back_new_catalog_and_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure after companion writes leaves the pre-upgrade dev catalog intact."""
+    db_path = tmp_path / "companion_rollback.sqlite"
+    _seed_database(db_path, monkeypatch, 72)
+    migrate = CharactersRAGDB._migrate_from_v72_to_v73_persona_companion
+
+    def interrupted(self: CharactersRAGDB, conn: sqlite3.Connection) -> None:
+        migrate(self, conn)
+        raise RuntimeError("companion migration interrupted")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_migrate_from_v72_to_v73_persona_companion", interrupted)
+        with pytest.raises(Exception, match="companion migration interrupted"):
+            CharactersRAGDB(db_path, "rollback-owner")
+    with sqlite3.connect(db_path) as conn:
+        assert conn.execute("SELECT version FROM db_schema_version").fetchone()[0] == 72
+        assert "companion_behavior_json" not in {
+            row[1] for row in conn.execute("PRAGMA table_info(persona_visual_packs)")
+        }
+        assert conn.execute(
+            "SELECT name FROM sqlite_master WHERE name = 'persona_buddy_preferences'"
+        ).fetchone() is None

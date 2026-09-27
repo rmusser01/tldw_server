@@ -17967,6 +17967,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         if self._get_schema_version_postgres(conn) != 77:
             raise SchemaError("Persona companion PostgreSQL migration failed version verification.")  # noqa: TRY003
+        self._ensure_chacha_rls_postgres(conn)
 
     def _migrate_from_v69_to_v70_postgres(self, conn: Any) -> None:
         """Add local tombstone metadata in the existing PostgreSQL migration transaction."""
@@ -20702,11 +20703,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return
         with TransactionContextManager(self):
             current_db_version = self._get_db_version(conn)
-            # Earlier H1/H2 branches used Persona's version numbers for history.
+            # Earlier H1/H2 and ambient companion branches used Persona's version numbers.
             # Repair their marker only when the actual catalog proves that lineage.
             if (
                 current_db_version in (68, 69, 70)
-                and self.backend.table_exists("conversation_history_projections", connection=conn)
+                and (
+                    self.backend.table_exists("conversation_history_projections", connection=conn)
+                    or (
+                        current_db_version == 69
+                        and self.backend.table_exists("persona_buddy_preferences", connection=conn)
+                        and self.backend.table_exists("persona_visual_pack_reviews", connection=conn)
+                        and "companion_behavior_json" in {
+                            column[1] for column in conn.execute("PRAGMA table_info(persona_visual_packs)")
+                        }
+                    )
+                )
                 and "assistant_defaults_explicit_none" not in {
                     column[1] for column in conn.execute("PRAGMA table_info(workspaces)")
                 }
@@ -25359,7 +25370,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
             if (
                 current_version in (73, 74)
-                and backend.table_exists("conversation_history_projections", connection=conn)
+                and (
+                    backend.table_exists("conversation_history_projections", connection=conn)
+                    or (
+                        current_version == 73
+                        and backend.table_exists("persona_buddy_preferences", connection=conn)
+                        and backend.table_exists("persona_visual_pack_reviews", connection=conn)
+                        and "companion_behavior_json" in {
+                            column["name"] for column in backend.get_table_info("persona_visual_packs", connection=conn)
+                        }
+                    )
+                )
                 and "assistant_defaults_explicit_none" not in {
                     column["name"] for column in backend.get_table_info("workspaces", connection=conn)
                 }
@@ -25367,7 +25388,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -25386,6 +25407,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 76 and current_version < 76:
                     self._migrate_from_v75_to_v76_postgres(conn)
                     current_version = 76
+                if target_version >= 77 and current_version < 77:
+                    self._migrate_from_v76_to_v77_persona_companion_postgres(conn)
+                    current_version = 77
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend))
                 self._postgres_schema_is_current(conn)
