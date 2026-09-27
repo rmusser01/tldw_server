@@ -1,3 +1,5 @@
+"""Contract tests for the trusted, immutable frontend license audit workflow."""
+
 from __future__ import annotations
 
 import re
@@ -195,6 +197,7 @@ def test_supported_bases_select_distinct_contexts_and_shared_context_is_rejected
 
 
 def test_workflow_checks_out_only_the_trusted_base_revision() -> None:
+    """Require a shallow checkout of the pinned trusted base without credentials."""
     job = load_yaml(WORKFLOW_PATH)["jobs"][JOB_ID]
     steps = job["steps"]
     action_steps = [step for step in steps if "uses" in step]
@@ -207,7 +210,7 @@ def test_workflow_checks_out_only_the_trusted_base_revision() -> None:
             "uses": CHECKOUT_ACTION,
             "with": {
                 "ref": "${{ github.sha }}",
-                "fetch-depth": 0,
+                "fetch-depth": 1,
                 "persist-credentials": False,
             },
         }

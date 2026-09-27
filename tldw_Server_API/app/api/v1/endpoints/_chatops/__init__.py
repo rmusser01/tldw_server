@@ -21,7 +21,7 @@ parser. Everything else -- the OAuth state machine, the installation record, pol
 read/write, quota enforcement, receipt and dedupe wiring, metric labels and the
 error envelope -- is one implementation here.
 
-See Docs/ADR/050-chatops-shared-shell.md.
+See Docs/ADR/054-chatops-shared-shell.md.
 """
 
 from .oauth_admin import ChatOpsOAuthProvider

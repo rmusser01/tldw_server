@@ -5,9 +5,6 @@ on:
     branches:
       - main
       - dev
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -32,9 +29,19 @@ jobs:
       pull-requests: read
       statuses: read
 
+  # The pull_request path reports to the PR, so it is the one branch protection
+  # sees -- but it used to start every gate immediately, in parallel with the
+  # license audit it is supposed to follow. This makes it wait for the verdict.
+  await_license:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/license-first-await.yml
+    permissions:
+      contents: read
+      statuses: read
+
   build:
     name: build (${{ matrix.name }})
-    needs: admission
+    needs: [admission, await_license]
     if: >-
       always() && !cancelled() &&
       (
@@ -43,7 +50,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -123,9 +136,15 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       )
-    needs: [build, admission]
+    needs: [build, admission, await_license]
     runs-on: ubuntu-latest
     steps:
       - name: Check matrix results

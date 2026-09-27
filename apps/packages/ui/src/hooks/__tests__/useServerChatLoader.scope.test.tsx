@@ -1,6 +1,7 @@
+import React from "react"
 import type { ServerChatMessage } from "@/services/tldw/TldwApiClient"
 // @vitest-environment jsdom
-import { act, renderHook } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen } from "@testing-library/react"
 import type { TFunction } from "i18next"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -35,7 +36,10 @@ const mocks = vi.hoisted(() => {
 
   return {
     store,
+    selection: null as any,
+    renderedMessages: [] as any[],
     streaming: false,
+    getChat: vi.fn(),
     getCharacter: vi.fn(),
     getHistoriesWithMetadata: vi.fn(),
     initialize: vi.fn(),
@@ -52,9 +56,15 @@ const mocks = vi.hoisted(() => {
   }
 })
 
+vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => ({...(await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()), useHistorySelectionContext: () => mocks.selection }))
+vi.mock("@/db/dexie/history-selection", () => ({ensureLocalProfileId: async () => "profile", loadHistoryBookmark: async () => null, saveHistoryBookmark: async () => {}, loadHistoryTurnRecoveries: async () => []}))
+vi.mock("@/db/dexie/fork-operations", () => ({findForkCandidate: async () => null, loadForkOperations: async () => []}))
+vi.mock("@/services/chat-history-selection", () => ({captureHistorySnapshot: async (owner: any, view: any) => ({status: "legacy_review_required", code: "legacy_review_required", view, snapshot: {version: 1, owner_key: owner.owner_key, conversation_id: owner.conversation_id, nodes: [], source_digest: "source", storage_context_digest: "storage", fences: {}, interpretation_status: {kind: "legacy_review_required"}}})}))
+import {useHistorySelection} from "@/hooks/chat/useHistorySelection"
+
 vi.mock("@/hooks/chat/useChatBaseState", () => ({
   useChatBaseState: () => ({
-    messages: [],
+    messages: mocks.renderedMessages,
     streaming: mocks.streaming,
     isProcessing: false,
     setHistory: mocks.setHistory,
@@ -77,6 +87,7 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({ getSelectedAssistantOperationRe
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: mocks.initialize,
+    getChat: mocks.getChat,
     ensureConfigForRequest: mocks.ensureConfigForRequest,
     listChatMessages: mocks.listChatMessages,
     getCharacter: mocks.getCharacter
@@ -124,6 +135,8 @@ describe("useServerChatLoader scoped local history", () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
+    mocks.selection = null
+    mocks.renderedMessages = []
     mocks.store.setServerChatId.mockReset()
     mocks.streaming = false
     mocks.getCharacter.mockResolvedValue(null)
@@ -149,7 +162,7 @@ describe("useServerChatLoader scoped local history", () => {
 
   it.each([401, 403, 404])("removes cached private messages and title when the canonical read returns %s", async status => {
     mocks.listChatMessages.mockRejectedValue(Object.assign(new Error(`HTTP ${status}`), { status }))
-    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((_key: string) => "Error") as TFunction }))
+    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((_key: string) => "Error") as unknown as TFunction }))
     await act(async () => { await vi.advanceTimersByTimeAsync(200) })
     expect(mocks.setMessages).toHaveBeenCalledWith([])
     expect(mocks.setHistory).toHaveBeenCalledWith([])
@@ -159,7 +172,7 @@ describe("useServerChatLoader scoped local history", () => {
   it.each([401, 403, 404])("finishes loading and clears the selected server identifier after HTTP %s", async status => {
     mocks.store.setServerChatId.mockImplementationOnce((id) => { mocks.store.serverChatId = id })
     mocks.listChatMessages.mockRejectedValue(Object.assign(new Error(`HTTP ${status}`), { status }))
-    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((_key: string) => "Error") as TFunction }))
+    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((_key: string) => "Error") as unknown as TFunction }))
     await act(async () => { await vi.advanceTimersByTimeAsync(200) })
     expect(mocks.store.serverChatId).toBeNull()
     expect(mocks.setIsLoading).toHaveBeenLastCalledWith(false)
@@ -169,7 +182,7 @@ describe("useServerChatLoader scoped local history", () => {
     const response = deferred<ServerChatMessage[]>()
     mocks.listChatMessages.mockReturnValue(response.promise)
     mocks.store.setServerChatId.mockImplementationOnce(id => { mocks.store.serverChatId = id })
-    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((_key: string) => "Error") as TFunction }))
+    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((_key: string) => "Error") as unknown as TFunction }))
     await act(async () => { await vi.advanceTimersByTimeAsync(200) })
     mocks.store.serverChatId = "chat-b"
     await act(async () => { response.reject(Object.assign(new Error("Access denied"), { status })) })
@@ -183,7 +196,7 @@ describe("useServerChatLoader scoped local history", () => {
     const response = deferred<ServerChatMessage[]>()
     mocks.listChatMessages.mockReturnValue(response.promise)
     mocks.store.setServerChatId.mockImplementationOnce(id => { mocks.store.serverChatId = id })
-    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((_key: string) => "Error") as TFunction }))
+    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((_key: string) => "Error") as unknown as TFunction }))
     await act(async () => { await vi.advanceTimersByTimeAsync(200) })
     mocks.ensureConfigForRequest.mockResolvedValue({ serverUrl: "http://server", authMode: "multi-user", accessToken: `test.${btoa(JSON.stringify({ sub: "B" }))}.signature` })
     await act(async () => {
@@ -202,7 +215,7 @@ describe("useServerChatLoader scoped local history", () => {
     mocks.store.serverChatAssistantKind = kind === "normal" ? null : kind
     mocks.store.serverChatCharacterId = kind === "character" ? 4 : null
     mocks.listChatMessages.mockImplementation(async (_id, params) => [{ id: "user", role: "user", content: params.render_placeholders === "false" ? "Ask {{char}}" : "Ask Cedar", version: 1 }])
-    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-a"), notification: { error: vi.fn() }, t: ((_key: string) => "Cedar") as TFunction }))
+    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-a"), notification: { error: vi.fn() }, t: ((_key: string) => "Cedar") as unknown as TFunction }))
     await act(async () => { await vi.advanceTimersByTimeAsync(200) })
     expect(mocks.listChatMessages.mock.calls[0][1].render_placeholders).toBe(kind === "character" ? "true" : "false")
     expect(mocks.setMessages.mock.calls[0][0][0].message).toBe(kind === "character" ? "Ask Cedar" : "Ask {{char}}")
@@ -226,7 +239,7 @@ describe("useServerChatLoader scoped local history", () => {
   it("reconciles a nonempty local mirror using acknowledged server identity", async () => {
     mocks.listChatMessages.mockResolvedValue([{ id: "answer", role: "assistant", content: "08:30", version: 2 }])
     const ensureServerChatHistoryId = vi.fn().mockResolvedValue("history-a")
-    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId, notification: { error: vi.fn() }, t: ((_key: string) => "Cedar") as TFunction }))
+    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId, notification: { error: vi.fn() }, t: ((_key: string) => "Cedar") as unknown as TFunction }))
     await act(async () => { await vi.advanceTimersByTimeAsync(200) })
     expect(mocks.reconcileServerChatMirror).toHaveBeenCalledWith(expect.objectContaining({ historyId: "history-a", chatId: "chat-a", messages: [expect.objectContaining({ serverMessageId: "answer", serverMessageVersion: 2 })] }))
     expect(ensureServerChatHistoryId.mock.calls[0][3]).toMatchObject({ requestScope: { userId: "A" } })
@@ -236,7 +249,7 @@ describe("useServerChatLoader scoped local history", () => {
     const response = deferred<ServerChatMessage[]>()
     mocks.listChatMessages.mockReturnValue(response.promise)
     const ensureServerChatHistoryId = vi.fn().mockResolvedValue("history-a")
-    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId, notification: { error: vi.fn() }, t: ((_key: string) => "Cedar") as TFunction }))
+    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId, notification: { error: vi.fn() }, t: ((_key: string) => "Cedar") as unknown as TFunction }))
     await act(async () => { await vi.advanceTimersByTimeAsync(200) })
     const signal = mocks.listChatMessages.mock.calls[0][2].signal as AbortSignal
     mocks.ensureConfigForRequest.mockResolvedValue({ serverUrl: "http://server", authMode: "multi-user", accessToken: kind === "invalidated" ? undefined : `new.${btoa(JSON.stringify({ sub: kind === "different-owner" ? "B" : "A" }))}.signature` })
@@ -245,7 +258,7 @@ describe("useServerChatLoader scoped local history", () => {
       await Promise.resolve(); await Promise.resolve()
     })
     expect(signal.aborted).toBe(kind !== "valid-rotation")
-    response.resolve([{ id: "late", role: "assistant", content: "Owned reply", version: 1 }])
+    response.resolve([{ id: "late", role: "assistant", content: "Owned reply", version: 1, created_at: "2026-09-23T00:00:00Z" }])
     await act(async () => { await Promise.resolve(); await Promise.resolve() })
     expect(mocks.reconcileServerChatMirror).toHaveBeenCalledTimes(kind === "valid-rotation" ? 1 : 0)
   })
@@ -254,7 +267,7 @@ describe("useServerChatLoader scoped local history", () => {
     mocks.streaming = true
     mocks.listChatMessages.mockResolvedValue([{ id: "old", role: "assistant", content: "Server snapshot", version: 1 }])
     const ensureServerChatHistoryId = vi.fn()
-    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId, notification: { error: vi.fn() }, t: vi.fn() as TFunction }))
+    renderHook(() => useServerChatLoader({ ensureServerChatHistoryId, notification: { error: vi.fn() }, t: vi.fn() as unknown as TFunction }))
     await act(async () => { await vi.advanceTimersByTimeAsync(200) })
     expect(mocks.setMessages).not.toHaveBeenCalled()
     expect(ensureServerChatHistoryId).not.toHaveBeenCalled()
@@ -268,7 +281,7 @@ describe("useServerChatLoader scoped local history", () => {
     mocks.getCharacter.mockReturnValueOnce(profile.promise).mockResolvedValue({ id: 5, name: "Robot" })
     mocks.listChatMessages.mockReturnValueOnce(rows.promise).mockResolvedValue([])
     const ensureServerChatHistoryId = vi.fn().mockResolvedValue("history")
-    const { rerender } = renderHook(() => useServerChatLoader({ ensureServerChatHistoryId, notification: { error: vi.fn() }, t: vi.fn() as TFunction }))
+    const { rerender } = renderHook(() => useServerChatLoader({ ensureServerChatHistoryId, notification: { error: vi.fn() }, t: vi.fn() as unknown as TFunction }))
     await act(async () => { await vi.advanceTimersByTimeAsync(200) })
     expect(mocks.getCharacter.mock.calls[0][1]).toMatchObject({ requestScope: { userId: "A" } })
     const oldSignal = mocks.getCharacter.mock.calls[0][1].signal as AbortSignal
@@ -313,7 +326,7 @@ describe("useServerChatLoader scoped local history", () => {
         ensureServerChatHistoryId,
         notification,
         t: ((_key: string, options?: { defaultValue?: string }) =>
-          options?.defaultValue ?? "Error") as unknown as TFunction
+          options?.defaultValue ?? "Error") as unknown as unknown as TFunction
       })
     )
 
@@ -338,4 +351,129 @@ describe("useServerChatLoader scoped local history", () => {
     )
     expect(notification.error).not.toHaveBeenCalled()
   })
+  it("does not overwrite the visible selected path when a delayed display load follows an explicit choice", async () => {
+    let epoch = 0
+    const list = deferred<any[]>()
+    mocks.listChatMessages.mockReturnValue(list.promise)
+    mocks.selection = { fence: () => { const captured = epoch; return () => captured === epoch }, getCurrent: () => ({ owner: { kind: "native", conversation_id: "chat-a" }, capture: { status: "captured" } }) }
+    function Surface() {
+      const [rows, setRows] = React.useState<any[]>([])
+      mocks.renderedMessages = rows
+      mocks.setMessages.mockImplementation(setRows)
+      useServerChatLoader({ ensureServerChatHistoryId: async () => "mirror", notification: { error: vi.fn() }, t: ((key: string) => key) as any })
+      return <><button onClick={() => { epoch++; setRows([{ id: "selected-a", message: "Selected answer A" }]) }}>Choose A</button><output>{rows.map(row => row.id + ":" + row.message).join("/")}</output></>
+    }
+    render(<Surface />)
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+    fireEvent.click(screen.getByText("Choose A"))
+    await act(async () => { list.resolve([{ id: "latest-b", role: "assistant", content: "Wrong latest B", timestamp: "2026-01-01" }]); await vi.runOnlyPendingTimersAsync() })
+    expect(screen.getByRole("status").textContent).toBe("selected-a:Selected answer A")
+  })
+
+})
+
+it("keeps an ancestor toolbar loader from fetching or overwriting the selected surface", async () => {
+  vi.useFakeTimers()
+  vi.clearAllMocks()
+  mocks.selection = null
+  mocks.renderedMessages = [{ id: "chosen", message: "Chosen answer", isBot: true }]
+  const ensureServerChatHistoryId = vi.fn()
+  renderHook(() => useServerChatLoader({
+    ensureServerChatHistoryId,
+    notification: { error: vi.fn() },
+    t: ((key: string) => key) as unknown as TFunction,
+    enabled: false
+  }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+  expect(mocks.listChatMessages).not.toHaveBeenCalled()
+  expect(mocks.setMessages).not.toHaveBeenCalled()
+  expect(mocks.setHistory).not.toHaveBeenCalled()
+  expect(ensureServerChatHistoryId).not.toHaveBeenCalled()
+  vi.useRealTimers()
+})
+it("holds native fork owner qualification before any ambient settings import and uses scoped metadata", async () => {
+  vi.useFakeTimers()
+  vi.clearAllMocks()
+  const held = deferred<boolean>()
+  let ready = false
+  mocks.store.serverChatId = "child"
+  mocks.store.serverChatAssistantKind = null
+  mocks.store.serverChatCharacterId = null
+  mocks.store.serverChatMetaLoaded = true
+  mocks.selection = {fence: () => () => true, settingsMode: () => ready ? "fork" : "pending",
+    loadConversation: vi.fn(() => held.promise), getCurrent: () => ({owner: {kind: "native", conversation_id: "child", validate_lease: () => true},
+      capture: {status: "captured"}, forkSettings: {authorNote: "server only"}})}
+  renderHook(() => useServerChatLoader({ensureServerChatHistoryId: vi.fn(), notification: {error: vi.fn()}, t: ((key: string) => key) as any}))
+  await act(async () => {await vi.advanceTimersByTimeAsync(300)})
+  expect(mocks.syncChatSettingsForServerChat).not.toHaveBeenCalled()
+  expect(mocks.initialize).not.toHaveBeenCalled()
+  expect(mocks.listChatMessages).not.toHaveBeenCalled()
+  await act(async () => {ready = true; held.resolve(true); await vi.runOnlyPendingTimersAsync()})
+  expect(mocks.syncChatSettingsForServerChat).not.toHaveBeenCalled()
+  expect(mocks.initialize).not.toHaveBeenCalled()
+  expect(mocks.listChatMessages).not.toHaveBeenCalled()
+  vi.useRealTimers()
+})
+
+it("real qualified ordinary legacy controller lets the loader hydrate settings before ancestry review", async () => {
+  vi.useFakeTimers()
+  vi.clearAllMocks()
+  mocks.store.serverChatId = "legacy"
+  mocks.store.serverChatAssistantKind = null
+  mocks.store.serverChatCharacterId = null
+  mocks.store.serverChatMetaLoaded = true
+  mocks.store.temporaryChat = false
+  mocks.renderedMessages = []
+  mocks.initialize.mockResolvedValue(undefined)
+  mocks.listChatMessages.mockResolvedValue([])
+  mocks.syncChatSettingsForServerChat.mockResolvedValue(null)
+  const mounted = renderHook(() => {
+    const controller = useHistorySelection()
+    mocks.selection = controller
+    useServerChatLoader({ensureServerChatHistoryId: vi.fn(), notification: {error: vi.fn()}, t: ((key: string) => key) as any})
+    return controller
+  })
+  await act(async () => {await mounted.result.current.open({kind: "native", owner_key: "owner", conversation_id: "legacy", validate_lease: () => true} as any)})
+  await act(async () => {await vi.advanceTimersByTimeAsync(300)})
+  expect(mounted.result.current.status).toBe("legacy_review_required")
+  expect(mocks.syncChatSettingsForServerChat).toHaveBeenCalledWith({historyId: null, serverChatId: "legacy", scope: undefined, allowScratchFallback: false})
+  expect(mocks.listChatMessages).toHaveBeenCalledOnce()
+  mounted.unmount()
+  vi.useRealTimers()
+})
+
+it.each(['scope', 'metadata missing', 'messages missing', 'late scope'] as const)('invalidates only the matching H1 owner after %s rejection', async scenario => {
+  vi.useFakeTimers()
+  vi.clearAllMocks()
+  mocks.store.serverChatId = 'rejected'
+  mocks.store.serverChatMetaLoaded = scenario === 'messages missing'
+  mocks.store.serverChatAssistantKind = null
+  mocks.store.serverChatCharacterId = null
+  mocks.store.temporaryChat = false
+  mocks.renderedMessages = []
+  mocks.initialize.mockResolvedValue(undefined)
+  mocks.syncChatSettingsForServerChat.mockResolvedValue(null)
+  const response = deferred<any>()
+  mocks.getChat.mockImplementation(() => scenario === 'late scope' ? response.promise : scenario === 'metadata missing' ? Promise.reject(Object.assign(new Error('not found'), {status: 404})) : Promise.resolve({id: 'rejected', scope_type: 'workspace', workspace_id: 'foreign'}))
+  mocks.listChatMessages.mockImplementation(() => scenario === 'messages missing' ? Promise.reject(Object.assign(new Error('not found'), {status: 404})) : Promise.resolve([]))
+  const notification = {error: vi.fn()}
+  const mounted = renderHook(() => {
+    const control = useHistorySelection()
+    mocks.selection = control
+    useServerChatLoader({ensureServerChatHistoryId: vi.fn(), notification, t: ((key: string) => key) as any})
+    return control
+  })
+  await act(async () => { await mounted.result.current.open({kind: 'native', owner_key: 'owner', conversation_id: 'rejected', validate_lease: () => true} as any) })
+  await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+  if (scenario === 'late scope') {
+    await act(async () => { await mounted.result.current.open({kind: 'native', owner_key: 'owner', conversation_id: 'later', validate_lease: () => true} as any); response.resolve({id: 'rejected', scope_type: 'workspace', workspace_id: 'foreign'}) })
+    expect(mounted.result.current.getCurrent().owner).toMatchObject({kind: 'native', conversation_id: 'later'})
+    expect(mocks.store.setServerChatLoadState).not.toHaveBeenCalledWith('failed')
+  } else {
+    expect(mounted.result.current.getCurrent().owner).toEqual({kind: 'unavailable', code: scenario === 'scope' ? 'server_chat_scope_mismatch' : 'server_chat_not_found'})
+    expect(mocks.store.setServerChatLoadState).toHaveBeenCalledWith('failed')
+  }
+  expect(mocks.store.setServerChatId).not.toHaveBeenCalledWith(null)
+  mounted.unmount()
+  vi.useRealTimers()
 })

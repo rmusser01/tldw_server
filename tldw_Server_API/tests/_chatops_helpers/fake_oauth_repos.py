@@ -6,7 +6,7 @@ tests/Discord/test_discord_oauth_lifecycle.py and
 tests/Slack/test_slack_oauth_lifecycle.py, at the same line numbers. They are
 provider-agnostic already: the provider is a value passed in, never a literal.
 
-See ADR-050.
+See ADR-054.
 """
 
 from __future__ import annotations

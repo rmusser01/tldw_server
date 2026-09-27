@@ -77,6 +77,67 @@ CONSEQUENCE FOR THIS TASK: adding the tree to the platform-mcp-core shard is NOT
 Related evidence: the shard-coverage guard reports baseline=130 test files already grandfathered as unshared repo-wide, so this tree is the largest instance of a standing problem rather than a one-off.
 - [ ] #2 Tests or verification recorded
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+
+
+Notes recorded on dev by the parallel work (merged 2026-09-27):
+TRIAGE DONE (2026-09-23), which this task required before gating. Two fixes shipped; the
+gate itself is blocked on 13 remaining failures, now all filed.
+BASELINE, app/core/MCP_unified/tests on dev 91e8bbf: 14 failed, 8 errors, 3324 passed,
+5 skipped. After the two fixes below: 13 failed, 0 errors, 3325 passed, 13 skipped.
+FIX 1 -- 8 of the 22 were not regressions. build_standalone_distributions runs
+`python -m build --no-isolation` under PIP_NO_INDEX=1, so every build-system requirement
+must be installed WITH dist-info metadata. A venv where setuptools is importable but
+unregistered makes the build fail with "Backend 'setuptools.build_meta' is not
+available", and every dependent test ERRORed. test_runtime_package_boundary already had a
+guard but called it at one site only -- its module-scoped fixture built without it, and
+test_gateway_protocol_artifact_consumer had no guard at all. The check now lives in the
+shared helper both build through. Verified conditional: skips when metadata is absent,
+does not skip when present, so CI still runs these.
+FIX 2 -- test_filesystem_glob_marks_file_size_unavailable, the test this task cites as
+proof of the gap (red since 5009fc8b95, 2026-06-03), is green. The size block already
+tolerated OSError, but candidate.is_symlink() above it was bare; on 3.12 that routes
+through Path.stat(follow_symlinks=False), the same call the size block guards. One
+unreadable entry aborted the whole fs.glob. Probed: removing the guard turns it red again.
+TWO SECURITY/LICENSING FINDINGS, both invisible because of exactly this gap:
+- TASK-13374 (high, supply-chain): mcp-unified-publish.yml's publish-pypi job has a
+  `github.event_name == 'push'` branch requiring neither target == 'pypi' nor the
+  confirm_publish typed string the manual path requires, the pypi environment has
+  protection_rules: [] (no reviewers), and publish-testpypi has no push branch. So a
+  merge to main that bumps apps/mcp-unified/pyproject.toml publishes to production PyPI
+  with no confirmation and without staging to TestPyPI.
+  test_mcp_unified_publish_workflow_is_manual_and_gated exists to prevent this and is red.
+- TASK-13375 (high, licensing): apps/mcp-unified/LICENSE ships full GPL-3.0 text. The
+  project is GPL-2.0 (9a34da262a) and the root LICENSE became a licensing-boundary
+  document in da0ec87d7d (TASK-12976), so the shipped file matches neither.
+REMAINING 13, all filed:
+- 5 in test_runtime_package_boundary: 1 -> TASK-13375, 4 -> TASK-13374.
+- 8 others -> TASK-13358, with a per-test triage table. Flagged first:
+  test_flashcards_export_rejects_cross_workspace_card_in_apkg_path fails with
+  KeyError 'rows' before reaching its isolation check, so that cross-workspace property
+  is currently unverified in either direction.
+THE SHARD CHANGE IS NOT IN THIS PR. Gating the tree requires the 13 resolved, and two of
+them are owner decisions (what licence the published artifact carries; whether a
+version-bump push is meant to publish). Adding the shard now would mean either a red
+required gate or 13 xfails -- and batch-xfailing them would reproduce the invisibility
+this task exists to end. Blocked on TASK-13375, TASK-13374, TASK-13358.
+THE REPO ALREADY HAS THE RATCHET THIS TASK NEEDS, AND IT CANNOT SEE THIS TREE.
+Helper_Scripts/ci/check_shard_coverage.py exists precisely to stop 'a test file in no shard'
+-- its own docstring says an unsharded file 'is silently never collected -> the suite goes
+green while skipping it'. That is this task, stated by an existing guard.
+It never fired here because DEFAULT_TESTS_ROOT = 'tldw_Server_API/tests' (:41), and it
+enumerates only that root (:98 tests_root.rglob). tldw_Server_API/app/core/MCP_unified/tests
+is outside it, so all 144 files are invisible to the guard -- not baselined, not ignored,
+just unseen. Current run: shards=809 test_files=4790 ignored=4 baseline=130.
+So the fix has two halves, not one:
+  1. Add the tree to the shard matrix (what this task already says).
+  2. Extend the guard to enumerate it, so the next in-app test tree cannot hide the same
+     way. It already takes --tests-root, so this is cheap -- but it must come after (1),
+     since the guard fails closed on anything unsharded.
+Demonstrated live on PR #2994 while this task was open: a new file added under
+tldw_Server_API/tests/Embeddings/ failed the guard because it was in no shard. The guard
+works; its root is the gap. Also note ci.yml repeats the shard matrix 5 times (per
+OS/Python job), so assigning a path means editing all 5 copies -- a single edit leaves four
+jobs still skipping the file.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

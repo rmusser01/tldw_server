@@ -114,7 +114,7 @@ Quota accounting is DB-backed:
 - session creation reserves pending bytes;
 - cancellation or expiry releases reservations: a session past its `expires_at`
   stops counting immediately, and the retention pass (`apply_blob_gc`) marks it
-  `expired` and removes its staged chunks (ADR-052);
+  `expired` and removes its staged chunks (ADR-048);
 - completion moves bytes from reserved to committed usage;
 - dedupe by dataset and full payload hash must not double-charge committed
   blobs.

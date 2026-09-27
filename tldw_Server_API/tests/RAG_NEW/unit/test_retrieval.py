@@ -1124,7 +1124,7 @@ class TestCrossSourceFusion:
     Across the retrievers in this module `score` is min-max normalised (media, chunk
     FTS, vector), a constant 1.0 (both notes paths), a constant 0.5 (chat history,
     character cards, SQL) or a constant 0.6/0.4 (claims). The old global sort compared
-    those numbers directly and the constants won. See ADR-049.
+    those numbers directly and the constants won. See ADR-053.
     """
 
     @staticmethod

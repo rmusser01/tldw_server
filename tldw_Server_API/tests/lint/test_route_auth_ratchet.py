@@ -28,6 +28,7 @@ from Helper_Scripts.ci.route_auth_ratchet import (  # noqa: E402
     NOT_AUTHENTICATION,
     diff_against_baseline,
     is_authenticated,
+    iter_routes,
 )
 
 
@@ -54,9 +55,24 @@ def _baseline_entries() -> list[str]:
 class _FakeDependant:
     """Minimal stand-in for a FastAPI ``Dependant`` for traversal tests."""
 
-    def __init__(self, call: object | None, dependencies: list["_FakeDependant"] | None = None):
+    def __init__(self, call: object | None, dependencies: list[_FakeDependant] | None = None):
         self.call = call
         self.dependencies = dependencies or []
+
+
+@pytest.mark.unit
+def test_included_route_candidates_are_inspected_without_private_fastapi_type() -> None:
+    """Included routes remain visible on FastAPI versions without _IncludedRouter."""
+
+    class _Included:
+        def effective_candidates(self):
+            context = type(
+                "Context", (), {"path": "/included", "methods": {"GET"}, "dependant": None}
+            )
+            return [context()]
+
+    app = type("App", (), {"routes": [_Included()]})()
+    assert list(iter_routes(app)) == [("/included", ["GET"], None)]
 
 
 def _named(qualname: str):

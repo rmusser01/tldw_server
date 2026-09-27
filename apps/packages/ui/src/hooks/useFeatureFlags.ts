@@ -204,12 +204,12 @@ const isFeatureFlagEnabledByRollout = (flag: FeatureFlagKey): boolean => {
  * @returns [isEnabled, setEnabled] tuple
  */
 export function useFeatureFlag(flag: FeatureFlagKey) {
-  const [persistedEnabled, setPersistedEnabled] = useStorage(
+  const [persistedEnabled, setPersistedEnabled, storageMeta] = useStorage(
     flag,
     FEATURE_FLAG_DEFAULTS[flag] ?? true
   )
   const rolloutEnabled = useMemo(() => isFeatureFlagEnabledByRollout(flag), [flag])
-  return [Boolean(persistedEnabled) && rolloutEnabled, setPersistedEnabled] as const
+  return [Boolean(persistedEnabled) && rolloutEnabled, setPersistedEnabled, !storageMeta?.isLoading] as const
 }
 
 /**

@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.Chat_Macros.output_profiles import (
 )
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.Chat_Macros.service import ChatMacrosService
+from tldw_Server_API.app.core.Chat_Macros.settings import normalize_settings
 from tldw_Server_API.app.core.Chat_Macros.storage import ChatMacroStorage
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
@@ -111,6 +112,33 @@ def test_create_update_delete_user_macro_and_validate_without_saving(service: Ch
     assert registry_commands == {"wrapup"}
 
 
+def test_create_macro_rejects_definition_name_mismatch_before_storage(service: ChatMacrosService) -> None:
+    """Reject a mismatched resource name before creating either definition."""
+    with pytest.raises(
+        MacroValidationError,
+        match="macro definition name 'other_name' must match resource name 'daily_digest'",
+    ):
+        service.create_macro("daily_digest", _user_macro_yaml("other_name"))
+
+    assert not (service.storage.macros_dir / "daily_digest").exists()
+    assert not (service.storage.macros_dir / "other_name").exists()
+
+
+def test_update_macro_rejects_definition_rename_before_storage(service: ChatMacrosService) -> None:
+    """A rejected rename leaves the original definition unchanged."""
+    original_raw = _user_macro_yaml("daily_digest")
+    service.create_macro("daily_digest", original_raw)
+
+    with pytest.raises(
+        MacroValidationError,
+        match="macro definition name 'renamed' must match resource name 'daily_digest'",
+    ):
+        service.update_macro("daily_digest", _user_macro_yaml("renamed"))
+
+    assert service.storage.read("daily_digest").raw == original_raw
+    assert not (service.storage.macros_dir / "renamed").exists()
+
+
 def test_user_enabled_override_preserves_authored_yaml(service: ChatMacrosService) -> None:
     raw = _user_macro_yaml() + "# keep this comment\n"
     service.create_macro("daily_digest", raw)
@@ -125,6 +153,21 @@ def test_user_enabled_override_preserves_authored_yaml(service: ChatMacrosServic
 
     assert enabled.enabled is True
     assert service.storage.read("daily_digest").raw == raw
+
+
+def test_normalize_settings_preserves_unknown_keys_without_aliasing() -> None:
+    """Preserve future settings without sharing mutable values with the input."""
+    raw = {
+        "disabled_builtins": ["wrapup"],
+        "future_authoring": {"options": ["keep"]},
+    }
+
+    normalized = normalize_settings(raw)
+    raw["future_authoring"]["options"].append("changed")
+
+    assert normalized["future_authoring"] == {"options": ["keep"]}
+    assert normalized["disabled_builtins"] == ["wrapup"]
+    assert "default" in normalized["output_profiles"]
 
 
 def test_collision_validation_does_not_sync_registry(
@@ -207,6 +250,116 @@ def test_output_profile_local_overrides_are_bounded(service: ChatMacrosService) 
 
     with pytest.raises(MacroValidationError, match="unknown output profile keys"):
         normalize_output_profile("bad", {"sectons": ["summary"]})
+
+
+def test_output_profile_renders_custom_section_titles() -> None:
+    """Render configured headings in place of generated section titles."""
+    profile = normalize_output_profile(
+        "handoff",
+        {
+            "format": "structured_sections",
+            "sections": ["summary", "action_items"],
+            "section_titles": {
+                "summary": "Executive brief",
+                "action_items": "Owners and dates",
+            },
+        },
+    )
+
+    rendered = render_output_profile(profile, {"summary": "S", "action_items": "A"})
+
+    assert "## Executive brief" in rendered
+    assert "## Owners and dates" in rendered
+
+
+def test_output_profile_rejects_titles_for_unknown_sections() -> None:
+    """Reject headings that do not belong to a configured output section."""
+    with pytest.raises(MacroValidationError, match="unknown section"):
+        normalize_output_profile(
+            "bad",
+            {"sections": ["summary"], "section_titles": {"risks": "Risk register"}},
+        )
+
+
+@pytest.mark.parametrize("title", ["", "   ", "\t\n", "x" * 129])
+def test_output_profile_rejects_blank_or_oversized_titles(title: str) -> None:
+    """Reject unusable headings at the backend validation boundary."""
+    with pytest.raises(MacroValidationError, match="section title"):
+        normalize_output_profile("bad", {"sections": ["summary"], "section_titles": {"summary": title}})
+
+
+def test_output_profile_trims_custom_heading() -> None:
+    """Persist a trimmed heading so rendered Markdown has useful text."""
+    profile = normalize_output_profile("brief", {"section_titles": {"summary": "  Brief  "}})
+    assert profile.section_titles == {"summary": "Brief"}
+
+
+@pytest.mark.parametrize("separator", ["\n", "\r", "\t", "\x00", "\x7f", "\x85", "\u2028", "\u2029"])
+def test_output_profile_rejects_heading_controls(separator: str) -> None:
+    """A configured heading cannot introduce another Markdown line or control."""
+    with pytest.raises(MacroValidationError, match="section title"):
+        normalize_output_profile("bad", {"section_titles": {"summary": f"Brief{separator}extra"}})
+
+
+@pytest.mark.parametrize("separator", ["\n", "\r", "\t", "\x00", "\x7f", "\x85", "\u2028", "\u2029"])
+def test_stored_heading_controls_are_repaired_without_mutating_source(separator: str) -> None:
+    """Previously valid persisted titles remain editable after stricter validation."""
+    title = f"Brief{separator}extra"
+    original = {"output_profiles": {"default": {"section_titles": {"summary": title}}}}
+    settings = normalize_settings(original, from_storage=True)
+    assert settings["output_profiles"]["default"]["section_titles"] == {"summary": "Brief extra"}
+    assert original["output_profiles"]["default"]["section_titles"]["summary"] == title
+    assert normalize_settings(settings) == settings
+
+
+@pytest.mark.parametrize(
+    "legacy_profile",
+    [
+        {"sections": []},
+        {"sections": ["summary"], "section_titles": {"summary": " \t "}},
+    ],
+)
+def test_legacy_empty_profiles_remain_readable_and_editable(
+    service: ChatMacrosService,
+    legacy_profile: dict,
+) -> None:
+    """Upgrade previously accepted empty values without relaxing new writes."""
+    original = {"output_profiles": {"default": legacy_profile}, "future_setting": True}
+    service.repository.save_settings("1", original)
+
+    profile = service.get_settings()["output_profiles"]["default"]
+    assert profile["sections"]
+    assert profile["section_titles"] == {}
+    assert service.repository.get_settings("1") == original
+    assert service.list_macros()
+    service.create_macro("daily_digest", _user_macro_yaml())
+    service.set_macro_enabled("daily_digest", False)
+    service.set_builtin_enabled("wrapup", False)
+    service.delete_macro("daily_digest")
+    assert service.get_settings()["future_setting"] is True
+    with pytest.raises(MacroValidationError):
+        service.save_output_profiles({"default": legacy_profile})
+
+
+@pytest.mark.parametrize("format_name", ["single_response", "structured_sections"])
+def test_output_profile_requires_at_least_one_section(format_name: str) -> None:
+    """Neither response format may silently suppress all selected output."""
+    with pytest.raises(MacroValidationError, match="at least one section"):
+        normalize_output_profile("empty", {"format": format_name, "sections": []})
+
+
+def test_save_profiles_preserves_current_settings_and_other_users(service: ChatMacrosService) -> None:
+    """Profile-only saves retain current toggles and remain user scoped."""
+    service.save_settings({"future_authoring": {"enabled": True}})
+    service.set_builtin_enabled("wrapup", False)
+    service.repository.save_settings("2", {"future_authoring": "other user"})
+
+    saved = service.save_output_profiles({"Review-Notes": {"sections": ["summary"]}})
+
+    assert saved["disabled_builtins"] == ["wrapup"]
+    assert saved["future_authoring"] == {"enabled": True}
+    assert "Review-Notes" in saved["output_profiles"]
+    assert service.repository.get_settings("2") == {"future_authoring": "other user"}
 
 
 def test_single_response_output_includes_failed_branches() -> None:

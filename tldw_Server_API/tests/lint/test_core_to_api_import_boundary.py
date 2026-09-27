@@ -55,6 +55,7 @@ CORE_TO_API_BASELINE = frozenset({
     "tldw_Server_API/app/core/Chat/chat_service.py",
     "tldw_Server_API/app/core/Chat/chat_target_resolution.py",
     "tldw_Server_API/app/core/Chat/command_router.py",
+    "tldw_Server_API/app/core/Chat/native_fork_projection.py",  # schema-only; arrived from dev (native chat forks)
     "tldw_Server_API/app/core/Chat_Macros/jobs.py",
     "tldw_Server_API/app/core/Chunking/auto_boundary_assistant.py",
     "tldw_Server_API/app/core/Claims_Extraction/__init__.py",
@@ -62,6 +63,7 @@ CORE_TO_API_BASELINE = frozenset({
     "tldw_Server_API/app/core/Collections/reading_service.py",
     "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
     "tldw_Server_API/app/core/DB_Management/Evaluations_DB.py",
+    "tldw_Server_API/app/core/DB_Management/chacha/message_store.py",  # schema-only; arrived from dev (history selection)
     "tldw_Server_API/app/core/Data_Tables/jobs_worker.py",
     "tldw_Server_API/app/core/Embeddings/audit_adapter.py",
     "tldw_Server_API/app/core/Embeddings/services/jobs_worker.py",

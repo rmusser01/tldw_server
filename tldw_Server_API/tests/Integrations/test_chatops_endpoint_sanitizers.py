@@ -5,7 +5,7 @@ which were 100% identical after normalising the provider vocabulary -- the same
 assertions written twice, so a third ChatOps provider would have meant a third copy,
 and a fix to the assertion would have needed two edits.
 
-See ADR-050.
+See ADR-054.
 """
 
 from __future__ import annotations

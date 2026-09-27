@@ -49,3 +49,11 @@ describe("playground-session-store", () => {
     expect(saved.state).not.toHaveProperty("markSourceSelectionIntent")
   })
 })
+
+it("stores only an initialization address and clears it with the session", () => {
+  const reference = { profile_id: "p", client_session_id: "a", owner_key: "owner", conversation_id: "chat" }
+  usePlaygroundSessionStore.getState().saveSession({ historyId: "chat", historySelectionReference: reference })
+  expect(usePlaygroundSessionStore.getState().historySelectionReference).toEqual(reference)
+  usePlaygroundSessionStore.getState().clearSession()
+  expect(usePlaygroundSessionStore.getState().historySelectionReference).toBeNull()
+})

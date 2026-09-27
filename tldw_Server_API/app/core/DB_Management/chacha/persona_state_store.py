@@ -1,3 +1,5 @@
+"""Persistence for owned Persona profiles, state and analytics."""
+
 from __future__ import annotations
 
 import json
@@ -1794,12 +1796,25 @@ class PersonaStateStore:
         *,
         user_id: str,
         include_deleted: bool = False,
+        conn: Any = None,
+        for_update: bool = False,
     ) -> dict[str, Any] | None:
+        """Read an owned profile, optionally locking it in an existing transaction."""
+        if for_update and (
+            conn is None or not getattr(conn, "in_transaction", False)
+            or (self.backend_type == BackendType.POSTGRESQL and not getattr(self._local, "tx_depth", 0))
+        ):
+            raise InputError("Persona locking reads require a transaction connection.")
         query = "SELECT * FROM persona_profiles WHERE id = ? AND user_id = ?"
         params: list[Any] = [persona_id, user_id]
         if not include_deleted:
             query += " AND deleted = 0"
-        cursor = self.execute_query(query, tuple(params), read_only=True)
+        if for_update and self.backend_type == BackendType.POSTGRESQL:
+            query += " FOR UPDATE"
+        cursor = (
+            conn.execute(query, tuple(params))
+            if conn is not None else self.execute_query(query, tuple(params), read_only=True)
+        )
         return self._persona_profile_row_to_dict(cursor.fetchone())
 
     def list_persona_profiles(

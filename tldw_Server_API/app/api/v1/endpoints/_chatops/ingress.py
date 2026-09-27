@@ -1,4 +1,4 @@
-"""The request path shared by the Discord and Slack ChatOps endpoints (ADR-050 stage 3).
+"""The request path shared by the Discord and Slack ChatOps endpoints (ADR-054 stage 3).
 
 Per protocol, and injected by each endpoint: the request signature check, the command
 parser, the tenant field names, and the objects tests patch on each endpoint module

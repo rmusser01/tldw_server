@@ -7,9 +7,6 @@ on:
   # Run on PRs targeting main/master/dev, not every branch
   pull_request:
     branches: [ main, master, dev ]
-  workflow_run:
-    workflows: [Frontend License Gate Audit]
-    types: [completed]
   schedule:
     - cron: '0 6 * * 1'
   # Allow manual runs
@@ -34,9 +31,19 @@ jobs:
       pull-requests: read
       statuses: read
 
+  # The pull_request path reports to the PR, so it is the one branch protection
+  # sees -- but it used to start every gate immediately, in parallel with the
+  # license audit it is supposed to follow. This makes it wait for the verdict.
+  await_license:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/license-first-await.yml
+    permissions:
+      contents: read
+      statuses: read
+
   analyze:
     name: Analyze (CodeQL)
-    needs: admission
+    needs: [admission, await_license]
     if: >-
       always() && !cancelled() &&
       (
@@ -45,7 +52,13 @@ jobs:
           needs.admission.result == 'success' &&
           needs.admission.outputs.should_run == 'true'
         ) ||
-        github.event_name != 'workflow_run'
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
       )
     runs-on: ubuntu-latest
     timeout-minutes: 60

@@ -4,7 +4,7 @@ Both include-list paths -- _retrieve_allowed_notes_via_sql and its ChaChaNotes
 sibling -- used to stamp score=1.0 on every row and return them in last_modified
 order, so a caller asking for relevance got recency wearing a perfect-relevance score.
 
-Cross-source rank fusion (ADR-049) stopped those rows crowding other sources out of a
+Cross-source rank fusion (ADR-053) stopped those rows crowding other sources out of a
 multi-source result set, which was the acute failure. It does nothing for a
 single-source notes query, which is what these tests cover.
 """

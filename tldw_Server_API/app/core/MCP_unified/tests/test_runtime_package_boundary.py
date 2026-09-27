@@ -377,8 +377,18 @@ def _sdist_project_members(sdist_members: set[str]) -> set[str]:
 def standalone_distributions(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> tuple[Path, Path]:
-    """Build standalone artifacts once for distribution metadata tests."""
+    """Build standalone artifacts once for distribution metadata tests.
 
+    The same environment guard the one direct caller of the build already used. Without
+    it, every test depending on this fixture ERRORed rather than skipped whenever the
+    build-system requirements were unresolvable -- e.g. a venv where setuptools is
+    importable but has no dist-info metadata, which makes `python -m build` fail with
+    "Backend 'setuptools.build_meta' is not available" under the PIP_NO_INDEX=1 and
+    --no-build-isolation this smoke uses. An unrunnable environment must skip; only a
+    real regression should fail. See TASK-13291.
+    """
+
+    _require_offline_build_tools()
     return _build_standalone_distributions(
         tmp_path_factory.mktemp("mcp_unified_distribution")
     )
@@ -586,46 +596,19 @@ def test_mcp_unified_publish_metadata_is_ready_for_public_alpha() -> None:
 
 
 def test_mcp_unified_package_license_file_is_local_to_project() -> None:
-    """Standalone artifacts should include a package-local license file.
+    """Standalone artifacts ship the verbatim GPL-3.0-only text as their licence file.
 
-    This used to assert the package LICENSE was byte-identical to the repository root
-    LICENSE. That stopped being the right check at da0ec87d7d, which turned the root
-    file into a multi-license SCOPE MAP pointing at LICENSES/ -- so the package would
-    have had to ship a monorepo scope map instead of a license, which is exactly what
-    this test's own name says it must not do.
-
-    What matters for a distribution uploaded to PyPI is that it carries the text of the
-    license it declares. apps/mcp-unified/pyproject.toml declares GPL-3.0-only, so that
-    is what is asserted, compared typographically loosely: the packaged copy uses curly
-    quotes and © where LICENSES/GPL-3.0-only.txt uses straight quotes and (C), and the
-    two are otherwise word-for-word identical.
+    Compared against LICENSES/GPL-3.0-only.txt, not the root LICENSE. The root file is
+    the repository's multi-licence scope map (it places apps/mcp-unified under
+    GPL-3.0-only as unlisted material), not a licence text, so byte-equality with it
+    could never hold once the scope map was introduced.
     """
 
-    root_license = REPO_ROOT / "LICENSE"
-    canonical_gpl = REPO_ROOT / "LICENSES" / "GPL-3.0-only.txt"
+    canonical = REPO_ROOT / "LICENSES" / "GPL-3.0-only.txt"
 
-    assert root_license.is_file()  # nosec B101
-    assert canonical_gpl.is_file()  # nosec B101
+    assert canonical.is_file()  # nosec B101
     assert PACKAGE_LICENSE.is_file()  # nosec B101
-
-    packaged = PACKAGE_LICENSE.read_text(encoding="utf-8")
-
-    # The package must carry a license, not the repository's scope map.
-    assert packaged != root_license.read_text(encoding="utf-8")  # nosec B101
-    assert "tldw_server Licensing" not in packaged  # nosec B101
-
-    _APPENDIX = "How to Apply These Terms"
-
-    def _terms(text: str) -> list[str]:
-        """Words of the license terms, typography normalised, appendix dropped."""
-        body = text.split(_APPENDIX)[0]
-        body = body.replace("\u201c", '"').replace("\u201d", '"').replace("\u00a9", "(C)")
-        return body.split()
-
-    assert _APPENDIX in packaged  # nosec B101
-    assert _terms(packaged) == _terms(  # nosec B101
-        canonical_gpl.read_text(encoding="utf-8")
-    )
+    assert PACKAGE_LICENSE.read_text(encoding="utf-8") == canonical.read_text(encoding="utf-8")  # nosec B101
 
 
 def test_mcp_unified_package_declares_pep561_typed_marker() -> None:

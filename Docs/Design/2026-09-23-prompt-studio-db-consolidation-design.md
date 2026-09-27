@@ -1,6 +1,6 @@
 # Prompt Studio database consolidation
 
-**Status:** Implemented · **Task:** TASK-13318 · **ADR:** [ADR-051](../ADR/051-prompt-studio-db-single-implementation.md) · **Review finding:** F20
+**Status:** Implemented · **Task:** TASK-13318 · **ADR:** [ADR-055](../ADR/055-prompt-studio-db-single-implementation.md) · **Review finding:** F20
 
 ## Problem
 

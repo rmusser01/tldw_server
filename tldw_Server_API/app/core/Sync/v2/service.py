@@ -11,7 +11,7 @@ import json
 import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from time import monotonic_ns
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import RFC_4122, UUID, uuid4
@@ -115,6 +115,8 @@ from .models import (
     SyncRestoreCompletenessStatus,
     SyncRestoreDomainCompleteness,
     _sync_v2_internal_domain_schemas,
+    blob_upload_expires_at,
+    blob_upload_session_is_expired,
     client_private_server_frontend_limitation_warning,
     normalize_supported_adapter_versions,
     normalize_sync_timestamp,
@@ -842,10 +844,10 @@ class SyncV2Settings:
     max_blob_bytes: int | None = None
     max_chunk_bytes: int = 4_194_304
     max_active_blob_uploads: int = 8
-    # How long an unfinished upload session holds one of those eight slots and its
-    # reserved quota. Sessions had no expiry at all: expires_at defaulted to None,
-    # was never set at insert and appeared in no WHERE clause, and no reaper existed,
-    # so eight failed uploads permanently disabled attachments for that user.
+    # How long a started upload holds its quota reservation. 0 disables expiry, which
+    # restores the pre-TASK-13321 behaviour where an abandoned upload held its slot and
+    # its bytes forever. 24h is long enough for a resumable upload over a poor link and
+    # short enough that a crashed client recovers the same day.
     blob_upload_session_ttl_seconds: int = 86_400
     user_blob_quota_bytes: int | None = None
     reserved_blob_bytes: int = 0
@@ -6272,10 +6274,15 @@ class SyncV2Service:
                 chunk_count=chunk_count,
                 reserved_quota_bytes=size_bytes,
                 idempotency_key=idempotency_key,
-                # Without this the session never expires, so a failed upload keeps one
-                # of max_active_blob_uploads slots and its reserved quota for ever.
-                expires_at=self._blob_upload_expires_at(),
                 metadata=normalized_metadata,
+                # Set here because it was set nowhere: the column, the "expired" status and
+                # the quota query's status filter were all built for a lifecycle whose
+                # writer was missing, so 8 crashed uploads locked a user out permanently.
+                # See TASK-13321.
+                expires_at=blob_upload_expires_at(
+                    self.settings.blob_upload_session_ttl_seconds,
+                    now=self.clock(),
+                ),
             )
         )
 
@@ -6480,6 +6487,11 @@ class SyncV2Service:
             raise SyncIdempotencyConflictError(
                 "Sync blob chunk was reused with different content"
             )
+        # Refuse before touching disk: an expired session's staged chunks are never
+        # completed, so writing one only leaves bytes behind. See TASK-13321.
+        if blob_upload_session_is_expired(session.expires_at, now=self.clock()):
+            blob_store.discard_upload(upload_id)
+            raise SyncStoreError("Sync blob upload session has expired")
         try:
             storage_key = blob_store.write_upload_chunk(
                 upload_id=upload_id,
@@ -6489,17 +6501,25 @@ class SyncV2Service:
             )
         except SyncBlobStoreError as exc:
             raise SyncStoreError(str(exc)) from exc
-        return self.store.record_blob_chunk(
-            SyncBlobChunkCreate(
-                upload_id=upload_id,
-                dataset_id=dataset_id,
-                chunk_index=chunk_index,
-                offset_bytes=offset_bytes,
-                size_bytes=len(chunk_payload),
-                chunk_hash=chunk_hash,
-                storage_key=storage_key,
+        try:
+            return self.store.record_blob_chunk(
+                SyncBlobChunkCreate(
+                    upload_id=upload_id,
+                    dataset_id=dataset_id,
+                    chunk_index=chunk_index,
+                    offset_bytes=offset_bytes,
+                    size_bytes=len(chunk_payload),
+                    chunk_hash=chunk_hash,
+                    storage_key=storage_key,
+                )
             )
-        )
+        except SyncStoreError:
+            # The deadline can pass between the check above and the store's own check.
+            # The session is then dead, so discard its staged chunks rather than leave
+            # them on disk until an explicit cancel that will never come.
+            if blob_upload_session_is_expired(session.expires_at, now=self.clock()):
+                blob_store.discard_upload(upload_id)
+            raise
 
     def complete_blob_upload(
         self,
@@ -11068,24 +11088,6 @@ class SyncV2Service:
             raise SyncInvalidDomainError(f"Sync domain is not enrolled for this dataset: {domain}")
         return dataset
 
-    def _blob_upload_expires_at(self) -> str | None:
-        """Return when a new upload session stops holding its slot and reserved quota.
-
-        Sessions previously had no expiry at all: expires_at defaulted to None, was
-        never set at insert, and appeared in no WHERE clause anywhere in the repo. With
-        max_active_blob_uploads = 8 and no reaper, eight ordinary transient failures --
-        a flaky network on one large attachment suffices -- permanently disabled
-        attachment upload for that user, through both this API and Notes, with no
-        self-service recovery: the upload_id is minted server-side and never returned,
-        so the cancel endpoint could not reach the orphans either.
-        """
-        ttl = int(self.settings.blob_upload_session_ttl_seconds or 0)
-        if ttl <= 0:
-            return None
-        started = _parse_sync_timestamp(self.clock())
-        if started is None:
-            started = datetime.now(timezone.utc)
-        return (started + timedelta(seconds=ttl)).isoformat()
 
     def _validate_blob_limits(
         self,

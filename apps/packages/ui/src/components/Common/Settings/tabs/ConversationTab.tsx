@@ -367,7 +367,7 @@ export function ConversationTab({
   const handleAsyncError = React.useCallback(
     (error: unknown) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description:
           (isErrorWithMessage(error)
             ? error.message

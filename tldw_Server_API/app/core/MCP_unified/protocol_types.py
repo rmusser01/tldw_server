@@ -162,7 +162,7 @@ def metadata_has_admin_claims(metadata: Any) -> bool:
     A configuration permission should not authorise permanently deleting another
     user's media and notes, which is what full parity would have granted. That
     narrowing is the only intentional divergence from AuthNZ; see
-    Docs/ADR/048-mcp-admin-claims.md.
+    Docs/ADR/052-mcp-admin-claims.md.
     """
     if not isinstance(metadata, dict):
         return False

@@ -58,7 +58,8 @@ def test_sync_v2_factory_enables_blob_transfer_from_env(monkeypatch) -> None:
         ("SYNC_V2_USER_BLOB_QUOTA_BYTES", "not-a-number"),
         ("SYNC_V2_USER_BLOB_QUOTA_BYTES", "0"),
         ("SYNC_V2_BLOB_UPLOAD_SESSION_TTL_SECONDS", "not-a-number"),
-        ("SYNC_V2_BLOB_UPLOAD_SESSION_TTL_SECONDS", "0"),
+        # 0 is valid for the TTL: it disables expiry (ADR-048).
+        ("SYNC_V2_BLOB_UPLOAD_SESSION_TTL_SECONDS", "-1"),
     ],
 )
 def test_sync_v2_factory_rejects_invalid_positive_integer_env(monkeypatch, name: str, value: str) -> None:

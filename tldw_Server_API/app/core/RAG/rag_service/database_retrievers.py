@@ -3079,7 +3079,7 @@ class NotesDBRetriever(BaseRetriever):
         The include list decides WHICH notes come back; the query decides their order
         and their score. This used to stamp score=1.0 on every row and return them in
         last_modified order, so a caller asking for relevance got recency wearing a
-        perfect-relevance score. Cross-source fusion (ADR-049) stopped those rows
+        perfect-relevance score. Cross-source fusion (ADR-053) stopped those rows
         crowding out other sources, but within a single-source notes query nothing
         rescued the ordering.
         """
@@ -5082,7 +5082,7 @@ class MultiDatabaseRetriever:
         standard RRF and matches the existing _reciprocal_rank_fusion, but it means a
         multi-source result set can be shorter than before for the same inputs.
 
-        See Docs/ADR/049-rag-cross-source-fusion.md.
+        See Docs/ADR/053-rag-cross-source-fusion.md.
         """
         if len(per_source) < 2:
             documents.sort(key=lambda d: getattr(d, "score", 0.0), reverse=True)

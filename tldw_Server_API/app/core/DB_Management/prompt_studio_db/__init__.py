@@ -1,4 +1,4 @@
-"""Backend-neutral Prompt Studio persistence (TASK-13318, ADR-051).
+"""Backend-neutral Prompt Studio persistence (TASK-13318, ADR-055).
 
 Aggregates move here one at a time out of the two parallel implementations in
 PromptStudioDatabase.py. Each repository runs over the legacy database object as its

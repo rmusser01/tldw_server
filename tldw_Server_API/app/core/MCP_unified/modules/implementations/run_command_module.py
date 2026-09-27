@@ -306,6 +306,11 @@ class RunCommandModule(BaseModule):
         self._validate_env_file_arguments(arguments)
         self._validate_shell_name_arguments(tool_name, arguments)
 
+    # No sanitize_input override. It existed to allow CLI flags like `--help` past the
+    # base SQL-injection denylist, which is gone (TASK-13294). What the override still
+    # did on its own was drop every carriage return and let DEL (\x7f) through. The
+    # base preserves \t, \n and \r and strips DEL, so allowing `--help` needs no code.
+
     def is_write_tool_call(
         self,
         tool_name: str,

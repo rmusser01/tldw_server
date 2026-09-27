@@ -145,3 +145,233 @@ def test_filesystem_override_preserves_whitespace_too() -> None:
     # and it agrees with its own patch-diff sanitizer
     sample = "x\ty\r\nz\x01"
     assert fs.sanitize_input(sample) == FilesystemModule._sanitize_patch_diff(sample)
+
+
+# ---------------------------------------------------------------------------
+# TASK-13294, second defect in the same function: the SQL-injection denylist.
+# ---------------------------------------------------------------------------
+
+
+def _base_sanitizer() -> Any:
+    """A concrete BaseModule just for sanitize_input.
+
+    Calling it unbound as `BaseModule.sanitize_input(None, x)` works for a plain
+    string but blows up the moment it recurses, because the recursive call goes
+    through `self`. Dicts, lists and the depth guard all need a real instance.
+    """
+    from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule
+
+    class _Probe(BaseModule):
+        """Minimal concrete BaseModule; only sanitize_input is exercised."""
+
+        async def on_initialize(self) -> None:  # pragma: no cover - never called
+            """Unused abstract-method stub."""
+            return None
+
+        async def on_shutdown(self) -> None:  # pragma: no cover - never called
+            """Unused abstract-method stub."""
+            return None
+
+        async def check_health(self) -> None:  # pragma: no cover - never called
+            """Unused abstract-method stub."""
+            return None
+
+        def get_tools(self) -> list[Any]:  # pragma: no cover - never called
+            """Unused abstract-method stub."""
+            return []
+
+        async def execute_tool(self, *args: Any, **kwargs: Any) -> None:  # pragma: no cover
+            """Unused abstract-method stub."""
+            return None
+
+    return _Probe.__new__(_Probe)
+
+
+_ORDINARY_CONTENT = [
+    "exp_data.csv",             # contains "xp_"
+    "sp_reports.txt",           # contains "sp_"
+    "src/*.py",                 # contains "/*"
+    "a/*glob*/b",               # contains "/*" and "*/"
+    "--- a markdown rule",      # contains "--"
+    "git log -- path/to/file",  # git pathspec separator
+    "pip install --no-cache-dir",
+    "https://xn--bcher-kva.example",  # punycode, contains "--"
+    "SELECT 1 -- note",
+]
+
+
+@pytest.mark.parametrize("value", _ORDINARY_CONTENT)
+def test_ordinary_content_is_not_rejected(value: str) -> None:
+    """The denylist buys nothing and refuses routine input.
+
+    It matched `\';`, `";`, `--`, `/*`, `*/`, `xp_` and `sp_` anywhere in any string,
+    on data bound to parameterised queries -- an audit of MCP_unified finds zero
+    f-string or %-formatted SQL, so there is no concatenation for these substrings to
+    escape into. What it did instead was reject a filename containing "xp_", every
+    glob, every markdown rule and every git pathspec, with a protocol InvalidParams
+    error on a tool call that was never dangerous.
+
+    `web_tool_base.sanitize_input` already carries this fix for web tools only, and its
+    docstring diagnoses the problem in the same terms.
+    """
+    assert _base_sanitizer().sanitize_input(value) == value, (
+        f"{value!r} was rejected or altered by the base sanitizer"
+    )
+
+
+def test_the_base_and_web_sanitizers_agree() -> None:
+    """The web override existed only to escape the denylist; pin that they match now."""
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations.web_tool_base import (
+        CONTROL_CHARS_RE,
+    )
+
+    sanitizer = _base_sanitizer()
+    for value in [*_ORDINARY_CONTENT, "a\tb\r\nc", "x\x00y\x01z", "plain"]:
+        assert sanitizer.sanitize_input(value) == CONTROL_CHARS_RE.sub("", value), (
+            f"base and web sanitizers disagree on {value!r}"
+        )
+
+
+def test_control_characters_are_still_stripped() -> None:
+    """Control: dropping the denylist must not drop the sanitising."""
+    sanitizer = _base_sanitizer()
+
+    assert sanitizer.sanitize_input("a\x00b\x01c\x7f") == "abc"
+    assert sanitizer.sanitize_input("keep\ttabs\r\nand newlines") == (
+        "keep\ttabs\r\nand newlines"
+    )
+
+
+def test_depth_guard_survives() -> None:
+    """Control: the recursion limit is the other thing this function does."""
+    nested: object = "leaf"
+    for _ in range(25):
+        nested = {"k": nested}
+    with pytest.raises(ValueError, match="too deeply nested"):
+        _base_sanitizer().sanitize_input(nested)
+
+
+def test_nested_structures_are_still_sanitised() -> None:
+    """Control: recursion into dicts and lists must keep working."""
+    payload = {"path": "src/*.py", "items": ["a\x01b", {"deep": "--flag"}]}
+    assert _base_sanitizer().sanitize_input(payload) == {
+        "path": "src/*.py",
+        "items": ["ab", {"deep": "--flag"}],
+    }
+
+
+# ---------------------------------------------------------------------------
+# TASK-13294, third defect: four subclass overrides that outlived the denylist.
+#
+# web_tool_base, filesystem_module, sandbox_module and run_command_module each
+# carried a sanitize_input override whose only reason to exist was escaping the
+# base denylist -- their docstrings say so ("allowing portable glob syntax",
+# "allowing CLI flags like `--help`", "allows CLI-style args and comment tokens").
+# With the denylist gone the base does that for free, and each override was by
+# then a strictly worse copy of it: every one let DEL through, sandbox_module kept
+# only "\n" (so it stripped tabs and carriage returns from every payload), and
+# run_command_module stripped carriage returns. Deleting them removes the drift
+# that let the base be fixed while fs.write stayed broken.
+# ---------------------------------------------------------------------------
+
+_OVERRIDE_MODULES = [
+    (
+        "tldw_Server_API.app.core.MCP_unified.modules.implementations.web_tool_base",
+        "WebToolBase",
+    ),
+    (
+        "tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module",
+        "FilesystemModule",
+    ),
+    (
+        "tldw_Server_API.app.core.MCP_unified.modules.implementations.sandbox_module",
+        "SandboxModule",
+    ),
+    (
+        "tldw_Server_API.app.core.MCP_unified.modules.implementations.run_command_module",
+        "RunCommandModule",
+    ),
+]
+
+
+def _module_class(module_path: str, class_name: str) -> type:
+    """Import `module_path` and return its `class_name` attribute."""
+    import importlib
+
+    return getattr(importlib.import_module(module_path), class_name)
+
+
+def _abstract_stub(self: Any, *args: Any, **kwargs: Any) -> None:
+    """Stand-in for an abstract method; sanitize_input never calls one."""
+    return None
+
+
+def _sanitizer_for(cls: type) -> Any:
+    """An instance of `cls` good enough to call sanitize_input on.
+
+    WebToolBase is itself abstract, so it needs a trivial concrete subclass; the
+    others can be allocated directly. Either way __init__ is skipped -- sanitize_input
+    touches no instance state.
+    """
+    if getattr(cls, "__abstractmethods__", frozenset()):
+        concrete = type(
+            f"_Concrete{cls.__name__}",
+            (cls,),
+            dict.fromkeys(cls.__abstractmethods__, _abstract_stub),
+        )
+        return concrete.__new__(concrete)
+    return cls.__new__(cls)
+
+
+@pytest.mark.parametrize(("module_path", "class_name"), _OVERRIDE_MODULES)
+def test_no_module_shadows_the_base_sanitizer(module_path: str, class_name: str) -> None:
+    """One definition, so a fix to it cannot be shadowed by a stale copy."""
+    cls = _module_class(module_path, class_name)
+    assert "sanitize_input" not in vars(cls), (
+        f"{class_name} defines its own sanitize_input again. The base already strips "
+        "control characters while preserving \\t, \\n and \\r, and carries no denylist "
+        "to escape; a second copy only drifts. If a module genuinely needs a different "
+        "rule, parameterise the base -- see TASK-13294."
+    )
+
+
+@pytest.mark.parametrize(("module_path", "class_name"), _OVERRIDE_MODULES)
+def test_every_module_preserves_load_bearing_whitespace(module_path: str, class_name: str) -> None:
+    """Tabs and carriage returns survive on every module, not just the base.
+
+    sandbox_module's override kept only "\\n", so a Makefile or TSV passed inline to
+    sandbox.exec lost every tab and the tool reported success. run_command_module's
+    dropped "\\r", corrupting CRLF payloads the same way.
+    """
+    sanitizer = _sanitizer_for(_module_class(module_path, class_name))
+
+    payload = "target:\n\tgcc -o x x.c\r\n"
+    assert sanitizer.sanitize_input(payload) == payload, (
+        f"{class_name} mangled tab/CR-significant content"
+    )
+
+
+@pytest.mark.parametrize(("module_path", "class_name"), _OVERRIDE_MODULES)
+def test_every_module_strips_delete(module_path: str, class_name: str) -> None:
+    """DEL (\\x7f) is a control character, and `ch >= " "` let all four keep it."""
+    sanitizer = _sanitizer_for(_module_class(module_path, class_name))
+
+    assert sanitizer.sanitize_input("a\x7fb") == "ab", f"{class_name} kept DEL"
+
+
+def test_patch_diff_sanitizer_matches_the_base() -> None:
+    """_sanitize_patch_diff is the one remaining second copy; keep it derived.
+
+    Its own comment said it had to match BaseModule.sanitize_input, which is exactly
+    the constraint a hand-copied predicate cannot hold -- it kept DEL after the base
+    stopped.
+    """
+    from tldw_Server_API.app.core.MCP_unified.modules.base import CONTROL_CHARS_RE
+    from tldw_Server_API.app.core.MCP_unified.modules.implementations.filesystem_module import (
+        FilesystemModule,
+    )
+
+    for value in ["--- a/x\n+++ b/x\n@@\n-\tone\n+\ttwo\r\n", "a\x7fb", "x\x00y", "plain"]:
+        assert FilesystemModule._sanitize_patch_diff(value) == CONTROL_CHARS_RE.sub("", value), (
+            f"_sanitize_patch_diff disagrees with the base on {value!r}"
+        )

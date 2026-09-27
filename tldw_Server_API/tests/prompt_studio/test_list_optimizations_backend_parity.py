@@ -79,7 +79,7 @@ def test_list_optimizations_exists_on_the_default_backend(db_path) -> None:
     """The endpoint's failure mode: AttributeError swallowed into a 500."""
     db = PromptStudioDatabase(str(db_path), "parity-client")
     try:
-        # ADR-051: the facade serves list_optimizations through the shared
+        # ADR-055: the facade serves list_optimizations through the shared
         # repository on both backends rather than delegating to self._impl.
         assert callable(getattr(db, "list_optimizations", None)), (
             "list_optimizations is not served on the default backend, so the "

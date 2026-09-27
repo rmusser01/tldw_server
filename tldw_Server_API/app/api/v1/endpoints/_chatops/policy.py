@@ -21,7 +21,7 @@ than unified: renaming them would break every existing caller and stored policy.
 :class:`ChatOpsPolicySpec` carries each provider's spelling so one normaliser can
 serve both. The ``thread`` mode is a real Slack capability, not drift.
 
-See Docs/ADR/050-chatops-shared-shell.md.
+See Docs/ADR/054-chatops-shared-shell.md.
 """
 
 from __future__ import annotations

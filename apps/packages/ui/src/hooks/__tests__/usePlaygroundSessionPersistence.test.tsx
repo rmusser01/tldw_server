@@ -4,6 +4,8 @@ import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
+  selection: null as any,
+  getSessionFiles: vi.fn(),
   assistantLoading: false,
   getConfig: vi.fn(),
   getFullChatData: vi.fn(),
@@ -11,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   setSystemPrompt: vi.fn(),
   setSelectedAssistant: vi.fn()
 }))
+
+vi.mock("@/hooks/chat/useHistorySelection", () => ({ useHistorySelectionContext: () => mocks.selection }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -22,6 +26,7 @@ vi.mock("@/db/dexie/helpers", () => ({
   formatToChatHistory: vi.fn(() => []),
   formatToMessage: vi.fn(() => []),
   getFullChatData: (...args: unknown[]) => mocks.getFullChatData(...args),
+  getSessionFiles: (...args: unknown[]) => mocks.getSessionFiles(...args),
   getPromptById: (...args: unknown[]) => mocks.getPromptById(...args)
 }))
 
@@ -56,6 +61,8 @@ describe("usePlaygroundSessionPersistence", () => {
   beforeEach(() => {
     mocks.assistantLoading = false
     localStorage.clear()
+    mocks.selection = null
+    mocks.getSessionFiles.mockResolvedValue([])
     vi.clearAllMocks()
     mocks.getConfig.mockResolvedValue(null)
     mocks.getFullChatData.mockResolvedValue(null)
@@ -641,4 +648,41 @@ describe("usePlaygroundSessionPersistence", () => {
       expect(optionState.serverChatMetaLoaded).toBe(false)
     })
   })
+})
+
+it("restores tab A's selected conversation even after the shared record was replaced by B", async () => {
+  useStoreMessageOption.setState({ messages: [], history: [], historyId: null, serverChatId: null, temporaryChat: false })
+  usePlaygroundSessionStore.getState().saveSession({ historyId: "chat-B", scopeKey: "global", historySelectionReference: { profile_id: "p", client_session_id: "B", owner_key: "owner-B", conversation_id: "chat-B" }, queuedMessages: [{ promptText: "B queue" } as any], trackedAssistantId: "B assistant", trackedAssistantKind: "character" })
+  mocks.getFullChatData.mockResolvedValue({ historyInfo: { id: "chat-A", last_used_prompt: { prompt_content: "A prompt" } }, messages: [{ id: "a-selected" }] })
+  const reference = { owner_kind: "local", profile_id: "p", client_session_id: "A", owner_key: "owner-A", conversation_id: "chat-A" }
+  mocks.selection = {
+    beginLoad: () => {}, fence: () => () => true, getStoredReference: () => reference, getReference: () => reference,
+    getCurrent: () => ({ capture: { status: "captured" } }),
+    loadConversation: async () => { useStoreMessageOption.getState().setMessages([{ id: "a-selected", isBot: true, name: "Assistant", message: "A selected answer", sources: [] }]); return true }
+  }
+  const { result } = renderHook(() => usePlaygroundSessionPersistence())
+  await waitFor(() => expect(result.current.sessionScopeReady).toBe(true))
+  await act(async () => { await result.current.restoreSession() })
+  const restored = useStoreMessageOption.getState()
+  expect(restored.historyId).toBe("chat-A")
+  expect(restored.messages.map(row => [row.id, row.message])).toEqual([["a-selected", "A selected answer"]])
+  expect(restored.queuedMessages).toEqual([])
+  expect(restored.serverChatAssistantId).toBeNull()
+  expect(mocks.setSystemPrompt).toHaveBeenLastCalledWith("A prompt")
+})
+
+it("preserves the selected native capture when restoring without a local mirror", async () => {
+  useStoreMessageOption.setState({ messages: [], history: [], historyId: null, serverChatId: null, temporaryChat: false })
+  usePlaygroundSessionStore.getState().clearSession()
+  usePlaygroundSessionStore.getState().saveSession({ serverChatId: "native-A", scopeKey: "global", compareMode: true, compareSelectedModels: ["native session model"] })
+  mocks.selection = {
+    beginLoad: () => {}, fence: () => () => true, getStoredReference: () => null, getReference: () => null,
+    getCurrent: () => ({ capture: { status: "captured" } }),
+    loadConversation: async () => { useStoreMessageOption.getState().setMessages([{ id: "chosen", isBot: true, name: "Assistant", message: "Selected native answer", sources: [] }]); return true }
+  }
+  const { result } = renderHook(() => usePlaygroundSessionPersistence())
+  await waitFor(() => expect(result.current.sessionScopeReady).toBe(true))
+  await act(async () => { await result.current.restoreSession() })
+  expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual(["Selected native answer"])
+  expect(useStoreMessageOption.getState()).toMatchObject({ compareMode: true, compareSelectedModels: ["native session model"] })
 })

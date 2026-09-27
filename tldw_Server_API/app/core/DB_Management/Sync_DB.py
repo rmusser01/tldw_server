@@ -87,6 +87,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     SyncNotesAttachmentSourceMap,
     SyncObjectState,
     SyncRestoreManifestStats,
+    blob_upload_session_is_expired,
     normalize_sync_timestamp,
     resolve_personal_context_ingress_result_revision,
 )
@@ -12132,6 +12133,12 @@ class SyncDatabase:
             )
             if session["status"] not in {"created", "uploading"}:
                 raise SyncStoreError("Sync blob upload session is not accepting chunks")
+            if blob_upload_session_is_expired(session["expires_at"], now=now):
+                # Releasing the reservation at read time is only sound if the session is
+                # also closed to writes. Otherwise a client could let a session expire --
+                # freeing its budget for another upload -- then resume it and exceed the
+                # quota. See TASK-13321.
+                raise SyncStoreError("Sync blob upload session has expired")
             if chunk.chunk_index < 0 or chunk.chunk_index >= int(session["chunk_count"]):
                 raise SyncStoreError("Sync blob chunk index is outside the upload session")
             expected_offset = int(session["chunk_size"]) * chunk.chunk_index
@@ -12266,6 +12273,13 @@ class SyncDatabase:
                 raise SyncDatasetNotFoundError(f"Sync dataset not found: {blob.dataset_id}")
             session = self._find_active_blob_session_for_blob(blob, connection=conn)
             if session is not None:
+                if blob_upload_session_is_expired(session["expires_at"], now=now):
+                    # summarize_blob_quota stops counting this session's reservation
+                    # at its deadline, so another upload may already have taken that
+                    # allowance. Committing it now would push committed usage past the
+                    # quota -- completion must honour the deadline exactly as chunk
+                    # writes do. See TASK-13321.
+                    raise SyncStoreError("Sync blob upload session has expired")
                 uploaded_chunks = self._blob_chunk_indexes(
                     session["upload_id"],
                     connection=conn,
@@ -12715,46 +12729,24 @@ class SyncDatabase:
     ) -> SyncBlobQuotaUsage:
         """Return committed and pending blob quota usage for one user.
 
-        Expired sessions are excluded from both the reserved bytes and the active
-        count. Without that predicate a failed upload held one of
-        max_active_blob_uploads slots and its reserved quota for ever: expires_at was
-        never set at insert and appeared in no WHERE clause, and no reaper existed, so
-        eight transient failures permanently disabled attachment upload for that user.
-        Rows whose expires_at is NULL are still counted -- those predate the TTL and
-        must not be silently released.
+        Expired upload sessions are excluded, so a client that abandoned an upload stops
+        paying for it without any reaper having run. See TASK-13321.
         """
 
-        # Expiry is evaluated in Python, not SQL: expires_at is TEXT on SQLite and
-        # TIMESTAMPTZ on PostgreSQL, so a bound string compares differently (or not at
-        # all) across the two. The lease code at _acquire_background_lease does the same
-        # for the same reason. The row count here is bounded by the active-upload cap.
-        now = _parse_iso_datetime(utcnow_iso())
-
-        def _live(rows: Any) -> tuple[int, int]:
-            total = 0
-            count = 0
-            for row in rows or ():
-                raw = _timestamp_to_string(row.get("expires_at"))
-                if raw:
-                    try:
-                        if _parse_iso_datetime(raw) <= now:
-                            continue  # expired: releases its slot and reserved quota
-                    except (TypeError, ValueError):
-                        pass  # unparseable expiry is treated as no expiry
-                total += int(row.get("reserved_quota_bytes") or 0)
-                count += 1
-            return total, count
-
+        # One timestamp for both branches, so a quota answer cannot straddle two instants.
+        quota_as_of = utcnow_iso()
         if dataset_id is None:
-            reserved_bytes, active_uploads = _live(
+            reserved_row = _first(
                 self.execute(
                     """
-                    SELECT reserved_quota_bytes, expires_at
+                    SELECT COALESCE(SUM(reserved_quota_bytes), 0) AS bytes,
+                           COUNT(*) AS active_upload_count
                       FROM sync_blob_upload_sessions
                      WHERE owner_user_id = ?
                        AND status IN ('created', 'uploading')
+                       AND (expires_at IS NULL OR expires_at > ?)
                     """,
-                    (owner_user_id,),
+                    (owner_user_id, quota_as_of),
                 )
             )
             used_row = _first(
@@ -12769,16 +12761,18 @@ class SyncDatabase:
                 )
             )
         else:
-            reserved_bytes, active_uploads = _live(
+            reserved_row = _first(
                 self.execute(
                     """
-                    SELECT reserved_quota_bytes, expires_at
+                    SELECT COALESCE(SUM(reserved_quota_bytes), 0) AS bytes,
+                           COUNT(*) AS active_upload_count
                       FROM sync_blob_upload_sessions
                      WHERE owner_user_id = ?
                        AND dataset_id = ?
                        AND status IN ('created', 'uploading')
+                       AND (expires_at IS NULL OR expires_at > ?)
                     """,
-                    (owner_user_id, dataset_id),
+                    (owner_user_id, dataset_id, quota_as_of),
                 )
             )
             used_row = _first(
@@ -12796,9 +12790,9 @@ class SyncDatabase:
         return SyncBlobQuotaUsage(
             owner_user_id=owner_user_id,
             dataset_id=dataset_id,
-            reserved_blob_bytes=reserved_bytes,
+            reserved_blob_bytes=int(reserved_row["bytes"] if reserved_row else 0),
             used_blob_bytes=int(used_row["bytes"] if used_row else 0),
-            active_upload_count=active_uploads,
+            active_upload_count=int(reserved_row["active_upload_count"] if reserved_row else 0),
         )
 
     def _require_blob_upload_session(

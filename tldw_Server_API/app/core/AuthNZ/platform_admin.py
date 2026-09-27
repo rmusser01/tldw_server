@@ -28,7 +28,7 @@ BYOK, Claims, billing, org, setup or any endpoint that re-derived the answer fro
 claims. Decided (TASK-13353): it is an administrator everywhere, so every copy now
 aliases this one.
 
-MCP_unified is deliberately narrower and does not use this set: per ADR-048 it accepts
+MCP_unified is deliberately narrower and does not use this set: per ADR-052 it accepts
 only "*", because a configuration permission should not authorise destroying another
 user's data.
 """

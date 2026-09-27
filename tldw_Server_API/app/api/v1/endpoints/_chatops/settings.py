@@ -1,5 +1,5 @@
 """Environment-driven settings and installation-record helpers shared by the ChatOps
-support modules (ADR-050 stage 2c).
+support modules (ADR-054 stage 2c).
 
 Each provider builds one ``ChatOpsSettings`` and binds its methods to the private
 names the endpoints already import (``_oauth_client_id``, ``_replay_window_seconds``,

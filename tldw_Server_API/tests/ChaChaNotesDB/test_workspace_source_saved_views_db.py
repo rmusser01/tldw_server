@@ -541,6 +541,7 @@ def test_saved_view_mutation_then_workspace_soft_delete_serializes(
 def test_workspace_soft_delete_then_saved_view_mutation_fails_after_serialization(
     db_path: Path,
     operation: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     deletion_db = CharactersRAGDB(db_path=db_path, client_id=OWNER_A)
     mutation_db = CharactersRAGDB(db_path=db_path, client_id=OWNER_A)
@@ -549,18 +550,23 @@ def test_workspace_soft_delete_then_saved_view_mutation_fails_after_serializatio
     delete_finished = threading.Event()
     allow_commit = threading.Event()
     results: dict[str, object] = {}
+    original_finish = deletion_db._finish_native_workspace_delete
+
+    def pause_after_final_transition(conn: Any, workspace_id: str, **kwargs: Any) -> None:
+        original_finish(conn, workspace_id, **kwargs)
+        delete_finished.set()
+        assert allow_commit.wait(timeout=5)
+
+    monkeypatch.setattr(deletion_db, "_finish_native_workspace_delete", pause_after_final_transition)
 
     def soft_delete() -> None:
         try:
-            with deletion_db.transaction():
-                workspace = deletion_db.get_workspace(WORKSPACE_A)
-                assert workspace is not None
-                results["deleted"] = deletion_db.delete_workspace(
-                    WORKSPACE_A,
-                    expected_version=workspace["version"],
-                )
-                delete_finished.set()
-                assert allow_commit.wait(timeout=5)
+            workspace = deletion_db.get_workspace(WORKSPACE_A)
+            assert workspace is not None
+            results["deleted"] = deletion_db.delete_workspace(
+                WORKSPACE_A,
+                expected_version=workspace["version"],
+            )
         except Exception as exc:  # noqa: BLE001  # pragma: no cover - surfaced below
             results["delete_error"] = exc
 

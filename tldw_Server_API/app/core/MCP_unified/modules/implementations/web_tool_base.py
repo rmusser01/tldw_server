@@ -2,18 +2,21 @@
 
 Centralizes the behavior these tools had duplicated: execution eval metadata, the
 structured error-result shape, the profile-id context reader, and the domain-list
-validator. The ``sanitize_input`` override that used to live here is gone -- it
-existed only to escape the base SQL denylist, which wrongly rejected legitimate
-URLs and queries containing ``--``/``/*``/punycode; that denylist has been removed,
-so BaseModule.sanitize_input is now permissive enough for every module.
+validator.
+
+These tools also carried a permissive ``sanitize_input`` override, because the
+base sanitizer used to reject any string containing ``--``/``/*``/``*/`` -- which
+is most real URLs, search queries and punycode domains. That denylist is gone
+(TASK-13294) and the base now does exactly what this override did, so the
+override has been removed rather than kept in sync.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-# CONTROL_CHARS_RE is re-exported from BaseModule, which strips exactly this class in
-# sanitize_input; web_fetch also rejects URLs containing any of them outright.
+# ``CONTROL_CHARS_RE`` is re-exported: the base owns the one definition, and
+# web_fetch_module imports it from this path to reject control chars in URLs.
 from ..base import (  # re-exported for module convenience
     CONTROL_CHARS_RE,
     BaseModule,

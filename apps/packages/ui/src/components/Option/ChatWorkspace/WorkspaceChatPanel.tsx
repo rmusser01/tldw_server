@@ -197,7 +197,7 @@ export const WorkspaceChatPanel = ({
     selectedAssistantSource,
     serverChatAssistantKind,
     serverChatAssistantId
-  } = useMessageOption(messageOptionArgs)
+  } = useMessageOption({ ...messageOptionArgs, hydrateServerChat: true })
 
   const selectedMatchesWorkspaceAssistant =
     selectedAssistantSource === "workspace" &&

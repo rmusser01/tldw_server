@@ -203,7 +203,7 @@ def _admin_override_module() -> SandboxModule:
 
 @pytest.mark.asyncio
 async def test_sandbox_run_denies_system_configure_cross_user_override() -> None:
-    """system.configure no longer reaches another user's session. See ADR-048.
+    """system.configure no longer reaches another user's session. See ADR-052.
 
     This test previously asserted the opposite. sandbox_module was the only one of six
     MCP admin predicates that accepted the system.configure permission, and it used it

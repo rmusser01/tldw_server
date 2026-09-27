@@ -68,6 +68,13 @@ TESTS = {
         "TLDW_SANDBOX_VZ_LINUX_WORKSPACE_BASE_IMAGE",
         "TLDW_SANDBOX_VZ_LINUX_WORKSPACE_DRILL",
     ),
+    "missing_agent": (
+        "test_vz_linux_missing_agent_host_gated.py",
+        "test_vz_linux_missing_agent_then_healthy_session_reuse",
+        "Missing-agent startup did not fail",
+        "TLDW_SANDBOX_VZ_LINUX_MISSING_AGENT_BASE_IMAGE",
+        "TLDW_SANDBOX_VZ_LINUX_MISSING_AGENT_DRILL",
+    ),
 }
 
 
@@ -224,6 +231,7 @@ def negative_execution(packet: Path, profile: str) -> dict[str, Any]:
         "readiness": "guest-readiness.json",
         "protocol": "guest-protocol.json",
         "workspace": "guest-workspace.json",
+        "missing_agent": "guest-missing-agent.json",
     }[profile]
     paths = [p for p in (packet / "pytest").glob("*/" + filename) if not p.parent.is_symlink() and not p.is_symlink()]
     if len(paths) != 1:
@@ -261,6 +269,9 @@ def negative_execution(packet: Path, profile: str) -> dict[str, Any]:
                 and "exec" in guest["capabilities"]
                 and "output_cap_v1" in guest["capabilities"]
             )
+        elif profile == "missing_agent":
+            proof = data["startup_proof"]
+            ok = ok and proof["vm_id"] == vm_id and proof["mode"] == "start-original"
         return {"ok": ok, "receipt": str(paths[0]), "vm_id": vm_id, "run": run}
     except (OSError, ValueError, TypeError, KeyError) as exc:
         return {"ok": False, "error": str(exc)}
@@ -453,7 +464,7 @@ def logged(
 
 
 def build_agent(profile: str, packet: Path) -> Path:
-    """Build an offline Linux arm64 Go overlay without editing production source.
+    """Build an offline Go overlay or stage the test-only startup launcher.
 
     Args:
         profile: A key in ``TESTS``.
@@ -466,6 +477,21 @@ def build_agent(profile: str, packet: Path) -> Path:
         OSError: An input or output artifact is unavailable.
         subprocess.TimeoutExpired: The build exceeds its bound.
     """
+    if profile == "missing_agent":
+        original_launcher = FIXTURES / "missing-agent-launcher.sh"
+        binary = packet / "tldw-agent-guest"
+        shutil.copy2(original_launcher, binary)
+        binary.chmod(0o755)
+        write_json(
+            packet / "build.json",
+            {
+                "profile": profile,
+                "fixture_sha256": digest(original_launcher),
+                "agent_sha256": digest(binary),
+                "artifact_kind": "test_only_guest_launcher",
+            },
+        )
+        return binary
     original = REPO / "tools/tldw-agent/internal/guest/vsock_client.go"
     source = original.read_text(encoding="utf-8")
     if profile == "mismatch":
@@ -593,7 +619,9 @@ def clone(materializer: Any, source: Path, evidence: Path, run_id: str, template
     return bundle
 
 
-def install_agent(helper: Any, boot: Path, target: Path, binary: Path, packet: Path) -> None:
+def install_agent(
+    helper: Any, boot: Path, target: Path, binary: Path, packet: Path, *, installer: Path | None = None
+) -> None:
     """Install a fault agent into an offline clone using a disposable preparer VM.
 
     Args:
@@ -602,6 +630,7 @@ def install_agent(helper: Any, boot: Path, target: Path, binary: Path, packet: P
         target: Offline disposable bundle exported writable to the preparer.
         binary: Test-only guest executable to install.
         packet: Existing private directory retaining preparer and exec evidence.
+        installer: Test-only offline installer, or the normal fault installer.
     Raises:
         RuntimeError: Installation verification or termination fails.
         Exception: Helper RPC or artifact I/O fails.
@@ -632,7 +661,7 @@ def install_agent(helper: Any, boot: Path, target: Path, binary: Path, packet: P
         reply = helper.exec_guest(
             vm_id=vm_id,
             request={
-                "argv": ["/bin/sh", "-eu", "-c", (FIXTURES / "install-agent.sh").read_text()],
+                "argv": ["/bin/sh", "-eu", "-c", (installer or FIXTURES / "install-agent.sh").read_text()],
                 "cwd": "/workspace",
                 "timeout_sec": 90,
             },
@@ -751,7 +780,8 @@ def exercise(
             packet = evidence / (profile + "-prepare")
             fault = clone(materializer, source, evidence, profile + "-source", "healthy", disks)
             boot = clone(materializer, source, evidence, profile + "-preparer", "healthy", disks)
-            install_agent(helper, boot, fault, agents[profile], packet)
+            installer = FIXTURES / "install-missing-agent.sh" if profile == "missing_agent" else None
+            install_agent(helper, boot, fault, agents[profile], packet, installer=installer)
             handles = disk_handles([boot / "rootfs.img", fault / "rootfs.img"])
             write_json(packet / "disk-handles.json", handles)
             if not handles["ok"]:

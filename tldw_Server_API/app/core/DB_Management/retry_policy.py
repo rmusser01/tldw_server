@@ -1,4 +1,4 @@
-"""One contention-retry policy for both database backends (TASK-13319, ADR-047).
+"""One contention-retry policy for both database backends (TASK-13319, ADR-051).
 
 SQLite reports contention as "database is locked"; PostgreSQL as SQLSTATE 40001/40P01/
 55P03, which the backends surface as ``TransientContentionError``. Either way the whole

@@ -5,7 +5,7 @@ from __future__ import annotations
 Given an attempt number or the previous delay, say how long to wait; and, for
 outbound HTTP, whether an attempt is worth retrying at all
 (:func:`classify_http_retry`, :func:`is_dns_resolution_error`). DB contention
-classification lives in core/DB_Management/retry_policy.py (ADR-047 follow-up).
+classification lives in core/DB_Management/retry_policy.py (ADR-051 follow-up).
 
 Two schedules, because the codebase retries two different things and one algorithm
 does not serve both:

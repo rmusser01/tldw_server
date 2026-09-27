@@ -236,6 +236,13 @@ class SandboxModule(BaseModule):
             decoded.append((path, data))
         return decoded
 
+    # No sanitize_input override. This module used to carry one purely to escape the
+    # base SQL-injection denylist, which rejected CLI-style args and comment tokens.
+    # That denylist is gone (TASK-13294), and the override that outlived it kept only
+    # "\n" -- so it silently stripped every tab and carriage return from a sandbox
+    # payload, corrupting any inline Makefile, TSV or CRLF file written through
+    # sandbox.exec, and it let DEL (\x7f) through. The base does the right thing.
+
     def validate_tool_arguments(self, tool_name: str, arguments: dict[str, Any]):
         # Enforce PRD oneOf and types
         cmd = arguments.get("command")

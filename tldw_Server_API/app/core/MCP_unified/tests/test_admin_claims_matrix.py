@@ -16,7 +16,7 @@ directions:
 Roles now come from AuthNZ's _PLATFORM_ADMIN_ROLES so the two cannot drift again.
 Permissions deliberately stay narrower than AuthNZ's _ADMIN_CLAIM_PERMISSIONS: only
 "*" grants admin, not "system.configure" or the "admin" permission. See
-Docs/ADR/048-mcp-admin-claims.md.
+Docs/ADR/052-mcp-admin-claims.md.
 """
 
 from __future__ import annotations

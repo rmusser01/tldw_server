@@ -428,6 +428,10 @@ If MCP is unavailable but the CLI works, use CLI fallback commands such as `back
 
 If neither MCP nor CLI is available, pause before making repo file changes unless the user explicitly approves a temporary exception. Commit Backlog.md task changes with the related work unless the user asks for different staging.
 
+### 0a. Architecture Decision Records
+
+For substantial specs, implementation plans, and PRs, search `Docs/ADR/README.md` and record an ADR assessment in the related Backlog task and work artifact: whether an ADR is required, the governing or proposed ADR path when applicable, and a short reason. Use the repo-local Superpowers guidance in `.agents/skills/adr-assessment/SKILL.md` during design and planning. Link existing governing decisions; create a new ADR for a new or changed durable architecture rule. Accepted ADR rationale is immutable except for supersession metadata, so a changed decision needs a new ADR. Do not promote historical inventory candidates without current implementation evidence and an owner decision.
+
 ### 1. Planning & Staging
 
 Break complex work into 3-5 stages. Document in a uniquely named plan file for the specific task (avoid generic names like `IMPLEMENTATION.md` or `IMPLEMENTATION_PLAN.md`), for example `IMPLEMENTATION_PLAN_<short_task_slug>.md` (e.g., `IMPLEMENTATION_PLAN_feedback_system.md`, `IMPLEMENTATION_PLAN_auth_refactor.md`):
