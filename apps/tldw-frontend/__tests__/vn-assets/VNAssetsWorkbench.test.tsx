@@ -228,6 +228,59 @@ describe('VNAssetsWorkbench', () => {
     await waitFor(() => expect(sessionStorage.length).toBe(0));
   });
 
+  it.each(['success', 'error'])('fences concurrent pack responses after restoring an invalid server setting: %s', async (outcome) => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+      { id: 8, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
+    ]);
+    let firstResponse!: (value: unknown) => void;
+    let secondResponse!: (value: unknown) => void;
+    let secondError!: (error: Error) => void;
+    mocks.startVNAssetGeneration
+      .mockImplementationOnce(() => new Promise((resolve) => { firstResponse = resolve; }))
+      .mockImplementationOnce(() => new Promise((resolve, reject) => {
+        secondResponse = resolve;
+        secondError = reject;
+      }));
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(1));
+    await user.click(screen.getByText('Moon Archive'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Start generation' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Start generation' }));
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(2));
+    const saved = sessionStorage.getItem('tldw:vn-generation:pending:v1');
+    const originalRequests = mocks.startVNAssetGeneration.mock.calls.map((call) => [...call]);
+    mocks.apiBaseUrl.mockReturnValue('ftp://invalid-server.example/api/v1');
+    await act(async () => firstResponse({ status: 'queued', batch_id: 41 }));
+    expect(screen.getByText('Current server and account could not be verified.')).toBeInTheDocument();
+    mocks.apiBaseUrl.mockReturnValue('http://localhost:8000/api/v1');
+    await user.click(screen.getByRole('button', { name: 'Retry recovery check' }));
+    await waitFor(() => expect(screen.queryByText('Current server and account could not be verified.')).not.toBeInTheDocument());
+    await act(async () => {
+      if (outcome === 'success') secondResponse({ status: 'queued', batch_id: 42 });
+      else secondError(Object.assign(new Error('Old command rejected'), { status: 422 }));
+    });
+    expect(sessionStorage.getItem('tldw:vn-generation:pending:v1')).toBe(saved);
+    expect(screen.getByLabelText('Generation status')).not.toHaveTextContent('queued');
+    expect(screen.queryByText('Old command rejected')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+    expect(mocks.startVNAssetGeneration).toHaveBeenCalledTimes(2);
+    await user.click(screen.getByRole('button', { name: 'Recover pending request' }));
+    await waitFor(() => expect(mocks.startVNAssetGeneration.mock.calls[2]).toEqual(originalRequests[1]));
+    await user.click(screen.getByText('Orbital Library'));
+    const recover = await screen.findByRole('button', { name: 'Recover pending request' });
+    await waitFor(() => expect(recover).toBeEnabled());
+    await user.click(recover);
+    await waitFor(() => expect(mocks.startVNAssetGeneration.mock.calls[3]).toEqual(originalRequests[0]));
+    await waitFor(() => expect(sessionStorage.length).toBe(0));
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+  });
+
   it('does not report an invalid server setting from an already stale account response', async () => {
     existingFailedPack();
     let response!: (value: unknown) => void;

@@ -125,6 +125,21 @@ full run passed 142 tests (41.42s); with the stale-invalid-server control, final
 verification passed all 143 tests (29.53s). Both scoped lint commands and
 typecheck pass, and unchanged VN Python Bandit has zero findings/errors.
 
+Qodo's complete 8e2df review found a further authority-fencing defect
+(4116657605): invalid settings cleared scope but not its epoch, so a second
+in-flight pack response became current after same-scope re-verification. Both
+rendered concurrent-pack regressions failed before the fix (3.17s test time):
+the late success and HTTP 422 each removed the second saved request. Advancing
+the epoch in the current-capture validation catch keeps every earlier capture
+stale without clearing commands. Five focused settings/fencing checks pass,
+including old-account isolation. Both packs can explicitly replay their exact
+original requests and clear only on acknowledgement, with no automatic POST.
+All 145 VN/fetch/shared-auth tests pass (49.11s), typecheck and both scoped lint
+commands pass. Fresh unchanged VN Python Bandit has zero findings/errors over
+9064 lines; it is not a TypeScript scan. CodeRabbit's complete 8e2df full review
+finished at 19:39:54 UTC with exact-head reviewed coverage and no actionable
+comments; that prior-head assessment does not qualify this follow-up.
+
 ## Stage 3: Gated Merge
 
 **Goal**: Merge normally only after current-head review and live dev gates pass.

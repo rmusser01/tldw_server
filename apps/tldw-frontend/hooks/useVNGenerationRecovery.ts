@@ -34,6 +34,7 @@ export function useVNGenerationRecovery(onBoundary: (resetAccount: boolean) => v
     try {
       return createVNCommandScope(getApiBaseUrl(), Number(capture.scope.principal)).server === capture.scope.server;
     } catch {
+      ++epoch.current;
       scope.current = null;
       setReady(false);
       report(new Error('Current server and account could not be verified.'));
