@@ -28514,7 +28514,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conversation_version = conversation["version"] if isinstance(conversation, dict) else conversation[1]
             failed_message_ids: set[str] = set()
             while True:
-                batch = self.get_messages_for_conversation(conversation_id, limit=100, offset=0)
+                # Settle this page's reads before invoking independently owned deletes.
+                with self.transaction():
+                    batch = self.get_messages_for_conversation(conversation_id, limit=100, offset=0)
                 batch = [m for m in batch if m.get("id") not in failed_message_ids]
                 if not batch:
                     break

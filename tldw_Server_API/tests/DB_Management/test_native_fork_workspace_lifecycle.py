@@ -54,6 +54,59 @@ def test_soft_delete_closure_survives_cascade_failure_and_retry(db: CharactersRA
     assert db.get_conversation_by_id(child, include_deleted=True)["deleted"]
 
 
+def test_soft_cascade_second_page_failure_preserves_progress_and_retries(
+    db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Page-read rollback preserves earlier message deletes and the admission fence."""
+    child = db.add_conversation({"character_id": 1, "title": "Paged child", "scope_type": "workspace", "workspace_id": "workspace-one"})
+    with db.transaction() as conn:
+        conn.execute("UPDATE conversations SET required_projection_version = 'native-fork-v1' WHERE id = ?", (child,))
+        for index in range(101):
+            db.add_message({
+                "conversation_id": child, "sender": "user", "content": f"Message {index}",
+                "images": [{"data": b"saved-image", "mime": "image/png"}],
+            }, conn=conn)
+    original = db.get_messages_for_conversation
+    pages = []
+
+    def fail_second_page(*args: Any, **kwargs: Any) -> Any:
+        page = original(*args, **kwargs)
+        pages.append(page)
+        if len(pages) == 2:
+            monkeypatch.setattr(db, "get_messages_for_conversation", original)
+            raise RuntimeError("injected second-page failure")
+        return page
+
+    monkeypatch.setattr(db, "get_messages_for_conversation", fail_second_page)
+    with pytest.raises(ConflictError, match="workspace_delete_incomplete"):
+        db.delete_workspace("workspace-one", expected_version=1)
+    if db.backend_type == BackendType.POSTGRESQL:
+        assert db.get_connection()._connection.info.transaction_status.name == "IDLE"
+    else:
+        assert not db.get_connection().in_transaction
+    assert [len(page) for page in pages] == [100, 1]
+    assert all(message["images"][0]["image_data"] == b"saved-image" for page in pages for message in page)
+    observer = CharactersRAGDB(db_path=db.db_path_str, client_id="alice", backend=db.backend)
+    try:
+        workspace = observer.get_workspace("workspace-one")
+        assert workspace is not None and not workspace["deleted"]
+        assert bool(workspace["native_chat_admission_closed"]) and workspace["version"] == 1
+        counts = observer.execute_query(
+            "SELECT deleted, COUNT(*) AS total FROM messages WHERE conversation_id = ? GROUP BY deleted",
+            (child,), read_only=True,
+        ).fetchall()
+        assert {bool(row["deleted"]): row["total"] for row in counts} == {False: 1, True: 100}
+    finally:
+        observer.close_connection()
+    assert db.delete_workspace("workspace-one", expected_version=1)
+    assert db.get_workspace("workspace-one") is None
+    assert db.get_conversation_by_id(child, include_deleted=True)["deleted"]
+    assert db.execute_query(
+        "SELECT COUNT(*) AS total FROM messages WHERE conversation_id = ? AND deleted = 0",
+        (child,), read_only=True,
+    ).fetchone()["total"] == 0
+
+
 @pytest.mark.parametrize("hard", [False, True])
 def test_admission_closure_commits_before_conversation_enumeration(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, hard: bool) -> None:
     enumerating = threading.Event()
@@ -132,6 +185,47 @@ def test_hard_delete_closure_survives_cascade_failure_and_retry(db: CharactersRA
     assert workspace is not None and bool(workspace["native_chat_admission_closed"])
     db.hard_delete_workspace("workspace-one")
     assert db.get_workspace("workspace-one", include_deleted=True) is None
+
+
+@pytest.mark.parametrize(("hard", "failure_at"), [(False, "messages"), (False, "conversation"), (True, "conversation")])
+def test_failed_cascade_releases_owned_reads_before_immediate_retry(
+    db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, hard: bool, failure_at: str,
+) -> None:
+    """A failed read or child deletion must not leave the next delete nested."""
+    child = db.add_conversation({"character_id": 1, "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one"})
+    with db.transaction() as conn:
+        conn.execute("UPDATE conversations SET required_projection_version = 'native-fork-v1' WHERE id = ?", (child,))
+    method = "get_messages_for_conversation" if failure_at == "messages" else (
+        "hard_delete_conversation" if hard else "soft_delete_conversation"
+    )
+    original = getattr(db, method)
+
+    def fail_once(*args: Any, **kwargs: Any) -> None:
+        monkeypatch.setattr(db, method, original)
+        if failure_at == "messages":
+            original(*args, **kwargs)
+        raise RuntimeError("injected cascade failure")
+
+    monkeypatch.setattr(db, method, fail_once)
+    with pytest.raises(ConflictError, match="workspace_delete_incomplete"):
+        if hard:
+            db.hard_delete_workspace("workspace-one")
+        else:
+            db.delete_workspace("workspace-one", expected_version=1)
+    if db.backend_type == BackendType.POSTGRESQL:
+        assert db.get_connection()._connection.info.transaction_status.name == "IDLE"
+    else:
+        assert not db.get_connection().in_transaction
+    workspace = db.get_workspace("workspace-one")
+    assert workspace is not None and bool(workspace["native_chat_admission_closed"])
+    assert workspace["version"] == 1
+    if hard:
+        db.hard_delete_workspace("workspace-one")
+        assert db.get_conversation_by_id(child, include_deleted=True) is None
+    else:
+        assert db.delete_workspace("workspace-one", expected_version=1)
+        assert db.get_conversation_by_id(child, include_deleted=True)["deleted"]
+    assert db.get_workspace("workspace-one") is None
 
 
 @pytest.mark.parametrize(("hard", "trashed"), [(False, False), (True, False), (True, True)])
@@ -249,7 +343,10 @@ def test_resume_state_retains_snapshot_bound_assistant_identity(db: CharactersRA
     assert state["conversation"]["assistant_binding_mode"] == "snapshot_v1"
 
 
-def test_postgres_workspace_delete_rejects_caller_owned_driver_transaction(db: CharactersRAGDB) -> None:
+@pytest.mark.parametrize("hard", [False, True])
+@pytest.mark.parametrize("commit", [False, True])
+def test_postgres_workspace_delete_rejects_caller_owned_driver_transaction(db: CharactersRAGDB, hard: bool, commit: bool) -> None:
+    """Rejected deletion leaves driver-owned work for the caller to settle."""
     if db.backend_type != BackendType.POSTGRESQL:
         pytest.skip("PostgreSQL driver transaction behavior")
     db.execute_query(
@@ -261,11 +358,22 @@ def test_postgres_workspace_delete_rejects_caller_owned_driver_transaction(db: C
     assert raw.info.transaction_status.name == "INTRANS"
     try:
         with pytest.raises(ConflictError, match="outermost transaction"):
-            db.delete_workspace("workspace-one", expected_version=1)
+            if hard:
+                db.hard_delete_workspace("workspace-one")
+            else:
+                db.delete_workspace("workspace-one", expected_version=1)
         assert raw.info.transaction_status.name == "INTRANS"
+        workspace = db.get_workspace("workspace-one")
+        assert workspace["name"] == "Uncommitted rename"
+        assert not bool(workspace["native_chat_admission_closed"])
+        if commit:
+            raw.commit()
+        else:
+            raw.rollback()
     finally:
         raw.rollback()
-    assert db.get_workspace("workspace-one")["name"] == "Workspace One"
+    expected_name = "Uncommitted rename" if commit else "Workspace One"
+    assert db.get_workspace("workspace-one")["name"] == expected_name
 
 
 def test_workspace_delete_guard_reads_postgres_driver_transaction_status() -> None:
