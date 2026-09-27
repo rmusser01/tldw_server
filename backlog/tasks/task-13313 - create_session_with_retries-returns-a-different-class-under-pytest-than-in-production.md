@@ -3,10 +3,10 @@ id: TASK-13313
 title: >-
   create_session_with_retries returns a different class under pytest than in
   production
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:54'
-updated_date: '2026-09-22 20:51'
+updated_date: '2026-09-27 17:32'
 labels:
   - bug
   - llm
@@ -78,6 +78,8 @@ TWO CLAIMS IN THE DESCRIPTION NEED QUALIFYING.
 2. 'An operator ... hits an unhandled RuntimeError on every chat call.' The RuntimeError is deliberate and documented -- openai_adapter.py carries the comment 'If disabled explicitly, raise clear error rather than falling back'. The defect is that the switch could not be exercised by any test, not that the error is unhandled. The new test asserts that documented behaviour, which is what AC #4 asked for.
 
 Verification: LLM_Adapters + LLM_Calls on this branch = 18 failed / 1230 passed. Baseline on origin/dev by detached checkout = 18 failed / 1195 passed, the identical 18 failures (all local adapters -- ollama, vllm, llamacpp, ooba, tabbyapi, aphrodite, local-llm -- none of which import any file changed here). Delta is +35 passing, exactly the new tests. Zero regressions. Adding tests/lint to the run gives 19 failed / 1242 passed; the extra is test_endpoint_auth_deps_import_boundary, also confirmed failing on a clean tree. ruff clean on all seven touched files.
+
+Re-verified on dev 2026-09-27: no PYTEST_CURRENT_TEST branch in chat_calls.py or any provider adapter (#2983). All ACs met.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

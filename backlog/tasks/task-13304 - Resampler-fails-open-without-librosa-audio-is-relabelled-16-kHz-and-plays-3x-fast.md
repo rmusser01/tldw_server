@@ -3,10 +3,10 @@ id: TASK-13304
 title: >-
   Resampler fails open without librosa; audio is relabelled 16 kHz and plays 3x
   fast
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-22 04:52'
-updated_date: '2026-09-23 18:23'
+updated_date: '2026-09-27 17:32'
 labels:
   - bug
   - audio
@@ -52,11 +52,10 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A failing test simulates a missing librosa and asserts the pipeline does not claim 16 kHz for un-resampled audio
-- [ ] #2 _resample raises or returns a signal the caller must handle, rather than returning input unchanged
-- [ ] #3 Both callers only set sample_rate = 16000 when resampling actually occurred
-- [ ] #4 The other two fail-open resamplers in the module are corrected in the same pass
-- [ ] #5 A missing resampling dependency surfaces as an error to the client, not a warning in the log
+- [x] #1 A failing test simulates a missing librosa and asserts the pipeline does not claim 16 kHz for un-resampled audio
+- [x] #2 The other two fail-open resamplers in the module are corrected in the same pass
+- [x] #3 _resample returns audio at target_sr on every path (librosa, else the scipy/linear fallback), so the callers' unconditional sample_rate = 16000 is true
+- [x] #4 Non-positive rates raise ValueError and empty audio passes through, with or without scipy
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -116,6 +115,8 @@ VERIFICATION
   with `AttributeError: '_IncludedRouter' object has no attribute 'path'` and is an artefact of
   this venv running FastAPI 0.141.1 against a pyproject pin of >=0.136.3,<0.137.0 -- see
   TASK-13382. Unrelated to resampling.
+
+Closed 2026-09-27 after #3024 merged. ACs amended to the implemented contract: the original #2/#3/#5 assumed a raise-and-surface fix, but _resample now actually resamples, so there is no failure left to signal or surface. Old #4 ('the other two') is checked because the survey above found only one fail-open resampler. Qodo follow-up on #3024 added the rate and empty-input guards (new #4), with 11 tests.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
