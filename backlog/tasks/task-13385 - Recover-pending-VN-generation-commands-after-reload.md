@@ -4,7 +4,7 @@ title: Recover pending VN generation commands after reload
 status: Done
 assignee: []
 created_date: '2026-09-27 15:25'
-updated_date: '2026-09-27 16:11'
+updated_date: '2026-09-27 16:12'
 labels:
   - vn-assets
   - frontend
@@ -13,6 +13,7 @@ dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/issues/2021'
   - 'https://github.com/rmusser01/tldw_server/pull/3015'
+  - 'https://github.com/rmusser01/tldw_server/pull/3028'
 documentation:
   - Docs/Design/VN_PENDING_COMMAND_RECOVERY.md
   - IMPLEMENTATION_PLAN_vn_command_recovery.md
@@ -53,6 +54,8 @@ Final follow-up reviewer found no remaining actionable defects after detail.code
 Final corrected full-browser check used backend detail.code/message/details/retryable and the real API client: exactly one Retry POST, canonical public message, empty journal, Start enabled, raw message/details absent and no pageerror after clean reload. Normal preview now serves /vn-assets HTTP200 at http://127.0.0.1:8128, APIbase8000, no fake environment credential; existing dependency link retained locally only while preview runs. Isolated browser sessions closed. Final independent review clear. All three plan stages complete; own implementation plan is removed per repository completion policy, preserved historically in local implementation commit3f32c5be34. No full-project frontend/backend or live-GPU acceptance run; scoped suite covered71 VN and26 real fetch-client cases,97passed13.23s, tsc0, scopedESLint0warnings and diffcheck0. Bandit only unchanged VN Python baseline0findings0errors6764lines; unsupported TypeScript assessed by scoped lint, privacy tests and independent review. No backend/Jobs/output changes. New feature not pushed or merged; integration needs requester choice. Colliding CLI-created archive13379 and preview-only UI link excluded from commits.
 
 Requester selected option2 (push and create PR), not merge. Fetched dev718c191082f1d6372fb6fe000ac763dcc07ffcbd; its four new commits touch only unrelated audio resampling/test and task13304/13382 records. Unpublished branch rebased conflict-free from old8b12335c171aaa3a40bc38a2076c4f89962e674f; range-diff shows all3patches unchanged and unrelated base files match dev byte-for-byte. Fresh97tests passed11.44s, typecheck0, scopedESLint0warnings and diffcheck0 on rebased head802bef1194309bb7543e7a0ccbf2395527f9da03. No remote branch or existing PR found; publish normally without force. Prior independent review and browser evidence apply to unchanged source patches, not a claim of completed new-head hosted review. Human-written Change summary and live CI remain merge gates; no merge or automation requested.
+
+Published requester-approved branch codex/vn-command-recovery by normal push, verified local/remote head01a964685dbe0b667ac85c898ab97496c63d6a06, and created PR3028 against dev: https://github.com/rmusser01/tldw_server/pull/3028. Attached PR to this chat. Human-owned Change summary explicitly pending; AI-authored summary is not a substitute. No merge or auto-merge enabled. Task implementation remains Done; hosted CI/review and human summary are PR integration gates, not claims of completion. Final tracking-only commit will be pushed normally after verifying remote ownership.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
