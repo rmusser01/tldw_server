@@ -1,5 +1,161 @@
 # PR 3016 VN Durability Review Implementation Plan
 
+## Current Review Wave: Tasks40-43
+
+Normal explicit12-file pre-commit completed exit0. Applicable checks Passed;
+no-file yaml/toml/wizardRuff/black Skipped, not passes; deprecated-stage warnings
+retained. Post-hook final-source/evidence audits match reviewed bytes: R1 15,
+cover6, scoped-review5, producers30/91 and qualified43 46of47/Main15of16 with
+exact superseded live repository exclusion only. All hook/test/agent sessions
+closed. Normal scoped commit/FF push and external review/CI/merge remain pending.
+No source changes by hooks, test/scanner repeat or body approval bypass.
+
+Full exact1db8aaa6 request5852005470 COMPLETED formal5328585115 at02:40:14Z,
+terminal5852030315 at02:40:17Z exacthead/busy5852006462 fresh404. New five
+4113844394/398/404/408/413;81reviews67threads5unresolved44comments/allpages exhausted.
+AC5 reopened/AC6 pending. Tasks1-39 remain independently approved/frozen/CLOSED.
+
+### Stage 1: Bound New Contracts
+**Goal:** Verify synchronous legacy cleanup/V1 start transitions, recipe API calls,
+configured-book snapshot outage behavior and repeated item-ledger query access.
+**Success Criteria:** Jobs authority, cancellation disposition, recipe immutability,
+atomic submission and legacy compatibility remain intact; no universal async claim.
+**Tests:** Public held-operation scheduling/resource/cancellation controls, real
+submission rollback and world-book controls, native existing/new schema query plans.
+**Status:** Complete
+
+### Stage 2: Minimal Corrections
+**Goal:** Task40 offloads complete legacy cleanup and V1 start operations through
+the existing owned-thread boundary. Task41 makes configured world-book reads strict
+only for new V1 snapshots, retaining the legacy V0 fallback. Task42 offloads complete
+generation/retry/regenerate service operations with owned connections/materialized
+responses. Task43 adds the smallest schema-managed item-leading recipe index.
+**Success Criteria:** No new queue/lease authority, historical byte/counter rewrite,
+raw SQL outside DB management, shared fixture/config change or broad abstraction.
+**Tests:** Sensitive bounded RED/GREEN, rollback/closure/once-repeated cancellation,
+exception/status/idempotency parity, scoped security/static/doc/type/tier checks.
+**Status:** Complete
+
+### Stage 3: Independent Review And Integration
+**Goal:** Fresh independent SPEC/QUALITY/final changed-contract approval, normal
+scoped hooks/commit/push, five individual replies and one full new-head review.
+**Success Criteria:** All exact-head review/required CI/current strict dev/human
+gates before normal merge; no body PATCH approval bypass/tracking-only push.
+**Tests:** Frozen matching evidence and focused final controls, no broad repeat.
+**Status:** In Progress
+
+All four producer scopes locally complete. Singer42 CLOSED/frozen91 verified:
+final27pass9warnings40.81s/XML39.857, separate existing5pass7warnings9.11s/XML8.380;
+authoritative isolated RED3held-read/5drain/3postcommit failures, earlier AuthNZ
+default-path/ref-inventory/collection harness failures qualified, not product/pass
+credit. Faraday43 CLOSED/frozen47 verified: native RED11fail2controls, final13pass
+4warnings16.91s/XML15.858; real legacy upgrade/native denial/plan/outcome controls.
+Counts overlap/not summed. Main40/41 frozen30 intact. Popper final combined review
+active; no approved claim or normal integration yet. Actual protected dev freshly
+unchanged f943 at03:06Z, no rebase. All producers' needed commands closed.
+
+Controller matching final seven nodes7pass0fail/errors/skips6warnings10.67s/
+XML9.923; overlapping producer tests, not summed. NEW controller16-entry freeze
+matches all producer30/91/47 inputs. Eight-file Bandit0/errors[]/onlyB101excluded,
+Ruff two exact baseline BLE001, compile/newline/whitespace/diff0. Isolated admitted
+plugins and approved temporary paths, not native CI. All Main sessions closed;
+independent review still pending, so no hook/commit/push/reply/merge claim.
+
+Independent Popper SPEC/QUALITY/final ISSUES T40-R1 accepted: off-thread local
+counter decrement can erase a simultaneous inline sibling begin. Actual public
+worker/native DB/standard-thread trace reproduction sees generating->reviewing
+while the sibling remains active; both deliveries/counters complete correctly.
+No additional actionable findings in Tasks41-43/V1 start. Correct only repository-
+local counter synchronization with a short Lock around begin/finish/read snapshot,
+never holding it over DB admission or I/O. Existing begin transaction ordering,
+cleanup before reconciliation/error isolation and local-only display scope remain.
+Sensitive overlap RED/GREEN and scoped fresh re-review required. Original review7,
+producer30/91/47 and Main16 freezes retained; only live repo hashes superseded.
+
+T40-R1 implemented/frozen15 checked0. Actual new overlap RED1 assertion failure,
+GREEN3pass4warnings8.72s/XML7.433 (new overlap plus2old failure/cancel controls),
+not summed. Short local Lock import/field/three counter sections and two immediate
+docs only; full normalized repo AST/index DDL preserved. Scoped repo/new-test
+Ruff empty/Bandit before-final0/errors[]/onlyB101excluded; compile/doc/tier/diff0.
+Original30/91 match; old43 46of47/Main15of16 qualified exact live repo exclusion,
+original ISSUES review7 intact. Popper scoped R1/final disposition active; no
+approved gate or hook/commit/push/reply/merge claim. All Main commands closed.
+
+Tasks40-43 local final gate COMPLETE: Popper scoped R1 SPEC/QUALITY/final PASS,
+combined all-four disposition PASS/no remaining actionable findings, CLOSED.
+Reviewer source/hash/AST/XML/JSON/compile audits only, no fresh tests/scans.
+New own5 hashes checked0; original ISSUES7 preserved. R1 original15/cover6 and
+producer30/91 match; qualified43 46of47/Main15of16 exclude exact live repo only.
+Actual protected dev fresh03:29Z f943 unchanged/no rebase. All needed agents/tests/
+static commands closed. Normal scoped12-file hooks/commit/FF push and five replies
+next; exact new-head full Qodo/seven required passes/merge remain external gates.
+AC5 open/AC6 pending. Body PATCH rejection and unanswered approval not bypassed.
+
+Tasks40/41 locally implemented/frozen30 entries; Popper fresh independent review
+active, not yet approved. Actual worker RED11fail and snapshot RED2fail4controls;
+combined GREEN17pass, final2 diagnostic controls and existing5 affected controls
+overlap, not summed. Final Bandit4files0/errors[]/onlyB101excluded; Ruff two exact
+baseline BLE001, not lint-clean. Initial cache-write permission failure has no
+lint pass credit; corrected no-cache audit/compile/full normalized AST/doc/tier
+evidence retained. Prior artifacts unchanged with exact live-source exclusions.
+Task42/43 independent producers still finalizing. The item-leading index belongs
+after existing item/outcome column upgrade in the schema initializer so old DBs
+can create it; only this minimal DDL hunk is authorized, not query changes.
+No new normal integration/replies/merge yet; AC5 open/AC6 pending.
+
+Ruling: Selected configured world-book query failures must not become frozen empty
+V1 context. Strict snapshot retrieval aborts atomic submission with safe contextual
+VN error; legacy V0 fallback remains. Cost if wrong: configured-book outages reject
+new submission rather than create reduced-context recipes, not historical rewriting.
+Ruling: Reuse the complete owning-thread boundary and materialize response data;
+private-memory/active caller transactions retain their documented fallback. This
+does not promise universally asynchronous DB access or change Jobs authority.
+Preflight: One implementer owns both worker transitions and strict snapshot helper/
+service callsite; endpoint implementer owns endpoint/new API tests only; index
+implementer owns repository schema/new DB tests only. Tracking/design/ledger are
+controller-owned. Each freezes only its owned source/evidence before final review.
+
+## Current External Integration Checkpoint: Tasks37-39
+
+Normal eight-file commit a7fe4f32d72fc922f2c915708387254f38277e5e, then
+conflict-free22commit rebase onto actual protected dev
+f94375c26e457be1f7752f20c9f11102f2503e42. All22 range-diff patches equal;
+all58 owned full raw diffs byte-identical; nine new MCP/backlog base paths had
+zero exact overlap. Added backup codex/vn3016-before-dev-f94375-a7fe4f32;
+previous backups and both already-applied retained stashes preserved.
+Exact34de108-lease push and GitHub verified current head
+1db8aaa6d47b3684dabf8ee0e2a40e0b62af4af5. No rebase while actual dev unchanged.
+Normal commit emitted no hooks: no commit-stage execution claim/no bypass.
+Inherited Git packing/gc notices preserved, no manual GC/prune/cleanup.
+
+Tasks1-39 LOCAL COMPLETE/frozen/independently approved. Godel, Volta and Pascal
+CLOSED; all needed tests/hooks/rebase/push commands closed. Latest Pascal final
+SPEC/QUALITY/changed-contract PASS/audits only; new own4 hashes verified.
+Post-rebase separate bounded VN4pass0fail/errors/skips6warnings16.43s/XML15.185;
+JobsSQLite1pass0fail/errors/skips6warnings4.18s/XML3.161. Counts overlap/not summed;
+no fresh PG/scanner/browser/E2E claim. After push17/4/qualified18/qualified20/37/72/
+priorreview4+8/Task25 103 hashes match, exact superseded live exclusions retained.
+Raw /tmp/vn3016-rebase-f94375-* and /tmp/vn3016-post-f94375-* preserved.
+
+Individual replies4113830763/4113830831/4113830910/4113830976 exact bodies verified;
+all four new threads resolved. AC5 checked, AC6 pending. Fresh80reviews62threads
+0unresolved44conversationcomments/all outer+nested pages exhausted. Human COMMENTED
+reviews are our replies, not full Qodo. Edited CodeRabbit skipped notice inspected;
+Qodo summary02:33:35Z1bug0rules47historicalomissions/exact1db footer is not full
+completion; its remaining archive observation is the tested approved-contract
+pushback, not new actionable code work. ONE full exact-head request5852005470
+at2026-09-27T02:35:40Z PENDING/busy5852006462 at02:35:52Z live body inspected.
+Do not duplicate while pending. Earlier full reviews are historical after push.
+
+Exact54 actual check runs33queued21completed(1cancelled1neutral19skipped), all seven
+required contexts ABSENT including trusted-license commit status. Status pages
+contain only CodeRabbit success55012645280/reviewskipped/notrequiredpass. Actual
+page counts1 each/pipefail exit0/newest per context/id; no actionable failure.
+OPEN/BLOCKED/mergedAtnull/no merge attempt. Only owned task/plan integration notes
+dirty locally; no tracking-only push invalidating review. Human summary remains
+VERBATIM; Verification is stale40e5. Guarded body PATCH rejection remains unbypassed,
+explicit async approval unanswered/no mutation or stale candidate use.
+
 ## Current Review Wave: Tasks 37-39
 
 Full exact34de108 request5851647535 completed formal5328428101/terminal5851679010

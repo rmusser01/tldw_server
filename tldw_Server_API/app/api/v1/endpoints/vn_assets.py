@@ -7,6 +7,8 @@ import inspect
 import json
 import os
 import uuid
+from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -124,6 +126,35 @@ async def _generated_files_repo() -> AuthnzGeneratedFilesRepo:
 
 async def _storage_service() -> Any:
     return await get_storage_service()
+
+
+async def _run_generation_operation(
+    service: VNAssetPackService,
+    operation: Callable[[], VNAssetGenerationStatusResponse],
+) -> VNAssetGenerationStatusResponse:
+    """Await complete submission work and transfer only materialized response data.
+
+    Args:
+        service: Initialized repository whose schema setup remains caller-owned.
+        operation: Synchronous generation/retry/regeneration service operation;
+            it finishes its transactions before returning a status response.
+
+    Returns:
+        The response reconstructed on the caller from a plain JSON-compatible dict.
+
+    Raises:
+        Native service errors unchanged unless caller cancellation was observed.
+        Cancellation drains commit/rollback/owned close before propagation; a linked
+        pending receipt remains available for normal recovery. Private-memory and
+        active caller transactions retain the repository's owner-thread fallback,
+        not a universally asynchronous database guarantee.
+    """
+    def materialize_response() -> dict[str, Any]:
+        """Finish service work and serialize its response on the owning thread."""
+        return operation().model_dump(mode="json")
+
+    response = await service.repo.run_worker_replay_operation(materialize_response)
+    return VNAssetGenerationStatusResponse.model_validate(response)
 
 
 def _cleanup_blocker_provider(
@@ -1878,13 +1909,14 @@ async def start_generation(
     if replay is not None:
         return replay
     try:
-        response = service.start_generation(
+        response = await _run_generation_operation(service, partial(
+            service.start_generation,
             pack_id,
             generation_request,
             user_id=owner_user_id,
             jobs_manager=jobs_manager,
             idempotency_receipt=receipt,
-        )
+        ))
     except ValueError as exc:
         _release_idempotency_claim(
             service,
@@ -1978,14 +2010,15 @@ async def retry_slot_generation(
     if replay is not None:
         return replay
     try:
-        response = service.retry_slot(
+        response = await _run_generation_operation(service, partial(
+            service.retry_slot,
             pack_id,
             slot_id,
             generation_request,
             user_id=owner_user_id,
             jobs_manager=jobs_manager,
             idempotency_receipt=receipt,
-        )
+        ))
     except ValueError as exc:
         _release_idempotency_claim(
             service,
@@ -2056,14 +2089,15 @@ async def regenerate_item(
     if replay is not None:
         return replay
     try:
-        response = service.regenerate_item(
+        response = await _run_generation_operation(service, partial(
+            service.regenerate_item,
             pack_id,
             item_id,
             generation_request,
             user_id=owner_user_id,
             jobs_manager=jobs_manager,
             idempotency_receipt=receipt,
-        )
+        ))
     except ValueError as exc:
         _release_idempotency_claim(
             service,

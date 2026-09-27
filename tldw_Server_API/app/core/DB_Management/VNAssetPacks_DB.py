@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from contextvars import copy_context
 from functools import partial
+from threading import Lock
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
@@ -305,6 +306,7 @@ class VNAssetPacksRepository:
         self.legacy_activity_reader: LegacyActivityReader | None = None
         # Inline execution display is instance-local, never queue/lease authority.
         self._inline_legacy_activity: dict[tuple[int, int], int] = {}
+        self._inline_legacy_activity_lock = Lock()
 
     @classmethod
     def initialized(cls, db: CharactersRAGDB) -> VNAssetPacksRepository:
@@ -1984,11 +1986,13 @@ class VNAssetPacksRepository:
         This display-only count is not shared across repository instances or
         processes. Jobs-backed work uses the authoritative reader instead.
         No transaction/connection is held across the caller's await.
+        Serialize only the local counter update against owning-thread cleanup.
         """
         with self.db.transaction() as conn:
             _lock_variant(conn, batch_id, slot_id, None)
             key = (batch_id, slot_id)
-            self._inline_legacy_activity[key] = self._inline_legacy_activity.get(key, 0) + 1
+            with self._inline_legacy_activity_lock:
+                self._inline_legacy_activity[key] = self._inline_legacy_activity.get(key, 0) + 1
 
     def finish_legacy_display(
         self, batch_id: int, slot_id: int, *, inline: bool, fallback_status: str | None,
@@ -2005,14 +2009,16 @@ class VNAssetPacksRepository:
         persisted claim or fence.
         Exclude only this exact finishing Jobs ID/lease during SDK handoff;
         replacement leases and siblings still contribute to display.
+        The local counter lock never spans database admission or reconciliation.
         """
         if inline:
             key = (batch_id, slot_id)
-            remaining = self._inline_legacy_activity.get(key, 0) - 1
-            if remaining > 0:
-                self._inline_legacy_activity[key] = remaining
-            else:
-                self._inline_legacy_activity.pop(key, None)
+            with self._inline_legacy_activity_lock:
+                remaining = self._inline_legacy_activity.get(key, 0) - 1
+                if remaining > 0:
+                    self._inline_legacy_activity[key] = remaining
+                else:
+                    self._inline_legacy_activity.pop(key, None)
         with self.db.transaction() as conn:
             try:
                 _lock_variant(conn, batch_id, slot_id, None)
@@ -2048,7 +2054,8 @@ class VNAssetPacksRepository:
             "SELECT id, status FROM vn_asset_batches WHERE pack_id = ? AND recipe_version = 0 AND status != 'cancelled'",
             (slot["pack_id"],),
         ).fetchall()}
-        active = any(self._inline_legacy_activity.get((batch_id, slot_id), 0) for batch_id in batches)
+        with self._inline_legacy_activity_lock:
+            active = any(self._inline_legacy_activity.get((batch_id, slot_id), 0) for batch_id in batches)
         queued = False
         if batches and self.legacy_activity_reader is not None:
             settled: set[tuple[int, int, str]] = set()
@@ -3012,6 +3019,10 @@ def _ensure_recipe_outcome_columns(conn: Any) -> None:
         conn.execute("ALTER TABLE vn_asset_generation_recipes ADD COLUMN claim_lease_id TEXT")
     if "claim_token" not in columns:
         conn.execute("ALTER TABLE vn_asset_generation_recipes ADD COLUMN claim_token TEXT")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_vn_asset_generation_recipes_item_outcome "
+        "ON vn_asset_generation_recipes(item_id, outcome_status)"
+    )
 
 
 def _lock_variant(conn: Any, batch_id: int | None, slot_id: int | None, variant_index: int | None) -> None:

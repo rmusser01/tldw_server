@@ -738,7 +738,7 @@ class VNAssetPackService:
                 raise ValueError("primary_character_not_found")
             recipes = []
             for slot in slots:
-                slot_recipe = build_slot_recipe(self.repo, pack, slot, character)
+                slot_recipe = build_slot_recipe(self.repo, pack, slot, character, strict_world_books=True)
                 for variant_index in range(int(variant_count or slot["variant_count"])):
                     recipes.append({
                         "slot_id": int(slot["id"]),

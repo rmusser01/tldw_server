@@ -324,10 +324,11 @@ class VNAssetGenerationWorker:
             if recipe_version == 0:
                 legacy_job_id = _positive_int(_job_id(job))
                 try:
-                    self.repo.finish_legacy_display(
+                    await self.repo.run_worker_replay_operation(partial(
+                        self.repo.finish_legacy_display,
                         batch_id, slot_id, inline=legacy_inline, fallback_status=legacy_status,
                         finishing_delivery=(legacy_job_id, lease_id) if legacy_job_id is not None and lease_id else None,
-                    )
+                    ))
                 except Exception as exc:  # noqa: BLE001 - display cannot alter generation's SDK disposition
                     # Frame metadata only: no messages, locals, source text or chained exceptions.
                     frames = []
@@ -903,11 +904,12 @@ class VNAssetGenerationWorker:
         )
 
         if attempt_token is not None:
-            self.repo.start_variant_generation(
+            await self.repo.run_worker_replay_operation(partial(
+                self.repo.start_variant_generation,
                 batch_id=batch_id, slot_id=slot_id, variant_index=variant_index,
                 attempt_token=attempt_token,
                 validate_authority=(lambda: self._require_current_job_lease(job, user_id=user_id)) if job else None,
-            )
+            ))
         else:
             self.repo.update_slot(slot_id, {"status": SLOT_STATUS_GENERATING, "last_error": None})
         with self.backend_gate.try_acquire(backend, model=model) as lease:
@@ -1290,7 +1292,13 @@ def _generated_variant_result(item: Mapping[str, Any], *, batch_id: int) -> dict
 def _world_book_entries_for_pack(
     repo: VNAssetPacksRepository,
     pack: Mapping[str, Any],
+    *, strict: bool = False,
 ) -> list[Any]:
+    """Read selected enabled entries; strict snapshot outages raise a safe VN error.
+
+    Unconfigured or genuinely empty books return an empty list. Legacy callers
+    keep the optional logged fallback; new snapshots must not freeze failed reads.
+    """
     world_book_ids: list[int] = []
     for raw_id in _loads_json_list(pack.get("source_world_book_ids_json")):
         parsed_id = _positive_int(raw_id)
@@ -1313,6 +1321,11 @@ def _world_book_entries_for_pack(
             )
         return entries
     except Exception as exc:
+        if strict:
+            raise VNAssetGenerationError(
+                "vn_asset_world_book_context_unavailable", retryable=True,
+                pack_id=pack.get("id"), operation="read_world_book_context",
+            ) from None
         logger.warning(
             "Failed to load VN asset world-book context: pack_id={} error={}",
             pack.get("id"),
@@ -1364,11 +1377,14 @@ def build_slot_recipe(
     pack: Mapping[str, Any],
     slot: Mapping[str, Any],
     character: Mapping[str, Any],
+    *, strict_world_books: bool = False,
 ) -> dict[str, Any]:
     """Return frozen generation parameters from pack, slot, and character rows.
 
     repo supplies world-book context. Invalid required row fields or prompt
-    construction failures propagate; optional world-book failures are logged.
+    construction failures propagate. strict_world_books aborts a new snapshot
+    with a safe retryable VN error on configured-book read failures; the default
+    retains the optional legacy fallback. Unconfigured/empty books remain valid.
     """
     labels = _loads_json(slot.get("labels_json"), {})
     preview = build_prompt_preview(
@@ -1381,7 +1397,7 @@ def build_slot_recipe(
         style_lock=_loads_json(pack.get("style_lock_json"), {}),
         slot_template=slot.get("prompt_template"),
         labels=labels,
-        world_book_entries=_world_book_entries_for_pack(repo, pack),
+        world_book_entries=_world_book_entries_for_pack(repo, pack, strict=strict_world_books),
     )
     width, height, image_format, extra_params = _generation_shape(pack, slot)
     return {
