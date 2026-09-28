@@ -402,6 +402,42 @@ describe("fetch-backed WebUI api client", () => {
     expect(JSON.stringify(storedRequestHistory()[0])).not.toContain(secret)
   })
 
+  it("preserves only documented VN pre-admission conflicts through the real Retry client", async () => {
+    const secret = "raw recipe data must not reach the browser"
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      detail: { code: "vn_asset_execution_recipe_invalid", message: secret, details: { recipe: secret }, retryable: false }
+    }, { status: 409, statusText: "Conflict" })))
+    await loadApiModule()
+    const { retryVNAssetSlot } = await import("@web/lib/api/vnAssets")
+    await expect(retryVNAssetSlot(7, 12, { idempotency_key: "vn-generation-original-key", source_batch_id: 41 })).rejects.toMatchObject({
+      status: 409, errorCode: "vn_asset_execution_recipe_invalid",
+      message: "The original backend selection cannot be read. Start generation to use current settings."
+    })
+    expect(JSON.stringify(storedRequestHistory())).not.toContain(secret)
+  })
+
+  it.each([
+    ["/rag/search", 409, "vn_asset_execution_recipe_invalid"],
+    ["/vn/vn-assets/packs/7/slots/12/retry", 500, "vn_asset_execution_recipe_invalid"],
+    ["/vn/vn-assets/packs/7/slots/12/retry", 409, "idempotency_key_in_progress"]
+  ])("does not classify ambiguous or unrelated errors as VN rejections (%s, %s, %s)", async (path, status, code) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ detail: { code, message: "private detail", details: {}, retryable: false } }, { status, statusText: "Conflict" })))
+    const { apiClient } = await loadApiModule()
+    let failure: unknown
+    try { await apiClient.post(path as string, {}) } catch (error) { failure = error }
+    expect(failure).toMatchObject({ status, message: "Conflict" })
+    expect((failure as { errorCode?: string }).errorCode).toBeUndefined()
+    expect(JSON.stringify(storedRequestHistory())).not.toContain("private detail")
+  })
+
+  it("does not mistake a provider-shaped field for a VN pre-admission rejection", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({
+      detail: { error_code: "vn_asset_execution_recipe_invalid", message: "private detail" }
+    }, { status: 409, statusText: "Conflict" })))
+    const { apiClient } = await loadApiModule()
+    await expect(apiClient.post("/vn/vn-assets/packs/7/slots/12/retry", {})).rejects.toMatchObject({ status: 409, message: "Conflict" })
+  })
+
   it("does not expose or persist untyped server-error strings", async () => {
     const secret = "legacy-upstream-provider-secret"
     const fetchMock = vi.fn().mockResolvedValue(
