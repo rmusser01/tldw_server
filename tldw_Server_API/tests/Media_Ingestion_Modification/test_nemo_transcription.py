@@ -31,14 +31,14 @@ class TestNemoTranscription:
         return audio_data, sample_rate
 
     @pytest.fixture
-    def mock_config(self):
+    def mock_config(self, tmp_path):
         """Mock configuration for testing."""
         return {
             'STT-Settings': {
                 'default_transcriber': 'parakeet',
                 'nemo_model_variant': 'standard',
                 'nemo_device': 'cpu',
-                'nemo_cache_dir': './test_models/nemo'
+                'nemo_cache_dir': str(tmp_path / 'nemo')
             }
         }
 
@@ -51,7 +51,7 @@ class TestNemoTranscription:
         except ImportError:
             pytest.skip("Nemo module not available")
 
-    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.loaded_config_data')
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.get_stt_config')
     def test_cache_dir_creation(self, mock_config_data, mock_config):
         """Test that cache directory is created properly."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
@@ -59,7 +59,7 @@ class TestNemoTranscription:
         )
 
         # Use fixture-provided config through the patched callable
-        mock_config_data.return_value = mock_config
+        mock_config_data.return_value = mock_config['STT-Settings']
 
         cache_dir = _get_cache_dir()
         assert isinstance(cache_dir, Path)
@@ -82,7 +82,7 @@ class TestNemoTranscription:
         assert key3 == 'parakeet_onnx'
 
     @patch('nemo.collections.asr.models.EncDecRNNTBPEModel.from_pretrained')
-    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.loaded_config_data')
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.get_stt_config')
     def test_load_parakeet_standard(self, mock_config_data, mock_from_pretrained, mock_config):
         """Test loading standard Parakeet model."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
@@ -92,7 +92,7 @@ class TestNemoTranscription:
         # Clear cache first
         _model_cache.clear()
 
-        mock_config_data.return_value = mock_config
+        mock_config_data.return_value = mock_config['STT-Settings']
         mock_model = MagicMock()
         mock_from_pretrained.return_value = mock_model
 
@@ -103,7 +103,7 @@ class TestNemoTranscription:
         assert 'parakeet_standard' in _model_cache
 
     @patch('nemo.collections.asr.models.EncDecMultiTaskModel.from_pretrained')
-    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.loaded_config_data')
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.get_stt_config')
     def test_load_canary_model(self, mock_config_data, mock_from_pretrained, mock_config):
         """Test loading Canary model."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
@@ -113,7 +113,7 @@ class TestNemoTranscription:
         # Clear cache first
         _model_cache.clear()
 
-        mock_config_data.return_value = mock_config
+        mock_config_data.return_value = mock_config['STT-Settings']
         mock_model = MagicMock()
         mock_from_pretrained.return_value = mock_model
 
@@ -456,7 +456,7 @@ class TestNemoTranscription:
 
     @patch('onnxruntime.InferenceSession')
     @patch('huggingface_hub.snapshot_download')
-    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.loaded_config_data')
+    @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.get_stt_config')
     def test_load_parakeet_onnx(self, mock_config_data, mock_download, mock_ort_session, mock_config):
         """Test loading ONNX variant of Parakeet."""
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
@@ -467,7 +467,7 @@ class TestNemoTranscription:
             _onnx_model_cache,
         )
 
-        mock_config_data.return_value = mock_config
+        mock_config_data.return_value = mock_config['STT-Settings']
         _model_cache.clear()
         _onnx_model_cache.clear()
 
