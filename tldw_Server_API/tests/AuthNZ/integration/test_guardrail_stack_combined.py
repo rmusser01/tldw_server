@@ -38,13 +38,10 @@ async def test_guardrail_stack_login_lockout_and_chat_budget(tmp_path):
     password_service = PasswordService()
     password_hash = password_service.hash_password("GuardrailStack!2024")
 
-    async with pool.transaction() as conn:
-        await conn.execute(
-            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
-            ("guardrail_user", "guardrail@example.com", password_hash),
-        )
+    # Seeded through UsersDB: profile_user_write_guard rejects raw users writes.
+    from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "guardrail_user")
+    user_id = await ensure_test_user(pool, "guardrail_user", "guardrail@example.com", password_hash=password_hash)
 
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
 

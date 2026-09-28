@@ -28,13 +28,10 @@ async def test_chat_budget_guard_dependency_returns_principal(tmp_path):
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    # Seed a basic user
-    async with pool.transaction() as conn:
-        await conn.execute(
-            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
-            ("budget_guard_user", "budget_guard@example.com", "x"),
-        )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "budget_guard_user")
+    # Seeded through UsersDB: profile_user_write_guard rejects raw users writes.
+    from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
+
+    user_id = await ensure_test_user(pool, "budget_guard_user", "budget_guard@example.com", password_hash="x")
 
     # Create a virtual key with a zero budget so it is immediately over limit
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
