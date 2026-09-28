@@ -588,7 +588,21 @@ async def test_concurrent_reload_installs_one_new_generation(
     assert first is not None
     configured[0] = 2
 
-    await asyncio.gather(manager.reload(), manager.reload(), manager.reload())
+    # Hold the drain open so the three reloads really overlap. Without it an
+    # idle generation can finish reloading before the next gathered task
+    # starts (slow CI runners), and sequential reloads each install one.
+    started, release = threading.Event(), threading.Event()
+    running = asyncio.create_task(manager.run(lambda: (started.set(), release.wait())))
+    reloads: list[asyncio.Task[None]] = []
+    try:
+        assert await asyncio.to_thread(started.wait, 1.0) is True
+        reloads = [asyncio.create_task(manager.reload()) for _ in range(3)]
+        await asyncio.sleep(0)
+        assert not any(task.done() for task in reloads)
+    finally:
+        release.set()
+        await running
+        await asyncio.gather(*reloads)
 
     second = manager.current_generation
     assert second is not None
