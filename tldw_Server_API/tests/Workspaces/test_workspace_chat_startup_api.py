@@ -20,6 +20,7 @@ from tldw_Server_API.app.api.v1.endpoints.workspace_chat_startup_transport impor
 from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import ChatSessionCreate
 from tldw_Server_API.app.core import feature_flags
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Workspaces import chat_startup
 from tldw_Server_API.tests.DB_Management.test_conversation_assistant_startup import db_factory as db_factory
@@ -44,7 +45,9 @@ def _payload(**values: Any) -> dict[str, Any]:
             "workspace_assistant_default_version": 2, **values}
 
 
-def _app(db: Any, monkeypatch: pytest.MonkeyPatch, *, authenticated: bool = True):
+def _app(
+    db: Any, monkeypatch: pytest.MonkeyPatch, *, authenticated: bool = True,
+) -> tuple[FastAPI, CharacterRateLimiter, dict[str, list[Any]]]:
     """Reuse real routes with owner-scoped DB/auth overrides and observable dependencies."""
     app = FastAPI()
     app.include_router(sessions.router, prefix="/api/v1/chats")
@@ -78,6 +81,27 @@ def _app(db: Any, monkeypatch: pytest.MonkeyPatch, *, authenticated: bool = True
     app.dependency_overrides[sessions.require_expected_user] = expected_user
     app.dependency_overrides[get_chacha_db_for_user] = database
     return app, limiter, effects
+
+
+@pytest.mark.unit
+def test_startup_storage_failure_logs_safe_context_without_private_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A storage outage is observable without logging keys, SQL parameters or traceback locals."""
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        """Emulate a driver error that embeds private receipt/request values."""
+        raise BackendDatabaseError(_PRIVATE)
+
+    monkeypatch.setattr(sessions, "start_workspace_chat", fail)
+    app, _, _ = _app(object(), monkeypatch)
+    logs: list[str] = []
+    sink = sessions.logger.add(logs.append, format="{message}", level="ERROR")
+    try:
+        with TestClient(app) as client:
+            response = client.post(_PATH, json=_payload(), headers={"Idempotency-Key": _PRIVATE})
+    finally:
+        sessions.logger.remove(sink)
+    assert response.status_code == 500
+    assert any("Workspace chat startup database failure" in entry for entry in logs)
+    assert _PRIVATE not in response.text + "".join(logs)
 
 
 @pytest.mark.unit

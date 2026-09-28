@@ -338,9 +338,17 @@ def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("scope", ["correct", "omitted", "wrong_workspace", "deleted", "closing", "transferred", "archived"])
+@pytest.mark.parametrize("query,parent_state,allowed", [
+    ({"scope_type": "workspace", "workspace_id": "ws"}, "active", True),
+    ({}, "active", True),
+    ({"scope_type": "workspace", "workspace_id": "other"}, "active", False),
+    ({"scope_type": "global"}, "active", False),
+    *[(query, state, state == "archived")
+      for state in ("deleted", "closing", "transferred", "archived")
+      for query in ({}, {"scope_type": "workspace", "workspace_id": "ws"})],
+])
 def test_workspace_persona_generation_requires_current_scope_access(
-    persona_chat_client, persona_chat_db, monkeypatch, scope,
+    persona_chat_client, persona_chat_db, monkeypatch, query, parent_state, allowed,
 ):
     """Ordinary generation supports Workspace Persona only with current parent access."""
     client, headers, provider_call = persona_chat_client
@@ -349,15 +357,14 @@ def test_workspace_persona_generation_requires_current_scope_access(
     persona_chat_db.upsert_workspace("ws", name="Private Workspace")
     with persona_chat_db.transaction() as conn:
         conn.execute("UPDATE conversations SET scope_type = ?, workspace_id = ? WHERE id = ?", ("workspace", "ws", cid))
-        if scope == "deleted":
+        if parent_state == "deleted":
             conn.execute("UPDATE workspaces SET deleted = ? WHERE id = ?", (True, "ws"))
-        elif scope == "closing":
+        elif parent_state == "closing":
             conn.execute("UPDATE workspaces SET system_operation_state = ? WHERE id = ?", ("staged", "ws"))
-        elif scope == "transferred":
+        elif parent_state == "transferred":
             conn.execute("UPDATE workspaces SET client_id = ? WHERE id = ?", ("other", "ws"))
-        elif scope == "archived":
+        elif parent_state == "archived":
             conn.execute("UPDATE workspaces SET archived = ? WHERE id = ?", (True, "ws"))
-    query = {} if scope == "omitted" else {"scope_type": "workspace", "workspace_id": "other" if scope == "wrong_workspace" else "ws"}
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", wraps=chat_endpoint.ProviderCredentialRuntime) as credentials,
         patch.object(chat_endpoint, "_resolve_auto_chat_routing_decision", wraps=chat_endpoint._resolve_auto_chat_routing_decision) as router,
@@ -367,7 +374,7 @@ def test_workspace_persona_generation_requires_current_scope_access(
             "model": "gpt-4", "api_provider": "openai", "conversation_id": cid, "save_to_db": True,
             "messages": [{"role": "user", "content": "Private Workspace turn"}],
         })
-    if scope in {"correct", "archived"}:
+    if allowed:
         assert response.status_code == 200, response.text
         assert provider_call.call_count == 1
         assert provider_call.call_args.kwargs["system_message"] == "You are Garden Helper."
@@ -375,6 +382,33 @@ def test_workspace_persona_generation_requires_current_scope_access(
         assert response.status_code == 404, response.text
         assert credentials.call_count == router.call_count == message.call_count == provider_call.call_count == 0
         assert persona_chat_db.get_messages_for_conversation(cid) == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("target", ["missing", "deleted"])
+@pytest.mark.parametrize("stream", [False, True])
+def test_supplied_missing_or_deleted_target_rejects_before_generation(
+    persona_chat_client, persona_chat_db, target, stream,
+) -> None:
+    """An explicit stale id cannot silently create a replacement or bypass admission."""
+    client, headers, provider_call = persona_chat_client
+    cid = "unknown-conversation"
+    if target == "deleted":
+        cid = persona_chat_db.add_conversation({"client_id": "1", "title": "Deleted target"})
+        persona_chat_db.soft_delete_conversation(cid, expected_version=persona_chat_db.get_conversation_by_id(cid)["version"])
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", wraps=chat_endpoint.ProviderCredentialRuntime) as credentials,
+        patch.object(chat_endpoint, "_resolve_auto_chat_routing_decision", wraps=chat_endpoint._resolve_auto_chat_routing_decision) as router,
+        patch.object(persona_chat_db, "add_conversation", wraps=persona_chat_db.add_conversation) as create,
+        patch.object(persona_chat_db, "add_message", wraps=persona_chat_db.add_message) as message,
+    ):
+        response = client.post("/api/v1/chat/completions", headers=headers, json={
+            "model": "auto", "api_provider": "openai", "conversation_id": cid,
+            "stream": stream, "save_to_db": True,
+            "messages": [{"role": "user", "content": "Do not create a replacement"}],
+        })
+    assert response.status_code == 404, response.text
+    assert credentials.call_count == router.call_count == create.call_count == message.call_count == provider_call.call_count == 0
 
 
 @pytest.mark.integration

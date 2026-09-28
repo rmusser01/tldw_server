@@ -155,12 +155,52 @@ async def test_chat_erasure_preserves_pre_receipt_database_support(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["_count_chat_messages", "_erase_chat_messages"])
 async def test_chat_receipt_probe_preserves_coverage_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
 ) -> None:
     """A broken store follows the existing bounded DSR preview error contract."""
     path = tmp_path / "broken-chacha.db"
     path.write_bytes(b"not a sqlite database")
     monkeypatch.setattr(dsr_service.DatabasePaths, "get_chacha_db_path", lambda _user_id: path)
     with pytest.raises(dsr_service.DataSubjectRequestCoverageUnavailableError):
-        await dsr_service._count_chat_messages("user-1")
+        await getattr(dsr_service, operation)("user-1")
+
+
+@pytest.mark.asyncio
+async def test_chat_erasure_failure_rolls_back_messages_and_receipt_reference(
+    creation_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The file-based eraser cannot commit messages before a failed conversation delete."""
+    if creation_db.backend_type.value != "sqlite":
+        pytest.skip("The data-subject eraser operates on a SQLite per-user file")
+    cid = _start(creation_db).conversation["id"]
+    creation_db.add_message({"conversation_id": cid, "sender": "user", "content": "Retained on rollback"})
+    with creation_db.transaction() as conn:
+        conn.execute("CREATE TRIGGER fail_chat_erasure BEFORE DELETE ON conversations "
+                     "BEGIN SELECT RAISE(ABORT, 'injected deletion failure'); END")
+    creation_db.close_all_connections()
+    monkeypatch.setattr(dsr_service.DatabasePaths, "get_chacha_db_path", lambda _user_id: creation_db.db_path)
+    with pytest.raises(sqlite3.IntegrityError, match="injected deletion failure"):
+        await dsr_service._erase_chat_messages("user-1")
+    with sqlite3.connect(creation_db.db_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM messages WHERE conversation_id = ?", (cid,)).fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM conversations WHERE id = ?", (cid,)).fetchone()[0] == 1
+        assert conn.execute("SELECT conversation_id FROM workspace_chat_startup_receipts").fetchone()[0] == cid
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["_count_chat_messages", "_erase_chat_messages"])
+async def test_receipt_erasure_missing_file_after_probe_is_not_recreated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    """A disappeared file keeps the count/error or erase/no-op contract without bootstrap."""
+    path = tmp_path / "missing-chacha.db"
+    monkeypatch.setattr(dsr_service.DatabasePaths, "get_chacha_db_path", lambda _user_id: path)
+    monkeypatch.setattr(dsr_service, "_has_workspace_chat_startup_receipts", lambda _path: True)
+    if operation == "_count_chat_messages":
+        with pytest.raises(dsr_service.DataSubjectRequestCoverageUnavailableError):
+            await dsr_service._count_chat_messages("user-1")
+    else:
+        assert await dsr_service._erase_chat_messages("user-1") == 0
+    assert not path.exists()

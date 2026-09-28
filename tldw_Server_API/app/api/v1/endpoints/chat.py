@@ -3480,11 +3480,16 @@ async def create_chat_completion(
     try:
         if request_data.conversation_id:
             request_data.conversation_id = validate_conversation_id(request_data.conversation_id)
-            conversation_scope = _resolve_conversation_scope(scope_type, workspace_id)
+            supplied_scope = (
+                _resolve_conversation_scope(scope_type, workspace_id)
+                if scope_type is not None or workspace_id is not None else None
+            )
             conversation = await asyncio.to_thread(
                 _verify_conversation_ownership,
-                chat_db, request_data.conversation_id, current_user, conversation_scope,
+                chat_db, request_data.conversation_id, current_user, supplied_scope,
+                use_stored_scope=supplied_scope is None,
             )
+            conversation_scope = _resolve_conversation_scope(**_scoped_conversation_fields(conversation))
             if conversation_scope.scope_type == "workspace":
                 workspace = await asyncio.to_thread(
                     require_workspace_for_chat_creation, chat_db, conversation_scope.workspace_id,
@@ -4565,7 +4570,7 @@ async def create_chat_completion(
                         native_history_owner_key,
                         prepare_native_history_message,
                     )
-                    history_scope = _resolve_conversation_scope(scope_type, workspace_id)
+                    history_scope = conversation_scope
                     _verify_conversation_ownership(chat_db, final_conversation_id, current_user, history_scope)
                     if _active_message_sync_service(current_user, history_scope) is not None:
                         raise HTTPException(409, detail={"code": "sync_owner_unsupported", "status": "unsupported_history_capability"})
@@ -6476,7 +6481,10 @@ def _verify_conversation_ownership(
     conversation_id: str,
     current_user: User,
     scope: ConversationScopeParams | None = None,
+    *,
+    use_stored_scope: bool = False,
 ) -> dict[str, Any]:
+    """Verify a live owned target before using stored scope for id-only chat turns."""
     conversation = db.get_conversation_by_id(conversation_id)
     if not conversation or conversation.get("deleted"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
@@ -6490,7 +6498,10 @@ def _verify_conversation_ownership(
     except (TypeError, ValueError):
         if str(conv_client_id) != str(user_id):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden for this conversation") from None
-    expected_scope = scope or ConversationScopeParams()
+    expected_scope = scope or (
+        _resolve_conversation_scope(**_scoped_conversation_fields(conversation))
+        if use_stored_scope else ConversationScopeParams()
+    )
     conversation_scope = conversation.get("scope_type") or "global"
     conversation_workspace_id = conversation.get("workspace_id")
     if conversation_scope != expected_scope.scope_type:

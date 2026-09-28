@@ -13,6 +13,11 @@ from tldw_Server_API.app.core.AuthNZ.repos.data_subject_requests_repo import (
     AuthnzDataSubjectRequestsRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_privacy import (
+    count_workspace_chat_startup_messages,
+    erase_workspace_chat_startup_chats,
+    has_workspace_chat_startup_receipts,
+)
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 from tldw_Server_API.app.services import admin_scope_service
@@ -175,30 +180,23 @@ async def _count_notes(user_id: int) -> int:
 
 def _has_workspace_chat_startup_receipts(path: Path) -> bool:
     """Keep chat erasure compatible with ChaCha databases predating receipts."""
-    if not path.exists():
-        return False
-    return bool(_sqlite_count_sync(
-        path,
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'workspace_chat_startup_receipts'",
-    ))
+    try:
+        return has_workspace_chat_startup_receipts(path)
+    except sqlite3.Error as exc:
+        raise DataSubjectRequestCoverageUnavailableError(
+            f"DSR count query failed for {path}: {exc}"
+        ) from exc
 
 
 async def _count_chat_messages(user_id: int) -> int:
     path = DatabasePaths.get_chacha_db_path(user_id)
     if await asyncio.to_thread(_has_workspace_chat_startup_receipts, path):
-        return await _sqlite_count(
-            path,
-            """
-            SELECT COUNT(1)
-            FROM messages m
-            JOIN conversations c ON m.conversation_id = c.id
-            WHERE (c.client_id = ? OR EXISTS (
-                SELECT 1 FROM workspace_chat_startup_receipts r
-                WHERE r.conversation_id = c.id AND r.owner_user_id = ?
-            )) AND c.deleted = 0 AND m.deleted = 0
-            """,
-            (str(user_id), str(user_id)),
-        )
+        try:
+            return await asyncio.to_thread(count_workspace_chat_startup_messages, path, str(user_id))
+        except FileNotFoundError as exc:
+            raise DataSubjectRequestCoverageUnavailableError(f"DSR subject store missing for {path}") from exc
+        except sqlite3.Error as exc:
+            raise DataSubjectRequestCoverageUnavailableError(f"DSR count query failed for {path}: {exc}") from exc
     return await _sqlite_count(
         path,
         """
@@ -494,23 +492,7 @@ async def _erase_chat_messages(user_id: int) -> int:
     path = DatabasePaths.get_chacha_db_path(user_id)
     if await asyncio.to_thread(_has_workspace_chat_startup_receipts, path):
         return await asyncio.to_thread(
-            _sqlite_hard_delete_sync,
-            path,
-            [
-                (
-                    "DELETE FROM messages WHERE conversation_id IN ("
-                    "SELECT c.id FROM conversations c WHERE c.client_id = ? OR EXISTS ("
-                    "SELECT 1 FROM workspace_chat_startup_receipts r "
-                    "WHERE r.conversation_id = c.id AND r.owner_user_id = ?))",
-                    (str(user_id), str(user_id)),
-                ),
-                (
-                    "DELETE FROM conversations WHERE client_id = ? OR EXISTS ("
-                    "SELECT 1 FROM workspace_chat_startup_receipts r "
-                    "WHERE r.conversation_id = conversations.id AND r.owner_user_id = ?)",
-                    (str(user_id), str(user_id)),
-                ),
-            ],
+            erase_workspace_chat_startup_chats, path, str(user_id),
         )
     return await asyncio.to_thread(
         _sqlite_hard_delete_sync,

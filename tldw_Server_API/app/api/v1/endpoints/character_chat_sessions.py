@@ -4540,7 +4540,22 @@ async def create_workspace_chat_startup(
         alias="Idempotency-Key", min_length=1, max_length=128, pattern=f"^{STARTUP_IDEMPOTENCY_KEY_PATTERN}$",
     ),
 ) -> ChatSessionResponse:
-    """Accept or replay one committed Workspace chat without legacy/Sync/greeting effects."""
+    """Accept or replay one committed Workspace chat without legacy/Sync/greeting effects.
+
+    Args:
+        session_data: Closed Workspace selection and metadata contract.
+        response: Receives 201 for acceptance or 200 and a replay header.
+        db: Authenticated owner's ChaCha store; startup owns its idle transaction.
+        current_user: Authenticated owner, not mutable writer/device attribution.
+        idempotency_key: Bounded retry key; only its owner-bound digest is retained.
+
+    Returns:
+        Current chat metadata projected after acceptance has committed.
+
+    Raises:
+        HTTPException: Authentication/rate-limit, input, current-access/Persona,
+            version/capacity/lifecycle, configuration or storage rejection.
+    """
     rate_limiter = get_character_rate_limiter()
     await rate_limiter.check_rate_limit(current_user.id, "chat_create")
     try:
@@ -4573,6 +4588,8 @@ async def create_workspace_chat_startup(
             detail["reason"] = error.reason
         raise HTTPException(error.status_code, detail) from None
     except (CharactersRAGDBError, BackendDatabaseError) as error:
+        # Driver messages and traceback locals may contain private receipt inputs.
+        logger.error("Workspace chat startup database failure")
         raise map_db_error_to_http(
             error, default_detail="Workspace chat startup failed", input_detail="Invalid Workspace chat startup",
             conflict_detail="Workspace chat startup conflict", log_error=False,
@@ -5404,8 +5421,8 @@ async def complete_chat_legacy(
 
 
 def _reject_session_workspace_scope(request: Request) -> None:
-    """Reject ignored Workspace scope options on global-only session consumers."""
-    if "scope_type" in request.query_params or "workspace_id" in request.query_params:
+    """Allow the global client form, rejecting unsupported or ambiguous scope."""
+    if request.query_params.getlist("scope_type") not in ([], ["global"]) or "workspace_id" in request.query_params:
         raise HTTPException(status_code=422, detail={"code": "session_scope_unsupported"})
 
 

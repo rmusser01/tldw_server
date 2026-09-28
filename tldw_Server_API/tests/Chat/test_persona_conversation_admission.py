@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as sessions
@@ -298,17 +299,47 @@ def test_global_session_rechecks_persona_before_context(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("route", ["completions", "prompt-preview", "complete-v2"])
-@pytest.mark.parametrize("query", [{"scope_type": "global"}, {"scope_type": ""}, {"workspace_id": ""}, {"workspace_id": "ws"}])
+@pytest.mark.parametrize("query", [
+    {"scope_type": "workspace"}, {"scope_type": ""}, {"scope_type": "invalid"},
+    {"workspace_id": ""}, {"workspace_id": "ws"},
+    [("scope_type", "workspace"), ("scope_type", "global")],
+])
 def test_global_session_rejects_supplied_workspace_scope_options(
-    creation_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, route: str, query: dict[str, str],
+    creation_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, route: str,
+    query: dict[str, str] | list[tuple[str, str]],
 ) -> None:
-    """Even empty/default-valued Workspace query options cannot be silently ignored."""
+    """Workspace, malformed and duplicate scope options cannot be silently ignored."""
     cid = creation_db.add_conversation({"assistant_kind": "persona", "assistant_id": "persona-a"})
     app, effects = _session_app(creation_db, monkeypatch)
     with TestClient(app) as client:
         response = client.post(f"/api/v1/chats/{cid}/{route}", json={}, params=query)
     assert response.status_code == 422, response.text
     assert effects == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("query", [b"", b"scope_type=global"])
+def test_global_session_scope_accepts_existing_client_query(query: bytes) -> None:
+    """Global clients may omit scope or name the supported global scope explicitly."""
+    request = Request({"type": "http", "query_string": query})
+    assert sessions._reject_session_workspace_scope(request) is None
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("route", ["completions", "prompt-preview"])
+def test_global_character_session_accepts_explicit_global_scope(
+    creation_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, route: str,
+) -> None:
+    """Real Character preparation and preview keep the client's explicit-global form."""
+    character = creation_db.get_character_card_by_name("Source")
+    cid = creation_db.add_conversation({"character_id": character["id"]})
+    app = FastAPI()
+    app.include_router(sessions.router, prefix="/api/v1/chats")
+    app.dependency_overrides[get_chacha_db_for_user] = lambda: creation_db
+    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id="user-1")
+    with TestClient(app) as client:
+        response = client.post(f"/api/v1/chats/{cid}/{route}", json={}, params={"scope_type": "global"})
+    assert response.status_code == 200, response.text
 
 
 @pytest.mark.integration
@@ -328,14 +359,15 @@ def test_global_session_keeps_workspace_chat_inaccessible(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("route", ["completions", "complete-v2"])
+@pytest.mark.parametrize("query", [{}, {"scope_type": "global"}])
 def test_character_only_session_cannot_downgrade_active_persona(
-    creation_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, route: str,
+    creation_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, route: str, query: dict[str, str],
 ) -> None:
     """An active Persona cannot be sent through a Character-only preparation/generator."""
     cid = creation_db.add_conversation({"assistant_kind": "persona", "assistant_id": "persona-a"})
     app, effects = _session_app(creation_db, monkeypatch)
     with TestClient(app) as client:
-        response = client.post(f"/api/v1/chats/{cid}/{route}", json={})
+        response = client.post(f"/api/v1/chats/{cid}/{route}", json={}, params=query)
     assert response.status_code == 409, response.text
     assert response.json()["detail"]["code"] == "persona_session_generation_unsupported"
     assert effects == []
