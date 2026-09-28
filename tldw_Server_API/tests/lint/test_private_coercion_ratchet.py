@@ -24,6 +24,10 @@ import ast
 from collections import Counter
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 APP_ROOT = REPO_ROOT / "tldw_Server_API" / "app"
 

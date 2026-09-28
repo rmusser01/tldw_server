@@ -28,10 +28,12 @@ SRC_LAYOUT_GLOBS = ("apps/*/src", "packages/*/src")
 
 
 def _src_dirs() -> list[Path]:
+    """Every src-layout directory (apps/*/src, packages/*/src) in this checkout."""
     return sorted(p for pattern in SRC_LAYOUT_GLOBS for p in REPO_ROOT.glob(pattern) if p.is_dir())
 
 
 def _first_party_packages() -> list[tuple[str, Path]]:
+    """(package name, its src dir) for each importable package under those dirs."""
     return [
         (pkg.name, src)
         for src in _src_dirs()

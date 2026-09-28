@@ -1131,7 +1131,9 @@ def test_backend_required_enforces_isolation_ratchets():
         assert suite in gate["run"]  # nosec B101 - regression assertion
 
 
-def _without_await_license(workflows: dict[str, tuple[dict[str, Any], str]], *, drop_job: bool):
+def _without_await_license(
+    workflows: dict[str, tuple[dict[str, Any], str]], *, drop_job: bool
+) -> dict[str, tuple[dict[str, Any], str]]:
     """Deep-copy the workflows and strip await_license from backend-required.yml."""
     import copy
 
@@ -1146,6 +1148,7 @@ def _without_await_license(workflows: dict[str, tuple[dict[str, Any], str]], *, 
     return mutated
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("drop_job", [False, True], ids=["gate-job-skips-await", "await-job-removed"])
 def test_a_deliberate_license_bypass_fails_the_contract(monkeypatch: pytest.MonkeyPatch, drop_job: bool) -> None:
     """TASK-13386 AC2: a gate that stops waiting on the license verdict must fail, not pass.
