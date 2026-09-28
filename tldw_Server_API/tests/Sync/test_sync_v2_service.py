@@ -8917,6 +8917,10 @@ def test_blob_upload_session_chunk_and_complete_flow_commits_blob(
         blob_store=LocalSyncBlobStore(tmp_path / "sync_blobs"),
         settings=SyncV2Settings(
             supports_attachments=True,
+            # The fixed _clock stamps the session deadline, but the store enforces it
+            # against its real now (ADR 048 blob-upload addendum), so a TTL would have
+            # already expired. Expiry is covered by test_sync_v2_blob_upload_expiry.py.
+            blob_upload_session_ttl_seconds=0,
             max_blob_bytes=64,
             max_chunk_bytes=8,
             user_blob_quota_bytes=128,
@@ -9007,6 +9011,10 @@ def test_blob_upload_completion_returns_committed_blob_when_cleanup_fails(
         blob_store=blob_store,
         settings=SyncV2Settings(
             supports_attachments=True,
+            # The fixed _clock stamps the session deadline, but the store enforces it
+            # against its real now (ADR 048 blob-upload addendum), so a TTL would have
+            # already expired. Expiry is covered by test_sync_v2_blob_upload_expiry.py.
+            blob_upload_session_ttl_seconds=0,
             max_blob_bytes=64,
             max_chunk_bytes=16,
             server_trusted_encryption=_ready_encryption(),
@@ -9067,6 +9075,10 @@ def test_blob_upload_conflicting_duplicate_chunk_does_not_overwrite_existing_chu
         blob_store=blob_store,
         settings=SyncV2Settings(
             supports_attachments=True,
+            # The fixed _clock stamps the session deadline, but the store enforces it
+            # against its real now (ADR 048 blob-upload addendum), so a TTL would have
+            # already expired. Expiry is covered by test_sync_v2_blob_upload_expiry.py.
+            blob_upload_session_ttl_seconds=0,
             max_blob_bytes=64,
             max_chunk_bytes=16,
             server_trusted_encryption=_ready_encryption(),
