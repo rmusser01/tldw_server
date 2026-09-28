@@ -4,6 +4,9 @@ import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { getRecentChatFromWebUI, getRecentChatFromCopilot, getHistoryByDocId, saveHistory } from "../helpers"
 
 const io = vi.hoisted(() => ({ histories: [] as HistoryInfo[] }))
+vi.mock("../schema", () => ({ db: { chatHistories: {
+  add: async (history: HistoryInfo) => { io.histories.unshift(structuredClone(history)) }
+} } }))
 vi.mock("../chat", () => ({ PageAssistDatabase: class {
   async getChatHistories() { return io.histories }
   async getHistoryByDocId(id: string) { return io.histories.find(history => history.doc_id === id) ?? null }

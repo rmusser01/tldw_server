@@ -11,6 +11,8 @@ import { test, expect } from '../../utils/fixtures';
 import { ChatPage, KnowledgeQAPage } from '../../utils/page-objects';
 import { ingestAndWaitForReady, waitForStreamComplete } from '../../utils/journey-helpers';
 import { TEST_CONFIG, fetchWithApiKey, waitForConnection } from '../../utils/helpers';
+import { readStore } from '../../../../extension/tests/e2e/utils/history-selection';
+import type { HistoryBookmark, HistoryInfo, Message } from '../../../../packages/ui/src/db/dexie/types';
 import {
   ROWAN_SOURCE,
   LARCH_SOURCE,
@@ -24,7 +26,6 @@ import {
   readMediaRecord,
   normalizeSourceText,
   readSavedMessages,
-  type SavedMessage,
 } from './uat390-grounding';
 
 test.describe('Ingest -> Search -> Chat journey', () => {
@@ -301,84 +302,86 @@ test.describe('Ingest -> Search -> Chat journey', () => {
         expect(draft).toContain(source.title);
         await chat.selectModel(model!);
         const prompt = `${draft}\n\nUsing only this source, answer: ${ROWAN_QUESTION}`;
-        const created = page.waitForResponse(
-          (response) =>
-            response.request().method() === 'POST' && /\/api\/v1\/chats\/?$/.test(response.url())
+        const nativeWrites: string[] = [];
+        const recordNativeWrite = (request: import('@playwright/test').Request) => {
+          if (request.method() === 'POST' && /\/api\/v1\/(?:chats(?:\/|$)|chat\/conversations(?:\/|$))/.test(request.url()))
+            nativeWrites.push(request.url());
+        };
+        page.on('request', recordNativeWrite);
+        const completionResponse = page.waitForResponse(response =>
+          response.request().method() === 'POST' && /\/api\/v1\/chat\/completions(?:\?|$)/.test(response.url())
         );
-        const completionRequest = page.waitForRequest(
-          (request) =>
-            request.method() === 'POST' &&
-            /\/api\/v1\/chat\/completions(?:\?|$)/.test(request.url())
-        );
-        // Primary Chat persistence returns save receipts; a separate fallback
-        // message POST is intentionally absent when the server saved both rows.
-        const [[response, completion]] = await Promise.all([
-          Promise.all([created, completionRequest]),
-          chat.sendMessage(prompt),
-        ]);
-        const sent = completion.postDataJSON();
+        const [completion] = await Promise.all([completionResponse, chat.sendMessage(prompt)]);
+        expect(completion.status()).toBe(200);
+        const sent = completion.request().postDataJSON();
         expect(sent.model).toBe(model);
         expect(sent.provider ?? sent.api_provider).toBe(provider);
-        expect(sent.save_to_db).toBe(true);
-        expect(
-          sent.messages
-            .filter((message: { role: string }) => message.role === 'user')
-            .map((message: { role: string; content: unknown }) => ({
-              role: message.role,
-              content: message.content,
-            }))
-        ).toEqual([{ role: 'user', content: prompt }]);
+        expect(sent.save_to_db).toBe(false);
+        expect(sent).not.toHaveProperty('conversation_id');
+        expect(sent.messages.filter((message: { role: string }) => message.role === 'user')
+          .map((message: { role: string; content: unknown }) => ({ role: message.role, content: message.content })))
+          .toEqual([{ role: 'user', content: prompt }]);
         evidence.chatProvider = { model: sent.model, provider: sent.provider ?? sent.api_provider };
-        expect(response.ok()).toBe(true);
-        const chatId = String((await response.json()).id);
-        expect(chatId).not.toMatch(/^(?:undefined|null|local[-_])/);
-        expect(sent.conversation_id).toBe(chatId);
-        evidence.chatConversationId = chatId;
         await waitForStreamComplete(page, 90_000);
         await chat.waitForResponse();
-        const visibleAnswer = (await chat.getMessages())
-          .filter((message) => message.role === 'assistant')
-          .at(-1)!.content;
+        const visibleAnswer = (await chat.getMessages()).filter(message => message.role === 'assistant').at(-1)!.content;
         assertRowanFacts(visibleAnswer);
-        let saved: SavedMessage[] = [];
-        await expect
-          .poll(
-            async () => {
-              saved = readSavedMessages(
-                (await apiGet(`/api/v1/chats/${chatId}/messages?render_placeholders=false`))
-                  .messages,
-                chatId
-              );
-              return saved.filter((message) => message.role === 'assistant').length;
-            },
-            { timeout: 30_000 }
-          )
-          .toBe(1);
-        const savedAnswer = saved.find((message) => message.role === 'assistant')!.content;
-        assertRowanFacts(savedAnswer);
-        assertSavedTurn(saved, prompt, savedAnswer);
+        let users: Message[] = [];
+        await expect.poll(async () => {
+          users = ((await readStore(page, 'messages')) as Message[])
+            .filter(row => row.role === 'user' && row.content === prompt);
+          return users.length;
+        }).toBe(1);
+        const user = users[0];
+        const historyId = user.history_id;
+        const history = ((await readStore(page, 'chatHistories')) as HistoryInfo[]).find(row => row.id === historyId)!;
+        const keyScope = createHash('sha256').update('tldw:service-prompt-single-user-api-key:v1\0' + TEST_CONFIG.apiKey.trim()).digest('hex');
+        expect(history.server_scope_key).toBe(JSON.stringify([TEST_CONFIG.serverUrl, 'single-user', 'manual', null, null, 'key:sha256:' + keyScope]));
+        expect(history.server_chat_id).toBeUndefined();
+        expect(history.local_owner_key).toMatch(/^local-history-v1:/);
+        const saved = ((await readStore(page, 'messages')) as Message[]).filter(row => row.history_id === historyId);
+        expect(saved).toHaveLength(2);
+        const assistant = saved.find(row => row.role === 'assistant')!;
+        assertRowanFacts(assistant.content);
+        expect(assistant.content).toBe(visibleAnswer);
+        assertSavedTurn([user, assistant], prompt, visibleAnswer);
+        expect(user.parent_message_id).toBeNull();
+        expect(assistant.parent_message_id).toBe(user.id);
+        expect(user.history_admission).toMatchObject({ owner_key: history.local_owner_key, conversation_id: historyId, input_message_id: user.id });
+        expect(assistant.history_settlement?.input_message_id).toBe(user.id);
+        expect(saved.every(row => row.history_provenance?.owner_key === history.local_owner_key)).toBe(true);
+        expect(saved.every(row => !row.serverMessageId)).toBe(true);
+        let bookmarks: HistoryBookmark[] = [];
+        await expect.poll(async () => {
+          bookmarks = ((await readStore(page, 'historySelections')) as HistoryBookmark[])
+            .filter(row => row.conversation_id === historyId && row.view.cursor.kind === 'after_message' && row.view.cursor.message_id === assistant.id);
+          return bookmarks.length;
+        }).toBe(1);
+        const bookmark = bookmarks[0];
+        expect(history.local_owner_key).toBe('local-history-v1:' + bookmark.profile_id);
+        expect(bookmark.view.owner_key).toBe(history.local_owner_key);
+        expect(bookmark.view.interpretation).toEqual({ kind: 'parent_graph_v1' });
+        const reference = { profile_id: bookmark.profile_id, client_session_id: bookmark.client_session_id,
+          owner_key: bookmark.owner_key, conversation_id: historyId, owner_kind: 'local' };
+        evidence.chatConversationId = historyId;
+        evidence.chatHistory = history;
         evidence.chatMessages = saved;
-        await page.goto(`/chat?settingsServerChatId=${encodeURIComponent(chatId)}`, {
-          waitUntil: 'domcontentloaded',
-        });
+        evidence.chatSelection = reference;
+        await page.goto('/chat?historySelection=' + encodeURIComponent(JSON.stringify(reference)), { waitUntil: 'domcontentloaded' });
         await waitForConnection(page);
         await chat.waitForReady();
-        await expect
-          .poll(
-            async () =>
-              (await chat.getMessages()).filter((message) => message.role === 'assistant').at(-1)
-                ?.content
-          )
-          .toBe(visibleAnswer);
-        const reloaded = readSavedMessages(
-          (await apiGet(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)).messages,
-          chatId
-        );
+        await expect.poll(async () => (await chat.getMessages()).filter(message => message.role === 'assistant').at(-1)?.content).toBe(visibleAnswer);
+        await expect(page).toHaveURL(/\/chat$/);
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await waitForConnection(page);
+        await chat.waitForReady();
+        await expect.poll(async () => (await chat.getMessages()).filter(message => message.role === 'assistant').at(-1)?.content).toBe(visibleAnswer);
+        const reloaded = ((await readStore(page, 'messages')) as Message[]).filter(row => row.history_id === historyId);
         expect(reloaded).toEqual(saved);
-        assertFullSourceHandoff(
-          reloaded.find((message: SavedMessage) => message.role === 'user').content,
-          source.text
-        );
+        expect(((await readStore(page, 'chatHistories')) as HistoryInfo[]).find(row => row.id === historyId)).toEqual(history);
+        assertFullSourceHandoff(reloaded.find(row => row.role === 'user')!.content, source.text);
+        expect(nativeWrites).toEqual([]);
+        page.off('request', recordNativeWrite);
       });
       await test.step('Ask an absent fact without inventing a price', async () => {
         await page.goto(`/knowledge/thread/${encodeURIComponent(qaId)}`, {

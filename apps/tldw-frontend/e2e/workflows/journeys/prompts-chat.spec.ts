@@ -3,12 +3,14 @@
  * Seeded auth and a controlled downstream model do not certify fresh-install UAT.
  * Export/import, failed sync, variables and account-switch variants remain separate.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { test, expect } from '../../utils/fixtures';
 import { PromptsWorkspacePage, ChatPage } from '../../utils/page-objects';
 import { waitForStreamComplete } from '../../utils/journey-helpers';
 import { TEST_CONFIG, fetchWithApiKey, waitForConnection } from '../../utils/helpers';
-import { assertSavedTurn, readSavedMessages, type SavedMessage } from './uat390-grounding';
+import { assertSavedTurn } from './uat390-grounding';
+import { readStore } from '../../../../extension/tests/e2e/utils/history-selection';
+import type { HistoryBookmark, HistoryInfo, Message } from '../../../../packages/ui/src/db/dexie/types';
 
 const SYSTEM = 'You are a pirate. Respond to everything in pirate speak. Always say ARRR at least once.';
 const QUESTION = 'Tell me about the weather today.';
@@ -88,50 +90,81 @@ test.describe('Prompts -> Chat journey', () => {
         await waitForConnection(page);
         await chat.waitForReady();
         await chat.selectModel(model!);
-        const created = page.waitForResponse(response =>
-          response.request().method() === 'POST' && /\/api\/v1\/chats\/?$/.test(response.url())
-        );
+        const nativeWrites: string[] = [];
+        page.on('request', request => {
+          if (request.method() === 'POST' && /\/api\/v1\/(?:chats(?:\/|$)|chat\/conversations(?:\/|$))/.test(request.url()))
+            nativeWrites.push(request.url());
+        });
         const completed = page.waitForResponse(response =>
           response.request().method() === 'POST' && /\/api\/v1\/chat\/completions(?:\?|$)/.test(response.url())
         );
-        const [[creation, completion]] = await Promise.all([
-          Promise.all([created, completed]), chat.sendMessage(QUESTION),
-        ]);
-        expect(creation.ok()).toBe(true);
-        const chatId = String((await creation.json()).id);
-        expect(chatId).not.toMatch(/^(?:undefined|null|local[-_]|$)/);
+        const [completion] = await Promise.all([completed, chat.sendMessage(QUESTION)]);
         expect(completion.status()).toBe(200);
         const sent = completion.request().postDataJSON();
-        expect(sent).toMatchObject({ model, conversation_id: chatId, save_to_db: true });
+        expect(sent).toMatchObject({ model, save_to_db: false });
+        expect(sent).not.toHaveProperty('conversation_id');
         expect(sent.provider ?? sent.api_provider).toBe(provider);
         expect(sent.messages.map(({ role, content }: { role: string; content: unknown }) => ({ role, content })))
           .toEqual([{ role: 'system', content: SYSTEM }, { role: 'user', content: QUESTION }]);
-        evidence.chatConversationId = chatId;
         evidence.completionRequest = sent;
         await waitForStreamComplete(page, 90_000);
         await chat.waitForResponse();
         const visible = (await chat.getMessages()).filter(message => message.role === 'assistant');
         expect(visible.map(message => message.content)).toEqual([ANSWER]);
-        let saved: SavedMessage[] = [];
+        let users: Message[] = [];
         await expect.poll(async () => {
-          saved = readSavedMessages(
-            (await apiGet(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)).messages, chatId
-          );
-          return saved.filter(message => message.role === 'assistant').length;
-        }, { timeout: 30_000 }).toBe(1);
-        const savedAnswer = saved.find(message => message.role === 'assistant')!.content;
-        expect(savedAnswer.trim()).toBe(ANSWER);
-        assertSavedTurn(saved, QUESTION, savedAnswer);
-        expect(saved.filter(message => message.role === 'system').map(message => message.content)).toEqual([SYSTEM]);
+          users = ((await readStore(page, 'messages')) as Message[])
+            .filter(row => row.role === 'user' && row.content === QUESTION);
+          return users.length;
+        }).toBe(1);
+        const user = users[0];
+        const historyId = user.history_id;
+        const history = ((await readStore(page, 'chatHistories')) as HistoryInfo[])
+          .find(row => row.id === historyId)!;
+        const keyScope = createHash('sha256').update('tldw:service-prompt-single-user-api-key:v1\0' + TEST_CONFIG.apiKey.trim()).digest('hex');
+        expect(history.server_scope_key).toBe(JSON.stringify([TEST_CONFIG.serverUrl, 'single-user', 'manual', null, null, 'key:sha256:' + keyScope]));
+        expect(history.server_chat_id).toBeUndefined();
+        expect(history.local_owner_key).toMatch(/^local-history-v1:/);
+        const saved = ((await readStore(page, 'messages')) as Message[]).filter(row => row.history_id === historyId);
+        expect(saved).toHaveLength(2);
+        const assistant = saved.find(row => row.role === 'assistant')!;
+        assertSavedTurn([user, assistant], QUESTION, ANSWER);
+        expect(user.parent_message_id).toBeNull();
+        expect(assistant.parent_message_id).toBe(user.id);
+        expect(user.history_admission).toMatchObject({ owner_key: history.local_owner_key, conversation_id: historyId, input_message_id: user.id });
+        expect(assistant.history_settlement?.input_message_id).toBe(user.id);
+        expect(saved.every(row => row.history_provenance?.owner_key === history.local_owner_key)).toBe(true);
+        expect(saved.every(row => !row.serverMessageId)).toBe(true);
+        let bookmarks: HistoryBookmark[] = [];
+        await expect.poll(async () => {
+          bookmarks = ((await readStore(page, 'historySelections')) as HistoryBookmark[])
+            .filter(row => row.conversation_id === historyId && row.view.cursor.kind === 'after_message' && row.view.cursor.message_id === assistant.id);
+          return bookmarks.length;
+        }).toBe(1);
+        const bookmark = bookmarks[0];
+        expect(history.local_owner_key).toBe('local-history-v1:' + bookmark.profile_id);
+        expect(bookmark.view.owner_key).toBe(history.local_owner_key);
+        expect(bookmark.view.interpretation).toEqual({ kind: 'parent_graph_v1' });
+        const reference = { profile_id: bookmark.profile_id, client_session_id: bookmark.client_session_id,
+          owner_key: bookmark.owner_key, conversation_id: historyId, owner_kind: 'local' };
+        evidence.chatConversationId = historyId;
+        evidence.chatHistory = history;
         evidence.chatMessages = saved;
-        await page.goto(`/chat?settingsServerChatId=${encodeURIComponent(chatId)}`, { waitUntil: 'domcontentloaded' });
+        evidence.chatSelection = reference;
+        await page.goto('/chat?historySelection=' + encodeURIComponent(JSON.stringify(reference)), { waitUntil: 'domcontentloaded' });
         await waitForConnection(page);
         await chat.waitForReady();
         await expect.poll(async () => (await chat.getMessages())
           .filter(message => message.role === 'assistant').map(message => message.content)).toEqual([ANSWER]);
-        expect(readSavedMessages(
-          (await apiGet(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)).messages, chatId
-        )).toEqual(saved);
+        await expect(page).toHaveURL(/\/chat$/);
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await waitForConnection(page);
+        await chat.waitForReady();
+        await expect.poll(async () => (await chat.getMessages())
+          .filter(message => message.role === 'assistant').map(message => message.content)).toEqual([ANSWER]);
+        expect(((await readStore(page, 'messages')) as Message[]).filter(row => row.history_id === historyId)).toEqual(saved);
+        expect(((await readStore(page, 'chatHistories')) as HistoryInfo[]).find(row => row.id === historyId)).toEqual(history);
+        expect(nativeWrites).toEqual([]);
       });
       await test.step('The source Prompt still exists with the same identity and instructions', async () => {
         await prompts.goto();

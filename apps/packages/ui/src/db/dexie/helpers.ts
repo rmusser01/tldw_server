@@ -69,7 +69,9 @@ export const saveHistory = async (
     ...(requestScope ? { server_scope_key: serverChatMirrorOwnerKey({ requestScope }) } : {})
   }
   const db = new PageAssistDatabase()
-  await db.addChatHistory(history)
+  // Only this internally constructed row may retain its captured account stamp.
+  if (requestScope) await chatDB.chatHistories.add(history)
+  else await db.addChatHistory(history)
   return history
 }
 
