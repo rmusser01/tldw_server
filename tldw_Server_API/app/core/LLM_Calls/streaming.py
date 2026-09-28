@@ -26,9 +26,9 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     normalize_provider_stream_error,
 )
 from tldw_Server_API.app.core.http_client import RetryPolicy, astream_sse
-from tldw_Server_API.app.core.LLM_Calls.error_utils import is_chunked_encoding_error
+from tldw_Server_API.app.core.LLM_Calls.error_utils import is_chunked_encoding_error, log_provider_failure
 
-from .sse import is_done_line, normalize_provider_line, sse_data
+from .sse import finalize_stream, is_done_line, normalize_provider_line, sse_data, sse_done
 
 _DEFAULT_SYNC_STREAM_QUEUE_SIZE = 16
 _SYNC_STREAM_QUEUE_TIMEOUT_SECONDS = 0.05
@@ -61,12 +61,16 @@ def provider_stream_error_frame(provider: Any) -> str:
 
 
 def _log_provider_stream_error(provider: Any, exc: BaseException) -> None:
-    """Record only bounded metadata for an upstream stream failure."""
-    logger.debug(
-        "Provider stream iteration failed provider={} error_type={} failure_kind={}",
+    """Record an upstream stream failure at error level, with bounded metadata only.
+
+    Clients get an error frame either way; this is the operator's only record of
+    which provider failed mid-stream and how (log_provider_failure logs no URLs,
+    bodies or exception text).
+    """
+    log_provider_failure(
         _bounded_provider_name(provider),
-        type(exc).__name__,
-        "connection" if is_chunked_encoding_error(exc) else "iteration",
+        exc,
+        phase="stream_connection" if is_chunked_encoding_error(exc) else "stream_iteration",
     )
 
 
@@ -87,7 +91,12 @@ def iter_sse_lines_requests(
       raising mid-stream.
     """
     try:
-        for raw_line in response.iter_lines(decode_unicode=decode_unicode):
+        try:
+            raw_lines = response.iter_lines(decode_unicode=decode_unicode)
+        except TypeError:
+            # httpx.Response.iter_lines() takes no arguments and already yields str.
+            raw_lines = response.iter_lines()
+        for raw_line in raw_lines:
             if not raw_line:
                 continue
             # raw_line can be bytes when decode_unicode=False
@@ -115,6 +124,36 @@ def iter_sse_lines_requests(
     except Exception as e_stream:
         _log_provider_stream_error(provider, e_stream)
         yield provider_stream_error_frame(provider)
+
+
+def iter_sse_lines_raising(response: Any, *, provider: str) -> Iterator[str]:
+    """Yield normalized SSE lines for adapters that surface failures as exceptions.
+
+    Unlike iter_sse_lines_requests, nothing is swallowed: an in-band SSE error
+    raises the status-aware sanitized ChatAPIError and transport errors
+    propagate, so the adapter's own handler can map them. The first provider
+    DONE is forwarded in place, later ones are dropped, and one DONE is
+    appended (and the response closed) if the provider never sent one.
+    """
+    from tldw_Server_API.app.core.LLM_Calls.providers.base import (
+        raise_if_in_band_provider_error,
+    )
+
+    seen_done = False
+    for raw in response.iter_lines():
+        if not raw:
+            continue
+        line = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+        raise_if_in_band_provider_error(provider, line, phase="stream_response")
+        if is_done_line(line):
+            if not seen_done:
+                seen_done = True
+                yield sse_done()
+            continue
+        normalized = normalize_provider_line(line)
+        if normalized is not None:
+            yield normalized
+    yield from finalize_stream(response=response, done_already=seen_done)
 
 
 async def aiter_sse_lines_httpx(
