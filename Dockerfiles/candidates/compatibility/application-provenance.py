@@ -5,7 +5,12 @@ import importlib.util
 import sys
 import sysconfig
 import types
+from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pytest
 
 CORE = "tldw_Server_API.app.core."
 XML = CORE + "Ingestion_Media_Processing.XML_Ingestion_Lib"
@@ -158,18 +163,22 @@ def snapshot(root: Path, items: list, *, candidate: bool = False, allow_processi
     return {"modules": records, "callables": callables, "tests": tests, "expat_version": pyexpat.EXPAT_VERSION}
 
 
-def evidence_class(base, root: Path, *, candidate: bool = True):
+def evidence_class(base: type, root: Path, *, candidate: bool = True) -> type:
     """Extend, never replace, the original exact-test/phase admission checks."""
     pytest = sys.modules["pytest"]  # Loaded by the original launcher after its path checks.
 
     class ProvenanceEvidence(base):
-        def __init__(self):
+        """Require stable import provenance in addition to the original test admission."""
+
+        def __init__(self) -> None:
+            """Initialize the original evidence collector and provenance observations."""
             super().__init__()
             self.items = []
             self.observations = []
             self.errors = []
 
-        def capture(self, phase, nodeid=""):
+        def capture(self, phase: str, nodeid: str = "") -> None:
+            """Record loaded identities or retain an error that rejects admission."""
             try:
                 observed = snapshot(
                     root,
@@ -185,20 +194,23 @@ def evidence_class(base, root: Path, *, candidate: bool = True):
                 # Preserve diagnostics but force the final result to fail.
                 self.errors.append({"phase": phase, "nodeid": nodeid, "error": str(exc)})
 
-        def pytest_collection_finish(self, session):
+        def pytest_collection_finish(self, session: "pytest.Session") -> None:
+            """Retain the original collection checks and snapshot the collected objects."""
             super().pytest_collection_finish(session)
             self.items = list(session.items)
             self.capture("collection")
 
         @pytest.hookimpl(hookwrapper=True, tryfirst=True)
-        def pytest_runtest_call(self, item):
+        def pytest_runtest_call(self, item: "pytest.Item") -> Iterator[None]:
+            """Observe imports before and after each test, including failed calls."""
             self.capture("before-call", item.nodeid)
             try:
                 yield
             finally:
                 self.capture("after-call", item.nodeid)
 
-        def result(self, exit_code):
+        def result(self, exit_code: int) -> dict[str, object]:
+            """Reject failed tests, incomplete observations, or changed module identities."""
             result = super().result(exit_code)
             expected = {("collection", "")} | {
                 (phase, nodeid) for nodeid in result["expected"] for phase in ("before-call", "after-call")

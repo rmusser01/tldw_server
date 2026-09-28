@@ -204,3 +204,25 @@ identical to dev. Recovery ref: `codex/task-13013-7-before-sep28-rebase`.
 The nine renewal regressions pass after rebase. Qodo reported zero active
 findings on the preceding published head; fresh required CI and final review
 are being obtained for the rebased head.
+
+## Final review follow-up
+
+The next Qodo pass raised five items. Restored the documented Dormant badge
+for missing/empty/invalid login timestamps while retaining safe parsing and
+the strict 90-day boundary (24 users-page tests pass). Added provenance factory
+and hook annotations/docstrings (40 tests pass; Bandit zero findings).
+
+Two suggestions were disproved against the actual execution environment:
+
+- Docker runtime identity: the workflow explicitly enables the containerd image
+  store. Its image ID is the OCI target manifest/index digest, as confirmed by
+  [Moby's implementation](https://github.com/moby/moby/blob/v28.5.2/daemon/containerd/image_inspect.go#L85-L89)
+  and read-only Docker 29.2 inspection (ID equals OCI index descriptor digest).
+  The proposed config-ID substitution would be incorrect for this store.
+  Existing subject-to-platform-to-config hashing remains enforced; 58 runtime
+  and CI contracts pass, with Actionlint clean and Bandit zero findings.
+- The Expat metadata helper is a standalone bootstrap CLI copied into a bare
+  Python image without Loguru. Its output is captured by `run_step` into retained
+  logs, and `python -S .../expat_candidate.py --help` succeeds without site
+  packages. Adding the suggested application logging import would break that
+  dependency-free path. No dependency or logging change was made.

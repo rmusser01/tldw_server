@@ -299,19 +299,21 @@ describe('UsersPage', () => {
     expect(deleteButton).toBeDisabled();
   });
 
-  it('does not show the dormant badge for users who have never logged in', async () => {
+  it('shows the dormant badge for users who have never logged in', async () => {
     render(<UsersPage />);
 
     await screen.findByText('Bob');
-    expect(screen.queryAllByText('Dormant')).toHaveLength(0);
+    expect(screen.getAllByText('Dormant')).toHaveLength(3);
   });
 
   it.each([
-    ['invalid timestamp', 'not-a-date', false],
+    ['missing timestamp', null, true],
+    ['empty timestamp', '', true],
+    ['invalid timestamp', 'not-a-date', true],
     ['recent login', '2026-02-16T12:00:00Z', false],
     ['90-day boundary', '2025-11-19T12:00:00Z', false],
     ['older login', '2025-11-18T12:00:00Z', true],
-  ])('marks dormancy only from a valid older login: %s', async (_scenario, lastLogin, dormant) => {
+  ])('classifies dormancy while preserving the 90-day boundary: %s', async (_scenario, lastLogin, dormant) => {
     vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-02-17T12:00:00Z'));
     apiMock.getUsers.mockResolvedValue([makeUser({ last_login: lastLogin })] as never);
 
