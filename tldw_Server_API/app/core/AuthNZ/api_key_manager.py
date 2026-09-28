@@ -46,6 +46,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
 )
+from tldw_Server_API.app.core.exceptions import ApiKeyNotFoundError
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRepo
@@ -994,9 +995,9 @@ class APIKeyManager:
                 old_key = await repo.fetch_key_for_user(key_id=key_id, user_id=user_id, conn=conn)
 
                 if not old_key:
-                    raise ValueError("API key not found or unauthorized")
+                    raise ApiKeyNotFoundError("API key not found or unauthorized")
                 if str(old_key.get("status") or "").lower() != APIKeyStatus.ACTIVE.value:
-                    raise ValueError("API key not found or unauthorized")
+                    raise ApiKeyNotFoundError("API key not found or unauthorized")
 
                 raw_allowed_ips = old_key.get("allowed_ips")
                 allowed_ips: Optional[list[str]] = None

@@ -134,6 +134,15 @@ class TransactionPassthroughError(Exception):
     """Sanitized domain failure that may cross a rolled-back DB transaction."""
 
 
+class ApiKeyNotFoundError(TransactionPassthroughError, ValueError):
+    """An API key is missing, not owned by the caller, or no longer active.
+
+    Raised inside AuthNZ transactions. Passthrough lets it survive the
+    transaction boundary (which otherwise sanitizes to ``TransactionError``);
+    subclassing ``ValueError`` keeps existing callers' 4xx mapping.
+    """
+
+
 class BuiltinCharacterSeedError(TransactionPassthroughError):
     """Raised when a bundled character cannot be installed with verified assets."""
 
