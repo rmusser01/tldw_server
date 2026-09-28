@@ -3,6 +3,7 @@
 Pydantic schemas for character chat sessions and messages.
 """
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal, Optional, Union
 
@@ -200,7 +201,11 @@ class ChatSessionCreate(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _reject_startup_input(cls, value: Any) -> Any:
-        """Reject caller-authored origin independently of legacy extra fields."""
+        """Reject caller-authored origin and strict selectors without closing legacy extras."""
+        if isinstance(value, Mapping) and any(field in value for field in (
+            "workspace_assistant_selection", "workspace_assistant_default_version",
+        )):
+            raise ValueError("Workspace assistant selection requires the strict startup route")
         return reject_assistant_startup_input(value)
 
     @model_validator(mode="after")

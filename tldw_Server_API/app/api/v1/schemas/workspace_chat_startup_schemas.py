@@ -22,6 +22,7 @@ STARTUP_TEXT_BYTE_LIMITS = {
 }
 STARTUP_TEXT_BYTES_MAX = 8192
 STARTUP_BODY_BYTES_MAX = 65536
+STARTUP_IDEMPOTENCY_KEY_PATTERN = r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}"
 
 
 def startup_text_size(value: str, field: str) -> int:

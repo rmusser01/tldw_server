@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import ChatSessionCreate
 from tldw_Server_API.app.api.v1.schemas.workspace_chat_startup_schemas import (
+    STARTUP_IDEMPOTENCY_KEY_PATTERN,
     WorkspaceChatStartupRequest,
     startup_request_fingerprint,
 )
@@ -235,7 +236,7 @@ def start_workspace_chat(
         raise WorkspaceStartupError("workspace_chat_startup_owner_mismatch", 404)
     if (
         not isinstance(idempotency_key, str)
-        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", idempotency_key) is None
+        or re.fullmatch(STARTUP_IDEMPOTENCY_KEY_PATTERN, idempotency_key) is None
     ):
         raise WorkspaceStartupError("invalid_idempotency_key", 422)
     if (

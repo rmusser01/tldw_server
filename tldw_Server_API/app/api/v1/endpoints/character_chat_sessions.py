@@ -53,6 +53,7 @@ from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
     get_request_routing_decision_store,
 )
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.endpoints.workspace_chat_startup_transport import WorkspaceStartupRoute
 
 # Schemas
 from tldw_Server_API.app.api.v1.schemas.chat_conversation_schemas import (
@@ -91,6 +92,10 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     PresetTokenInfo,
     PresetUpdate,
     PromptPreviewResponse,
+)
+from tldw_Server_API.app.api.v1.schemas.workspace_chat_startup_schemas import (
+    STARTUP_IDEMPOTENCY_KEY_PATTERN,
+    WorkspaceChatStartupRequest,
 )
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
@@ -204,6 +209,8 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     sanitized_provider_stream_exception,
 )
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
+from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_store import WorkspaceStartupError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -263,6 +270,7 @@ from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Utils.common import parse_boolean
 from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
 from tldw_Server_API.app.core.Workspaces.assistant_defaults import project_assistant_startup
+from tldw_Server_API.app.core.Workspaces.chat_startup import start_workspace_chat
 
 from .llm_providers import get_configured_providers
 
@@ -4522,6 +4530,69 @@ def _inject_message_steering_instruction(
 # ========================================================================
 # Chat Session Endpoints
 # ========================================================================
+
+async def create_workspace_chat_startup(
+    session_data: WorkspaceChatStartupRequest,
+    response: Response,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+    idempotency_key: str = Header(
+        alias="Idempotency-Key", min_length=1, max_length=128, pattern=f"^{STARTUP_IDEMPOTENCY_KEY_PATTERN}$",
+    ),
+) -> ChatSessionResponse:
+    """Accept or replay one committed Workspace chat without legacy/Sync/greeting effects."""
+    rate_limiter = get_character_rate_limiter()
+    await rate_limiter.check_rate_limit(current_user.id, "chat_create")
+    try:
+        receipt_limit = int(os.getenv("WORKSPACE_CHAT_STARTUP_RECEIPT_LIMIT_PER_USER", "10000"))
+    except ValueError:
+        raise HTTPException(503, {"code": "workspace_chat_startup_configuration_invalid"}) from None
+    owner_id = str(current_user.id)
+
+    def start_and_project() -> tuple[ChatSessionResponse, bool]:
+        """Keep synchronous acceptance and post-commit reads on the same worker."""
+        result = start_workspace_chat(
+            db, owner_id=owner_id, request=session_data, idempotency_key=idempotency_key,
+            receipt_limit=receipt_limit, chat_limit=rate_limiter._limits.max_chats_per_user,
+            title_timestamp=datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S"),
+        )
+        # Settle projection-only reads too: cached PostgreSQL handles must be
+        # idle before a later startup can own its acceptance transaction.
+        with db.transaction():
+            projected = _convert_db_conversation_to_response(
+                _attach_conversation_assistant_names(db, dict(result.conversation), owner_id),
+                resume_state=db.get_roleplay_resume_state(result.conversation["id"]), db=db, user_id=owner_id,
+            )
+        return projected, result.replayed
+
+    try:
+        projected, replayed = await run_in_threadpool(start_and_project)
+    except WorkspaceStartupError as error:
+        detail = {"code": error.code}
+        if error.reason is not None:
+            detail["reason"] = error.reason
+        raise HTTPException(error.status_code, detail) from None
+    except (CharactersRAGDBError, BackendDatabaseError) as error:
+        raise map_db_error_to_http(
+            error, default_detail="Workspace chat startup failed", input_detail="Invalid Workspace chat startup",
+            conflict_detail="Workspace chat startup conflict", log_error=False,
+        ) from error
+    response.status_code = 200 if replayed else 201
+    if replayed:
+        response.headers["Idempotency-Replayed"] = "true"
+    return projected
+
+
+router.add_api_route(
+    "/workspace-startup", create_workspace_chat_startup, methods=["POST"], response_model=ChatSessionResponse,
+    status_code=status.HTTP_201_CREATED, summary="Start a Workspace chat with strict retry semantics",
+    tags=["Chat Sessions"], dependencies=[Depends(require_expected_user)], route_class_override=WorkspaceStartupRoute,
+    responses={200: {
+        "description": "Matching accepted replay", "model": ChatSessionResponse,
+        "headers": {"Idempotency-Replayed": {"schema": {"type": "string", "enum": ["true"]}}},
+    }, 413: {"description": "Raw startup body exceeds 65536 bytes"}},
+)
+
 
 @router.post("/", response_model=ChatSessionResponse, status_code=status.HTTP_201_CREATED,
              summary="Create a new chat session", tags=["Chat Sessions"],
