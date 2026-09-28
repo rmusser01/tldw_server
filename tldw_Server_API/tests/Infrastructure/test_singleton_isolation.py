@@ -118,6 +118,34 @@ def test_a_reload_does_not_outlive_the_block_that_asked_for_it() -> None:
     )
 
 
+def test_a_first_import_outlives_the_block_that_made_it() -> None:
+    """Only a swap is undone; a first import is the app everyone should share.
+
+    Unloading a first import meant the next test's ``from ...main import app``
+    imported a whole new app, one per test, each kept alive by the shared
+    endpoint routers -- enough to push several CI shards past their timeout.
+    """
+    from types import ModuleType
+
+    from tldw_Server_API.tests.helpers.app_main_state import (
+        app_main_isolated,
+        clear_app_main,
+        restore_app_main,
+        set_app_main,
+        snapshot_app_main,
+    )
+
+    original = snapshot_app_main()
+    first = ModuleType("tldw_Server_API.app.main")
+    try:
+        clear_app_main()
+        with app_main_isolated():
+            set_app_main(first)
+        assert snapshot_app_main() is first, "a first import of app.main was unloaded"
+    finally:
+        restore_app_main(original)
+
+
 PROBE = """\
 from tldw_Server_API.tests.helpers.app_main_state import (
     import_app_main,
