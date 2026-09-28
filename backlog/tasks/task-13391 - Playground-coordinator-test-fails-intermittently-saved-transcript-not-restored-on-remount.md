@@ -1,11 +1,12 @@
 ---
 id: TASK-13391
 title: >-
-  Playground coordinator test fails on main and dev: saved transcript not
+  Playground coordinator test fails intermittently: saved transcript not
   restored on remount
 status: To Do
 assignee: []
 created_date: '2026-09-28 00:17'
+updated_date: '2026-09-28 12:38'
 labels:
   - frontend
   - chat
@@ -33,6 +34,12 @@ It may be a real defect (a saved Character chat's transcript not restored after 
 - [ ] #2 Both coordinator tests pass from apps/packages/ui on dev
 - [ ] #3 If a product defect: a regression test that fails before the fix
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+CORRECTION 2026-09-28: not a deterministic failure. The identical code that failed yesterday (dev 3c9d97c56b: 4 failed; main 96bf0996eb: 3; the sync branch: 3; and CI on #3035 shard 7/8) passes today: 7 of 7 full-file runs, including 3c9d97c56b itself, current dev 26deeb6525 and runs with every core saturated. All of yesterday's failures, local and CI, happened between about 22:45 and 23:20 UTC. The test's only Date.now() is fixture data, and the loader's only time use is mirror timestamps, so no time dependence was found. It stays open as intermittent: the next failure should capture the time, machine load and full output. When it does flake it is still a hard blocker, because the ratchet rejects the result as an unfinished assertion instead of tolerating a base failure.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
