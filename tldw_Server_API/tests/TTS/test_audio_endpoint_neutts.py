@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
+from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
 
 @pytest.fixture
@@ -25,9 +26,11 @@ def client(monkeypatch):
         mgr._config_cache = None  # type: ignore[attr-defined]
     except Exception:
         _ = None
+    reset_settings()
     app = FastAPI()
     app.include_router(audio_router, prefix="/api/v1/audio")
-    with TestClient(app) as c:
+    # /audio/health requires auth since 0fa12b8c26.
+    with TestClient(app, headers={"X-API-KEY": os.environ["SINGLE_USER_API_KEY"]}) as c:
         yield c
 
 
