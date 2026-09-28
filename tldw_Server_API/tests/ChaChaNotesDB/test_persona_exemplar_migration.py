@@ -16,9 +16,13 @@ def db_path(tmp_path: Path) -> Path:
     return tmp_path / "persona_exemplar_migration.sqlite"
 
 
-def test_migration_v32_to_latest_creates_persona_exemplar_table(db_path: Path):
+def test_migration_v32_to_latest_creates_persona_exemplar_table(db_path: Path, monkeypatch):
+    # Seed below v59: the v59 attachment registry migration fails closed on a
+    # pre-existing registry, so a current-schema seed can't be replayed from v32.
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 58)
     db = CharactersRAGDB(db_path, "persona-exemplar-migration-seed")
     db.close_connection()
+    monkeypatch.undo()
 
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute("PRAGMA foreign_keys = OFF")
@@ -117,15 +121,31 @@ def test_postgres_initializer_uses_postgres_safe_v33_migration(monkeypatch):
 
     applied_scripts: list[str] = []
 
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn: 32)
+    # f5f5b63005 bootstraps on a pooled session this fake does not model.
+    from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
+
+    monkeypatch.setattr(
+        schema_bootstrap,
+        "postgres_schema_migration",
+        lambda backend, _lock_timeout: backend.transaction(),
+    )
+    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn, **_kwargs: 32)
     monkeypatch.setattr(db, "_ensure_postgres_fts", lambda conn: None)
+
+    class _StopAfterV35(Exception):
+        pass
 
     def _record_script(script: str, conn, expected_version=None):
         applied_scripts.append(script)
+        # This pins the v33 step; later migrations verify catalogs this fake
+        # does not model, so stop once v35 is reached.
+        if script == CharactersRAGDB._MIGRATION_SQL_V34_TO_V35:
+            raise _StopAfterV35
 
     monkeypatch.setattr(db, "_apply_postgres_migration_script", _record_script)
 
-    db._initialize_schema_postgres()
+    with pytest.raises(_StopAfterV35):
+        db._initialize_schema_postgres()
 
     assert CharactersRAGDB._MIGRATION_SQL_V32_TO_V33_POSTGRES in applied_scripts
     assert CharactersRAGDB._MIGRATION_SQL_V34_TO_V35 in applied_scripts

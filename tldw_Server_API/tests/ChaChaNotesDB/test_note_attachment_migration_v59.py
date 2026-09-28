@@ -30,15 +30,40 @@ BLOB_HASH = "sha256:" + "a" * 64
 OBJECT_HASH = "sha256:" + "b" * 64
 
 
-def _prepare_v58_database(db_path: Path) -> None:
-    """Create the preceding real schema, then remove only v59 state."""
+@pytest.fixture
+def _bootstrap_in_fake_transaction(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the Postgres bootstrap inside the fake backend's own transaction.
 
-    db = CharactersRAGDB(str(db_path), client_id=OWNER)
+    f5f5b63005 moved bootstrap onto schema_bootstrap.postgres_schema_migration,
+    which checks out a pooled session these fakes do not model.
+    """
+    from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
+
+    monkeypatch.setattr(
+        schema_bootstrap,
+        "postgres_schema_migration",
+        lambda backend, _lock_timeout: backend.transaction(),
+    )
+
+
+def _prepare_v58_database(db_path: Path) -> None:
+    """Create the real v59 schema, then remove only v59 state.
+
+    Seeding stops at v59 so later migrations (e.g. v60's task-catalog source
+    check) see a genuine predecessor catalog when the test upgrades.
+    """
+
+    original = CharactersRAGDB._CURRENT_SCHEMA_VERSION
+    CharactersRAGDB._CURRENT_SCHEMA_VERSION = 59
     try:
-        if db.get_note_by_id(NOTE_ID) is None:
-            db.add_note("Attachment parent", "Body", note_id=NOTE_ID)
+        db = CharactersRAGDB(str(db_path), client_id=OWNER)
+        try:
+            if db.get_note_by_id(NOTE_ID) is None:
+                db.add_note("Attachment parent", "Body", note_id=NOTE_ID)
+        finally:
+            db.close_all_connections()
     finally:
-        db.close_all_connections()
+        CharactersRAGDB._CURRENT_SCHEMA_VERSION = original
 
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys = OFF")
@@ -135,7 +160,7 @@ def test_sqlite_v58_to_v59_creates_empty_canonical_registry(tmp_path: Path) -> N
     migrated = CharactersRAGDB(str(db_path), client_id=OWNER)
     try:
         with migrated.transaction() as conn:
-            assert migrated._get_db_version(conn) == 59
+            assert migrated._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
             columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(note_attachments)")}
             assert columns == {
                 "client_id",
@@ -347,7 +372,7 @@ def test_sqlite_v59_initializer_serializes_on_one_schema_authority(tmp_path: Pat
 
     assert not any(thread.is_alive() for thread in threads)
     assert errors == []
-    assert sorted(versions) == [59, 59]
+    assert sorted(versions) == [CharactersRAGDB._CURRENT_SCHEMA_VERSION] * 2
     with sqlite3.connect(db_path) as conn:
         assert conn.execute("SELECT COUNT(*) FROM note_attachments").fetchone()[0] == 0
 
@@ -1033,6 +1058,7 @@ def test_postgres_v59_catalog_verifier_uses_complete_fixed_catalog_queries() -> 
     assert "policyname =" not in policy_query
 
 
+@pytest.mark.usefixtures("_bootstrap_in_fake_transaction")
 def test_postgres_current_v59_marker_rejects_missing_live_name_index_after_version_lock() -> None:
     backend = _PostgresCatalogBackend(drift="missing_live_index")
     db = _postgres_db(backend)
@@ -1087,6 +1113,7 @@ class _FailingPostgresTransactionBackend(_PostgresMigrationBackend):
         return result
 
 
+@pytest.mark.usefixtures("_bootstrap_in_fake_transaction")
 def test_postgres_v59_failure_rolls_back_temporary_force_relaxation_and_version() -> None:
     backend = _FailingPostgresTransactionBackend()
     db = _postgres_db(backend)
@@ -1131,6 +1158,7 @@ class _RollbackBackend:
         return QueryResult(rows=[], rowcount=0)
 
 
+@pytest.mark.usefixtures("_bootstrap_in_fake_transaction")
 def test_postgres_initializer_rolls_back_failed_v59_migration(monkeypatch: pytest.MonkeyPatch) -> None:
     backend = _RollbackBackend()
     db = CharactersRAGDB.__new__(CharactersRAGDB)

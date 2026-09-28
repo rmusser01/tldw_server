@@ -109,7 +109,7 @@ def test_flashcard_template_queries_use_postgres_safe_deleted_clause(monkeypatch
             def fetchall(self):
                 return self._rows
 
-        def _fake_execute_query(query, params=None):
+        def _fake_execute_query(query, params=None, **_kwargs):
             captured.append((str(query), params))
             if "COUNT(*)" in str(query):
                 return _Cursor(row={"cnt": 0})
