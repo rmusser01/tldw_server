@@ -10,10 +10,14 @@ import tldw_Server_API.app.core.PrivilegeMaps.service as service_module
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.privilege_catalog import PrivilegeCatalog
+from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.PrivilegeMaps.introspection import RouteMetadata
 from tldw_Server_API.app.core.PrivilegeMaps.service import PrivilegeMapService
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
+
+# These service fixtures never authenticate their seeded users.
+_FIXTURE_HASH = "hashed"
 
 
 async def _fetch_id(pool, query: str, value: str) -> int:
