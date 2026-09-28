@@ -271,8 +271,9 @@ vi.mock("@/db/dexie/helpers", async () => ({
   getRecentChatFromWebUI: vi.fn(async () => null)
 }))
 
+const modelSettingsState = vi.hoisted(() => ({ setSystemPrompt: vi.fn(), reset: vi.fn() }))
 vi.mock("@/store/model", () => ({
-  useStoreChatModelSettings: () => ({ setSystemPrompt: vi.fn(), reset: vi.fn() })
+  useStoreChatModelSettings: () => modelSettingsState
 }))
 
 vi.mock("@/components/Layouts/HeaderShortcuts", () => ({ HeaderShortcuts: () => null }))
@@ -480,6 +481,7 @@ describe("Playground coordinator integration", () => {
     messageOptionState.value.serverChatId = null
     messageOptionState.value.selectedCharacter = null
     messageOptionState.value.setMessages.mockClear()
+    messageOptionState.value.setHistory.mockClear()
     messageOptionState.value.setHistoryId.mockClear()
     messageOptionState.value.setServerChatId.mockClear()
     messageOptionState.value.setServerChatCharacterId.mockClear()
@@ -963,21 +965,35 @@ describe("Playground coordinator integration", () => {
 
   it.each(["settings", "timeline"] as const)("finishes a delayed current %s local-history load", async origin => {
     const { PageAssistDatabase } = await import("@/db/dexie/chat")
+    const { db } = await import("@/db/dexie/schema")
+    const history = { id: "owned-local", title: "Owned local title", createdAt: 1, is_rag: false, server_scope_key: '["http://chat.test","multi-user","manual",null,"A",null]', local_owner_key: "local-history-v1:profile" }
+    const originalProfileTable = db.userSettings
+    const originalHistoryTable = db.chatHistories
+    db.userSettings = { ...originalProfileTable, get: vi.fn(async () => ({ id: "main", user_id: "profile", history_profile_id: "profile" })) } as unknown as typeof db.userSettings
+    db.chatHistories = { ...originalHistoryTable, get: vi.fn(async (id: string) => id === history.id ? history : undefined) } as unknown as typeof db.chatHistories
     let release!: () => void
     const held = new Promise<void>(resolve => { release = resolve })
     const read = vi.spyOn(PageAssistDatabase.prototype, "getChatHistory").mockImplementation(async () => { await held; return [] })
-    vi.spyOn(PageAssistDatabase.prototype, "getHistoryInfo").mockResolvedValue({ id: "owned-local", title: "Owned local title", createdAt: 1, is_rag: false, server_scope_key: '["http://chat.test","multi-user","manual",null,"A",null]' })
+    const readInfo = vi.spyOn(PageAssistDatabase.prototype, "getHistoryInfo").mockResolvedValue(history)
     if (origin === "settings") window.history.pushState({}, "", "/chat?settingsHistoryId=owned-local")
     const view = render(<Playground />)
-    if (origin === "timeline") {
-      await act(async () => { await Promise.resolve() })
-      act(() => window.dispatchEvent(new CustomEvent("tldw:open-history", { detail: { historyId: "owned-local" } })))
+    try {
+      if (origin === "timeline") {
+        await act(async () => { await Promise.resolve() })
+        act(() => window.dispatchEvent(new CustomEvent("tldw:open-history", { detail: { historyId: "owned-local" } })))
+      }
+      await waitFor(() => expect(read).toHaveBeenCalledWith("owned-local"))
+      await act(async () => { release(); await held })
+      await waitFor(() => expect(document.title).toBe("Owned local title"))
+      expect(messageOptionState.value.setHistoryId).toHaveBeenCalledWith("owned-local", { preserveServerChatId: false })
+    } finally {
+      release()
+      view.unmount()
+      read.mockRestore()
+      readInfo.mockRestore()
+      db.userSettings = originalProfileTable
+      db.chatHistories = originalHistoryTable
     }
-    await waitFor(() => expect(read).toHaveBeenCalledWith("owned-local"))
-    await act(async () => { release(); await held })
-    await waitFor(() => expect(document.title).toBe("Owned local title"))
-    expect(messageOptionState.value.setHistoryId).toHaveBeenCalledWith("owned-local", { preserveServerChatId: false })
-    view.unmount()
   })
 
   it("does not complete a failed local settings return as a successful server selection", async () => {
@@ -985,16 +1001,54 @@ describe("Playground coordinator integration", () => {
     let fail!: () => void
     const held = new Promise<never>((_resolve, reject) => { fail = () => reject(new Error("Synthetic local failure")) })
     const read = vi.spyOn(PageAssistDatabase.prototype, "getChatHistory").mockReturnValue(held)
-    vi.spyOn(PageAssistDatabase.prototype, "getHistoryInfo").mockResolvedValue({ id: "missing-local", title: "Missing local title", createdAt: 1, is_rag: false })
-    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const readInfo = vi.spyOn(PageAssistDatabase.prototype, "getHistoryInfo").mockResolvedValue({ id: "missing-local", title: "Missing local title", createdAt: 1, is_rag: false, server_scope_key: '["http://chat.test","multi-user","manual",null,"A",null]' })
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined)
     window.history.pushState({}, "", "/chat?settingsHistoryId=missing-local&settingsServerChatId=target-server")
     const view = render(<Playground />)
-    await waitFor(() => expect(read).toHaveBeenCalled())
-    messageOptionState.value.setServerChatId.mockClear()
-    await act(async () => { fail(); await held.catch(() => undefined) })
-    expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled()
-    expect(window.location.search).toContain("settingsHistoryId=missing-local")
-    view.unmount()
+    try {
+      await waitFor(() => expect(read).toHaveBeenCalled())
+      messageOptionState.value.setServerChatId.mockClear()
+      await act(async () => { fail(); await held.catch(() => undefined) })
+      expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled()
+      expect(window.location.search).toContain("settingsHistoryId=missing-local")
+    } finally {
+      fail()
+      await held.catch(() => undefined)
+      view.unmount()
+      read.mockRestore()
+      readInfo.mockRestore()
+      error.mockRestore()
+    }
+  })
+
+  it("keeps a rejected local settings return without restarting its history read", async () => {
+    const { PageAssistDatabase } = await import("@/db/dexie/chat")
+    // Bound both retries and commits so a render-loop regression cannot exhaust the worker.
+    const repeatedRead = new Promise<never>(() => {})
+    let commits = 0
+    const onRender = () => { if (++commits > 40) throw new Error("Local settings return did not settle") }
+    const read = vi.spyOn(PageAssistDatabase.prototype, "getChatHistory")
+      .mockResolvedValueOnce([])
+      .mockReturnValue(repeatedRead)
+    const readInfo = vi.spyOn(PageAssistDatabase.prototype, "getHistoryInfo").mockResolvedValue({
+      id: "unowned-local", title: "Unowned local title", createdAt: 1, is_rag: false,
+      server_scope_key: '["http://chat.test","multi-user","manual",null,"A",null]'
+    })
+    window.history.pushState({}, "", "/chat?settingsHistoryId=unowned-local")
+    const view = render(<RouteTestBoundary><React.Profiler id="rejected-settings-return" onRender={onRender}><Playground /></React.Profiler></RouteTestBoundary>)
+    try {
+      await screen.findByText("Selected history unavailable")
+      await act(async () => { await Promise.resolve() })
+      expect(read).toHaveBeenCalledTimes(1)
+      expect(window.location.search).toBe("?settingsHistoryId=unowned-local")
+      expect(messageOptionState.value.setHistoryId).not.toHaveBeenCalled()
+      expect(messageOptionState.value.setHistory).not.toHaveBeenCalled()
+      expect(messageOptionState.value.setMessages).not.toHaveBeenCalled()
+    } finally {
+      view.unmount()
+      read.mockRestore()
+      readInfo.mockRestore()
+    }
   })
 
 

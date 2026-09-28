@@ -1989,18 +1989,24 @@ const PlaygroundContent = () => {
     setHistory,
   });
 
+  const setLocalHistoryId = React.useCallback(
+    (id: string) => setHistoryId(id, { preserveServerChatId: false }),
+    [setHistoryId],
+  );
+  const setLocalSelectedSystemPrompt = React.useCallback(
+    (id: string | null) => {
+      if (id) setSelectedSystemPrompt(id);
+    },
+    [setSelectedSystemPrompt],
+  );
   const loadLocalConversation = useLoadLocalConversation(
     {
       setServerChatId,
-      setHistoryId: (id) => setHistoryId(id, { preserveServerChatId: false }),
+      setHistoryId: setLocalHistoryId,
       setHistory,
       setMessages,
-      setSelectedModel: (id) => setSelectedModel(id),
-      setSelectedSystemPrompt: (id) => {
-        if (id) {
-          setSelectedSystemPrompt(id);
-        }
-      },
+      setSelectedModel,
+      setSelectedSystemPrompt: setLocalSelectedSystemPrompt,
       setSystemPrompt,
       setContextFiles,
     },

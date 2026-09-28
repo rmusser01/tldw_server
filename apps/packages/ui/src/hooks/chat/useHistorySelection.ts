@@ -1193,6 +1193,7 @@ export function useHistorySelection(
     },
     [refreshRecovery]
   )
+  const getCurrent = useCallback(() => live.current, [])
   const reference: HistorySelectionReference | null =
     state.view && state.bookmarkScope
       ? {
@@ -1231,7 +1232,7 @@ export function useHistorySelection(
     beginLoad: invalidate,
     canAutomaticallyLoad,
     getSignal: () => request.current?.signal,
-    getCurrent: () => live.current
+    getCurrent
   }
 }
 export type HistorySelectionController = ReturnType<typeof useHistorySelection>
