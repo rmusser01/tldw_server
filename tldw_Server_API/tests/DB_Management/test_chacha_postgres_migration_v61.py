@@ -10,6 +10,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends import pg_rls_policies
 from tldw_Server_API.app.core.DB_Management.backends.base import (
+    AuthorizationDeniedError,
     BackendType,
     DatabaseConfig,
     UniqueConstraintError,
@@ -729,7 +730,7 @@ def test_postgres_v61_restricted_role_enforces_recipient_rls_predicates(
             recipient_user_id: str | None = "recipient-a",
         ) -> None:
             before = _shared_chat_rows(backend)
-            with pytest.raises(BackendDatabaseError, match="^PostgreSQL query execution failed$"):
+            with pytest.raises(AuthorizationDeniedError, match=r"\(SQLSTATE 42501\)$"):
                 with backend.transaction() as conn:
                     _set_restricted_recipient(
                         backend,
@@ -973,12 +974,21 @@ def test_postgres_v60_to_v61_constraints_forced_rls_and_head_rerun(
             assert rerun_relations == relations
             assert rerun_policies == policies
             assert _shared_chat_rows(backend) == shared_rows_before
-            # v65 adds history_version; head reconciliation adds the title's
-            # FTS vector. Every historical column and value remains unchanged.
+            # Later migrations add history, startup and native-fork metadata.
+            # Every historical column and value remains unchanged.
             assert backend.execute(
                 "SELECT * FROM conversations WHERE id = %s", (conversation_id,)
             ).rows == [
-                {**conversation_before[0], "history_version": 1, "conversations_fts_tsv": ""},
+                {
+                    **conversation_before[0],
+                    "history_version": 1,
+                    "conversations_fts_tsv": "",
+                    "assistant_startup_json": None,
+                    "required_projection_version": None,
+                    "native_creation_operation_kind": None,
+                    "native_creation_operation_id": None,
+                    "native_bundle_json": None,
+                },
             ]
     finally:
         db.close_all_connections()
