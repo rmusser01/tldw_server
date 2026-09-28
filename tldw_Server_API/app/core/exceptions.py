@@ -965,6 +965,13 @@ def exception_type_chain(error: BaseException, *, limit: int = 6) -> str:
     chain from display, but ``__context__`` is still set, and the inner type is usually
     the whole diagnosis. Types only, never messages -- a database error message can
     carry row values (a unique-violation detail includes the email address).
+
+    Args:
+        error: The exception to describe, outermost first.
+        limit: Maximum number of type names to include; the walk also stops at a cycle.
+
+    Returns:
+        Type names joined by ``" <- "``, e.g. ``"TransactionError <- ProfileUserWriteRejected"``.
     """
 
     names: list[str] = []

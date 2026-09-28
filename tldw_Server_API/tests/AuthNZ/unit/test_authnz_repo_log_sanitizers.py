@@ -434,6 +434,9 @@ async def test_postgres_transaction_execute_failure_log_omits_raw_exception() ->
     rendered = "\n".join(records)
     assert "PostgreSQL transaction failed" in rendered
     assert "RuntimeError" in rendered
+    # The cause type must be in the message text itself: the TransactionError is raised
+    # outside any except block, so nothing downstream can recover it (TASK-13387).
+    assert "PostgreSQL transaction failed: cause=RuntimeError" in rendered
     _assert_safe_log(rendered)
 
 
@@ -468,4 +471,5 @@ async def test_sqlite_transaction_execute_failure_log_omits_raw_exception(
     rendered = "\n".join(records)
     assert "SQLite transaction failed" in rendered
     assert "RuntimeError" in rendered
+    assert "SQLite transaction failed: cause=RuntimeError" in rendered
     _assert_safe_log(rendered)

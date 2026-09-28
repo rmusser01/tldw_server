@@ -1305,11 +1305,16 @@ class DatabasePool:
             ):
                 raise DatabaseConcurrencyConflict() from None
             if isinstance(primary_failure, Exception):
+                # The TransactionError below is raised outside any except block, so
+                # nothing downstream can recover the cause; this line must carry it.
                 logger.bind(
                     backend="postgresql",
                     operation=failure_operation,
                     error_type=type(primary_failure).__name__,
-                ).error("PostgreSQL transaction failed")
+                ).error(
+                    "PostgreSQL transaction failed: cause={}",
+                    exception_type_chain(primary_failure),
+                )
                 raise TransactionError("PostgreSQL transaction") from None
             raise primary_failure from None
 

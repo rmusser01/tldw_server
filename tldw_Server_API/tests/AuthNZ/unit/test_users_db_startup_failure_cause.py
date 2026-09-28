@@ -22,14 +22,15 @@ pytestmark = pytest.mark.unit
 
 
 class _Inner(Exception):
-    pass
+    """Stands in for the real root cause, e.g. ProfileUserWriteRejected."""
 
 
 class _Outer(Exception):
-    pass
+    """Stands in for the generic wrapper raised `from None`."""
 
 
 def _raise_detached_wrapper() -> None:
+    """Raise _Outer from None while handling an _Inner whose message holds an email."""
     try:
         raise _Inner("user@example.com already exists")
     except _Inner:
@@ -76,7 +77,7 @@ async def test_a_rejected_users_bootstrap_logs_its_real_cause(tmp_path, monkeypa
     reset_settings()
     await reset_db_pool()
 
-    async def _rejected(*_args, **_kwargs):
+    async def _rejected(*_args: object, **_kwargs: object) -> None:
         raise ProfileUserWriteRejected()
 
     monkeypatch.setattr(Users_DB, "_execute_profile_users_bootstrap", _rejected)
