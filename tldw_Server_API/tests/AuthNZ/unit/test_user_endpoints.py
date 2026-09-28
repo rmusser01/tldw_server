@@ -68,8 +68,14 @@ class TestUserEndpoints:
         app.dependency_overrides.clear()
 
     @pytest.mark.asyncio
-    async def test_update_user_profile(self, mock_db_pool, test_user, valid_access_token):
+    async def test_update_user_profile(self, monkeypatch, mock_db_pool, test_user, valid_access_token):
         """Test updating user profile."""
+        from tldw_Server_API.app.api.v1.endpoints import users as users_endpoints
+
+        # Email writes go through the profile-version gateway, which needs a
+        # real users row; the endpoint contract is what is under test here.
+        update_email = AsyncMock()
+        monkeypatch.setattr(users_endpoints, "update_user_email", update_email)
         # Setup mock connection with proper transaction context
         mock_conn = AsyncMock()
         mock_conn.execute = AsyncMock()
@@ -102,6 +108,8 @@ class TestUserEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert data["email"] == "newemail@example.com"
+        assert update_email.await_args.kwargs["email"] == "newemail@example.com"
+        assert update_email.await_args.kwargs["user_id"] == test_user["id"]
 
         app.dependency_overrides.clear()
 
