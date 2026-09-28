@@ -34,6 +34,24 @@ from tldw_Server_API.app.services.scheduled_task_recurring_question_service impo
 
 pytestmark = pytest.mark.unit
 
+@pytest.fixture(autouse=True)
+def _message_store_test_key(monkeypatch):
+    """ADR-184 1A (74b7d88d3e): agent_task authoring persists the raw message
+    to the encrypted store, which refuses writes without a configured key
+    (fail-closed). Configure a key the way production does."""
+    import base64
+
+    from tldw_Server_API.app.core.DB_Management import (
+        Automation_Message_Store_DB as _store_module,
+    )
+
+    monkeypatch.setattr(
+        _store_module,
+        "_message_store_keys",
+        lambda: (base64.urlsafe_b64encode(b"0" * 32).decode(), None),
+    )
+
+
 OWNER_ID = 9901
 ACTOR = "recurring-question-scheduler-test"
 
