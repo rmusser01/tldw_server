@@ -826,8 +826,17 @@ async def _fetch_user_by_email_for_verification(db: Any, email: str) -> dict[str
     return await _svc_fetch_user_by_email_for_verification(db, email)
 
 
-async def _mark_user_verified(db: Any, user_id: int, now_utc: datetime) -> None:
-    await _svc_mark_user_verified(db, user_id, now_utc)
+async def _mark_user_verified(user_id: int, now_utc: datetime) -> None:
+    """Mark the user verified in its own short, committed transaction.
+
+    The versioned users gateway locks the user row ``FOR UPDATE``. Doing that
+    inside the request-scoped transaction and then creating the session / org
+    membership on other pool connections (whose FKs need ``KEY SHARE`` on the
+    same row) self-deadlocks on PostgreSQL until the pool times out.
+    """
+    pool = await get_db_pool()
+    async with pool.transaction() as conn:
+        await _svc_mark_user_verified(conn, user_id, now_utc)
 
 
 def _current_user_username(user: Any) -> str:
@@ -3131,7 +3140,7 @@ async def verify_magic_link(
         if not user and user_info:
             user_id = int(user_info["user_id"])
             # Mark user verified (magic link serves as email verification)
-            await _mark_user_verified(db, user_id, datetime.utcnow())
+            await _mark_user_verified(user_id, datetime.utcnow())
             user = await fetch_active_user_by_id(db, user_id)
 
     if not user:
@@ -3148,7 +3157,7 @@ async def verify_magic_link(
     # If an existing account wasn't verified, magic link serves as verification
     try:
         if user.get("is_verified") is False:
-            await _mark_user_verified(db, int(user["id"]), datetime.utcnow())
+            await _mark_user_verified(int(user["id"]), datetime.utcnow())
             user["is_verified"] = True
     except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug("Magic link verification: failed to mark user verified: {}", exc)
