@@ -194,3 +194,13 @@ The requester subsequently explicitly approved publication to PR 2869. The
 [approval record](https://github.com/rmusser01/tldw_server/pull/2869#issuecomment-5862294181)
 is now posted. The verified renewal is authorized for publication; current-head
 CI and final review remain required before merge.
+
+## Final September 28 rebase
+
+Dev advanced to `bd2ae757d274e7eda3edb48eb682733c401efe56` with capability
+disclosure authentication changes. Rebased without conflicts; range-diff
+confirms all 144 patches equivalent, and all 13 new upstream paths are byte
+identical to dev. Recovery ref: `codex/task-13013-7-before-sep28-rebase`.
+The nine renewal regressions pass after rebase. Qodo reported zero active
+findings on the preceding published head; fresh required CI and final review
+are being obtained for the rebased head.
