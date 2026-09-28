@@ -589,6 +589,11 @@ def test_two_account_databases_have_separate_checkouts_and_visible_notes(pg_http
             release.set()
             completed = await first
         assert completed.status_code == 200
+        # A first request schedules default-character work that checks out a pooled
+        # connection -- possibly the one owner 1 just returned. Let it finish before
+        # asserting the requests released their checkouts.
+        if deps._chacha_default_char_tasks:
+            await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
         assert all(raw.info.transaction_status.name == "IDLE" for raw in raw_by_user.values())
         assert f.backend.execute("SELECT title FROM notes WHERE id=%s", (f.note,)).scalar == "Committed title"
 
