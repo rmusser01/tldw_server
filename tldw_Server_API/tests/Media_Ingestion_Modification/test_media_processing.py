@@ -1365,41 +1365,36 @@ class TestProcessDocuments:
             marks=pytest.mark.skipif(not VALID_HTML_URL, reason="VALID_HTML_URL not defined"),
         ),
     ])
-    def test_process_doc_url_various_formats(self, url, check_content_part, expected_status, expected_error_part, client, dummy_headers):
-        """Test processing various document URLs."""
+    def test_process_doc_url_various_formats(self, url, check_content_part, expected_status, expected_error_part, client, dummy_headers, monkeypatch):
+        """Test processing various document URLs.
+
+        The download is served locally, as in test_process_doc_multi_status_mixed:
+        the live fixtures drifted (the TXT/MD URLs now 404, so those cases only
+        ever skipped, and example.com dropped its "Example Domain" heading).
+        """
+        served = {
+            VALID_TXT_URL: ("LICENSE.txt", "GNU GENERAL PUBLIC LICENSE\nThis license applies to the program."),
+            VALID_MD_URL: ("README.md", "# tldw\n\nA FastAPI server for media analysis.\n"),
+            VALID_HTML_URL: (
+                "index.html",
+                "<html><head><title>Example Domain</title></head><body>"
+                "<h1>Example Domain</h1><p>This domain is for use in documentation examples.</p>"
+                "</body></html>",
+            ),
+        }
+
+        async def fake_download_url_async(client, url, target_dir, *_args, **_kwargs):
+            name, body = served[url]
+            target_path = Path(target_dir) / name
+            target_path.write_text(body, encoding="utf-8")
+            return target_path
+
+        monkeypatch.setattr(
+            "tldw_Server_API.app.api.v1.endpoints.media.process_documents.core_download_url_async",
+            fake_download_url_async,
+        )
         form_data = {"urls": [url], "perform_analysis": "false"}
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
-
-        # In environments without outbound network or with strict DNS/egress
-        # policies, external hosts (e.g., example.com) may not resolve and the
-        # endpoint will return a download/egress error instead of the expected
-        # processing behavior. Treat this as an environment quirk rather than a
-        # behavioral regression by skipping before strict assertions.
-        data_for_skip = None
-        try:
-            data_for_skip = response.json()
-        except Exception:
-            data_for_skip = None
-
-        if isinstance(data_for_skip, dict):
-            results_list = data_for_skip.get("results")
-            if isinstance(results_list, list) and results_list:
-                err_val = results_list[0].get("error")
-                if isinstance(err_val, str):
-                    network_error_markers = [
-                        "Download/preparation failed",
-                        "Host could not be resolved",
-                        "nodename nor servname provided",
-                        "Name or service not known",
-                        "Temporary failure in name resolution",
-                        "Network is unreachable",
-                        "Network/request error",
-                    ]
-                    if any(marker in err_val for marker in network_error_markers):
-                        pytest.skip(
-                            "Skipping document URL test due to network/DNS "
-                            "restrictions in test environment."
-                        )
 
         # Adjust expected counts based on status
         expected_processed = 1 if expected_status == 200 else 0
