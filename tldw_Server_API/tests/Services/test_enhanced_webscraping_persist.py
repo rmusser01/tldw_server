@@ -92,6 +92,15 @@ def _captured_logs() -> Iterator[list[str]]:
         logger.remove(sink_id)
 
 
+# The user-visible wording, written out independently of the service's table.
+_PUBLIC_FAILURE_MESSAGES = {
+    "source_access_denied": "Source access was blocked by the website or outbound access policy.",
+    "empty_extraction": "No readable content was extracted from the source.",
+    "extraction_timeout": "Source extraction timed out.",
+    "extraction_failed": "Source extraction failed. Check the server logs for details.",
+}
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -123,7 +132,7 @@ async def test_persistence_reports_safe_extraction_failure_without_storing(
     ])
     # Users need to see which source failed: host plus path, never the query.
     assert response["extraction_failures"] == [{"code": code, "source": "example.com/private"}]
-    assert response["errors"] == [f"example.com/private: {svc_mod._EXTRACTION_FAILURE_MESSAGES[code]}"]
+    assert response["errors"] == [f"example.com/private: {_PUBLIC_FAILURE_MESSAGES[code]}"]
     assert response["stored_articles"] == 0
     assert "private-secret" not in str(response)
     assert "<html>" not in str(response)

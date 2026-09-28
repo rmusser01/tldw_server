@@ -20,6 +20,16 @@ pytestmark = pytest.mark.unit
             "https://blog.example.org/2026/09/28/a-very-long-article-slug-that-keeps-going",
             "blog.example.org/…ng-article-slug-that-keeps-going",
         ),
+        # Readable slugs survive, digits and all.
+        ("https://example.com/news/my-article-2026-09-28", "example.com/news/my-article-2026-09-28"),
+        # Token-looking segments are masked wherever they sit in the path.
+        ("https://example.com/share/Ab3dE9fGh1JkLmN0pQrS", "example.com/share/…"),
+        ("https://example.com/d/d41d8cd98f00b204e9800998ecf8427e/file.pdf", "example.com/d/…/file.pdf"),
+        ("https://example.com/i/550e8400-e29b-41d4-a716-446655440000", "example.com/i/…"),
+        (
+            "https://cdn.example.com/files/report/eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig",
+            "cdn.example.com/files/report/…",
+        ),
     ],
 )
 def test_hint_is_host_plus_path_tail(url: str, hint: str) -> None:

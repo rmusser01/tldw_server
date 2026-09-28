@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from urllib.parse import urlsplit, urlunsplit
 
@@ -49,15 +50,35 @@ def redact_urls_for_log(values: Iterable[object]) -> list[str]:
 
 
 _URL_HINT_TAIL_CHARS = 32
+# A path segment looks like a secret or opaque id when it holds a UUID or an
+# unbroken letters-and-digits run of 16+ characters that includes a digit (hex
+# digests, base64 tokens, JWT parts). Readable slugs such as
+# "my-article-2026-09-28" break into short runs and are kept.
+_UUID_RE = re.compile(r"[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}")
+_LONG_ALNUM_RUN_RE = re.compile(r"[A-Za-z0-9]{16,}")
+
+
+def _looks_like_token(segment: str) -> bool:
+    if _UUID_RE.search(segment):
+        return True
+    return any(any(char.isdigit() for char in run) for run in _LONG_ALNUM_RUN_RE.findall(segment))
 
 
 def url_hint_for_display(value: object, *, tail_chars: int = _URL_HINT_TAIL_CHARS) -> str | None:
     """Return a short user-facing identifier for a URL: its host plus the end of its path.
 
-    Enough for a user to tell which source failed, without echoing the full URL:
-    credentials, port, query and fragment (where tokens usually live) are dropped,
-    and a long path keeps only its last ``tail_chars`` characters. Returns None
-    when there is no host to show.
+    Enough for a user to tell which source failed without echoing the full URL:
+    credentials, port, query and fragment are dropped, path segments that look
+    like tokens or opaque ids are replaced with an ellipsis, and a long path keeps
+    only its last ``tail_chars`` characters.
+
+    Args:
+        value: The URL to describe; any object is converted with ``str()``.
+        tail_chars: Maximum number of path characters to keep, counted from the end.
+
+    Returns:
+        ``"host/path-tail"`` (just ``"host"`` for an empty path), or None when the
+        value has no parseable host.
     """
     try:
         parsed = urlsplit(str(value or ""))
@@ -66,7 +87,10 @@ def url_hint_for_display(value: object, *, tail_chars: int = _URL_HINT_TAIL_CHAR
         return None
     if not host:
         return None
-    path = parsed.path.rstrip("/")
+    path = "/".join(
+        "…" if _looks_like_token(segment) else segment
+        for segment in parsed.path.rstrip("/").split("/")
+    )
     if len(path) > tail_chars:
         path = "/…" + path[-tail_chars:]
     return f"{host}{path}"
