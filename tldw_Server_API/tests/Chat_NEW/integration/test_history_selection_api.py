@@ -8,12 +8,12 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 
 @pytest.fixture
 def history_api(credentialed_test_client, populated_chacha_db, auth_headers):
+    """Use the authenticated owner for API writes while retaining seeded data."""
     client = credentialed_test_client
-    # Preserve fixture writer attribution while supplying the authenticated owner
-    # through the same trusted construction boundary as the real dependency.
+    # Match request dependency ownership; existing seed attribution is unchanged.
     db = CharactersRAGDB(
         db_path=populated_chacha_db.db_path_str,
-        client_id=populated_chacha_db.client_id,
+        client_id="1",
         owner_user_id="1",
     )
     client.app.dependency_overrides[get_chacha_db_for_user] = lambda: db
