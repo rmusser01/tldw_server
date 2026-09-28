@@ -832,7 +832,18 @@ export const ContentReviewPage: React.FC = () => {
     updateDraftField("excludedSectionIds", [])
   }
 
-  const handleMarkReviewed = async () => {
+  const navigateToAdjacent = React.useCallback((direction: 1 | -1) => {
+    if (!activeDraftId) return
+    const index = drafts.findIndex((d) => d.id === activeDraftId)
+    if (index === -1) return
+    const next = drafts[index + direction]
+    if (next) {
+      setActiveDraftId(next.id)
+      syncRoute(activeBatchId, next.id)
+    }
+  }, [activeBatchId, activeDraftId, drafts, syncRoute])
+
+  const handleMarkReviewed = React.useCallback(async () => {
     if (!draftContent) return
     const now = Date.now()
     const updated = {
@@ -847,7 +858,7 @@ export const ContentReviewPage: React.FC = () => {
     setIsDirty(false)
     setLastSavedAt(now)
     navigateToAdjacent(1)
-  }
+  }, [draftContent, navigateToAdjacent])
 
   const handleDiscard = async () => {
     if (!draftContent) return
@@ -873,17 +884,6 @@ export const ContentReviewPage: React.FC = () => {
     setDrafts((prev) => prev.map((d) => (d.id === updated.id ? updated : d)))
     setDraftContent(updated)
     setIsDirty(false)
-  }
-
-  const navigateToAdjacent = (direction: 1 | -1) => {
-    if (!activeDraftId) return
-    const index = drafts.findIndex((d) => d.id === activeDraftId)
-    if (index === -1) return
-    const next = drafts[index + direction]
-    if (next) {
-      setActiveDraftId(next.id)
-      syncRoute(activeBatchId, next.id)
-    }
   }
 
   const handleCommit = async () => {

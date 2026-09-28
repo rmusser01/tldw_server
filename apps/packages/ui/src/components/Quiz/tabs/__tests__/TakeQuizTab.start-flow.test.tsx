@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 import { ASSERTION_REASONING_OPTIONS, TakeQuizTab } from "../TakeQuizTab"
@@ -265,6 +265,29 @@ describe("TakeQuizTab start flow", () => {
       )
     ).toBeInTheDocument()
   }, 15000)
+
+  it("updates the assignment warning when its due time passes", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-03-01T14:29:59.000Z"))
+    const props = {
+      onNavigateToGenerate: () => {},
+      onNavigateToCreate: () => {},
+      assignmentMode: "shared" as const,
+      assignmentDueAt: "2026-03-01T14:30:00.000Z"
+    }
+    const view = render(<MemoryRouter><TakeQuizTab {...props} /></MemoryRouter>)
+    try {
+      expect(screen.queryByText("This shared assignment is past due.")).not.toBeInTheDocument()
+      await act(async () => { await vi.advanceTimersByTimeAsync(1001) })
+      expect(screen.getByText("This shared assignment is past due.")).toBeInTheDocument()
+
+      view.rerender(<MemoryRouter><TakeQuizTab {...props} assignmentDueAt="invalid" /></MemoryRouter>)
+      expect(screen.queryByText("This shared assignment is past due.")).not.toBeInTheDocument()
+    } finally {
+      view.unmount()
+      vi.useRealTimers()
+    }
+  })
 
   it("renders shared-assignment context with due date and note", () => {
     render(

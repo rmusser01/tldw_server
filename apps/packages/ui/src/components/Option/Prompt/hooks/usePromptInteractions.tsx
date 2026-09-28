@@ -213,7 +213,7 @@ export function usePromptInteractions(deps: UsePromptInteractionsDeps) {
       createdAt:
         typeof promptRecord?.createdAt === "number"
           ? promptRecord.createdAt
-          : Date.now(),
+          : 0,
       usageCount: getPromptUsageCount(promptRecord),
       lastUsedAt: getPromptLastUsedAt(promptRecord)
     }

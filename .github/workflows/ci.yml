@@ -2683,10 +2683,8 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestTemplateProcessing
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
-              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
               tldw_Server_API/tests/Chunking/test_template_*.py
-              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -3034,7 +3032,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
-              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -3075,7 +3072,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
-              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py
@@ -4091,9 +4087,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
-              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_template_*.py
-              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -4441,7 +4435,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
-              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -4482,7 +4475,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
-              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py
@@ -5421,9 +5413,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
-              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_template_*.py
-              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -5771,7 +5761,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
-              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -5812,7 +5801,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
-              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py
@@ -6757,9 +6745,7 @@ jobs:
               tldw_Server_API/tests/Chunking/test_chunking_templates_endpoint_sanitization.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_chunking_templates_validate_schema.py
-              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
               tldw_Server_API/tests/Chunking/test_template_*.py
-              tldw_Server_API/tests/Chunking/test_chunking_templates_owner_scope.py
           - name: ai-chunking-templates-api
             paths: >-
               tldw_Server_API/tests/Chunking/test_chunking_templates.py::TestAPIEndpoints
@@ -7107,7 +7093,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat/test_messages_tool_calls_exposure.py
               tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
               tldw_Server_API/tests/Character_Chat/test_persona_dialogue_tree_character_eval.py
-              tldw_Server_API/tests/Character_Chat/test_message_listing_raw_content.py
           - name: chat-character-legacy-files
             paths: >-
               tldw_Server_API/tests/Character_Chat/test_file_mime_detection.py
@@ -7148,7 +7133,6 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_memory.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_prompt_presets.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_templates.py
-              tldw_Server_API/tests/Character_Chat_NEW/unit/test_character_behavior_snapshot.py
           - name: chat-character-unit-chat
             paths: >-
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_chat_completion_precheck.py

@@ -248,13 +248,12 @@ export const CreateTab: React.FC<CreateTabProps> = ({
       : osceEditorDirty)
   }, [activityType, descriptionValue, nameValue, osceEditorDirty, passingScoreValue, questions, timeLimitValue])
 
-  const currentDraft = React.useMemo<QuizCreateDraft>(() => ({
+  const currentDraft = React.useMemo<Omit<QuizCreateDraft, "updatedAt">>(() => ({
     name: (nameValue ?? "").trim(),
     description: descriptionValue ?? "",
     timeLimit: typeof timeLimitValue === "number" ? timeLimitValue : null,
     passingScore: typeof passingScoreValue === "number" ? passingScoreValue : null,
-    questions,
-    updatedAt: Date.now()
+    questions
   }), [descriptionValue, nameValue, passingScoreValue, questions, timeLimitValue])
 
   React.useEffect(() => {
@@ -280,7 +279,7 @@ export const CreateTab: React.FC<CreateTabProps> = ({
     }
 
     const timeoutId = window.setTimeout(() => {
-      const result = writeCreateDraft(currentDraft)
+      const result = writeCreateDraft({ ...currentDraft, updatedAt: Date.now() })
       if (!result) {
         setDraftStorageUnavailable(true)
         lastRecommendationRef.current = null

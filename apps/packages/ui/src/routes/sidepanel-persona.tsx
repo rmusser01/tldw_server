@@ -248,6 +248,24 @@ const SidepanelPersona = ({
       : null
   const setBuddyShellRenderContext = useSetBuddyShellRenderContext()
   const visualRuntimeOverride = usePersonaVisualRuntimeStore((state) => state.override)
+  const [visualOverrideCheckedAt, setVisualOverrideCheckedAt] = React.useState(Date.now)
+  React.useEffect(() => {
+    if (!visualRuntimeOverride) return
+    const clearExpired = usePersonaVisualRuntimeStore.getState().clearExpired
+    let timer: number | undefined
+    const checkExpiry = () => {
+      const now = Date.now()
+      setVisualOverrideCheckedAt(now)
+      const remainingMs = visualRuntimeOverride.expiresAt - now
+      if (remainingMs <= 0) {
+        clearExpired(now)
+        return
+      }
+      timer = window.setTimeout(checkExpiry, Math.min(2_147_483_647, Math.ceil(remainingMs)))
+    }
+    checkExpiry()
+    return () => window.clearTimeout(timer)
+  }, [visualRuntimeOverride])
   const visualRuntimeDiagnostics = usePersonaVisualRuntimeStore(
     (state) => state.runtimeDiagnostics
   )
@@ -1238,10 +1256,11 @@ const SidepanelPersona = ({
     (!sessionId ||
       !visualRuntimeOverride.sessionId ||
       visualRuntimeOverride.sessionId === sessionId) &&
-    visualRuntimeOverride.expiresAt > Date.now()
+    visualRuntimeOverride.expiresAt > visualOverrideCheckedAt
       ? visualRuntimeOverride
       : null
   const resolvedLiveVisualState = resolvePersonaVisualState({
+    now: visualOverrideCheckedAt,
     liveVoiceState: liveVoiceController.state,
     activeToolStatus: liveVoiceController.activeToolStatus,
     wakeArmed: liveVoiceController.wakeArmed,

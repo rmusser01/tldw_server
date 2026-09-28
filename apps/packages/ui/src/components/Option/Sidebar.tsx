@@ -67,6 +67,10 @@ import { useStoreChatModelSettings } from "@/store/model"
 import { useStoreMessageOption } from "@/store/option"
 import { ModeToggle } from "@/components/Sidepanel/Chat/ModeToggle"
 
+const FolderPicker = React.lazy(() =>
+  import("@/components/Folders/FolderPicker").then((m) => ({ default: m.FolderPicker }))
+)
+
 const FOLDER_CONVERSATION_BATCH_SIZE = 10
 
 type Props = {
@@ -75,17 +79,17 @@ type Props = {
 }
 
 export const Sidebar = ({ onClose, isOpen }: Props) => {
-  const FolderPicker = React.useMemo(
-    () =>
-      React.lazy(
-        () => import("@/components/Folders/FolderPicker").then((m) => ({ default: m.FolderPicker }))
-      ),
-    []
-  )
   const { t } = useTranslation(["option", "common"])
   const client = useQueryClient()
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState("")
+  const [now, setNow] = useState(Date.now)
+  useEffect(() => {
+    if (!isOpen) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(timer)
+  }, [isOpen])
   const debouncedSearchQuery = useDebounce(searchQuery, 300)
   const [deleteGroup, setDeleteGroup] = useState<string | null>(null)
   const [dexiePrivateWindowError, setDexiePrivateWindowError] = useState(false)
@@ -294,7 +298,6 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
 
   // Helper to format relative time
   const formatRelativeTime = (timestamp: number) => {
-    const now = Date.now()
     const diff = now - timestamp
     const minutes = Math.floor(diff / 60000)
     const hours = Math.floor(diff / 3600000)

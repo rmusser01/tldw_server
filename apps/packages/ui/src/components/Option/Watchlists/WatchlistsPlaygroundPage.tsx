@@ -464,7 +464,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const initializedRunPollingRef = useRef(false)
   const runNotificationsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const runNotificationsPollingInFlightRef = useRef(false)
-  const sessionStartedAtMsRef = useRef<number>(Date.now())
+  const [sessionStartedAtMs] = React.useState(Date.now)
   const [guidedTourState, setGuidedTourState] = React.useState<GuidedTourState>(() => readGuidedTourState())
   const [guidedTourOpen, setGuidedTourOpen] = React.useState(false)
   const [showGuidedTourCompletion, setShowGuidedTourCompletion] = React.useState(false)
@@ -1480,7 +1480,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         if (
           initialized &&
           !previousStatus &&
-          shouldNotifyNewTerminalRun(run, sessionStartedAtMsRef.current)
+          shouldNotifyNewTerminalRun(run, sessionStartedAtMs)
         ) {
           const status = String(run.status || "").toLowerCase()
           const kind = status === "failed" ? "failed" : "completed"
@@ -1535,6 +1535,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   }, [
     runNotificationsPollPlan.pageSize,
     runNotificationsPollPlan.suppressCompleted,
+    sessionStartedAtMs,
     selectedWatchlistId,
     showGroupedRunNotification,
     showRunNotification,

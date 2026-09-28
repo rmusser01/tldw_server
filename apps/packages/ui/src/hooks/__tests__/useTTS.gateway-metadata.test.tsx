@@ -140,7 +140,9 @@ describe("useTTS gateway metadata", () => {
     })
   })
 
-  it("keeps legacy clip records free of gateway-only provenance", async () => {
+  it("keeps legacy clip records free of gateway-only provenance and timestamps each save", async () => {
+    let now = 1000
+    vi.spyOn(Date, "now").mockImplementation(() => now)
     testState.context = {
       provider: "tldw",
       utterance: "First. Second. Third.",
@@ -163,6 +165,12 @@ describe("useTTS gateway metadata", () => {
       await result.current.speak({ utterance: "ignored", saveClip: true })
     })
 
+    expect(testState.savedClip?.createdAt).toBe(1000)
+    now = 2000
+    await act(async () => {
+      await result.current.speak({ utterance: "ignored", saveClip: true })
+    })
+    expect(testState.savedClip?.createdAt).toBe(2000)
     expect(testState.savedClip?.requestedBackend).toBeUndefined()
     expect(testState.savedClip?.actualBackends).toBeUndefined()
     expect(testState.savedClip?.fallbackUsed).toBeUndefined()

@@ -93,3 +93,45 @@ The recovery ref is `codex/task-13013-7-before-summary-rebase`. The pinned
 offline uv check still passes. Scoped ESLint reports zero errors and the
 same 121 existing warnings. No Python code changed in this follow-up, so
 Bandit is not applicable to its TypeScript test and documentation edits.
+
+## September 27 integration
+
+Rebased all 139 patches onto dev
+`3c9d97c56b29abc4c0396274b9560859aee06959`, with recovery ref
+`codex/task-13013-7-before-sep27-rebase`. Range-diff maps 132 equivalent
+patches and seven conflict adaptations, with no dropped patches. All 398
+branch-only and 1,096 upstream-only paths retain their exact tree entries.
+
+Workflow conflicts preserve dev's PR license wait and the release scan gates.
+The obsolete SBOM workflow-run trigger was removed to match dev's intended
+event routing; direct PR and reusable release calls remain. Duplicate shard
+entries were removed without dropping distinct tests. Dev's explicit
+virtualizer 3.13.19 pin and schema compatibility assertion are retained.
+
+The current-head Characters harness failures are resolved in GitHub CI.
+The newly exposed 15 shared React hook-rule errors are repaired without
+disabling rules: render-time clocks move to existing state/timer flows,
+operation callbacks retain operation-time clocks, draft timestamps belong to
+the write, and the lazy folder picker is declared at module scope. Deadline
+timers clean up on unmount; persona expiry handles fractional deadlines and
+rechecks after early timer execution. Missing prompt creation dates use the
+existing unknown-date convention rather than inventing the current time.
+
+Validation: 132 workflow/dependency contracts pass; pinned uv and frozen Bun
+lock checks pass; five integration workflows pass Actionlint; frontend type
+check passes. Quiz coverage passes 37 tests and callback/TTS coverage passes
+26 tests; ingest/watchlist coverage passes 25 tests plus the persona expiry
+regression. Scoped Bandit on the merged Python schema test reports only its
+three ordinary assertion findings, with no parse errors. Independent review
+found the fractional-expiry case, which was corrected and verified by that
+reviewer before publication.
+Local logs use `/private/tmp/task-13013-7-sep27-*`, `/tmp/quiz-time-*`, and
+`/private/tmp/sep27-hook-*`.
+
+The complete shared-hook gate passes across 5,405 files with zero gate
+failures. It separately reports 1,375 other ESLint errors outside its three
+compiler-rule scope; this is not a claim that all repository lint is clean.
+
+The human summary remains satisfied. Renewal approval remains pending;
+neither canonical nor CI exception records were extended. Fresh CI and Qodo
+review are still required before merge.
