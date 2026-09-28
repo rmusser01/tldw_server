@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import sqlite3
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,17 @@ def _iter_database_list_rows(conn: Any) -> Iterable[Any]:
     if rows is None:
         return ()
     return rows
+
+
+_WAL_RETRY_SLEEP_S = 0.01
+
+
+def _is_wal_switch_lock_error(exc: sqlite3.OperationalError, deadline: float) -> bool:
+    # Switching a rollback-journal DB to WAL needs an exclusive lock, and SQLite
+    # returns SQLITE_BUSY without calling the busy handler when another
+    # connection holds a write lock (deadlock avoidance), so concurrent first
+    # opens of a legacy DB fail instantly unless we retry within busy_timeout.
+    return "database is locked" in str(exc) and time.monotonic() < deadline
 
 
 def _is_in_memory_connection(conn: Any) -> bool:
@@ -44,7 +57,15 @@ def configure_sqlite_connection(
     is_memory = _is_in_memory_connection(conn)
 
     if use_wal and (enable_on_memory or not is_memory):
-        conn.execute("PRAGMA journal_mode=WAL")
+        deadline = time.monotonic() + busy_timeout_ms / 1000
+        while True:
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                break
+            except sqlite3.OperationalError as exc:
+                if not _is_wal_switch_lock_error(exc, deadline):
+                    raise
+                time.sleep(_WAL_RETRY_SLEEP_S)
 
     if synchronous:
         conn.execute(f"PRAGMA synchronous={synchronous}")
@@ -137,7 +158,15 @@ async def configure_sqlite_connection_async(
     is_memory = await _is_in_memory_connection_async(conn)
 
     if use_wal and (enable_on_memory or not is_memory):
-        await conn.execute("PRAGMA journal_mode=WAL")
+        deadline = time.monotonic() + busy_timeout_ms / 1000
+        while True:
+            try:
+                await conn.execute("PRAGMA journal_mode=WAL")
+                break
+            except sqlite3.OperationalError as exc:
+                if not _is_wal_switch_lock_error(exc, deadline):
+                    raise
+                await asyncio.sleep(_WAL_RETRY_SLEEP_S)
 
     if synchronous:
         await conn.execute(f"PRAGMA synchronous={synchronous}")
