@@ -10,6 +10,8 @@ from urllib.parse import unquote, urlparse
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
+
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
 
@@ -2002,7 +2004,9 @@ async def test_execute_upgrade_rolls_back_when_staging_insert_fails(
 
     repo.create_policy_assignment = _boom_create_policy_assignment  # type: ignore[method-assign]
     try:
-        with pytest.raises(RuntimeError, match="upgrade assignment insert failed"):
+        # Unexpected in-transaction failures surface sanitized (d7bab343d3);
+        # what matters here is the rollback asserted below.
+        with pytest.raises(TransactionError):
             await service.execute_upgrade_pack(
                 source_governance_pack_id=imported.governance_pack_id,
                 pack=target_pack,
@@ -2017,3 +2021,56 @@ async def test_execute_upgrade_rolls_back_when_staging_insert_fails(
 
     inventory = await repo.list_governance_packs(owner_scope_type="user", owner_scope_id=7)
     assert [(item["pack_version"], item["is_active_install"]) for item in inventory] == [("1.0.0", True)]
+
+
+@pytest.mark.asyncio
+async def test_execute_upgrade_in_transaction_stale_source_keeps_domain_error(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Domain errors raised inside the upgrade transaction must not be sanitized away."""
+    from tldw_Server_API.app.core.MCP_unified.governance_packs import (
+        load_governance_pack_fixture,
+    )
+    from tldw_Server_API.app.services.mcp_hub_governance_pack_service import (
+        GovernancePackUpgradeStaleError,
+        McpHubGovernancePackService,
+    )
+
+    repo = await _make_repo(tmp_path, monkeypatch)
+    await _seed_research_capability_mappings(repo)
+    service = McpHubGovernancePackService(repo=repo)
+    source_pack = load_governance_pack_fixture("minimal_researcher_pack")
+    imported = await service.import_pack(
+        pack=source_pack,
+        owner_scope_type="user",
+        owner_scope_id=7,
+        actor_id=7,
+    )
+    target_pack = deepcopy(source_pack)
+    target_pack.manifest.pack_version = "1.0.1"
+    plan = await service.dry_run_upgrade_pack(
+        source_governance_pack_id=imported.governance_pack_id,
+        pack=target_pack,
+        owner_scope_type="user",
+        owner_scope_id=7,
+    )
+
+    original_get_governance_pack = repo.get_governance_pack
+
+    async def _source_gone_inside_transaction(governance_pack_id, *args, **kwargs):
+        if kwargs.get("conn") is not None:
+            return None
+        return await original_get_governance_pack(governance_pack_id, *args, **kwargs)
+
+    monkeypatch.setattr(repo, "get_governance_pack", _source_gone_inside_transaction)
+    with pytest.raises(GovernancePackUpgradeStaleError):
+        await service.execute_upgrade_pack(
+            source_governance_pack_id=imported.governance_pack_id,
+            pack=target_pack,
+            owner_scope_type="user",
+            owner_scope_id=7,
+            actor_id=7,
+            planner_inputs_fingerprint=plan.planner_inputs_fingerprint,
+            adapter_state_fingerprint=plan.adapter_state_fingerprint,
+        )
