@@ -491,7 +491,6 @@ def test_full_suite_pytest_steps_do_not_leak_shared_postgres_dsn() -> None:
     workflow = _load(".github/workflows/ci.yml")
     jobs = workflow["jobs"]
     step_names = {
-        "Run Python 3.11 compatibility smoke tests",
         "Run shard tests",
         "Run OS shard tests",
         "Run release OS shard tests",
@@ -652,7 +651,6 @@ def test_wait_for_postgres_action_bounds_linux_client_install() -> None:
 def test_full_suite_ffmpeg_setup_scopes_heavy_install_to_media_runtime_shards() -> None:
     workflow = _load(".github/workflows/ci.yml")
     matrix_jobs = [
-        "full-suite-linux-311-smoke",
         "full-suite-linux-312-shards",
         "full-suite-linux-313-shards",
         "full-suite-macos-312-shards",
@@ -695,7 +693,7 @@ def test_full_suite_test_result_uploads_are_non_blocking() -> None:
         if str(step.get("name", "")).startswith("Upload test results")
     ]
 
-    assert len(upload_steps) == 6
+    assert len(upload_steps) == 5
     for step in upload_steps:
         assert step.get("if") == "always()"
         assert step.get("continue-on-error") is True
@@ -742,67 +740,6 @@ def test_full_suite_summaries_follow_backend_path_filter() -> None:
         assert job["needs"] == [shard_job, "changes", "admission", "await_license"]
         wanted = expected_if if summary_job == "full-suite-linux-312-summary" else non_pr_if
         assert _normalize_ws(job["if"]) == _normalize_ws(wanted), summary_job
-
-
-def test_linux_311_smoke_is_sharded_for_timeout_control() -> None:
-    workflow = _load(".github/workflows/ci.yml")
-    job = workflow["jobs"]["full-suite-linux-311-smoke"]
-    assert job["name"] == "Full Suite (Ubuntu / Python 3.11 / ${{ matrix.shard.name }})"
-
-    shards = job["strategy"]["matrix"]["shard"]
-    shard_paths = {shard["name"]: set(str(shard["paths"]).split()) for shard in shards}
-    assert set(shard_paths) == {
-        "authnz-unit",
-        "config-core-loaders",
-        "config-effective-api",
-        "config-module-yaml",
-        "config-routes-startup",
-        "config-runtime-env",
-        "core",
-        "utils-http",
-    }
-    assert shard_paths["authnz-unit"] == {"tldw_Server_API/tests/AuthNZ_Unit"}
-    assert shard_paths["utils-http"] == {
-        "tldw_Server_API/tests/Utils",
-        "tldw_Server_API/tests/http_client",
-    }
-    config_shards = {name for name in shard_paths if name.startswith("config-")}
-    config_paths = [path for name in config_shards for path in shard_paths[name]]
-    expected_config_paths = {
-        str(path)
-        for path in Path("tldw_Server_API/tests/Config").glob("test_*.py")
-    }
-    assert len(config_paths) == len(set(config_paths))
-    assert set(config_paths) == expected_config_paths
-    assert "tldw_Server_API/tests/Config" not in config_paths
-    assert shard_paths["config-effective-api"] == {
-        "tldw_Server_API/tests/Config/test_effective_config_api.py"
-    }
-    assert shard_paths["config-module-yaml"] == {
-        "tldw_Server_API/tests/Config/test_module_yaml_integration.py"
-    }
-    assert {
-        "tldw_Server_API/tests/test_*.py",
-        "tldw_Server_API/tests/Health",
-        "tldw_Server_API/tests/sanity_tests",
-        "tldw_Server_API/tests/schemas",
-        "tldw_Server_API/tests/unit",
-    } == shard_paths["core"]
-
-    steps = job["steps"]
-    for step_name in [
-        "Smoke start server (single-user)",
-        "Smoke health check",
-        "Print smoke server log on failure",
-        "Smoke stop server",
-    ]:
-        step = _get_step(steps, step_name)
-        assert "matrix.shard.name == 'core'" in step["if"]
-
-    run_step = _get_step(steps, "Run Python 3.11 compatibility smoke tests")
-    run_script = run_step["run"]
-    assert "${{ matrix.shard.paths }}" in run_script
-    assert "test-results-linux-3.11-smoke" not in run_script
 
 
 def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:

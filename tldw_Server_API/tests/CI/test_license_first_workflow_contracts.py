@@ -88,14 +88,13 @@ ORIGINAL_JOB_NAMES = {
     "ci.yml": (
         "http-client-patch-guard",
         "syntax-check",
-        "preflight-python-311",
+        "preflight-python-312",
         "shard-coverage",
         "quickstart-dry-run",
         "lint",
         "frontend-lint",
         "wizard-tests",
         "changes",
-        "full-suite-linux-311-smoke",
         "full-suite-linux-312-shards",
         "full-suite-linux-312-summary",
         "full-suite-linux-313-shards",
@@ -138,7 +137,6 @@ ORIGINAL_JOB_NAMES = {
 }
 ORIGINAL_DEPENDENCIES = {
     ("backend-required.yml", "backend-required"): ("changes",),
-    ("ci.yml", "full-suite-linux-311-smoke"): ("lint", "syntax-check", "changes"),
     ("ci.yml", "full-suite-linux-312-shards"): ("lint", "syntax-check", "changes"),
     ("ci.yml", "full-suite-linux-312-summary"): ("full-suite-linux-312-shards", "changes"),
     ("ci.yml", "full-suite-linux-313-shards"): ("lint", "syntax-check", "changes"),
@@ -177,10 +175,9 @@ DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | {
     ("security-required.yml", "security-required"),
 }
 NON_ADMITTED_ROOT_JOBS = {
-    ("ci.yml", "preflight-python-311"),
+    ("ci.yml", "preflight-python-312"),
 }
 BACKEND_CHANGED_JOBS = {
-    "full-suite-linux-311-smoke",
     "full-suite-linux-312-shards",
     "full-suite-linux-312-summary",
     "full-suite-linux-313-shards",
@@ -590,7 +587,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 )
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 55
+    assert checkout_count == 54
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -630,8 +627,8 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     combined_text = "\n".join(text for _, text in workflows.values())
     assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
     assert combined_text.count("github.event.pull_request.number") == 27
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 55
-    assert combined_text.count("github.event.pull_request.head.sha") == 52
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 54
+    assert combined_text.count("github.event.pull_request.head.sha") == 51
     assert combined_text.count("github.event.pull_request.base.sha") == 5
     assert combined_text.count("needs.admission.outputs.base_sha") == 11
 
@@ -901,7 +898,7 @@ def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
                         save_condition.startswith("github.event_name!='workflow_run'&&")
                     )
 
-    assert setup_helper_count == 24
+    assert setup_helper_count == 23
     assert setup_python_cache_count == 1
     assert cache_save_count == 6
     assert cache_restore_count == 6

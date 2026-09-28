@@ -123,8 +123,8 @@ jobs:
           ok = compileall.compile_dir('tldw_Server_API/app', force=True, quiet=1)
           sys.exit(0 if ok else 1)
           PY
-  preflight-python-311:
-    name: Governed Preflight (Python 3.11)
+  preflight-python-312:
+    name: Governed Preflight (Python 3.12)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -140,10 +140,10 @@ jobs:
         with:
           install-ffmpeg: 'false'
           install-portaudio: 'true'
-      - name: Setup Python 3.11 and dependencies
+      - name: Setup Python 3.12 and dependencies
         uses: ./.github/actions/setup-python-deps
         with:
-          python-version: '3.11'
+          python-version: '3.12'
           use-uv: 'true'
           enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
           extras: dev
@@ -507,241 +507,6 @@ jobs:
           git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
           mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"
           python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
-  full-suite-linux-311-smoke:
-    name: Full Suite (Ubuntu / Python 3.11 / ${{ matrix.shard.name }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    needs: [lint, syntax-check, changes]
-    # admission is skipped outside workflow_run, and an implicit success() treats any
-    # skipped ancestor as a reason to skip -- so without always() these shards never
-    # ran on pull_request or push while the summaries reported green.
-    if: >-
-      always() && !cancelled() &&
-      needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
-      needs.changes.result == 'success' &&
-      ((github.event_name != 'pull_request' && github.event_name != 'workflow_run') ||
-       needs.changes.outputs.backend_changed == 'true')
-    strategy:
-      fail-fast: false
-      matrix:
-        shard:
-          - name: core
-            paths: >-
-              tldw_Server_API/tests/test_*.py
-              tldw_Server_API/tests/Health
-              tldw_Server_API/tests/sanity_tests
-              tldw_Server_API/tests/schemas
-              tldw_Server_API/tests/unit
-          - name: authnz-unit
-            paths: >-
-              tldw_Server_API/tests/AuthNZ_Unit
-          - name: config-core-loaders
-            paths: >-
-              tldw_Server_API/tests/Config/test_claims_env_int_parsing.py
-              tldw_Server_API/tests/Config/test_config_adapter.py
-              tldw_Server_API/tests/Config/test_config_admin_endpoint_sanitizers.py
-              tldw_Server_API/tests/Config/test_config_precedence_contract.py
-              tldw_Server_API/tests/Config/test_config_providers_endpoints.py
-              tldw_Server_API/tests/Config/test_config_sections_typed_loaders.py
-              tldw_Server_API/tests/Config/test_config_txt_inline_comment_regression.py
-              tldw_Server_API/tests/Config/test_config_utils_sanitizers.py
-              tldw_Server_API/tests/Config/test_docs_info_capabilities.py
-          - name: config-effective-api
-            paths: >-
-              tldw_Server_API/tests/Config/test_effective_config_api.py
-          - name: config-module-yaml
-            paths: >-
-              tldw_Server_API/tests/Config/test_module_yaml_integration.py
-          - name: config-runtime-env
-            paths: >-
-              tldw_Server_API/tests/Config/test_claims_verification_env.py
-              tldw_Server_API/tests/Config/test_env_absent_defaults.py
-              tldw_Server_API/tests/Config/test_env_file_selection.py
-              tldw_Server_API/tests/Config/test_feature_flags.py
-              tldw_Server_API/tests/Config/test_local_api_and_custom_openai2_config_keys.py
-              tldw_Server_API/tests/Config/test_migrate_api_keys.py
-              tldw_Server_API/tests/Config/test_pyproject_tooling_extra.py
-              tldw_Server_API/tests/Config/test_redis_config.py
-              tldw_Server_API/tests/Config/test_web_scraper_config_keys.py
-          - name: config-routes-startup
-            paths: >-
-              tldw_Server_API/tests/Config/test_openapi_config_jobs.py
-              tldw_Server_API/tests/Config/test_route_and_cors_guards.py
-              tldw_Server_API/tests/Config/test_route_toggle_evaluations_regressions.py
-              tldw_Server_API/tests/Config/test_startup_api_key_logging.py
-              tldw_Server_API/tests/Config/test_startup_validation.py
-          - name: utils-http
-            paths: >-
-              tldw_Server_API/tests/Utils
-              tldw_Server_API/tests/http_client
-    services:
-      postgres:
-        image: mirror.gcr.io/library/postgres:18-bookworm
-        env:
-          POSTGRES_USER: tldw_user
-          POSTGRES_PASSWORD: TestPassword123!
-          POSTGRES_DB: tldw_content
-        ports:
-          - 5432/tcp
-        options: >-
-          --health-cmd "pg_isready -U tldw_user -d tldw_content"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      PYTHONPATH: .
-      PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
-      TEST_MODE: 'true'
-      DISABLE_HEAVY_STARTUP: '1'
-      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
-      POSTGRES_TEST_HOST: 127.0.0.1
-      POSTGRES_TEST_DB: tldw_content
-      POSTGRES_TEST_USER: tldw_user
-      POSTGRES_TEST_PASSWORD: TestPassword123!
-      TEST_DB_HOST: 127.0.0.1
-      TEST_DB_USER: tldw_user
-      TEST_DB_PASSWORD: TestPassword123!
-      TEST_DB_NAME: tldw_test
-      TLDW_TEST_POSTGRES_REQUIRED: '1'
-      WORKFLOWS_EGRESS_ALLOWLIST: "93.184.216.34,does-not-resolve.invalid,example.com"
-      RESULTS_DIR: test-results-linux-3.11-${{ matrix.shard.name }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-
-      - name: Install FFmpeg and PortAudio (Linux)
-        uses: ./.github/actions/setup-ffmpeg
-        with:
-          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing' || matrix.shard.name == 'platform-services-main-pollers') }}
-          install-portaudio: 'true'
-
-      - name: Setup Python and deps (with uv)
-        uses: ./.github/actions/setup-python-deps
-        with:
-          python-version: '3.11'
-          use-uv: 'true'
-          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
-          cache-dependency-path: |
-            pyproject.toml
-            uv.lock
-          extras: dev,multiplayer
-
-      - name: Install pg client and wait for PG
-        uses: ./.github/actions/wait-for-postgres
-        with:
-          host: 127.0.0.1
-          port: ${{ job.services.postgres.ports['5432'] }}
-          user: tldw_user
-
-      - name: Export PG env vars
-        shell: bash
-        run: |
-          PORT="${{ job.services.postgres.ports['5432'] }}"
-          DB_USER="${POSTGRES_TEST_USER:-tldw_user}"
-          DB_PASSWORD="${POSTGRES_TEST_PASSWORD:?POSTGRES_TEST_PASSWORD is required}"
-          DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
-          DB_URL="postgresql://${DB_USER}:${DB_PASSWORD}@127.0.0.1:${PORT}/${DB_NAME}"
-          echo "::add-mask::${DB_PASSWORD}"
-          echo "::add-mask::${DB_URL}"
-          {
-            echo "POSTGRES_TEST_PORT=${PORT}"
-            echo "TEST_DB_PORT=${PORT}"
-            echo "TEST_DATABASE_URL=${DB_URL}"
-            echo "DATABASE_URL=${DB_URL}"
-          } >> "$GITHUB_ENV"
-
-      - name: Ensure base DB exists
-        shell: bash
-        env:
-          PGPASSWORD: ${{ env.POSTGRES_TEST_PASSWORD }}
-        run: |
-          PORT="${{ job.services.postgres.ports['5432'] }}"
-          DB_NAME="${POSTGRES_TEST_DB:-tldw_content}"
-          DB_USER="${POSTGRES_TEST_USER:-tldw_user}"
-          psql -h 127.0.0.1 -p "$PORT" -U "$DB_USER" -d postgres -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 || \
-            psql -h 127.0.0.1 -p "$PORT" -U "$DB_USER" -d postgres -c "CREATE DATABASE ${DB_NAME}"
-
-      - name: Install additional deps for PG tests
-        run: |
-          python -m pip install --upgrade pip
-          pip install "psycopg[binary]>=3.1" pytest pytest-asyncio
-
-      - name: Smoke start server (single-user)
-        if: matrix.shard.name == 'core'
-        env:
-          SERVER_LABEL: smoke
-          AUTH_MODE: single_user
-          DATABASE_URL: sqlite:///./Databases/users.db
-          SINGLE_USER_API_KEY: "smoke-ci-key-12345"
-          E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
-          PYTEST_CURRENT_TEST: "ci-smoke-linux-py311-single::startup"
-          TEST_MODE: 'true'
-          DISABLE_HEAVY_STARTUP: '0'
-          DEFER_HEAVY_STARTUP: '1'
-          STARTUP_TRACE: '1'
-          MCP_DEBUG: '1'
-          ULTRA_MINIMAL_APP: '1'
-          PRIVILEGE_METADATA_VALIDATE_ON_STARTUP: '0'
-        shell: bash
-        run: |
-          python tldw_Server_API/tests/scripts/server_lifecycle.py start
-
-      - name: Smoke health check
-        if: always() && matrix.shard.name == 'core'
-        env:
-          SERVER_LABEL: smoke
-          E2E_TEST_BASE_URL: "http://127.0.0.1:8000"
-          SMOKE_STARTUP_TIMEOUT_SECONDS: '240'
-        shell: bash
-        run: |
-          python tldw_Server_API/tests/scripts/server_lifecycle.py health-check
-
-      - name: Print smoke server log on failure
-        if: failure() && matrix.shard.name == 'core'
-        env:
-          SERVER_LABEL: smoke
-        shell: bash
-        run: |
-          python - <<'PY'
-          import os, pathlib
-          label = os.environ.get('SERVER_LABEL', 'smoke')
-          p = pathlib.Path(f'server-{label}.log')
-          if p.exists():
-              print('===== smoke server log =====')
-              print(p.read_text(encoding='utf-8'))
-          PY
-
-      - name: Smoke stop server
-        if: always() && matrix.shard.name == 'core'
-        env:
-          SERVER_LABEL: smoke
-        shell: bash
-        run: |
-          python tldw_Server_API/tests/scripts/server_lifecycle.py stop || true
-
-      - name: Run Python 3.11 compatibility smoke tests
-        shell: bash
-        run: |
-          mkdir -p "${RESULTS_DIR}"
-          export DATABASE_URL="sqlite:///./Databases/users.db"
-          unset TEST_DATABASE_URL POSTGRES_TEST_DB
-          pytest -q --disable-warnings -p pytest_asyncio.plugin \
-            -m "not jobs and not e2e" \
-            ${{ matrix.shard.paths }} \
-            --durations=50 \
-            --junit-xml="${RESULTS_DIR}/smoke.xml"
-
-      - name: Upload test results (Linux 3.11 smoke)
-        if: always()
-        continue-on-error: true
-        uses: actions/upload-artifact@v7
-        with:
-          name: full-suite-ubuntu-py3.11-${{ matrix.shard.name }}
-          path: ${{ env.RESULTS_DIR }}
-
   full-suite-linux-312-shards:
     name: Full Suite shard (Ubuntu / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: ubuntu-latest
