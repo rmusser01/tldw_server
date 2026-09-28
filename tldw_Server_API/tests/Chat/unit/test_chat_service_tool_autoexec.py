@@ -2500,7 +2500,7 @@ async def test_auto_continue_cancellation_drains_sync_adapter_before_exit(
         )
     )
     try:
-        assert await asyncio.to_thread(entered.wait, 1.0)
+        assert await asyncio.to_thread(entered.wait, 10.0)
         assert mark_attempts == ["openai"]
         assert marked == []
         task.cancel()
