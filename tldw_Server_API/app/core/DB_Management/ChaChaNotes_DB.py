@@ -81,6 +81,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (  # noqa: E402
     DatabaseBackend,
     DatabaseConfig,
     QueryResult,
+    SavedViewNameUniqueConstraintError,
     UniqueConstraintError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import (  # noqa: E402
@@ -28803,15 +28804,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     @staticmethod
     def _is_workspace_source_saved_view_postgres_unique_error(exc: Exception) -> bool:
-        """Match only SQLSTATE 23505 for the named saved-view unique constraint."""
-        if isinstance(exc, UniqueConstraintError):
-            # The backend redacts driver diagnostics (no __cause__, no
-            # constraint name). The table's only other unique key is the
-            # uuid4 primary key, and the caller re-reads the named conflict
-            # in a fresh transaction before reporting it.
-            return True
+        """Match the exact safe category or legacy named driver uniqueness error."""
         current: BaseException | None = exc
         while current is not None:
+            if isinstance(current, SavedViewNameUniqueConstraintError):
+                return True
             sqlstate = getattr(current, "sqlstate", None) or getattr(current, "pgcode", None)
             diagnostics = getattr(current, "diag", None)
             constraint_name = getattr(diagnostics, "constraint_name", None)
