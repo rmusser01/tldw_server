@@ -1,10 +1,10 @@
 ---
 id: TASK-13378
 title: Persist VN generation recipe snapshots and replay them on Retry
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-25 16:11'
-updated_date: '2026-09-27 08:01'
+updated_date: '2026-09-27 08:50'
 labels:
   - vn-assets
 dependencies: []
@@ -99,12 +99,16 @@ Final fully queued slot outcome verification: all 393 VN backend tests passed (1
 Dev advanced from a6e51f60d532e33d20f426f636edca2d049444fd to 8b25dc729cec12d4e7c3b28b575b70812ecc772e via PR #3013, changing only 29 CI workflows for license-first ordering. Confirmed clean owned local/remote head 8c86ba5c730df8dc53dd0330651e180c9ff7bfa8 before conflict-free rebase. Range-diff confirms all 20 prior PR patches unchanged; VN runtime/tests/frontend/docs/tracking trees byte-identical before this evidence note. Both prior-head Qodo and CodeRabbit complete full reviews are clear; CodeRabbit finished at 07:48:38 UTC (trigger 5853894556), sticky explicitly marks exact 8c86 head reviewed with no open defects. Repeated retention/output architecture text is the previously withdrawn inference, not new concrete evidence. Fresh full VN backend, frontend VN/typecheck and quality/security/schema verification required before an explicit full-head lease-protected push and new-head complete review. Preserve shared environments and existing dependency links; temporarily link missing UI dependencies only for verification, then remove only that new link. TASK-13378 and Stage 4 remain In Progress.
 
 Final license-first CI base rebase verification: all 393 VN backend tests passed (208.01s), all 37 frontend VN tests passed, frontend typecheck passed, OpenAPI drift, compilation, scoped Ruff with documented BLE001/UP035 exclusions and diff checks passed. Bandit returned zero findings/errors. Temporary missing UI dependency link used only the existing installation and was removed; existing apps/frontend links, shared environments and dependency policy remain unchanged. Unrelated MCP TASK-13358, parent TASK-13291 and ADR records untouched. Conflict-free rebase onto dev 8b25dc729cec12d4e7c3b28b575b70812ecc772e preserves all 20 prior PR patches in range-diff. Both prior-head reviews complete with no open actionable defect; require new-head full review and all current dev gates. Remote branch still owned 8c86ba5c730df8dc53dd0330651e180c9ff7bfa8, dev unchanged, and human Change summary remains verbatim before publishing with an explicit full-head lease. TASK-13378 and Stage 4 stay In Progress until verified protected normal merge.
+
+Verified PR #3015 merged normally into dev at 2026-09-27 08:49:40 UTC: merge commit bfa343a6082b85ba71244483806f6fce3c2a7bfc has exact parents 8b25dc729cec12d4e7c3b28b575b70812ecc772e (dev) and 04952ce46167b5e5afe2c05521c3a6bb56827e6d (reviewed head). The reviewed head is an ancestor of fetched origin/dev, and merged content is byte-identical to that tested head. Immediately before merge, both exact-head full reviews were complete (Qodo 5854044651; CodeRabbit full-review trigger 5854040206 with sticky 5836661220 exact reviewed coverage), all 22 threads were resolved, no actionable findings remained, and all seven live required gates passed: backend-required, security-required, coverage-required, frontend-required, e2e-required, container-build-check, frontend-license-policy/trusted/dev. Used gh pr merge --merge --match-head-commit with the full reviewed SHA, without admin/bypass or alternate method. Human-owned Change summary remains verbatim. Final new-base local verification was 393 VN backend tests (208.01s), 37 frontend VN tests, typecheck, compilation, scoped Ruff with documented pre-existing exclusions, OpenAPI drift/diff checks, and Bandit zero findings/errors. All four review-plan stages are complete; remove only IMPLEMENTATION_PLAN_vn_recipe_pr_review.md per repository policy, with the complete historical plan preserved in merged commit 04952ce46167b5e5afe2c05521c3a6bb56827e6d. Post-merge tracking finalization is local to this owned worktree and will be committed separately; no unreviewed changes are pushed to protected dev or appended to the merged PR. Keep the worktree/chat, shared dependencies and unrelated MCP TASK-13358, parent TASK-13291 and ADR records untouched. Stop the Finish VN recipe PR 3015 automation. Parent #2021 remains open for the explicitly deferred exactly-once output and mutable model-content work.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Implemented versioned VN batch recipes and one-time execution choices. Retry reproduces the recorded failed slot recipe; Regenerate captures current settings. Legacy batches cannot claim a faithful Retry. Worker fanout replay and duplicate delivery preserve terminal state, and implicit local model paths are guarded by digest/mode without being stored in batch or item metadata. Remaining #2021 work includes exactly-once recovery after file persistence and mutable local model contents.
+
+PR #3015 merged into dev by protected normal merge commit bfa343a6082b85ba71244483806f6fce3c2a7bfc after exact-head complete reviews and all seven current gates passed. Review correctness fixes preserve failed-source provenance and successful fully queued child outcomes, valid zero-work/lazy-depth behavior, faithful stored Retry validation and owner eligibility. Acceptance criteria and Definition of Done are complete. The own completed review plan is retired locally with its historical contents preserved in the merged commit; unrelated tasks and parent #2021 remain unchanged.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
