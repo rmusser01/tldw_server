@@ -13,7 +13,8 @@ import pytest
 from Helper_Scripts.Supply_Chain.exception_policy import evaluate_trivy_report, load_policy
 
 pytestmark = pytest.mark.unit
-POLICY = Path(".github/supply-chain/vulnerability-exceptions.json")
+# Historical dispositions retain their original approval window and byte-level evidence.
+POLICY = zipfile.Path("Docs/Evidence/TASK-13013.7.45-ci-image-bypass-evidence.zip", "canonical-policy.json")
 EVIDENCE = json.loads(Path("Docs/Evidence/TASK-13013.7.39-fresh-candidates.json").read_text())
 TODAY = date(2026, 9, 10)
 COMPONENTS = ("image-app", "image-worker", "image-audio-worker")

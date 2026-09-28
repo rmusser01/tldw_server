@@ -9,8 +9,8 @@
 ## Stage 2: Review and repair
 **Goal**: Reconcile Qodo feedback and confirmed integration/CI defects.
 **Success Criteria**: Every actionable review item has a tested fix or evidence-backed disposition.
-**Tests**: Focused regressions, scoped lint/Bandit, affected frontend suites.
-**Status**: Complete
+**Tests**: Focused regressions, scoped lint/Bandit, affected frontend suites, exact-identity policy renewal.
+**Status**: In Progress
 
 ## Stage 3: Validate and merge
 **Goal**: Push rebased head, obtain current review/check results, merge into dev when prerequisites hold.

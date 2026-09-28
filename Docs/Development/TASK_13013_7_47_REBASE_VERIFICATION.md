@@ -153,3 +153,43 @@ direct-script CLI and diff checks pass; production Bandit reports zero
 findings. Logs: `/private/tmp/sep27-release-final.log` and
 `/private/tmp/bandit_sep27_release.json`. Retained-file consistency does not
 replace existing trust in scanner execution or signed provenance.
+
+## September 28 approval renewal and fresh Qodo review
+
+After clarification of the two scopes, the requester said “ok approved” to
+renewing the same 342 canonical dispositions and 310 app/audio CI-only
+risk-acceptance records through October 2. Both policies now contain new
+`-r20260928` records superseding their prior IDs, created September 28 UTC.
+Only IDs, supersedes links and dates changed; exact matching fields, owner,
+approval PR, rationale and mitigation are preserved. This does not reclassify
+the CI-accepted findings as fixed or non-applicable.
+
+The nine renewal cases failed before the change. The affected historical,
+renewal, exception-evaluator and CI-bypass suites pass 674 tests. Historical
+tests now read the identical canonical-policy bytes already retained in the
+TASK-13013.7.45 archive; their original dates and preservation assertions remain.
+The new tests check all 652 renewed records against the two archived policy
+hashes, reject changed identities and dates, and replay both archived complete
+reports: canonical admission retains 155 blockers per app/audio image; combined
+CI admission excepts 235 rows with zero unmatched approvals. This is retained
+report replay, not a claim of a fresh current-head image scan. Fresh CI remains
+a prerequisite for merging and will reject new, changed or stale findings.
+
+Fresh Qodo feedback also led to exact SBOM digest matching (62 release tests),
+launcher/acquisition annotations with the dependent launcher checksum updated
+(37 launcher/provenance tests), completion-time Watchlists sampling (22 focused
+frontend tests), and neutral sampler normalization in the existing shared core
+(41 capability and Characters cases). Targeted regressions failed before their
+fixes. Source Bandit scans report zero findings; the new renewal test contains
+only ordinary pytest assertion findings. No native candidate rebuild was run.
+
+The admin-label translation suggestion is inapplicable to the standalone
+English-only admin-ui: its layout uses `lang="en"`, its providers contain no
+translation provider, and its package/configuration has no i18n dependency or
+catalog. No new translation framework was added.
+
+Automatic approval review rejected posting the detailed approval record to
+PR 2869 as an external disclosure without destination-specific authorization.
+The local renewal is verified; publishing that approval record and renewal is
+awaiting explicit authorization for that GitHub destination. No approval
+comment has been posted, and no merge is claimed.

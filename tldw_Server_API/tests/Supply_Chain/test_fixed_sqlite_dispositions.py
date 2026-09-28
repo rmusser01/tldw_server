@@ -2,14 +2,15 @@
 
 import hashlib
 import json
+import zipfile
 from datetime import date
-from pathlib import Path
 
 import pytest
 from Helper_Scripts.Supply_Chain.exception_policy import evaluate_trivy_report, load_policy
 
 pytestmark = pytest.mark.unit
-POLICY = Path(".github/supply-chain/vulnerability-exceptions.json")
+# Historical dispositions retain their original approval window and byte-level evidence.
+POLICY = zipfile.Path("Docs/Evidence/TASK-13013.7.45-ci-image-bypass-evidence.zip", "canonical-policy.json")
 COMPONENTS = ("image-app", "image-worker", "image-audio-worker")
 CVES = ("CVE-2026-11822", "CVE-2026-11824")
 PURL = "pkg:deb/debian/libsqlite3-0@3.53.4-2?arch=amd64&distro=debian-13.6"

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import zipfile
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -13,7 +14,8 @@ from Helper_Scripts.Supply_Chain.dependency_review import derive_allow_ghsas, va
 from Helper_Scripts.Supply_Chain.exception_policy import PolicyError, evaluate_trivy_report, load_policy
 
 pytestmark = pytest.mark.unit
-POLICY = Path(".github/supply-chain/vulnerability-exceptions.json")
+# Historical dispositions retain their original approval window and byte-level evidence.
+POLICY = zipfile.Path("Docs/Evidence/TASK-13013.7.45-ci-image-bypass-evidence.zip", "canonical-policy.json")
 TODAY = date(2026, 9, 10)
 GHSA = "GHSA-8mgp-746c-j5xp"
 CVE = "CVE-2026-81726"

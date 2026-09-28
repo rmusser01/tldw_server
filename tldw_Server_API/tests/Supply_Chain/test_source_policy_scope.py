@@ -2,16 +2,17 @@
 
 import hashlib
 import json
+import zipfile
 from dataclasses import replace
 from datetime import date
-from pathlib import Path
 
 import pytest
 from Helper_Scripts.Supply_Chain.dependency_review import derive_allow_ghsas
 from Helper_Scripts.Supply_Chain.exception_policy import evaluate_trivy_report, load_policy
 
 pytestmark = pytest.mark.unit
-POLICY = Path(".github/supply-chain/vulnerability-exceptions.json")
+# Historical dispositions retain their original approval window and byte-level evidence.
+POLICY = zipfile.Path("Docs/Evidence/TASK-13013.7.45-ci-image-bypass-evidence.zip", "canonical-policy.json")
 TODAY = date(2026, 9, 11)
 OPTIONAL_IDS = {"TASK-13013.7.38-LIGHTNING-01"} | {f"TASK-13013.7.40-OPTIONAL-{index:02d}" for index in range(1, 6)}
 BASE_IDENTITIES = (

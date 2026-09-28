@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from datetime import date
 from pathlib import Path
 
@@ -11,7 +12,8 @@ from Helper_Scripts.Supply_Chain.exception_policy import PolicyError, evaluate_t
 
 pytestmark = pytest.mark.unit
 
-POLICY = Path(".github/supply-chain/vulnerability-exceptions.json")
+# Historical dispositions retain their original approval window and byte-level evidence.
+POLICY = zipfile.Path("Docs/Evidence/TASK-13013.7.45-ci-image-bypass-evidence.zip", "canonical-policy.json")
 TODAY = date(2026, 9, 10)
 ADVISORIES = [
     ("CVE-2026-45829", "CRITICAL"),

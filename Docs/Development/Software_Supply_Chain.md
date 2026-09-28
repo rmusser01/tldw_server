@@ -270,9 +270,13 @@ occurrence prevents that advisory allowance. Reassess new model-management paths
 or changed consumers. Prior candidate qualification remains incomplete.
 The old OS-only comment does not authorize these later records; the linked
 evidence records the conversation authorization and the PR review location.
-Loading this policy
-on September 18, 2026 UTC or later fails until expired records are removed or
-replaced through the renewal process below.
+The requester approved renewal of the same 342 canonical records and the
+separate 310 app/audio CI-only records through October 2, 2026. The September 28
+records supersede the prior IDs with unchanged finding identities, rationale
+and mitigation. Loading either policy after October 2 fails until expired
+records are removed or replaced through the renewal process below. Renewal
+verification and publication status are recorded in
+[TASK-13013.7.47](TASK_13013_7_47_REBASE_VERIFICATION.md).
 
 Every exception is one exact vulnerability, component, package URL, installed
 version, and severity. It requires a stable `id`, `vulnerability_id`,
