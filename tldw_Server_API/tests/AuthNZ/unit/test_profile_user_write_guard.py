@@ -143,6 +143,23 @@ def test_unprotected_concrete_sql_is_returned_unchanged(
     )
 
 
+def test_postgres_in_clause_helper_output_passes_guard() -> None:
+    """sqlglot cannot tokenize adjacent '$1,$2'; generated SQL must stay parseable."""
+    from tldw_Server_API.app.core.AuthNZ.database import build_postgres_in_clause
+
+    placeholders, _ = build_postgres_in_clause(["a", "b", "c"], start_param=2)
+    statement = f"SELECT id FROM tool_catalogs WHERE org_id = $1 AND team_id IN ({placeholders})"  # nosec B608
+    assert (
+        _guard_sql(
+            statement,
+            backend="postgres",
+            connection_identity=object(),
+            operation="fetch",
+        )
+        == statement
+    )
+
+
 def test_unknown_users_update_column_fails_closed() -> None:
     with pytest.raises(ProfileUserWriteRejected):
         _guard_sql(

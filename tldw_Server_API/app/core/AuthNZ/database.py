@@ -348,7 +348,7 @@ def build_postgres_in_clause(values: list, start_param: int = 1) -> tuple[str, l
 
     Returns:
         Tuple of (placeholders_string, values_list) where:
-        - placeholders_string: e.g., "$1,$2,$3" for 3 values starting at 1
+        - placeholders_string: e.g., "$1, $2, $3" for 3 values starting at 1
         - values_list: list of the values for parameter binding
 
     Raises:
@@ -357,18 +357,20 @@ def build_postgres_in_clause(values: list, start_param: int = 1) -> tuple[str, l
     Example:
         >>> placeholders, params = build_postgres_in_clause(['a', 'b', 'c'])
         >>> query = f"SELECT * FROM table WHERE col IN ({placeholders})"
-        >>> # query = "SELECT * FROM table WHERE col IN ($1,$2,$3)"
+        >>> # query = "SELECT * FROM table WHERE col IN ($1, $2, $3)"
         >>> # params = ['a', 'b', 'c']
         >>> conn.fetch(query, *params)
 
         >>> # With offset for additional parameters
         >>> placeholders, params = build_postgres_in_clause(['x', 'y'], start_param=3)
-        >>> # placeholders = "$3,$4", params = ['x', 'y']
+        >>> # placeholders = "$3, $4", params = ['x', 'y']
     """
     if not values:
         raise ValueError("Cannot build IN clause for empty values list")
     # Generate only '$N' placeholders - never include actual values in SQL string
-    placeholders = ",".join(f"${i}" for i in range(start_param, start_param + len(values)))
+    # Keep the space: sqlglot (used by profile_user_write_guard) cannot tokenize
+    # adjacent "$1,$2", and an unparseable statement is rejected fail-closed.
+    placeholders = ", ".join(f"${i}" for i in range(start_param, start_param + len(values)))
     return placeholders, list(values)
 
 
