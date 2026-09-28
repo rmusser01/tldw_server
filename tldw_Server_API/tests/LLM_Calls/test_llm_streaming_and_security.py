@@ -87,7 +87,8 @@ def test_sync_sse_helper_bounds_transport_exception_and_log_detail() -> None:
 
     _assert_bounded_stream_error(chunks, sentinel)
     assert sentinel not in "".join(logs)
-    assert "RuntimeError" in "".join(logs)
+    # log_provider_failure lowercases its bounded labels.
+    assert "runtimeerror" in "".join(logs).lower()
 
 
 @pytest.mark.asyncio
@@ -110,7 +111,8 @@ async def test_async_sse_helper_bounds_transport_exception_and_log_detail() -> N
 
     _assert_bounded_stream_error(chunks, sentinel)
     assert sentinel not in "".join(logs)
-    assert "RuntimeError" in "".join(logs)
+    # log_provider_failure lowercases its bounded labels.
+    assert "runtimeerror" in "".join(logs).lower()
 
 
 @pytest.mark.asyncio
