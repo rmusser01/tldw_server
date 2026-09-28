@@ -293,11 +293,13 @@ def test_migration_v44_to_latest_repairs_missing_persona_tables(
     seed = _seed_historical_v44(db_path, monkeypatch)
     try:
         with seed.transaction() as conn:
-            conn.execute(
+            retained_character_id = conn.execute(
                 "INSERT INTO character_cards (name, description, client_id) VALUES (?, ?, ?)",
                 ("Retained character", "Historical content", seed.client_id),
-            )
-            before = dict(conn.execute("SELECT * FROM character_cards").fetchone())
+            ).lastrowid
+            before = dict(conn.execute(
+                "SELECT * FROM character_cards WHERE id = ?", (retained_character_id,),
+            ).fetchone())
     finally:
         seed.close_all_connections()
 
