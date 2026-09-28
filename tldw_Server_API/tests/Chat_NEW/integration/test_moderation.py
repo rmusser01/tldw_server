@@ -218,14 +218,14 @@ async def _missing_audit_service_override():
 
 
 @pytest.mark.unit
-def test_input_block_returns_400(monkeypatch):
+def test_input_block_returns_400(monkeypatch, credentialed_test_client_factory):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
         policy = _StubPolicy(enabled=True, input_action='block', output_action='redact')
 
         with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -247,7 +247,7 @@ def test_input_block_returns_400(monkeypatch):
 
 
 @pytest.mark.unit
-def test_input_block_fails_closed_when_mandatory_audit_fails():
+def test_input_block_fails_closed_when_mandatory_audit_fails(credentialed_test_client_factory):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -256,7 +256,7 @@ def test_input_block_fails_closed_when_mandatory_audit_fails():
 
         with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
              patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_provider:
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -279,7 +279,7 @@ def test_input_block_fails_closed_when_mandatory_audit_fails():
 
 
 @pytest.mark.unit
-def test_input_block_fails_closed_when_audit_service_missing():
+def test_input_block_fails_closed_when_audit_service_missing(credentialed_test_client_factory):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -288,7 +288,7 @@ def test_input_block_fails_closed_when_audit_service_missing():
 
         with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
              patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_provider:
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -863,7 +863,7 @@ def test_streaming_cross_chunk_redaction_persisted(
 
 
 @pytest.mark.unit
-def test_character_chat_input_guardian_overlay_uses_character_chat_type():
+def test_character_chat_input_guardian_overlay_uses_character_chat_type(credentialed_test_client_factory):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -903,7 +903,7 @@ def test_character_chat_input_guardian_overlay_uses_character_chat_type():
                 },
             ),
         ):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
@@ -932,7 +932,9 @@ def test_character_chat_input_guardian_overlay_uses_character_chat_type():
 
 
 @pytest.mark.unit
-def test_continued_character_conversation_input_guardian_overlay_uses_saved_conversation_chat_type():
+def test_continued_character_conversation_input_guardian_overlay_uses_saved_conversation_chat_type(
+    credentialed_test_client_factory,
+):
     db, db_path = _make_test_db()
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -980,7 +982,7 @@ def test_continued_character_conversation_input_guardian_overlay_uses_saved_conv
                 },
             ),
         ):
-            with TestClient(app) as client:
+            with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
                 body = {
