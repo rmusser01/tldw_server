@@ -14,6 +14,26 @@ expected-head lease on publication. Exclude local preview link and archive13379.
 frontend typecheck, scoped lint, diff checks; unchanged VN Python Bandit baseline.
 **Status**: Complete
 
+During the final ownership check for the tested scoped verification-feedback
+fix, dev advanced to `de7f453593dbb40f069a4666fd562fc5f3622817` through
+independent PR #3039 (seven scheduled-automation message-store/settings/test/task
+files, inspected read-only). The local fix was first preserved as
+`4490d2dae00cede179a31eb5f5b1fed4e7b1a9b5`; tracked checkout was clean before
+the conflict-free 28-commit rebase. The completed FINAL range-diff preserves all
+28 patches unchanged at `470037b3520e086340fd19349ee742c29fa85300`.
+The intermediate range while rebase was still running is not qualification.
+Fresh 236 VN/fetch/shared-auth tests pass (50.66s, 11 files, one worker), as do
+typecheck, both scoped lint commands, VN backend compilation, diff and base-file
+equality checks. VN Python Bandit has zero findings/errors over 9068 lines; it
+does not scan TypeScript. All 393 VN backend tests pass (504.28s, 13 warnings,
+normal exit 0), using the activated main environment, existing CI overlay and
+approved DB temporary root without changes or weakened limits.
+The remote remains owned `ba3f8d7e5909bd4a340658cb7cc18b96049a062a`; protected
+publication uses that full expected-head lease after qualification and
+fresh live-dev/ownership checks. The additional evidence commit changes only
+TASK-13385 and this plan. New exact-base/head full reviews, CI and
+verified normal merge remain pending. No independent PR #3039 files are edited.
+
 Dev advanced to `bd2ae757d274e7eda3edb48eb682733c401efe56` through independently
 merged PR #3008 (13 files). Its VN change requires an authenticated caller for
 starter-matrix discovery; Start/Retry dispatch is unchanged. The auth-discovery
