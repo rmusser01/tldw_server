@@ -18,7 +18,8 @@ def test_all_production_rbac_seed_callers_own_pool_transactions() -> None:
     repository_root = Path(__file__).resolve().parents[4]
     app_root = repository_root / "tldw_Server_API" / "app"
     expected_callers = {
-        "core/AuthNZ/initialize.py": 2,
+        # 03dec014b2 (#2920) added the SQLite schema-ensure seed call.
+        "core/AuthNZ/initialize.py": 3,
         "core/MCP_unified/adapters/tldw_runtime.py": 1,
     }
     actual_callers: dict[str, int] = {}
@@ -421,7 +422,10 @@ def _migrate_version_089_database(db_path: Path) -> None:
 
     manager = MigrationManager(db_path)
     migrations = get_authnz_migrations()
-    assert migrations[-1].version == 96
+    # Derived rather than pinned: a hard-coded latest version went stale when
+    # efddb3b43c (v97) and c1d54c4e8f (v98) landed. The helper only relies on
+    # migrations[-1] being the newest one, which it re-applies for idempotency.
+    assert migrations[-1].version == max(migration.version for migration in migrations)
     for migration in migrations:
         manager.add_migration(migration)
 
