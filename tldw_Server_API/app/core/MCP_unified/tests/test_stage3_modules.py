@@ -4,7 +4,7 @@ import pytest
 from typing import Dict, Any, List
 
 from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, ModuleConfig
-from tldw_Server_API.app.core.MCP_unified.modules.registry import get_module_registry
+from tldw_Server_API.app.core.MCP_unified.modules.registry import get_module_registry, reset_module_registry
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.knowledge_module import KnowledgeModule
 from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
 
@@ -50,6 +50,9 @@ class StubMediaModule(BaseModule):
 
 @pytest.mark.asyncio
 async def test_knowledge_aggregates_stub_sources():
+    # Start from an empty global registry: earlier tests may have left a real
+    # "media" module registered, which would shadow the stub below.
+    await reset_module_registry()
     registry = get_module_registry()
     await registry.register_module("notes", StubNotesModule, ModuleConfig(name="notes"))
     await registry.register_module("media", StubMediaModule, ModuleConfig(name="media"))
