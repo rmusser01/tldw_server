@@ -32,16 +32,35 @@ pytestmark = pytest.mark.unit
 # Fixtures
 # ---------------------------------------------------------------------------
 
+@pytest.fixture(autouse=True)
+def _fresh_core_scheduler(monkeypatch):
+    """Give every test its own process-global core Scheduler.
+
+    Each test here runs on its own event loop, but get_global_scheduler() hands
+    back one process-wide Scheduler whose SQLite backend (and that backend's
+    asyncio write lock) outlive the loop that created them. A lock left held by
+    a task on a finished loop made the next test's stop() wait on it forever,
+    which is how this file hung the platform-acp CI shard until the 60-minute
+    job timeout.
+    """
+    from tldw_Server_API.app.core.Scheduler import scheduler as core_scheduler
+
+    monkeypatch.setattr(core_scheduler, "_GLOBAL_SCHEDULER", None)
+
+
 @pytest.fixture()
 def scheduler():
     """Provide a started scheduler service; stop on teardown."""
     svc = get_workflows_scheduler()
-    asyncio.run(svc.start())
-    yield svc
+    # Start and stop on the same loop: the scheduler's tasks belong to the loop
+    # that started them.
+    loop = asyncio.new_event_loop()
     try:
-        asyncio.run(svc.stop())
-    except Exception:
-        pass
+        loop.run_until_complete(svc.start())
+        yield svc
+        loop.run_until_complete(svc.stop())
+    finally:
+        loop.close()
 
 
 # ---------------------------------------------------------------------------
