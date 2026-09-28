@@ -13,6 +13,8 @@ production uses and the one the guard sanctions.
 from __future__ import annotations
 
 import uuid as _uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 
@@ -24,6 +26,7 @@ async def ensure_test_user(
     role: str = "user",
     password_hash: str = "x",
     is_active: bool = True,
+    is_verified: bool = False,
     is_superuser: bool = False,
 ) -> int:
     """Return the id of ``username``, creating the user if it is not there yet.
@@ -40,6 +43,7 @@ async def ensure_test_user(
         role: Role for a newly created user.
         password_hash: Stored verbatim; these users never authenticate.
         is_active: Active flag for a newly created user.
+        is_verified: Verified flag for a newly created user.
         is_superuser: Superuser flag for a newly created user.
 
     Returns:
@@ -60,7 +64,48 @@ async def ensure_test_user(
         password_hash=password_hash,
         role=role,
         is_active=is_active,
+        is_verified=is_verified,
         is_superuser=is_superuser,
         uuid_value=_uuid.uuid4(),
     )
     return int(created["id"])
+
+
+@asynccontextmanager
+async def unmanaged_authnz_pg_connection(database: str | None = None) -> AsyncIterator[Any]:
+    """Open a plain asyncpg connection to the AuthNZ Postgres test database.
+
+    For tests that must fabricate state the app itself can never write: a
+    database left behind by an older release, or one damaged out of band
+    (legacy columns, NULL activity flags, views or tables shadowing
+    ``users``). The guarded ``DatabasePool`` rightly refuses those writes, so
+    such tests set the state up the way an old server or an operator would,
+    on a connection the app does not manage. Everything else seeds through
+    :func:`ensure_test_user`.
+
+    Args:
+        database: Database to connect to. Defaults to the shared
+            ``TEST_DB_NAME`` behind ``test_db_pool``; pass the per-test name
+            from ``isolated_test_environment`` to target that database.
+    """
+    import asyncpg
+
+    from tldw_Server_API.tests.AuthNZ.conftest import (
+        TEST_DB_HOST,
+        TEST_DB_NAME,
+        TEST_DB_PASSWORD,
+        TEST_DB_PORT,
+        TEST_DB_USER,
+    )
+
+    conn = await asyncpg.connect(
+        host=TEST_DB_HOST,
+        port=TEST_DB_PORT,
+        user=TEST_DB_USER,
+        password=TEST_DB_PASSWORD,
+        database=database or TEST_DB_NAME,
+    )
+    try:
+        yield conn
+    finally:
+        await conn.close()

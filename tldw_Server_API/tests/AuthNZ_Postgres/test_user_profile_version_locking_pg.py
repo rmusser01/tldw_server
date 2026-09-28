@@ -1,27 +1,20 @@
 from __future__ import annotations
 
-import uuid
-
 import asyncpg
 import pytest
 
 from tldw_Server_API.app.core.UserProfiles.version_gateway import ProfileVersionGateway
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 pytestmark = pytest.mark.postgres
 
 
 @pytest.mark.asyncio
 async def test_profile_version_lock_uses_transaction_connection(test_db_pool):
-    user_id = await test_db_pool.fetchval(
-        """
-        INSERT INTO users (uuid, username, email, password_hash, is_active)
-        VALUES ($1, $2, $3, $4, TRUE)
-        RETURNING id
-        """,
-        str(uuid.uuid4()),
+    user_id = await ensure_test_user(
+        test_db_pool,
         "pg-profile-version-lock",
         "pg-profile-version-lock@example.com",
-        "hash",
     )
     gateway = ProfileVersionGateway(test_db_pool)
     backend_pool = test_db_pool.pool
@@ -42,9 +35,10 @@ async def test_profile_version_lock_uses_transaction_connection(test_db_pool):
                         await competing_conn.execute(
                             "SET LOCAL lock_timeout = '500ms'"
                         )
+                        # A row lock conflicts with the gateway's FOR UPDATE the
+                        # same way an UPDATE would, without a raw users write.
                         await competing_conn.execute(
-                            "UPDATE users SET profile_version = profile_version "
-                            "WHERE id = $1",
+                            "SELECT id FROM users WHERE id = $1 FOR UPDATE",
                             int(user_id),
                         )
                 lock_failure_observed = True

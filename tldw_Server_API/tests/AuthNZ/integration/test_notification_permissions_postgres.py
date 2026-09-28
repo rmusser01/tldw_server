@@ -6,6 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.tests.helpers.authnz_seed import (
+    ensure_test_user,
+    unmanaged_authnz_pg_connection,
+)
+
 
 pytestmark = pytest.mark.integration
 
@@ -34,15 +39,18 @@ async def test_postgres_notification_backfill_returns_false_on_transaction_error
 async def test_postgres_fresh_initialization_grants_notifications_after_roles_are_seeded(
     isolated_test_environment,
 ) -> None:
-    _client, _db_name = isolated_test_environment
+    _client, db_name = isolated_test_environment
 
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.initialize import setup_database
 
     pool = await get_db_pool()
-    await pool.execute(
-        "TRUNCATE user_permissions, user_roles, role_permissions, permissions, roles RESTART IDENTITY CASCADE"
-    )
+    # The guarded pool refuses TRUNCATE; empty the RBAC tables the way an
+    # operator resetting the database would, on an unmanaged connection.
+    async with unmanaged_authnz_pg_connection(db_name) as conn:
+        await conn.execute(
+            "TRUNCATE user_permissions, user_roles, role_permissions, permissions, roles RESTART IDENTITY CASCADE"
+        )
 
     await setup_database()
 
@@ -112,16 +120,7 @@ async def test_postgres_notification_backfill_is_idempotent_and_preserves_overri
         ("notification-missing", "notification-missing@example.test", "missing-role"),
     )
     for username, email, role_name in legacy_users:
-        await pool.execute(
-            """
-            INSERT INTO users (username, email, password_hash, role)
-            VALUES (?, ?, ?, ?)
-            """,
-            username,
-            email,
-            "test-password-hash",
-            role_name,
-        )
+        await ensure_test_user(pool, username, email, role=role_name)
 
     await pool.execute(
         """

@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta
-from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
 @pytest.mark.integration
@@ -97,11 +97,7 @@ async def test_admin_endpoints_pg(test_db_pool):
     await mgr.initialize()
 
     # Insert admin user
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid4()), "pgadmin", "pgadmin@example.com", "x",
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "pgadmin")
+    user_id = await ensure_test_user(pool, "pgadmin", "pgadmin@example.com")
 
     # Override AuthPrincipal to treat this user as admin for claim-first gates
     async def _principal_override(request: Request):  # type: ignore[override]
@@ -288,10 +284,7 @@ async def test_org_member_list_pagination_filters_pg(test_db_pool):
     )
 
     # Insert admin user and override principal for claim-first gates
-    admin_id = await pool.fetchval(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE) RETURNING id",
-        str(uuid4()), "pg-root-admin", "pg-root-admin@example.com", "x",
-    )
+    admin_id = await ensure_test_user(pool, "pg-root-admin", "pg-root-admin@example.com")
 
     async def _principal_override(request=None):  # type: ignore[override]
         principal = AuthPrincipal(
@@ -337,14 +330,7 @@ async def test_org_member_list_pagination_filters_pg(test_db_pool):
         base_ts = datetime.utcnow().replace(microsecond=0)
         for idx in range(total_members):
             username = f"pg-member{idx}"
-            user_id = await pool.fetchval(
-                """
-                INSERT INTO users (uuid, username, email, password_hash, is_active)
-                VALUES ($1, $2, $3, $4, TRUE)
-                RETURNING id
-                """,
-                str(uuid4()), username, f"{username}@example.com", "x",
-            )
+            user_id = await ensure_test_user(pool, username, f"{username}@example.com")
             user_ids.append(user_id)
 
             if idx % 10 == 0:

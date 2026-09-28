@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
 @pytest.mark.integration
@@ -48,12 +49,7 @@ async def test_llm_budget_middleware_returns_402_postgres(test_db_pool, monkeypa
     )
 
     # Insert a user
-    import uuid
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()), "pgbudget", "pgbudget@example.com", "x",
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "pgbudget")
+    user_id = await ensure_test_user(pool, "pgbudget", "pgbudget@example.com")
 
     # Create a virtual key with small daily token budget
     mgr = APIKeyManager(pool)

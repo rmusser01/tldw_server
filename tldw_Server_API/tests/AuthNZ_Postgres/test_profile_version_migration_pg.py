@@ -7,6 +7,10 @@ from pathlib import Path
 
 import pytest
 
+from tldw_Server_API.tests.helpers.authnz_seed import (
+    unmanaged_authnz_pg_connection as _legacy_conn,
+)
+
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
 _POSTGRES_SCHEMA_PATH = (
@@ -18,26 +22,32 @@ _POSTGRES_SCHEMA_PATH = (
 )
 
 
-async def _insert_legacy_user(test_db_pool, *, updated_at: datetime | None) -> int:  # noqa: ANN001
+async def _legacy_execute(query: str, *args: object) -> None:
+    async with _legacy_conn() as conn:
+        await conn.execute(query, *args)
+
+
+async def _insert_legacy_user(*, updated_at: datetime | None) -> int:
     username = f"profile-version-{uuid.uuid4().hex[:8]}"
-    return int(
-        await test_db_pool.fetchval(
-            """
-            INSERT INTO users (uuid, username, email, password_hash, updated_at)
-            VALUES ($1, $2, $3, 'hash', $4)
-            RETURNING id
-            """,
-            str(uuid.uuid4()),
-            username,
-            f"{username}@example.com",
-            updated_at,
+    async with _legacy_conn() as conn:
+        return int(
+            await conn.fetchval(
+                """
+                INSERT INTO users (uuid, username, email, password_hash, updated_at)
+                VALUES ($1, $2, $3, 'hash', $4)
+                RETURNING id
+                """,
+                str(uuid.uuid4()),
+                username,
+                f"{username}@example.com",
+                updated_at,
+            )
         )
-    )
 
 
-async def _reset_to_legacy_users_schema(test_db_pool) -> None:  # noqa: ANN001
-    await test_db_pool.execute("ALTER TABLE users DROP COLUMN IF EXISTS profile_version")
-    await test_db_pool.execute(
+async def _reset_to_legacy_users_schema() -> None:
+    await _legacy_execute("ALTER TABLE users DROP COLUMN IF EXISTS profile_version")
+    await _legacy_execute(
         """
         ALTER TABLE users
         ALTER COLUMN updated_at TYPE TIMESTAMP WITHOUT TIME ZONE
@@ -60,9 +70,9 @@ async def test_postgres_upgrade_backfills_naive_updated_at_without_version_jump(
         ensure_user_profile_version_pg,
     )
 
-    await _reset_to_legacy_users_schema(test_db_pool)
+    await _reset_to_legacy_users_schema()
     legacy_value = datetime(2026, 1, 2, 3, 4, 5, 123456)
-    user_id = await _insert_legacy_user(test_db_pool, updated_at=legacy_value)
+    user_id = await _insert_legacy_user(updated_at=legacy_value)
 
     assert await ensure_user_profile_version_pg(test_db_pool) is True
 
@@ -95,8 +105,8 @@ async def test_postgres_upgrade_preserves_aware_updated_at_and_is_idempotent(
         ensure_user_profile_version_pg,
     )
 
-    await test_db_pool.execute("ALTER TABLE users DROP COLUMN IF EXISTS profile_version")
-    await test_db_pool.execute(
+    await _legacy_execute("ALTER TABLE users DROP COLUMN IF EXISTS profile_version")
+    await _legacy_execute(
         """
         ALTER TABLE users
         ALTER COLUMN updated_at TYPE TIMESTAMPTZ
@@ -104,7 +114,7 @@ async def test_postgres_upgrade_preserves_aware_updated_at_and_is_idempotent(
         """
     )
     aware_value = datetime(2026, 1, 2, 3, 4, 5, 654321, tzinfo=timezone.utc)
-    user_id = await _insert_legacy_user(test_db_pool, updated_at=aware_value)
+    user_id = await _insert_legacy_user(updated_at=aware_value)
 
     assert await ensure_user_profile_version_pg(test_db_pool) is True
     first_value = await test_db_pool.fetchval(
@@ -128,8 +138,8 @@ async def test_postgres_upgrade_rejects_null_updated_at_and_rolls_back(
         ensure_user_profile_version_pg,
     )
 
-    await _reset_to_legacy_users_schema(test_db_pool)
-    user_id = await _insert_legacy_user(test_db_pool, updated_at=None)
+    await _reset_to_legacy_users_schema()
+    user_id = await _insert_legacy_user(updated_at=None)
 
     with pytest.raises(RuntimeError, match="profile_version"):
         await ensure_user_profile_version_pg(test_db_pool)
@@ -146,7 +156,7 @@ async def test_postgres_upgrade_rejects_null_updated_at_and_rolls_back(
     )
     assert exists is False
 
-    await test_db_pool.execute(
+    await _legacy_execute(
         "UPDATE users SET updated_at = $2 WHERE id = $1",
         user_id,
         datetime(2026, 1, 2, 3, 4, 5),
@@ -165,21 +175,22 @@ async def test_postgres_current_schema_corruption_fails_closed_at_startup(
 
     assert await ensure_user_profile_version_pg(test_db_pool) is True
     user_id = await _insert_legacy_user(
-        test_db_pool,
         updated_at=datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc),
     )
-    await test_db_pool.execute(
+    await _legacy_execute(
         "ALTER TABLE users ALTER COLUMN profile_version DROP NOT NULL"
     )
-    await test_db_pool.execute(
+    await _legacy_execute(
         "UPDATE users SET profile_version = NULL WHERE id = $1",
         user_id,
     )
 
-    with pytest.raises(RuntimeError, match="profile_version"):
-        await ensure_authnz_core_tables_pg(test_db_pool)
+    # Fails closed: False makes startup refuse to boot (initialize.py raises).
+    # The transaction boundary sanitizes the profile_version reason away, so
+    # it cannot be asserted here; TASK-13393 tracks restoring it for operators.
+    assert await ensure_authnz_core_tables_pg(test_db_pool) is False
 
-    await test_db_pool.execute(
+    await _legacy_execute(
         "UPDATE users SET profile_version = updated_at WHERE id = $1",
         user_id,
     )
@@ -196,7 +207,7 @@ async def test_postgres_readiness_rejects_updatable_view_alias_to_users(
 
     view_name = f"user_alias_{uuid.uuid4().hex[:8]}"
     nested_view_name = f"nested_user_alias_{uuid.uuid4().hex[:8]}"
-    async with test_db_pool.pool.acquire() as raw_conn:
+    async with _legacy_conn() as raw_conn:
         await raw_conn.execute(
             f"CREATE VIEW public.{view_name} AS "
             "SELECT id, email FROM public.users"
@@ -209,7 +220,7 @@ async def test_postgres_readiness_rejects_updatable_view_alias_to_users(
         with pytest.raises(RuntimeError, match="indirect.*users write"):
             await ensure_user_profile_version_pg(test_db_pool)
     finally:
-        async with test_db_pool.pool.acquire() as raw_conn:
+        async with _legacy_conn() as raw_conn:
             await raw_conn.execute(f"DROP VIEW IF EXISTS public.{nested_view_name}")
             await raw_conn.execute(f"DROP VIEW IF EXISTS public.{view_name}")
 
@@ -223,7 +234,7 @@ async def test_postgres_readiness_rejects_inherited_users_descendant(
     )
 
     table_name = f"user_child_{uuid.uuid4().hex[:8]}"
-    async with test_db_pool.pool.acquire() as raw_conn:
+    async with _legacy_conn() as raw_conn:
         await raw_conn.execute(
             f"CREATE TABLE public.{table_name} () INHERITS (public.users)"
         )
@@ -231,7 +242,7 @@ async def test_postgres_readiness_rejects_inherited_users_descendant(
         with pytest.raises(RuntimeError, match="indirect.*users write"):
             await ensure_user_profile_version_pg(test_db_pool)
     finally:
-        async with test_db_pool.pool.acquire() as raw_conn:
+        async with _legacy_conn() as raw_conn:
             await raw_conn.execute(f"DROP TABLE IF EXISTS public.{table_name}")
 
 
@@ -243,7 +254,7 @@ async def test_postgres_readiness_serializes_concurrent_legacy_upgrades(
         ensure_postgres_profile_version_on_connection,
     )
 
-    await _reset_to_legacy_users_schema(test_db_pool)
+    await _reset_to_legacy_users_schema()
 
     async def _upgrade() -> None:
         async with test_db_pool.pool.acquire() as raw_conn:

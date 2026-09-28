@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import uuid
-from datetime import datetime, timezone
-
 import pytest
 
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
     AuthnzOrgsTeamsRepo,
     DEFAULT_BASE_TEAM_NAME,
 )
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
 pytestmark = pytest.mark.integration
@@ -20,41 +18,8 @@ async def test_authnz_orgs_teams_repo_membership_postgres(test_db_pool):
     pool = test_db_pool
 
     # Create two users
-    now = datetime.utcnow().replace(microsecond=0)
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (uuid, username, email, password_hash, role,
-                               is_active, is_verified, storage_quota_mb, storage_used_mb, created_at)
-            VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, 5120, 0.0, $6)
-            """,
-            str(uuid.uuid4()),
-            "owner_pg",
-            "owner_pg@example.com",
-            "x",
-            "user",
-            now,
-        )
-        await conn.execute(
-            """
-            INSERT INTO users (uuid, username, email, password_hash, role,
-                               is_active, is_verified, storage_quota_mb, storage_used_mb, created_at)
-            VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, 5120, 0.0, $6)
-            """,
-            str(uuid.uuid4()),
-            "member_pg",
-            "member_pg@example.com",
-            "x",
-            "user",
-            now,
-        )
-
-    owner_id = await pool.fetchval(
-        "SELECT id FROM users WHERE username = $1", "owner_pg"
-    )
-    member_id = await pool.fetchval(
-        "SELECT id FROM users WHERE username = $1", "member_pg"
-    )
+    owner_id = await ensure_test_user(pool, "owner_pg", "owner_pg@example.com", is_verified=True)
+    member_id = await ensure_test_user(pool, "member_pg", "member_pg@example.com", is_verified=True)
 
     repo = AuthnzOrgsTeamsRepo(pool)
 
@@ -169,37 +134,16 @@ async def test_authnz_orgs_teams_repo_membership_postgres(test_db_pool):
 async def test_authnz_orgs_teams_repo_list_organizations_for_user_variants_postgres(test_db_pool):
     """AuthnzOrgsTeamsRepo.list_organizations_for_user should support totals, pagination and empty memberships."""
     pool = test_db_pool
-    now = datetime.utcnow().replace(microsecond=0)
 
     # Create 3 users: org owner, multi-org member, and a user with no memberships.
-    async with pool.acquire() as conn:
-        for username, email in (
-            ("owner_list_pg", "owner_list_pg@example.com"),
-            ("member_list_pg", "member_list_pg@example.com"),
-            ("no_orgs_pg", "no_orgs_pg@example.com"),
-        ):
-            await conn.execute(
-                """
-                INSERT INTO users (uuid, username, email, password_hash, role,
-                                   is_active, is_verified, storage_quota_mb, storage_used_mb, created_at)
-                VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, 5120, 0.0, $6)
-                """,
-                str(uuid.uuid4()),
-                username,
-                email,
-                "x",
-                "user",
-                now,
-            )
-
-    owner_id = await pool.fetchval(
-        "SELECT id FROM users WHERE username = $1", "owner_list_pg"
+    owner_id = await ensure_test_user(
+        pool, "owner_list_pg", "owner_list_pg@example.com", is_verified=True
     )
-    member_id = await pool.fetchval(
-        "SELECT id FROM users WHERE username = $1", "member_list_pg"
+    member_id = await ensure_test_user(
+        pool, "member_list_pg", "member_list_pg@example.com", is_verified=True
     )
-    no_orgs_user_id = await pool.fetchval(
-        "SELECT id FROM users WHERE username = $1", "no_orgs_pg"
+    no_orgs_user_id = await ensure_test_user(
+        pool, "no_orgs_pg", "no_orgs_pg@example.com", is_verified=True
     )
 
     repo = AuthnzOrgsTeamsRepo(pool)
