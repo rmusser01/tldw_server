@@ -795,6 +795,11 @@ export const useServerChatLoader = ({
           return
         }
         const owner = control.getCurrent().owner
+        if (temporaryChat && owner?.kind === "unavailable") {
+          setServerChatLoadState("failed")
+          setServerChatLoadError(code)
+          return
+        }
         if (owner?.kind !== "native" || owner.conversation_id !== serverChatId) return
         setServerChatLoadState("failed")
         setServerChatLoadError(code)
@@ -816,18 +821,25 @@ export const useServerChatLoader = ({
           stopWatchingAuthority = watchServerChatLoadAuthority(snapshot, controller)
           await waitForChatPromotion(setServerChatId, useStoreMessageOption.getState().historyId, snapshot, { waitUntilSaved: true })
           if (!canCommitCurrentLoad()) return
-          const selectionState = selectionRef.current?.getCurrent()
-          if (selectionState?.error === "unbound_server_mirror" || selectionState?.owner?.kind === "unavailable") {
-            setServerChatLoadState("failed")
-            setServerChatLoadError(selectionState.error || "history_owner_unavailable")
-            return
-          }
           const control = selectionRef.current
-          if (control?.settingsMode?.(serverChatId, scope) === "pending") {
-            if (!await control.loadConversation({serverChatId, scope, temporary: temporaryChat})) return
+          if (temporaryChat && control) {
+            // H1 Decision 24: temporary owners stay unsupported (zero profile/bookmark/
+            // mirror writes) but keep read access; the canonical read below is display-only.
+            if (!await control.loadConversation({serverChatId, scope, temporary: true})) return
             selectionCurrent = control.fence()
+          } else {
+            const selectionState = control?.getCurrent()
+            if (selectionState?.error === "unbound_server_mirror" || selectionState?.owner?.kind === "unavailable") {
+              setServerChatLoadState("failed")
+              setServerChatLoadError(selectionState.error || "history_owner_unavailable")
+              return
+            }
+            if (control?.settingsMode?.(serverChatId, scope) === "pending") {
+              if (!await control.loadConversation({serverChatId, scope, temporary: temporaryChat})) return
+              selectionCurrent = control.fence()
+            }
+            if (control?.settingsMode?.(serverChatId, scope) === "pending") return
           }
-          if (control?.settingsMode?.(serverChatId, scope) === "pending") return
           const forkChild = control?.settingsMode?.(serverChatId, scope) === "fork"
           const forkOwner = forkChild ? control?.getCurrent().owner : null
           if (forkChild && (forkOwner?.kind !== "native" || !forkOwner.validate_lease())) return
@@ -926,7 +938,8 @@ export const useServerChatLoader = ({
             let syncedSettings = null
             if (assistantKind == null && characterId == null) {
               try {
-                syncedSettings = forkChild ? control?.getCurrent().forkSettings ?? null : await syncChatSettingsForServerChat({
+                // The settings sync writes local and server settings; temporary reads skip it.
+                syncedSettings = forkChild ? control?.getCurrent().forkSettings ?? null : temporaryChat ? null : await syncChatSettingsForServerChat({
                   historyId: null,
                   serverChatId,
                   scope,
@@ -1085,7 +1098,7 @@ export const useServerChatLoader = ({
           }
           if (!canCommitCurrentLoad()) return
           const currentSelection = selectionRef.current?.getCurrent()
-          if (selectionRef.current && !(currentSelection?.owner?.kind === "native" && currentSelection.owner.conversation_id === serverChatId && currentSelection.capture)) {
+          if (selectionRef.current && !temporaryChat && !(currentSelection?.owner?.kind === "native" && currentSelection.owner.conversation_id === serverChatId && currentSelection.capture)) {
             if (!await selectionRef.current.loadConversation({ serverChatId, scope, temporary: temporaryChat })) return
             selectionCurrent = selectionRef.current.fence()
             if (!canCommitCurrentLoad()) return
