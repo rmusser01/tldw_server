@@ -40,7 +40,9 @@ vi.mock('@tanstack/react-query', () => ({
     refetch: mocks.refetch,
     isLoading: false,
     isFetching: false
-  })
+  }),
+  // useMediaSearch drops its cached results through the client on account changes.
+  useQueryClient: () => ({ removeQueries: vi.fn() })
 }))
 
 vi.mock('@plasmohq/storage', () => ({
