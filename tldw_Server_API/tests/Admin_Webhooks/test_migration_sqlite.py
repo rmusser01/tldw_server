@@ -321,7 +321,8 @@ def test_sqlite_096_is_additive_across_supported_upgrade_points(
         names = _table_names(conn)
         assert names >= CANONICAL_TABLES
         assert names >= {"admin_webhooks", "admin_webhooks_delivery_log"}
-        assert _current_schema_version(conn) == 96
+        # Upgrading runs to the head of the chain, which later migrations extend past 096.
+        assert _current_schema_version(conn) == migrations.get_authnz_migrations()[-1].version
         if legacy_row is not None:
             assert conn.execute(
                 "SELECT * FROM admin_webhooks WHERE id = 44"
