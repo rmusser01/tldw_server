@@ -25,6 +25,23 @@ from tldw_Server_API.app.services.scheduled_task_recurring_question_service impo
     ScheduledTaskRecurringQuestionService,
 )
 
+@pytest.fixture(autouse=True)
+def _message_store_test_key(monkeypatch):
+    """ADR-184 1A: agent_task previews persist the raw message to the
+    encrypted store; without a configured key that store refuses writes
+    (fail-closed). Give these tests a key so preview authoring works."""
+    from tldw_Server_API.app.core.Scheduled_Tasks import (
+        automation_message_store as _store_module,
+    )
+    import base64
+
+    monkeypatch.setattr(
+        _store_module,
+        "_message_store_keys",
+        lambda: (base64.urlsafe_b64encode(b"0" * 32).decode(), None),
+    )
+
+
 OWNER_ID = 4101
 OTHER_OWNER_ID = 4102
 ACTOR = "task-service-test"

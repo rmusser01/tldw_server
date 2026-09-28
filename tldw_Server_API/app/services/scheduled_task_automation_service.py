@@ -44,6 +44,9 @@ from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
 from tldw_Server_API.app.core.Scheduled_Tasks.automation_executors import (
     _config_section as _automation_config_section,
 )
+from tldw_Server_API.app.core.Scheduled_Tasks.automation_message_store import (
+    AutomationMessageStore,
+)
 from tldw_Server_API.app.core.Scheduled_Tasks.execution_certification import (
     AgentAutomationAdmission,
     AgentExecutionDispatchReadiness,
@@ -412,6 +415,7 @@ class ScheduledTaskAutomationService:
         self,
         repository: ScheduledTasksDatabase | None = None,
         *,
+        message_store: AutomationMessageStore | None = None,
         execution_certification_resolver: Callable[
             [], ExecutionCertification
         ] = resolve_current_agent_execution_certification,
@@ -422,6 +426,8 @@ class ScheduledTaskAutomationService:
         """Initialize repository access and injectable readiness resolvers."""
 
         self._repository = repository
+        self._message_store: AutomationMessageStore | None = message_store
+        self._message_store_ready: set[tuple[int, str]] = set()
         self._schema_ready_keys: set[tuple[int, str]] = set()
         self._execution_certification_resolver = (
             execution_certification_resolver
@@ -1185,6 +1191,21 @@ class ScheduledTaskAutomationService:
             next_offset=offset + len(rows) if offset + len(rows) < total else None,
         )
 
+    def _message_store_for(self, owner_id: int) -> AutomationMessageStore:
+        """Return the owner's message store (ADR-184 decision 1A).
+
+        Separate database file from the scheduled-tasks DBs by design:
+        backups/exports of the automation tables never carry raw prompts.
+        """
+        if self._message_store is not None:
+            return self._message_store
+        store = AutomationMessageStore.for_user(owner_id)
+        key = (owner_id, str(store.db_path))
+        if key not in self._message_store_ready:
+            store.ensure_schema()
+            self._message_store_ready.add(key)
+        return store
+
     def _repo(self, owner_id: int) -> ScheduledTasksDatabase:
         repo = self._repository or ScheduledTasksDatabase.for_user(owner_id)
         schema_key = (owner_id, str(repo.db_path))
@@ -1203,7 +1224,34 @@ class ScheduledTaskAutomationService:
         payload_hash: str,
     ) -> ScheduledTaskPreviewResponse:
         self._require_agent_automation_supported(request.family)
+        # ADR-184 1A: the redaction in _normalize_preview is the last place
+        # the raw agent message exists server-side -- persist it to the
+        # encrypted store BEFORE the preview row, so a stored definition's
+        # message_ref always resolves. Refusal on store failure is honest:
+        # authoring an unrunnable definition is what the bound work refuses.
+        raw_message = ""
+        if request.family == "agent_task":
+            request_input = request.input if isinstance(request.input, dict) else {}
+            raw_message = str(request_input.get("message") or "")
         normalized, validation_errors, warnings = self._normalize_preview(request)
+        message_ref = ""
+        normalized_input = normalized.get("input")
+        if isinstance(normalized_input, dict):
+            message_ref = str(normalized_input.get("message_ref") or "")
+        if raw_message.strip() and message_ref:
+            try:
+                self._message_store_for(owner_id).store_message(
+                    owner_id, message_ref, raw_message
+                )
+            except Exception as exc:
+                raise ScheduledTaskAutomationError(
+                    "message_store_unavailable",
+                    reason=str(exc),
+                    recovery_action=(
+                        "Retry authoring once the message store is available; "
+                        "no definition was persisted."
+                    ),
+                ) from exc
         status = "invalid" if validation_errors else "valid"
         row = tx.create_preview(
             owner_id=owner_id,
