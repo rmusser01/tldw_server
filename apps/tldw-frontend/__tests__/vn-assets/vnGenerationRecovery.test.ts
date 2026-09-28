@@ -93,11 +93,17 @@ describe('VN generation recovery journal', () => {
     expect(() => clearVNCommands()).toThrow(/unavailable/);
   });
 
-  it('normalizes the API base but refuses credential-bearing URLs or unverified IDs', () => {
+  it('normalizes the API base', () => {
     expect(createVNCommandScope('https://VN.example/api/v1/', 1)).toEqual(scope);
-    for (const server of ['https://secret@vn.example', 'https://vn.example?token=secret', 'file:///api']) {
+  });
+
+  it.each(['https://secret@vn.example', 'https://vn.example?token=secret', 'file:///api'])(
+    'refuses an invalid API base: %s', (server) => {
       expect(() => createVNCommandScope(server, 1)).toThrow();
-    }
+    },
+  );
+
+  it('refuses an unverified principal ID', () => {
     expect(() => createVNCommandScope(scope.server, 'cached-user')).toThrow();
   });
 

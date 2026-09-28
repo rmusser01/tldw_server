@@ -28,9 +28,10 @@ equality checks. VN Python Bandit has zero findings/errors over 9068 lines; it
 does not scan TypeScript. All 393 VN backend tests pass (504.28s, 13 warnings,
 normal exit 0), using the activated main environment, existing CI overlay and
 approved DB temporary root without changes or weakened limits.
-The remote remains owned `ba3f8d7e5909bd4a340658cb7cc18b96049a062a`; protected
-publication uses that full expected-head lease after qualification and
-fresh live-dev/ownership checks. The additional evidence commit changes only
+The remote was owned `ba3f8d7e5909bd4a340658cb7cc18b96049a062a`; protected
+publication as `7ee1cd4bf5b306ff417ca7889da3554018f678c1` used that full
+expected-head lease after qualification and fresh live-dev/ownership checks.
+The additional evidence commit changes only
 TASK-13385 and this plan. New exact-base/head full reviews, CI and
 verified normal merge remain pending. No independent PR #3039 files are edited.
 
@@ -156,6 +157,29 @@ scoped findings with regression tests before fixing. No backend scope expansion.
 **Tests**: Exact base/head coverage in completed Qodo and CodeRabbit full reviews,
 all review comments/threads checked, scoped regressions and relevant suites.
 **Status**: In Progress
+
+The first complete full reviews of published
+`7ee1cd4bf5b306ff417ca7889da3554018f678c1` finished on 2026-09-28:
+Qodo in Deep mode at 03:51:33 UTC (explicit update 5863015836), and
+CodeRabbit at 03:54:59 UTC (trigger 5862971038, exact source/covered commit
+with kind reviewed). Qodo finding 4118397636 asks to isolate successful URL
+normalization, invalid URLs and unverified principal rejection. The original
+29-test journal suite passed before the split (1.09s); this is test hygiene,
+not a new runtime defect or invented red evidence. Separate normalization and
+principal cases plus `it.each` invalid URLs now pass as 33 journal tests
+(0.788s), with the complete 240-test VN/fetch/shared-auth suite passing in
+53.78s across 11 files with one worker. CodeRabbit minor 4118400067 is corrected
+through official task editing: the current final summary separates words and
+counts into readable sentences and paragraphs, retaining historical notes.
+Typecheck, both scoped lint commands, diff and runtime/base-file equality checks
+pass. Fresh Python VN Bandit has zero findings/errors over 9068 lines and does
+not scan TypeScript. Runtime, backend, design, auth, CI and shared environments
+are unchanged; the fresh 393-test backend qualification above still applies.
+CodeRabbit's remaining architecture inference is the already documented server
+idempotency/rollback limitation, not an established authorization bypass or new
+scoped code defect. This cleanup changes only tests, TASK-13385 and this plan.
+Its published head still needs complete full reviews and all exact-head live
+gates before verified normal merge. Stage 2/3 remain In Progress.
 
 Qodo's first requested full `ba3f8d7e5909bd4a340658cb7cc18b96049a062a`
 reassessment completed in Deep mode at 03:12:51 UTC (explicit update
