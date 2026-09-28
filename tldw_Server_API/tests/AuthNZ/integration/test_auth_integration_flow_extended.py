@@ -248,13 +248,10 @@ async def test_resend_verification_throttled(isolated_test_environment, test_use
     client, _db_name = isolated_test_environment
 
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+
     pool = await get_db_pool()
-    async with pool.transaction() as conn:
-        await conn.execute(
-            "UPDATE users SET is_verified = $1 WHERE id = $2",
-            False,
-            int(test_user["id"]),
-        )
+    await UsersDB(pool).update_user(int(test_user["id"]), is_verified=False)
 
     class _StubEmail:
         def __init__(self) -> None:

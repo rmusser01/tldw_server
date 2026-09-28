@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
 @pytest.mark.integration
@@ -78,12 +79,7 @@ async def test_allowlists_and_budget_402_postgres(test_db_pool, monkeypatch):
     )
 
     # Insert user
-    import uuid
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()), "vkpg402", "vkpg402@example.com", "x",
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "vkpg402")
+    user_id = await ensure_test_user(pool, "vkpg402", "vkpg402@example.com")
 
     # Create virtual key with allowlists and small budget
     mgr = APIKeyManager(pool)

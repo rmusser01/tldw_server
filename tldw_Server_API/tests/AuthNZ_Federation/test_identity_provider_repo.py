@@ -6,6 +6,7 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.settings import Settings
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
@@ -20,16 +21,7 @@ def _sqlite_settings(db_path: Path) -> Settings:
 
 
 async def _insert_test_user(pool: DatabasePool, *, username: str, email: str) -> int:
-    await pool.execute(
-        """
-        INSERT INTO users (username, email, password_hash)
-        VALUES (?, ?, ?)
-        """,
-        (username, email, "not-a-real-password-hash"),
-    )
-    row = await pool.fetchone("SELECT id FROM users WHERE email = ?", (email,))
-    assert row is not None
-    return int(row["id"])
+    return await ensure_test_user(pool, username, email)
 
 
 async def test_create_and_fetch_identity_provider(tmp_path: Path) -> None:
