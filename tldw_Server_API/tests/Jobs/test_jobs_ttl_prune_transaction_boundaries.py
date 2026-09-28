@@ -202,18 +202,15 @@ class _FailCounterWriteConnection:
 
 
 class _SQLTraceCursor:
-    """Record adapter SQL and bounded prune batch fetch sizes."""
+    """Record adapter SQL."""
 
     def __init__(
         self,
         inner: Any,
         traces: list[str],
-        batch_lengths: list[int] | None,
     ) -> None:
         self._inner = inner
         self._traces = traces
-        self._batch_lengths = batch_lengths
-        self._last_sql = ""
 
     def __enter__(self) -> _SQLTraceCursor:
         self._inner.__enter__()
@@ -223,28 +220,13 @@ class _SQLTraceCursor:
         return self._inner.__exit__(exc_type, exc, tb)
 
     def execute(self, sql: Any, params: Any = None) -> Any:
-        self._last_sql = " ".join(str(sql).split())
-        self._traces.append(self._last_sql)
+        self._traces.append(" ".join(str(sql).split()))
         if params is None:
             return self._inner.execute(sql)
         return self._inner.execute(sql, params)
 
     def fetchall(self) -> Any:
         return self._inner.fetchall()
-
-    def fetchmany(self, size: int | None = None) -> Any:
-        rows = (
-            self._inner.fetchmany(size)
-            if size is not None
-            else self._inner.fetchmany()
-        )
-        if (
-            self._batch_lengths is not None
-            and self._last_sql.startswith("SELECT id FROM jobs")
-            and "ORDER BY id FOR UPDATE" in self._last_sql
-        ):
-            self._batch_lengths.append(len(rows or []))
-        return rows
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)
@@ -257,11 +239,9 @@ class _SQLTraceConnection:
         self,
         inner: Any,
         traces: list[str],
-        batch_lengths: list[int] | None = None,
     ) -> None:
         self._inner = inner
         self._traces = traces
-        self._batch_lengths = batch_lengths
 
     def execute(self, sql: Any, params: Any = ()) -> Any:
         self._traces.append(" ".join(str(sql).split()))
@@ -271,7 +251,6 @@ class _SQLTraceConnection:
         return _SQLTraceCursor(
             self._inner.cursor(*args, **kwargs),
             self._traces,
-            self._batch_lengths,
         )
 
     def __enter__(self) -> _SQLTraceConnection:
@@ -868,10 +847,31 @@ def test_prune_postgres_processes_fixed_candidates_in_bounded_batches(
     traces: list[str] = []
     batch_lengths: list[int] = []
     original_connect = jm._connect
+    original_prune_batch = jm._prune_postgres_batch
+
+    def record_prune_batch(
+        cur: Any,
+        candidate_ids: list[int],
+        *,
+        archive_enabled: bool,
+        test_mode: bool,
+    ) -> int:
+        batch_lengths.append(len(candidate_ids))
+        return original_prune_batch(
+            cur,
+            candidate_ids,
+            archive_enabled=archive_enabled,
+            test_mode=test_mode,
+        )
+
+    monkeypatch.setattr(jm, "_prune_postgres_batch", record_prune_batch)
     monkeypatch.setattr(
         jm,
         "_connect",
-        lambda: _SQLTraceConnection(original_connect(), traces),
+        lambda: _SQLTraceConnection(
+            original_connect(),
+            traces,
+        ),
     )
     # 9cd728aae8 locks the whole candidate ID set once, then archives and deletes
     # it in _PRUNE_BATCH_SIZE slices; record each slice's size.

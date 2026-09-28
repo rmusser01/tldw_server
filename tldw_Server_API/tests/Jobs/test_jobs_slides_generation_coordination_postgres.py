@@ -28,7 +28,6 @@ from tldw_Server_API.app.core.Jobs.operations.postgres.lifecycle import (
 from tldw_Server_API.app.core.Jobs.pg_migrations import (
     ensure_jobs_rls_policies_pg,
     ensure_jobs_tables_pg,
-    slides_archive_indexes_ready_pg,
 )
 
 UTC = timezone.utc
@@ -97,20 +96,16 @@ def test_postgres_migration_adds_archive_indexes_shared_tables_and_narrow_uuid_c
     jobs_pg_dsn,
 ):
     ensure_jobs_tables_pg(jobs_pg_dsn)
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
     with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("DROP INDEX IF EXISTS idx_jobs_archive_slides_scope")
         cur.execute("DROP INDEX IF EXISTS idx_jobs_archive_uuid_unique")
         cur.execute("CREATE INDEX idx_jobs_archive_slides_scope ON jobs_archive(uuid)")
         cur.execute("CREATE UNIQUE INDEX idx_jobs_archive_uuid_unique ON jobs_archive(id)")
 
-    # Read the catalog directly: constructing a JobManager runs the migration,
-    # which would repair the indexes before readiness is checked.
-    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
-        assert slides_archive_indexes_ready_pg(cur) is False
+    assert manager.get_slides_generation_readiness()["archive_indexes_ready"] is False
     ensure_jobs_tables_pg(jobs_pg_dsn)
-    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
-        # The contract includes archived_at DESC; the check must see the sort order.
-        assert slides_archive_indexes_ready_pg(cur) is True
+    assert manager.get_slides_generation_readiness()["archive_indexes_ready"] is True
 
     with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
@@ -212,6 +207,27 @@ def test_postgres_migration_adds_archive_indexes_shared_tables_and_narrow_uuid_c
                         ),
                         (job_uuid,),
                     )
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("ordering", ("ASC", "ASC NULLS FIRST", "DESC NULLS LAST"))
+def test_postgres_archive_index_readiness_rejects_wrong_sort_options(jobs_pg_dsn, ordering):
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
+        assert slides_archive_indexes_ready_pg(cur) is True
+        cur.execute("DROP INDEX idx_jobs_archive_slides_scope")
+        cur.execute(
+            psycopg.sql.SQL(
+                "CREATE INDEX idx_jobs_archive_slides_scope ON jobs_archive "
+                "(domain, queue, job_type, idempotency_key, owner_user_id, archived_at {}) "
+                "WHERE idempotency_key IS NOT NULL"
+            ).format(psycopg.sql.SQL(ordering))
+        )
+        assert slides_archive_indexes_ready_pg(cur) is False
+
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        assert slides_archive_indexes_ready_pg(cur) is True
 
 
 @pytest.mark.pg_jobs
@@ -1009,15 +1025,16 @@ def test_postgres_archive_index_shape_helper_rejects_wrong_catalog_rows():
             True,
             False,
             6,
-            ["domain", "queue", "job_type", "idempotency_key", "owner_user_id", "archived_at DESC"],
+            ["domain", "queue", "job_type", "idempotency_key", "owner_user_id", "archived_at"],
+            [0, 0, 0, 0, 0, 3],
             "(idempotency_key IS NOT NULL)",
         ),
-        (True, True, True, 1, ["uuid"], "(uuid IS NOT NULL)"),
+        (True, True, True, 1, ["uuid"], [0], "(uuid IS NOT NULL)"),
     )
     assert slides_archive_indexes_ready_pg(StubCursor(exact_rows)) is True
     wrong_rows = (
-        (True, True, False, 1, ["uuid"], "(uuid IS NOT NULL)"),
-        (True, True, True, 1, ["uuid"], "(uuid IS NOT NULL)"),
+        (True, True, False, 1, ["uuid"], [0], "(uuid IS NOT NULL)"),
+        (True, True, True, 1, ["uuid"], [0], "(uuid IS NOT NULL)"),
     )
     assert slides_archive_indexes_ready_pg(StubCursor(wrong_rows)) is False
     included_rows = (
@@ -1026,10 +1043,11 @@ def test_postgres_archive_index_shape_helper_rejects_wrong_catalog_rows():
             True,
             False,
             7,
-            ["domain", "queue", "job_type", "idempotency_key", "owner_user_id", "archived_at DESC"],
+            ["domain", "queue", "job_type", "idempotency_key", "owner_user_id", "archived_at"],
+            [0, 0, 0, 0, 0, 3],
             "(idempotency_key IS NOT NULL)",
         ),
-        (True, True, True, 2, ["uuid"], "(uuid IS NOT NULL)"),
+        (True, True, True, 2, ["uuid"], [0], "(uuid IS NOT NULL)"),
     )
     assert slides_archive_indexes_ready_pg(StubCursor(included_rows)) is False
 
