@@ -454,6 +454,8 @@ class AnthropicAdapter(ChatProvider):
                         tool_states: dict[int, dict[str, Any]] = {}
                         tool_counter = 0
                         done_sent = False
+                        # Own loop (TASK-13373): translates Anthropic events into OpenAI deltas;
+                        # the shared SSE helpers only pass lines through.
                         for raw in resp.iter_lines():
                             if not raw:
                                 continue
