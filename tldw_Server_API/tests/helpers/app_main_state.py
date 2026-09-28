@@ -69,10 +69,17 @@ def import_app_main() -> ModuleType:
     return current
 
 
+# Modules produced by reload_app_main(), as opposed to an ordinary first import.
+# Modules are never freed while in sys.modules, and a stale id only makes a later
+# first import look like a reload (the old, merely slow, behaviour).
+_RELOADED_IDS: set[int] = set()
+
+
 def reload_app_main() -> ModuleType:
     clear_app_main()
     importlib.invalidate_caches()
     imported = importlib.import_module(APP_MAIN_MODULE_NAME)
+    _RELOADED_IDS.add(id(imported))
     return set_app_main(imported)
 
 
@@ -99,12 +106,18 @@ def app_main_isolated() -> Iterator[None]:
 
     Yields:
         None. The block runs with whatever module is current; on exit the module
-        that was current on entry is put back, or removed again if there was
-        none.
+        that was current on entry is put back, or, if there was none, a module
+        from :func:`reload_app_main` is removed again (a plain first import
+        stays).
     """
     snapshot = snapshot_app_main()
     try:
         yield
     finally:
-        if snapshot_app_main() is not snapshot:
+        current = snapshot_app_main()
+        # An ordinary first import is not a swap: nothing held an earlier app
+        # to split from. Unloading it made every later test re-import app.main,
+        # leaking a whole FastAPI app per test until shards crawled into the CI
+        # timeout. Only undo a module that reload_app_main() produced.
+        if current is not snapshot and (snapshot is not None or id(current) in _RELOADED_IDS):
             restore_app_main(snapshot)
