@@ -14,6 +14,26 @@ expected-head lease on publication. Exclude local preview link and archive13379.
 frontend typecheck, scoped lint, diff checks; unchanged VN Python Bandit baseline.
 **Status**: Complete
 
+Dev advanced to `bd2ae757d274e7eda3edb48eb682733c401efe56` through independently
+merged PR #3008 (13 files). Its VN change requires an authenticated caller for
+starter-matrix discovery; Start/Retry dispatch is unchanged. The auth-discovery
+routes and OpenAPI fingerprint are inherited without edits. Clean tracked
+checkout and owned remote `93428614b05ad22a7934bb68f0238649a50d3ef5` were
+verified before the conflict-free rebase. The completed-rebase range-diff
+preserves all 26 prior patches unchanged at local
+`45a8dd9aec9c60205742aab0200e515312d43448`. Fresh 220 VN/fetch/shared-auth
+tests pass (71.91s, 11 files, one worker), and all 393 VN backend tests pass
+(735.97s, 13 warnings, normal exit 0). Main environment, existing temporary CI
+overlay and approved DB temp root were used without changes. Typecheck, both
+scoped lint commands, backend compilation and diff checks pass. VN Python Bandit
+has zero findings/errors over 9068 lines; it does not scan TypeScript. Backend,
+CI, unrelated tasks, fingerprint and shared TldwAuth match the new base.
+The evidence commit changes only TASK-13385 and this plan. Publication uses an
+explicit lease protecting the full original 934 remote head. Complete new-base/
+head reviews, exact-head CI and verified normal merge remain pending. The skipped
+Qodo 934 result and unanswered retry question concern the superseded base, not
+new-head qualification. Stage 2/3 remain In Progress until verified merge.
+
 Final merge audit found dev advanced to
 `3c9d97c56b29abc4c0396274b9560859aee06959` through independently merged core
 PR #3011 (611 files, including AuthNZ, DB, frontend and CI changes). Clean tracked
