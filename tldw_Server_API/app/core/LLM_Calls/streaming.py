@@ -87,7 +87,12 @@ def iter_sse_lines_requests(
       raising mid-stream.
     """
     try:
-        for raw_line in response.iter_lines(decode_unicode=decode_unicode):
+        try:
+            raw_lines = response.iter_lines(decode_unicode=decode_unicode)
+        except TypeError:
+            # httpx.Response.iter_lines() takes no arguments and already yields str.
+            raw_lines = response.iter_lines()
+        for raw_line in raw_lines:
             if not raw_line:
                 continue
             # raw_line can be bytes when decode_unicode=False
