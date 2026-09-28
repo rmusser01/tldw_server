@@ -190,9 +190,9 @@ class TestAuthEndpointsIntegration:
     async def test_login_inactive_account(self, mock_db_pool, password_service, inactive_user):
         """Test login with inactive account."""
         inactive_user_copy = inactive_user.copy()
-        # Use a password that meets requirements
-        test_password = "Test@Pass#2024"
-        inactive_user_copy['password_hash'] = password_service.hash_password(test_password)
+        # The fixture seeds a real user through UsersDB, and login reads that row,
+        # so use the password it was created with.
+        test_password = "Inactive@Pass#2024!"
 
         mock_db_pool.fetchrow = AsyncMock(return_value=inactive_user_copy)
 
