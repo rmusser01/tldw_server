@@ -190,6 +190,7 @@ catalog. No new translation framework was added.
 
 Automatic approval review rejected posting the detailed approval record to
 PR 2869 as an external disclosure without destination-specific authorization.
-The local renewal is verified; publishing that approval record and renewal is
-awaiting explicit authorization for that GitHub destination. No approval
-comment has been posted, and no merge is claimed.
+The requester subsequently explicitly approved publication to PR 2869. The
+[approval record](https://github.com/rmusser01/tldw_server/pull/2869#issuecomment-5862294181)
+is now posted. The verified renewal is authorized for publication; current-head
+CI and final review remain required before merge.
