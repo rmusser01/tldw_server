@@ -1768,7 +1768,6 @@ const PlaygroundContent = () => {
   ]);
 
   const initializePlayground = React.useCallback(async () => {
-    if (historySelection.canAutomaticallyLoad?.() === false) return;
     let handoff;
     let handoffInHash = false;
     let storedHistoryReference;
@@ -1781,6 +1780,11 @@ const PlaygroundContent = () => {
       storedHistoryReference = historySelection.getStoredReference();
     }
     catch { await historySelection.open({ kind: "unavailable", code: "invalid_history_reference" }); return; }
+    // An invalidated lease (e.g. after an account change) stops AUTOMATIC restores
+    // only. A historySelection link is deliberate, as useServerChatLoader treats
+    // deliberate selections, and this runs once per mount, so gating it here would
+    // drop the link for as long as the page stays open (TASK-13390).
+    if (!handoff && historySelection.canAutomaticallyLoad?.() === false) return;
     if (handoff) {
       const loaded = await historySelection.loadConversation(handoff.owner_kind === "local" ? { historyId: handoff.conversation_id } : { serverChatId: handoff.conversation_id }, handoff);
       if (loaded && historySelection.getCurrent().capture) {
