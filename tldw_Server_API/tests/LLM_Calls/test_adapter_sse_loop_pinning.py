@@ -63,9 +63,15 @@ def _body(*lines: bytes) -> bytes:
 def _run(monkeypatch: pytest.MonkeyPatch, module_name: str, adapter_name: str, model: str, body: bytes | None):
     transport = _transport(body)
     module = importlib.import_module(f"tldw_Server_API.app.core.LLM_Calls.providers.{module_name}")
+
+    def _client_on_mock_transport(*_args: Any, **_kwargs: Any) -> httpx.Client:
+        return httpx.Client(transport=transport)
+
+    # Swap the project's own client factories (the sanctioned seam); the real
+    # adapter code still builds requests and parses the stream.
     if hasattr(module, "http_client_factory"):
-        monkeypatch.setattr(module, "http_client_factory", lambda *_a, **_k: httpx.Client(transport=transport))
-    monkeypatch.setattr(http_helpers, "_hc_create_client", lambda *_a, **_k: httpx.Client(transport=transport))
+        monkeypatch.setattr(module, "http_client_factory", _client_on_mock_transport)
+    monkeypatch.setattr(http_helpers, "_hc_create_client", _client_on_mock_transport)
     adapter = getattr(module, adapter_name)()
     request: dict[str, Any] = {
         "messages": [{"role": "user", "content": "hello"}],
