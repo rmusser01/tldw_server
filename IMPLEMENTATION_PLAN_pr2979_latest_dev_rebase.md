@@ -50,3 +50,9 @@ the distinction between transactional fixtures and native IndexedDB acceptance.
 **Success Criteria:** Current-base reviewable head; honest tracker and PR gate status.
 **Tests:** Hosted checks and exact PR head/base; generated-artifact exclusion.
 **Status:** In Progress
+
+Source checkpoint `0bc05d3f35` is published, and GitHub confirms dev `3d102e0d31`
+as its base. Final pre-push fetch showed zero missing dev commits. The PR body
+records all settled repairs, bounded evidence and excluded generated artifacts.
+Fresh hosted CI/Qodo and the requester-owned Change summary remain required;
+the prior 14 review threads are resolved, not a new-head review receipt.
