@@ -1,9 +1,10 @@
 ---
 id: TASK-13381
 title: Chat cannot reach its own HTTP-status extraction for NetworkError
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-23 17:54'
+updated_date: '2026-09-28 19:25'
 labels:
   - bug
   - chat
@@ -45,11 +46,17 @@ Open question for whoever takes it: adding `NetworkError` to the tuple is the sm
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A NetworkError carrying an HTTP status in its message reaches Chat's status extraction, or a recorded decision says it should not
-- [ ] #2 An upstream 429 on the Chat path surfaces as 429 with Retry-After rather than as 500
-- [ ] #3 The blast radius of widening the tuple is assessed at all three call sites, including any retry behaviour that currently depends on NetworkError propagating
-- [ ] #4 test_chat_orchestrator_cannot_yet_reach_this_path is retired or inverted, and TASK-13287's note removed
+- [x] #1 A NetworkError carrying an HTTP status in its message reaches Chat's status extraction, or a recorded decision says it should not
+- [x] #2 The blast radius of widening the tuple is assessed at all three call sites, including any retry behaviour that currently depends on NetworkError propagating
+- [x] #3 test_chat_orchestrator_cannot_yet_reach_this_path is retired or inverted, and TASK-13287's note removed
+- [x] #4 An upstream 429 on the Chat path surfaces as ChatRateLimitError (HTTP 429) rather than 500; Retry-After is forwarded only where the upstream exception carries headers
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Closed 2026-09-28, verified on dev after #3011 merged. AC1: NetworkError and RetryExhaustedError are in _CHAT_ORCHESTRATOR_PROVIDER_EXCEPTIONS (chat_orchestrator.py:50,99); tests/Chat/unit/test_orchestrator_network_exception_routing.py pins that they reach the handler and that NetworkError('HTTP 429') classifies as 429, which the handler maps to ChatRateLimitError. AC3: nothing in core/Chat, core/Character_Chat or endpoints/chat.py catches a raw NetworkError (the only reference is the _is_network_exception classifier), so no retry behaviour depended on it escaping. AC4: the tripwire test is gone from dev. AC2 amended below: a message-only NetworkError('HTTP 429') has no response headers, so there is no upstream Retry-After to forward.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

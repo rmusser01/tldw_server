@@ -4,7 +4,7 @@ title: 144 MCP_unified test files run in no CI job
 status: In Progress
 assignee: []
 created_date: '2026-09-22 04:34'
-updated_date: '2026-09-23 23:10'
+updated_date: '2026-09-28 19:25'
 labels:
   - ci
   - mcp
@@ -60,7 +60,6 @@ QUARANTINE: 10 files were ALREADY red when the tree was wired in (21 entries tot
 
 2026-09-23 (post-quarantine-drain) local re-run of the exact CI shard command (DATABASE_URL=sqlite:///./Databases/users.db, TEST_DATABASE_URL/POSTGRES_TEST_DB unset, -p pytest_asyncio.plugin -m 'not jobs and not e2e', PYTEST_DISABLE_PLUGIN_AUTOLOAD=1) on tldw_Server_API/app/core/MCP_unified/tests at ea1cbc6941+: exit 0, 3343 passed, 14 skipped, 0 failed, wall 179s serial; slowest single test 2.9s. Sizing: ~3 min locally vs the 60-minute shard timeout, so one shard is ample even at a 5-10x CI slowdown; no split needed. check_shard_coverage.py: OK (new_uncovered=0). AC4 still open: it needs a real CI run, which needs this branch pushed (commits are local-only; gh run list for fix/core-module-review-batch-1 returns nothing). Not pushed by this agent - pushing is the owner's call. Once pushed, record the 'Full Suite shard (Ubuntu / Python 3.12 / platform-mcp-inapp)' result here and close.
 
-
 Notes recorded on dev by the parallel core-review work (merged 2026-09-23):
 TRIAGE (2026-09-22), per this task's own requirement not to gate blind.
 Collection is healthy: 3,351 tests collect from tldw_Server_API/app/core/MCP_unified/tests in 6.4s.
@@ -77,7 +76,6 @@ CONSEQUENCE FOR THIS TASK: adding the tree to the platform-mcp-core shard is NOT
 Related evidence: the shard-coverage guard reports baseline=130 test files already grandfathered as unshared repo-wide, so this tree is the largest instance of a standing problem rather than a one-off.
 - [ ] #2 Tests or verification recorded
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-
 
 Notes recorded on dev by the parallel work (merged 2026-09-27):
 TRIAGE DONE (2026-09-23), which this task required before gating. Two fixes shipped; the
@@ -138,6 +136,8 @@ tldw_Server_API/tests/Embeddings/ failed the guard because it was in no shard. T
 works; its root is the gap. Also note ci.yml repeats the shard matrix 5 times (per
 OS/Python job), so assigning a path means editing all 5 copies -- a single edit leaves four
 jobs still skipping the file.
+
+2026-09-28: AC4 is still unmet, and the gate may never have run. The platform-mcp-inapp shard is defined in ci.yml (full-suite-linux-312/313, macos, windows and release shard jobs), but those jobs run on a PR only when the changes job reports backend_changed == 'true', and none appeared in #3035's 22-job CI run. ci.yml has also not run on a push to dev since February. So no green run of the in-app MCP gate has been observed. The shard-skipping itself is being worked separately (branch fix/ci-shards-skipped-by-admission).
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
