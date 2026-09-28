@@ -451,10 +451,17 @@ async def stream_audio_job_progress(
                 yield ln
         finally:
             if not prod_task.done():
-                with contextlib.suppress(_AUDIO_JOBS_NONCRITICAL_EXCEPTIONS):
-                    prod_task.cancel()
-                with contextlib.suppress(_AUDIO_JOBS_NONCRITICAL_EXCEPTIONS):
+                prod_task.cancel()
+                try:
                     await prod_task
+                except asyncio.CancelledError:
+                    # The producer's own cancellation is expected; only propagate
+                    # when this generator's task is itself being cancelled.
+                    current = asyncio.current_task()
+                    if current is not None and current.cancelling():
+                        raise
+                except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS:
+                    pass
 
     sse_headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     return StreamingResponse(_gen(), media_type="text/event-stream", headers=sse_headers)
