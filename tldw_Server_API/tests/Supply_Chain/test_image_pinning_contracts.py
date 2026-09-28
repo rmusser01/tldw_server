@@ -249,3 +249,12 @@ def test_next_runtime_pins_only_the_fixed_bookworm_pcre2_package(name: str) -> N
     ]
     assert 'test "$(dpkg-query -W -f=\'${Version}\' libpcre2-8-0)" = "10.42-1+deb12u1"' in runtime
     assert "rm -rf /var/lib/apt/lists/*" in runtime
+
+
+@pytest.mark.parametrize("name", ["prod", "worker", "audio_gpu_worker"])
+def test_python_runtime_pins_fixed_trixie_pcre2_without_changing_builder(name: str) -> None:
+    builder, runtime = (ROOT / f"Dockerfiles/Dockerfile.{name}").read_text().split(" AS runtime", 1)
+    install = runtime.split("apt-get install", 1)[1].split("&&", 1)[0]
+    assert "libpcre2-8-0=10.46-1~deb13u2" in install.split()
+    assert 'test "$(dpkg-query -W -f=\'${Version}\' libpcre2-8-0)" = "10.46-1~deb13u2"' in runtime
+    assert "libpcre2-8-0=10.46-1~deb13u2" not in builder

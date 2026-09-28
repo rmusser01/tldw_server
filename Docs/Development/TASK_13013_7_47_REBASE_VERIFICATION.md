@@ -254,3 +254,12 @@ CI admission remains required. No exception policy changed.
 
 CI on `b2738e447d` confirms the required source security gate passes with the
 renewed policy. Its full container gate is blocked by the above scanner rows.
+
+The worker and app reports also contain the three PCRE2 identities at Trixie
+`10.46-1~deb13u1`. All three Python runtime stages now pin the Debian-fixed
+`10.46-1~deb13u2` in their existing APT install and verify the installed version.
+Both pinned amd64 Python 3.11.16 and 3.12.14 bases were checked: PCRE2 is the only
+package delta; ctypes ABI loading, grep, Python executable hashes and dynamic
+link checks pass. All 89 affected contracts pass. Builders and unrelated native
+candidates are unchanged. Runtime probes for the current app and worker images
+passed in CI; their remaining admission mismatches are being assessed separately.

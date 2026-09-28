@@ -38,7 +38,9 @@ ADD --checksum=sha256:e417fb0642502c090d84a6f5fce1a2e5961dfe18644415ddce77a1a67c
 FROM python:3.11.16-slim-trixie@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpcre2-8-0=10.46-1~deb13u2 \
         ca-certificates \
+    && test "$(dpkg-query -W -f='${Version}' libpcre2-8-0)" = "10.46-1~deb13u2" \
     && rm -rf \
         /var/lib/apt/lists/* \
         /usr/local/bin/pip* \
