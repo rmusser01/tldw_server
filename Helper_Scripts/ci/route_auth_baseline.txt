@@ -17,8 +17,6 @@ DELETE /api/v1/auth/single-user/session
 GET /
 GET /api/v1/audio-studio/media-tickets/{token}
 GET /api/v1/audio/realtime/capabilities
-GET /api/v1/audio/stream/status
-GET /api/v1/audio/transcriptions/health
 GET /api/v1/auth/federation/{provider_slug}/callback
 GET /api/v1/auth/federation/{provider_slug}/login
 GET /api/v1/auth/verify-email
@@ -42,7 +40,6 @@ GET /api/v1/llm/providers/{provider_name}
 GET /api/v1/mcp/health
 GET /api/v1/media/transcription-models
 GET /api/v1/notes/health
-GET /api/v1/ocr/backends
 GET /api/v1/paper-search/acm
 GET /api/v1/paper-search/acm/by-doi
 GET /api/v1/paper-search/arxiv
@@ -165,7 +162,6 @@ POST /api/v1/config/validate-provider
 POST /api/v1/mcp/auth/refresh
 POST /api/v1/mcp/auth/token
 POST /api/v1/mcp/catalog/test-connection
-POST /api/v1/ocr/points/preload
 POST /api/v1/prototype-promotions
 POST /api/v1/prototype-sessions
 POST /api/v1/setup/assistant
