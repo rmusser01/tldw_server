@@ -78,30 +78,36 @@ export function useLoadLocalConversation(
       selection?.beginLoad()
       let selectionCurrent = selection?.fence() || (() => true)
       let snapshot: ServicePromptSnapshot | undefined
-      const isCurrent = () => mountedRef.current &&
+      // The controller advances its own fence while opening. This caller lease
+      // must track navigation/account changes independently of that fence.
+      const isCurrentLoad = () => mountedRef.current &&
         !snapshot?.scopeSignal.aborted && !snapshot?.scopeInvalidatedSignal.aborted &&
         generation === loadGenerationRef.current &&
-        restoreRevision === usePlaygroundSessionStore.getState().restoreRevision &&
-        selectionCurrent()
+        restoreRevision === usePlaygroundSessionStore.getState().restoreRevision
+      const isCurrent = () => isCurrentLoad() && selectionCurrent()
       try {
-        snapshot = await loadServicePromptSnapshot([])
-        if (!isCurrent()) return false
         const db = dbRef.current!
-        const [history, historyDetails] = await Promise.all([
-          db.getChatHistory(conversationId),
-          db.getHistoryInfo(conversationId)
-        ])
-        if (!isCurrent()) return false
-        if (!historyDetails || historyDetails.server_scope_key !== serverChatMirrorOwnerKey(snapshot)) return false
-
+        const historyDetails = await db.getHistoryInfo(conversationId)
+        if (!isCurrent() || !historyDetails) return false
+        // Profile-owned forks browse independently of the inference account.
+        // The controller still validates the local profile before publishing.
+        const profileOwned = selection && historyDetails.local_owner_key &&
+          !historyDetails.server_scope_key && !historyDetails.server_chat_id &&
+          historyDetails.message_source !== "server"
+        if (!profileOwned) {
+          snapshot = await loadServicePromptSnapshot([])
+          if (!isCurrent() || historyDetails.server_scope_key !== serverChatMirrorOwnerKey(snapshot)) return false
+        }
+        const history = await db.getChatHistory(conversationId)
         if (!isCurrent()) return false
         if (selection) {
-          if (!await selection.loadConversation({ historyId: conversationId })) return false
+          if (!await selection.loadConversation({ historyId: conversationId, isCurrent: isCurrentLoad })) return false
           if (generation !== loadGenerationRef.current) return false
           selectionCurrent = selection.fence()
         }
         if (!isCurrent()) return false
         const selected = selection?.getCurrent()
+        if (selected?.owner?.kind === "unavailable") return false
         setServerChatId(selected?.owner?.kind === "native" ? selected.owner.conversation_id : null)
         setHistoryId(conversationId)
         if (!selected || selected.capture?.status !== "captured") {

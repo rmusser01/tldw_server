@@ -1895,7 +1895,7 @@ const PlaygroundContent = () => {
         if (recentChat && canPublish()) {
           const loaded = await historySelection.loadConversation({ historyId: recentChat.history.id });
           selectionCurrent = historySelection.fence();
-          if (!loaded || !canPublish()) return;
+          if (!loaded || !canPublish() || historySelection.getCurrent().owner?.kind === "unavailable") return;
           setHistoryId(recentChat.history.id);
           if (historySelection.getCurrent().capture?.status !== "captured") {
             setHistory(formatToChatHistory(recentChat.messages));

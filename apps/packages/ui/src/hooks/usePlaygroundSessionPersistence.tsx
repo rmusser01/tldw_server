@@ -546,9 +546,12 @@ export function usePlaygroundSessionPersistence() {
     const restoreRevision =
       usePlaygroundSessionStore.getState().restoreRevision
     let snapshot: ServicePromptSnapshot | undefined
-    const isCurrentRestore = () =>
+    // Opening advances the controller fence; pass only the independent caller
+    // lease into the owner, then capture the controller's new fence afterward.
+    const restoreLeaseValid = () =>
       !snapshot?.scopeSignal.aborted && !snapshot?.scopeInvalidatedSignal.aborted &&
-      usePlaygroundSessionStore.getState().restoreRevision === restoreRevision && selectionCurrent()
+      usePlaygroundSessionStore.getState().restoreRevision === restoreRevision
+    const isCurrentRestore = () => restoreLeaseValid() && selectionCurrent()
     const scopeKey = await resolveCurrentScopeKey()
     if (!isCurrentRestore()) {
       initialRestoreSettledRef.current = true
@@ -567,7 +570,8 @@ export function usePlaygroundSessionPersistence() {
     if (tabReference) {
       const selected = selectionRef.current!
       const loaded = await selected.loadConversation(tabReference.owner_kind === "local"
-        ? { historyId: tabReference.conversation_id } : { serverChatId: tabReference.conversation_id }, tabReference)
+        ? { historyId: tabReference.conversation_id, isCurrent: restoreLeaseValid }
+        : { serverChatId: tabReference.conversation_id, isCurrent: restoreLeaseValid }, tabReference)
       if (!loaded || usePlaygroundSessionStore.getState().restoreRevision !== restoreRevision) return "cancelled"
       selectionCurrent = selected.fence()
       // A failed owner validation stays visible; never substitute the other tab's session.
@@ -656,7 +660,9 @@ export function usePlaygroundSessionPersistence() {
           clearSession()
           return "not-restored"
         }
-        if (chatData.historyInfo.server_scope_key !== serverChatMirrorOwnerKey(snapshot)) {
+        // The selected-history controller validates stamped records before
+        // capture and preserves explicit profile-owned and unbound read-only paths.
+        if (!selectionRef.current && chatData.historyInfo.server_scope_key !== serverChatMirrorOwnerKey(snapshot)) {
           clearSession()
           return "not-restored"
         }
@@ -665,17 +671,18 @@ export function usePlaygroundSessionPersistence() {
         }
 
         if (selectionRef.current && !tabReference) {
-          if (!await selectionRef.current.loadConversation({ historyId: savedHistoryId, serverChatId: savedServerChatId }, tabReference || sessionStore.historySelectionReference)) return "cancelled"
+          if (!await selectionRef.current.loadConversation({ historyId: savedHistoryId, serverChatId: savedServerChatId, isCurrent: restoreLeaseValid }, tabReference || sessionStore.historySelectionReference)) return "cancelled"
           if (usePlaygroundSessionStore.getState().restoreRevision !== restoreRevision) return "cancelled"
           selectionCurrent = selectionRef.current.fence()
           const current = selectionRef.current.getCurrent()
           if (!current.capture && current.error) {
             if (current.error === "unbound_server_mirror") {
-              // Preserve the local read-only locator; binding is a separate explicit action.
+              // Preserve the locator for explicit authorized binding. An automatic
+              // restore cannot prove which account owns an unstamped transcript.
               setHistoryId(savedHistoryId)
               setServerChatId(null)
-              setHistory(formatToChatHistory(chatData.messages))
-              setMessages(formatToMessage(chatData.messages))
+              setHistory([])
+              setMessages([])
             }
             return "restored"
           }
@@ -704,7 +711,7 @@ export function usePlaygroundSessionPersistence() {
       // Restore settings from session store
       if (savedServerChatId && selectionRef.current?.getCurrent().error !== "unbound_server_mirror") {
         if (!savedHistoryId && selectionRef.current && !tabReference) {
-          if (!await selectionRef.current.loadConversation({ serverChatId: savedServerChatId }, tabReference || sessionStore.historySelectionReference)) return "cancelled"
+          if (!await selectionRef.current.loadConversation({ serverChatId: savedServerChatId, isCurrent: restoreLeaseValid }, tabReference || sessionStore.historySelectionReference)) return "cancelled"
           if (usePlaygroundSessionStore.getState().restoreRevision !== restoreRevision) return "cancelled"
           selectionCurrent = selectionRef.current.fence()
           if (!selectionRef.current.getCurrent().capture && selectionRef.current.getCurrent().error) return "restored"

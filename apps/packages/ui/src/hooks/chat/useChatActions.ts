@@ -28,7 +28,12 @@ import {
   updateLastUsedPrompt,
   updateChatHistoryCreatedAt
 } from "@/db/dexie/helpers"
-import { removeAcknowledgedServerMirrorMessage } from "@/db/dexie/server-chat-mirror"
+import {
+  linkServerChatMirror,
+  reconcileServerChatMirror,
+  removeAcknowledgedServerMirrorMessage,
+  serverChatMirrorOwnerKey
+} from "@/db/dexie/server-chat-mirror"
 import {
   rollbackScopedComparePersistence,
   runChatPersistenceTransaction
@@ -4636,22 +4641,37 @@ export const useChatActions = ({
     notification
   )(messageId, comparison)
 
-  const createServerOnlyChatBranch = async (index: number): Promise<string | null> => {
+  const branchSourceRevision = usePlaygroundSessionStore.getState().restoreRevision
+  const createServerOnlyChatBranch = async (
+    index: number
+  ): Promise<{ chatId: string; historyId: string; messages: Message[] } | null> => {
     if (!serverChatId) return null
+    let owner: ServicePromptSnapshot | undefined
+    const isCurrent = () =>
+      usePlaygroundSessionStore.getState().restoreRevision === branchSourceRevision &&
+      owner !== undefined &&
+      !owner.scopeSignal.aborted &&
+      !owner.scopeInvalidatedSignal.aborted
     try {
-      await tldwClient.initialize().catch(() => null)
+      owner = await loadServicePromptSnapshot([])
+      if (!isCurrent()) return null
+      const requestOptions = {
+        ...(scope ? { scope: structuredClone(scope) } : {}),
+        signal: owner.scopeSignal,
+        requestScope: owner.requestScope
+      }
+      const prefix = structuredClone(excludeLocalRagDiagnostics(messages.slice(0, index + 1)))
+      const snapshot = buildHistoryFromMessages(prefix)
+      if (!prefix.length) throw new Error("Chat history is not ready to branch")
       let title = (serverChatTitle || "").trim()
       let characterId = serverChatCharacterId ?? selectedCharacter?.id ?? null
       let state = normalizeConversationState(serverChatState || "in-progress")
-      try {
-        const source = await tldwClient.getChat(serverChatId, scope ? { scope } : undefined)
-        const sourceCompat = source as typeof source & { conversation_state?: string }
-        title ||= (source?.title || "").trim()
-        characterId = source?.character_id ?? characterId
-        state = normalizeConversationState(source?.state ?? sourceCompat.conversation_state ?? state)
-      } catch {
-        // The active chat's selected character and metadata are sufficient.
-      }
+      const source = await tldwClient.getChat(serverChatId, requestOptions)
+      if (!isCurrent()) return null
+      const sourceCompat = source as typeof source & { conversation_state?: string }
+      title ||= (source?.title || "").trim()
+      characterId = source?.character_id ?? characterId
+      state = normalizeConversationState(source?.state ?? sourceCompat.conversation_state ?? state)
       if (characterId === null || characterId === undefined) throw new Error("Cannot branch server chat without character_id")
       const base = (title || (serverChatTopic || "").trim() || "Extension chat").slice(0, 60)
       const created = await tldwClient.createChat({
@@ -4663,19 +4683,61 @@ export const useChatActions = ({
         cluster_id: serverChatClusterId || undefined,
         source: serverChatSource || undefined,
         external_ref: serverChatExternalRef || undefined
-      }, scope ? { scope } : undefined)
+      }, requestOptions)
+      if (!isCurrent()) return null
       const createdCompat = created as typeof created & { chat_id?: string; conversation_state?: string }
       const chatId = String(created?.id ?? createdCompat.chat_id ?? "")
       if (!chatId) throw new Error("Failed to create server branch chat")
       invalidateServerChatHistory()
-      const prefix = history.slice(0, index + 1)
-      for (const row of prefix) {
-        if (!row.content?.trim()) continue
-        await tldwClient.addChatMessage(chatId, {
-          role: row.role === "system" || row.role === "assistant" ? row.role : "user",
-          content: row.content.trim()
-        }, scope ? { scope } : undefined)
+      const copiedMessages: Message[] = []
+      const copiedIds = new Map<string, string>()
+      for (const original of prefix) {
+        const role = original.role ?? (original.name === "System" ? "system" : original.isBot ? "assistant" : "user")
+        const content = original.message || ""
+        const image = original.images?.find(Boolean) || ""
+        const imageBase64 = image.includes(",") ? image.slice(image.indexOf(",") + 1) : image
+        if (!content.trim() && !imageBase64) continue
+        const parentId = original.parentMessageId ? copiedIds.get(original.parentMessageId) : undefined
+        const receipt = await tldwClient.addChatMessage(chatId, {
+          role,
+          ...(content ? { content } : {}),
+          ...(imageBase64 ? { image_base64: imageBase64 } : {}),
+          ...(parentId ? { parent_message_id: parentId } : {})
+        }, requestOptions)
+        if (!isCurrent()) return null
+        const id = receipt?.id != null ? String(receipt.id) : ""
+        if (!id) throw new Error("Missing copied message receipt")
+        if (original.id) copiedIds.set(original.id, id)
+        if (original.serverMessageId) copiedIds.set(original.serverMessageId, id)
+        copiedMessages.push({
+          ...original,
+          id,
+          serverMessageId: id,
+          serverMessageVersion: receipt.version,
+          parentMessageId: parentId ?? null,
+          variants: undefined,
+          activeVariantIndex: undefined
+        })
       }
+      const ownerKey = serverChatMirrorOwnerKey(owner)
+      const branchHistoryId = await linkServerChatMirror({
+        chatId,
+        title: String(created?.title ?? title),
+        ownerKey,
+        signal: owner.scopeInvalidatedSignal,
+        validate_lease: isCurrent
+      })
+      if (!isCurrent()) return null
+      await reconcileServerChatMirror({
+        historyId: branchHistoryId,
+        chatId,
+        ownerKey,
+        messages: copiedMessages,
+        localMessages: copiedMessages,
+        signal: owner.scopeInvalidatedSignal,
+        validate_lease: isCurrent
+      })
+      if (!isCurrent()) return null
       retireServerBranchRoute(chatId, characterId)
       setServerChatId(chatId)
       setServerChatState(normalizeConversationState(created?.state ?? createdCompat.conversation_state ?? "in-progress"))
@@ -4687,12 +4749,16 @@ export const useChatActions = ({
       setServerChatTitle(String(created?.title ?? serverChatTitle ?? ""))
       setServerChatCharacterId(created?.character_id ?? characterId)
       setServerChatMetaLoaded(true)
-      setMessages(messages.slice(0, index + 1))
-      setHistory(prefix)
-      return chatId
+      setHistoryId(branchHistoryId, { preserveServerChatId: true })
+      setMessages(copiedMessages)
+      setHistory(snapshot)
+      return { chatId, historyId: branchHistoryId, messages: copiedMessages }
     } catch {
+      if (!isCurrent()) return null
       notification.error({ message: "Branch failed", description: "Unable to create a branched server chat. Check your server connection and try again." })
       return null
+    } finally {
+      owner?.release()
     }
   }
 
@@ -4718,9 +4784,12 @@ export const useChatActions = ({
       if (decodeChatErrorPayload(lastAssistant.message) || getLocalRagDiagnosticUser(messages, lastAssistant)) return
       const index = nextMessages.length - 1
       if (index < 0) return
-      const chatId = await createServerOnlyChatBranch(index)
-      if (!chatId) throw new Error("Failed to create branch for regeneration")
-      return { submitExtras: { serverChatIdOverride: chatId } }
+      const branch = await createServerOnlyChatBranch(index)
+      if (!branch) throw new Error("Failed to create branch for regeneration")
+      return {
+        messages: branch.messages,
+        submitExtras: { serverChatIdOverride: branch.chatId, historyIdOverride: branch.historyId }
+      }
     }
   })
 
