@@ -24,6 +24,7 @@ from tldw_Server_API.app.api.v1.endpoints.media.process_emails import process_em
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.Ingestion_Media_Processing import persistence
+from tldw_Server_API.app.services import storage_quota_service
 
 pytestmark = pytest.mark.integration
 
@@ -74,6 +75,17 @@ def offline_client(tmp_path, monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", forbidden)
     monkeypatch.setattr(socket.socket, "connect_ex", forbidden)
     monkeypatch.setattr(socket, "getaddrinfo", forbidden)
+
+    class _UnlimitedQuota:
+        """Quota is outside this harness; the synthetic user has no AuthNZ row."""
+
+        async def initialize(self) -> None:
+            return None
+
+        async def check_quota(self, *_args, **_kwargs):
+            return True, {}
+
+    monkeypatch.setattr(storage_quota_service, "get_storage_quota_service", _UnlimitedQuota)
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
     monkeypatch.setitem(persistence.settings, "EMAIL_NATIVE_PERSIST_ENABLED", True)
