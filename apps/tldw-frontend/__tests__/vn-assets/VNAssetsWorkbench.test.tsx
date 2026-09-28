@@ -388,6 +388,94 @@ describe('VNAssetsWorkbench', () => {
     await act(async () => newResponse({ status: 'queued' }));
   });
 
+  it.each(['start', 'retry', 'cancel', 'recover-start', 'recover-retry'].flatMap((kind) =>
+    ['focus', 'pageshow'].map((event) => ({ kind, event })),
+  ))('explains an unsent $kind after $event interrupts pre-send verification', async ({ kind, event }) => {
+    existingFailedPack();
+    if (kind === 'cancel') {
+      mocks.getVNAssetGeneration.mockResolvedValue({ status: 'processing', batch_id: 41 });
+      mocks.cancelVNAssetGeneration.mockResolvedValue({ status: 'cancelled', batch_id: 41 });
+    }
+    const recovering = kind.startsWith('recover-');
+    const retrying = kind.endsWith('retry');
+    const original = {
+      packId: 7,
+      ...(retrying ? { slotId: 12 } : {}),
+      request: {
+        idempotency_key: 'vn-generation-original-interrupted-key',
+        ...(retrying ? { source_batch_id: 41 } : {}),
+      },
+    };
+    const other = { packId: 8, request: { idempotency_key: 'vn-generation-other-pending-key' } };
+    const key = 'tldw:vn-generation:pending:v1';
+    const raw = JSON.stringify({
+      version: 1, scope: { server: 'http://localhost:8000/api/v1', principal: '1' },
+      commands: recovering ? [original, other] : [other],
+    });
+    sessionStorage.setItem(key, raw);
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    const name = recovering ? 'Recover pending request' : kind === 'cancel' ? 'Cancel'
+      : retrying ? 'Retry sprite_neutral' : 'Start generation';
+    await waitFor(() => expect(screen.getByRole('button', { name })).toBeEnabled());
+    let resolveProfile!: (value: unknown) => void;
+    mocks.profile.mockImplementationOnce(() => new Promise((resolve) => { resolveProfile = resolve; }));
+    await user.click(screen.getByRole('button', { name }));
+    await waitFor(() => expect(mocks.profile).toHaveBeenCalledTimes(2));
+    act(() => window.dispatchEvent(new Event(event)));
+    await waitFor(() => expect(mocks.getVNAssetGeneration).toHaveBeenCalledTimes(2));
+    await act(async () => resolveProfile({ user: { id: 1, is_active: true } }));
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(key)).toBe(raw);
+    expect(screen.getByLabelText('Generation status')).toHaveTextContent(kind === 'cancel' ? 'processing' : 'failed');
+    expect(screen.getByRole('button', { name })).toBeEnabled();
+    expect(screen.getByText('The request was not sent because verification was interrupted. Try again.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name }));
+    const send = kind === 'cancel' ? mocks.cancelVNAssetGeneration
+      : retrying ? mocks.retryVNAssetSlot : mocks.startVNAssetGeneration;
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    if (recovering) {
+      expect(send.mock.calls[0]).toEqual(retrying ? [7, 12, original.request] : [7, original.request]);
+    }
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem(key)!).commands).toEqual([other]));
+    expect(screen.queryByText('The request was not sent because verification was interrupted. Try again.')).not.toBeInTheDocument();
+  });
+
+  it.each(['start', 'retry', 'cancel'].flatMap((kind) =>
+    ['account', 'pack'].map((context) => ({ kind, context })),
+  ))('does not report an old unsent $kind in a changed $context context', async ({ kind, context }) => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+      { id: 8, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
+    ]);
+    if (kind === 'cancel') mocks.getVNAssetGeneration.mockResolvedValue({ status: 'processing', batch_id: 41 });
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    const name = kind === 'cancel' ? 'Cancel' : kind === 'retry' ? 'Retry sprite_neutral' : 'Start generation';
+    await waitFor(() => expect(screen.getByRole('button', { name })).toBeEnabled());
+    let resolveProfile!: (value: unknown) => void;
+    mocks.profile.mockImplementationOnce(() => new Promise((resolve) => { resolveProfile = resolve; }));
+    await user.click(screen.getByRole('button', { name }));
+    if (context === 'account') {
+      mocks.profile.mockResolvedValue({ user: { id: 2, is_active: true } });
+      act(() => window.dispatchEvent(new CustomEvent('tldw:auth-principal-changed', { detail: { kind: 'switch' } })));
+    } else {
+      await user.click(screen.getByText('Moon Archive'));
+      act(() => window.dispatchEvent(new Event('focus')));
+    }
+    await waitFor(() => expect(screen.getByRole('button', { name })).toBeEnabled());
+    await act(async () => resolveProfile({ user: { id: 1, is_active: true } }));
+    expect(screen.queryByText('The request was not sent because verification was interrupted. Try again.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name })).toBeEnabled();
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+  });
+
   it.each(['failure', 'success'])('ignores an older %s identity result after a newer same-account check', async (outcome) => {
     existingFailedPack();
     mocks.listVNAssetPacks.mockResolvedValue([

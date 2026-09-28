@@ -137,6 +137,27 @@ scoped findings with regression tests before fixing. No backend scope expansion.
 all review comments/threads checked, scoped regressions and relevant suites.
 **Status**: In Progress
 
+Qodo's first requested full `ba3f8d7e5909bd4a340658cb7cc18b96049a062a`
+reassessment completed in Deep mode at 03:12:51 UTC (explicit update
+5862605551), finding 4118238588. Ten rendered Start/Retry/Cancel and recovered
+Start/Retry cases across focus/pageshow failed on missing unsent feedback
+(6.94s test time, 9.69s total); six account/pack-context controls passed before
+the fix. The existing matching-token completion helper now reports an unsent
+verification only for the still-owned, selected-pack action. Verification
+sequencing, authority epochs, current-capture checks and journal behavior are
+unchanged; there is no automatic retry or POST. All 16 focused checks pass
+(6.82s test time, 10.31s total), including unchanged journal bytes before an
+explicit retry, exact original recovery body/key and acknowledgement-only
+removal. Final 236 VN/fetch/shared-auth tests pass (67.46s, 11 files, one worker).
+Typecheck, both scoped lint commands and diff checks pass. Unchanged VN Python
+Bandit reports zero findings/errors over 9068 lines; it does not scan TypeScript.
+The new-base 393 backend tests already passed (735.97s, 13 warnings, normal exit
+0), and this frontend-only feedback fix changes no backend/auth/CI/environment.
+CodeRabbit's full ba3 review completed at 03:17:04 UTC with exact source/covered
+commit, kind reviewed, minimal merge risk and no actionable scoped finding.
+Those complete reviews do not qualify the changed fix head. New complete
+reassessments, exact-head gates and verified normal merge remain required.
+
 Qodo's requested full 78bb52e2 reassessment completed at 23:53:20 UTC with no
 active bugs/rules. CodeRabbit's full review completed at 23:57:42 UTC with exact
 source/covered-commit coverage and one valid minor finding, 4117523366. A new

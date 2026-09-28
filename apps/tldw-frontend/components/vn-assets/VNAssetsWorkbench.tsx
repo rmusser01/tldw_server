@@ -100,8 +100,11 @@ export default function VNAssetsWorkbench() {
 
   const starterMatrix = starterMatrices[0] ?? null;
 
-  const finishGenerationCommand = useCallback((packId: number, token: symbol): void => {
+  const finishGenerationCommand = useCallback((packId: number, token: symbol, notSent = false): void => {
     if (generationCommandPending.current.get(packId) !== token) return;
+    if (notSent && selectedPackIdRef.current === packId) {
+      setError('The request was not sent because verification was interrupted. Try again.');
+    }
     generationCommandPending.current.delete(packId);
     setPendingCommands((previous) => {
       const next = { ...previous };
@@ -341,7 +344,7 @@ export default function VNAssetsWorkbench() {
     setError(null);
     const capture = await recovery.verify();
     if (!capture || !recovery.remember(capture, command)) {
-      finishGenerationCommand(packId, token);
+      finishGenerationCommand(packId, token, !capture);
       return;
     }
     try {
@@ -373,7 +376,7 @@ export default function VNAssetsWorkbench() {
     setPendingCommands((previous) => ({ ...previous, [selectedPack.id]: { kind: 'cancel' } }));
     setError(null);
     const capture = await recovery.verify();
-    if (!capture || !recovery.isCurrent(capture)) { finishGenerationCommand(selectedPack.id, token); return; }
+    if (!capture || !recovery.isCurrent(capture)) { finishGenerationCommand(selectedPack.id, token, true); return; }
     try {
       const nextGeneration = await cancelVNAssetGeneration(selectedPack.id);
       if (!recovery.isCurrent(capture)) return;
