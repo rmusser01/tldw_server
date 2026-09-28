@@ -769,6 +769,9 @@ export const useServerChatLoader = ({
           activeController: serverChatLoadRef.current.controller
         })
       const applyOwnedAssistantSelection = async (selection: Parameters<typeof setSelectedAssistant>[0]) => {
+        // setSelectedAssistant persists to extension storage; temporary reads make no
+        // durable writes (H1), so they keep whatever assistant is already selected.
+        if (temporaryChat) return canCommitCurrentLoad()
         const before = ownedSelectionRevision
         if (!canCommitCurrentLoad() || getSelectedAssistantOperationRevision() !== before) return false
         await setSelectedAssistant(selection, { isCurrent: () => {

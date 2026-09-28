@@ -483,12 +483,16 @@ it.each(['scope', 'metadata missing', 'messages missing', 'late scope'] as const
   vi.useRealTimers()
 })
 
-it.each([false, true])("TASK-13389 temporary mode reads a saved server chat with zero durable writes (prior temporary owner: %s)", async prior => {
+it.each([
+  [false, null],
+  [true, null],
+  [false, "5"]
+])("TASK-13389 temporary mode reads a saved server chat with zero durable writes (prior temporary owner: %s, character: %s)", async (prior, characterId) => {
   vi.useFakeTimers()
   vi.clearAllMocks()
   mocks.store.serverChatId = "saved"
-  mocks.store.serverChatAssistantKind = null
-  mocks.store.serverChatCharacterId = null
+  mocks.store.serverChatAssistantKind = characterId ? "character" : null
+  mocks.store.serverChatCharacterId = characterId
   mocks.store.serverChatMetaLoaded = true
   mocks.store.temporaryChat = true
   mocks.renderedMessages = []
@@ -516,6 +520,8 @@ it.each([false, true])("TASK-13389 temporary mode reads a saved server chat with
   expect(mocks.reconcileServerChatMirror).not.toHaveBeenCalled()
   expect(mocks.linkServerChatMirror).not.toHaveBeenCalled()
   expect(mocks.syncChatSettingsForServerChat).not.toHaveBeenCalled()
+  // The selected assistant is persisted to extension storage, so a temporary read leaves it alone.
+  expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
   mounted.unmount()
   vi.useRealTimers()
 })
