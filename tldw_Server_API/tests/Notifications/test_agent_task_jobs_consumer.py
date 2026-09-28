@@ -418,7 +418,7 @@ async def test_queued_agent_job_is_blocked_before_registered_executor(
 
 
 @pytest.mark.asyncio
-async def test_tool_requesting_config_skips_with_actionable_reason(consumer_env) -> None:
+async def test_tool_requesting_config_terminates_approval_required(consumer_env) -> None:
     user_id = 1014
     definition = _create_definition(
         user_id, input_config={"question": "q", "tools": ["fs_read", "http_fetch"]}
@@ -427,13 +427,16 @@ async def test_tool_requesting_config_skips_with_actionable_reason(consumer_env)
 
     result = await handle_agent_task_job(_job(definition, user_id))
 
-    assert result["status"] == "skipped"
+    # ADR-184 2A: a terminal outcome with a pass-back notification, not a
+    # skip -- the read-only envelope routes here until it exists.
+    assert result["status"] == "approval_required"
     sdb = ScheduledTasksDatabase.for_user(user_id=user_id)
     run = sdb.get_scheduled_task_run_by_slot(
         definition_id=definition.id, run_slot_key=SLOT
     )
-    assert run["error"] == "tools_not_executable_in_phase1"
-    assert "approval-escalation" in (run["result_summary"] or "")
+    assert run["status"] == "approval_required"
+    assert run["error"] == "tools_require_read_only_envelope"
+    assert "read-only tool envelope" in (run["result_summary"] or "")
 
 
 @pytest.mark.asyncio
