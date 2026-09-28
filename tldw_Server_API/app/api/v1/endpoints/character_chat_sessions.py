@@ -239,6 +239,7 @@ from tldw_Server_API.app.core.LLM_Calls.sse import (
     sse_data,
     sse_done,
 )
+from tldw_Server_API.app.core.Persona.conversation_admission import require_current_persona
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (
     PersonaExemplarPromptAssembly,
     assemble_persona_exemplar_prompt,
@@ -5328,8 +5329,15 @@ async def complete_chat_legacy(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="An unexpected error occurred during completion") from e
 
 
+def _reject_session_workspace_scope(request: Request) -> None:
+    """Reject ignored Workspace scope options on global-only session consumers."""
+    if "scope_type" in request.query_params or "workspace_id" in request.query_params:
+        raise HTTPException(status_code=422, detail={"code": "session_scope_unsupported"})
+
+
 @router.post("/{chat_id}/completions", response_model=CharacterChatCompletionPrepResponse,
-             summary="Prepare messages for chat completion (rate-limited)", tags=["Chat Sessions"])
+             summary="Prepare messages for chat completion (rate-limited)", tags=["Chat Sessions"],
+             dependencies=[Depends(_reject_session_workspace_scope)])
 async def prepare_chat_completion(
     chat_id: str = Path(..., description="Chat session ID"),
     body: CharacterChatCompletionPrepRequest = None,
@@ -5347,6 +5355,9 @@ async def prepare_chat_completion(
         # Validate chat ownership
         conversation = db.get_conversation_by_id(chat_id)
         _verify_chat_ownership(conversation, current_user.id, chat_id)
+
+        if require_current_persona(db, owner_id=str(current_user.id), conversation=conversation) is not None:
+            raise HTTPException(status_code=409, detail={"code": "persona_session_generation_unsupported"})
 
         # Per-minute completion limiter (global per-user)
         rate_limiter = get_character_rate_limiter()
@@ -5741,6 +5752,7 @@ def _extract_directive_conflicts(text: str) -> list[dict[str, str]]:
     response_model_exclude_unset=True,
     summary="Preview assembled prompt with token budget breakdown",
     tags=["Chat Sessions"],
+    dependencies=[Depends(_reject_session_workspace_scope)],
 )
 async def prompt_assembly_preview(
     chat_id: str = Path(..., description="Chat session ID"),
@@ -5759,6 +5771,7 @@ async def prompt_assembly_preview(
 
         conversation = db.get_conversation_by_id(chat_id)
         _verify_chat_ownership(conversation, current_user.id, chat_id)
+        require_current_persona(db, owner_id=str(current_user.id), conversation=conversation)
 
         user_name = conversation.get("user_name", "User")
         include_ctx = bool(body.include_character_context)
@@ -6071,6 +6084,7 @@ async def prompt_assembly_preview(
         },
     },
     tags=["Chat Sessions"],
+    dependencies=[Depends(_reject_session_workspace_scope)],
 )
 async def character_chat_completion(
     chat_id: str = Path(..., description="Chat session ID"),
@@ -6105,6 +6119,9 @@ async def character_chat_completion(
         # Validate and ownership
         conversation = db.get_conversation_by_id(chat_id)
         _verify_chat_ownership(conversation, current_user.id, chat_id)
+
+        if require_current_persona(db, owner_id=str(current_user.id), conversation=conversation) is not None:
+            raise HTTPException(status_code=409, detail={"code": "persona_session_generation_unsupported"})
 
         # Prepare rate limiter
         rate_limiter = get_character_rate_limiter()

@@ -267,12 +267,16 @@ from tldw_Server_API.app.core.Notes.organization_capture import (
     replace_keywords,
     stable_note_id,
 )
+from tldw_Server_API.app.core.Persona.conversation_admission import require_current_persona
 from tldw_Server_API.app.core.Skills.context_integration import (
     add_skill_tool_to_tools_list_async,
     build_system_message_with_skills_async,
 )
 from tldw_Server_API.app.core.Utils.chunked_image_processor import get_image_processor
-from tldw_Server_API.app.core.Workspaces.assistant_defaults import project_assistant_startup
+from tldw_Server_API.app.core.Workspaces.assistant_defaults import (
+    project_assistant_startup,
+    require_workspace_for_chat_creation,
+)
 
 _ORIGINAL_PERFORM_CHAT_API_CALL = perform_chat_api_call
 from fastapi.encoders import jsonable_encoder
@@ -3476,6 +3480,20 @@ async def create_chat_completion(
     try:
         if request_data.conversation_id:
             request_data.conversation_id = validate_conversation_id(request_data.conversation_id)
+            conversation_scope = _resolve_conversation_scope(scope_type, workspace_id)
+            conversation = await asyncio.to_thread(
+                _verify_conversation_ownership,
+                chat_db, request_data.conversation_id, current_user, conversation_scope,
+            )
+            if conversation_scope.scope_type == "workspace":
+                workspace = await asyncio.to_thread(
+                    require_workspace_for_chat_creation, chat_db, conversation_scope.workspace_id,
+                )
+                if str(workspace.get("client_id") or "") != user_id:
+                    raise HTTPException(status_code=404, detail="Workspace not found")
+            await asyncio.to_thread(
+                require_current_persona, chat_db, owner_id=user_id, conversation=conversation,
+            )
         if request_data.character_id:
             request_data.character_id = validate_character_id(request_data.character_id)
         if request_data.tools:

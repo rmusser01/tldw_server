@@ -1,20 +1,24 @@
+"""Ordinary chat history and streaming retain current assistant admission."""
+
 import asyncio
 import base64
 import io
 import json
 from contextlib import asynccontextmanager, nullcontext
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, List, Optional
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from loguru import logger
 from PIL import Image
-from unittest.mock import AsyncMock, MagicMock
 
 pytestmark = pytest.mark.unit
 
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
 from tldw_Server_API.app.core.Chat.streaming_utils import StreamingResponseHandler
+from tldw_Server_API.app.core.DB_Management.chacha.conversation_store import ConversationStore
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
 class DummyRequestData:
@@ -27,9 +31,16 @@ class DummyRequestData:
 
 
 class DummyChatDB:
+    _normalize_nullable_text = staticmethod(CharactersRAGDB._normalize_nullable_text)
+    _ALLOWED_CONVERSATION_ASSISTANT_KINDS = CharactersRAGDB._ALLOWED_CONVERSATION_ASSISTANT_KINDS
+    _ALLOWED_PERSONA_MEMORY_MODES = CharactersRAGDB._ALLOWED_PERSONA_MEMORY_MODES
+
     def __init__(self, records: List[Dict[str, Any]]):
+        """Keep the real identity normalizer without opening a database for history tests."""
         self._records = records
         self.client_id = "client"
+        self.owner_user_id = "client"
+        self.conversation_store = ConversationStore(self)
 
     def get_messages_for_conversation(self, conversation_id: str, limit: int, offset: int, order: str, *, strict_images: bool = False):
         assert conversation_id == "conv"
@@ -793,8 +804,8 @@ async def test_streaming_topic_monitoring_runs_without_output_moderation(monkeyp
 
 
 def test_document_generator_accepts_string_ids(tmp_path):
-    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
     from tldw_Server_API.app.core.Chat.document_generator import DocumentGeneratorService, DocumentType
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
     db_path = tmp_path / "chacha.db"
     service_db = CharactersRAGDB(db_path=str(db_path), client_id="client")

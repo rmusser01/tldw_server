@@ -201,6 +201,7 @@ from tldw_Server_API.app.core.Moderation.review_service import (
     is_moderation_review_capture_enabled,
 )
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
+from tldw_Server_API.app.core.Persona.conversation_admission import require_current_persona
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _shared_is_test_mode,
 )
@@ -897,45 +898,34 @@ async def _resolve_assistant_context_for_chat(
     loop: Any,
     conversation_id: str | None,
 ) -> tuple[dict[str, Any] | None, int | None, dict[str, Any] | None, dict[str, Any]]:
-    """Resolve character or persona context for ordinary chat."""
+    """Recheck current Persona admission before resolving ordinary chat context."""
     existing_conversation: dict[str, Any] | None = None
     get_conversation_by_id = getattr(chat_db, "get_conversation_by_id", None)
     if conversation_id and callable(get_conversation_by_id):
         existing_conversation = await asyncio.to_thread(get_conversation_by_id, conversation_id)
+
+    if existing_conversation:
+        persona_profile = await asyncio.to_thread(
+            require_current_persona, chat_db,
+            owner_id=chat_db.owner_user_id, conversation=existing_conversation,
+        )
+        if persona_profile is not None:
+            assistant_context = _normalize_conversation_assistant_context(existing_conversation)
+            return (
+                _build_persona_chat_projection(
+                    persona_profile, fallback_persona_id=assistant_context["assistant_id"],
+                ),
+                None,
+                existing_conversation,
+                assistant_context,
+            )
 
     default_character_id = await _resolve_default_character_id(chat_db, loop)
     assistant_context = _normalize_conversation_assistant_context(
         existing_conversation,
         default_character_id=default_character_id,
     )
-    assistant_kind = assistant_context.get("assistant_kind")
     assistant_id = assistant_context.get("assistant_id")
-
-    if assistant_kind == "persona":
-        if not assistant_id:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Persona-backed conversation is missing assistant_id.",
-            )
-
-        persona_owner = str(getattr(chat_db, "client_id", "") or "").strip()
-        persona_profile = await asyncio.to_thread(partial(
-                chat_db.get_persona_profile,
-                assistant_id,
-                user_id=persona_owner,
-            ),
-        )
-        if persona_profile is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Persona profile not found for persona-backed conversation.",
-            )
-        return (
-            _build_persona_chat_projection(persona_profile, fallback_persona_id=assistant_id),
-            None,
-            existing_conversation,
-            assistant_context,
-        )
 
     character_lookup = getattr(request_data, "character_id", None)
     if character_lookup is None and existing_conversation:
