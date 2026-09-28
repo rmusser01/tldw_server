@@ -28159,7 +28159,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "SELECT * FROM workspaces "
             "WHERE deleted = 0 AND system_operation_state IS NULL ORDER BY name"
         )
-        cursor = self.execute_query(query, ())
+        cursor = self.execute_query(query, (), read_only=True)
         return [self._workspace_row_to_dict(row) for row in cursor.fetchall()]
 
     def read_workspace_clone_snapshot(self, workspace_id: str) -> WorkspaceCloneSnapshot:
@@ -28497,9 +28497,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _cascade_and_finish_soft_workspace_delete(self, workspace_id: str, expected_version: int) -> bool:
         """Run the existing per-chat cascade after durable admission closure."""
+        # read_only: settle this read's own PostgreSQL transaction, so a failed
+        # cascade does not leave the connection INTRANS and have the retry
+        # rejected by _require_outermost_workspace_delete.
         conversations = self.execute_query(
             "SELECT id, version FROM conversations WHERE workspace_id = ? AND scope_type = ? AND deleted = 0",
             (workspace_id, "workspace"),
+            read_only=True,
         ).fetchall()
         for conversation in conversations:
             conversation_id = conversation["id"] if isinstance(conversation, dict) else conversation[0]
@@ -28562,6 +28566,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         conversations = self.execute_query(
             "SELECT id FROM conversations WHERE workspace_id = ? AND scope_type = ?",
             (workspace_id, "workspace"),
+            read_only=True,
         ).fetchall()
         for conversation in conversations:
             conversation_id = conversation["id"] if isinstance(conversation, dict) else conversation[0]
