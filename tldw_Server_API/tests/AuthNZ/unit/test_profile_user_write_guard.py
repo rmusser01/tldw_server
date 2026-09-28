@@ -7,11 +7,13 @@ from statistics import mean, quantiles
 from time import perf_counter
 
 import pytest
+from sqlglot import exp
 from sqlglot import logger as sqlglot_logger
 
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     ProfileUserWriteRejected,
     _active_capability_count,
+    _bootstrap_simple_constraint_is_canonical,
     _classification_cache_clear,
     _classification_cache_info,
     _classify_sql,
@@ -28,6 +30,27 @@ from tldw_Server_API.app.core.DB_Management.Users_DB import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def test_sqlite_autoincrement_does_not_depend_on_standalone_rendering(monkeypatch) -> None:
+    # sqlglot30.20 suppresses rendering outside an INTEGER PRIMARY KEY column.
+    monkeypatch.setattr(exp.AutoIncrementColumnConstraint, "sql", lambda *_args, **_kwargs: "")
+    assert _bootstrap_simple_constraint_is_canonical(  # nosec B101
+        exp.AutoIncrementColumnConstraint(), backend="sqlite"
+    )
+
+
+@pytest.mark.parametrize("arguments", [{"this": True}, {"this": False}, {"this": None}, {"unknown": "option"}])
+def test_sqlite_autoincrement_rejects_noncanonical_arguments(arguments) -> None:
+    assert not _bootstrap_simple_constraint_is_canonical(  # nosec B101
+        exp.AutoIncrementColumnConstraint(**arguments), backend="sqlite"
+    )
+
+
+def test_postgres_does_not_accept_sqlite_autoincrement() -> None:
+    assert not _bootstrap_simple_constraint_is_canonical(  # nosec B101
+        exp.AutoIncrementColumnConstraint(), backend="postgres"
+    )
 
 
 @pytest.mark.parametrize(

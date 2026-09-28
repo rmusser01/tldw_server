@@ -65,6 +65,7 @@ vi.mock("@/db/dexie/history-selection", () => ({ensureLocalProfileId: mocks.ensu
 vi.mock("@/db/dexie/fork-operations", () => ({findForkCandidate: async () => null, loadForkOperations: async () => []}))
 vi.mock("@/services/chat-history-selection", () => ({captureHistorySnapshot: mocks.captureHistorySnapshot.mockImplementation(async (owner: any, view: any) => ({status: "legacy_review_required", code: "legacy_review_required", view, snapshot: {version: 1, owner_key: owner.owner_key, conversation_id: owner.conversation_id, nodes: [], source_digest: "source", storage_context_digest: "storage", fences: {}, interpretation_status: {kind: "legacy_review_required"}}}))}))
 import {useHistorySelection} from "@/hooks/chat/useHistorySelection"
+import {usePlaygroundSessionStore} from "@/store/playground-session"
 
 vi.mock("@/hooks/chat/useChatBaseState", () => ({
   useChatBaseState: () => ({
@@ -479,6 +480,81 @@ it.each(['scope', 'metadata missing', 'messages missing', 'late scope'] as const
     expect(mocks.store.setServerChatLoadState).toHaveBeenCalledWith('failed')
   }
   expect(mocks.store.setServerChatId).not.toHaveBeenCalledWith(null)
+  mounted.unmount()
+  vi.useRealTimers()
+})
+
+
+it("does not automatically reacquire an invalidated native owner or hydrate its settings", async () => {
+  vi.useFakeTimers()
+  vi.clearAllMocks()
+  mocks.store.serverChatId = "child"
+  mocks.store.serverChatMetaLoaded = true
+  const loadConversation = vi.fn(async () => true)
+  mocks.selection = {
+    fence: () => () => true, settingsMode: () => "pending",
+    canAutomaticallyLoad: () => false, loadConversation,
+    getCurrent: () => ({ error: "request_config_scope_changed", owner: {
+      kind: "native", conversation_id: "child", validate_lease: () => false,
+    } }),
+  }
+  renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((key: string) => key) as any }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+  expect(loadConversation).not.toHaveBeenCalled()
+  expect(mocks.syncChatSettingsForServerChat).not.toHaveBeenCalled()
+  expect(mocks.listChatMessages).not.toHaveBeenCalled()
+  expect(mocks.setMessages).not.toHaveBeenCalled()
+  vi.useRealTimers()
+})
+
+it.each(["child", "another-chat"])("reopens deliberately selected %s once after owner invalidation", async chatId => {
+  vi.useFakeTimers()
+  vi.clearAllMocks()
+  usePlaygroundSessionStore.getState().clearSession()
+  mocks.store.serverChatId = chatId
+  mocks.store.serverChatMetaLoaded = true
+  mocks.renderedMessages = []
+  mocks.listChatMessages.mockResolvedValue([])
+  let valid = false
+  const loadConversation = vi.fn(async () => { valid = true; return true })
+  mocks.selection = {
+    fence: () => () => valid,
+    settingsMode: () => valid ? "normal" : "pending",
+    canAutomaticallyLoad: () => valid, loadConversation,
+    getCurrent: () => ({ capture: valid ? { status: "legacy_review_required" } : null, owner: { kind: "native", conversation_id: chatId, validate_lease: () => valid } }),
+  }
+  const notification = { error: vi.fn() }
+  const ensureServerChatHistoryId = vi.fn()
+  const t = ((key: string) => key) as any
+  const mounted = renderHook(() => useServerChatLoader({ ensureServerChatHistoryId, notification, t }))
+  await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+  expect(loadConversation).not.toHaveBeenCalled()
+  await act(async () => {
+    usePlaygroundSessionStore.getState().requestServerChatSelection(chatId)
+  })
+  await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+  expect(loadConversation).toHaveBeenCalledExactlyOnceWith({ serverChatId: chatId, scope: undefined, temporary: mocks.store.temporaryChat, isCurrent: expect.any(Function) })
+  expect(mocks.listChatMessages).toHaveBeenCalled()
+  valid = false
+  mounted.rerender()
+  await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+  expect(loadConversation).toHaveBeenCalledTimes(1)
+  mounted.unmount()
+  usePlaygroundSessionStore.getState().clearSession()
+  vi.useRealTimers()
+})
+
+it("discards deliberate reopen intent when account state clears before the load starts", async () => {
+  vi.useFakeTimers()
+  vi.clearAllMocks()
+  mocks.store.serverChatId = "child"
+  const loadConversation = vi.fn(async () => true)
+  mocks.selection = { fence: () => () => false, canAutomaticallyLoad: () => false, loadConversation }
+  const mounted = renderHook(() => useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((key: string) => key) as any }))
+  await act(async () => { usePlaygroundSessionStore.getState().requestServerChatSelection("child") })
+  await act(async () => { usePlaygroundSessionStore.getState().clearSession() })
+  await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+  expect(loadConversation).not.toHaveBeenCalled()
   mounted.unmount()
   vi.useRealTimers()
 })

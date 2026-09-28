@@ -871,3 +871,22 @@ def test_composition_message_version_is_internal_to_validated_snapshot(history_d
     assert {key: value for key, value in internal[0].items() if key != "_message_version"} == public[0]
     assert "_message_version" not in public[0]
     assert snapshot_to_wire(validated) == snapshot_to_wire(captured)
+
+
+@pytest.mark.parametrize("field", ["tool_calls_json", "extra_json"])
+def test_selected_history_rejects_corrupt_metadata(history_db, field):
+    db, cid = history_db
+    mid = add(db, cid)
+    db.set_message_metadata_extra(mid, {"valid": True})
+    # The identifiers come from this test's fixed parametrization, never API input.
+    with db.transaction() as conn:
+        sql = {
+            "tool_calls_json": "UPDATE message_metadata SET tool_calls_json = ? WHERE message_id = ?",
+            "extra_json": "UPDATE message_metadata SET extra_json = ? WHERE message_id = ?",
+        }[field]
+        conn.execute(sql, ("{broken", mid))
+    snap = snapshot(db, cid)
+    with pytest.raises(HistorySelectionError, match="invalid_metadata"):
+        db.get_conversation_history_selected_content(
+            cid, [mid], snapshot=snap, owner_client_id="alice", owner_key=OWNER_KEY
+        )

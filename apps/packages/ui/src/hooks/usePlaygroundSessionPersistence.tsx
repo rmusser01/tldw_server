@@ -528,6 +528,8 @@ export function usePlaygroundSessionPersistence() {
 
   // Restore session from persisted state
   const restoreSession = useCallback(async (): Promise<PlaygroundSessionRestoreOutcome> => {
+    // Account changes require an explicit reopen, not a fresh automatic lease.
+    if (selectionRef.current?.canAutomaticallyLoad?.() === false) return "cancelled"
     selectionRef.current?.beginLoad()
     let selectionCurrent = selectionRef.current?.fence() || (() => true)
     if (!sessionScopeReady) return "cancelled"

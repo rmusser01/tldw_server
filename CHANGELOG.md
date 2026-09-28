@@ -17,9 +17,63 @@ and this project adheres to Some kind of Versioning
 ### Removed
 
 
+## [0.1.45] - 2026-09-27
+
+> Patch release. Rolls up the dev changes merged after 0.1.44 (#3029, #3030, #3032).
+> See the [change inventory](Docs/Development/releases/0.1.45-change-inventory.md) and
+> [release plan](Docs/superpowers/plans/2026-09-27-release-0.1.45-plan.md). The protected
+> frontend source is unchanged since 0.1.44.
+
+### Fixed
+
+- **Trusted license gate no longer posts a false policy failure for runs that never produced a verdict.** A run cancelled before or during evaluation, by hand or by the workflow's own cancel-in-progress when a newer run starts, posted `failure` on `frontend-license-policy/trusted/*` and blocked the PR. The publisher now runs only when evaluation reached a verdict, so those runs leave `pending`, which is still fail-closed. The gate runs on `pull_request_target`, which executes the default branch's workflow file, so this release is what puts the fix into effect (#3029, #3032; TASK-13361).
+- **SQLite users bootstrap under sqlglot 30.20.0.** This is dev's equivalent of the fix 0.1.44 shipped, reconciled on merge to keep 0.1.44's backend-scoped check. The canonical SQLite users DDL is now one module constant shared by startup and its tests, and a positive test pins it (#3030).
+
+### Changed
+
+- Backlog ledger: six core-review tasks closed after verification against the code, and TASK-13386 filed (#3029).
+
+## [0.1.44] - 2026-09-27
+
+> Draft release candidate. Includes all 272 commits and 37 merged PRs
+> after `v0.1.43` through `35d6dd90d4c3b703a753efdbd926e30af4f9eac5` (PR #3025),
+> plus the prior closure records. See the [complete change inventory](Docs/Development/releases/0.1.44-change-inventory.md)
+> and [release plan](Docs/superpowers/plans/2026-09-27-release-0.1.44-plan.md).
+
+### Added
+
+- **Chat Macros v1.1** — Guided and YAML authoring, import/export, cloning, validation and named output-profile editors; built-ins remain immutable (#2951).
+- **Workspace Persona provenance** — Persist local startup selection, opt-out and origin together, redact inaccessible origins and prevent forged import provenance (#2963).
+- **Chat history and fork foundations** — Owner-validated history selection and independent local-copy identities/assets in the WebUI and full-page extension (#2968). Native fork contracts, retained-context projection and operation storage are groundwork; no public native-fork flow is exposed yet (#3002).
+- **VN generation recipes** — Snapshot generation settings at acceptance and replay failed-slot recipes on Retry; Regenerate uses current settings (#3015).
+
+### Changed
+
+- **Authentication and tenant isolation** — Enforce cross-user ownership across endpoints, storage, workflow and worker access; PostgreSQL core-chat RLS, owner-isolation tests and auth/scope/RLS ratchets. Audio diagnostics and warm-up require admin access; provider-initializing TTS health/catalog requires authentication (#2985, #2986, #2991, #2993, #2995, #2998, #2999, #3005, #2968).
+- **CI and licensing** — Separate event concurrency so required gates report, run licensing admission before dependent gates, reduce audit clone depth, add Kanban/ACP/MCP coverage and timezone guards, and ship the canonical MCP GPL text (#2981, #2987–#2990, #2997, #3004, #3007, #3010, #3013).
+- **Release records** — Carry completed 0.1.43 post-publication review records and prepare consistent 0.1.44 metadata, source manifest and proposed legal dates. Update architecture/workflow inventories and record reproducible missing-agent macOS VM startup recovery (#3014, #3017).
+
+### Fixed
+
+- **Release review** — Verify named PostgreSQL chat-isolation policies at startup, enforce isolation ratchets in required CI, reject stale/timed-out merge checks, return bounded errors for corrupt selected history metadata, retain invalidated history leases during automatic restore, and localize macro settings controls. See [review follow-up](Docs/Development/releases/0.1.44-review-follow-up.md).
+- **Post-release review repairs** — Clear denied chat selection safely, improve sign-in recovery copy, normalize image detail, restore readiness compatibility, include production configuration in packages, and isolate test fixtures and diagnostics (#2978).
+- **Core reliability** — Correct share-link signing/error handling, PostgreSQL Notes slides candidates, duplicate RAG metric counting, MCP tab/carriage-return preservation, UTC timestamp interpretation, MLX cache ownership and other independently reproduced core defects (#2980).
+- **Cancellation, OCR and Sync** — Propagate cancellation, preserve OCR input until consumed, keep withheld Sync envelopes reachable, and expire abandoned blob uploads so quota is released (#2982, #3006).
+- **MCP and integration** — Remove ineffective SQL denylist filtering while retaining parameterized-query boundaries; fix MCP test failures and media auth import boundaries; remove production branching on pytest environment state (#2996, #2997, #3012, #2983).
+
+- **Audio resampling and MCP tests** — Actually resample buffered audio through the existing fallback when librosa is unavailable; correct MCP assertions and parser requirements (#3024, #3025).
+- **SQLite bootstrap compatibility** — Validate the canonical AUTOINCREMENT constraint structurally so sqlglot 30.20.0 can initialize the users database; retain the guard’s schema and write boundaries.
+
+### Upgrade requirements and limits
+
+- Chat NetworkError status/retry translation remains a separately tracked known defect (#3026, TASK-13381).
+- Back up persistent data and **drain all API, worker and direct database writers** before registered per-user schema migrations. Restart only compatible binaries. Mixed-version rolling upgrades and data-preserving rollback to old binaries are unsupported (#2963, #2968, #3002).
+- PostgreSQL application credentials must use a **NOSUPERUSER, NOBYPASSRLS role that does not own content tables**; migrations still run as the owner. Existing deployments using a privileged application role will fail startup until corrected. Existing pgvector tables require owner-prefixed migration to be listed; previously issued ownerless Chatbook signed URLs stop verifying (#2985).
+- Native fork storage/projection is preparatory; later fork recovery/synchronization remains separate. Broader UAT and certification are separately tracked; targeted regressions do not establish a fresh full-matrix pass. See [#2963](https://github.com/rmusser01/tldw_server/pull/2963), [#2985](https://github.com/rmusser01/tldw_server/pull/2985), and [#3002](https://github.com/rmusser01/tldw_server/pull/3002) for migration/compatibility details.
+
 ## [0.1.43] - 2026-09-20
 
-> Draft release candidate. Includes all 616 development commits after `v0.1.42`
+> Published release. Includes all 616 development commits after `v0.1.42`
 > through `d72b1d2850ea947b6d12cac19f6b95867b68a580` (PR #2970), plus release
 > reconciliation. See the [complete change inventory](Docs/Development/releases/0.1.43-change-inventory.md)
 > and [release plan](Docs/superpowers/plans/2026-09-20-release-0.1.43-plan.md).

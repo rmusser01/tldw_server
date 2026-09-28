@@ -821,10 +821,10 @@ export function ServerChatList({
         return
       }
       if (isTrashView) return
-      if (chat.id !== serverChatId) selectServerChat(chat)
+      selectServerChat(chat)
       onConversationSelected?.()
     },
-    [isTrashView, onConversationSelected, selectionMode, selectServerChat, serverChatId, toggleChatSelected]
+    [isTrashView, onConversationSelected, selectionMode, selectServerChat, toggleChatSelected]
   )
 
   const selectionPropsForChat = React.useCallback(

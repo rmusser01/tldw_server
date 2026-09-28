@@ -3,6 +3,7 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSelectServerChat } from "../useSelectServerChat";
+import { usePlaygroundSessionStore } from "@/store/playground-session";
 
 const navigateMock = vi.hoisted(() => vi.fn());
 const setSelectedAssistantMock = vi.hoisted(() => vi.fn(async () => undefined));
@@ -115,6 +116,7 @@ describe("useSelectServerChat context reset", () => {
         external_ref: null,
       } as any);
     });
+    expect(usePlaygroundSessionStore.getState().serverChatSelectionIntent).toEqual({ chatId: "chat-2" });
 
     expect(optionState.value.setWebSearch).toHaveBeenCalledWith(false);
     expect(optionState.value.setSelectedSystemPrompt).toHaveBeenCalledWith("");

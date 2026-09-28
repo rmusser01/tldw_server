@@ -16,7 +16,9 @@ const mocks = vi.hoisted(() => ({
   recent: vi.fn(),
   setPrompt: vi.fn(),
   setAssistant: vi.fn(),
-  currentScope: "current"
+  currentScope: "current",
+  assistantLoading: false,
+  configChanged: null as (() => void) | null
 }))
 const bookmarkKey = (scope: any, owner: any) =>
   JSON.stringify([
@@ -62,7 +64,7 @@ vi.mock("@/services/chat-history-selection", () => ({
 }))
 vi.mock("@/services/service-prompts", () => ({
   resolveServicePromptScope: async () => ({ scopeKey: "current" }),
-  subscribeToServicePromptConfigChanges: () => () => {}
+  subscribeToServicePromptConfigChanges: (listener: () => void) => { mocks.configChanged = listener; return () => {} }
 }))
 vi.mock("@/db/dexie/server-chat-mirror", () => ({
   serverChatMirrorOwnerKey: () => "verified-current",
@@ -81,7 +83,7 @@ vi.mock("@/hooks/useConnectionState", () => ({
   })
 }))
 vi.mock("@/hooks/useSelectedAssistant", () => ({
-  useSelectedAssistant: () => [null, mocks.setAssistant]
+  useSelectedAssistant: () => [null, mocks.setAssistant, { isLoading: mocks.assistantLoading }]
 }))
 vi.mock("@/store/model", () => ({
   useStoreChatModelSettings: () => ({ setSystemPrompt: mocks.setPrompt })
@@ -102,6 +104,8 @@ import { usePlaygroundSessionStore } from "@/store/playground-session"
 
 let controller: HistorySelectionController
 let outcome: string | undefined
+let restoreAgain: () => Promise<string>
+let sessionReady: boolean
 const reference = {
   profile_id: "profile",
   client_session_id: "saved-tab",
@@ -113,6 +117,8 @@ function ColdSession() {
   const selection = useHistorySelectionContext()!
   React.useLayoutEffect(() => { controller = selection }, [selection])
   const session = usePlaygroundSessionPersistence()
+  restoreAgain = session.restoreSession
+  sessionReady = session.sessionScopeReady
   const started = React.useRef(false)
   const { historyId, serverChatId, messages } = useStoreMessageOption()
   React.useEffect(() => {
@@ -175,6 +181,8 @@ function seedBookmark(ref = reference) {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.assistantLoading = false
+  mocks.configChanged = null
   localStorage.clear()
   sessionStorage.clear()
   mocks.bookmarks.clear()
@@ -397,4 +405,36 @@ it("cancels held selected-local session restore after live owner navigation", as
   expect(controller.getCurrent().owner).toMatchObject({ kind: "local", conversation_id: "local-B" })
   expect(useStoreMessageOption.getState()).toMatchObject({ historyId: "local-B", compareMode: true, compareSelectedModels: ["B model"] })
   expect(mocks.setPrompt).not.toHaveBeenCalledWith("stale prompt")
+})
+
+
+it.each(["success", "error"])("automatic restore after readiness cycling retains the invalidated lease and fences held %s", async (late) => {
+  const native = { ...reference, owner_key: "native-current", owner_kind: "native", conversation_id: "native-A" }
+  seedBookmark(native)
+  usePlaygroundSessionStore.getState().saveSession({ serverChatId: "native-A", historySelectionReference: native, scopeKey: "current" })
+  const captureNormally = mocks.capture.getMockImplementation()!
+  let finish!: () => void
+  mocks.capture.mockImplementationOnce((owner, view) => new Promise((resolve, reject) => {
+    finish = () => late === "success" ? resolve(captureNormally(owner, view)) : reject(new Error("late old-owner failure"))
+  }))
+  const mounted = mount()
+  await waitFor(() => expect(mocks.capture).toHaveBeenCalledTimes(1))
+  act(() => { mocks.currentScope = "other-account"; mocks.configChanged!() })
+  expect(controller.error).toBe("request_config_scope_changed")
+  mocks.assistantLoading = true
+  mounted.rerender(<HistorySelectionProvider storageKey="cold-h1"><ColdSession /></HistorySelectionProvider>)
+  await waitFor(() => expect(sessionReady).toBe(false))
+  mocks.assistantLoading = false
+  mounted.rerender(<HistorySelectionProvider storageKey="cold-h1"><ColdSession /></HistorySelectionProvider>)
+  await waitFor(() => expect(sessionReady).toBe(true))
+  let restored: string | undefined
+  await act(async () => { restored = await restoreAgain() })
+  expect(restored).toBe("cancelled")
+  expect(mocks.capture).toHaveBeenCalledTimes(1)
+  await act(async () => { finish(); await new Promise(resolve => setTimeout(resolve, 0)) })
+  expect(controller.error).toBe("request_config_scope_changed")
+  expect(controller.getCurrent().capture).toBeNull()
+  await act(async () => { await controller.loadConversation({ serverChatId: "native-A" }) })
+  expect(controller.getCurrent().capture).not.toBeNull()
+  expect(controller.error).toBeNull()
 })
