@@ -255,9 +255,16 @@ def test_character_writes_remain_owned_by_the_callers_transaction(owners):
     assert db.list_character_exemplars(character) == []
 
 
-def test_sqlite_shared_file_preserves_sync_client_semantics(tmp_path):
-    """A SQLite client_id identifies the last syncing device, not a separate tenant."""
+@pytest.mark.parametrize("existing_file", [False, True])
+def test_sqlite_shared_file_preserves_sync_client_semantics(tmp_path, existing_file):
+    """A SQLite client_id identifies the last syncing device, not a separate tenant.
+
+    Opening ``second`` issues DDL on the shared file; ``first``'s next write must
+    still see its tables (SQLite otherwise fails it with "no such table").
+    """
     path = tmp_path / "single-owner.db"
+    if existing_file:
+        CharactersRAGDB(path, client_id="device-seed").close_connection()
     first = CharactersRAGDB(path, client_id="device-first")
     second = CharactersRAGDB(path, client_id="device-second")
     try:

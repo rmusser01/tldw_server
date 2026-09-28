@@ -46003,6 +46003,12 @@ class TransactionContextManager:
         self.conn = self.db.get_connection()
         if not self.conn.in_transaction:
             begin_immediate_if_needed(self.conn)
+            # Load any schema another connection changed (every CharactersRAGDB open
+            # issues DDL) before the caller's first write. Otherwise SQLite re-prepares
+            # an INSERT on a table with an FTS5 trigger plus another AFTER INSERT trigger
+            # mid-statement and fails with "no such table". The write lock is held now,
+            # so the schema cannot change again inside this transaction.
+            self.conn.execute("SELECT 1 FROM sqlite_master LIMIT 1")
             self.is_outermost_transaction = True
             logger.debug(f"Transaction started (outermost) on thread {threading.get_ident()}.")
         else:
