@@ -53,8 +53,10 @@ the distinction between transactional fixtures and native IndexedDB acceptance.
 
 Previous source checkpoint `00fed1c6af` is published on dev `3d102e0d31`.
 The original publication had zero missing dev commits. Current verified local
-VAD and Character repairs are committed965ea81fc0/f435078aac; the new fetch
-finds three AuthNZ diagnostic commits through devca3b7f834a to rebase next.
+VAD and Character repairs were committed965ea81fc0/f435078aac before the
+clean100-commit replay onto devca3b7f834a. Rebased checkpointdbbf5ad1fde7
+has0missingdev, exact6upstream path changes and all13frozen qualification hashes
+retained; upstream AuthNZ cause-chain/privacy controls31pass with normal exit.
 The PR body will be refreshed with the settled scope and excluded artifacts.
 Fresh hosted CI/Qodo and the requester-owned Change summary remain required;
 the prior 14 review threads are resolved. Fresh Qodo on head00fed1c6af reports
@@ -158,10 +160,41 @@ TASK18.38/.40 Character mocks/settings are frozen with62passing controls and
 zero failures/errors/skips; seeded/plain settings and later deletion remain real,
 all production files unchanged. Initial hosted failure was settings line134,
 not deletion. Reviews, compile/lint and security comparison clear.
-Fresh fetch finds three additional dev commits through ca3b7f834abc10ba0889caeae868afe9d290009b;
-account for all current changes, rebase, then qualify upstream AuthNZ diagnostic
-overlap before publishing. Newly reproduced LLM/catalog/MCP causes are read-only
-until separate tasks are registered; no full UAT.
+Latestdevca3b7f834abc10ba0889caeae868afe9d290009b is fully included after
+clean100-commit replay, checkpointdbbf5ad1fde7. Exact6upstream diagnostic paths
+changed, all13frozen VAD/Character qualification hashes retained;31upstream
+AuthNZ privacy/cause controls pass,0fail/error/skip and normal exit.
+Final native repairs are reviewed and verified: UAT497/TASK18.41 initializes
+only the shared safe HTTP success URL before optional metadata; UAT499/TASK18.46
+uses native INFO/WARNING level names in both existing branches. All callers and
+privacy/egress/retry boundaries remain. TASK18.48 scopes actual stdlib HTTPX INFO
+capture in the existing concurrent test and restores its handler/level. Final
+HTTP307 and provider41 pass with0fail/error/skip and normal exits; all130 original
+assertions and concurrency barriers/deadlines/instrumentation checks remain.
+Compile passes; Ruff retains7 baseline findings, Bandit adds34 test assertions
+only with0production findings. Frozen hashes and root/independent review clear.
+Earlier4/9 causal reds, failed logging observation and297/1 gate are retained.
+Tasks18.41/.46/.48 Done, committed13f50abb00; these qualifications overlap.
+
+Fixture43 canonical seeds82pass and44 precise detached error65pass, all normal
+exits/zero skips, all original14/170asserts retained plus2privacy controls;
+production unchanged. Reviewed, Done and committed013f19b825. Fixture42 adds
+three traced Notes/webhook inventory names and47 one automation scheduler
+mapping. Final21-module lifecycle/ownership gate370passes0fail/error/skip and
+normalexit; all72originalasserts AST-identical, all23productionpaths unchanged,
+all44frozenhashes match. Compile/Ruff pass, Bandit unchanged72testasserts. Root
+review clear;18.42/.47 Done, committed3c1a588f22. Earlier369/1 and original failures remain recorded.
+
+UAT498/TASK18.45 spaces only two shared PostgreSQL INSERT parameter lists after
+managed guard parser rejection reproduced before I/O. Caller auth/scopes,
+bound values, conflicts, SQL guards and transactions remain. Two focused guard
+reds become4causal passes including2actualPostgreSQL; final9modules198pass with
+0fail/error/skip and normalexit. Original15unitasserts retained, compile/Ruff
+pass, Bandit adds2testasserts with0source/errors. Root/independent review clear;
+Done and committedc5bd693404. Tracker499/471/28 describes bounded engineering
+scopes; hosted Windows, current-head CI/Qodo, native diagnostic confirmation
+and removal, and requester-owned final Change summary remain merge gates.
+Full UAT remains paused.
 
 Fixture-only follow-ups retain original guards/oracles: protected health/MFA/
 resend295 passes; canonical Privilege seeds42 plus seven overlapping controls;
@@ -171,7 +204,7 @@ Current exact inventory refresh363 passes with independently attributed source
 deltas; new pure coercion bootstrap dependency remains frozen alongside all
 unchanged discovery/network mutation controls;348 full frozen HTTP/coercion
 dependency checks also pass without skips, independently reviewed and committed
-f30e8257e7. Dev3d102 is included; latestca3b7f834a rebase remains next.
+f30e8257e7. Latestdevca3b7f834a is included,0missing at the verified replay.
 Full UAT remains paused while
 these repairs, remaining CI causes, publication and current-head merge gates
 finish. Captures, runtime databases and private diagnostic artifacts stay ignored.
