@@ -422,6 +422,9 @@ class UserDatabase:
         Returns:
             bool: True if update successful
         """
+        # No such user: the versioned write gateway would raise ProfileVersionInvalid.
+        if type(user_id) is not int or user_id <= 0:
+            return False
         with self.backend.transaction() as conn:
             # Build update query
             allowed_fields = ['email', 'is_active', 'is_verified', 'metadata']
