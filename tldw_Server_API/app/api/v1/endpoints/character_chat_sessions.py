@@ -7057,7 +7057,7 @@ async def character_chat_completion(
                             type(exc).__name__,
                         )
                         payload = provider_stream_error_payload(exc)
-                        await stream.send_raw_sse_line(f"data: {json.dumps(payload)}")
+                        await stream.send_json(payload)
                         await stream.done()
                     except Exception as exc:  # noqa: BLE001 - lazy adapter failures are terminal frames
                         stream_success_state["successful"] = False
@@ -8690,7 +8690,7 @@ async def persist_streamed_assistant_message(
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail=_build_persist_validation_degraded_detail(existing_id),
-                )
+                ) from None
             return CharacterChatStreamPersistResponse(
                 chat_id=chat_id,
                 assistant_message_id=existing_id,
