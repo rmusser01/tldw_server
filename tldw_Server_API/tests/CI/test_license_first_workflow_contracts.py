@@ -528,13 +528,25 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
             else:
                 assert "admission" not in needs, (name, job_name)
                 assert "await_license" not in needs, (name, job_name)
+                # admission is skipped outside workflow_run, and an implicit success()
+                # skips a job with any skipped ancestor. Downstream jobs must opt out with
+                # always() and check each direct dependency themselves, or they silently
+                # never run on pull_request/push (the full-suite shards did exactly that).
+                dependencies_succeeded = "always() && !cancelled() && " + " && ".join(
+                    f"needs.{dependency}.result == 'success'" for dependency in needs
+                )
                 if name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
-                    assert _normalized(job.get("if")) == _normalized(backend_changed), (name, job_name)
+                    assert _normalized(job.get("if")) == _normalized(
+                        f"{dependencies_succeeded} && ({backend_changed})"
+                    ), (name, job_name)
                 elif (name, job_name) == ("ci.yml", "full-suite-os-313-release-shards"):
                     assert _normalized(job.get("if")) == _normalized(
+                        f"{dependencies_succeeded} && "
                         "github.event_name != 'pull_request' && "
                         "github.event_name != 'workflow_run'"
                     )
+                elif (name, job_name) == ("jobs-suite.yml", "jobs-postgres"):
+                    assert _normalized(job.get("if")) == _normalized(dependencies_succeeded)
                 elif (name, job_name) in {
                     ("coverage-required.yml", "coverage-required"),
                     ("e2e-required.yml", "e2e-required"),
@@ -1111,3 +1123,15 @@ def test_helper_is_the_only_checked_out_program_and_owns_all_outputs() -> None:
     assert script.count('"${GITHUB_OUTPUT}"') == 1
     assert ">>" not in script
     assert _unquoted_shell_expansions(script) == []
+
+
+def test_full_suite_summaries_fail_closed_on_skipped_shards() -> None:
+    # A summary only runs when its shards were supposed to run, so a skipped shard job
+    # means the suite never executed. Accepting "skipped" hid exactly that for weeks.
+    jobs = _load_ordinary_workflows()["ci.yml"][0]["jobs"]
+    summaries = [name for name in BACKEND_CHANGED_JOBS if name.endswith("-summary")]
+    assert len(summaries) == 4
+    for name in summaries:
+        script = "\n".join(step.get("run", "") for step in jobs[name]["steps"])
+        assert 'if [ "$r" != "success" ]; then' in script, name
+        assert '"skipped"' not in script, name
