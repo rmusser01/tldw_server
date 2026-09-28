@@ -11,6 +11,7 @@ import zipfile
 from email.message import EmailMessage
 from io import BytesIO
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import BackgroundTasks, FastAPI
@@ -47,6 +48,7 @@ def offline_client(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.Claims_Extraction import claims_utils
     from tldw_Server_API.app.core.Embeddings.jobs_adapter import EmbeddingsJobsAdapter
     from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib
+    from tldw_Server_API.app.services import storage_quota_service
 
     calls = []
 
@@ -91,6 +93,9 @@ def offline_client(tmp_path, monkeypatch):
     monkeypatch.setitem(persistence.settings, "EMAIL_NATIVE_PERSIST_ENABLED", True)
     monkeypatch.setitem(email_endpoint.settings, "EMAIL_OPERATOR_SEARCH_ENABLED", True)
     monkeypatch.setitem(email_endpoint.settings, "EMAIL_GMAIL_CONNECTOR_ENABLED", False)
+    # Quota remains outside this native parser/persistence harness.
+    quota_service = SimpleNamespace(check_quota=AsyncMock(return_value=(True, {})))
+    monkeypatch.setattr(storage_quota_service, "get_storage_quota_service", lambda: quota_service)
     db = MediaDatabase(db_path=str(tmp_path / "media.db"), client_id="offline-email-test")
     app = FastAPI()
     # Register production functions without route-level auth/billing dependencies.
