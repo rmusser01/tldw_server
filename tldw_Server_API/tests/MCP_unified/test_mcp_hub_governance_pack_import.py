@@ -1969,6 +1969,7 @@ async def test_execute_upgrade_rolls_back_when_staging_insert_fails(
     tmp_path,
     monkeypatch,
 ) -> None:
+    from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
     from tldw_Server_API.app.core.MCP_unified.governance_packs import (
         load_governance_pack_fixture,
     )
@@ -2004,9 +2005,9 @@ async def test_execute_upgrade_rolls_back_when_staging_insert_fails(
 
     repo.create_policy_assignment = _boom_create_policy_assignment  # type: ignore[method-assign]
     try:
-        # Unexpected in-transaction failures surface sanitized (d7bab343d3);
-        # what matters here is the rollback asserted below.
-        with pytest.raises(TransactionError):
+        with pytest.raises(
+            TransactionError, match="^Transaction failed during: SQLite transaction$"
+        ) as raised:
             await service.execute_upgrade_pack(
                 source_governance_pack_id=imported.governance_pack_id,
                 pack=target_pack,
@@ -2016,6 +2017,8 @@ async def test_execute_upgrade_rolls_back_when_staging_insert_fails(
                 planner_inputs_fingerprint=plan.planner_inputs_fingerprint,
                 adapter_state_fingerprint=plan.adapter_state_fingerprint,
             )
+        assert raised.value.__cause__ is None
+        assert raised.value.__suppress_context__ is True
     finally:
         repo.create_policy_assignment = original_create_policy_assignment  # type: ignore[method-assign]
 
