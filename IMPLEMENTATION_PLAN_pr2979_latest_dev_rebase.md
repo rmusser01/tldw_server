@@ -51,8 +51,127 @@ the distinction between transactional fixtures and native IndexedDB acceptance.
 **Tests:** Hosted checks and exact PR head/base; generated-artifact exclusion.
 **Status:** In Progress
 
-Source checkpoint `0bc05d3f35` is published, and GitHub confirms dev `3d102e0d31`
-as its base. Final pre-push fetch showed zero missing dev commits. The PR body
-records all settled repairs, bounded evidence and excluded generated artifacts.
+Previous source checkpoint `00fed1c6af` is published on dev `3d102e0d31`.
+The original publication had zero missing dev commits. Current verified local
+VAD and Character repairs are committed965ea81fc0/f435078aac; the new fetch
+finds three AuthNZ diagnostic commits through devca3b7f834a to rebase next.
+The PR body will be refreshed with the settled scope and excluded artifacts.
 Fresh hosted CI/Qodo and the requester-owned Change summary remain required;
-the prior 14 review threads are resolved, not a new-head review receipt.
+the prior 14 review threads are resolved. Fresh Qodo on head00fed1c6af reports
+zero bugs and retains only the two previously source-dispositioned recommendations.
+Fresh Playground accessibility CI reproduces four H1 fixture ownership failures;
+TASK13260.278.18.4 / UAT476 tracks the bounded test-only repair. Additional
+frontend shards and AuthNZ route binding require causal attribution under UAT419.
+
+Bounded new-head repairs: UAT476 all three Playground quality scripts pass and
+UAT477 exact route/header/owner controls pass; both source units are committed.
+UAT478 fixes obsolete Sidepanel/mirror fixtures with228 passes, preserving real
+ownership. UAT479 aligns Sync fixture clocks and restores a shadowed test while
+retaining production expiry:343 full-module passes, zero skips; final narrow
+constraint oracle has31 overlapping passes, clean Ruff and unchanged Bandit.
+UAT480 supplies and persists the captured account stamp for new local Chat
+creation without relaxing public import sanitation;134 production-boundary
+fixture controls and2 first-attempt native browser journeys pass. UAT481 preserves native
+Character provider recovery and updates exact canonical acceptance. UAT482
+repairs the rejected Settings-return loader callback loop with stable existing
+H1 methods/getter and setter wrappers, keeping account and selection fences;
+156 source checks pass in both implementation and independent review. Normal
+whole WebUI/extension types pass for these integrated repairs. UAT483 reuses the
+existing JSON SSE emitter for Character provider failures; UAT484 preserves all
+privacy assertions while updating two exact normalized logger tokens. Combined
+streaming21 pass, zero skips, independent review clear, Ruff clean and unchanged
+test-only Bandit findings. Auth tenant/profile fixtures use current gateways;
+six modules138 pass with all original assertions retained. Protected health/MFA/
+resend and remaining database/runtime failures are separately tracked and traced.
+Historical Character/PG fixture follow-up TASK18.6 proves exact old migrations
+before current APIs, keeps specific RLS denials and full old-row/new-default
+checks. Final five-module84 pass, including28 actual PostgreSQL, zero skips;
+independent review clear, Ruff clean, Bandit348 assertions only and no errors.
+Fresh CI attribution continues before publication/merge/UAT.
+
+Further current-base units: UAT481122 native controls and both whole typechecks
+pass; all three bounded Character cases are verified with two earlier Phase7
+harness failures retained. Four cockpit sends pass first attempts with native
+backend/provider completion calls. Native keyboard failure is traced to palette
+host replacement on hideHeader transitions (UAT490/TASK18.25), with loader-focus
+observation still requiring causal attribution. UAT485 uses existing borrowed
+schema checkout binding;145 normal controls pass. UAT486 releases only owned
+nonmemory SQLite bootstrap checkouts;74 unique owner/lifecycle controls pass.
+UAT487's two native URL callers reuse the existing initialized validator;69
+security/quota/egress controls pass, no skips. Read-only UAT488 has9 direct
+passes; its earlier broader127 accounting is126pass/one independent deadline
+failure, retaining the original interrupted run and disjoint38pass follow-up.
+UAT491 reuses the existing30s acquisition budget while retaining5s DDL and30s
+statement limits. Final integrated133/133 pass, zero failures/errors/skips,
+including all72 PostgreSQL bootstrap cases and finite held-lock invalidation/
+reuse controls. Root reviewed and committed485/486/488/491 as40ac75b9ed.
+UAT489 factory retirement passes47 controls with central ownership, runtime
+rejection and committed-data reuse intact; independently reviewed, committed
+e88d29142f. UAT490 stable palette passes68 controls and unchanged native
+keyboard first attempt1/1, zero retries/skips; normal types pass with Web8GB,
+retaining the default4GB OOM. Reviewed and committed5b340ea0b1. Actual loader
+focus steal UAT494/TASK18.30 is independently verified and committed2ca5c6929f:
+only the dashboard fallback opts out;129 controls and unchanged native keyboard
+first attempt pass without skips/retries/flakiness. Normal types/lint/build pass.
+
+Further actual PostgreSQL causes: UAT492/TASK18.27 preserves only a static
+exact saved-view uniqueness subtype without driver payload; recovery lifetime
+and all account/RLS/rollback guards remain. UAT493/TASK18.28 types five
+standalone nullable identity parameters in two shared Sync queries, retaining
+all filters/locks/expiry. Historical saved-view checkpoint TASK18.29 tests
+existing exact53→54 branch over its actual synthetic seed without replaying
+later migrations on mislabeled current tables. Production edits were held
+until133 qualification and common-source review/commit, then released. Final
+saved-view/backend/API152 and Sync/blob/quota/expiry246 controls total398 pass,
+zero failures/errors/skips, including mandatory actual PostgreSQL. Root review,
+compile/lint and security comparison clear; committed5badebd487/9818eb292a.
+RAG TASK18.31 has two native reds: its barrier omits current max_bytes keyword;
+bounded trace proves TypeError before the event. The existing keyword now reaches
+the real secure reader, preserving deadlines/result and every assertion. Full22
+controls pass without skips, independent review clear, committede4e2364b7b.
+Slides hosted concurrency remains unconfirmed after three bounded native probes
+(macOS, actual connection barrier, Linux3.12); stop/reassess rather than equate
+those passes with CI acceptance. Media15 original failures all reproduce
+natively without skips. UAT495/TASK18.32 repairs fixed-window VAD framing and
+detector-local TorchScript recovery shared by three callers, preserving ASR bytes,
+ONNX, rates and timing guards. Native speech also confirmed UAT496/TASK18.39:
+ongoing None events were incorrectly classified as silence despite triggered=True.
+The shared boolean state now prevents premature commits. The inherited actual-VAD
+control now reuses tracked speech through the existing guarded converter and a
+nonzero deterministic clock, retaining exact thresholds/guards. Final frozen64
+checks pass with no failures/errors/skips, including all three unchanged native
+streaming tests. Real-model timeline commits once after silence, never while
+active. Both independent reviews clear; production Bandit0 and compile/lint
+comparison clear. Earlier54pass/1invalid-fixturefail qualification is retained.
+TASK18.33–.35 upload/config/HTML fixture repairs are independently reviewed and
+committed5a8274a16b/e894435942/9b1b029fae; exact success/warning/content assertions
+remain. Recorded module gates30pass/7skip/1xpass,147pass/5skip,64pass/8skip/1xpass
+retain inherited skips as unexecuted; URL security127pass/1inheritedxfail.
+Windows10 child rc1 failures still need native A/B confirmation: TASK18.36 adds
+a temporary bounded diagnostic to the existing Windows3.12 shard, committed
+61811b0819; local148CI/admission controls pass. It withholds child output, uses
+strict fixed-field artifacts and never inherits operator secrets. Native results
+and diagnostic removal remain required. TASK18.37 UTF-8 vector reads reproduce
+21fail/70pass under cp1252 and pass91 after seven explicit encodings, with all
+assertions retained; independently reviewed and committed f13ff16ee7.
+TASK18.38/.40 Character mocks/settings are frozen with62passing controls and
+zero failures/errors/skips; seeded/plain settings and later deletion remain real,
+all production files unchanged. Initial hosted failure was settings line134,
+not deletion. Reviews, compile/lint and security comparison clear.
+Fresh fetch finds three additional dev commits through ca3b7f834abc10ba0889caeae868afe9d290009b;
+account for all current changes, rebase, then qualify upstream AuthNZ diagnostic
+overlap before publishing. Newly reproduced LLM/catalog/MCP causes are read-only
+until separate tasks are registered; no full UAT.
+
+Fixture-only follow-ups retain original guards/oracles: protected health/MFA/
+resend295 passes; canonical Privilege seeds42 plus seven overlapping controls;
+worker/redaction72 including24 actual PostgreSQL, final nine overlapping;
+offline Email41 including native22 with every38assertion and tripwire unchanged.
+Current exact inventory refresh363 passes with independently attributed source
+deltas; new pure coercion bootstrap dependency remains frozen alongside all
+unchanged discovery/network mutation controls;348 full frozen HTTP/coercion
+dependency checks also pass without skips, independently reviewed and committed
+f30e8257e7. Dev3d102 is included; latestca3b7f834a rebase remains next.
+Full UAT remains paused while
+these repairs, remaining CI causes, publication and current-head merge gates
+finish. Captures, runtime databases and private diagnostic artifacts stay ignored.
