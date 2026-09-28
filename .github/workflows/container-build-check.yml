@@ -128,6 +128,11 @@ jobs:
 
   container-build-check:
     name: container-build-check
+    # This job's name is the required status check, so it must REPORT rather
+    # than skip. A skipped job leaves the check unreported, and a run whose
+    # jobs all skip concludes "success" -- so a failed licence audit shows
+    # green while running nothing. The last arm exists purely so a negative
+    # verdict reaches the assertion step below and goes red.
     if: >-
       always() && !cancelled() &&
       (
@@ -142,11 +147,25 @@ jobs:
             needs.await_license.result == 'skipped' ||
             needs.await_license.outputs.license_passed == 'true'
           )
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
         )
       )
     needs: [build, admission, await_license]
     runs-on: ubuntu-latest
     steps:
+      - name: Require the license audit to have passed
+        if: >-
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
+        run: |
+          echo "::error::License audit did not pass for this PR head, so the gates were not run. Fix the licence policy failure and re-run."
+          exit 1
+
       - name: Check matrix results
         run: |
           if [ "${{ needs.build.result }}" != "success" ]; then
