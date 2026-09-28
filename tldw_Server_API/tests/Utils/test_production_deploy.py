@@ -51,6 +51,9 @@ def _simulate_posix_artifact_permissions_on_windows(monkeypatch: pytest.MonkeyPa
     if os.name != "posix":
         monkeypatch.setattr(production_artifacts, "posix_owner_only_supported", lambda: True)
         monkeypatch.setattr(os, "fchmod", lambda descriptor, mode: None, raising=False)
+        # Embedded restore scripts execute in Linux containers, independently
+        # of the orchestration host's ownership APIs.
+        monkeypatch.setattr(os, "chown", lambda path, uid, gid, **kwargs: None, raising=False)
 
 
 def test_native_artifact_capability_requires_posix_fchmod() -> None:
@@ -825,6 +828,12 @@ def test_app_restore_uses_one_open_source_when_artifact_path_is_swapped(
         nonlocal swapped
         handle = real_open(path, *args, **kwargs)
         if not swapped and Path(path) == source and args and args[0] == "rb":
+            if os.name != "posix":
+                # Windows denies renaming an open file; model the retained
+                # POSIX stream while keeping native descriptor coverage on POSIX.
+                content = handle.read()
+                handle.close()
+                handle = io.BytesIO(content)
             os.replace(replacement, source)
             swapped = True
         return handle
@@ -834,6 +843,8 @@ def test_app_restore_uses_one_open_source_when_artifact_path_is_swapped(
     _run_embedded_script(production_deploy._RESTORE_APP_SCRIPT, source, digest, destination)
 
     assert (destination / "file").read_bytes() == b"verified"
+    assert swapped
+    assert source.read_bytes() == _tar_bytes(member_name="file", payload=b"swapped")
 
 
 def test_app_restore_rejects_unsafe_archive_before_touching_live_data(tmp_path: Path) -> None:
@@ -940,6 +951,10 @@ def test_redis_restore_stages_one_open_source_before_atomic_replace(
         nonlocal swapped
         handle = real_open(path, *args, **kwargs)
         if not swapped and Path(path) == source and args and args[0] == "rb":
+            if os.name != "posix":
+                content = handle.read()
+                handle.close()
+                handle = io.BytesIO(content)
             real_replace(replacement, source)
             swapped = True
         return handle
@@ -954,6 +969,8 @@ def test_redis_restore_stages_one_open_source_before_atomic_replace(
     _run_embedded_script(production_deploy._RESTORE_REDIS_SCRIPT, source, digest, destination)
 
     assert (destination / "dump.rdb").read_bytes() == b"verified-rdb"
+    assert swapped
+    assert source.read_bytes() == b"swapped-rdb"
     assert replacements[-1][1] == destination / "dump.rdb"
 
 
