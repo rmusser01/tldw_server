@@ -26,7 +26,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     normalize_provider_stream_error,
 )
 from tldw_Server_API.app.core.http_client import RetryPolicy, astream_sse
-from tldw_Server_API.app.core.LLM_Calls.error_utils import is_chunked_encoding_error
+from tldw_Server_API.app.core.LLM_Calls.error_utils import is_chunked_encoding_error, log_provider_failure
 
 from .sse import finalize_stream, is_done_line, normalize_provider_line, sse_data, sse_done
 
@@ -61,12 +61,16 @@ def provider_stream_error_frame(provider: Any) -> str:
 
 
 def _log_provider_stream_error(provider: Any, exc: BaseException) -> None:
-    """Record only bounded metadata for an upstream stream failure."""
-    logger.debug(
-        "Provider stream iteration failed provider={} error_type={} failure_kind={}",
+    """Record an upstream stream failure at error level, with bounded metadata only.
+
+    Clients get an error frame either way; this is the operator's only record of
+    which provider failed mid-stream and how (log_provider_failure logs no URLs,
+    bodies or exception text).
+    """
+    log_provider_failure(
         _bounded_provider_name(provider),
-        type(exc).__name__,
-        "connection" if is_chunked_encoding_error(exc) else "iteration",
+        exc,
+        phase="stream_connection" if is_chunked_encoding_error(exc) else "stream_iteration",
     )
 
 
