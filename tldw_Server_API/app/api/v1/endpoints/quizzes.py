@@ -142,7 +142,12 @@ def _v2_question_import_entry(entry: QuestionQuizExportV2) -> QuizImportEntry:
 @router.get(
     "/generation-profiles",
     response_model=list[QuizGenerationProfileDefinition],
-    dependencies=[Depends(rbac_rate_limit("quizzes.read"))],
+    # rbac_rate_limit is a requests-per-minute budget, not an authorization
+    # check, so this route had no caller behind it despite appearing guarded.
+    dependencies=[
+        Depends(get_request_user),
+        Depends(rbac_rate_limit("quizzes.read")),
+    ],
 )
 def list_quiz_generation_profiles() -> list[QuizGenerationProfileDefinition]:
     """List quiz generation profiles exposed by the generator."""
