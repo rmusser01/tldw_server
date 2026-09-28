@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.unit
@@ -95,6 +96,12 @@ def test_postgres_initializer_routes_historical_v52_through_v53_script(
     db._uses_shared_content_backend = False
     db._backend_refresh_suspended = False
     db._local = SimpleNamespace()
+    # f5f5b63005 bootstraps on a pooled session this fake does not model.
+    monkeypatch.setattr(
+        schema_bootstrap,
+        "postgres_schema_migration",
+        lambda backend, _lock_timeout: backend.transaction(),
+    )
 
     applied_scripts: list[tuple[str, int | None]] = []
     schema_version_locks: list[bool] = []
@@ -117,7 +124,10 @@ def test_postgres_initializer_routes_historical_v52_through_v53_script(
         db._initialize_schema_postgres()
 
     assert (CharactersRAGDB._MIGRATION_SQL_V52_TO_V53_POSTGRES, 53) in applied_scripts
-    assert schema_version_locks == [True]
+    # Unlocked reads are the readiness probes (f5f5b63005); the read that routes
+    # the migration must hold the lock.
+    assert schema_version_locks[-1] is True
+    assert schema_version_locks.count(True) == 1
 
 
 def test_postgres_v53_script_adds_emq_group_columns_and_updates_version() -> None:
