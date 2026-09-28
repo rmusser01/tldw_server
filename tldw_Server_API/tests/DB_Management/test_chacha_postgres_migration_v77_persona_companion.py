@@ -131,6 +131,9 @@ def test_postgres_v77_migrates_prior_dev_and_enforces_companion_constraints(
                     persona_id=legacy_persona, user_id="legacy-owner", title="Preserved Pack",
                     manifest={"manifest_version": 1, "renderer_type": "sprite_frames"},
                 )
+                # Its read-back must not leave the checkout idle in transaction: those
+                # locks would make the migration DDL below time out.
+                assert db._get_thread_connection().info.transaction_status.name == "IDLE"
                 with backend.transaction() as conn:
                     backend.execute(
                         "UPDATE persona_visual_packs SET companion_behavior_json = %s WHERE id = %s",
