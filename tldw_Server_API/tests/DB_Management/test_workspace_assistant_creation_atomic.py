@@ -143,6 +143,26 @@ def test_resolved_insertion_preserves_identity_title_and_origin(
     assert payload == original_payload
 
 
+@pytest.mark.parametrize("identity", [{}, {"assistant_kind": None}, {
+    "assistant_kind": "persona", "assistant_id": "persona-b",
+}])
+def test_resolver_accepts_mapping_without_changing_selection_intent(
+    creation_db: CharactersRAGDB, identity: dict[str, Any],
+) -> None:
+    """Core callers can pass fields while sharing the same validated legacy resolver."""
+    payload = {"scope_type": "workspace", "workspace_id": "ws", **identity}
+    with creation_db.transaction() as conn:
+        expected = assistant_defaults.resolve_workspace_assistant_startup(
+            creation_db, user_id="user-1", request=ChatSessionCreate.model_validate(payload), conn=conn,
+        )
+        actual = assistant_defaults.resolve_workspace_assistant_startup(
+            creation_db, user_id="user-1", request=payload, conn=conn,
+        )
+    assert (actual.request.model_dump(), actual.request.model_fields_set, actual.startup, actual.display_name) == (
+        expected.request.model_dump(), expected.request.model_fields_set, expected.startup, expected.display_name,
+    )
+
+
 def test_resolved_insertion_obeys_caller_rollback(
     creation_db: CharactersRAGDB, db_factory: Callable[[], CharactersRAGDB],
 ) -> None:

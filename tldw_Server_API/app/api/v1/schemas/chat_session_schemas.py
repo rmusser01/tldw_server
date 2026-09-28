@@ -18,8 +18,13 @@ from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, 
 from tldw_Server_API.app.core.Character_Chat.emote_directives import CharacterEmoteEvent
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, reject_assistant_startup_input
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
+from tldw_Server_API.app.core.Workspaces.chat_startup_schemas import (
+    ALLOWED_CONVERSATION_STATES as ALLOWED_CONVERSATION_STATES,
+)
+from tldw_Server_API.app.core.Workspaces.chat_startup_schemas import (
+    _validate_conversation_state,
+)
 
-ALLOWED_CONVERSATION_STATES = ("in-progress", "resolved", "backlog", "non-viable")
 ALLOWED_ASSISTANT_KINDS = ("character", "persona")
 ALLOWED_PERSONA_MEMORY_MODES = ("read_only", "read_write")
 MAX_ASSISTANT_OVERLAY_TEXT_CHARS = 20_000
@@ -36,18 +41,6 @@ def _default_offset_pagination_aliases(response):
 # ========================================================================
 # Chat Session Schemas
 # ========================================================================
-
-
-def _validate_conversation_state(value: Optional[str]) -> Optional[str]:
-    """Shared validator for conversation state field."""
-    if value is None:
-        return None
-    normalized = value.strip().lower()
-    if not normalized:
-        raise ValueError("state cannot be empty")
-    if normalized not in ALLOWED_CONVERSATION_STATES:
-        raise ValueError(f"Invalid state '{value}'. Allowed: {', '.join(ALLOWED_CONVERSATION_STATES)}")
-    return normalized
 
 
 def _normalize_required_overlay_text(value: Any) -> Any:

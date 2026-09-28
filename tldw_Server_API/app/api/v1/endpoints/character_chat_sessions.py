@@ -4590,7 +4590,10 @@ router.add_api_route(
     responses={200: {
         "description": "Matching accepted replay", "model": ChatSessionResponse,
         "headers": {"Idempotency-Replayed": {"schema": {"type": "string", "enum": ["true"]}}},
-    }, 413: {"description": "Raw startup body exceeds 65536 bytes"}},
+    }, 409: {"description": "Startup or replay rejected by current version, binding, admission or lifetime capacity"},
+    410: {"description": "The accepted conversation is deleted; the key remains consumed"},
+    413: {"description": "Raw startup body exceeds 65536 bytes"},
+    429: {"description": "Creation rate limit or Workspace live-chat quota exceeded"}},
 )
 
 

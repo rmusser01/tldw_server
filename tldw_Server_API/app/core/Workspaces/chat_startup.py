@@ -9,12 +9,6 @@ from collections.abc import Mapping
 from typing import Any
 from uuid import uuid4
 
-from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import ChatSessionCreate
-from tldw_Server_API.app.api.v1.schemas.workspace_chat_startup_schemas import (
-    STARTUP_IDEMPOTENCY_KEY_PATTERN,
-    WorkspaceChatStartupRequest,
-    startup_request_fingerprint,
-)
 from tldw_Server_API.app.core.DB_Management.backends.base import UniqueConstraintError
 from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_store import (
     WorkspaceStartupError,
@@ -27,6 +21,11 @@ from tldw_Server_API.app.core.Workspaces.assistant_defaults import (
     WorkspaceDefaultUnavailable,
     insert_resolved_workspace_conversation,
     resolve_workspace_assistant_startup,
+)
+from tldw_Server_API.app.core.Workspaces.chat_startup_schemas import (
+    STARTUP_IDEMPOTENCY_KEY_PATTERN,
+    WorkspaceChatStartupRequest,
+    startup_request_fingerprint,
 )
 
 
@@ -157,7 +156,7 @@ def _attempt_startup(
                 resolved = resolve_workspace_assistant_startup(
                     db,
                     user_id=owner_id,
-                    request=ChatSessionCreate.model_validate(adapted),
+                    request=adapted,
                     conn=conn,
                 )
             except WorkspaceDefaultUnavailable as error:

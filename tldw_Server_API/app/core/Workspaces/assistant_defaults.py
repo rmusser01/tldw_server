@@ -180,7 +180,7 @@ def require_workspace_for_chat_creation(
 
 
 def resolve_workspace_assistant_startup(
-    db: CharactersRAGDB, *, user_id: str, request: ChatSessionCreate, conn: Any = None,
+    db: CharactersRAGDB, *, user_id: str, request: ChatSessionCreate | Mapping[str, Any], conn: Any = None,
 ) -> ResolvedConversationAssistant:
     """Select once from original omission/null intent and current Workspace state.
 
@@ -189,6 +189,8 @@ def resolve_workspace_assistant_startup(
     Passing an existing transaction locks Workspace then selected Persona reads;
     legacy no-connection callers retain unlocked DB signatures.
     """
+    if isinstance(request, Mapping):
+        request = ChatSessionCreate.model_validate(request)
     if request.scope_type != "workspace":
         return ResolvedConversationAssistant(request, AssistantStartup(), "Assistant")
     workspace = require_workspace_for_chat_creation(db, request.workspace_id, conn=conn)

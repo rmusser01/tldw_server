@@ -41,7 +41,8 @@ All paths in this section are relative to `tldw_Server_API/` unless stated other
 
 | File | Responsibility |
 | --- | --- |
-| `app/api/v1/schemas/workspace_chat_startup_schemas.py` (new) | Closed request, selection/version validation, pure canonical fingerprint. |
+| `app/core/Workspaces/chat_startup_schemas.py` (new) | Closed request, selection/version validation, shared state grammar and pure canonical fingerprint. |
+| `app/api/v1/schemas/workspace_chat_startup_schemas.py` (new) | Public reexports of the core-owned strict request/hash, without a core-to-API import. |
 | `app/api/v1/endpoints/workspace_chat_startup_transport.py` (new) | Strict-route-only APIRoute body-size guard and sanitized validation detail; no global middleware change. |
 | `app/core/DB_Management/chacha/workspace_chat_startup_schema.py` (new) | Backend-specific receipt table/index DDL called only by registered migrations. |
 | `app/core/DB_Management/chacha/workspace_chat_startup_store.py` (new) | Owner serialization, receipt/conversation consistent reads, count/insert, mutation invalidation/hard-delete tombstones, bounded domain errors. |
@@ -57,13 +58,25 @@ All paths in this section are relative to `tldw_Server_API/` unless stated other
 Define these small interfaces in their owning files and use them consistently:
 
 ```python
-# workspace_chat_startup_schemas.py
+# core/Workspaces/chat_startup_schemas.py
 import hashlib
 import json
 from collections.abc import Mapping
 from typing import Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
-from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import _validate_conversation_state
+
+ALLOWED_CONVERSATION_STATES = ("in-progress", "resolved", "backlog", "non-viable")
+
+def _validate_conversation_state(value: str | None) -> str | None:
+    """Shared state grammar, also imported by legacy API models."""
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if not normalized:
+        raise ValueError("state cannot be empty")
+    if normalized not in ALLOWED_CONVERSATION_STATES:
+        raise ValueError(f"Invalid state '{value}'. Allowed: {', '.join(ALLOWED_CONVERSATION_STATES)}")
+    return normalized
 
 STARTUP_TEXT_BYTE_LIMITS = {
     "workspace_id": 256, "title": 4096, "state": 16,
@@ -458,7 +471,31 @@ Backup review caught a false-positive rehearsal that restored over unchanged sou
 
 Publication preflight at `origin/dev` `3c9d97c56b29abc4c0396274b9560859aee06959`: upstream Persona Companion now owns SQLite73/PostgreSQL77, and upstream retry-backoff owns ADR051. Finish the frozen checkpoint, preserve a recovery ref, then rebase and assign receipts the next free migration numbers and ADR ID with all links/tests updated. Do not publish the colliding registry or treat pre-integration green evidence as current-head qualification.
 
+Current-dev integration is now on `3c9d97c56b29abc4c0396274b9560859aee06959`, with receipts SQLite74/PostgreSQL78 and ADR056. The recovery ref retains `723faed87c`. The final registered migration/Companion/import-contract subset passes **46 tests, four warnings, no failures/skips**, 438.18s. Three earlier live Companion failures were test-harness pool closure, corrected by releasing only the cached connection before offline DDL; Companion behavior is unchanged. Mapping adaptation preserves legacy selection intent and uses the existing resolver, with the strict model/state grammar owned by core and public API reexports.
+
+Fresh whole-branch source/spec/security review reported no actionable findings. A subsequent exported-contract probe found absent declarations for existing 409/410 outcomes: two RED tests preceded response-description-only repair and four GREEN controls (5.29s). The regenerated export has **2105 paths/3245 schemas**, fingerprint prefix `d02f5ee5adf4`; standard fingerprint check and ignored TypeScript regeneration pass. This bounded metadata correction is qualified separately from the earlier review.
+
+The existing PostgreSQL logical dump/restore helper passes **one rehearsal, eight warnings**, 40.13s, using only the official isolated per-test database. The rehearsal deliberately removes fixture-owned receipts/live chat after the dump, then verifies exact restored receipt/policy catalog contents, ENABLE/FORCE RLS, live-key replay, permanent 410 and lifetime capacity. A controlled no-op restore fails the intended snapshot comparison (19.92s). This supersedes the earlier pending backup entry: it is not physical cluster/PITR, non-bypass post-restore behavioral or production deployment certification. Separate native RLS acceptance remains required.
+
+The broad Workspace non-PG sweep completed **1249 passed, four failed, 25 deselected, eight warnings**, 906.00s. All four Activity index 500 failures independently reproduce on pristine exact dev (four failed/one passed, four warnings, 9.22s); no unrelated activity repair or green-sweep claim. Legacy Character completed **184 passed, three failed, five skipped, 19 warnings**, 956.66s; its three failure nodes independently match pristine dev. Current-source security/static guards pass without new findings: production Bandit is clean; test B105 and 19 Ruff findings match physical pristine base. The final 23-file required-PG acceptance/coverage and corrected compatibility runs remain in progress; Stage 5 delivery/AC2-5 stay open until final results, new human summary, PR/current-head CI and normal merge.
+
+Bounded correction review verified two minor OpenAPI description errors: live-chat quota is 429 rather than 409, and 410 covers soft-deleted as well as hard-deleted targets. Three clean metadata REDs preceded the description-only repair and 429 declaration; five final-source metadata/route checks pass (four warnings, 3.64s), fingerprint prefix `6c384f248a590`, with standard check/types and closed request/header/status inspection passing. Source-only closure review found no remaining findings; runtime behavior did not change. The running 1395-case matrix predates only this metadata edit and must not be relabeled as a new 1396-case run.
+
+Compatibility test doubles were minimally aligned with immutable ownership/real identity normalization (130-case session file passes) and the current owned active Persona lookup signature (56-case retry file passes; pristine exact dev also passes that file). All existing error/payload/order/image/no-write assertions remain. The first broad diagnostic used `/private/tmp` outside the default approved fixture DB roots and predates these corrections: **2679 passed, 176 failed, 136 errors, five skipped, 30 warnings**, 1939.14s, not qualification. The corrected 2996-case run uses the existing `$TMPDIR` root without changing path guards; it collected the retry double before its correction, whose final-source full-file gate is separate. Three unrelated World Book PostgreSQL stub failures and one legacy history-helper assertion reproduce on pristine exact dev (four failed/five passed, three warnings, 20.62s). Do not mistake invalid-harness errors or independently proven baseline failures for strict-startup defects or hide them with a green-suite claim.
+
+Final required-backend acceptance on integrated base `3c9d97c56b`: **1383 passed, 12 intentional backend-specific skips, seven warnings, no failures/errors**, 6207.69s, across 23 files/1395 collected cases (`/private/tmp/persona-strict-final-dual-backend.log/xml`). Official live PostgreSQL was required and available. The skips are SQLite variants of PostgreSQL driver/row-lock tests and two PostgreSQL variants of SQLite-file DSR erasure, not unavailable-backend skips. Coverage is **419/428 statements, 97.90%** across six new modules; the nine uncovered orchestrator lines were inspected as defensive disappearance/mutation, exhausted-retry and integrity-error paths. This run predates only the final response-metadata correction, separately qualified above. It is not newer-dev hosted evidence.
+
+The existing Workspace PostgreSQL complement passes **25 tests, 1256 deselected, five warnings, no failures/skips**, 185.73s (`/private/tmp/persona-strict-final-workspaces-postgres.log/xml`). It completes the PostgreSQL-selected nodes omitted by the non-PG sweep; overlapping counts must not be summed as unique tests. Shared temporary-directory cleanup warnings after the summaries are retained; no other agents' files were removed.
+
+The corrected monolithic compatibility run was interrupted after profiling showed garbage collection dominated execution; it exited 143 without completed JUnit and remains partial diagnostic evidence only. Qualification now reruns **every file** in fresh serial pytest processes with the same supported `$TMPDIR`, unchanged guards/fixtures/timeouts, and an official 2996-node collection manifest. Per-file results under `/private/tmp/persona-strict-compat-files` require complete node-set reconciliation, fresh XML and matching process outcomes. This qualifies file-isolated compatibility, not combined-order/resource-lifecycle behavior. The one-off external runner is not shipped infrastructure and does not promise automatic parent-SIGTERM child cleanup.
+
+Latest inspected dev `de7f453593` adds auth capability-disclosure (#3008) and encrypted scheduled-task message-store (#3039) changes. The tracked intersection with this slice is only the generated OpenAPI fingerprint; Persona runtime, receipt migration/RLS and lifecycle source are unchanged upstream. Finish frozen file-level qualification, retain a recovery ref, integrate the latest actual dev and refresh relevant Persona/auth/automation/OpenAPI gates before publishing. The logical backup qualification above supersedes the historical pending physical-backup entry; no physical/PITR or production certification is claimed.
+
+File-isolated compatibility is complete: **2987 passed, four failed, five existing skips, no errors**, across **124 complete files/2996 unique nodes**. Independent reconciliation matches the exact official collection manifest without missing/duplicate nodes, verifies fresh JUnit timestamps and process outcomes, and matches the entire failure set to the pristine-base reproduction. The failures are one legacy history-helper assertion and three World Book PostgreSQL stubs, not new strict-startup failures. Skips retain the existing mock-roundtrip, heartbeat coordination, Resource Governor rate-limit, V3 import and removed-streaming-endpoint limitations. Every file was rerun; interrupted diagnostics were not used to omit nodes. Evidence is `/private/tmp/persona-strict-compat-files/{collection,results}.json` and the per-file log/XML pairs. This is not a green monolithic suite or combined-order/resource-lifecycle certification.
+
 ## Planning Review And Evidence
+
+The entries below preserve planning-time evidence and approval history. Their Not Started statuses are historical; the current execution statuses are the five stage headings above.
 
 Source audit and the unmodified 10-file baseline are tracked under TASK-13245.6. Current fixture code already supplies the snapshot-loader credential override; do not edit it merely to replay a historical repair. Independent plan review must cover mutation completeness, PostgreSQL lock order, native cascade integration, privacy, strict validation and activation boundaries. Requester review of this refreshed design is required before runtime implementation.
 

@@ -6,7 +6,7 @@
 
 ## Release Gates
 
-Before cutover, require reviewed exact-head tests, current hosted checks, a requester-owned Change summary, and an up-to-date normal merge into `dev`. Check the final migration registry and ADR links after integration; planning numbers are not reservations. The upstream registry now uses SQLite 73/PostgreSQL 77 for Persona Companion, so receipt migrations must follow those versions rather than replace them.
+Before cutover, require reviewed exact-head tests, current hosted checks, a requester-owned Change summary, and an up-to-date normal merge into `dev`. Check the final migration registry and ADR links after integration; planning numbers are not reservations. Receipts use SQLite 74/PostgreSQL 78 after Companion's 73/77, with the durable contract in ADR056.
 
 Required capabilities in every running binary:
 
@@ -22,7 +22,7 @@ Keeping the strict endpoint disabled does not make an older writer safe against 
 1. Block new API/Sync/import requests at the deployment boundary and drain active requests and jobs. Stop every API worker, Sync worker, background task and administrative/import process that can open or mutate ChaCha storage. Include local scripts and cached handles, not only the HTTP listener.
 2. Confirm no old process can reconnect or restart automatically. This is an offline upgrade, not a rolling migration. Schema checks on a newly opened handle do not fence an already-open driver.
 3. Inventory the actual configured SQLite user databases or shared PostgreSQL content database and their trusted owner configuration. Do not infer authority from a device/writer `client_id`, migrate an unreviewed path, or use the test database URL against production.
-4. Take a consistent physical backup using the existing backup tooling and test restoration into a disposable target. For SQLite use `DB_Backups.create_backup` with the allowed configured paths; do not copy only the main file while WAL writers are live. For PostgreSQL use the existing configured helper with matching `pg_dump`/`pg_restore` clients:
+4. Take a consistent database backup using the existing tooling and test restoration into a disposable target. For SQLite use `DB_Backups.create_backup` with the allowed configured paths; do not copy only the main file while WAL writers are live. For PostgreSQL the existing configured helper makes a custom-format logical dump with matching `pg_dump`/`pg_restore` clients, not a physical cluster backup or PITR archive:
 
 ```bash
 source .venv/bin/activate
@@ -68,4 +68,4 @@ Restart only compatible binaries after all databases pass validation. Re-enable 
 
 ## Evidence Limits
 
-The cached-writer rehearsal deliberately uses an already-open unhooked driver: an identity change is detected on replay, but change-away-and-back can escape permanent invalidation. It demonstrates why the writer drain is mandatory; it does not certify old binaries or mixed writers. The SQLite physical-backup rehearsal checks the existing backup/restore path, retained keys and capacity. PostgreSQL migration/RLS/process evidence and an operator's physical-backup rehearsal must be recorded separately. Do not label a source review, thread-only barrier or restored modern database as process/crash/historical-upgrade certification.
+The cached-writer rehearsal deliberately uses an already-open unhooked driver: an identity change is detected on replay, but change-away-and-back can escape permanent invalidation. It demonstrates why the writer drain is mandatory; it does not certify old binaries or mixed writers. The SQLite physical-backup rehearsal checks the existing backup/restore path, retained keys and capacity. PostgreSQL logical-dump rehearsal, migration/RLS/process evidence, and any operator physical-backup/PITR exercise are separate evidence. Do not label a source review, thread-only barrier or restored modern database as process/crash/historical-upgrade certification.

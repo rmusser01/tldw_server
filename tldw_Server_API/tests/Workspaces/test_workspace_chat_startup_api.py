@@ -127,6 +127,22 @@ def test_strict_route_is_static_and_uses_only_its_bounded_override(monkeypatch: 
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("status_code,required_word,excluded_word", [
+    ("409", "rejected", "quota"), ("410", "deleted", "permanently"), ("429", "quota", "lifetime"),
+])
+def test_openapi_describes_conflict_deletion_and_quota_responses(
+    monkeypatch: pytest.MonkeyPatch, status_code: str, required_word: str, excluded_word: str,
+) -> None:
+    """Document current deletion and quota outcomes without promising permanent deletion."""
+    app, _, _ = _app(object(), monkeypatch)
+    responses = app.openapi()["paths"][_PATH]["post"]["responses"]
+    assert status_code in responses
+    description = responses[status_code]["description"].lower()
+    assert required_word in description
+    assert excluded_word not in description
+
+
+@pytest.mark.unit
 def test_openapi_key_pattern_rejects_invalid_embedded_text(monkeypatch: pytest.MonkeyPatch) -> None:
     """Generated clients see a whole-key pattern, not a matching valid substring."""
     app, _, _ = _app(object(), monkeypatch)
