@@ -588,7 +588,13 @@ def test_audio_transcriptions_sanitizes_heartbeat_task_start_failure_log(
             return lambda: 10
         return original_shim_attr(name)
 
-    def _raise_create_task(coro):
+    real_create_task = audio_tx.asyncio.create_task
+
+    # audio_tx.asyncio is the global asyncio module, so only fail the heartbeat
+    # loop; other tasks (e.g. the AuthNZ DB pool used by billing deps) must run.
+    def _raise_create_task(coro, *args, **kwargs):
+        if getattr(coro, "__name__", "") != "_hb_loop":
+            return real_create_task(coro, *args, **kwargs)
         coro.close()
         raise RuntimeError("heartbeat task leaked /private/rg-task")
 

@@ -190,8 +190,10 @@ async def test_generate_tts_audio_defaults_to_kitten_provider_model_and_voice(
     service = _RecordingTTSService()
     _patch_tts_service(monkeypatch, service)
 
-    audio_bytes, alignment = await audiobook_jobs_worker._generate_tts_audio(
+    audio_bytes, alignment, _route = await audiobook_jobs_worker._generate_tts_audio(
         text="Hello world",
+        backend=None,
+        allow_fallback=None,
         model=None,
         provider=None,
         voice=None,
@@ -217,8 +219,10 @@ async def test_generate_tts_audio_preserves_explicit_provider_model_and_voice(
     service = _RecordingTTSService()
     _patch_tts_service(monkeypatch, service)
 
-    audio_bytes, alignment = await audiobook_jobs_worker._generate_tts_audio(
+    audio_bytes, alignment, _route = await audiobook_jobs_worker._generate_tts_audio(
         text="Hello world",
+        backend=None,
+        allow_fallback=None,
         model="pocket_tts_cpp",
         provider="pocket_tts_cpp",
         voice="custom_voice",
@@ -244,8 +248,10 @@ async def test_generate_tts_audio_infers_pocket_tts_cpp_from_model_only_override
     service = _RecordingTTSService()
     _patch_tts_service(monkeypatch, service)
 
-    audio_bytes, alignment = await audiobook_jobs_worker._generate_tts_audio(
+    audio_bytes, alignment, _route = await audiobook_jobs_worker._generate_tts_audio(
         text="Hello world",
+        backend=None,
+        allow_fallback=None,
         model="pocket_tts_cpp",
         provider=None,
         voice=None,
@@ -269,8 +275,10 @@ async def test_generate_tts_audio_uses_openai_default_voice_for_explicit_openai_
     service = _RecordingTTSService()
     _patch_tts_service(monkeypatch, service)
 
-    audio_bytes, alignment = await audiobook_jobs_worker._generate_tts_audio(
+    audio_bytes, alignment, _route = await audiobook_jobs_worker._generate_tts_audio(
         text="Hello world",
+        backend=None,
+        allow_fallback=None,
         model=None,
         provider="openai",
         voice=None,
@@ -295,8 +303,10 @@ async def test_generate_tts_audio_preserves_pocket_tts_cpp_provider_defaults_wit
     service = _RecordingTTSService()
     _patch_tts_service(monkeypatch, service)
 
-    audio_bytes, alignment = await audiobook_jobs_worker._generate_tts_audio(
+    audio_bytes, alignment, _route = await audiobook_jobs_worker._generate_tts_audio(
         text="Hello world",
+        backend=None,
+        allow_fallback=None,
         model=None,
         provider="pocket_tts_cpp",
         voice=None,

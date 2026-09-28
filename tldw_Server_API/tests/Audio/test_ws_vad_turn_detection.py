@@ -334,6 +334,45 @@ def test_silero_turn_detector_honors_min_utterance(monkeypatch):
     assert detector.observe(b"\x00" * 160) is True
 
 
+def test_silero_turn_detector_fails_open_on_torchscript_error(monkeypatch):
+    """A TorchScript error (torch.jit.Error is not a RuntimeError) must fail open, not abort the stream."""
+
+    class _FakeJitError(Exception):
+        pass
+
+    class _RaisingVADIterator:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def reset_states(self):
+            return None
+
+        def __call__(self, _audio_in, return_seconds=False, **_kwargs):
+            raise _FakeJitError("Input audio chunk is too short")
+
+    import types
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.VAD_Lib as vlib
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+
+    monkeypatch.setattr(vlib, "_lazy_import_silero_vad", lambda: ("model", [None, None, None, _RaisingVADIterator, None]))
+    fake_torch = types.SimpleNamespace(jit=types.SimpleNamespace(Error=_FakeJitError), from_numpy=lambda arr: arr)
+    monkeypatch.setattr(unified, "torch", fake_torch)
+
+    detector = unified.SileroTurnDetector(
+        sample_rate=16000,
+        enabled=True,
+        vad_threshold=0.5,
+        min_silence_ms=200,
+        turn_stop_secs=0.05,
+    )
+    assert detector.available
+
+    assert detector.observe(b"\x00" * 8) is False
+    assert detector.available is False
+    assert "too short" in (detector.unavailable_reason or "")
+
+
 def test_silero_turn_detector_real_vad_end_to_end():
 
 

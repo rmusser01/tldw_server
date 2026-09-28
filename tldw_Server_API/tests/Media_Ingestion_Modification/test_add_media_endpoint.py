@@ -1041,7 +1041,10 @@ def test_add_media_single_file_upload_success(test_api_client, db_session, creat
             perform_chunking=False,
         )
     else:
-        form_data = create_add_media_form_data(media_type=media_type)
+        # No analysis provider is configured here; since 4e697b467c requesting
+        # analysis without one yields a "Warning" result, so keep this upload
+        # plumbing test on the analysis-free path.
+        form_data = create_add_media_form_data(media_type=media_type, perform_analysis=False)
 
     # --- CORRECTED TestClient Call ---
     # Pass form data via `data` and files via `files` in the same call

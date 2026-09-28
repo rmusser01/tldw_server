@@ -9,13 +9,18 @@ from tldw_Server_API.app.core.TTS.tts_exceptions import TTSGenerationError
 
 
 @pytest.mark.asyncio
-async def test_audio_health_endpoint_smoke():
+async def test_audio_health_endpoint_smoke(monkeypatch):
     # Import router lazily to avoid heavy imports at module load time
     from tldw_Server_API.app.api.v1.endpoints.audio.audio import router
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
+    # /health requires an authenticated caller since 0fa12b8c26.
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-1234567890")
+    reset_settings()
     app = FastAPI()
     app.include_router(router, prefix="")
-    with TestClient(app) as client:
+    with TestClient(app, headers={"X-API-KEY": "test-api-key-1234567890"}) as client:
         resp = client.get("/health")
     assert resp.status_code in (200, 500)
     if resp.status_code == 200:
