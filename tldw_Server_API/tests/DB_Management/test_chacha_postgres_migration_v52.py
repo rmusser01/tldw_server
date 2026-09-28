@@ -136,7 +136,7 @@ def test_postgres_initializer_routes_historical_v52_through_v53_script(
         (migration_transaction.connection, True),
     ]
     assert coordinator_calls == [
-        (db._backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT),
+        (db._backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_STATEMENT_TIMEOUT),
     ]
     assert migration_transaction.exit_exception is _ReachedV53Error
 

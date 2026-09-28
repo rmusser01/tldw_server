@@ -4,6 +4,8 @@
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
+import time
+from typing import Any
 
 import pytest
 
@@ -127,3 +129,57 @@ def test_schema_lock_survives_commit_and_is_released_before_checkout_reuse(
             pass
     finally:
         backend.get_pool().close_all()
+
+
+def test_schema_lock_acquisition_deadline_invalidates_only_waiter_then_allows_reuse(
+    pg_database_config: DatabaseConfig, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A short acquisition deadline closes the waiter while preserving the lock owner."""
+    blocker_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    pool = backend.get_pool()
+    invalidated: list[tuple[Any, int]] = []
+    yielded: list[Any] = []
+    original_invalidate = pool.invalidate_connection
+
+    def record_invalidation(connection: Any) -> None:
+        invalidated.append((connection, connection.info.backend_pid))
+        original_invalidate(connection)
+
+    monkeypatch.setattr(pool, "invalidate_connection", record_invalidation)
+    try:
+        with blocker_backend.transaction() as blocker:
+            blocker_backend.execute(
+                "SELECT pg_advisory_lock(hashtext(%s), hashtext(current_schema()))",
+                ("chacha_schema_bootstrap",), connection=blocker,
+            )
+            try:
+                started = time.monotonic()
+                with pytest.raises(TransientContentionError):
+                    with postgres_schema_migration(backend, "100ms") as connection:
+                        yielded.append(connection)
+                assert time.monotonic() - started < 2
+                assert yielded == []
+                assert len(invalidated) == 1
+                failed, failed_pid = invalidated[0]
+                assert failed.closed
+                assert blocker_backend.execute(
+                    "SELECT count(*) FROM pg_locks WHERE pid=%s AND locktype='advisory' AND granted",
+                    (blocker.info.backend_pid,), connection=blocker,
+                ).scalar == 1
+                assert blocker_backend.execute("SELECT 1 AS value", connection=blocker).rows == [{"value": 1}]
+            finally:
+                blocker_backend.execute(
+                    "SELECT pg_advisory_unlock(hashtext(%s), hashtext(current_schema()))",
+                    ("chacha_schema_bootstrap",), connection=blocker,
+                )
+        with postgres_schema_migration(backend, "100ms") as fresh:
+            assert fresh is not failed
+            assert backend.execute("SELECT 1 AS value", connection=fresh).rows == [{"value": 1}]
+            assert backend.execute(
+                "SELECT count(*) FROM pg_locks WHERE pid=%s AND locktype='advisory' AND granted",
+                (failed_pid,), connection=fresh,
+            ).scalar == 0
+    finally:
+        backend.get_pool().close_all()
+        blocker_backend.get_pool().close_all()

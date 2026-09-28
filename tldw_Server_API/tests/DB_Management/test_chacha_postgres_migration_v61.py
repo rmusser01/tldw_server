@@ -101,7 +101,7 @@ def test_postgres_initializer_routes_schema_v60_through_v61(
         (migration_transaction.connection, True),
     ]
     assert coordinator_calls == [
-        (db._backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT),
+        (db._backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_STATEMENT_TIMEOUT),
     ]
     assert migration_transaction.exit_exception is _ReachedV61
 

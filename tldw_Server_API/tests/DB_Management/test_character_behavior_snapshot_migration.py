@@ -1871,7 +1871,7 @@ def test_postgres_v65_contract_has_matching_constraints_indexes_and_initializer_
         db._initialize_schema_postgres()
 
     assert applied == ["64-to-65"]
-    assert coordinator_calls == [(backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT)]
+    assert coordinator_calls == [(backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_STATEMENT_TIMEOUT)]
     assert version_reads[:3] == [(backend, False), (migration_connection, False), (migration_connection, True)]
 
 
@@ -1981,7 +1981,7 @@ def test_postgres_v65_checkpoint_failure_uses_outer_transaction_rollback(
         "SELECT set_config('statement_timeout',%s,true)",
     ]
     assert any("conversation_behavior_snapshots" in sql for sql in backend._pending) is False
-    assert coordinator_calls == [(backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT)]
+    assert coordinator_calls == [(backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_STATEMENT_TIMEOUT)]
     assert version_reads[:3] == [(backend, False), (migration_connection, False), (migration_connection, True)]
 
 

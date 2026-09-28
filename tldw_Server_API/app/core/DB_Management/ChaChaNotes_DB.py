@@ -110,6 +110,8 @@ from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLit
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (  # noqa: E402
     ClosedChaChaOperationError,
     ConnectionState,
+    ExternalConnection,
+    chacha_operation,
     current_connection_state,
 )
 from tldw_Server_API.app.core.DB_Management.content_backend import get_content_backend  # noqa: E402
@@ -7789,6 +7791,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         try:
             self._initialize_schema()
             self._mark_backend_bootstrapped(self._backend)
+            if self._owner_managed_backend and self.backend_type == BackendType.SQLITE and not self.is_memory_db:
+                # File bootstrap owns this checkout; runtime work opens its own.
+                self.close_connection()
             logger.debug(f"CharactersRAGDB initialization completed successfully for {self.db_path_str}")
         except (CharactersRAGDBError, sqlite3.Error) as e:
             logger.critical(f"FATAL: DB Initialization failed for {self.db_path_str}: {e}", exc_info=True)
@@ -18330,41 +18335,51 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _repair_conversation_assistant_identity(self, conn: Any) -> None:
         """Repair only historical missing Character fields, comparing locked normalized bindings."""
-        query = """
-            SELECT id, character_id, assistant_kind, assistant_id, persona_memory_mode,
-                   assistant_startup_json
-              FROM conversations
-             WHERE character_id IS NOT NULL
-               AND (COALESCE(TRIM(assistant_kind), '') = ''
-                    OR COALESCE(TRIM(assistant_id), '') = '')
-        """
         if self.backend_type == BackendType.POSTGRESQL:
-            # This runs on every current-schema open, which must not need a writable
-            # transaction (f5f5b63005): lock rows only when one actually needs repair.
-            if conn.execute(query + " LIMIT 1").fetchone() is None:
-                return
-            query += " FOR UPDATE"
-        rows = conn.execute(query).fetchall()
-        for row in rows:
-            kind = row["assistant_kind"]
-            assistant_id = row["assistant_id"]
-            if kind is None or not kind.strip(" "):
-                kind = "character"
-            if assistant_id is None or not assistant_id.strip(" "):
-                assistant_id = str(row["character_id"])
-            try:
-                binding = self.conversation_store._normalize_conversation_assistant_identity(
-                    character_id=row["character_id"], assistant_kind=kind,
-                    assistant_id=assistant_id, persona_memory_mode=row["persona_memory_mode"],
-                )
-            except InputError:
-                preserve_origin = False
-            else:
-                preserve_origin = self.conversation_store._assistant_identity_matches(row, binding)
-            conn.execute(
-                "UPDATE conversations SET assistant_kind = ?, assistant_id = ?, assistant_startup_json = ? WHERE id = ?",
-                (kind, assistant_id, row["assistant_startup_json"] if preserve_origin else None, row["id"]),
+            # Schema transactions own their checkout independently of a live request.
+            repair_scope = chacha_operation(
+                independent=True,
+                bindings=(ExternalConnection(self, conn._connection, conn._backend),),
             )
+        else:
+            repair_scope = contextlib.nullcontext()
+        with repair_scope:
+            if self.backend_type == BackendType.POSTGRESQL:
+                conn = BackendConnectionWrapper(self, conn._connection, conn._backend)
+            query = """
+                SELECT id, character_id, assistant_kind, assistant_id, persona_memory_mode,
+                       assistant_startup_json
+                  FROM conversations
+                 WHERE character_id IS NOT NULL
+                   AND (COALESCE(TRIM(assistant_kind), '') = ''
+                        OR COALESCE(TRIM(assistant_id), '') = '')
+            """
+            if self.backend_type == BackendType.POSTGRESQL:
+                # Clean storage needs validation without requesting write permissions.
+                if conn.execute(query + " LIMIT 1").fetchone() is None:
+                    return
+                query += " FOR UPDATE"
+            rows = conn.execute(query).fetchall()
+            for row in rows:
+                kind = row["assistant_kind"]
+                assistant_id = row["assistant_id"]
+                if kind is None or not kind.strip(" "):
+                    kind = "character"
+                if assistant_id is None or not assistant_id.strip(" "):
+                    assistant_id = str(row["character_id"])
+                try:
+                    binding = self.conversation_store._normalize_conversation_assistant_identity(
+                        character_id=row["character_id"], assistant_kind=kind,
+                        assistant_id=assistant_id, persona_memory_mode=row["persona_memory_mode"],
+                    )
+                except InputError:
+                    preserve_origin = False
+                else:
+                    preserve_origin = self.conversation_store._assistant_identity_matches(row, binding)
+                conn.execute(
+                    "UPDATE conversations SET assistant_kind = ?, assistant_id = ?, assistant_startup_json = ? WHERE id = ?",
+                    (kind, assistant_id, row["assistant_startup_json"] if preserve_origin else None, row["id"]),
+                )
 
     def _ensure_recent_voice_command_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Backfill voice command schema columns after version-number collisions."""

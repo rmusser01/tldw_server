@@ -129,7 +129,7 @@ def test_postgres_initializer_routes_schema_v66_through_v67(
         db._initialize_schema_postgres()
 
     assert migration_calls == [migration_transaction.connection]
-    assert coordinator_calls == [(db._backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT)]
+    assert coordinator_calls == [(db._backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_STATEMENT_TIMEOUT)]
     assert version_reads[:3] == [
         (db._backend, False), (migration_transaction.connection, False),
         (migration_transaction.connection, True),
