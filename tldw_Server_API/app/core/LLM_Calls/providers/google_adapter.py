@@ -623,6 +623,8 @@ class GoogleAdapter(ChatProvider):
                     seen_done = False
                     buffer = ""
                     tool_state = {"tool_index": 0}
+                    # Own loop (TASK-13373): translates Gemini events and JSON arrays into
+                    # OpenAI deltas; the shared SSE helpers only pass lines through.
                     for raw in resp.iter_lines():
                         if not raw:
                             continue
