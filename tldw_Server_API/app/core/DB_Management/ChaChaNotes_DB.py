@@ -18302,6 +18302,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     OR COALESCE(TRIM(assistant_id), '') = '')
         """
         if self.backend_type == BackendType.POSTGRESQL:
+            # This runs on every current-schema open, which must not need a writable
+            # transaction (f5f5b63005): lock rows only when one actually needs repair.
+            if conn.execute(query + " LIMIT 1").fetchone() is None:
+                return
             query += " FOR UPDATE"
         rows = conn.execute(query).fetchall()
         for row in rows:
