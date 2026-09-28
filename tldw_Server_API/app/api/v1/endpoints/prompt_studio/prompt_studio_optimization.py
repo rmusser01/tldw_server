@@ -1226,7 +1226,8 @@ async def cancel_optimization(
 ########################################################################################################################
 # Optimization Strategy Endpoints
 
-@router.get("/strategies", response_model=StandardResponse, openapi_extra={
+@router.get("/strategies", response_model=StandardResponse,
+            dependencies=[Depends(get_prompt_studio_user)], openapi_extra={
     "responses": {"200": {"description": "Strategies", "content": {"application/json": {"examples": {"list": {"summary": "Available strategies", "value": {"success": True, "data": [{"name": "iterative", "display_name": "Iterative Refinement"}]}}}}}}}
 })
 async def get_optimization_strategies() -> StandardResponse:
