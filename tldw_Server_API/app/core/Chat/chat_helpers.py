@@ -372,7 +372,6 @@ async def load_conversation_history(
         List of messages in OpenAI format
     """
     if not loop:
-        import asyncio
         loop = asyncio.get_running_loop()
 
     historical_messages = []
