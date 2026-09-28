@@ -121,7 +121,9 @@ async def test_persistence_reports_safe_extraction_failure_without_storing(
             **failure,
         )
     ])
-    assert response["extraction_failures"] == [{"code": code}]
+    # Users need to see which source failed: host plus path, never the query.
+    assert response["extraction_failures"] == [{"code": code, "source": "example.com/private"}]
+    assert response["errors"] == [f"example.com/private: {svc_mod._EXTRACTION_FAILURE_MESSAGES[code]}"]
     assert response["stored_articles"] == 0
     assert "private-secret" not in str(response)
     assert "<html>" not in str(response)
@@ -135,7 +137,7 @@ async def test_persistence_classifies_empty_success_payload_without_storing(
 ):
     _patch_db(monkeypatch)
     response = await _persist([_article(content=" \n\t")])
-    assert response["extraction_failures"] == [{"code": "empty_extraction"}]
+    assert response["extraction_failures"] == [{"code": "empty_extraction", "source": "example.com/a"}]
     assert response["stored_articles"] == 0
 
 
@@ -155,7 +157,7 @@ async def test_queued_timeout_reaches_persistence_with_its_safe_category(monkeyp
     try:
         articles = await scraper.scrape_multiple(["https://example.com/article"])
         response = await _persist(articles)
-        assert response["extraction_failures"] == [{"code": "extraction_timeout"}]
+        assert response["extraction_failures"] == [{"code": "extraction_timeout", "source": "example.com/article"}]
         assert response["stored_articles"] == 0
         assert all(job.status == scraper_mod.JobStatus.FAILED for job in scraper.job_queue._completed_jobs.values())
     finally:
@@ -285,7 +287,7 @@ async def test_enhanced_webscraping_persist_does_not_infer_duplicate_from_error_
 
     assert response["status"] == "persist-ok"
     assert response["duplicate_articles"] == 0
-    assert response["errors"] == ["Source extraction failed. Check the server logs for details."]
+    assert response["errors"] == ["example.com/unavailable: Source extraction failed. Check the server logs for details."]
 
 
 @pytest.mark.integration
@@ -367,7 +369,7 @@ async def test_enhanced_webscraping_persist_mixed_duplicate_and_failure_retains_
     assert response["stored_articles"] == 0
     assert response["skipped_articles"] == 1
     assert response["duplicate_articles"] == 1
-    assert response["errors"] == ["Source extraction failed. Check the server logs for details."]
+    assert response["errors"] == ["example.com/b: Source extraction failed. Check the server logs for details."]
 
 
 @pytest.mark.integration

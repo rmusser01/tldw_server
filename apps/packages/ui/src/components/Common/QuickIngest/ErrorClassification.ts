@@ -189,3 +189,19 @@ export function classifyError(error: string | undefined, data?: unknown): ErrorC
 
   return UNKNOWN_CATEGORY
 }
+
+/**
+ * Sources whose extraction failed, as the server's safe hints (host plus the
+ * end of the path; never the query string), so users can tell which page failed.
+ */
+export function extractionFailureSources(data?: unknown): string[] {
+  const result = data && typeof data === "object" ? data as Record<string, unknown> : null
+  const payload = result?.result && typeof result.result === "object"
+    ? result.result as Record<string, unknown> : result
+  const failures = payload?.extraction_failures
+  if (!Array.isArray(failures)) return []
+  return failures.flatMap(failure => {
+    const source = failure && typeof failure === "object" ? (failure as Record<string, unknown>).source : null
+    return typeof source === "string" && source ? [source] : []
+  })
+}

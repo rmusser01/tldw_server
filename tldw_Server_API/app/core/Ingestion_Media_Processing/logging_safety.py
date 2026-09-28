@@ -46,3 +46,27 @@ def redact_url_for_log(value: object) -> str:
 def redact_urls_for_log(values: Iterable[object]) -> list[str]:
     """Return a list of URL-like values safe to include in logs."""
     return [redact_url_for_log(value) for value in values]
+
+
+_URL_HINT_TAIL_CHARS = 32
+
+
+def url_hint_for_display(value: object, *, tail_chars: int = _URL_HINT_TAIL_CHARS) -> str | None:
+    """Return a short user-facing identifier for a URL: its host plus the end of its path.
+
+    Enough for a user to tell which source failed, without echoing the full URL:
+    credentials, port, query and fragment (where tokens usually live) are dropped,
+    and a long path keeps only its last ``tail_chars`` characters. Returns None
+    when there is no host to show.
+    """
+    try:
+        parsed = urlsplit(str(value or ""))
+        host = parsed.hostname
+    except ValueError:
+        return None
+    if not host:
+        return None
+    path = parsed.path.rstrip("/")
+    if len(path) > tail_chars:
+        path = "/…" + path[-tail_chars:]
+    return f"{host}{path}"
