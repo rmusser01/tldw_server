@@ -14,6 +14,7 @@ from typing import Dict
 from unittest.mock import AsyncMock, patch
 
 # 3rd-party Libraries
+import httpx
 import pytest
 from fastapi import status # Added
 from fastapi.testclient import TestClient
@@ -1366,33 +1367,36 @@ class TestProcessDocuments:
         ),
     ])
     def test_process_doc_url_various_formats(self, url, check_content_part, expected_status, expected_error_part, client, dummy_headers, monkeypatch):
-        """Test processing various document URLs.
+        """Process controlled TXT, Markdown, and HTML through the real downloader."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing import download_utils
 
-        The download is served locally, as in test_process_doc_multi_status_mixed:
-        the live fixtures drifted (the TXT/MD URLs now 404, so those cases only
-        ever skipped, and example.com dropped its "Example Domain" heading).
-        """
         served = {
-            VALID_TXT_URL: ("LICENSE.txt", "GNU GENERAL PUBLIC LICENSE\nThis license applies to the program."),
-            VALID_MD_URL: ("README.md", "# tldw\n\nA FastAPI server for media analysis.\n"),
+            VALID_TXT_URL: ("text/plain", b"GNU GENERAL PUBLIC LICENSE\nThis license applies to the program."),
+            VALID_MD_URL: ("text/markdown", b"# tldw\n\nA FastAPI server for media analysis.\n"),
             VALID_HTML_URL: (
-                "index.html",
-                "<html><head><title>Example Domain</title></head><body>"
-                "<h1>Example Domain</h1><p>This domain is for use in documentation examples.</p>"
-                "</body></html>",
+                "text/html",
+                b"<html><head><title>Example Domain</title></head><body>"
+                b"<h1>Example Domain</h1><p>Controlled document URL content.</p></body></html>",
             ),
         }
+        content_type, body = served[url]
 
-        async def fake_download_url_async(client, url, target_dir, *_args, **_kwargs):
-            name, body = served[url]
-            target_path = Path(target_dir) / name
-            target_path.write_text(body, encoding="utf-8")
-            return target_path
+        def document_response(request: httpx.Request) -> httpx.Response:
+            assert request.method == "GET"
+            assert str(request.url) == url
+            return httpx.Response(
+                200,
+                headers={"content-type": content_type, "content-length": str(len(body))},
+                content=body,
+            )
 
-        monkeypatch.setattr(
-            "tldw_Server_API.app.api.v1.endpoints.media.process_documents.core_download_url_async",
-            fake_download_url_async,
-        )
+        transport = httpx.MockTransport(document_response)
+
+        def create_document_client(**kwargs):
+            return httpx.AsyncClient(timeout=kwargs.get("timeout", 60.0), transport=transport)
+
+        monkeypatch.setattr(download_utils, "_create_async_client", create_document_client)
+
         form_data = {"urls": [url], "perform_analysis": "false"}
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
 
@@ -1417,6 +1421,10 @@ class TestProcessDocuments:
             assert result["content"] is not None and len(result["content"]) > 0
             assert check_content_part in result["content"] # Check if expected text is present
             assert result["chunks"] is not None and len(result["chunks"]) > 0
+            if url == VALID_HTML_URL:
+                assert result["source_format"] == "html"
+                assert Path(result["processing_source"]).suffix == ".html"
+                assert "Controlled document URL content." in result["content"]
         else: # Expected 207 (failure)
             check_media_item_result(result, "Error")
             assert result["input_ref"] == url
