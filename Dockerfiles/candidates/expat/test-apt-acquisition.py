@@ -21,16 +21,16 @@ PAYLOAD = b"candidate acquisition regression fixture\n"
 class AcquisitionTests(unittest.TestCase):
     """Exercise recovery, exhaustion and integrity with APT, not a command fake."""
 
-    def test_transient_503_recovers_beyond_default_retry_budget(self):
+    def test_transient_503_recovers_beyond_default_retry_budget(self) -> None:
         self.acquire("transient", expected_exit=0, expected_requests=5)
 
-    def test_persistent_503_stops_after_five_retries(self):
+    def test_persistent_503_stops_after_five_retries(self) -> None:
         self.acquire("persistent", expected_exit=100, expected_requests=6)
 
-    def test_corrupt_success_response_fails_hash_verification(self):
+    def test_corrupt_success_response_fails_hash_verification(self) -> None:
         self.acquire("corrupt", expected_exit=100, expected_requests=1)
 
-    def test_repository_requests_use_alternate_endpoint_for_same_snapshot(self):
+    def test_repository_requests_use_alternate_endpoint_for_same_snapshot(self) -> None:
         """Catch wrong Dockerfile source wiring, suite drift, or extra repositories."""
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run(  # nosec B603
@@ -68,7 +68,7 @@ class AcquisitionTests(unittest.TestCase):
         requests = Counter()
 
         class Handler(BaseHTTPRequestHandler):
-            def do_GET(self):
+            def do_GET(self) -> None:
                 requests["count"] += 1
                 failing = scenario == "persistent" or (scenario == "transient" and requests["count"] <= 4)
                 content = b"No healthy backends" if failing else PAYLOAD
@@ -79,7 +79,7 @@ class AcquisitionTests(unittest.TestCase):
                 self.end_headers()
                 self.wfile.write(content)
 
-            def log_message(self, *_args):
+            def log_message(self, *_args: object) -> None:
                 pass
 
         with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server, tempfile.TemporaryDirectory() as directory:

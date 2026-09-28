@@ -9,6 +9,10 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import pytest
 
 TESTS = (
     "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_xml_ingestion.py::test_import_xml_handler_reports_malformed_input",
@@ -29,10 +33,10 @@ class Evidence:
         self.collected: list[str] = []
         self.reports: list[dict] = []
 
-    def pytest_collection_finish(self, session) -> None:
+    def pytest_collection_finish(self, session: "pytest.Session") -> None:
         self.collected = [item.nodeid for item in session.items]
 
-    def pytest_runtest_logreport(self, report) -> None:
+    def pytest_runtest_logreport(self, report: "pytest.TestReport") -> None:
         self.reports.append(
             {
                 "nodeid": report.nodeid,

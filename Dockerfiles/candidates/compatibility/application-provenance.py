@@ -11,7 +11,7 @@ CORE = "tldw_Server_API.app.core."
 XML = CORE + "Ingestion_Media_Processing.XML_Ingestion_Lib"
 CHUNK = CORE + "Chunking"
 STRATEGY = CHUNK + ".strategies.json_xml"
-LAUNCHER_SHA256 = "2d233408102f35185b3a1e7b2098e9ca2a9f50fa2d5f8898dbd0444012ac820e"
+LAUNCHER_SHA256 = "038ba836f60dc9b01b18eb766d20f3288c22b91ed62499d24f1bc718374ec65c"
 PARSER_HASHES = {
     "pyexpat": "9b2373fe4f83cca3ece2e1dc12713580b439b897138c8405f93b7542980df4ad",
     "_elementtree": "38df3969aaedc9a64a1e9cbb5dad606524eb9b58d5e41cf1118369693b827685",

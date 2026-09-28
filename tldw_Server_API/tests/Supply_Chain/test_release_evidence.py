@@ -680,3 +680,38 @@ def test_release_verifier_rechecks_policy_after_checksums_are_resealed(tmp_path:
     files[scan_name] = hashlib.sha256((tmp_path / scan_name).read_bytes()).hexdigest()
     with pytest.raises(EvidenceError, match="decision_file"):
         verify_release_manifest(replace(manifest, files=files), tmp_path)
+
+
+@pytest.mark.parametrize("field", ["bom-ref", "purl"])
+@pytest.mark.parametrize(
+    "identity",
+    [
+        "pkg:oci/app@{subject}0",
+        "pkg:oci/app@{subject}.other?arch=amd64",
+        "pkg:oci/app@other?image=@{subject}",
+        "pkg:oci/app@other#image@{subject}",
+    ],
+)
+def test_release_rejects_sbom_digest_substrings(tmp_path: Path, field: str, identity: str) -> None:
+    _write_complete_fixture(tmp_path)
+    record_path = tmp_path / "image-app.json"
+    subject = json.loads(record_path.read_text())["subject_digest"]
+    sbom_path = tmp_path / "sbom-image-app.cdx.json"
+    sbom = json.loads(sbom_path.read_text())
+    sbom["metadata"]["component"] = {field: identity.format(subject=subject)}
+    _write_json(sbom_path, sbom)
+    with pytest.raises(EvidenceError, match="subject"):
+        load_image_evidence(record_path)
+
+
+@pytest.mark.parametrize("field", ["bom-ref", "purl"])
+@pytest.mark.parametrize("suffix", ["", "?arch=amd64&repository_url=registry.example/app", "?arch=amd64#layer"])
+def test_release_accepts_exact_sbom_digest_with_qualifiers(tmp_path: Path, field: str, suffix: str) -> None:
+    _write_complete_fixture(tmp_path)
+    record_path = tmp_path / "image-app.json"
+    subject = json.loads(record_path.read_text())["subject_digest"]
+    sbom_path = tmp_path / "sbom-image-app.cdx.json"
+    sbom = json.loads(sbom_path.read_text())
+    sbom["metadata"]["component"] = {field: f"pkg:oci/app@{subject}{suffix}"}
+    _write_json(sbom_path, sbom)
+    assert load_image_evidence(record_path).subject_digest == subject

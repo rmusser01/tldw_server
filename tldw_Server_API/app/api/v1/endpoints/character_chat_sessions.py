@@ -180,7 +180,6 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
     await_owned_worker,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
-from tldw_Server_API.app.core.LLM_Calls.capability_registry import get_allowed_fields
 
 # Chat helpers and utilities
 # For chat completions
@@ -6162,10 +6161,6 @@ async def character_chat_completion(
             if body.repetition_penalty is not None
             else character_generation_settings.get("repetition_penalty")
         )
-        # Creation snapshots include 1.0 even for adapters without this optional
-        # sampler. Neutral repetition must not turn a valid completion into 400.
-        if resolved_repetition_penalty == 1.0:
-            resolved_repetition_penalty = None
         resolved_stop = (
             body.stop
             if body.stop is not None
@@ -6410,14 +6405,6 @@ async def character_chat_completion(
                         "model": model,
                     },
                 )
-
-        # Behavior snapshots include the neutral default even for providers that
-        # do not accept this extension. Preserve meaningful penalties for validation.
-        if (
-            resolved_repetition_penalty == 1.0
-            and "repetition_penalty" not in get_allowed_fields(provider)
-        ):
-            resolved_repetition_penalty = None
 
         # If we will persist, ensure message cap won't be exceeded.
         # Otherwise enforce a soft cap for non-persisted completions.

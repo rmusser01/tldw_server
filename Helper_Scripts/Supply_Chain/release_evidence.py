@@ -293,7 +293,10 @@ def _validate_sbom(path: Path, context: str, subject: str) -> None:
     if not isinstance(component, Mapping):
         raise _error(context, "metadata.component")
     identities = (component.get("bom-ref"), component.get("purl"))
-    if not any(type(identity) is str and f"@{subject}" in identity for identity in identities):
+    if not any(
+        type(identity) is str and identity.partition("?")[0].partition("#")[0].endswith(f"@{subject}")
+        for identity in identities
+    ):
         raise _error(context, "subject")
 
 

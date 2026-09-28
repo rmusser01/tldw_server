@@ -163,7 +163,6 @@ export const RunsTab: React.FC = () => {
 
   // Fetch runs
   const loadRuns = useCallback(async (showLoading = true) => {
-    setRunsCheckedAt(Date.now())
     if (showLoading) setRunsLoading(true)
     try {
       let items: WatchlistRun[] = []
@@ -222,6 +221,7 @@ export const RunsTab: React.FC = () => {
         })
       )
     } finally {
+      setRunsCheckedAt(Date.now())
       if (showLoading) setRunsLoading(false)
     }
   }, [
