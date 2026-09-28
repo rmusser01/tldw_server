@@ -109,10 +109,12 @@ async def test_prompt_load_uses_resolver_captured_before_concurrent_transition(
     release_read = threading.Event()
     original_read = prompt_loader_mod._read_regular_file_bytes_no_follow
 
-    def barrier_read(path: Any) -> bytes:
+    # The loader passes max_bytes= (53f0a747d2); a narrower stub signature raised
+    # TypeError before read_started was ever set.
+    def barrier_read(path: Any, **kwargs: Any) -> bytes:
         read_started.set()
         assert release_read.wait(timeout=1.0)  # nosec B101
-        return original_read(path)
+        return original_read(path, **kwargs)
 
     monkeypatch.setattr(
         prompt_loader_mod,
