@@ -36,8 +36,19 @@ _STORE_DB_NAME = "automation_message_store.db"
 DEFAULT_MESSAGE_TTL_DAYS = 30
 
 
+class AutomationMessageStoreError(RuntimeError):
+    """Application-level store failure (missing key, encryption failure)."""
+
+
 def _message_store_keys() -> tuple[str | None, str | None]:
-    """Return the message-store envelope keys: dedicated, else BYOK fallback."""
+    """Return the message-store envelope keys: dedicated, else BYOK fallback.
+
+    Rotation note: when the BYOK fallback keys are used, the BYOK rotation
+    routine re-encrypts provider secrets but NOT this store's rows -- the
+    secondary key keeps old rows readable during dual-read, so keep the
+    retired key as secondary until the store's own re-encryption lands
+    (tracked on TASK-13264).
+    """
     settings = get_settings()
     primary = (
         getattr(settings, "AUTOMATION_MESSAGE_ENCRYPTION_KEY", None)
@@ -117,16 +128,25 @@ class AutomationMessageStore:
         self.ensure_schema()
         primary, _secondary = _message_store_keys()
         if not primary:
-            raise RuntimeError("automation message encryption key is not configured")
+            raise AutomationMessageStoreError(
+                "automation message encryption key is not configured"
+            )
         envelope = encrypt_json_blob_with_key({"message": raw_message}, primary)
         if not envelope:
-            raise RuntimeError("automation message encryption failed")
+            raise AutomationMessageStoreError("automation message encryption failed")
         import json
 
         blob = json.dumps(envelope)
         now = _utcnow()
         expires = now + timedelta(days=ttl_days)
+        # Opportunistic retention sweep: writes are rare, rate-limited
+        # authoring events, so piggybacking the expired-rows DELETE here
+        # bounds ciphertext on disk without a separate scheduler (review F3).
         with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute(
+                "DELETE FROM automation_messages WHERE expires_at < ?",
+                (now.isoformat(),),
+            )
             conn.execute(
                 """
                 INSERT INTO automation_messages
@@ -155,8 +175,18 @@ class AutomationMessageStore:
         the run row would then leak parts of. A successful resolve refreshes
         the TTL (last-access retention).
         """
+        # Contract: resolve NEVER raises -- a locked, unreadable, or damaged
+        # store is one more unresolvable-ref case (honest failed run), not an
+        # exception the executor must diagnose (review F9).
+        try:
+            return self._resolve_message_inner(owner_id, message_ref, _utcnow())
+        except (sqlite3.Error, OSError):
+            return None
+
+    def _resolve_message_inner(
+        self, owner_id: int, message_ref: str, now: datetime
+    ) -> str | None:
         self.ensure_schema()
-        now = _utcnow()
         with sqlite3.connect(str(self.db_path)) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
@@ -200,6 +230,16 @@ class AutomationMessageStore:
         except sqlite3.Error:
             pass  # Retention refresh is best-effort; the resolve stands.
         return message
+
+    def delete_message(self, owner_id: int, message_ref: str) -> None:
+        """Delete one entry (compensating delete for failed authoring)."""
+        self.ensure_schema()
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute(
+                "DELETE FROM automation_messages"
+                " WHERE message_ref = ? AND owner_id = ?",
+                (message_ref, int(owner_id)),
+            )
 
     # --- retention --------------------------------------------------------
 

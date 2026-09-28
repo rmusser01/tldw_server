@@ -30,8 +30,8 @@ def _message_store_test_key(monkeypatch):
     """ADR-184 1A: agent_task previews persist the raw message to the
     encrypted store; without a configured key that store refuses writes
     (fail-closed). Give these tests a key so preview authoring works."""
-    from tldw_Server_API.app.core.Scheduled_Tasks import (
-        automation_message_store as _store_module,
+    from tldw_Server_API.app.core.DB_Management import (
+        Automation_Message_Store_DB as _store_module,
     )
     import base64
 

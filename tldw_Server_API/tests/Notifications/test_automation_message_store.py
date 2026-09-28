@@ -19,12 +19,13 @@ import pytest
 from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_automation_schemas import (
     ScheduledTaskPreviewCreateRequest,
 )
+from tldw_Server_API.app.core.DB_Management import Automation_Message_Store_DB as store_module
+from tldw_Server_API.app.core.DB_Management.Automation_Message_Store_DB import (
+    AutomationMessageStore,
+    AutomationMessageStoreError,
+)
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
     ScheduledTasksDatabase,
-)
-from tldw_Server_API.app.core.Scheduled_Tasks import automation_message_store as store_module
-from tldw_Server_API.app.core.Scheduled_Tasks.automation_message_store import (
-    AutomationMessageStore,
 )
 from tldw_Server_API.app.services.scheduled_task_automation_service import (
     ScheduledTaskAutomationError,
@@ -113,7 +114,7 @@ def test_unconfigured_key_refuses_store(tmp_path, monkeypatch):
     monkeypatch.setattr(store_module, "_message_store_keys", lambda: (None, None))
     store = _store(tmp_path)
 
-    with pytest.raises(RuntimeError):
+    with pytest.raises(AutomationMessageStoreError):
         store.store_message(OWNER_ID, "ref-1", RAW)
 
 
@@ -182,7 +183,7 @@ def test_recurring_question_preview_never_touches_the_store(tmp_path):
 def test_store_failure_refuses_authoring_without_persisting(tmp_path):
     class DownStore(AutomationMessageStore):
         def store_message(self, *args: Any, **kwargs: Any) -> None:
-            raise RuntimeError("store down")
+            raise AutomationMessageStoreError("store down")
 
     repo = ScheduledTasksDatabase(tmp_path / "scheduled_tasks_down.db")
     repo.ensure_schema()
@@ -199,3 +200,29 @@ def test_store_failure_refuses_authoring_without_persisting(tmp_path):
     assert excinfo.value.code == "message_store_unavailable"  # nosec B101
     rows, total = repo.list_previews(owner_id=OWNER_ID, limit=10, offset=0)
     assert rows == [] and total == 0  # nosec B101
+
+
+def test_invalid_preview_never_touches_the_store(tmp_path):
+    store = _store(tmp_path)
+    service, repo = _service_with_store(tmp_path, store)
+
+    preview = service.create_preview(
+        owner_id=OWNER_ID,
+        actor=ACTOR,
+        payload=ScheduledTaskPreviewCreateRequest(
+            mode="create",
+            family="agent_task",
+            name="Triage agent",
+            config={},
+            input={"agent_ref": "agent:triage", "message": RAW},
+            schedule={"kind": "not-a-schedule"},
+            visibility_policy={"mode": "metadata_only"},
+        ),
+    )
+
+    assert preview.status == "invalid"  # nosec B101
+    message_ref = str(
+        (preview.normalized_config or {}).get("input", {}).get("message_ref") or ""
+    )
+    # An invalid preview cannot be consumed; its prompt must not be retained.
+    assert message_ref == "" or store.resolve_message(OWNER_ID, message_ref) is None  # nosec B101

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
@@ -44,8 +45,9 @@ from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import (
 from tldw_Server_API.app.core.Scheduled_Tasks.automation_executors import (
     _config_section as _automation_config_section,
 )
-from tldw_Server_API.app.core.Scheduled_Tasks.automation_message_store import (
+from tldw_Server_API.app.core.DB_Management.Automation_Message_Store_DB import (
     AutomationMessageStore,
+    AutomationMessageStoreError,
 )
 from tldw_Server_API.app.core.Scheduled_Tasks.execution_certification import (
     AgentAutomationAdmission,
@@ -1238,12 +1240,18 @@ class ScheduledTaskAutomationService:
         normalized_input = normalized.get("input")
         if isinstance(normalized_input, dict):
             message_ref = str(normalized_input.get("message_ref") or "")
-        if raw_message.strip() and message_ref:
+        # Store only for a preview that will be VALID: an invalid preview can
+        # never be consumed into a definition, so its prompt would be pure
+        # retained ciphertext (review F7). Previews are immutable -- a fixed
+        # payload authors a fresh preview and a fresh store row.
+        message_stored = False
+        if raw_message.strip() and message_ref and not validation_errors:
             try:
                 self._message_store_for(owner_id).store_message(
                     owner_id, message_ref, raw_message
                 )
-            except Exception as exc:
+                message_stored = True
+            except (AutomationMessageStoreError, sqlite3.Error, OSError, ValueError) as exc:
                 raise ScheduledTaskAutomationError(
                     "message_store_unavailable",
                     reason=str(exc),
@@ -1253,7 +1261,8 @@ class ScheduledTaskAutomationService:
                     ),
                 ) from exc
         status = "invalid" if validation_errors else "valid"
-        row = tx.create_preview(
+        try:
+            row = tx.create_preview(
             owner_id=owner_id,
             mode=request.mode,
             family=request.family,
@@ -1270,7 +1279,20 @@ class ScheduledTaskAutomationService:
             redaction_policy=normalized.get("redaction_policy", {"mode": "none", "fields": []}),
             expires_at=_iso(_utcnow() + PREVIEW_TTL),
             created_by=actor,
-        )
+            )
+        except Exception:
+            # The store row and the preview row live in different databases:
+            # if the row insert fails, compensate by dropping the store entry
+            # so a retry does not strand ciphertext (review F8; TTL still
+            # bounds anything this best-effort delete itself misses).
+            if message_stored:
+                try:
+                    self._message_store_for(owner_id).delete_message(
+                        owner_id, message_ref
+                    )
+                except Exception:  # noqa: BLE001 - compensation is best-effort
+                    pass
+            raise
         return self._preview_response(row)
 
     def _create_definition(
