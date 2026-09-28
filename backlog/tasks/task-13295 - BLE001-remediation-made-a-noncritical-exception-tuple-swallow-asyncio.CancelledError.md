@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-09-22 04:45'
-updated_date: '2026-09-23 23:14'
+updated_date: '2026-09-28 19:41'
 labels:
   - bug
   - ingestion
@@ -66,7 +66,6 @@ asyncio.TimeoutError was checked and deliberately LEFT - it is an alias of the b
 
 2026-09-23 completion (e8e9449ae1). AC1: tests/MediaIngestion_NEW/unit/test_persistence_cancellation_and_quota.py::test_cancelling_add_media_mid_persistence_propagates parks add_media_orchestrate inside the upload quota check, cancels the task, asserts CancelledError and that no item was processed. Red against 9f5373725b^ persistence.py ('DID NOT RAISE CancelledError'; log shows 'Quota check failed (non-fatal)'), green now. AC2 amended (premise false): the upload quota path already re-raised 413 before the tuple catch pre-9f5373725b; test_over_quota_upload_is_rejected_with_413 passes before and after (regression guard). The :5078 'except HTTPException: raise' from 9f5373725b was on the per-URL item path in process_document_like_item and was a regression: SSRF blocks / per-URL quota rejections escaped instead of returning the item's Error result (ingest-jobs worker then fails the job; reading_service's tuple does not catch HTTPException; /media/add folds it to 207 anyway). Reverted with a comment; test_over_quota_url_item_is_reported_as_that_items_error red before revert (HTTPException 413 raised), green after. AC4 (HTTPException audit): kept in the tuple deliberately. AST pass over persistence.py (direct 'raise HTTPException' + intra-file call graph: validate_add_media_inputs, add_media_orchestrate, add_media_persist, process_document_like_item, _run_doc_item) finds exactly one tuple catch that can see an HTTPException with no earlier 'except HTTPException' handler - the per-item prep catch in process_document_like_item, which is intentional. Limitation: HTTPExceptions raised by other modules inside tuple-guarded blocks were not traced. Tests: MediaIngestion_NEW/unit + lint: 412 passed, 31 failed, 12 collection errors; the same 31 fail with HEAD persistence.py and the errors are missing yt_dlp (env). Bandit -ll persistence.py: no issues.
 
-
 Notes recorded on dev by the parallel core-review work (merged 2026-09-23):
 Fixed on branch ci/review-followup-visibility. Two of the task's claims did not survive verification; the core defect did, and is larger than filed.
 VERIFIED (the real defect): asyncio.CancelledError derives from BaseException, not Exception, so the bare 'except Exception:' these tuples replaced never caught it. Listing it widened what is suppressed. Proved end to end, not just by MRO: test_cancellation_during_ledger_init_propagates drives _get_media_ingestion_daily_ledger, whose 'await ledger.initialize()' sits inside a tuple-guarded try. Against unfixed code the cancellation is logged as 'Media ingestion budget: failed to initialize ResourceDailyLedger:' -- with an empty message, because CancelledError carries none -- and the function returns None, so the caller proceeds as though the ledger were merely unavailable.
@@ -88,9 +87,10 @@ That is the honest shape of this whole task: the cleanup was riding on the bug. 
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 
-
 Notes from the other branch (merged 2026-09-27):
 Re-checked on dev 2026-09-27: the CancelledError fix and its AST ratchet are in place (#2982). Stays open for AC #4 (HTTPException in the tuple), deferred as recorded above.
+
+Correction 2026-09-28: the 2026-09-27 note above ('stays open for AC #4') used the pre-reconciliation numbering and is wrong. Current AC3 ('removed from the tuple, or every suppress site that must not swallow it is narrowed') is met by the 'except HTTPException: raise' guards ahead of both 413 raises, as the final summary records. The task is correctly Done.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
