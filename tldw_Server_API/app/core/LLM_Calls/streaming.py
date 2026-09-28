@@ -28,7 +28,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
 from tldw_Server_API.app.core.http_client import RetryPolicy, astream_sse
 from tldw_Server_API.app.core.LLM_Calls.error_utils import is_chunked_encoding_error
 
-from .sse import is_done_line, normalize_provider_line, sse_data
+from .sse import finalize_stream, is_done_line, normalize_provider_line, sse_data, sse_done
 
 _DEFAULT_SYNC_STREAM_QUEUE_SIZE = 16
 _SYNC_STREAM_QUEUE_TIMEOUT_SECONDS = 0.05
@@ -120,6 +120,36 @@ def iter_sse_lines_requests(
     except Exception as e_stream:
         _log_provider_stream_error(provider, e_stream)
         yield provider_stream_error_frame(provider)
+
+
+def iter_sse_lines_raising(response: Any, *, provider: str) -> Iterator[str]:
+    """Yield normalized SSE lines for adapters that surface failures as exceptions.
+
+    Unlike iter_sse_lines_requests, nothing is swallowed: an in-band SSE error
+    raises the status-aware sanitized ChatAPIError and transport errors
+    propagate, so the adapter's own handler can map them. The first provider
+    DONE is forwarded in place, later ones are dropped, and one DONE is
+    appended (and the response closed) if the provider never sent one.
+    """
+    from tldw_Server_API.app.core.LLM_Calls.providers.base import (
+        raise_if_in_band_provider_error,
+    )
+
+    seen_done = False
+    for raw in response.iter_lines():
+        if not raw:
+            continue
+        line = raw.decode("utf-8", errors="replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+        raise_if_in_band_provider_error(provider, line, phase="stream_response")
+        if is_done_line(line):
+            if not seen_done:
+                seen_done = True
+                yield sse_done()
+            continue
+        normalized = normalize_provider_line(line)
+        if normalized is not None:
+            yield normalized
+    yield from finalize_stream(response=response, done_already=seen_done)
 
 
 async def aiter_sse_lines_httpx(
