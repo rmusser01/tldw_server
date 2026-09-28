@@ -2313,6 +2313,7 @@ jobs:
           echo "Python 3.12 full-suite shards passed."
 
   full-suite-linux-313-shards:
+    # ~550 extra jobs per run: main pushes, releases and manual dispatch only.
     name: Full Suite shard (Ubuntu / Python 3.13 / ${{ matrix.shard.name }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -2324,8 +2325,7 @@ jobs:
       always() && !cancelled() &&
       needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
       needs.changes.result == 'success' &&
-      ((github.event_name != 'pull_request' && github.event_name != 'workflow_run') ||
-       needs.changes.outputs.backend_changed == 'true')
+      github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
       matrix:
@@ -3805,11 +3805,7 @@ jobs:
           )
         )
       ) &&
-      (
-        (github.event_name != 'pull_request' &&
-         github.event_name != 'workflow_run') ||
-        needs.changes.outputs.backend_changed == 'true'
-      )
+      (github.event_name != 'pull_request' && github.event_name != 'workflow_run')
     steps:
       - name: Check Python 3.13 shard result
         shell: bash
@@ -3823,6 +3819,7 @@ jobs:
 
 
   full-suite-macos-312-shards:
+    # ~550 extra jobs per run: main pushes, releases and manual dispatch only.
     name: Full Suite shard (macos-latest / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: macos-latest
     timeout-minutes: 60
@@ -3834,8 +3831,7 @@ jobs:
       always() && !cancelled() &&
       needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
       needs.changes.result == 'success' &&
-      ((github.event_name != 'pull_request' && github.event_name != 'workflow_run') ||
-       needs.changes.outputs.backend_changed == 'true')
+      github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
       matrix:
@@ -5143,11 +5139,7 @@ jobs:
           )
         )
       ) &&
-      (
-        (github.event_name != 'pull_request' &&
-         github.event_name != 'workflow_run') ||
-        needs.changes.outputs.backend_changed == 'true'
-      )
+      (github.event_name != 'pull_request' && github.event_name != 'workflow_run')
     steps:
       - name: Check macos-latest Python 3.12 shard result
         shell: bash
@@ -5160,6 +5152,7 @@ jobs:
           echo "macos-latest Python 3.12 full-suite shards passed."
 
   full-suite-windows-312-shards:
+    # ~550 extra jobs per run: main pushes, releases and manual dispatch only.
     name: Full Suite shard (windows-latest / Python 3.12 / ${{ matrix.shard.name }})
     runs-on: windows-latest
     timeout-minutes: 60
@@ -5171,8 +5164,7 @@ jobs:
       always() && !cancelled() &&
       needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
       needs.changes.result == 'success' &&
-      ((github.event_name != 'pull_request' && github.event_name != 'workflow_run') ||
-       needs.changes.outputs.backend_changed == 'true')
+      github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
       matrix:
@@ -6485,11 +6477,7 @@ jobs:
           )
         )
       ) &&
-      (
-        (github.event_name != 'pull_request' &&
-         github.event_name != 'workflow_run') ||
-        needs.changes.outputs.backend_changed == 'true'
-      )
+      (github.event_name != 'pull_request' && github.event_name != 'workflow_run')
     steps:
       - name: Check windows-latest Python 3.12 shard result
         shell: bash
@@ -7802,11 +7790,10 @@ jobs:
     name: Character Chat Rate-Limits (TEST_MODE=0)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [full-suite-linux-312-summary, full-suite-linux-313-summary, changes]
+    needs: [full-suite-linux-312-summary, changes]
     if: >-
       always() && !cancelled() &&
       needs.full-suite-linux-312-summary.result == 'success' &&
-      needs.full-suite-linux-313-summary.result == 'success' &&
       needs.changes.result == 'success' &&
       ((github.event_name != 'pull_request' && github.event_name != 'workflow_run') ||
        needs.changes.outputs.backend_changed == 'true')

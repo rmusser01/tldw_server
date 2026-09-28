@@ -702,6 +702,10 @@ def test_full_suite_test_result_uploads_are_non_blocking() -> None:
         assert step.get("uses") == "actions/upload-artifact@v7"
 
 
+def _normalize_ws(text: str) -> str:
+    return " ".join(text.split())
+
+
 def test_full_suite_summaries_follow_backend_path_filter() -> None:
     workflow = _load(".github/workflows/ci.yml")
     expected_if = """always() && !cancelled() && (
@@ -729,10 +733,15 @@ def test_full_suite_summaries_follow_backend_path_filter() -> None:
         "full-suite-windows-312-summary": "full-suite-windows-312-shards",
     }
 
+    # 3.13, macOS and Windows are ~550 extra jobs, so they skip PRs entirely.
+    non_pr_if = expected_if.split(") && (\n  (github.event_name")[0] + """) &&
+(github.event_name != 'pull_request' && github.event_name != 'workflow_run')"""
+
     for summary_job, shard_job in summary_to_shards.items():
         job = workflow["jobs"][summary_job]
         assert job["needs"] == [shard_job, "changes", "admission", "await_license"]
-        assert job["if"] == expected_if
+        wanted = expected_if if summary_job == "full-suite-linux-312-summary" else non_pr_if
+        assert _normalize_ws(job["if"]) == _normalize_ws(wanted), summary_job
 
 
 def test_linux_311_smoke_is_sharded_for_timeout_control() -> None:

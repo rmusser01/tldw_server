@@ -150,7 +150,6 @@ ORIGINAL_DEPENDENCIES = {
     ("ci.yml", "full-suite-os-313-release-shards"): ("lint", "syntax-check"),
     ("ci.yml", "character-chat-rate-limits"): (
         "full-suite-linux-312-summary",
-        "full-suite-linux-313-summary",
         "changes",
     ),
     ("container-build-check.yml", "container-build-check"): ("build",),
@@ -191,6 +190,15 @@ BACKEND_CHANGED_JOBS = {
     "full-suite-windows-312-shards",
     "full-suite-windows-312-summary",
     "character-chat-rate-limits",
+}
+# Too many jobs to run on every PR; main pushes, releases and manual dispatch only.
+NON_PR_FULL_SUITE_JOBS = {
+    "full-suite-linux-313-shards",
+    "full-suite-linux-313-summary",
+    "full-suite-macos-312-shards",
+    "full-suite-macos-312-summary",
+    "full-suite-windows-312-shards",
+    "full-suite-windows-312-summary",
 }
 FETCH_DEPTH_CHECKOUTS = {
     ("backend-required.yml", "changes"),
@@ -428,6 +436,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
         "${{ needs.admission.outputs.head_sha || "
         "github.event.workflow_run.pull_requests[0].head.sha || github.sha }}"
     )
+    non_pr = "github.event_name != 'pull_request' && github.event_name != 'workflow_run'"
     backend_changed = (
         "(github.event_name != 'pull_request' && "
         "github.event_name != 'workflow_run') || "
@@ -480,6 +489,8 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 extra_condition = None
                 if name == "frontend-e2e-tiers.yml":
                     extra_condition = frontend_conditions[job_name]
+                elif name == "ci.yml" and job_name in NON_PR_FULL_SUITE_JOBS:
+                    extra_condition = non_pr
                 elif name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
                     extra_condition = backend_changed
                 elif (name, job_name) in {
@@ -535,16 +546,17 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 dependencies_succeeded = "always() && !cancelled() && " + " && ".join(
                     f"needs.{dependency}.result == 'success'" for dependency in needs
                 )
-                if name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
+                if name == "ci.yml" and (
+                    job_name in NON_PR_FULL_SUITE_JOBS
+                    or job_name == "full-suite-os-313-release-shards"
+                ):
+                    assert _normalized(job.get("if")) == _normalized(
+                        f"{dependencies_succeeded} && {non_pr}"
+                    ), (name, job_name)
+                elif name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
                     assert _normalized(job.get("if")) == _normalized(
                         f"{dependencies_succeeded} && ({backend_changed})"
                     ), (name, job_name)
-                elif (name, job_name) == ("ci.yml", "full-suite-os-313-release-shards"):
-                    assert _normalized(job.get("if")) == _normalized(
-                        f"{dependencies_succeeded} && "
-                        "github.event_name != 'pull_request' && "
-                        "github.event_name != 'workflow_run'"
-                    )
                 elif (name, job_name) == ("jobs-suite.yml", "jobs-postgres"):
                     assert _normalized(job.get("if")) == _normalized(dependencies_succeeded)
                 elif (name, job_name) in {
