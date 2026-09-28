@@ -314,5 +314,3 @@ async def wrap_sync_stream(
                 await asyncio.sleep(0.001)
 
         await await_owned_worker(_await_worker_release())
-
-

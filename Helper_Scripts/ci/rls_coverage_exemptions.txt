@@ -15,3 +15,5 @@
 share_tokens: Public share links are redeemed anonymously. GET /api/v1/sharing/public/{token} carries no auth dependency and resolves the token through share_token_service -> find_tokens_by_prefix, so a policy comparing owner_user_id to app.current_user_id returns zero rows and every share link stops working. Isolation here comes from the token being a secret, as with any credential-lookup table.
 
 shared_workspaces: Recipients read shares granted to them, not shares they own. get_active_share_for_user (AuthNZ/repos/shared_workspace_repo.py:215) selects by team and organization membership, so an owner-scoped policy would hide every share from the people it was shared with. The membership predicate in that query is the access control.
+
+automation_messages: Not a PostgreSQL table. Automation_Message_Store_DB keeps it in a separate per-owner SQLite file opened with sqlite3 (ADR-184), never on the shared PostgreSQL content database, so an RLS policy has nothing to attach to; isolation is the per-owner file plus its encryption. Confirmed: its only DDL is in that store, and the store has no PostgreSQL backend.
