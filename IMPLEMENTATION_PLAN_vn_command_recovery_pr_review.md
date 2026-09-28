@@ -117,6 +117,24 @@ scoped findings with regression tests before fixing. No backend scope expansion.
 all review comments/threads checked, scoped regressions and relevant suites.
 **Status**: In Progress
 
+Qodo's requested full 78bb52e2 reassessment completed at 23:53:20 UTC with no
+active bugs/rules. CodeRabbit's full review completed at 23:57:42 UTC with exact
+source/covered-commit coverage and one valid minor finding, 4117523366. A new
+write exceeding 64 readable commands was classified as unreadable storage and
+exposed whole-journal discard. Three storage validation cases and two rendered
+Start/Retry capacity cases failed before the fix (5 failed, 0.687s test time,
+3.03s total); the rendered failures showed the actual discard button. One shared
+writer error change now reports an unsent write without marking saved records
+unreadable. Corrupt reads, quota denial and warned-discard controls are unchanged.
+All 26 focused checks pass (4.31s test time, 6.04s total), including exact-key
+replay and removal of only the acknowledged entry. Final 220 VN/fetch/shared-auth
+tests pass (50.89s, 11 files, one worker), typecheck and both scoped lint commands
+pass, and diff checks are clean. Unchanged VN Python Bandit has zero
+findings/errors over 9064 lines; it does not scan TypeScript. No backend, CI,
+dependency or environment changes. Publish the scoped fix, reply and resolve the
+finding, then obtain complete new-head reviews and all live CI before normal
+merge. Prior-head completion is not qualification of this follow-up.
+
 Qodo completed the exact-head full-diff reassessment at issuecomment-5858115068
 with no production defects and accepted the human-gate clarification. Its minor
 tracking hygiene feedback was addressed in 804c0745c0. CodeRabbit completed the

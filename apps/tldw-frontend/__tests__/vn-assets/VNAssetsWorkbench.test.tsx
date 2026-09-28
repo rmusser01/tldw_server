@@ -557,6 +557,44 @@ describe('VNAssetsWorkbench', () => {
     await waitFor(() => expect(screen.getByLabelText('Generation status')).toHaveTextContent('queued'));
   });
 
+  it.each(['start', 'retry'])('preserves 64 readable commands without offering discard when %s exceeds capacity', async (kind) => {
+    existingFailedPack();
+    mocks.listVNAssetPacks.mockResolvedValue([
+      { id: 7, title: 'Orbital Library', primary_character_id: 42, status: 'draft' },
+      { id: 20, title: 'Moon Archive', primary_character_id: 43, status: 'draft' },
+    ]);
+    const commands = Array.from({ length: 64 }, (_, index) => ({
+      packId: index + 20, request: { idempotency_key: `vn-generation-original-${index}` },
+    }));
+    const key = 'tldw:vn-generation:pending:v1';
+    const raw = JSON.stringify({
+      version: 1, scope: { server: 'http://localhost:8000/api/v1', principal: '1' }, commands,
+    });
+    sessionStorage.setItem(key, raw);
+    const user = userEvent.setup();
+    render(<VNAssetsWorkbench />);
+    const send = await screen.findByRole('button', { name: kind === 'start' ? 'Start generation' : 'Retry sprite_neutral' });
+    await waitFor(() => expect(send).toBeEnabled());
+    await user.click(send);
+    expect(sessionStorage.getItem(key)).toBe(raw);
+    expect(mocks.startVNAssetGeneration).not.toHaveBeenCalled();
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Discard unreadable requests' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: /I checked server status/ })).not.toBeInTheDocument();
+    expect(screen.getByText('The generation request could not be saved for recovery. No request was sent.')).toBeInTheDocument();
+
+    await user.click(screen.getByText('Moon Archive'));
+    const recover = await screen.findByRole('button', { name: 'Recover pending request' });
+    await waitFor(() => expect(recover).toBeEnabled());
+    expect(screen.getByRole('button', { name: 'Start generation' })).toBeDisabled();
+    await user.click(recover);
+    await waitFor(() => expect(mocks.startVNAssetGeneration).toHaveBeenCalledWith(20, commands[0].request));
+    await waitFor(() => expect(JSON.parse(sessionStorage.getItem(key)!).commands).toEqual(commands.slice(1)));
+    expect(mocks.retryVNAssetSlot).not.toHaveBeenCalled();
+    expect(mocks.cancelVNAssetGeneration).not.toHaveBeenCalled();
+  });
+
   it.each(['{', ''])('guards unreadable recovery until explicit warned discard: %j', async (raw) => {
     existingFailedPack();
     sessionStorage.setItem('tldw:vn-generation:pending:v1', raw);

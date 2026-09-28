@@ -68,6 +68,19 @@ describe('VN generation recovery journal', () => {
     expect(() => writeVNCommands(scope, [command])).toThrow(/unavailable/);
   });
 
+  it.each(['capacity', 'invalid', 'duplicate'])('keeps readable commands intact after %s write validation fails', (failure) => {
+    const saved = Array.from({ length: 64 }, (_, index) => ({ ...command, packId: index + 20 }));
+    writeVNCommands(scope, saved);
+    expect(readVNCommands(scope)).toEqual(saved);
+    const raw = sessionStorage.getItem(key);
+    const next = failure === 'capacity' ? [...saved, command]
+      : failure === 'invalid' ? [{ ...command, request: { idempotency_key: 'invalid' } }]
+        : [command, command];
+    expect(() => writeVNCommands(scope, next)).toThrow('The generation request could not be saved for recovery. No request was sent.');
+    expect(sessionStorage.getItem(key)).toBe(raw);
+    expect(readVNCommands(scope)).toEqual(saved);
+  });
+
   it('surfaces a denied read of saved commands', () => {
     const prototype = Object.getPrototypeOf(window.sessionStorage);
     vi.spyOn(prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });

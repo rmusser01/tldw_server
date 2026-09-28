@@ -80,7 +80,7 @@ export function readVNCommands(scope: VNCommandScope): VNPendingCommand[] {
 
 export function writeVNCommands(scope: VNCommandScope, commands: VNPendingCommand[]): void {
   if (commands.length > 64 || !commands.every(validCommand) || new Set(commands.map((command) => command.packId)).size !== commands.length) {
-    throw new VNRecoveryStorageError(true);
+    throw new Error('The generation request could not be saved for recovery. No request was sent.');
   }
   try {
     if (!commands.length) window.sessionStorage.removeItem(VN_COMMAND_STORAGE_KEY);
