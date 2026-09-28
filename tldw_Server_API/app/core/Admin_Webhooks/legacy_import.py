@@ -652,7 +652,12 @@ def _publish_exclusive_output(path: Path, payload: bytes) -> _FileEvidence:
                 os.close(descriptor)
 
 
-def _remove_published_output_if_same(path: Path, evidence: _FileEvidence) -> None:
+def _remove_published_output_if_same(
+    path: Path,
+    evidence: _FileEvidence,
+    *,
+    expected_payload: bytes,
+) -> None:
     try:
         metadata = os.lstat(path)
     except OSError:
@@ -664,6 +669,15 @@ def _remove_published_output_if_same(path: Path, evidence: _FileEvidence) -> Non
         or stat.S_IMODE(metadata.st_mode) != evidence.mode
         or f"{metadata.st_dev}:{metadata.st_ino}" != evidence.identity
     ):
+        return
+    # dev:inode alone cannot prove the file is still ours: Linux filesystems reuse a
+    # freed inode at once, so a file another process put at this path after an
+    # unlink can carry the same identity. Only remove bytes we wrote.
+    try:
+        current_payload = _read_private_file(path)
+    except LegacyImportError:
+        return
+    if not hmac.compare_digest(current_payload, expected_payload):
         return
     with suppress(OSError):
         path.unlink()
@@ -2283,7 +2297,11 @@ class LegacyImportService:
                 and not transaction_exited
                 and normalized_output is not None
             ):
-                _remove_published_output_if_same(normalized_output, published_output)
+                _remove_published_output_if_same(
+                    normalized_output,
+                    published_output,
+                    expected_payload=plaintext,
+                )
         with suppress(Exception):
             await self._emit_rollback_audit(
                 operator_id=operator_id,
