@@ -10430,11 +10430,11 @@ class SyncDatabase:
                    AND resolution_action = ?
                    AND (
                         resolved_by_device_id = ?
-                        OR (resolved_by_device_id IS NULL AND ? IS NULL)
+                        OR (resolved_by_device_id IS NULL AND CAST(? AS TEXT) IS NULL)
                    )
                    AND (
                         resolution_notes = ?
-                        OR (resolution_notes IS NULL AND ? IS NULL)
+                        OR (resolution_notes IS NULL AND CAST(? AS TEXT) IS NULL)
                    )
                 """,
                 (
@@ -11889,7 +11889,7 @@ class SyncDatabase:
                            AND owner_user_id = ?
                            AND (
                                 device_id = ?
-                                OR (device_id IS NULL AND ? IS NULL)
+                                OR (device_id IS NULL AND CAST(? AS TEXT) IS NULL)
                            )
                            AND idempotency_key = ?
                         """,
@@ -12413,11 +12413,11 @@ class SyncDatabase:
                       FROM sync_blob_objects
                      WHERE dataset_id = ?
                        AND (? = 1 OR status = 'available')
-                       AND (? IS NULL OR owner_user_id = ?)
-                       AND (? IS NULL OR blob_id = ?)
-                       AND (? IS NULL OR payload_hash = ?)
+                       AND (CAST(? AS TEXT) IS NULL OR owner_user_id = ?)
+                       AND (CAST(? AS TEXT) IS NULL OR blob_id = ?)
+                       AND (CAST(? AS TEXT) IS NULL OR payload_hash = ?)
                        AND (
-                            ? IS NULL
+                            CAST(? AS TEXT) IS NULL
                             OR attachment_id = ?
                             OR payload_hash IN (
                                 SELECT payload_hash
@@ -12506,7 +12506,7 @@ class SyncDatabase:
             SELECT *
               FROM sync_blob_objects
              WHERE dataset_id = ?
-               AND (? IS NULL OR status = ?)
+               AND (CAST(? AS TEXT) IS NULL OR status = ?)
              ORDER BY updated_at ASC, blob_id ASC
             """,
             (dataset_id, status, status),

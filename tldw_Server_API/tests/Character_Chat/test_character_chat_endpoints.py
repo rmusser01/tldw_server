@@ -130,8 +130,11 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             chat_version = updated_chat["version"]
 
             # 3b) Chat settings read/write
+            # ceaf7dd1c3 snapshots behavior into settings at creation, so a
+            # fresh chat already has a settings row (no greeting flag yet).
             r = await client.get(f"/api/v1/chats/{chat_id}/settings", headers=headers)
-            assert r.status_code == 404
+            assert r.status_code == 200
+            assert "greetingEnabled" not in r.json()["settings"]
 
             settings_payload = {
                 "settings": {
@@ -644,8 +647,7 @@ async def test_edit_message_returns_generic_500_for_db_error(monkeypatch):
     os.environ["USER_DB_BASE_DIR"] = tmpdir
 
     try:
-        from tldw_Server_API.app.api.v1.endpoints import character_messages as character_messages_endpoint
-        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
         from tldw_Server_API.app.main import app
 
         settings = get_settings()
@@ -675,9 +677,11 @@ async def test_edit_message_returns_generic_500_for_db_error(monkeypatch):
             def fake_edit_message_content(*args, **kwargs):
                 raise CharactersRAGDBError("message edit backend unavailable")
 
+            # f7e52e82a3 moved the edit onto db.update_message inside the
+            # resume-state transaction; the module-level helper is gone.
             monkeypatch.setattr(
-                character_messages_endpoint,
-                "edit_message_content",
+                CharactersRAGDB,
+                "update_message",
                 fake_edit_message_content,
             )
 
@@ -703,8 +707,7 @@ async def test_edit_message_maps_conflict_error_to_409(monkeypatch):
     os.environ["USER_DB_BASE_DIR"] = tmpdir
 
     try:
-        from tldw_Server_API.app.api.v1.endpoints import character_messages as character_messages_endpoint
-        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
         from tldw_Server_API.app.main import app
 
         settings = get_settings()
@@ -734,9 +737,11 @@ async def test_edit_message_maps_conflict_error_to_409(monkeypatch):
             def fake_edit_message_content(*args, **kwargs):
                 raise ConflictError("message edit conflict")
 
+            # f7e52e82a3 moved the edit onto db.update_message inside the
+            # resume-state transaction; the module-level helper is gone.
             monkeypatch.setattr(
-                character_messages_endpoint,
-                "edit_message_content",
+                CharactersRAGDB,
+                "update_message",
                 fake_edit_message_content,
             )
 

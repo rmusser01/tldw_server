@@ -28725,6 +28725,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     @staticmethod
     def _is_workspace_source_saved_view_postgres_unique_error(exc: Exception) -> bool:
         """Match only SQLSTATE 23505 for the named saved-view unique constraint."""
+        if isinstance(exc, UniqueConstraintError):
+            # The backend redacts driver diagnostics (no __cause__, no
+            # constraint name). The table's only other unique key is the
+            # uuid4 primary key, and the caller re-reads the named conflict
+            # in a fresh transaction before reporting it.
+            return True
         current: BaseException | None = exc
         while current is not None:
             sqlstate = getattr(current, "sqlstate", None) or getattr(current, "pgcode", None)

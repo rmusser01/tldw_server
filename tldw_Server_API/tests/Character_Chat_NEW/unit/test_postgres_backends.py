@@ -2,6 +2,7 @@
 Regression tests for Character Chat services when operating against a PostgreSQL backend.
 """
 
+import contextlib
 from typing import Any, Dict, List, Optional
 
 import pytest
@@ -90,6 +91,7 @@ class StubDB:
     def __init__(self, connections):
 
         self.backend_type = BackendType.POSTGRESQL
+        self.client_id = "owner-1"  # world books are owner-scoped (a9f0c1a1b5)
         self._connections = list(connections)
 
     def get_connection(self):
@@ -97,6 +99,13 @@ class StubDB:
         if not self._connections:
             raise AssertionError("No stub connections remaining for test")
         return self._connections.pop(0)
+
+    @contextlib.contextmanager
+    def transaction(self):
+        # WorldBookService writes through db.transaction() (9cc0b15671).
+        conn = self.get_connection()
+        yield conn
+        conn.commit()
 
 
 def _gather_sql(connection: RecordingConnection) -> str:
@@ -206,6 +215,9 @@ def test_world_book_entry_insert_uses_returning_clause():
 
     service = WorldBookService(db)
     world_book_id = service.create_world_book(name="Lore Book")
+    # PostgreSQL entry writes first confirm the owner's book exists
+    # (a9f0c1a1b5); that read is not what this test pins.
+    service.get_world_book = lambda book_id: {"id": book_id}
     entry_id = service.add_world_book_entry(
         world_book_id,
         keywords=["hero"],

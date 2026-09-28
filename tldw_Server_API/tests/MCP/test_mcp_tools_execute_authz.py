@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
 client = TestClient(app)
@@ -113,25 +114,9 @@ def test_tools_execute_with_api_key_and_role_permission_allows_200(tmp_path, mon
 
     # Run AuthNZ migrations (creates RBAC tables and expands api_keys schema)
     ensure_authnz_tables(Path(db_file))
-    # Insert a user directly (compatible with base SQLite schema)
     pool = _run(get_db_pool())
-    async def _insert_user():
-        async with pool.transaction() as conn:
-            if hasattr(conn, 'fetchval'):
-                uid = await conn.fetchval(
-                    "INSERT INTO users (username, email, password_hash, is_active, role, is_verified) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
-                    "permit_user", "permit@test.local", "dummyhash", True, "user", True
-                )
-                return uid
-            else:
-                cur = await conn.execute(
-                    "INSERT INTO users (username, email, password_hash, is_active, role, is_verified) VALUES (?,?,?,?,?,?)",
-                    ("permit_user", "permit@test.local", "dummyhash", 1, "user", 1)
-                )
-                uid = cur.lastrowid
-                await conn.commit()
-                return uid
-    user_id = _run(_insert_user())
+    # Raw users INSERTs trip profile_user_write_guard (5f31630280); seed via UsersDB.
+    user_id = _run(ensure_test_user(pool, "permit_user", "permit@test.local", is_verified=True))
     api_mgr = _run(get_api_key_manager())
     key_data = _run(api_mgr.create_api_key(user_id=user_id, name="permit-key"))
     api_key = key_data["key"]
@@ -268,24 +253,8 @@ def test_tools_execute_with_api_key_can_run_virtual_cli_help(tmp_path, monkeypat
     ensure_authnz_tables(Path(db_file))
     pool = _run(get_db_pool())
 
-    async def _insert_user():
-        async with pool.transaction() as conn:
-            if hasattr(conn, 'fetchval'):
-                uid = await conn.fetchval(
-                    "INSERT INTO users (username, email, password_hash, is_active, role, is_verified) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
-                    "run_user", "run@test.local", "dummyhash", True, "user", True
-                )
-                return uid
-            else:
-                cur = await conn.execute(
-                    "INSERT INTO users (username, email, password_hash, is_active, role, is_verified) VALUES (?,?,?,?,?,?)",
-                    ("run_user", "run@test.local", "dummyhash", 1, "user", 1)
-                )
-                uid = cur.lastrowid
-                await conn.commit()
-                return uid
-
-    user_id = _run(_insert_user())
+    # Raw users INSERTs trip profile_user_write_guard (5f31630280); seed via UsersDB.
+    user_id = _run(ensure_test_user(pool, "run_user", "run@test.local", is_verified=True))
     api_mgr = _run(get_api_key_manager())
     key_data = _run(api_mgr.create_api_key(user_id=user_id, name="run-key"))
     api_key = key_data["key"]

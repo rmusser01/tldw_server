@@ -16,7 +16,7 @@ from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase, utcnow_iso
 from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.attachment_refs import (
@@ -332,7 +332,9 @@ def test_postgres_canonical_content_supports_all_single_byte_range_forms(
                 auth_mode="multi_user",
             ),
         ),
-        clock=lambda: "2026-08-11T20:30:00+00:00",
+        # The chunk write checks expiry against wall-clock utcnow (5c2356e754),
+        # so a fixed past clock makes the upload session expire on creation.
+        clock=utcnow_iso,
     )
     app = FastAPI()
     app.include_router(notes_endpoint.router, prefix="/api/v1/notes")

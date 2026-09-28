@@ -4,6 +4,7 @@ pytest_plugins = [
 
 import pytest
 from fastapi import status
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -90,10 +91,11 @@ def test_create_chat_with_alternate_random_greeting(authenticated_client, mock_c
      # Arrange: create character with alt greetings
     char_id = _create_character_with_alts(mock_chacha_db)
 
-    # Patch random.choice to force a deterministic selection
+    # Force a deterministic selection. Since f7e52e82a3 the conversation factory
+    # picks alternates from SystemRandom().random(); 0.0 selects index 0.
     with patch(
-        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.random.choice",
-        return_value="Hey there, {{user}}!",
+        "tldw_Server_API.app.core.Character_Chat.character_conversation_factory.random",
+        SimpleNamespace(SystemRandom=lambda: SimpleNamespace(random=lambda: 0.0)),
     ):
         resp = authenticated_client.post(
             "/api/v1/chats/",
