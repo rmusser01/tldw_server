@@ -155,6 +155,12 @@ def test_chacha_redacted_query_reaches_postgres_backend() -> None:
         def _prepare_backend_statement(query: str, params: Any = None) -> tuple[str, Any]:
             return query, params
 
+        @staticmethod
+        def _connection_state() -> None:
+            # execute_query is wrapped by _owned_database_call (84a2c51934); no
+            # operation-owned checkout here, so it runs without one.
+            return None
+
         def get_connection(self) -> BackendConnectionWrapper:
             return BackendConnectionWrapper(self, connection, backend)
 
