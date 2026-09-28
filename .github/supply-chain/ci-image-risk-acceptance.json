@@ -32,21 +32,6 @@
       "supersedes": "TASK-13013.7.45-app-002"
     },
     {
-      "id": "TASK-13013.7.45-app-003-r20260928",
-      "component": "image-app",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/ffmpeg@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-app-003"
-    },
-    {
       "id": "TASK-13013.7.45-app-004-r20260928",
       "component": "image-app",
       "vulnerability_id": "CVE-2026-64832",
@@ -285,21 +270,6 @@
       "created_on": "2026-09-28",
       "expires_on": "2026-10-02",
       "supersedes": "TASK-13013.7.45-app-019"
-    },
-    {
-      "id": "TASK-13013.7.45-app-020-r20260928",
-      "component": "image-app",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libavcodec61@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-app-020"
     },
     {
       "id": "TASK-13013.7.45-app-021-r20260928",
@@ -542,21 +512,6 @@
       "supersedes": "TASK-13013.7.45-app-036"
     },
     {
-      "id": "TASK-13013.7.45-app-037-r20260928",
-      "component": "image-app",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libavdevice61@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-app-037"
-    },
-    {
       "id": "TASK-13013.7.45-app-038-r20260928",
       "component": "image-app",
       "vulnerability_id": "CVE-2026-64832",
@@ -795,21 +750,6 @@
       "created_on": "2026-09-28",
       "expires_on": "2026-10-02",
       "supersedes": "TASK-13013.7.45-app-053"
-    },
-    {
-      "id": "TASK-13013.7.45-app-054-r20260928",
-      "component": "image-app",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libavfilter10@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-app-054"
     },
     {
       "id": "TASK-13013.7.45-app-055-r20260928",
@@ -1052,21 +992,6 @@
       "supersedes": "TASK-13013.7.45-app-070"
     },
     {
-      "id": "TASK-13013.7.45-app-071-r20260928",
-      "component": "image-app",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libavformat61@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-app-071"
-    },
-    {
       "id": "TASK-13013.7.45-app-072-r20260928",
       "component": "image-app",
       "vulnerability_id": "CVE-2026-64832",
@@ -1305,21 +1230,6 @@
       "created_on": "2026-09-28",
       "expires_on": "2026-10-02",
       "supersedes": "TASK-13013.7.45-app-087"
-    },
-    {
-      "id": "TASK-13013.7.45-app-088-r20260928",
-      "component": "image-app",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libavutil59@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-app-088"
     },
     {
       "id": "TASK-13013.7.45-app-089-r20260928",
@@ -1562,21 +1472,6 @@
       "supersedes": "TASK-13013.7.45-app-104"
     },
     {
-      "id": "TASK-13013.7.45-app-105-r20260928",
-      "component": "image-app",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libpostproc58@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-app-105"
-    },
-    {
       "id": "TASK-13013.7.45-app-106-r20260928",
       "component": "image-app",
       "vulnerability_id": "CVE-2026-64832",
@@ -1817,21 +1712,6 @@
       "supersedes": "TASK-13013.7.45-app-121"
     },
     {
-      "id": "TASK-13013.7.45-app-122-r20260928",
-      "component": "image-app",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libswresample5@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-app-122"
-    },
-    {
       "id": "TASK-13013.7.45-app-123-r20260928",
       "component": "image-app",
       "vulnerability_id": "CVE-2026-64832",
@@ -2070,21 +1950,6 @@
       "created_on": "2026-09-28",
       "expires_on": "2026-10-02",
       "supersedes": "TASK-13013.7.45-app-138"
-    },
-    {
-      "id": "TASK-13013.7.45-app-139-r20260928",
-      "component": "image-app",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libswscale8@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-app-139"
     },
     {
       "id": "TASK-13013.7.45-app-140-r20260928",
@@ -2357,21 +2222,6 @@
       "supersedes": "TASK-13013.7.45-audio-worker-002"
     },
     {
-      "id": "TASK-13013.7.45-audio-worker-003-r20260928",
-      "component": "image-audio-worker",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/ffmpeg@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-audio-worker-003"
-    },
-    {
       "id": "TASK-13013.7.45-audio-worker-004-r20260928",
       "component": "image-audio-worker",
       "vulnerability_id": "CVE-2026-64832",
@@ -2610,21 +2460,6 @@
       "created_on": "2026-09-28",
       "expires_on": "2026-10-02",
       "supersedes": "TASK-13013.7.45-audio-worker-019"
-    },
-    {
-      "id": "TASK-13013.7.45-audio-worker-020-r20260928",
-      "component": "image-audio-worker",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libavcodec61@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-audio-worker-020"
     },
     {
       "id": "TASK-13013.7.45-audio-worker-021-r20260928",
@@ -2867,21 +2702,6 @@
       "supersedes": "TASK-13013.7.45-audio-worker-036"
     },
     {
-      "id": "TASK-13013.7.45-audio-worker-037-r20260928",
-      "component": "image-audio-worker",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libavdevice61@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-audio-worker-037"
-    },
-    {
       "id": "TASK-13013.7.45-audio-worker-038-r20260928",
       "component": "image-audio-worker",
       "vulnerability_id": "CVE-2026-64832",
@@ -3120,21 +2940,6 @@
       "created_on": "2026-09-28",
       "expires_on": "2026-10-02",
       "supersedes": "TASK-13013.7.45-audio-worker-053"
-    },
-    {
-      "id": "TASK-13013.7.45-audio-worker-054-r20260928",
-      "component": "image-audio-worker",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libavfilter10@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-audio-worker-054"
     },
     {
       "id": "TASK-13013.7.45-audio-worker-055-r20260928",
@@ -3377,21 +3182,6 @@
       "supersedes": "TASK-13013.7.45-audio-worker-070"
     },
     {
-      "id": "TASK-13013.7.45-audio-worker-071-r20260928",
-      "component": "image-audio-worker",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libavformat61@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-audio-worker-071"
-    },
-    {
       "id": "TASK-13013.7.45-audio-worker-072-r20260928",
       "component": "image-audio-worker",
       "vulnerability_id": "CVE-2026-64832",
@@ -3630,21 +3420,6 @@
       "created_on": "2026-09-28",
       "expires_on": "2026-10-02",
       "supersedes": "TASK-13013.7.45-audio-worker-087"
-    },
-    {
-      "id": "TASK-13013.7.45-audio-worker-088-r20260928",
-      "component": "image-audio-worker",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libavutil59@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-audio-worker-088"
     },
     {
       "id": "TASK-13013.7.45-audio-worker-089-r20260928",
@@ -3887,21 +3662,6 @@
       "supersedes": "TASK-13013.7.45-audio-worker-104"
     },
     {
-      "id": "TASK-13013.7.45-audio-worker-105-r20260928",
-      "component": "image-audio-worker",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libpostproc58@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-audio-worker-105"
-    },
-    {
       "id": "TASK-13013.7.45-audio-worker-106-r20260928",
       "component": "image-audio-worker",
       "vulnerability_id": "CVE-2026-64832",
@@ -4142,21 +3902,6 @@
       "supersedes": "TASK-13013.7.45-audio-worker-121"
     },
     {
-      "id": "TASK-13013.7.45-audio-worker-122-r20260928",
-      "component": "image-audio-worker",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libswresample5@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-audio-worker-122"
-    },
-    {
       "id": "TASK-13013.7.45-audio-worker-123-r20260928",
       "component": "image-audio-worker",
       "vulnerability_id": "CVE-2026-64832",
@@ -4395,21 +4140,6 @@
       "created_on": "2026-09-28",
       "expires_on": "2026-10-02",
       "supersedes": "TASK-13013.7.45-audio-worker-138"
-    },
-    {
-      "id": "TASK-13013.7.45-audio-worker-139-r20260928",
-      "component": "image-audio-worker",
-      "vulnerability_id": "CVE-2026-64831",
-      "purl": "pkg:deb/debian/libswscale8@7.1.5-0%2Bdeb13u1?arch=amd64&distro=debian-13.6&epoch=7",
-      "installed_version": "7:7.1.5-0+deb13u1",
-      "severity": "HIGH",
-      "rationale": "Requester explicitly approved bypassing the current app/audio CI image findings on 2026-09-11. This is temporary CI risk acceptance pending qualification, not a finding of non-applicability or a confirmed fix.",
-      "mitigation": "Exact finding identity and expiry remain enforced. Complete build, runtime, scanner and admission evidence remains required. Canonical release and source policy is unchanged.",
-      "owner": "rmusser01",
-      "approval": "https://github.com/rmusser01/tldw_server/pull/2869",
-      "created_on": "2026-09-28",
-      "expires_on": "2026-10-02",
-      "supersedes": "TASK-13013.7.45-audio-worker-139"
     },
     {
       "id": "TASK-13013.7.45-audio-worker-140-r20260928",

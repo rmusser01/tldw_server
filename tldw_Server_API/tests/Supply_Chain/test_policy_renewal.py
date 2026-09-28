@@ -3,7 +3,7 @@
 import hashlib
 import json
 import zipfile
-from dataclasses import replace
+from dataclasses import asdict, replace
 from datetime import date
 from pathlib import Path
 
@@ -12,6 +12,9 @@ from Helper_Scripts.Supply_Chain.exception_policy import PolicyError, evaluate_t
 
 pytestmark = pytest.mark.unit
 ARCHIVE = Path("Docs/Evidence/TASK-13013.7.45-ci-image-bypass-evidence.zip")
+RENEWAL = Path("Docs/Evidence/TASK-13013.7.47-sep28-admission.zip")
+DISPOSITIONS = Path("Docs/Evidence/TASK-13013.7.47-sep28-dispositions.json")
+PROPOSED_CI = Path("Docs/Evidence/TASK-13013.7.47-sep28-proposed-ci-additions.json")
 START = date(2026, 9, 28)
 END = date(2026, 10, 2)
 POLICIES = [
@@ -38,7 +41,7 @@ def test_renewal_preserves_every_prior_identity_and_disposition(
         prior_bytes = archive.read(member)
     assert hashlib.sha256(prior_bytes).hexdigest() == digest
     prior = json.loads(prior_bytes)["exceptions"]
-    path = Path(".github/supply-chain") / filename
+    path = zipfile.Path(RENEWAL, filename)
     current = json.loads(path.read_text())["exceptions"]
     assert len(current) == len(prior) == count
     for old, new in zip(prior, current, strict=True):
@@ -57,7 +60,7 @@ def test_renewal_preserves_every_prior_identity_and_disposition(
 
 @pytest.mark.parametrize("component", ["image-app", "image-audio-worker"])
 def test_retained_reports_have_identical_coverage_and_ci_acceptance_stays_separate(component: str) -> None:
-    policies = [load_policy(Path(".github/supply-chain") / row[0], today=START) for row in POLICIES]
+    policies = [load_policy(zipfile.Path(RENEWAL, row[0]), today=START) for row in POLICIES]
     canonical, ci = policies
     assert {record.component for record in ci.exceptions} == {"image-app", "image-audio-worker"}
     combined = replace(canonical, exceptions=canonical.exceptions + ci.exceptions)
@@ -78,7 +81,7 @@ def test_retained_reports_have_identical_coverage_and_ci_acceptance_stays_separa
 @pytest.mark.parametrize("field", ["vulnerability_id", "purl", "installed_version", "severity", "component"])
 def test_renewal_does_not_accept_changed_finding_identities(field: str) -> None:
     for filename, _, _, _ in POLICIES:
-        policy = load_policy(Path(".github/supply-chain") / filename, today=START)
+        policy = load_policy(zipfile.Path(RENEWAL, filename), today=START)
         for record in policy.exceptions:
             values = {
                 "vulnerability_id": record.vulnerability_id,
@@ -109,3 +112,63 @@ def test_renewal_does_not_accept_changed_finding_identities(field: str) -> None:
             }
             decision = evaluate_trivy_report(report, component=values["component"], policy=policy, today=START)
             assert len(decision.blocking) == 1 and not decision.excepted
+
+
+@pytest.mark.parametrize("filename", [row[0] for row in POLICIES])
+def test_live_policy_contains_only_retained_records_and_reviewed_dispositions(filename: str) -> None:
+    with zipfile.ZipFile(RENEWAL) as archive:
+        renewed = json.loads(archive.read(filename))
+        retired = set(json.loads(archive.read("retirement.json"))["retired_ids"])
+    renewed["exceptions"] = [record for record in renewed["exceptions"] if record["id"] not in retired]
+    if filename == "vulnerability-exceptions.json":
+        renewed["exceptions"] += json.loads(DISPOSITIONS.read_text())["exceptions"]
+    assert json.loads((Path(".github/supply-chain") / filename).read_text()) == renewed
+
+
+@pytest.mark.parametrize("component", ["app", "audio-worker", "worker", "webui", "admin-ui"])
+def test_retirement_preserves_all_current_findings_and_removes_stale_matches(component: str) -> None:
+    canonical, ci = [load_policy(Path(".github/supply-chain") / row[0], today=START) for row in POLICIES]
+    policy = (
+        replace(canonical, exceptions=canonical.exceptions + ci.exceptions)
+        if component in {"app", "audio-worker"}
+        else canonical
+    )
+    with zipfile.ZipFile(RENEWAL) as archive:
+        report = json.loads(archive.read(f"{component}/trivy-image-{component}.json"))
+        original = json.loads(archive.read(f"{component}/scan-decision-image-{component}.json"))
+    decision = evaluate_trivy_report(report, component=f"image-{component}", policy=policy, today=START)
+    reviewed = load_policy(DISPOSITIONS, today=START)
+    allowed = evaluate_trivy_report(report, component=f"image-{component}", policy=reviewed, today=START).excepted
+    moved = [asdict(finding) for finding in allowed]
+    assert len(moved) == (10 if component in {"app", "audio-worker"} else 0)
+    assert [asdict(finding) for finding in decision.blocking] == [
+        row for row in original["blocking"] if row not in moved
+    ]
+
+    def key(row: dict[str, str]) -> str:
+        return json.dumps(row, sort_keys=True)
+
+    assert sorted([asdict(finding) for finding in decision.excepted], key=key) == sorted(
+        original["excepted"] + moved, key=key
+    )
+    assert not decision.unmatched_exception_ids
+
+
+@pytest.mark.parametrize("component", ["app", "audio-worker"])
+def test_proposed_ci_additions_are_inactive_and_leave_pcre2_blocked(component: str) -> None:
+    canonical, ci = [load_policy(Path(".github/supply-chain") / row[0], today=START) for row in POLICIES]
+    proposal = load_policy(PROPOSED_CI, today=START)
+    assert len(proposal.exceptions) == 6
+    assert {r.vulnerability_id for r in proposal.exceptions} == {"CVE-2026-96889", "CVE-2026-86138", "CVE-2026-86139"}
+    assert not {r.id for r in proposal.exceptions} & {r.id for r in canonical.exceptions + ci.exceptions}
+    with zipfile.ZipFile(RENEWAL) as archive:
+        report = json.loads(archive.read(f"{component}/trivy-image-{component}.json"))
+    active = replace(canonical, exceptions=canonical.exceptions + ci.exceptions)
+    before = evaluate_trivy_report(report, component=f"image-{component}", policy=active, today=START)
+    candidate = replace(active, exceptions=active.exceptions + proposal.exceptions)
+    after = evaluate_trivy_report(report, component=f"image-{component}", policy=candidate, today=START)
+    assert len(before.blocking) == 6 and len(after.blocking) == 3
+    assert all("/libpcre2-8-0@" in finding.purl for finding in after.blocking)
+    assert not after.unmatched_exception_ids
+    for record in load_policy(DISPOSITIONS, today=START).exceptions + proposal.exceptions:
+        assert record.expires_on == END

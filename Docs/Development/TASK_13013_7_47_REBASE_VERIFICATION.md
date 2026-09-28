@@ -263,3 +263,24 @@ package delta; ctypes ABI loading, grep, Python executable hashes and dynamic
 link checks pass. All 89 affected contracts pass. Builders and unrelated native
 candidates are unchanged. Runtime probes for the current app and worker images
 passed in CI; their remaining admission mismatches are being assessed separately.
+
+## September 28 admission reconciliation
+
+All three Python runtime probes passed. Complete five-image scan evidence is
+retained in Docs/Evidence/TASK-13013.7.47-sep28-admission.zip. Removed 46 stale
+records (28 canonical, 18 CI-only); added 20 supported, exact current-use
+exclusions under existing authorization. See the dispositions companion for
+evidence and deployment assumptions. Canonical policy now has 334 records;
+CI-only policy has 292. No new risk acceptance was activated.
+
+18 focused checks verify historical renewal, exact policy deltas, unchanged
+remaining findings, expiry and the six inactive proposed CI-only additions.
+Three unexcluded advisory IDs in each of app/audio require an explicit decision;
+application exploitation is not claimed. The proposed additions expire October
+2 and do not affect canonical release admission.
+
+Final local verification: 72 renewal/retirement/evaluator checks pass; Black,
+Ruff and scoped Bandit are clear (test assertions excluded from Bandit).
+Independent review confirmed exact removals/additions, unchanged retained
+records, supported cJSON/X11 boundaries, no librsvg exploit claim, and all six
+proposed CI records remaining inactive. The evidence archive hash matches.
