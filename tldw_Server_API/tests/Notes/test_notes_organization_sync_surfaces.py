@@ -1013,7 +1013,8 @@ async def test_notes_studio_derive_retry_repairs_missing_sidecar_after_capture(
             }
         }
 
-    original_create = db.create_note_studio_document
+    # The Sync path writes the sidecar via ensure_note_studio_document since 147ad5fc06.
+    original_create = db.ensure_note_studio_document
     create_calls = 0
 
     def fail_first_sidecar_create(**fields):
@@ -1023,7 +1024,7 @@ async def test_notes_studio_derive_retry_repairs_missing_sidecar_after_capture(
             raise RuntimeError("simulated sidecar write failure")
         return original_create(**fields)
 
-    monkeypatch.setattr(db, "create_note_studio_document", fail_first_sidecar_create)
+    monkeypatch.setattr(db, "ensure_note_studio_document", fail_first_sidecar_create)
     studio = NotesStudioService(db=db, user_id="user-1", generation_adapter=generate)
     arguments = {
         "source_note_id": source_id,
