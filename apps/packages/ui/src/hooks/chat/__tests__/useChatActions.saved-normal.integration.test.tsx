@@ -163,7 +163,10 @@ vi.mock("@/db/dexie/schema", () => ({ db: {
       else mocks.rows[index] = row
       return row.id
     },
-    delete: async (id: string) => { mocks.rows = mocks.rows.filter(row => row.id !== id) }
+    delete: async (id: string) => {
+      const index = mocks.rows.findIndex(row => row.id === id)
+      if (index >= 0) mocks.rows.splice(index, 1)
+    }
   }
 } }))
 vi.mock("@/hooks/useSelectedAssistant", () => ({
@@ -510,20 +513,27 @@ describe("saved normal Chat pipeline with autosave", () => {
   it.each(["local", "server"])("deletes a qualified mirror row and clears its %s reply target using the canonical request ID", async replyKind => {
     const localId = "history-A:server:answer"
     const serverId = "canonical-answer"
+    mocks.mirrorHistories.set("mirror", {
+      id: "mirror", server_chat_id: "cedar",
+      server_scope_key: serverChatMirrorOwnerKey({ requestScope: {
+        config: { serverUrl: mocks.config.serverUrl, authMode: "single-user" }, userId: null
+      } })
+    })
+    const stored = { id: localId, history_id: "mirror", serverMessageId: serverId,
+      serverMessageVersion: 2, role: "assistant", content: "Cedar reply", createdAt: 1 }
+    const draft = { ...stored, id: "same-text-draft", serverMessageId: undefined }
+    const otherHistory = { ...stored, id: "other-history:server:answer", history_id: "other-history" }
+    mocks.rows.push(stored, draft, otherHistory)
     useStoreMessageOption.setState({ historyId: "mirror", serverChatId: "cedar", temporaryChat: false,
       messages: [{ id: localId, serverMessageId: serverId, serverMessageVersion: 2, role: "assistant", isBot: true, name: "Cedar", message: "Cedar reply" }],
       history: [{ role: "assistant", content: "Cedar reply" }],
       replyTarget: { id: replyKind === "local" ? localId : serverId, role: "assistant", text: "Cedar reply" }
     })
-    // Since 977e118e57 a server-mirrored row is removed through
-    // removeAcknowledgedServerMirrorMessage, which refuses unless the local mirror is
-    // provably bound to this server chat. Seed that binding and the unique mirror row.
-    mocks.mirrorHistories.set("mirror", { id: "mirror", server_chat_id: "cedar", server_scope_key: "scope-A" })
-    mocks.rows.push({ id: localId, history_id: "mirror", serverMessageId: serverId, role: "assistant", content: "Cedar reply" })
     const { result } = renderWorkspace()
     await act(async () => { await result.current.actions.deleteMessage(0) })
     expect(mocks.deleteMessage).toHaveBeenCalledWith(serverId, 2, "cedar")
     expect(mocks.rows.find(row => row.id === localId)).toBeUndefined()
+    expect(mocks.rows).toEqual([draft, otherHistory])
     expect(useStoreMessageOption.getState().messages).toEqual([])
     expect(useStoreMessageOption.getState().replyTarget).toBeNull()
   })

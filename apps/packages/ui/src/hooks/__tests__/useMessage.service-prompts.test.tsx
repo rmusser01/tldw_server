@@ -1,5 +1,7 @@
 import React from "react"
 import type { Message } from "@/store/option"
+import type { HistoryInfo, Message as StoredMessage } from "@/db/dexie/types"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import type { AssistantSelection } from "@/types/assistant-selection"
 import type { EffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import type { SelectedChatModelValidationResult } from "@/utils/chat-model-validation"
@@ -207,6 +209,8 @@ const mocks = vi.hoisted(() => {
     getChat: vi.fn(),
     deleteMessage: vi.fn(),
     removeMessageById: vi.fn(),
+    mirrorHistories: new Map<string, HistoryInfo>(),
+    mirrorMessages: new Map<string, StoredMessage>(),
     addMedia: vi.fn(),
     answerDefinition,
     chatBaseState,
@@ -436,6 +440,21 @@ vi.mock("@/db/dexie/helpers", () => {
   }
 })
 
+// Keep mirror ownership checks and transaction orchestration real; replace IndexedDB storage.
+vi.mock("@/db/dexie/schema", () => ({ db: {
+  chatHistories: { get: async (id: string) => mocks.mirrorHistories.get(id) },
+  messages: {
+    get: async (id: string) => mocks.mirrorMessages.get(id),
+    where: (field: keyof StoredMessage) => ({ equals: (value: unknown) => ({
+      toArray: async () => [...mocks.mirrorMessages.values()].filter(row => row[field] === value)
+    }) }),
+    delete: async (id: string) => { mocks.mirrorMessages.delete(id) }
+  },
+  modelNickname: {}, sessionFiles: {},
+  transaction: async (_mode: unknown, _tables: unknown, operation: (transaction: { abort: () => void }) => Promise<unknown>) =>
+    operation({ abort: vi.fn() })
+} }))
+
 vi.mock("@/hooks/utils/messageHelpers", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/hooks/utils/messageHelpers")>()
   return {
@@ -461,7 +480,8 @@ vi.mock("@/services/application", () => ({
   getPrompt: vi.fn(async () => "Please summarize {text}")
 }))
 
-vi.mock("@/hooks/handlers/messageHandlers", () => ({
+vi.mock("@/hooks/handlers/messageHandlers", async importOriginal => ({
+  ...await importOriginal<typeof import("@/hooks/handlers/messageHandlers")>(),
   createBranchMessage: () => vi.fn(),
   createRegenerateLastMessage: () => vi.fn()
 }))
@@ -598,6 +618,8 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.mirrorHistories.clear()
+    mocks.mirrorMessages.clear()
     mocks.loadServicePromptSnapshot.mockResolvedValue(mocks.makeSnapshot())
     mocks.promptForRag.mockResolvedValue({
       ragPrompt: "legacy answer {context} {question}",
@@ -691,11 +713,22 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
     const localId = "history-A:server:answer"
     const canonicalId = "canonical-answer"
     try {
+      mocks.mirrorHistories.set("history-1", {
+        id: "history-1", title: "Cedar", createdAt: 1, is_rag: false,
+        message_source: "server", server_chat_id: "cedar",
+        server_scope_key: serverChatMirrorOwnerKey(mocks.makeSnapshot())
+      })
+      const stored: StoredMessage = { id: localId, history_id: "history-1", name: "Cedar",
+        role: "assistant", content: "Cedar reply", createdAt: 1,
+        serverMessageId: canonicalId, serverMessageVersion: 2 }
+      const draft = { ...stored, id: "same-text-draft", serverMessageId: undefined }
+      const otherHistory = { ...stored, id: "other-history:server:answer", history_id: "other-history" }
+      for (const row of [stored, draft, otherHistory]) mocks.mirrorMessages.set(row.id, row)
       Object.assign(mocks.storeState, { serverChatId: "cedar", replyTarget: { id: replyKind === "local" ? localId : canonicalId }, messages: [{ id: localId, serverMessageId: canonicalId, serverMessageVersion: 2, isBot: true, name: "Cedar", message: "Cedar reply" }] })
       const { result } = renderHook(() => useMessage())
       await act(async () => { await result.current.deleteMessage(0) })
       expect(mocks.deleteMessage).toHaveBeenCalledWith(canonicalId, 2, "cedar")
-      expect(mocks.removeMessageById).toHaveBeenCalledWith("history-1", localId)
+      expect([...mocks.mirrorMessages.values()]).toEqual([draft, otherHistory])
       expect(mocks.setMessages).toHaveBeenCalledWith([])
       expect(mocks.storeState.clearReplyTarget).toHaveBeenCalledOnce()
     } finally {
