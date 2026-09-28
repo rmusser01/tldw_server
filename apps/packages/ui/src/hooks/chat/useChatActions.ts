@@ -3859,6 +3859,7 @@ export const useChatActions = ({
             }
             if (historySelection) {
               await sendNativeHistoryCharacter({
+                t,
                 controller: historySelection,
                 originIsCurrent: historyOriginIsCurrent!,
                 signal,

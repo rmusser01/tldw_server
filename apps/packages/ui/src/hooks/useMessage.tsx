@@ -2772,6 +2772,7 @@ export const useMessage = () => {
             if (historySelection) {
               try {
                 await sendNativeHistoryCharacter({
+                  t,
                   controller: historySelection,
                   originIsCurrent: historyOriginIsCurrent!,
                   signal,

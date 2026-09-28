@@ -725,6 +725,7 @@ describe("createCharacterChatMode contract", () => {
   ])("offers model settings for canonical credential failure %s", code => {
     for (const error of [
       Object.assign(new Error("Safe provider failure"), { code }),
+      Object.assign(new Error("Safe provider failure"), { status: 502, details: { detail: { error_code: code, message: "Safe provider failure" } } }),
       { response: { data: { detail: { error_code: code, message: "Safe provider failure" } } } }
     ]) {
       expect(classifyCharacterChatFailureRecovery(error)).toMatchObject({

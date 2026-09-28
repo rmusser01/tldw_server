@@ -155,7 +155,7 @@ const collectChatFailureStrings = (
     if (values.length >= MAX_FAILURE_DETAIL_VALUES) return values;
   }
 
-  for (const key of ["response", "data", "body", "cause"]) {
+  for (const key of ["response", "data", "body", "details", "cause"]) {
     collectChatFailureStrings(value[key], values, seen);
     if (values.length >= MAX_FAILURE_DETAIL_VALUES) return values;
   }
