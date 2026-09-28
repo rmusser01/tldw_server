@@ -1,9 +1,10 @@
 ---
 id: TASK-13388
 title: Prepare the 0.1.45 release with the dev changes since 0.1.44
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-27 20:09'
+updated_date: '2026-09-28 00:18'
 labels:
   - release
 dependencies: []
@@ -25,11 +26,17 @@ The protected frontend is unchanged since 0.1.44: the manifest is byte-identical
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 LICENSES/releases/0.1.45 record, countdown grant and manifest are consistent (test_licensing_policy passes, including TLDW_VERIFY_RELEASE_SOURCE=1)
-- [ ] #2 pyproject and app version are 0.1.45; CHANGELOG has the 0.1.45 entry
-- [ ] #3 Owner has reviewed the licence record in the release PR before merge
+- [x] #1 LICENSES/releases/0.1.45 record, countdown grant and manifest are consistent (test_licensing_policy passes, including TLDW_VERIFY_RELEASE_SOURCE=1)
+- [x] #2 pyproject and app version are 0.1.45; CHANGELOG has the 0.1.45 entry
+- [x] #3 Owner has reviewed the licence record in the release PR before merge
 - [ ] #4 After merge: main synced back to dev; TASK-13361 AC #1/#4 verified live on a PR
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-09-27: released. #3034 merged to main at 96bf0996eb after owner approval, with all 7 required checks green and the Watchlists RC gates confirmed failing identically on main (pre-existing). Annotated tag v0.1.45; GitHub release published; PyPI publish, publish-ghcr-main and the Docker images all succeeded, and PyPI serves tldw-server 0.1.45. TASK-13361 verified live on the published gate. Remaining for AC #4: the main-to-dev sync #3035, held behind #3033 (the other session's 0.1.44 sync) and blocked by the pre-existing Playground coordinator failure (TASK-13391).
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
