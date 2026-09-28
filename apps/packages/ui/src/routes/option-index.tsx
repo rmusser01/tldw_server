@@ -434,6 +434,7 @@ const OptionIndex = () => {
           <PageAssistLoader
             label="Loading home..."
             description="Preparing your dashboard"
+            autoFocus={false}
           />
         }
       >
