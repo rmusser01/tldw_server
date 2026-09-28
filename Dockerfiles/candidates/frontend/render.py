@@ -15,6 +15,11 @@ EXPECTED_BUILDER_FROM = (
     "FROM node:24.20.0-bookworm-slim@sha256:"
     "ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS builder\n"
 )
+EXPECTED_BOOKWORM_UPDATE = r"""RUN apt-get update \
+ && apt-get install -y --no-install-recommends --only-upgrade libpcre2-8-0=10.42-1+deb12u1 \
+ && test "$(dpkg-query -W -f='${Version}' libpcre2-8-0)" = "10.42-1+deb12u1" \
+ && rm -rf /var/lib/apt/lists/*
+"""
 CANDIDATE_RUNTIME_BLOCK = r"""# Candidate only: not admitted for production use.
 FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS runtime
 
@@ -65,7 +70,9 @@ def render_candidate(source: str) -> str:
     prefix, remainder = source.split(EXPECTED_RUNTIME_FROM)
     if prefix.count(EXPECTED_BUILDER_FROM) != 1:
         raise ValueError("expected canonical Node builder stage")
-    return prefix + CANDIDATE_RUNTIME_BLOCK + remainder
+    if remainder.count(EXPECTED_BOOKWORM_UPDATE) != 1:
+        raise ValueError("expected exactly one canonical Bookworm package update")
+    return prefix + CANDIDATE_RUNTIME_BLOCK + remainder.replace(EXPECTED_BOOKWORM_UPDATE, "", 1)
 
 
 def _parser() -> argparse.ArgumentParser:

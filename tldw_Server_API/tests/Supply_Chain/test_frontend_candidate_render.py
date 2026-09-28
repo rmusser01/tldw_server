@@ -41,6 +41,7 @@ def renderer():
 def test_render_preserves_canonical_builder_prefix_and_runtime_remainder(application):
     source = CANONICAL[application].read_text()
     prefix, remainder = source.split(RUNTIME_FROM)
+    remainder = remainder.replace(renderer().EXPECTED_BOOKWORM_UPDATE, "", 1)
 
     output = renderer().render_candidate(source)
 
@@ -108,6 +109,7 @@ def test_render_does_not_weaken_apt_or_claim_snapshot_reproducibility(forbidden)
 def test_render_preserves_application_runtime_contract(application):
     source = CANONICAL[application].read_text()
     _, remainder = source.split(RUNTIME_FROM)
+    remainder = remainder.replace(renderer().EXPECTED_BOOKWORM_UPDATE, "", 1)
     output = renderer().render_candidate(source)
 
     assert remainder in output
@@ -187,3 +189,22 @@ def test_cli_rejects_changed_source_without_writing_output(tmp_path):
     assert result.returncode != 0
     assert "expected exactly one canonical runtime stage" in result.stderr
     assert not output.exists()
+
+
+@pytest.mark.parametrize("application", ["webui", "admin-ui"])
+def test_ubuntu_candidate_excludes_bookworm_specific_update(application: str) -> None:
+    output = renderer().render_candidate(CANONICAL[application].read_text())
+    assert "libpcre2-8-0=10.42-1+deb12u1" not in output
+    assert '"zlib1g=${ZLIB1G_VERSION}"' in output
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "version"])
+def test_render_rejects_drift_in_bookworm_package_update(mutation: str) -> None:
+    module = renderer()
+    source = CANONICAL["webui"].read_text()
+    block = module.EXPECTED_BOOKWORM_UPDATE
+    changed = {"missing": "", "duplicate": block * 2, "version": block.replace("10.42-1+deb12u1", "unreviewed")}[
+        mutation
+    ]
+    with pytest.raises(ValueError, match="Bookworm package update"):
+        module.render_candidate(source.replace(block, changed))

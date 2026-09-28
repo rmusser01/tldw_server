@@ -226,3 +226,31 @@ Two suggestions were disproved against the actual execution environment:
   logs, and `python -S .../expat_candidate.py --help` succeeds without site
   packages. Adding the suggested application logging import would break that
   dependency-free path. No dependency or logging change was made.
+
+## Current scanner refresh: frontend PCRE2
+
+The current-head Admin UI report rejected three newly reported PCRE2 identities
+(CVE-2026-86145, CVE-2026-89157 and CVE-2026-89161), all for
+`libpcre2-8-0=10.42-1`. All 56 existing dispositions matched with zero stale
+records. This establishes an admission failure, not application exploitability;
+CVE-2026-89157 explicitly requires a 32-bit platform, unlike the admitted amd64
+images. Debian records `10.42-1+deb12u1` as fixed for all three:
+[86145](https://security-tracker.debian.org/tracker/CVE-2026-86145),
+[89157](https://security-tracker.debian.org/tracker/CVE-2026-89157),
+[89161](https://security-tracker.debian.org/tracker/CVE-2026-89161).
+
+Both Bookworm frontend runtime stages now install only that exact PCRE2 update
+through authenticated APT and assert the installed version. The Ubuntu candidate
+renderer removes only this verified Debian-specific block when changing distro,
+rejecting drift. Existing base pins, builders, runtime users and gates remain.
+
+A minimal linux/amd64 build from the exact pinned Node base succeeded. A complete
+dpkg before/after comparison showed only `libpcre2-8-0:amd64` changed; APT reported
+one upgrade, zero installs and zero removals. Offline Node 24.20.0 linux/x64,
+Node SHA-256, dependency resolution and PCRE2-backed grep checks passed. All 49
+focused contracts pass; Ruff, scoped Black, Bandit and independent review are
+clear. This package-layer validation is not a full application image scan; fresh
+CI admission remains required. No exception policy changed.
+
+CI on `b2738e447d` confirms the required source security gate passes with the
+renewed policy. Its full container gate is blocked by the above scanner rows.

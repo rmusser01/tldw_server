@@ -234,3 +234,18 @@ def test_webui_production_build_uses_canonical_node_turbopack_pipeline() -> None
     assert "npm run build:prod" in dockerfile
     assert "npm run compile:prod" not in dockerfile
     assert "bun run build:prod" not in dockerfile
+
+
+@pytest.mark.parametrize("name", ["webui", "admin-ui"])
+def test_next_runtime_pins_only_the_fixed_bookworm_pcre2_package(name: str) -> None:
+    runtime = (ROOT / f"Dockerfiles/Dockerfile.{name}").read_text().split(" AS runtime", 1)[1]
+    install = re.search(r"apt-get install ([^\n]+)", runtime)
+    assert install is not None
+    assert install.group(1).removesuffix(" \\").split() == [
+        "-y",
+        "--no-install-recommends",
+        "--only-upgrade",
+        "libpcre2-8-0=10.42-1+deb12u1",
+    ]
+    assert 'test "$(dpkg-query -W -f=\'${Version}\' libpcre2-8-0)" = "10.42-1+deb12u1"' in runtime
+    assert "rm -rf /var/lib/apt/lists/*" in runtime
