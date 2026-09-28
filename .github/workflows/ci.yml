@@ -869,10 +869,16 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+          # DB_Management alone is ~3700 tests; test_[a-l] carries the slow
+          # per-test ChaCha Postgres bootstraps, so it gets its own shard.
+          - name: db-management-a-l
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[a-l]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
-              tldw_Server_API/tests/DB_Management
+              tldw_Server_API/tests/DB_Management/test_[m-z]*.py
+              tldw_Server_API/tests/DB_Management/unit
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
               tldw_Server_API/tests/PrivilegeCatalog
@@ -2014,6 +2020,7 @@ jobs:
           # TEST_PATHS is a matrix-provided list of pytest path arguments.
           # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            -p pytest_timeout -o timeout_method=signal \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \
@@ -2439,10 +2446,16 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+          # DB_Management alone is ~3700 tests; test_[a-l] carries the slow
+          # per-test ChaCha Postgres bootstraps, so it gets its own shard.
+          - name: db-management-a-l
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[a-l]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
-              tldw_Server_API/tests/DB_Management
+              tldw_Server_API/tests/DB_Management/test_[m-z]*.py
+              tldw_Server_API/tests/DB_Management/unit
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
               tldw_Server_API/tests/PrivilegeCatalog
@@ -3523,6 +3536,7 @@ jobs:
           # TEST_PATHS is a matrix-provided list of pytest path arguments.
           # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            -p pytest_timeout -o timeout_method=signal \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \
@@ -3849,10 +3863,16 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+          # DB_Management alone is ~3700 tests; test_[a-l] carries the slow
+          # per-test ChaCha Postgres bootstraps, so it gets its own shard.
+          - name: db-management-a-l
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[a-l]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
-              tldw_Server_API/tests/DB_Management
+              tldw_Server_API/tests/DB_Management/test_[m-z]*.py
+              tldw_Server_API/tests/DB_Management/unit
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
               tldw_Server_API/tests/PrivilegeCatalog
@@ -4857,6 +4877,7 @@ jobs:
           # TEST_PATHS is a matrix-provided list of pytest path arguments.
           # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            -p pytest_timeout -o timeout_method=signal \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \
@@ -5182,10 +5203,16 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+          # DB_Management alone is ~3700 tests; test_[a-l] carries the slow
+          # per-test ChaCha Postgres bootstraps, so it gets its own shard.
+          - name: db-management-a-l
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[a-l]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
-              tldw_Server_API/tests/DB_Management
+              tldw_Server_API/tests/DB_Management/test_[m-z]*.py
+              tldw_Server_API/tests/DB_Management/unit
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
               tldw_Server_API/tests/PrivilegeCatalog
@@ -6516,10 +6543,16 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
+          # DB_Management alone is ~3700 tests; test_[a-l] carries the slow
+          # per-test ChaCha Postgres bootstraps, so it gets its own shard.
+          - name: db-management-a-l
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[a-l]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
-              tldw_Server_API/tests/DB_Management
+              tldw_Server_API/tests/DB_Management/test_[m-z]*.py
+              tldw_Server_API/tests/DB_Management/unit
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
               tldw_Server_API/tests/PrivilegeCatalog
@@ -7524,6 +7557,7 @@ jobs:
           # TEST_PATHS is a matrix-provided list of pytest path arguments.
           # shellcheck disable=SC2086
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            -p pytest_timeout -o timeout_method=${{ runner.os == 'Windows' && 'thread' || 'signal' }} \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \

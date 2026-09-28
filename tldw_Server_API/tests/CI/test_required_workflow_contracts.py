@@ -855,6 +855,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "chacha-core-stores",
             "chacha-character-conversation",
             "chacha-content-persona",
+            "db-management-a-l",
             "db-privileges",
         }
         assert auth_db_shards.issubset(shard_names)
@@ -1855,3 +1856,25 @@ def test_regular_full_suite_steps_skip_dedicated_media_legacy_free_shard() -> No
     assert len(regular_shard_steps) == 5
     for step in regular_shard_steps:
         assert step.get("if") == "matrix.shard.name != 'media-legacy-free'"
+
+
+def test_full_suite_shards_fail_a_hung_test_instead_of_the_shard() -> None:
+    """Each shard loads pytest-timeout so one hung test fails alone.
+
+    PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 means pyproject's timeout settings never
+    load unless the plugin is named. Without it a single hang burned the whole
+    60-minute shard job (nine shards in one run). ``signal`` fails just the test;
+    Windows has no SIGALRM, so the mixed-OS release job picks ``thread`` there.
+    """
+    jobs = _load(".github/workflows/ci.yml")["jobs"]
+    for job_name in (
+        "full-suite-linux-312-shards",
+        "full-suite-linux-313-shards",
+        "full-suite-macos-312-shards",
+        "full-suite-os-313-release-shards",
+    ):
+        scripts = [step.get("run", "") for step in jobs[job_name]["steps"] if "$TEST_PATHS" in step.get("run", "")]
+        assert scripts, job_name
+        for script in scripts:
+            assert "-p pytest_timeout" in script, job_name
+            assert "timeout_method=" in script, job_name
