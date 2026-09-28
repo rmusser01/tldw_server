@@ -958,6 +958,25 @@ def raise_detached_error(error: BaseException) -> NoReturn:
         raise
 
 
+def exception_type_chain(error: BaseException, *, limit: int = 6) -> str:
+    """Return ``Outer <- Inner <- ...`` type names for ``error``'s cause/context chain.
+
+    For server-side logs at ``raise ... from None`` boundaries: suppression hides the
+    chain from display, but ``__context__`` is still set, and the inner type is usually
+    the whole diagnosis. Types only, never messages -- a database error message can
+    carry row values (a unique-violation detail includes the email address).
+    """
+
+    names: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen and len(names) < limit:
+        seen.add(id(current))
+        names.append(type(current).__name__)
+        current = current.__cause__ or current.__context__
+    return " <- ".join(names)
+
+
 class InvalidMetadataOrderKeyError(ValueError):
     """Raised when a metadata order key cannot be safely used."""
 
