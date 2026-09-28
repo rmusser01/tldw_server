@@ -4,10 +4,38 @@
 """
 from __future__ import annotations
 
+import asyncio
+import os
+
 import pytest
 
 from tldw_Server_API.app.core.MCP_unified import get_mcp_server
 from tldw_Server_API.app.core.MCP_unified.tests.support import build_mcp_test_client
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _seed_single_user_admin_rbac():
+    """Grant the single-user principal (id 1) its admin role once per session.
+
+    Production seeds this at startup (services/startup_auth.py). These tests
+    build bare apps or call modules with user_id="1" directly, so without the
+    seed the real AuthNZ RBAC adapter denies them on a fresh users.db (they
+    previously passed only when an earlier test had already seeded it).
+    """
+    from tldw_Server_API.app.core.AuthNZ.initialize import ensure_single_user_rbac_seed_if_needed
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+    saved = os.environ.get("AUTH_MODE")
+    os.environ["AUTH_MODE"] = "single_user"
+    try:
+        asyncio.run(ensure_single_user_rbac_seed_if_needed())
+    finally:
+        if saved is None:
+            os.environ.pop("AUTH_MODE", None)
+        else:
+            os.environ["AUTH_MODE"] = saved
+        reset_settings()
+    yield
 
 
 @pytest.fixture
