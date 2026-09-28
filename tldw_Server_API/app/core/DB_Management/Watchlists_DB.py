@@ -65,6 +65,7 @@ from tldw_Server_API.app.core.Watchlists.briefing_delivery_state import (
 )
 
 from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, DatabaseError as _DatabaseError
+from .backends.base import ConstraintViolationError as _ConstraintViolationError
 from .backends.factory import DatabaseBackendFactory
 from .backends.query_utils import prepare_backend_statement
 from .db_path_utils import DatabasePaths
@@ -4276,6 +4277,10 @@ class WatchlistsDatabase:
         return parsed
 
     def _check_output_preset_name_available(self, *, name: str, exclude_id: int | None = None) -> None:
+        if self._output_preset_name_taken(name=name, exclude_id=exclude_id):
+            raise ValueError("output_preset_name_exists")
+
+    def _output_preset_name_taken(self, *, name: str, exclude_id: int | None = None) -> bool:
         row = self.backend.execute(
             """
             SELECT id
@@ -4285,13 +4290,11 @@ class WatchlistsDatabase:
             (self.user_id, name),
         ).first
         if not row:
-            return
+            return False
         existing_id = row.get("id")
         if existing_id is None:
-            return
-        if exclude_id is not None and int(existing_id) == int(exclude_id):
-            return
-        raise ValueError("output_preset_name_exists")
+            return False
+        return exclude_id is None or int(existing_id) != int(exclude_id)
 
     @staticmethod
     def _is_output_preset_name_constraint_error(exc: _DatabaseError) -> bool:
@@ -4302,9 +4305,20 @@ class WatchlistsDatabase:
             return True
         return "unique constraint failed" in message and "watchlist_output_presets" in message and "name" in message
 
-    @classmethod
-    def _raise_output_preset_constraint_error(cls, exc: _DatabaseError) -> None:
-        if cls._is_output_preset_name_constraint_error(exc):
+    def _raise_output_preset_constraint_error(
+        self,
+        exc: _DatabaseError,
+        *,
+        name: str | None = None,
+        exclude_id: int | None = None,
+    ) -> None:
+        # Backends redact driver messages (constraint names included), so a
+        # lost name race is recognised by re-reading the conflicting row.
+        if self._is_output_preset_name_constraint_error(exc) or (
+            isinstance(exc, _ConstraintViolationError)
+            and name is not None
+            and self._output_preset_name_taken(name=name, exclude_id=exclude_id)
+        ):
             raise ValueError("output_preset_name_exists") from exc
         raise exc
 
@@ -4344,7 +4358,7 @@ class WatchlistsDatabase:
                 ),
             )
         except _DatabaseError as exc:
-            self._raise_output_preset_constraint_error(exc)
+            self._raise_output_preset_constraint_error(exc, name=clean_name)
         preset_id = self._extract_lastrowid(res)
         if not preset_id:
             raise RuntimeError("failed_to_create_output_preset")
@@ -4427,7 +4441,11 @@ class WatchlistsDatabase:
                 tuple(params),
             )
         except _DatabaseError as exc:
-            self._raise_output_preset_constraint_error(exc)
+            self._raise_output_preset_constraint_error(
+                exc,
+                name=fields.get("name") and self._normalize_output_preset_name(str(fields["name"])),
+                exclude_id=int(preset_id),
+            )
         return self.get_output_preset(preset_id=int(preset_id))
 
     def delete_output_preset(self, *, preset_id: int) -> bool:
