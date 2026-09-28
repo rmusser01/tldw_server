@@ -1912,7 +1912,7 @@ def handle_db_errors(e: Exception, entity_type: str = "resource"):
     ):
         raise _note_sync_http_error(e)
 
-    logger_func = logger.warning  # Default to warning for known DB operational errors
+    log_level = "WARNING"  # Default to warning for known DB operational errors
     http_status_code = status.HTTP_500_INTERNAL_SERVER_ERROR  # Default
     detail_message = f"An unexpected error occurred while processing your request for {entity_type}."
 
@@ -1940,18 +1940,20 @@ def handle_db_errors(e: Exception, entity_type: str = "resource"):
         else:  # Generic conflict based on the exception's original message
             detail_message = exception_message_str
     elif isinstance(e, CharactersRAGDBError):  # General DB Error from our library
-        logger_func = logger.error  # Log as error
+        log_level = "ERROR"
         detail_message = f"A database error occurred while processing your request for {entity_type}."
     elif isinstance(e, ValueError):  # Catch generic ValueErrors that might not be InputError
         http_status_code = status.HTTP_400_BAD_REQUEST
         detail_message = str(e)
     else:  # Truly unexpected errors
-        logger_func = logger.error
+        log_level = "ERROR"
 
-    logger_func(f"Error for {entity_type}: {type(e).__name__} - {str(e)}",
-                exc_info=isinstance(e, (CharactersRAGDBError, Exception)) and not isinstance(e,
-                                                                                             (InputError, ConflictError,
-                                                                                              ValueError)))
+    # Positional args, not an f-string: loguru str.format()s the message when kwargs
+    # are present, so braces in str(e) (e.g. pydantic input dicts) raised KeyError here.
+    include_traceback = not isinstance(e, (InputError, ConflictError, ValueError))
+    logger.opt(exception=e if include_traceback else None).log(
+        log_level, "Error for {}: {} - {}", entity_type, type(e).__name__, e
+    )
     raise HTTPException(status_code=http_status_code, detail=detail_message)
 
 

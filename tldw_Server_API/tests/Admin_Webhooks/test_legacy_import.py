@@ -728,6 +728,7 @@ async def test_extract_failure_cleanup_preserves_replaced_output_inode(
     assert output.read_bytes() == replacement
 
 
+@pytest.mark.unit
 def test_output_cleanup_preserves_replacement_that_reused_the_inode(tmp_path: Path) -> None:
     """Linux reuses a freed inode at once; identity alone must not authorize unlink."""
     from tldw_Server_API.app.core.Admin_Webhooks import legacy_import as legacy_import_module
