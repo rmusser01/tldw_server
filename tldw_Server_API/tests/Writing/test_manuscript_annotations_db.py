@@ -109,28 +109,27 @@ def test_fresh_db_creates_manuscript_annotations_table(raw_db):
     }.issubset(_trigger_names(raw_db))
 
 
-def test_sqlite_v50_migration_routes_to_current_schema(tmp_path):
+def test_sqlite_v50_migration_routes_to_current_schema(tmp_path, monkeypatch):
     db_path = tmp_path / "migrating.db"
-    db = CharactersRAGDB(str(db_path), client_id="test_client")
-    db.close_connection()
 
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.executescript(
-            """
-            DROP TRIGGER IF EXISTS manuscript_annotations_sync_create;
-            DROP TRIGGER IF EXISTS manuscript_annotations_sync_update;
-            DROP TRIGGER IF EXISTS manuscript_annotations_sync_delete;
-            DROP TRIGGER IF EXISTS manuscript_annotations_sync_undelete;
-            DROP INDEX IF EXISTS idx_mann_project_target;
-            DROP INDEX IF EXISTS idx_mann_project_status;
-            DROP INDEX IF EXISTS idx_mann_source;
-            DROP INDEX IF EXISTS idx_mann_deleted;
-            DROP TABLE IF EXISTS manuscript_annotations;
-            UPDATE db_schema_version
-               SET version = 50
-             WHERE schema_name = 'rag_char_chat_schema';
-            """
-        )
+    # Build a genuine v50 database from the registered historical steps. Downgrading a
+    # current database by dropping tables no longer works: later steps fail closed on
+    # objects that already exist (e.g. v58->v59, 6202f62b92).
+    def initialize_historical(db: CharactersRAGDB) -> None:
+        with db.transaction() as conn:
+            db._apply_schema_v4(conn)
+            for prior in range(4, 50):
+                db._run_sqlite_linear_migration_step(conn, from_version=prior, target_version=50, initial_version=4)
+            assert db._get_db_version(conn) == 50
+
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 50)
+        patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical)
+        historical = CharactersRAGDB(str(db_path), client_id="test_client")
+    try:
+        assert "manuscript_annotations" not in _table_names(historical)
+    finally:
+        historical.close_connection()
 
     migrated = CharactersRAGDB(str(db_path), client_id="test_client")
     try:

@@ -2890,6 +2890,9 @@ async def test_lost_terminal_cas_reloads_completed_winner(stores, monkeypatch):
             generation_provenance_json=generation_input.provenance_json,
             committed_at=(_FIXED_NOW + timedelta(minutes=1)).isoformat(),
             expires_at=(_FIXED_NOW + timedelta(days=30, minutes=1)).isoformat(),
+            # The winner commits inside the fixed clock; the default wall clock is past
+            # the 24h input deadline, so the commit raised generation_expired.
+            now=lambda: _FIXED_NOW + timedelta(minutes=1),
         )
         return False
 
@@ -2927,6 +2930,9 @@ async def test_lost_retry_reset_cas_reloads_completed_or_terminal_winner(
                 generation_provenance_json=generation_input.provenance_json,
                 committed_at=(_FIXED_NOW + timedelta(minutes=2)).isoformat(),
                 expires_at=(_FIXED_NOW + timedelta(days=30, minutes=2)).isoformat(),
+                # The winner commits inside the fixed clock; the default wall clock is past
+                # the 24h input deadline, so the commit raised generation_expired.
+                now=lambda: _FIXED_NOW + timedelta(minutes=2),
             )
         else:
             current = slides.get_generation_receipt(_RECEIPT_ID, owner_user_id="owner-1")

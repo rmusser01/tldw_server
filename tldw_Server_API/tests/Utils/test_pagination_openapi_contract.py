@@ -84,6 +84,17 @@ def _has_property_path(
     return True
 
 
+def _mounted_endpoints(routes: list[object]):
+    """Yield every endpoint callable, descending into included routers."""
+    for route in routes:
+        endpoint = getattr(route, "endpoint", None)
+        if endpoint is not None:
+            yield endpoint
+        included = getattr(route, "original_router", None)
+        if included is not None:
+            yield from _mounted_endpoints(included.routes)
+
+
 def test_pagination_matrix_has_no_unresolved_candidates() -> None:
     """Every inventoried route should be either canonicalized or explicitly exempt."""
     unresolved = [
@@ -116,9 +127,18 @@ def test_canonical_matrix_response_models_expose_pagination_when_openapi_resolva
     from tldw_Server_API.app.main import app
 
     components = app.openapi()["components"]["schemas"]
+    # Components are keyed by class name, so a row whose endpoint is not mounted would
+    # be checked against a same-named model from another route family (the legacy
+    # admin_ops webhook routes vs the canonical admin_webhooks ones, 602711075b).
+    mounted = {
+        f"{endpoint.__module__.replace('.', '/')}.py:{endpoint.__name__}"
+        for endpoint in _mounted_endpoints(app.routes)
+    }
     mismatches: list[str] = []
     for row in _matrix_rows():
         if row["status"] != CANONICAL_STATUS:
+            continue
+        if row["endpoint"] not in mounted:
             continue
         component_name = _component_name(row["response_model"])
         if component_name is None or component_name not in components:

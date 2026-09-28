@@ -517,11 +517,16 @@ class BackendCursorWrapper:
         backend: DatabaseBackend,
         *,
         log_errors: bool = True,
+        operation_owned: bool = True,
     ):
         self._db = db
         self._connection = connection
         self._backend = backend
-        self._operation_state = current_connection_state(db) if backend.backend_type == BackendType.POSTGRESQL else None
+        self._operation_state = (
+            current_connection_state(db)
+            if operation_owned and backend.backend_type == BackendType.POSTGRESQL
+            else None
+        )
         self._log_errors = log_errors
         self._result: QueryResult | None = None
         self._adapter: BackendCursorAdapter | None = None
@@ -589,11 +594,30 @@ class BackendCursorWrapper:
 class BackendConnectionWrapper:
     """Connection wrapper that returns backend-aware cursors."""
 
-    def __init__(self, db: CharactersRAGDB, connection, backend: DatabaseBackend):
+    def __init__(
+        self,
+        db: CharactersRAGDB,
+        connection,
+        backend: DatabaseBackend,
+        *,
+        operation_owned: bool = True,
+    ):
+        """Wrap a connection.
+
+        Args:
+            operation_owned: False for a connection the backend handed out directly
+                (schema bootstrap/migration), which is never the current ChaCha
+                operation's checkout and so must not be bound to that state.
+        """
         self._db = db
         self._connection = connection
         self._backend = backend
-        self._operation_state = current_connection_state(db) if backend.backend_type == BackendType.POSTGRESQL else None
+        self._operation_owned = operation_owned
+        self._operation_state = (
+            current_connection_state(db)
+            if operation_owned and backend.backend_type == BackendType.POSTGRESQL
+            else None
+        )
 
     @_owned_wrapper_call
     def cursor(self, *, log_errors: bool = True):
@@ -604,6 +628,7 @@ class BackendConnectionWrapper:
             self._connection,
             self._backend,
             log_errors=log_errors,
+            operation_owned=self._operation_owned,
         )
 
     @_owned_wrapper_call
@@ -18451,7 +18476,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         for statement in statements:
             self.backend.execute(statement, connection=conn)
         if self._get_schema_version_postgres(conn) >= 74:
-            self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, self.backend))
+            self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, self.backend, operation_owned=False))
             return
         for statement in (
             """
@@ -25334,14 +25359,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
             if self._postgres_schema_is_current(conn):
                 if target_version >= 74:
-                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend))
+                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 return
 
         with postgres_schema_migration(backend, self._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT) as conn:
             self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
             if self._postgres_schema_is_current(conn):
                 if target_version >= 74:
-                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend))
+                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 return
             schema_exists = backend.table_exists('db_schema_version', connection=conn)
 
@@ -25411,7 +25436,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._migrate_from_v76_to_v77_persona_companion_postgres(conn)
                     current_version = 77
                 if target_version >= 74:
-                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend))
+                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
                 return
 

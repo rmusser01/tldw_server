@@ -18,12 +18,16 @@ class _LoggerStub:
         self.error_records: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.info_records: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self.warning_records: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
+        self.exception_records: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
 
     def debug(self, message: str, *args: Any, **kwargs: Any) -> None:
         self.debug_records.append((message, args, kwargs))
 
     def error(self, message: str, *args: Any, **kwargs: Any) -> None:
         self.error_records.append((message, args, kwargs))
+
+    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
+        self.exception_records.append((message, args, kwargs))
 
     def info(self, message: str, *args: Any, **kwargs: Any) -> None:
         self.info_records.append((message, args, kwargs))
@@ -74,7 +78,12 @@ async def test_list_users_sanitizes_generic_failure_log(monkeypatch: pytest.Monk
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to retrieve users"
-    assert logger_stub.error_records == [("Failed to list users", (), {})]
+    # list_users logs the traceback on purpose (806083b0b0, 5c03d4d9cf); the sanitizer
+    # contract is that the message and its args never carry the exception text.
+    assert logger_stub.exception_records == [
+        ("Failed to list users (principal={}, page={}, limit={})", (None, 1, 20), {})
+    ]
+    assert logger_stub.error_records == []
 
 
 @pytest.mark.asyncio
@@ -142,7 +151,12 @@ async def test_list_users_sanitizes_generic_header_assignment_log(
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == "Failed to retrieve users"
-    assert logger_stub.error_records == [("Failed to list users", (), {})]
+    # list_users logs the traceback on purpose (806083b0b0, 5c03d4d9cf); the sanitizer
+    # contract is that the message and its args never carry the exception text.
+    assert logger_stub.exception_records == [
+        ("Failed to list users (principal={}, page={}, limit={})", (None, 1, 20), {})
+    ]
+    assert logger_stub.error_records == []
     assert logger_stub.debug_records == [("TEST_MODE header assignment failed", (), {})]
 
 
