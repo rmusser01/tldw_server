@@ -435,7 +435,7 @@ def test_media_add_route_preserves_existing_dependency_guards():
 
     route = next(route for route in add_endpoint.router.routes if route.path == "/add")
 
-    assert len(route.dependencies) == 5
+    assert len(route.dependencies) == 6
 
 
 @pytest.mark.asyncio
