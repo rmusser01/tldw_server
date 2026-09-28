@@ -1083,11 +1083,17 @@ def test_add_media_single_file_upload_success(test_api_client, db_session, creat
     if response.status_code != expected_code:
         logger.error(f"File upload test ({sample_path.name}) failed. Status: {response.status_code}, Expected: {expected_code}, Text: {response.text}")
 
-    assert response.status_code in [status.HTTP_200_OK, status.HTTP_207_MULTI_STATUS]
+    if media_type == "video":
+        assert response.status_code in [status.HTTP_200_OK, status.HTTP_207_MULTI_STATUS]
+    else:
+        assert response.status_code == status.HTTP_200_OK
     data = check_batch_response(response, response.status_code, expected_processed=1, expected_errors=0, check_results_len=1)
 
     result = data["results"][0]
-    assert result["status"] in ["Success", "Warning"]
+    if media_type == "video":
+        assert result["status"] in ["Success", "Warning"]
+    else:
+        assert result["status"] == "Success"
     check_media_item_result(result, result["status"], expected_media_type=media_type)
     assert result["input_ref"] == sample_path.name
     # Processing source might be a temp path, check its name matches
@@ -1104,6 +1110,57 @@ def test_add_media_single_file_upload_success(test_api_client, db_session, creat
     # Check DB insertion
     assert isinstance(result.get("db_id"), int), f"Expected integer db_id for {media_type} upload, got {result.get('db_id')}"
     assert "added" in result.get("db_message", "").lower() or "updated" in result.get("db_message", "").lower()
+
+
+@patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.analyze")
+def test_add_media_requested_analysis_without_provider_preserves_source(
+    mock_analyze: MagicMock,
+    test_api_client: Any,
+    db_session: MediaDatabase,
+    create_upload_file: Any,
+    dummy_headers: dict[str, str],
+) -> None:
+    """Missing provider selection warns without dropping the uploaded source."""
+    from tldw_Server_API.app.core.DB_Management.media_db.api import get_document_version
+
+    form_data = create_add_media_form_data(
+        media_type="document",
+        perform_analysis=True,
+        api_name=None,
+    )
+    response = test_api_client.post(
+        ADD_MEDIA_ENDPOINT,
+        data=form_data,
+        files={"files": create_upload_file(SAMPLE_TXT_PATH)},
+        headers=dummy_headers,
+    )
+    data = check_batch_response(
+        response,
+        status.HTTP_207_MULTI_STATUS,
+        expected_processed=0,
+        expected_errors=0,
+        expected_warnings=1,
+        check_results_len=1,
+    )
+    result = data["results"][0]
+    check_media_item_result(result, "Warning", expected_media_type="document")
+    assert result["warnings"] == ["Analysis was not run: choose an analysis provider."]
+    assert result["input_ref"] == SAMPLE_TXT_PATH.name
+    assert Path(result["processing_source"]).name == SAMPLE_TXT_PATH.name
+    assert result["source_format"] == "txt"
+    source_text = SAMPLE_TXT_PATH.read_text(encoding="utf-8").strip()
+    assert source_text in result["content"]
+    assert result["chunks"]
+    assert all(chunk["metadata"].get("analysis") is None for chunk in result["chunks"])
+    assert result["analysis"] is None
+    assert result["summary"] is None
+    assert isinstance(result["db_id"], int)
+    assert "added" in result["db_message"].lower()
+    stored = db_session.get_media_by_id(result["db_id"])
+    assert stored["content"] == result["content"]
+    version = get_document_version(db_session, result["db_id"])
+    assert version["analysis_content"] is None
+    mock_analyze.assert_not_called()
 
 
 # === Mixed Success/Failure Tests ===
