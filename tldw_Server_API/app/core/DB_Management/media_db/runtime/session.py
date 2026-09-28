@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
     DatabaseBackend,
     DatabaseConfig,
+    DatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import (
     DatabaseBackendFactory,
@@ -156,5 +157,7 @@ class MediaDbFactory:
             return
         try:
             backend.get_pool().close_all()
-        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        # DatabaseError: a registry reset already retired this backend and owns
+        # closing its pool; there is nothing left for the factory to close.
+        except (AttributeError, DatabaseError, OSError, RuntimeError, TypeError, ValueError):
             return
