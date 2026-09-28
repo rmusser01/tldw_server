@@ -270,8 +270,9 @@ def test_record_event_sqlite_writes_row(tmp_path: Path) -> None:
         analytics.close()
 
 
-@pytest.mark.asyncio
-async def test_submit_feedback_maps_issues_to_analytics() -> None:
+@pytest.fixture
+def feedback_system() -> UnifiedFeedbackSystem:
+    """A feedback system with analytics enabled and every analytics write mocked."""
     system = UnifiedFeedbackSystem.__new__(UnifiedFeedbackSystem)
     system.enable_analytics = True
     system.analytics = MagicMock()
@@ -280,6 +281,12 @@ async def test_submit_feedback_maps_issues_to_analytics() -> None:
     system.analytics.record_document_performance = AsyncMock(return_value=True)
     system.analytics.record_feedback = AsyncMock(return_value=True)
     system.analytics.record_event = AsyncMock(return_value=True)
+    return system
+
+
+@pytest.mark.asyncio
+async def test_submit_feedback_maps_issues_to_analytics(feedback_system: UnifiedFeedbackSystem) -> None:
+    system = feedback_system
 
     await system.submit_feedback(
         conversation_id="",
@@ -299,18 +306,14 @@ async def test_submit_feedback_maps_issues_to_analytics() -> None:
     assert payload["improvement_areas"] == ["missing_details"]
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("stars", "stored"), [(1, 0.2), (5, 1.0)])
-async def test_submit_feedback_keeps_stars_over_five_for_stored_trends(stars: int, stored: float) -> None:
-    # TASK-13371: stored analytics history uses stars/5; a min->0 remap would shift it.
-    system = UnifiedFeedbackSystem.__new__(UnifiedFeedbackSystem)
-    system.enable_analytics = True
-    system.analytics = MagicMock()
-    system.user_feedback = None
-    system.analytics.record_search_quality = AsyncMock(return_value=True)
-    system.analytics.record_document_performance = AsyncMock(return_value=True)
-    system.analytics.record_feedback = AsyncMock(return_value=True)
-    system.analytics.record_event = AsyncMock(return_value=True)
+async def test_submit_feedback_keeps_stars_over_five_for_stored_trends(
+    feedback_system: UnifiedFeedbackSystem, stars: int, stored: float
+) -> None:
+    """1 and 5 stars store as 0.2 and 1.0: stored analytics history uses stars/5 (TASK-13371)."""
+    system = feedback_system
 
     await system.submit_feedback(
         conversation_id="",
