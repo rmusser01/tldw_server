@@ -1,4 +1,5 @@
 import { useHistorySelectionContext } from "./useHistorySelection"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import { waitForChatPromotion } from "@/services/pending-chat-promotion"
 import React from "react"
@@ -708,6 +709,8 @@ export const useServerChatLoader = ({
   }>({ chatId: null, timer: null })
 
   messagesRef.current = messages
+  const selectionIntent = usePlaygroundSessionStore(state => state.serverChatSelectionIntent)
+  const handledSelectionIntent = React.useRef<typeof selectionIntent>(null)
   streamingRef.current = streaming
   processingRef.current = isProcessing
   selectedAssistantRef.current = selectedAssistant
@@ -730,7 +733,10 @@ export const useServerChatLoader = ({
       return
     }
     if (!serverChatId || assistantMeta?.isLoading) return
+    const deliberateSelection = selectionIntent?.chatId === serverChatId &&
+      selectionIntent !== handledSelectionIntent.current
     if (
+      !deliberateSelection &&
       shouldSkipLoadedServerChatReload({
         activeServerChatId: serverChatId,
         loadedChatId: serverChatLoadRef.current.chatId,
@@ -741,7 +747,7 @@ export const useServerChatLoader = ({
       return
     }
     if (serverChatLoadRef.current.inFlight) {
-      if (serverChatLoadRef.current.chatId === serverChatId) {
+      if (!deliberateSelection && serverChatLoadRef.current.chatId === serverChatId) {
         return
       }
       if (serverChatLoadRef.current.controller) {
@@ -815,6 +821,18 @@ export const useServerChatLoader = ({
         let stopWatchingAuthority: (() => void) | undefined
         let pendingAssistantPresentation: Promise<unknown> | undefined
         try {
+          if (deliberateSelection) {
+            if (usePlaygroundSessionStore.getState().serverChatSelectionIntent !== selectionIntent) return
+            handledSelectionIntent.current = selectionIntent
+            const control = selectionRef.current
+            if (control && !await control.loadConversation({ serverChatId, scope, temporary: temporaryChat,
+              isCurrent: () => !controller.signal.aborted &&
+                usePlaygroundSessionStore.getState().serverChatSelectionIntent === selectionIntent &&
+                useStoreMessageOption.getState().serverChatId === serverChatId
+            })) return
+            selectionCurrent = control?.fence() || (() => true)
+            if (controller.signal.aborted || usePlaygroundSessionStore.getState().serverChatSelectionIntent !== selectionIntent) return
+          } else if (selectionRef.current?.canAutomaticallyLoad?.() === false) return
           setIsLoading(true)
           setServerChatLoadState("loading")
           setServerChatLoadError(null)
@@ -1281,6 +1299,7 @@ export const useServerChatLoader = ({
     }
   }, [
     enabled,
+    selectionIntent,
     assistantMeta?.isLoading,
     ensureServerChatHistoryId,
     notification,

@@ -338,7 +338,8 @@ def test_all_ordinary_workflows_call_exact_inert_admission_gate() -> None:
         }, name
 
         admission = data["jobs"]["admission"]
-        assert admission == {
+        await_license = data["jobs"]["await_license"]
+        assert (admission, await_license) == ({  # nosec B101 - regression assertion
             "if": (
                 "vars.LICENSE_FIRST_CI_ENABLED == 'true' && "
                 "github.event_name == 'workflow_run' && "
@@ -347,7 +348,11 @@ def test_all_ordinary_workflows_call_exact_inert_admission_gate() -> None:
             "uses": "./.github/workflows/license-first-admission.yml",
             "with": {"workflow_file": name},
             "permissions": EXPECTED_PERMISSIONS,
-        }, name
+        }, {
+            "if": "github.event_name == 'pull_request'",
+            "uses": "./.github/workflows/license-first-await.yml",
+            "permissions": {"contents": "read", "statuses": "read"},
+        }), name
 
 
 @pytest.mark.parametrize(
@@ -1111,3 +1116,16 @@ def test_helper_is_the_only_checked_out_program_and_owns_all_outputs() -> None:
     assert script.count('"${GITHUB_OUTPUT}"') == 1
     assert ">>" not in script
     assert _unquoted_shell_expansions(script) == []
+
+
+def test_backend_required_enforces_isolation_ratchets():
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gate = next(step for step in steps if step.get("name") == "Enforce tenant isolation ratchets")
+    assert not gate.get("continue-on-error", False)  # nosec B101 - regression assertion
+    for suite in (
+        "tldw_Server_API/tests/CI/test_rls_coverage_ratchet.py",
+        "tldw_Server_API/tests/lint/test_route_auth_ratchet.py",
+        "tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py",
+    ):
+        assert suite in gate["run"]  # nosec B101 - regression assertion

@@ -127,6 +127,7 @@ export const useSelectServerChat = () => {
       setServerChatSource(chat.source ?? null)
       setServerChatExternalRef(chat.external_ref ?? null)
       setServerChatMetaLoaded(true)
+      usePlaygroundSessionStore.getState().requestServerChatSelection(chat.id)
       updatePageTitle(chat.title)
       const chatPath = typeof window !== "undefined" &&
         window.location.pathname.toLowerCase().endsWith("sidepanel.html")

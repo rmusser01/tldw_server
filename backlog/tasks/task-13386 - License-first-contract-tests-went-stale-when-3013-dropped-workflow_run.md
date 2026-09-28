@@ -4,6 +4,7 @@ title: 'License-first contract tests went stale when #3013 dropped workflow_run'
 status: To Do
 assignee: []
 created_date: '2026-09-27 17:24'
+updated_date: '2026-09-27 22:02'
 labels:
   - ci
   - tests
@@ -25,10 +26,16 @@ These are the contract that keeps a runner root from bypassing license admission
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Both tests assert the post-#3013 design (await_license on pull_request, no workflow_run) across all 28 gated workflows
+- [x] #1 Both tests assert the post-#3013 design (await_license on pull_request, no workflow_run) across all 28 gated workflows
 - [ ] #2 A deliberate bypass (a gate job without await_license) makes the tests fail
 - [ ] #3 Explained why gap-verified-12 did not block #3013, and fixed if it is a shard gap
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-09-27: both stale contract tests were fixed independently on each line: in the 0.1.44 release on main, and by #2817 on dev. The v0.1.45 sync (#3035) resolves them to dev's version, which also pins the await_license job shape; test_license_first_workflow_contracts.py passes on the merged tree. AC #1 is done. AC #2 (a deliberate bypass must fail) and AC #3 (why the gap-verified-12 shard did not block #3013) are still open.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

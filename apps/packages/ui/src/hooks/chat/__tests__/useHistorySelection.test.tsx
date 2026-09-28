@@ -191,6 +191,35 @@ beforeEach(() => {
     }
   })
 })
+
+it("does not capture or publish a deliberate reopen cancelled before its account watcher installs", async () => {
+  const mounted = renderHook(() => useHistorySelection())
+  let current = true
+  let pending!: Promise<boolean>
+  act(() => {
+    pending = mounted.result.current.loadConversation({ serverChatId: "chat", isCurrent: () => current })
+    current = false
+  })
+  await act(async () => { expect(await pending).toBe(false) })
+  expect(mocks.capture).not.toHaveBeenCalled()
+  expect(mounted.result.current.getCurrent().owner).toBeNull()
+})
+
+it("does not publish a late capture error after deliberate selection is cancelled", async () => {
+  let reject!: (error: Error) => void
+  mocks.capture.mockReturnValue(new Promise((_resolve, fail) => { reject = fail }))
+  const mounted = renderHook(() => useHistorySelection())
+  let current = true
+  let pending!: Promise<boolean>
+  act(() => {
+    pending = mounted.result.current.loadConversation({ serverChatId: "chat", isCurrent: () => current })
+  })
+  await waitFor(() => expect(mocks.capture).toHaveBeenCalledTimes(1))
+  current = false
+  await act(async () => { reject(new Error("cancelled-owner-error")); expect(await pending).toBe(false) })
+  expect(mounted.result.current.getCurrent().error).toBeNull()
+  expect(mounted.result.current.canAutomaticallyLoad()).toBe(false)
+})
 describe("mounted history selection", () => {
   it("keeps identical initialization independent and follows only the originating view revision", async () => {
     render(
@@ -787,7 +816,9 @@ it.each(["published", "held-success", "held-error"])("config invalidation hides 
   expect(hook.result.current.error).toBe("request_config_scope_changed")
   expect(await hook.result.current.inspectForkOperation(retained[0] as any)).toBe(false)
   expect(retained[0]).toMatchObject({operation_id: "private-operation", candidate_child_id: "private-child", state: "partial"})
+  expect(hook.result.current.canAutomaticallyLoad()).toBe(false)
   await act(async () => {await hook.result.current.loadConversation({serverChatId: "chat"})})
+  expect(hook.result.current.canAutomaticallyLoad()).toBe(true)
   await waitFor(() => expect(hook.result.current.forkOperations).toEqual(retained))
   expect(mocks.forkRecords.mock.calls.at(-1)?.[0]).toMatchObject({owner_key: "owner", conversation_id: "chat", scope: {type: "global"}})
 })

@@ -218,12 +218,17 @@ class MessageStore:
                     )
                 nodes[mid] = node
                 if mid in selected_set:
+                    try:
+                        selected_tools = json.loads(record["selected_tools"] or "null")
+                        selected_extra = json.loads(record["selected_extra"] or "null")
+                    except (TypeError, ValueError) as exc:
+                        raise HistorySelectionError("invalid_metadata") from exc
                     contents[mid] = {
                         "id": mid,
                         "message": record["selected_text"] or "",
                         "images": [],
-                        "tool_calls": json.loads(record["selected_tools"] or "null"),
-                        "extra_metadata": json.loads(record["selected_extra"] or "null"),
+                        "tool_calls": selected_tools,
+                        "extra_metadata": selected_extra,
                     }
                     if include_message_versions:
                         # Composition needs the physical version to distinguish an

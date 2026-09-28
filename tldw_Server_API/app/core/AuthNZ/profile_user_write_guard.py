@@ -872,12 +872,12 @@ def _bootstrap_simple_constraint_is_canonical(
     *,
     backend: str,
 ) -> bool:
-    # AUTOINCREMENT is a bare keyword, so its type plus the absence of arguments is the
-    # whole contract. Checked structurally rather than by rendering: sqlglot 30.20.0 only
-    # emits AUTOINCREMENT alongside its INTEGER PRIMARY KEY column, so rendering the
-    # constraint alone returns '' and rejected the canonical SQLite users table.
-    if type(kind) is exp.AutoIncrementColumnConstraint:
-        return not any(value is not None for value in kind.args.values())
+    if backend == "sqlite" and type(kind) is exp.AutoIncrementColumnConstraint:
+        # sqlglot30.20 renders this standalone node as empty SQL because its
+        # generator requires the INTEGER PRIMARY KEY parent. The enclosing
+        # bootstrap validator already checks that column contract; this flag
+        # is canonical only when it carries no additional AST arguments.
+        return not kind.args
     expected_sql: dict[type[exp.Expression], str] = {
         exp.PrimaryKeyColumnConstraint: "PRIMARY KEY",
         exp.UniqueColumnConstraint: "UNIQUE",

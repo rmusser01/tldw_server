@@ -1,4 +1,5 @@
 import React from "react"
+import { useTranslation } from "react-i18next"
 import { Tooltip } from "antd"
 import { Plus, RefreshCw, Upload } from "lucide-react"
 
@@ -53,6 +54,8 @@ const catalogValidation = (macro: ChatMacroSummary): {
 }
 
 export const ChatMacrosSettings = () => {
+  const { t } = useTranslation("settings")
+  const label = (key: string, defaultValue: string) => t(`chatMacrosSettings.${key}`, defaultValue)
   const [activeTab, setActiveTab] = React.useState<ActiveTab>("macros")
   const [macros, setMacros] = React.useState<ChatMacroSummary[]>([])
   const [catalogLoading, setCatalogLoading] = React.useState(true)
@@ -304,9 +307,9 @@ export const ChatMacrosSettings = () => {
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-4 text-text">
       <header className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold">Chat macros</h1>
+          <h1 className="text-xl font-semibold">{label("title", "Chat macros")}</h1>
           <p className="mt-1 max-w-3xl text-sm text-text-muted">
-            Author reusable chat workflows and shape how their results are returned.
+            {label("description", "Author reusable chat workflows and shape how their results are returned.")}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2" data-testid="chat-macro-header-actions">
@@ -315,26 +318,26 @@ export const ChatMacrosSettings = () => {
             type="file"
             className="sr-only"
             accept=".yaml,.yml,text/yaml,text/plain"
-            aria-label="Import macro YAML file"
+            aria-label={label("importFile", "Import macro YAML file")}
             onChange={(event) => void handleImportFile(event)}
           />
           <button type="button" className={headerButtonClassName} onClick={openNewMacro}>
             <Plus aria-hidden="true" size={16} />
-            New macro
+            {label("new", "New macro")}
           </button>
           <button
             type="button"
-            aria-label="Import macro"
+            aria-label={label("importLabel", "Import macro")}
             className={headerButtonClassName}
             onClick={importMacro}
           >
             <Upload aria-hidden="true" size={16} />
-            Import
+            {label("import", "Import")}
           </button>
-          <Tooltip title="Refresh macros">
+          <Tooltip title={label("refresh", "Refresh macros")}>
             <button
               type="button"
-              aria-label="Refresh macros"
+              aria-label={label("refresh", "Refresh macros")}
               className={iconButtonClassName}
               onClick={() => {
                 void refreshCatalog()
@@ -349,7 +352,7 @@ export const ChatMacrosSettings = () => {
 
       {importError ? <p className="text-sm font-medium text-danger" role="alert">{importError}</p> : null}
 
-      <div className="flex border-b border-border" role="tablist" aria-label="Chat macro settings views">
+      <div className="flex border-b border-border" role="tablist" aria-label={label("tabs", "Chat macro settings views")}>
         <button
           id="chat-macros-tab"
           type="button"
@@ -359,7 +362,7 @@ export const ChatMacrosSettings = () => {
           className={tabClassName(activeTab === "macros")}
           onClick={() => setActiveTab("macros")}
         >
-          Macros
+          {label("macros", "Macros")}
         </button>
         <button
           id="chat-macro-profiles-tab"
@@ -370,7 +373,7 @@ export const ChatMacrosSettings = () => {
           className={tabClassName(activeTab === "profiles")}
           onClick={() => setActiveTab("profiles")}
         >
-          Output profiles
+          {label("profiles", "Output profiles")}
         </button>
       </div>
 
@@ -381,10 +384,10 @@ export const ChatMacrosSettings = () => {
         hidden={activeTab !== "macros"}
       >
         <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(220px,300px)_minmax(0,1fr)]">
-          <aside className="min-w-0 border-b border-border pb-4 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-4" aria-label="Macro catalog">
+          <aside className="min-w-0 border-b border-border pb-4 xl:border-b-0 xl:border-r xl:pb-0 xl:pr-4" aria-label={label("catalog", "Macro catalog")}>
             <div className="mb-2 flex items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold">Macros</h2>
-              {catalogLoading ? <span className="text-xs text-text-muted">Loading macros</span> : null}
+              <h2 className="text-sm font-semibold">{label("macros", "Macros")}</h2>
+              {catalogLoading ? <span className="text-xs text-text-muted">{label("loadingMacros", "Loading macros")}</span> : null}
             </div>
 
             {catalogError ? (
@@ -395,7 +398,7 @@ export const ChatMacrosSettings = () => {
                   className="text-sm font-medium text-danger underline decoration-danger/50 underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                   onClick={() => void refreshCatalog()}
                 >
-                  Retry macro list
+                  {label("retryCatalog", "Retry macro list")}
                 </button>
               </div>
             ) : null}
@@ -414,17 +417,17 @@ export const ChatMacrosSettings = () => {
                   >
                     <button
                       type="button"
-                      aria-label={`Select /${macro.command}`}
+                      aria-label={t("chatMacrosSettings.select", { command: macro.command, defaultValue: `Select /${macro.command}` })}
                       aria-pressed={selected}
                       className="min-w-0 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                       onClick={() => selectMacro(macro)}
                     >
                       <span className="block truncate text-sm font-medium text-text">/{macro.command}</span>
                       <span className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs text-text-muted">
-                        <span>{macro.source}</span>
-                        <span>{macro.enabled ? "Enabled" : "Disabled"}</span>
+                        <span>{label(macro.source, macro.source)}</span>
+                        <span>{macro.enabled ? label("enabled", "Enabled") : label("disabled", "Disabled")}</span>
                         <span className={validation.className} title={macro.validation_error || undefined}>
-                          {validation.label}
+                          {label(validation.label.toLowerCase(), validation.label)}
                         </span>
                       </span>
                     </button>
@@ -432,7 +435,7 @@ export const ChatMacrosSettings = () => {
                       type="button"
                       role="switch"
                       aria-checked={macro.enabled}
-                      aria-label={`Toggle /${macro.command}`}
+                      aria-label={t("chatMacrosSettings.toggle", { command: macro.command, defaultValue: `Toggle /${macro.command}` })}
                       disabled={busyMacro === macro.name}
                       onClick={() => void toggleMacro(macro)}
                       className={[
@@ -451,7 +454,7 @@ export const ChatMacrosSettings = () => {
                 )
               })}
               {!catalogLoading && macros.length === 0 ? (
-                <p className="px-2 py-3 text-sm text-text-muted">No macros found.</p>
+                <p className="px-2 py-3 text-sm text-text-muted">{label("empty", "No macros found.")}</p>
               ) : null}
             </div>
           </aside>
@@ -460,11 +463,11 @@ export const ChatMacrosSettings = () => {
             {cloneSource ? (
               <section className="mb-4 border-y border-border py-3" aria-labelledby="chat-macro-clone-title">
                 <h2 id="chat-macro-clone-title" className="mb-3 text-sm font-semibold text-text">
-                  Clone /{cloneSource.command}
+                  {t("chatMacrosSettings.clone", { command: cloneSource.command, defaultValue: `Clone /${cloneSource.command}` })}
                 </h2>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                   <label className="min-w-0 flex-1 text-sm font-medium text-text" htmlFor="chat-macro-clone-name">
-                    Clone macro name
+                    {label("cloneName", "Clone macro name")}
                     <input
                       id="chat-macro-clone-name"
                       className="mt-1 h-9 w-full rounded-md border border-border bg-surface px-2.5 text-sm text-text outline-none focus:border-primary focus:ring-2 focus:ring-focus disabled:cursor-not-allowed disabled:opacity-60"
@@ -482,7 +485,7 @@ export const ChatMacrosSettings = () => {
                     disabled={cloneBusy || !cloneName.trim()}
                     onClick={() => void cloneMacro()}
                   >
-                    {cloneBusy ? "Cloning" : `Clone /${cloneSource.command}`}
+                    {cloneBusy ? label("cloning", "Cloning") : t("chatMacrosSettings.clone", { command: cloneSource.command, defaultValue: `Clone /${cloneSource.command}` })}
                   </button>
                 </div>
                 {cloneError ? <p className="mt-2 text-sm font-medium text-danger" role="alert">{cloneError}</p> : null}
@@ -509,7 +512,7 @@ export const ChatMacrosSettings = () => {
         aria-labelledby="chat-macro-profiles-tab"
         hidden={activeTab !== "profiles"}
       >
-          {settingsLoading ? <p className="text-sm text-text-muted">Loading output profiles</p> : null}
+          {settingsLoading ? <p className="text-sm text-text-muted">{label("loadingProfiles", "Loading output profiles")}</p> : null}
           {!settingsLoading && settingsError ? (
             <div className="flex flex-wrap items-center gap-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2" role="alert">
               <span className="min-w-0 flex-1 text-sm font-medium text-danger">{settingsError}</span>
@@ -518,7 +521,7 @@ export const ChatMacrosSettings = () => {
                 className="text-sm font-medium text-danger underline decoration-danger/50 underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                 onClick={() => void refreshSettings()}
               >
-                Retry settings
+                {label("retrySettings", "Retry settings")}
               </button>
             </div>
           ) : null}
