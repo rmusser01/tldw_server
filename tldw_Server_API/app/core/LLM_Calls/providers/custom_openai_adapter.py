@@ -339,6 +339,9 @@ class CustomOpenAIAdapter(ChatProvider):
                     timeout=timeout or 120.0,
                 ) as resp:
                     resp.raise_for_status()
+                    # Own loop (TASK-13373): stops reading at DONE or an error event and emits
+                    # the error frame only after the response context exits cleanly; the
+                    # shared SSE helpers keep reading and emit the frame inline.
                     for raw in resp.iter_lines():
                         if not raw:
                             continue

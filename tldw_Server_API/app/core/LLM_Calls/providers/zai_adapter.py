@@ -21,13 +21,8 @@ from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
     merge_extra_body,
     merge_extra_headers,
 )
-from tldw_Server_API.app.core.LLM_Calls.sse import (
-    finalize_stream,
-    is_done_line,
-    normalize_provider_line,
-    sse_done,
-)
-from tldw_Server_API.app.core.LLM_Calls.streaming import provider_stream_error_frame
+from tldw_Server_API.app.core.LLM_Calls.sse import finalize_stream
+from tldw_Server_API.app.core.LLM_Calls.streaming import iter_sse_lines_requests
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 from .base import ChatProvider, raise_if_in_band_provider_error
@@ -135,48 +130,14 @@ def _zai_request(
                 response.raise_for_status()
 
                 def stream_generator():
-                    done_sent = False
-                    skip_finalize = False
                     try:
-                        for raw_line in response.iter_lines(decode_unicode=True):
-                            if not raw_line:
-                                continue
-                            raise_if_in_band_provider_error(
-                                "zai",
-                                raw_line,
-                                phase="stream_response",
-                            )
-                            if is_done_line(raw_line):
-                                done_sent = True
-                            normalized = normalize_provider_line(raw_line)
-                            if normalized is None:
-                                continue
-                            yield normalized
-                        if not done_sent:
-                            done_sent = True
-                            yield sse_done()
-                    except GeneratorExit:
-                        skip_finalize = True
-                        try:
-                            response.close()
-                        finally:
-                            with contextlib.suppress(Exception):
-                                session.close()
-                        raise
-                    except Exception as e_stream:
-                        log_provider_failure(
-                            "zai",
-                            e_stream,
-                            phase="stream_iteration",
-                        )
-                        yield provider_stream_error_frame("zai")
+                        yield from iter_sse_lines_requests(response, decode_unicode=True, provider="zai")
+                        yield from finalize_stream(response, done_already=False)
                     finally:
-                        try:
-                            if not skip_finalize:
-                                yield from finalize_stream(response, done_already=done_sent)
-                        finally:
-                            with contextlib.suppress(Exception):
-                                session.close()
+                        with contextlib.suppress(Exception):
+                            response.close()
+                        with contextlib.suppress(Exception):
+                            session.close()
 
                 return stream_generator()
             except Exception:
