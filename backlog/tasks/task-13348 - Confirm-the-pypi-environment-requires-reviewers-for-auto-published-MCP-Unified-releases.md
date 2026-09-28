@@ -3,9 +3,10 @@ id: TASK-13348
 title: >-
   Confirm the pypi environment requires reviewers for auto-published MCP Unified
   releases
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-23 00:40'
+updated_date: '2026-09-28 00:09'
 labels:
   - ci
   - security
@@ -31,15 +32,27 @@ Source: found while draining the quarantine in TASK-13343.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The pypi GitHub environment's protection rules are confirmed, and the finding recorded either way
+- [x] #1 The pypi GitHub environment's protection rules are confirmed, and the finding recorded either way
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Checked 2026-09-27 via the GitHub API (gh api repos/rmusser01/tldw_server/environments/pypi): protection_rules = [] (no required reviewers, no wait timer), deployment_branch_policy = null (any branch may deploy), can_admins_bypass = true. testpypi is the same. So the risk this task described is real: publish-pypi (mcp-unified-publish.yml, environment pypi, OIDC id-token: write, pypa/gh-action-pypi-publish) runs unattended on any push to main that bumps the MCP Unified version; the only gate is the workflow's own if: (main + the three version-bearing paths). Remediation is a repository-settings change, not a tree change, and is the owner's call because e4231f6d82 made auto-publish deliberate: either (a) add a required reviewer to the pypi environment (restores a human gate, costs one click per release), or (b) at minimum restrict pypi deployments to the main branch (keeps auto-publish, closes other branches). Recommended: (b) now; (a) if unattended publishing is not intended. Bandit: N/A (no code change).
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Confirmed: the pypi environment has no protection rules and no branch policy; auto-publish on a version bump to main is unattended. Remediation (branch policy and/or required reviewer) is a settings change pending the owner.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
 - [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

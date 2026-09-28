@@ -297,3 +297,29 @@ async def test_submit_feedback_maps_issues_to_analytics() -> None:
     assert payload["feedback_type"] == "report"
     assert payload["categories"] == ["missing_details"]
     assert payload["improvement_areas"] == ["missing_details"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("stars", "stored"), [(1, 0.2), (5, 1.0)])
+async def test_submit_feedback_keeps_stars_over_five_for_stored_trends(stars: int, stored: float) -> None:
+    # TASK-13371: stored analytics history uses stars/5; a min->0 remap would shift it.
+    system = UnifiedFeedbackSystem.__new__(UnifiedFeedbackSystem)
+    system.enable_analytics = True
+    system.analytics = MagicMock()
+    system.user_feedback = None
+    system.analytics.record_search_quality = AsyncMock(return_value=True)
+    system.analytics.record_document_performance = AsyncMock(return_value=True)
+    system.analytics.record_feedback = AsyncMock(return_value=True)
+    system.analytics.record_event = AsyncMock(return_value=True)
+
+    await system.submit_feedback(
+        conversation_id="",
+        query="q",
+        document_ids=["doc-1"],
+        chunk_ids=[],
+        relevance_score=stars,
+    )
+
+    assert system.analytics.record_search_quality.await_args.kwargs["relevance_score"] == stored
+    doc = system.analytics.record_document_performance.await_args.args[0]
+    assert doc["relevance_score"] == stored
