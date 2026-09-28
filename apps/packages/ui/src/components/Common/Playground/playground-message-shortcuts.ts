@@ -1,3 +1,5 @@
+import { isEditableTarget } from "@/utils/editable-target"
+
 export type PlaygroundMessageShortcutAction =
   | "variant_prev"
   | "variant_next"
@@ -12,13 +14,6 @@ type ShortcutEvent = {
   repeat?: boolean
   key?: string
   target?: EventTarget | null
-}
-
-const isEditableTarget = (target: EventTarget | null | undefined): boolean => {
-  if (!target || !(target instanceof HTMLElement)) return false
-  if (target.isContentEditable) return true
-  const tagName = target.tagName.toLowerCase()
-  return tagName === "input" || tagName === "textarea" || tagName === "select"
 }
 
 export const resolvePlaygroundMessageShortcutAction = (

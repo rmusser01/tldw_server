@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-09-22 04:52'
-updated_date: '2026-09-23 00:12'
+updated_date: '2026-09-23 19:34'
 labels:
   - bug
   - audio
@@ -48,25 +48,31 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] #1 A failing test loads model A then requests model B and asserts B is returned, not A
-- [x] #2 The cache is keyed by model id (and any other parameter that changes the loaded artifact)
-- [x] #3 The reported model name always matches the model actually used
-- [x] #4 The keyed-but-unlocked Nemo and Parakeet_ONNX caches gain a lock so concurrent loads cannot double-resident
-- [x] #5 Cache eviction still works with the keyed structure
+- [ ] #1 A failing test loads model A then requests model B and asserts B is returned, not A
+- [ ] #2 The cache is keyed by model id (and any other parameter that changes the loaded artifact)
+- [ ] #3 The reported model name always matches the model actually used
+- [ ] #4 The keyed-but-unlocked Nemo and Parakeet_ONNX caches gain a lock so concurrent loads cannot double-resident
+- [ ] #5 Cache eviction still works with the keyed structure
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Duplicate of TASK-13309 (filed twice during the 2026-09-22 review). Work and status are tracked there.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A failing test reproduced the defect before any code changed, with controls pinning the behaviour that had to stay unchanged. Qodo review then found follow-on defects in three of this batch's fixes; those were corrected in the same PR before merge.
+Closed as duplicate of TASK-13309.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->

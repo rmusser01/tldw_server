@@ -204,7 +204,8 @@ jobs:
             fi
             git cat-file -e "${BASE_SHA}^{commit}"
             git cat-file -e "${HEAD_SHA}^{commit}"
-            git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "${RUNNER_TEMP}/backend-required-changed-files.txt"
+            # --diff-filter=d: a file the PR deletes cannot be type-checked.
+            git diff --name-only --diff-filter=d "$BASE_SHA" "$HEAD_SHA" > "${RUNNER_TEMP}/backend-required-changed-files.txt"
             mapfile -t CHANGED_PY < <(grep -E '^tldw_Server_API/.*\.py$' "${RUNNER_TEMP}/backend-required-changed-files.txt" || true)
           else
             mapfile -t CHANGED_PY < <(git ls-files | grep -E '^tldw_Server_API/.*\.py$' || true)

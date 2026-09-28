@@ -82,5 +82,10 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-048](048-sync-blob-upload-expiry-as-a-read-time-predicate.md) | Accepted | Judge Sync blob upload-session expiry by comparing expires_at at read time rather than transitioning rows to an expired status. |
 | [ADR-049](049-chat-history-selection-ownership.md) | Accepted | Bind chat continuation to owner-validated history selection and give local copies independent identity and assets. |
 | [ADR-050](050-native-chat-fork-storage-lifecycle.md) | Accepted | Retain owner-bound native fork receipts independently of child chats and fence closing workspaces. |
+| [ADR-051](051-retry-backoff-schedules.md) | Accepted | Outbound HTTP retries use decorrelated jitter; in-process contention retries use short capped exponential. |
+| [ADR-052](052-mcp-admin-claims.md) | Accepted | One MCP admin predicate, deliberately narrower on permissions; addendum: the `admin` permission is the service-account admin grant, honoured everywhere in AuthNZ. |
+| [ADR-053](053-rag-cross-source-fusion.md) | Accepted | Multi-source RAG results are ordered by reciprocal rank fusion rescaled to (0,1]; single-source retrieval is unchanged. |
+| [ADR-054](054-chatops-shared-shell.md) | Accepted | Discord and Slack share one ChatOps shell under endpoints/_chatops/; only the signature algorithm and command parser stay per-protocol. |
+| [ADR-055](055-prompt-studio-db-single-implementation.md) | Accepted | One backend-neutral Prompt Studio DB implementation, moved aggregate by aggregate behind a parity harness. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.

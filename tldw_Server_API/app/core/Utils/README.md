@@ -30,6 +30,10 @@ compatibility, CPU-bound execution, and optional system checks.
 ## Module Map
 
 - `Utils.py` contains legacy general-purpose helpers and project path helpers.
+- `coercion.py` is the one boolean vocabulary (`parse_bool`, `env_bool`):
+  stripped, case-insensitive, three-way (unrecognised returns the caller's
+  default). Use it instead of a private `_env_bool`/`_as_bool`;
+  `core/testing.is_truthy` delegates to it.
 - `metadata_utils.py` normalizes safe metadata dictionaries for media APIs.
 - `prompt_loader.py` loads prompt resources from configured namespaces.
 - `pydantic_compat.py` wraps model dump/validation compatibility.

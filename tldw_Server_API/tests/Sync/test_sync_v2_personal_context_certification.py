@@ -1218,6 +1218,12 @@ def test_postgres_two_connections_choose_exactly_one_existing_authority(
             return str(exc)
         return "bound"
 
+    checked_out = [first_connection, second_connection]
+
+    def _return_checked_out() -> None:
+        while checked_out:
+            pool.return_connection(checked_out.pop())
+
     try:
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = (
@@ -1230,6 +1236,13 @@ def test_postgres_two_connections_choose_exactly_one_existing_authority(
             sorted([_AUTHORITY_ERROR, "bound"]),
             "PostgreSQL race did not choose exactly one authority",
         )
+        # The race is over and both transactions have committed, so give the pool its
+        # connections back BEFORE verifying. The pool is deliberately sized at 2 with
+        # no overflow so the two binds genuinely contend, which also means holding both
+        # checkouts starves anything else: list_datasets_for_user takes no connection
+        # argument and reaches for the pool, so verifying here used to deadlock the
+        # test against itself and fail with PoolTimeout after 30 seconds.
+        _return_checked_out()
         active = [
             dataset
             for dataset in database.list_datasets_for_user(owner)
@@ -1237,8 +1250,7 @@ def test_postgres_two_connections_choose_exactly_one_existing_authority(
         ]
         _require(len(active) == 1, "PostgreSQL race persisted multiple authorities")
     finally:
-        pool.return_connection(first_connection)
-        pool.return_connection(second_connection)
+        _return_checked_out()
         pool.close_all()
 
 

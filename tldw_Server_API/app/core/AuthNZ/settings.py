@@ -490,6 +490,13 @@ class Settings(BaseSettings):
         default=None,
         description="Secondary BYOK encryption key for dual-read during rotations"
     )
+    AUTOMATION_MESSAGE_ENCRYPTION_KEY: Optional[str] = Field(
+        default=None,
+        description=(
+            "Base64-encoded 32-byte key for the scheduled-automation message "
+            "store (ADR-184); falls back to BYOK_ENCRYPTION_KEY when unset"
+        ),
+    )
     OPENAI_OAUTH_ENABLED: bool = Field(
         default=False,
         description="Enable OpenAI OAuth account-linking for BYOK users",

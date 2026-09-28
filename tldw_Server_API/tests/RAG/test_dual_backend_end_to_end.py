@@ -106,6 +106,41 @@ async def test_dual_backend_notes_retrieval(dual_backend_env: DualBackendEnv) ->
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_dual_backend_notes_slides_source_retrieval(dual_backend_env: DualBackendEnv) -> None:
+    """Slides-source candidates and projection run real SQL on both backends.
+
+    Regression for TASK-13292: the PostgreSQL candidate SQL shipped without its
+    f-string prefix, so notes returned an error on PostgreSQL every time while
+    SQLite worked. Earlier tests mocked these methods, so no SQL ever ran.
+    """
+    env = dual_backend_env
+    _seed_notes(env)
+
+    notes_retriever = NotesDBRetriever(
+        db_path=env.chacha_db.db_path_str,
+        config=RetrievalConfig(max_results=5),
+        chacha_db=env.chacha_db,
+    )
+    owner = env.chacha_db.client_id
+
+    candidates = await notes_retriever.retrieve_slides_source_candidates_v1(
+        query="backend parity",
+        owner_user_id=owner,
+        top_k=5,
+    )
+    assert candidates, f"No notes slides-source candidates for {env.label}"
+
+    projected = await notes_retriever.project_slides_source_documents_v1(
+        projections=[(candidates[0], 1000)],
+        owner_user_id=owner,
+    )
+    assert projected, f"No projected notes slides-source documents for {env.label}"
+    assert projected[0].content.startswith("# Dual Backend Note")
+    assert "backend parity" in projected[0].content
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_dual_backend_hybrid_merge_with_controlled_vector_results(
     dual_backend_env: DualBackendEnv,
     deterministic_embeddings,

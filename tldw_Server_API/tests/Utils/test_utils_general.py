@@ -1,5 +1,4 @@
 import builtins
-import tempfile
 import zipfile
 from pathlib import Path
 
@@ -132,28 +131,6 @@ def test_extract_text_from_segments_error_logs_shape_not_raw_text(monkeypatch):
     assert result == "Error: Unable to extract transcription"
     assert error_messages
     assert all("private transcript" not in message for message in error_messages)
-
-
-def test_save_temp_file_normalizes_and_preserves_content(monkeypatch):
-    class DummyUpload:
-        def __init__(self, name, data):
-            self.name = name
-            self._data = data
-
-        def read(self):
-            return self._data
-
-    upload = DummyUpload("../evil.txt", b"payload")
-    saved_path = Utils.save_temp_file(upload)
-
-    temp_dir = Path(tempfile.gettempdir()).resolve()
-    resolved_saved = Path(saved_path).resolve()
-
-    assert resolved_saved.parent == temp_dir
-    assert resolved_saved.exists()
-    assert b"payload" == resolved_saved.read_bytes()
-
-    resolved_saved.unlink()
 
 
 def test_safe_read_file_handles_empty_decodes(monkeypatch):

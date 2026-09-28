@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statement
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .base import (
+    ConstraintViolationError,
     BackendFeatures,
     AuthorizationDeniedError,
     BackendType,
@@ -35,6 +36,7 @@ from .base import (
     DatabaseError,
     FTSQuery,
     QueryResult,
+    TransientContentionError,
     UniqueConstraintError,
 )
 from .fts_translator import FTSQueryTranslator
@@ -67,6 +69,10 @@ if PSYCOPG2_AVAILABLE:
     )
 else:
     _PSYCOPG_DRIVER_EXCEPTIONS = ()
+
+# SQLSTATEs a retry of the whole transaction can clear: serialization_failure,
+# deadlock_detected, lock_not_available.
+_CONTENTION_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
 
 _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -1065,6 +1071,8 @@ class PostgreSQLBackend(DatabaseBackend):
         query, params = self._prepare_query(query, params)
         redacted_failure = False
         unique_failure = False
+        constraint_failure = False
+        contention_failure = False
         authorization_failure = False
         if connection:
             conn = connection
@@ -1133,12 +1141,22 @@ class PostgreSQLBackend(DatabaseBackend):
             )
 
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as e:
-            sqlstate = getattr(e, "sqlstate", None) if isinstance(e, _PSYCOPG_DRIVER_EXCEPTIONS) else None
-            unique_failure = sqlstate == "23505"
+            _sqlstate = (
+                getattr(e, "sqlstate", None)
+                if isinstance(e, _PSYCOPG_DRIVER_EXCEPTIONS)
+                else None
+            )
+            unique_failure = _sqlstate == "23505"
+            # SQLSTATE class 23 is integrity_constraint_violation: NOT NULL (23502),
+            # FOREIGN KEY (23503), UNIQUE (23505), CHECK (23514) and friends. The CLASS
+            # of failure only -- the driver exception is still never chained and the
+            # message is unchanged.
+            constraint_failure = bool(_sqlstate) and str(_sqlstate).startswith("23")
+            contention_failure = _sqlstate in _CONTENTION_SQLSTATES
             # 42501 is how a row-level security denial surfaces. Without this the
             # caller cannot tell a tenant boundary from a syntax error, because
             # the driver message is redacted and the cause is not chained.
-            authorization_failure = sqlstate == "42501"
+            authorization_failure = _sqlstate == "42501"
             if not external_conn:
                 try:
                     conn.rollback()
@@ -1150,7 +1168,7 @@ class PostgreSQLBackend(DatabaseBackend):
             # query text, parameters or row values, so it can be logged where
             # the driver message cannot, and it is the difference between
             # "a tenant boundary held" and "the schema is wrong".
-            logger.bind(exception_type=type(e).__name__, sqlstate=sqlstate).error(
+            logger.bind(exception_type=type(e).__name__, sqlstate=_sqlstate).error(
                 "PostgreSQL query execution failed"
             )
             redacted_failure = True
@@ -1166,6 +1184,10 @@ class PostgreSQLBackend(DatabaseBackend):
                     "PostgreSQL denied the statement: row-level security policy "
                     "or insufficient privilege (SQLSTATE 42501)"
                 )
+            if constraint_failure:
+                raise ConstraintViolationError("PostgreSQL query execution failed")
+            if contention_failure:
+                raise TransientContentionError("PostgreSQL query execution failed")
             raise DatabaseError("PostgreSQL query execution failed")
 
     def execute_many(

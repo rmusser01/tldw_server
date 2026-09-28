@@ -30,6 +30,7 @@ import {
   type SourceListItem,
   type SourceSortMode,
 } from "./sourceListUtils"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const PAGE_SIZE = 10
 const SOURCE_LIST_FILTER_STORAGE_PREFIX = "knowledge_qa_source_filters:"
@@ -535,14 +536,10 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
           'button, a, input, select, textarea, [role="button"], [role="link"], [contenteditable]'
         )
       )
-      const isEditableTarget =
-        target instanceof HTMLElement &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
+      const typing = isEditableTarget(target)
 
       if (event.key === "?" && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        if (isEditableTarget) return
+        if (typing) return
         event.preventDefault()
         setShortcutsOpen(true)
         return
@@ -556,7 +553,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
         !event.ctrlKey &&
         !event.altKey
       ) {
-        if (isEditableTarget) return
+        if (typing) return
 
         const visiblePosition = Number.parseInt(event.key, 10) - 1
         const selectedItem = visibleItems[visiblePosition]

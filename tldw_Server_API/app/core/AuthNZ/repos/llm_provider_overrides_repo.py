@@ -7,6 +7,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     fold_provider_credential_rows,
 )
@@ -86,23 +87,7 @@ class AuthnzLLMProviderOverridesRepo:
             return dt.replace(tzinfo=timezone.utc)
         return dt.astimezone(timezone.utc)
 
-    @staticmethod
-    def _row_to_dict(row: Any) -> dict[str, Any]:
-        if row is None:
-            return {}
-        if isinstance(row, dict):
-            return dict(row)
-        try:
-            return dict(row)
-        except Exception as row_cast_error:
-            logger.bind(error_type=type(row_cast_error).__name__).debug(
-                "LLM provider override row cast failed; trying keys()/mapping fallback"
-            )
-        try:
-            keys = row.keys()
-            return {key: row[key] for key in keys}
-        except Exception:
-            return {}
+    _row_to_dict = staticmethod(row_dict)
 
     async def _canonicalize_legacy_rows_for_write(
         self,

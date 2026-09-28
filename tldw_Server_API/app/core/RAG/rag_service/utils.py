@@ -11,6 +11,9 @@ from typing import Any, Callable, Optional
 import numpy as np
 import tiktoken
 from loguru import logger
+from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
+    resolve_tiktoken_encoding_or_default,
+)
 
 
 class TokenCounter:
@@ -23,12 +26,7 @@ class TokenCounter:
         Args:
             model: Model name for tokenizer
         """
-        try:
-            self.encoding = tiktoken.encoding_for_model(model)
-        except KeyError:
-            # Fallback to cl100k_base encoding
-            self.encoding = tiktoken.get_encoding("cl100k_base")
-            logger.warning(f"Model {model} not found, using cl100k_base encoding")
+        self.encoding = resolve_tiktoken_encoding_or_default(model)
 
     def count(self, text: str) -> int:
         """Count tokens in text."""

@@ -76,7 +76,6 @@ import {
   NOTES_LIST_REGION_ID,
   NOTES_EDITOR_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
-  shouldIgnoreGlobalShortcut,
   calculateSidebarHeight,
   NOTE_TEMPLATES,
   toSortableTimestamp,
@@ -93,6 +92,7 @@ import {
   hasNotesGraphActiveNotes,
   resolveNotesGraphFocusNoteId,
 } from './notes-manager-utils'
+import { isEditableTarget } from "@/utils/editable-target"
 
 const LazyNotesManagerOverlays = React.lazy(() => import("./NotesManagerOverlays"))
 
@@ -2216,7 +2216,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
 
       // ? — open shortcut help (only when not typing in an input)
       if (event.key === '?' && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        if (shouldIgnoreGlobalShortcut(event.target)) return
+        if (isEditableTarget(event.target)) return
         event.preventDefault()
         setShortcutHelpOpen(true)
         return
@@ -2224,7 +2224,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
 
       // Alt+N — create new note
       if (event.altKey && (event.key === 'n' || event.key === 'N') && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
-        if (shouldIgnoreGlobalShortcut(event.target)) return
+        if (isEditableTarget(event.target)) return
         event.preventDefault()
         void handleNewNote()
         return
@@ -2232,7 +2232,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
 
       // Alt+Shift+D - duplicate current note or draft
       if (event.altKey && event.shiftKey && !event.ctrlKey && !event.metaKey && (event.key === 'd' || event.key === 'D')) {
-        if (shouldIgnoreGlobalShortcut(event.target)) return
+        if (isEditableTarget(event.target)) return
         event.preventDefault()
         void duplicateSelectedNote()
         return
@@ -2240,7 +2240,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
 
       // Ctrl/Cmd+K — focus search
       if ((event.ctrlKey || event.metaKey) && event.key === 'k' && !event.shiftKey && !event.altKey) {
-        if (shouldIgnoreGlobalShortcut(event.target)) return
+        if (isEditableTarget(event.target)) return
         event.preventDefault()
         focusSearchInput()
         return
@@ -2248,7 +2248,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
 
       // / — focus search (only when not typing in an input)
       if (event.key === '/' && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
-        if (shouldIgnoreGlobalShortcut(event.target)) return
+        if (isEditableTarget(event.target)) return
         event.preventDefault()
         focusSearchInput()
         return
@@ -2256,7 +2256,7 @@ const NotesManagerPage: React.FC<{ sourceNoteId?: string | null }> = ({ sourceNo
 
       // Ctrl/Cmd+Shift+E/S/P — switch editor mode
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey) {
-        if (shouldIgnoreGlobalShortcut(event.target)) return
+        if (isEditableTarget(event.target)) return
         if (event.key === 'E' || event.key === 'e') {
           event.preventDefault()
           ed.setEditorMode('edit')

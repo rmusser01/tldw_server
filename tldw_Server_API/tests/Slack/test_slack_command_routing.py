@@ -19,6 +19,30 @@ def _sign(secret: str, timestamp: int, body: bytes) -> str:
     return f"v0={digest}"
 
 
+def _as_web_user_in_installing_org(monkeypatch: pytest.MonkeyPatch, module, app: FastAPI, provider: str, external_id: str) -> None:
+    """The job-status route needs a logged-in user in the org that installed the tenant."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
+
+    async def _memberships(_user_id: int):
+        return [{"org_id": 5, "status": "active"}]
+
+    installed = {(5, provider): [external_id]}
+
+    class _Repo:
+        async def list_installations(self, *, org_id: int, provider: str | None = None, **_kwargs):
+            return [{"external_id": ext} for ext in installed.get((org_id, provider), [])]
+
+    async def _repo():
+        return _Repo()
+
+    monkeypatch.setattr(module, "list_org_memberships_for_user", _memberships)
+    monkeypatch.setattr(module, "_get_workspace_provider_installations_repo", _repo)
+    monkeypatch.setattr(module, "get_settings", lambda: SimpleNamespace(AUTH_MODE="multi_user"))
+    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=7)
+
+
 @pytest.fixture()
 def slack_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("SLACK_SIGNING_SECRET", "test-signing-secret")
@@ -28,6 +52,7 @@ def slack_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
     app = FastAPI()
     app.include_router(slack_endpoint.router, prefix="/api/v1")
+    _as_web_user_in_installing_org(monkeypatch, slack_endpoint, app, "slack", "T1")
     return TestClient(app)
 
 
@@ -60,10 +85,12 @@ def test_slack_commands_parse_rag_route(slack_client: TestClient) -> None:
     assert isinstance(job_id, int)
     assert payload["response_mode"] == "ephemeral"
 
-    # The REST job lookup is an admin-only ops route: it reads the global jobs
-    # table with no tenant scope, so an unauthenticated caller used to be able
-    # to enumerate every tenant's jobs. Users get status from the signed
-    # in-band "status" command instead, which scopes by actor.
+    # The REST job lookup requires login and scopes to the job owner or an active
+    # member of the org that installed the tenant (TASK-13364); an unauthenticated
+    # caller used to be able to enumerate every tenant's jobs.
+    # The fixture signs a web user in for the scoping tests; drop that so this call
+    # is unauthenticated.
+    slack_client.app.dependency_overrides.clear()
     job_status = slack_client.get(f"/api/v1/slack/jobs/{job_id}")
     assert job_status.status_code in (401, 403)
 

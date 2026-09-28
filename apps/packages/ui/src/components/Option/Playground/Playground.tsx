@@ -101,7 +101,10 @@ import { useDesktop, useMobile } from "@/hooks/useMediaQuery";
 import { useDarkMode } from "@/hooks/useDarkmode";
 import { useLoadLocalConversation, restoreReadableLocalComparison } from "@/hooks/useLoadLocalConversation";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
-import { resolvePlaygroundShortcutAction } from "./playground-shortcuts";
+import {
+  resolvePlaygroundShortcutAction,
+  shouldOpenShortcutsHelp,
+} from "./playground-shortcuts";
 import {
   EDIT_MESSAGE_EVENT,
   OPEN_HISTORY_EVENT,
@@ -167,6 +170,7 @@ import {
 } from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
 import { getAssistantSelectionMode } from "@/types/assistant-selection";
+import { isEditableTarget } from "@/utils/editable-target"
 
 const readSidepanelChatWebUiHandoffFromLocation = () => {
   if (typeof window === "undefined") return null;
@@ -2546,13 +2550,10 @@ const PlaygroundContent = () => {
     if (typeof window === "undefined") return;
 
     const handleShortcut = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const isEditableTarget = Boolean(
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable),
-      );
+      // A bare "?" is ordinary typed input, so the shortcut must never fire
+      // while the caret is in the composer or any other editable target.
+      // Modifier chords (Cmd/Ctrl+F) are unreachable by typing and stay active.
+      const editableTarget = isEditableTarget(event.target);
       if (
         (event.metaKey || event.ctrlKey) &&
         !event.altKey &&
@@ -2567,13 +2568,7 @@ const PlaygroundContent = () => {
         });
         return;
       }
-      if (
-        !event.altKey &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        event.shiftKey &&
-        event.key === "?"
-      ) {
+      if (shouldOpenShortcutsHelp(event)) {
         event.preventDefault();
         setShortcutsHelpOpen(true);
         return;
@@ -2594,7 +2589,7 @@ const PlaygroundContent = () => {
 
       const action = resolvePlaygroundShortcutAction(event);
       if (!action) return;
-      if (isEditableTarget) return;
+      if (editableTarget) return;
       event.preventDefault();
 
       if (action === "toggle_artifacts") {

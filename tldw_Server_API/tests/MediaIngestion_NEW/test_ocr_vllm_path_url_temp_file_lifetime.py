@@ -186,7 +186,11 @@ def test_a_failed_write_does_not_leak_the_temp_file(
     monkeypatch.setenv(f"{env_prefix}_USE_DATA_URL", "false")
 
     created: list[str] = []
-    real_named_temp_file = module.tempfile.NamedTemporaryFile
+    # The backends stage page images through runtime_support.image_payload, which owns
+    # the temp file, so the write failure is injected there.
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR import runtime_support
+
+    real_named_temp_file = runtime_support.tempfile.NamedTemporaryFile
 
     class _WriteFails:
         """A NamedTemporaryFile whose write raises, recording the path it created."""
@@ -213,7 +217,7 @@ def test_a_failed_write_does_not_leak_the_temp_file(
         created.append(handle.name)
         return _WriteFails(handle)
 
-    monkeypatch.setattr(module.tempfile, "NamedTemporaryFile", _failing_temp_file)
+    monkeypatch.setattr(runtime_support.tempfile, "NamedTemporaryFile", _failing_temp_file)
 
     with pytest.raises(OSError):
         module._ocr_via_vllm(_PNG, "prompt", *extra_args)

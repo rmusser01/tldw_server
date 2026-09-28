@@ -80,6 +80,7 @@ from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
 )
 
 # Import additional services
+from tldw_Server_API.app.core.Evaluations.scoring import normalize_geval_metric
 from tldw_Server_API.app.core.Evaluations.user_rate_limiter import get_user_rate_limiter_for_user
 from tldw_Server_API.app.core.Evaluations.webhook_identity import webhook_user_id_from_user
 from tldw_Server_API.app.core.Evaluations.webhook_manager import WebhookEvent, WebhookManager
@@ -1083,15 +1084,7 @@ async def evaluate_geval(
                 raw_value = float(raw_candidate) if raw_candidate is not None else 0.0
             except (TypeError, ValueError):
                 raw_value = 0.0
-            if metric_name == "fluency":
-                # Some providers report fluency on a 1-3 scale, others on 1-5.
-                max_score = 3.0 if raw_value <= 3.0 else 5.0
-            else:
-                max_score = 5.0
-            normalized = raw_value / max_score if raw_value >= 1.0 else raw_value
-            if normalized > 1.0:
-                normalized = 1.0
-            return normalized, raw_value
+            return normalize_geval_metric(metric_name, raw_value), raw_value
 
         for metric_name, metric_value in raw_metrics.items():
             if isinstance(metric_value, dict):

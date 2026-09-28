@@ -984,3 +984,20 @@ it("local recovery remains available after remote account invalidation but refus
   })
   expect(mocks.dismissRecovery).toHaveBeenCalledOnce()
 })
+it("does not re-commit consumers when a load starts with nothing to clear", () => {
+  // A commit here re-runs every consumer effect; effects that start a load
+  // (Playground's settings return) would then loop without end.
+  let commits = 0
+  const { result } = renderHook(() => {
+    React.useEffect(() => {
+      commits += 1
+    })
+    return useHistorySelection()
+  })
+  const before = commits
+  act(() => {
+    result.current.beginLoad()
+    result.current.beginLoad()
+  })
+  expect(commits).toBe(before)
+})

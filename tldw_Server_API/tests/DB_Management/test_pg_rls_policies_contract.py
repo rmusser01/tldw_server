@@ -605,3 +605,17 @@ def test_every_core_chat_policy_has_a_with_check():
         start = sql.index(f"CREATE POLICY {table}_tenant_isolation")
         policy = sql[start : sql.index(";", start)]
         assert "WITH CHECK" in policy, f"{table} policy must constrain writes too"
+
+
+def test_every_native_chat_table_is_forced_with_an_owner_policy():
+    """The native fork DDL is spelled out per table; this keeps it in step with the schema."""
+    from tldw_Server_API.app.core.DB_Management.chacha.native_fork_schema import NATIVE_CHAT_TABLES
+
+    sql = "\n".join(build_chacha_rls_sql())
+    owner = "client_id = current_setting('app.current_user_id', true)"
+    for table in NATIVE_CHAT_TABLES:
+        assert f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY" in sql, table
+        assert f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY" in sql, table
+        policy = sql.split(f"CREATE POLICY {table}_owner ON {table}", 1)[1].split("$policy$", 1)[0]
+        assert f"USING ({owner})" in policy, table
+        assert f"WITH CHECK ({owner})" in policy, table

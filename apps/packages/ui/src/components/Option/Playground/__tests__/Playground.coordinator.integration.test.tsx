@@ -154,7 +154,34 @@ const tldwClientState = vi.hoisted(() => ({
   getCharacter: vi.fn(async (id: string | number) => ({
     id,
     name: "Route Character"
-  }))
+  })),
+  // Playground hydrates saved transcripts through the H1 history-selection
+  // capture endpoint; answer it from the same server transcript fixture.
+  captureHistorySelection: vi.fn(async (chatId: string, request: { view: Record<string, unknown>; purpose: "send" | "fork" }) => {
+    const { resolveHistorySelection } = await import("@/utils/history-selection")
+    const listed = await tldwClientState.listChatMessages(chatId, { limit: 1000, offset: 0, historyCapture: true }) as Array<{ id: string; role: string; content: string; version?: number }>
+    const view = { ...request.view, owner_key: "native-owner" } as never
+    const nodes = listed.map((row, index) => ({ id: String(row.id), revision: String(row.version ?? 1), role: row.role, parent_id: index ? String(listed[index - 1].id) : null, settled: true }))
+    const snapshot = { version: 1 as const, owner_key: "native-owner", conversation_id: chatId, fences: { conversation: "1", history: "1", settings: "1" }, nodes, source_digest: "source", storage_context_digest: "storage", interpretation_status: { kind: "parent_graph_v1" as const } }
+    const resolved = resolveHistorySelection(snapshot, view, request.purpose, "")
+    if (resolved.status !== "ready") return { status: resolved.status, code: resolved.code, snapshot, view }
+    const text = new Map(listed.map(row => [String(row.id), row.content]))
+    return { status: "captured", snapshot, view, rows: resolved.rows, purpose: request.purpose, storage_context_digest: "storage", selected_content: resolved.rows.map(row => ({ id: row.id, revision: row.revision, message: text.get(row.id) ?? "", images: [] })) }
+  })
+}))
+
+// jsdom has no IndexedDB; keep the per-profile H1 bookmark state in memory.
+vi.mock("@/db/dexie/history-selection", async importOriginal => ({
+  ...await importOriginal<typeof import("@/db/dexie/history-selection")>(),
+  ensureLocalProfileId: async () => "profile",
+  loadHistoryBookmark: async () => null,
+  saveHistoryBookmark: async () => undefined,
+  loadHistoryTurnRecoveries: async () => []
+}))
+vi.mock("@/db/dexie/fork-operations", async importOriginal => ({
+  ...await importOriginal<typeof import("@/db/dexie/fork-operations")>(),
+  findForkCandidate: async () => null,
+  loadForkOperations: async () => []
 }))
 
 
@@ -180,7 +207,17 @@ vi.mock("@/hooks/useMessageOption", () => ({
 vi.mock("@/hooks/useConnectionState", () => ({ useConnectionState: () => ({ serverUrl: "http://chat.test", lastConfigUpdatedAt: 0 }) }))
 vi.mock("@/hooks/usePlaygroundSessionPersistence", async importOriginal => {
   const actual = await importOriginal<typeof import("@/hooks/usePlaygroundSessionPersistence")>()
-  const useFixture = () => { usePlaygroundSessionStore(); return sessionPersistenceState.value }
+  const { useHistorySelectionContext } = await import("@/hooks/chat/useHistorySelection")
+  // Like the real hook, clearing the persisted session detaches the H1 history owner.
+  const useFixture = () => {
+    usePlaygroundSessionStore()
+    const context = useHistorySelectionContext()
+    const selection = React.useRef(context)
+    selection.current = context
+    const clear = sessionPersistenceState.value.clearPersistedSession
+    const clearPersistedSession = React.useCallback(() => { selection.current?.reset(); return clear() }, [clear])
+    return { ...sessionPersistenceState.value, clearPersistedSession }
+  }
   return { usePlaygroundSessionPersistence: () => {
     const useImplementation = realLoader.session ? actual.usePlaygroundSessionPersistence : useFixture
     return useImplementation()
@@ -222,7 +259,8 @@ vi.mock("@/services/tldw-server", async (importOriginal) => {
   }
 })
 
-vi.mock("@/db/dexie/helpers", () => ({
+vi.mock("@/db/dexie/helpers", async () => ({
+  formatSelectedHistory: (await vi.importActual<typeof import("@/db/dexie/helpers")>("@/db/dexie/helpers")).formatSelectedHistory,
   generateID: () => "owned-message",
   formatToChatHistory: vi.fn(),
   formatToMessage: vi.fn(),
@@ -406,6 +444,8 @@ describe("Playground coordinator integration", () => {
     realLoader.storageWrites = 0
     useMessageOptionMock.mockImplementation(() => messageOptionState.value)
     realLoader.invalidated = new AbortController()
+    // Playground's H1 controller keeps its history reference in sessionStorage.
+    sessionStorage.clear()
     window.history.pushState({}, "", "/chat")
     messageOptionState.value.messages = []
     messageOptionState.value.history = []
@@ -977,13 +1017,14 @@ describe("Playground coordinator integration", () => {
   it.each(["profile", "messages"])("keeps a saved target over a previous character while %s is delayed", async delayed => {
     realLoader.enabled = true
     useMessageOptionMock.mockImplementation(useRealServerConversation)
-    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: true, streaming: false, isProcessing: false, testAssistant: { kind: "character", id: "4", name: "Cedar", metadata: { selectionMode: "tracked" } } } as Partial<SelectionTestState>)
+    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isProcessing: false, testAssistant: { kind: "character", id: "4", name: "Cedar", metadata: { selectionMode: "tracked" } } } as Partial<SelectionTestState>)
     const profile = { id: 5, name: "Robot" }
     const messages = [{ id: "answer", role: "assistant", content: "BEEP BOOP", version: 1 }]
     let release!: () => void
     const pending = new Promise<void>(resolve => { release = resolve })
     tldwClientState.getChat.mockResolvedValue({ id: "robot", title: "Robot chat", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat", scope_type: "global" })
-    tldwClientState.listChatMessages.mockImplementation(async () => { if (delayed === "messages") await pending; return messages })
+    // Only the messages endpoint is slow; the H1 capture endpoint answers independently.
+    tldwClientState.listChatMessages.mockImplementation(async (_id: string, options?: { historyCapture?: boolean }) => { if (delayed === "messages" && !options?.historyCapture) await pending; return messages })
     tldwClientState.getCharacter.mockImplementation(async () => { if (delayed === "profile") await pending; return profile })
     window.history.pushState({}, "", "/chat?settingsServerChatId=robot")
     const changes: Array<{ id: string | null; meta: boolean }> = []
@@ -1010,7 +1051,7 @@ describe("Playground coordinator integration", () => {
   it.each(["picker", "picker-roundtrip", "replacement", "principal"])("does not install a late saved identity after %s changes during metadata fetch", async change => {
     realLoader.enabled = true
     useMessageOptionMock.mockImplementation(useRealServerConversation)
-    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: true, streaming: false, isProcessing: false, testAssistant: { kind: "character", id: "4", name: "Cedar", metadata: { selectionMode: "tracked" } } } as Partial<SelectionTestState>)
+    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isProcessing: false, testAssistant: { kind: "character", id: "4", name: "Cedar", metadata: { selectionMode: "tracked" } } } as Partial<SelectionTestState>)
     let release!: () => void
     const pending = new Promise<void>(resolve => { release = resolve })
     tldwClientState.getChat.mockImplementation(async () => { await pending; return { id: "robot", title: "Robot chat", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat", scope_type: "global" } })
@@ -1034,7 +1075,7 @@ describe("Playground coordinator integration", () => {
   it.each([false, true])("keeps the saved target while a raw preference change suppresses a late profile (same turn %s)", async sameTurn => {
     realLoader.enabled = true
     useMessageOptionMock.mockImplementation(useRealServerConversation)
-    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: true, streaming: false, isProcessing: false, testAssistant: { kind: "character", id: "4", name: "Cedar", metadata: { selectionMode: "tracked" } } } as Partial<SelectionTestState>)
+    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isProcessing: false, testAssistant: { kind: "character", id: "4", name: "Cedar", metadata: { selectionMode: "tracked" } } } as Partial<SelectionTestState>)
     let release!: () => void
     const pending = new Promise<void>(resolve => { release = resolve })
     tldwClientState.getChat.mockResolvedValue({ id: "robot", title: "Robot chat", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat", scope_type: "global" })
@@ -1058,7 +1099,7 @@ describe("Playground coordinator integration", () => {
   it.each(["replacement", "principal", "unmount"])("discards optional profile completion after %s", async change => {
     realLoader.enabled = true
     useMessageOptionMock.mockImplementation(useRealServerConversation)
-    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: true, streaming: false, isProcessing: false, testAssistant: { kind: "character", id: "4", name: "Cedar", metadata: { selectionMode: "tracked" } } } as Partial<SelectionTestState>)
+    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isProcessing: false, testAssistant: { kind: "character", id: "4", name: "Cedar", metadata: { selectionMode: "tracked" } } } as Partial<SelectionTestState>)
     let release!: () => void
     const pending = new Promise<void>(resolve => { release = resolve })
     tldwClientState.getChat.mockResolvedValue({ id: "robot", title: "Robot chat", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat", scope_type: "global" })
@@ -1083,7 +1124,7 @@ describe("Playground coordinator integration", () => {
     realLoader.enabled = true
     realLoader.additionalLoader = true
     useMessageOptionMock.mockImplementation(useRealServerConversation)
-    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: true, streaming: false, isProcessing: false, testAssistant: { kind: "character", id: "4", name: "Cedar", metadata: { selectionMode: "tracked" } } } as Partial<SelectionTestState>)
+    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isProcessing: false, testAssistant: { kind: "character", id: "4", name: "Cedar", metadata: { selectionMode: "tracked" } } } as Partial<SelectionTestState>)
     let releaseStorage!: () => void
     realLoader.storageBarrier = new Promise<void>(resolve => { releaseStorage = resolve })
     tldwClientState.getChat.mockResolvedValue({ id: "robot", title: "Robot chat", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat", scope_type: "global" })
@@ -1109,7 +1150,7 @@ describe("Playground coordinator integration", () => {
     useMessageOptionMock.mockImplementation(useRealServerConversation)
     window.localStorage.clear()
     await setOwnedAssistant({ kind: "character", id: "4", name: "Cedar", metadata: { selectionMode: "tracked" } })
-    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: true, streaming: false, isProcessing: false })
+    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isProcessing: false })
     let release!: () => void
     const pending = new Promise<void>(resolve => { release = resolve })
     tldwClientState.getChat.mockResolvedValue({ id: "robot", title: "Robot chat", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat", scope_type: "global" })
@@ -1149,7 +1190,7 @@ describe("Playground coordinator integration", () => {
     useMessageOptionMock.mockImplementation(useRealServerConversation)
     window.localStorage.clear()
     await setOwnedAssistant({ kind: "character", id: "5", name: "Robot", metadata: { selectionMode: "tracked" } })
-    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: true, streaming: false, isProcessing: false })
+    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isProcessing: false })
     let release!: () => void
     const pending = new Promise<void>(resolve => { release = resolve })
     tldwClientState.getChat.mockResolvedValue({ id: "robot", title: "Robot chat", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat", scope_type: "global" })
@@ -1181,7 +1222,7 @@ describe("Playground coordinator integration", () => {
     useMessageOptionMock.mockImplementation(useRealServerConversation)
     window.localStorage.clear()
     await setOwnedAssistant({ kind: "character", id: "5", name: "Robot", metadata: { selectionMode: "tracked" } })
-    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: true, streaming: false, isProcessing: false })
+    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isProcessing: false })
     let release!: () => void
     const pending = new Promise<void>(resolve => { release = resolve })
     tldwClientState.getChat.mockResolvedValue({ id: "robot", title: "Robot chat", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat", scope_type: "global" })
@@ -1228,7 +1269,7 @@ describe("Playground coordinator integration", () => {
     useMessageOptionMock.mockImplementation(useRealServerConversation)
     window.localStorage.clear()
     await setOwnedAssistant({ kind: "character", id: "5", name: "Robot", metadata: { selectionMode: "tracked" } })
-    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: true, streaming: false, isProcessing: false })
+    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isProcessing: false })
     let release!: () => void
     new Promise<void>(resolve => { release = resolve })
     tldwClientState.getChat.mockResolvedValue({ id: "robot", title: "Robot chat", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat", scope_type: "global" })
@@ -1291,7 +1332,7 @@ describe("Playground coordinator integration", () => {
     realLoader.webStorage = true
     window.localStorage.clear()
     await setOwnedAssistant({ kind: "character", id: "5", name: "Robot", metadata: { selectionMode: "tracked" } })
-    useStoreMessageOption.setState({ serverChatId: "robot", historyId: null, messages: [], history: [], serverChatMetaLoaded: true, serverChatCharacterId: 5, serverChatAssistantKind: "character", serverChatAssistantId: "5", temporaryChat: true, streaming: false, isProcessing: false })
+    useStoreMessageOption.setState({ serverChatId: "robot", historyId: null, messages: [], history: [], serverChatMetaLoaded: true, serverChatCharacterId: 5, serverChatAssistantKind: "character", serverChatAssistantId: "5", temporaryChat: false, streaming: false, isProcessing: false })
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const view = render(<App><QueryClientProvider client={queryClient}><CharacterSelect /></QueryClientProvider></App>)
     try {

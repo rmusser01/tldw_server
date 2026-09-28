@@ -924,6 +924,10 @@ def build_chacha_rls_sql() -> list[str]:
     stmts.extend(build_source_review_rls_sql())
     stmts.extend(build_workspace_source_saved_view_rls_sql())
     stmts.extend(build_shared_workspace_chat_rls_sql())
+    # Native fork tables. Written out per table rather than looped over
+    # NATIVE_CHAT_TABLES: the RLS coverage ratchet scans source text and cannot
+    # see DDL assembled from a loop variable. Keep this list in step with
+    # chacha/native_fork_schema.py (test_pg_rls_policies_contract checks it).
     add("""
         DO $native_chat_rls$
         BEGIN

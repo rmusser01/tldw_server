@@ -48,6 +48,7 @@ from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.services.worker_startup_policy import worker_path_enabled
 from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 router = APIRouter()
 
@@ -55,7 +56,7 @@ MAX_CACHED_JOB_MANAGER_INSTANCES = 4
 MAX_MEDIA_INGEST_JOBS_OFFSET = 10_000
 _job_manager_cache: LRUCache = LRUCache(maxsize=MAX_CACHED_JOB_MANAGER_INSTANCES)
 _job_manager_lock = threading.Lock()
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 _TERMINAL_MEDIA_INGEST_JOB_STATUSES = frozenset({"completed", "failed", "cancelled", "quarantined"})
 
 

@@ -24,13 +24,14 @@ from tldw_Server_API.app.core.Billing.enforcement import (
     get_billing_enforcer,
 )
 from tldw_Server_API.app.core.Resource_Governance import cost_units
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 # Warning header name for soft limit notifications
 BILLING_WARNING_HEADER = "X-Billing-Warning"
 BILLING_LIMIT_HEADER = "X-Billing-Limit"
 BILLING_USAGE_HEADER = "X-Billing-Usage"
 _BILLING_HEADERS = (BILLING_LIMIT_HEADER, BILLING_USAGE_HEADER, BILLING_WARNING_HEADER)
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
 def propagate_billing_headers(source: Response, target: Response) -> None:

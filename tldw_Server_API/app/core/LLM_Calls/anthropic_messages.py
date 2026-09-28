@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     normalize_provider_stream_error,
     provider_result_contains_error,
 )
+from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 
 
 def _blocks_to_text(blocks: list[dict[str, Any]]) -> str:
@@ -341,7 +342,7 @@ def _parse_openai_sse_line(line: str) -> dict[str, Any] | None:
     stripped = line.strip()
     if not stripped:
         return None
-    if stripped.lower() == "data: [done]":
+    if is_done_line(stripped):
         return {"_done": True}
     if not stripped.startswith("data:"):
         return None

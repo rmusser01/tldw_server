@@ -10,7 +10,7 @@ from uuid import uuid4
 import pytest
 from psycopg import Cursor, sql
 
-from tldw_Server_API.app.api.v1.endpoints import media
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext import Plaintext_Files as plaintext_files
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database, search_media
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
@@ -175,7 +175,7 @@ def processor(monkeypatch, warnings=None, status="Success", error=None):
     def extract(**_):
         return result
 
-    monkeypatch.setattr(media, "process_document_content", extract)
+    monkeypatch.setattr(plaintext_files, "process_document_content", extract)
     return result
 
 

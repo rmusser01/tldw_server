@@ -192,6 +192,7 @@ from tldw_Server_API.app.core.Usage.usage_tracker import (
     backfill_legacy_tokens_to_ledger,
     log_llm_usage,
 )
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 # Exception buckets to replace broad Exception catches while preserving behavior.
 try:
@@ -220,7 +221,7 @@ _EMBEDDINGS_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     json.JSONDecodeError,
     *_REDIS_ERRORS,
 )
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 # ============================================================================
 # Embeddings Implementation Import (Safe/Lazy)
@@ -5038,7 +5039,12 @@ async def create_embeddings_batch_endpoint(
 # Model Management Endpoints
 # ============================================================================
 
-@router.get("/embeddings/models", summary="List available embedding models")
+@router.get(
+    "/embeddings/models",
+    summary="List available embedding models",
+    # Capability disclosure: model ids and allowlist status.
+    dependencies=[Depends(get_request_user)],
+)
 async def list_embedding_models():
     """List configured/known models with allowlist status."""
     cfg = settings.get("EMBEDDING_CONFIG", {}) or {}
