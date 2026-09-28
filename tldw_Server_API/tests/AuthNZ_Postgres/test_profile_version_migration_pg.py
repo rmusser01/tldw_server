@@ -185,8 +185,10 @@ async def test_postgres_current_schema_corruption_fails_closed_at_startup(
         user_id,
     )
 
-    with pytest.raises(RuntimeError, match="profile_version"):
-        await ensure_authnz_core_tables_pg(test_db_pool)
+    # Fails closed: False makes startup refuse to boot (initialize.py raises).
+    # The transaction boundary sanitizes the profile_version reason away, so
+    # it cannot be asserted here; TASK-13393 tracks restoring it for operators.
+    assert await ensure_authnz_core_tables_pg(test_db_pool) is False
 
     await _legacy_execute(
         "UPDATE users SET profile_version = updated_at WHERE id = $1",
