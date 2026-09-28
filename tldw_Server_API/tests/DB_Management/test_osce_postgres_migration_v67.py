@@ -8,6 +8,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -84,6 +85,8 @@ def test_postgres_initializer_routes_schema_v66_through_v67(
     db._uses_shared_content_backend = False
     db._backend_refresh_suspended = False
     db._local = SimpleNamespace()
+    # f5f5b63005 bootstraps on a pooled session this fake does not model.
+    monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", lambda *_args: _FakeTransaction())
 
     monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 67)
     monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, lock=False: 66)
