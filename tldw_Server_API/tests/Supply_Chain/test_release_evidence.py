@@ -546,3 +546,137 @@ def test_release_evidence_cli_assembles_and_verifies(tmp_path: Path) -> None:
     assert payload["decision"] == "pass"
     assert len(payload["project_images"]) == 5
     assert len(payload["reference_images"]) == 6
+
+
+def _write_finding(root: Path) -> dict[str, str]:
+    """Retain one exact high-severity finding for policy recomputation."""
+    finding = {
+        "vulnerability_id": "CVE-2026-1000",
+        "purl": "pkg:pypi/example@1.0.0",
+        "installed_version": "1.0.0",
+        "severity": "HIGH",
+        "target": "site-packages/example",
+    }
+    _edit_json(
+        root / "trivy-image-app.json",
+        Results=[
+            {
+                "Target": finding["target"],
+                "Vulnerabilities": [
+                    {
+                        "VulnerabilityID": finding["vulnerability_id"],
+                        "PkgIdentifier": {"PURL": finding["purl"]},
+                        "InstalledVersion": finding["installed_version"],
+                        "Severity": finding["severity"],
+                    }
+                ],
+            }
+        ],
+    )
+    return finding
+
+
+def _write_approval(root: Path, **overrides: object) -> None:
+    """Create a current, exact synthetic policy approval, never real policy data."""
+    today = datetime.now(timezone.utc).date()
+    record = {
+        "id": "VEX-2026-1000",
+        "vulnerability_id": "CVE-2026-1000",
+        "component": "image-app",
+        "purl": "pkg:pypi/example@1.0.0",
+        "installed_version": "1.0.0",
+        "severity": "HIGH",
+        "rationale": "Synthetic test approval.",
+        "mitigation": "Synthetic test isolation.",
+        "owner": "security@example.invalid",
+        "approval": "https://github.com/rmusser01/tldw_server/issues/13013",
+        "created_on": (today - timedelta(days=2)).isoformat(),
+        "expires_on": (today + timedelta(days=1)).isoformat(),
+        "supersedes": None,
+    }
+    record.update(overrides)
+    _write_json(root / "vulnerability-exceptions.json", {"schema_version": 1, "exceptions": [record]})
+
+
+@pytest.mark.parametrize("forged_exception", [False, True])
+def test_release_recomputes_decision_from_retained_scan(tmp_path: Path, forged_exception: bool) -> None:
+    _write_complete_fixture(tmp_path)
+    finding = _write_finding(tmp_path)
+    if forged_exception:
+        _edit_json(tmp_path / "scan-decision-image-app.json", excepted=[finding])
+    with pytest.raises(EvidenceError, match="decision_file"):
+        build_release_manifest(tmp_path, _metadata())
+
+
+def test_release_rejects_invented_excepted_findings(tmp_path: Path) -> None:
+    _write_complete_fixture(tmp_path)
+    _edit_json(tmp_path / "scan-decision-image-app.json", excepted=[{"invented": "finding"}])
+    with pytest.raises(EvidenceError, match="decision_file"):
+        build_release_manifest(tmp_path, _metadata())
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"installed_version": "2.0.0"},
+        {"component": "image-worker"},
+        {"purl": "pkg:pypi/other@1.0.0"},
+        {"severity": "CRITICAL"},
+        {"expires_on": "2026-01-01", "created_on": "2025-12-31"},
+    ],
+)
+def test_release_rejects_inexact_or_expired_approval(tmp_path: Path, override: dict[str, object]) -> None:
+    _write_complete_fixture(tmp_path)
+    finding = _write_finding(tmp_path)
+    _write_approval(tmp_path, **override)
+    _edit_json(tmp_path / "scan-decision-image-app.json", excepted=[finding])
+    with pytest.raises(EvidenceError, match="decision_file"):
+        build_release_manifest(tmp_path, _metadata())
+
+
+def test_release_rejects_unmatched_approval(tmp_path: Path) -> None:
+    _write_complete_fixture(tmp_path)
+    _write_approval(tmp_path)
+    with pytest.raises(EvidenceError, match="decision_file"):
+        build_release_manifest(tmp_path, _metadata())
+
+
+def test_release_accepts_exact_current_approval(tmp_path: Path) -> None:
+    _write_complete_fixture(tmp_path)
+    finding = _write_finding(tmp_path)
+    _write_approval(tmp_path)
+    _edit_json(tmp_path / "scan-decision-image-app.json", excepted=[finding])
+    manifest = build_release_manifest(tmp_path, _metadata())
+    verify_release_manifest(manifest, tmp_path)
+    assert manifest.decision == "pass"
+
+
+@pytest.mark.parametrize("seconds_ahead", [-1, 0, 1])
+def test_release_scanner_start_cannot_exceed_current_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seconds_ahead: int
+) -> None:
+    from Helper_Scripts.Supply_Chain import release_evidence
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 9, 4, 18, 0, tzinfo=timezone.utc) - timedelta(seconds=seconds_ahead)
+
+    monkeypatch.setattr(release_evidence, "datetime", FrozenDateTime)
+    _write_complete_fixture(tmp_path)
+    if seconds_ahead > 0:
+        with pytest.raises(EvidenceError, match="scan_started_at"):
+            build_release_manifest(tmp_path, _metadata())
+    else:
+        assert build_release_manifest(tmp_path, _metadata()).decision == "pass"
+
+
+def test_release_verifier_rechecks_policy_after_checksums_are_resealed(tmp_path: Path) -> None:
+    _write_complete_fixture(tmp_path)
+    manifest = build_release_manifest(tmp_path, _metadata())
+    _write_finding(tmp_path)
+    scan_name = "trivy-image-app.json"
+    files = dict(manifest.files)
+    files[scan_name] = hashlib.sha256((tmp_path / scan_name).read_bytes()).hexdigest()
+    with pytest.raises(EvidenceError, match="decision_file"):
+        verify_release_manifest(replace(manifest, files=files), tmp_path)

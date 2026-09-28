@@ -12,6 +12,11 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+if __package__:
+    from .exception_policy import PolicyError, evaluate_trivy_report, load_policy
+else:
+    from exception_policy import PolicyError, evaluate_trivy_report, load_policy
+
 _PROJECT_IMAGES = {
     "app": ("Dockerfiles/Dockerfile.prod", "promoted"),
     "worker": ("Dockerfiles/Dockerfile.worker", "promoted"),
@@ -292,7 +297,7 @@ def _validate_sbom(path: Path, context: str, subject: str) -> None:
         raise _error(context, "subject")
 
 
-def _validate_scan(path: Path, context: str, subject: str) -> None:
+def _validate_scan(path: Path, context: str, subject: str) -> Mapping[str, object]:
     payload = _load_json_file(path, context)
     if not isinstance(payload, Mapping):
         raise _error(context, "root")
@@ -322,9 +327,10 @@ def _validate_scan(path: Path, context: str, subject: str) -> None:
     image_config = metadata.get("ImageConfig")
     if not isinstance(image_config, Mapping) or image_config.get("architecture") != "amd64":
         raise _error(context, "architecture")
+    return payload
 
 
-def _validate_decision(path: Path, context: str, name: str) -> None:
+def _validate_decision(path: Path, context: str, name: str, report: Mapping[str, object]) -> None:
     payload = _load_json_file(path, context)
     if not isinstance(payload, Mapping) or set(payload) != _DECISION_FIELDS:
         raise _error(context, "fields")
@@ -339,6 +345,21 @@ def _validate_decision(path: Path, context: str, name: str) -> None:
         raise _error(context, "excepted")
     if type(unmatched) is not list or unmatched:
         raise _error(context, "unmatched_exception_ids")
+    today = datetime.now(timezone.utc).date()
+    policy_path = _relative_file(path.parent, _POLICY_FILE, context)
+    try:
+        policy = load_policy(policy_path, today=today)
+        decision = evaluate_trivy_report(report, component=_COMPONENT_NAMES[name], policy=policy, today=today)
+    except (PolicyError, UnicodeError) as error:
+        raise _error(context, "policy evaluation") from error
+    expected = {
+        "component": decision.component,
+        "blocking": [asdict(item) for item in decision.blocking],
+        "excepted": [asdict(item) for item in decision.excepted],
+        "unmatched_exception_ids": list(decision.unmatched_exception_ids),
+    }
+    if payload != expected:
+        raise _error(context, "policy decision mismatch")
 
 
 def load_image_evidence(path: Path) -> ImageEvidence:
@@ -412,8 +433,8 @@ def load_image_evidence(path: Path) -> ImageEvidence:
     scan_path = _relative_file(root, scan_name, f"{context} scan_file")
     decision_path = _relative_file(root, decision_name, f"{context} decision_file")
     _validate_sbom(sbom_path, f"{context} sbom_file", subject)
-    _validate_scan(scan_path, f"{context} scan_file", subject)
-    _validate_decision(decision_path, f"{context} decision_file", name)
+    report = _validate_scan(scan_path, f"{context} scan_file", subject)
+    _validate_decision(decision_path, f"{context} decision_file", name, report)
 
     return ImageEvidence(
         name=name,
@@ -453,6 +474,8 @@ def _validate_scanner(value: object) -> dict[str, str]:
     updated = _timestamp(scanner["database_updated_at"], "database_updated_at")
     downloaded = _timestamp(scanner["database_downloaded_at"], "database_downloaded_at")
     started = _timestamp(scanner["scan_started_at"], "scan_started_at")
+    if started > datetime.now(timezone.utc):
+        raise _error("scanner", "scan_started_at")
     if updated > downloaded or downloaded > started:
         raise _error("scanner", "database_downloaded_at")
     if started - updated > timedelta(hours=24):

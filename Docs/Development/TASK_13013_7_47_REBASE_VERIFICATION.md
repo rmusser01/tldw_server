@@ -135,3 +135,21 @@ compiler-rule scope; this is not a claim that all repository lint is clean.
 The human summary remains satisfied. Renewal approval remains pending;
 neither canonical nor CI exception records were extended. Fresh CI and Qodo
 review are still required before merge.
+
+### Fresh Qodo findings
+
+Qodo's September 28 UTC review identified two release-evidence validation
+gaps. Ten negative regression cases reproduced acceptance of fabricated
+decisions, missing or inexact approvals, and future scanner metadata.
+The image evidence loader now recomputes retained decisions through the
+existing exact-match policy evaluator using the current UTC admission date.
+The scanner check also bounds scan start by verification time. Both assembly
+and verification use these shared checks; valid exact approvals retain their
+existing format. Independent review found no remaining issues in this fix.
+This change does not renew, add, or broaden any real exception record.
+Final verification passes 102 tests, including tampered evidence with
+recomputed checksums and clock boundary cases. Ruff, touched-range Black,
+direct-script CLI and diff checks pass; production Bandit reports zero
+findings. Logs: `/private/tmp/sep27-release-final.log` and
+`/private/tmp/bandit_sep27_release.json`. Retained-file consistency does not
+replace existing trust in scanner execution or signed provenance.
