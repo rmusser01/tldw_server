@@ -119,13 +119,15 @@ class ObservedWrite:
 
 
 EXPECTED_MEMBERSHIP_WRITES = (
+    # 7a0a0df7b6 (TASK-13317) moved the tenant transaction from the admin
+    # endpoint into core/AuthNZ/tenant_provisioning.py unchanged.
     ExpectedWrite(
-        "tldw_Server_API/app/api/v1/endpoints/admin/admin_tenant_provisioning.py",
+        "tldw_Server_API/app/core/AuthNZ/tenant_provisioning.py",
         "provision_tenant",
         "INSERT org_members",
     ),
     ExpectedWrite(
-        "tldw_Server_API/app/api/v1/endpoints/admin/admin_tenant_provisioning.py",
+        "tldw_Server_API/app/core/AuthNZ/tenant_provisioning.py",
         "provision_tenant",
         "INSERT org_members",
     ),

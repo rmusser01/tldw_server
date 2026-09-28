@@ -151,6 +151,9 @@ class TestProvisionEndpointUnit:
     async def test_provision_uses_backend_aware_postgres_transaction(self):
         from tldw_Server_API.app.api.v1.endpoints.admin import admin_tenant_provisioning
 
+        # 7a0a0df7b6 moved the transaction (and its gateway) into core.
+        from tldw_Server_API.app.core.AuthNZ import tenant_provisioning as tenant_provisioning_core
+
         payload = TenantProvisionRequest(
             username="tenant_user",
             email="tenant@example.com",
@@ -178,7 +181,7 @@ class TestProvisionEndpointUnit:
                 "tldw_Server_API.app.core.AuthNZ.password_service.get_password_service"
             ) as password_service,
             patch.object(
-                admin_tenant_provisioning,
+                tenant_provisioning_core,
                 "VersionedUserWriteGateway",
                 return_value=gateway,
             ) as gateway_type,
@@ -212,6 +215,9 @@ class TestProvisionEndpointUnit:
     @pytest.mark.asyncio
     async def test_provisioning_failure_exits_the_single_transaction_with_error(self):
         from tldw_Server_API.app.api.v1.endpoints.admin import admin_tenant_provisioning
+
+        # 7a0a0df7b6 moved the transaction (and its gateway) into core.
+        from tldw_Server_API.app.core.AuthNZ import tenant_provisioning as tenant_provisioning_core
 
         payload = TenantProvisionRequest(
             username="tenant_user",
@@ -250,7 +256,7 @@ class TestProvisionEndpointUnit:
                 "tldw_Server_API.app.core.AuthNZ.password_service.get_password_service"
             ) as password_service,
             patch.object(
-                admin_tenant_provisioning,
+                tenant_provisioning_core,
                 "VersionedUserWriteGateway",
                 return_value=gateway,
             ),
