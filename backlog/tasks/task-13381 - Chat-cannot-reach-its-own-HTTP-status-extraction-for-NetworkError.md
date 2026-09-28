@@ -4,7 +4,7 @@ title: Chat cannot reach its own HTTP-status extraction for NetworkError
 status: Done
 assignee: []
 created_date: '2026-09-23 17:54'
-updated_date: '2026-09-28 19:25'
+updated_date: '2026-09-28 19:39'
 labels:
   - bug
   - chat
@@ -56,6 +56,8 @@ Open question for whoever takes it: adding `NetworkError` to the tuple is the sm
 
 <!-- SECTION:NOTES:BEGIN -->
 Closed 2026-09-28, verified on dev after #3011 merged. AC1: NetworkError and RetryExhaustedError are in _CHAT_ORCHESTRATOR_PROVIDER_EXCEPTIONS (chat_orchestrator.py:50,99); tests/Chat/unit/test_orchestrator_network_exception_routing.py pins that they reach the handler and that NetworkError('HTTP 429') classifies as 429, which the handler maps to ChatRateLimitError. AC3: nothing in core/Chat, core/Character_Chat or endpoints/chat.py catches a raw NetworkError (the only reference is the _is_network_exception classifier), so no retry behaviour depended on it escaping. AC4: the tripwire test is gone from dev. AC2 amended below: a message-only NetworkError('HTTP 429') has no response headers, so there is no upstream Retry-After to forward.
+
+Evidence correction (Qodo on #3048): test_orchestrator_network_exception_routing.py's first two tests only pin classification and tuple membership. Added test_chat_api_call_maps_a_network_error_through_the_real_handler, which drives chat_api_call itself with the dispatcher raising NetworkError: 'HTTP 429' -> ChatRateLimitError(429), status-less -> ChatProviderError(504). Probed: both cases fail with NetworkError removed from the tuple.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

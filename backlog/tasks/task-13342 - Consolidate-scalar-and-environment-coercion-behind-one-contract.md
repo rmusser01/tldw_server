@@ -4,7 +4,7 @@ title: Consolidate scalar and environment coercion behind one contract
 status: In Progress
 assignee: []
 created_date: '2026-09-22 05:10'
-updated_date: '2026-09-28 19:25'
+updated_date: '2026-09-28 19:39'
 labels:
   - refactor
   - security
@@ -67,7 +67,7 @@ Reconciled 2026-09-28 against dev after #3011 merged TASK-13322 (Done). The Done
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Duplicate of TASK-13322. Design doc retained and linked from 13322.
+Partly delivered via TASK-13322 (#3011): stages 1-3, meaning fail-closed parsers, core/Utils/coercion.py and the table test, are on dev. Still open here: the stage 4 private-coercion lint ratchet (AC4), the no-changed-parse guarantee (AC5), and a Bandit run (AC6).
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
