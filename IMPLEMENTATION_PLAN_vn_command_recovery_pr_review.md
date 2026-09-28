@@ -131,9 +131,11 @@ replay and removal of only the acknowledged entry. Final 220 VN/fetch/shared-aut
 tests pass (50.89s, 11 files, one worker), typecheck and both scoped lint commands
 pass, and diff checks are clean. Unchanged VN Python Bandit has zero
 findings/errors over 9064 lines; it does not scan TypeScript. No backend, CI,
-dependency or environment changes. Publish the scoped fix, reply and resolve the
-finding, then obtain complete new-head reviews and all live CI before normal
-merge. Prior-head completion is not qualification of this follow-up.
+dependency or environment changes. The scoped fix was published as
+`c2b242a916c0ce141555bc8351aab19e987af3c6`; finding 4117523366 was answered
+and resolved. Complete reviews and exact-head CI for this tracking follow-up,
+and verified normal merge, remain pending. Prior-head completion does not qualify
+a changed tracking head.
 
 Qodo completed the exact-head full-diff reassessment at issuecomment-5858115068
 with no production defects and accepted the human-gate clarification. Its minor
