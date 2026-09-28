@@ -620,17 +620,14 @@ class FilesystemModule(BaseModule):
             grep_tool,
         ]
 
+    def verbatim_argument_keys(self, tool_name: str | None) -> frozenset[str]:
+        """File-content arguments the upstream hardening pass must not strip (TASK-13294)."""
+        return _VERBATIM_ARGS.get(tool_name or "", frozenset())
+
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
-        # The per-key exemptions below do not protect what they name on the production
-        # path: tool_execution/security.py:harden_and_sanitize_tool_arguments already
-        # called self.sanitize_input(arguments) unconditionally before execute_tool was
-        # reached, so old_string/new_string/source/diff arrive already stripped and
-        # exempting them from a second, idempotent pass changes nothing. They cannot be
-        # made to work from here -- sanitize_input receives the whole dict with no tool
-        # name, so the upstream pass has no way to know which keys this tool exempts.
-        # Left in place rather than deleted: the intent (byte-preserve exact-match
-        # strings) is right, and honouring it means threading tool_name through
-        # sanitize_input across all 22 inheriting modules. TASK-13294 AC#6.
+        # The upstream hardening pass honours the same _VERBATIM_ARGS table through
+        # verbatim_argument_keys, so these values arrive byte-exact; this local pass
+        # covers direct callers of execute_tool that skip the protocol.
         raw_args = arguments or {}
         verbatim = _VERBATIM_ARGS.get(tool_name, frozenset())
         if tool_name == "fs.patch":
