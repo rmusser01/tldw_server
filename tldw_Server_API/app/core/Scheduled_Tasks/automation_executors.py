@@ -21,6 +21,7 @@ chat entrypoint — this module adds no secret handling of its own.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from loguru import logger
@@ -190,8 +191,11 @@ async def _execute_agent_task(definition: DefinitionRow, payload: dict[str, Any]
             "agent_task definition carries no message_ref (authored before "
             "the ADR-184 message store, or metadata incomplete)"
         )
-    raw_message = AutomationMessageStore.for_user(definition.owner_id).resolve_message(
-        definition.owner_id, message_ref
+    # The store read is sqlite I/O (mkdir, connect, query) -- keep it off
+    # the event loop so one slow read cannot stall other jobs' dispatch.
+    store = AutomationMessageStore.for_user(definition.owner_id)
+    raw_message = await asyncio.to_thread(
+        store.resolve_message, definition.owner_id, message_ref
     )
     if raw_message is None:
         raise LookupError(
@@ -219,13 +223,15 @@ async def _execute_agent_task(definition: DefinitionRow, payload: dict[str, Any]
 
 
 def register_automation_executors() -> None:
-    """Register the production executor for the wired phase-1 family.
+    """Register the production executors for the wired families.
 
-    ``recurring_question`` only: ``agent_task`` is deliberately unwired in
-    phase 1 (its message is redacted at rest; the consumer skips those runs
-    with an actionable reason). Idempotent: safe at every worker startup.
-    The seam stays test-overridable — tests replace entries in the
-    consumer's registry directly.
+    ``recurring_question`` (phase-1 generation-only) and ``agent_task``
+    (ADR-184 phase 2: generation-only with the message resolved from the
+    encrypted store at dispatch). agent_task dispatch additionally sits
+    behind the deployment certification gate, and tool-requesting runs
+    terminate ``approval_required`` before the executor runs. Idempotent:
+    safe at every worker startup. The seam stays test-overridable — tests
+    replace entries in the consumer's registry directly.
     """
     global _REGISTERED
     register_executor("recurring_question", _execute_generation_only)
