@@ -1129,3 +1129,41 @@ def test_backend_required_enforces_isolation_ratchets():
         "tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py",
     ):
         assert suite in gate["run"]  # nosec B101 - regression assertion
+
+
+def _without_await_license(workflows: dict[str, tuple[dict[str, Any], str]], *, drop_job: bool):
+    """Deep-copy the workflows and strip await_license from backend-required.yml."""
+    import copy
+
+    mutated = copy.deepcopy(workflows)
+    data, text = mutated["backend-required.yml"]
+    if drop_job:
+        data["jobs"].pop("await_license")
+    for job in data["jobs"].values():
+        needs = job.get("needs")
+        if isinstance(needs, list) and "await_license" in needs:
+            needs.remove("await_license")
+    return mutated
+
+
+@pytest.mark.parametrize("drop_job", [False, True], ids=["gate-job-skips-await", "await-job-removed"])
+def test_a_deliberate_license_bypass_fails_the_contract(monkeypatch: pytest.MonkeyPatch, drop_job: bool) -> None:
+    """TASK-13386 AC2: a gate that stops waiting on the license verdict must fail, not pass.
+
+    #3013 changed this contract and the tests went stale unnoticed, so the tests
+    themselves are checked here: strip await_license from backend-required.yml and the
+    admission contracts must reject it.
+    """
+    import sys
+
+    module = sys.modules[__name__]
+    real = _load_ordinary_workflows()
+    monkeypatch.setattr(module, "_load_ordinary_workflows", lambda: _without_await_license(real, drop_job=drop_job))
+
+    # The dependency-graph contract must catch both shapes of bypass.
+    with pytest.raises((AssertionError, KeyError)):
+        test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable()
+    # Removing the await job itself must also fail the exact-gate contract.
+    if drop_job:
+        with pytest.raises((AssertionError, KeyError)):
+            test_all_ordinary_workflows_call_exact_inert_admission_gate()

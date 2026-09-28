@@ -233,6 +233,22 @@ jobs:
             tldw_Server_API/tests/lint/test_route_auth_ratchet.py \
             tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py
 
+      # These pin the license-first ordering and the trusted license gate. They used to
+      # run only in ci.yml's full-suite shard, which is not required and is skipped on
+      # most PRs, so #3013 merged with them red (TASK-13386). Workflow edits count as
+      # backend changes, so a PR touching the gates now has to keep these green.
+      - name: Enforce CI gate contracts
+        if: needs.changes.outputs.backend_changed == 'true'
+        env:
+          PYTHONPATH: .
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          TEST_MODE: "true"
+          DISABLE_HEAVY_STARTUP: "1"
+        run: |
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py \
+            tldw_Server_API/tests/CI/test_frontend_license_gate_workflow.py
+
       - name: Backend unit smoke
         if: needs.changes.outputs.backend_changed == 'true'
         env:
