@@ -236,7 +236,13 @@ async def handle_agent_task_job(
             "run_id": None,
             "reason": "definition_missing",
         }
-    if run["status"] in ("succeeded", "skipped", "failed", "timed_out"):
+    if run["status"] in (
+        "succeeded",
+        "skipped",
+        "failed",
+        "timed_out",
+        "approval_required",
+    ):
         return {
             "status": run["status"],
             "definition_id": definition_id,
@@ -256,7 +262,13 @@ async def handle_agent_task_job(
             definition_id=definition_id,
             run_slot_key=run_slot_key,
         )
-        if latest and latest["status"] in ("succeeded", "skipped", "failed", "timed_out"):
+        if latest and latest["status"] in (
+            "succeeded",
+            "skipped",
+            "failed",
+            "timed_out",
+            "approval_required",
+        ):
             return {
                 "status": latest["status"],
                 "definition_id": definition_id,
@@ -545,6 +557,12 @@ def _finish(
                 )
             elif status == "skipped":
                 message = summary or f"Skipped: {error or 'unknown reason'}."
+            elif status == "approval_required":
+                message = (
+                    summary
+                    or "This run requests tools and terminated "
+                    "approval-required (ADR-184 decision 2A)."
+                )
             else:
                 message = f"Run failed: {error or 'unknown error'}."
             cdb.create_user_notification(
