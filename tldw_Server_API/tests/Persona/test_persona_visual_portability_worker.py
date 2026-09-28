@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.Persona.visual_portability.preview import (
     PersonaVisualPackImportPreviewer,
 )
 from tldw_Server_API.app.core.Persona.visual_service import PersonaVisualService
+from tldw_Server_API.app.core.Persona.visuals import VISUAL_STATE_IDS
 
 
 pytestmark = pytest.mark.unit
@@ -107,6 +108,53 @@ def _create_pack_with_asset(
         manifest=_valid_manifest(str(asset["id"])),
     )
     return persona_id, pack, asset
+
+
+def _create_active_pack(
+    db: CharactersRAGDB,
+    *,
+    persona_id: str,
+    title: str,
+    user_id: str = "user-1",
+) -> dict[str, Any]:
+    """Activate through review: direct status='active' creation is rejected since 790b6d1073."""
+    pack = db.create_persona_visual_pack(
+        persona_id=persona_id,
+        user_id=user_id,
+        title=title,
+        manifest={"manifest_version": 1, "renderer_type": "sprite_frames", "states": {}, "animations": {}},
+    )
+    service = PersonaVisualService(db)
+    asset = service.create_asset_from_upload(
+        persona_id=persona_id,
+        user_id=user_id,
+        pack_id=str(pack["id"]),
+        content=_png_bytes(),
+        mime_type="image/png",
+        original_filename="idle.png",
+        asset_role="frame",
+    )
+    manifest = _valid_manifest(str(asset["id"]))
+    manifest["states"] = {state: {"animation_id": "idle"} for state in sorted(VISUAL_STATE_IDS)}
+    pack = db.update_persona_visual_pack_manifest(
+        pack_id=str(pack["id"]),
+        persona_id=persona_id,
+        user_id=user_id,
+        manifest=manifest,
+    )
+    review = service.review_pack(
+        pack_id=str(pack["id"]),
+        user_id=user_id,
+        reviewer_user_id=user_id,
+        expected_version=int(pack["version"]),
+    )
+    return service.activate_pack(
+        persona_id=persona_id,
+        user_id=user_id,
+        pack_id=str(pack["id"]),
+        expected_version=int(pack["version"]),
+        reviewed_fingerprint=str(review["fingerprint"]),
+    )
 
 
 @pytest.fixture()
@@ -764,12 +812,10 @@ async def test_persona_visual_import_commit_worker_replaces_selected_draft_only(
     target_persona_id = db_instance.create_persona_profile(
         {"user_id": "user-1", "name": "Worker Target Persona"}
     )
-    active_pack = db_instance.create_persona_visual_pack(
+    active_pack = _create_active_pack(
+        db_instance,
         persona_id=target_persona_id,
-        user_id="user-1",
         title="Active Target Visuals",
-        manifest={"manifest_version": 1, "renderer_type": "sprite_frames", "states": {}, "animations": {}},
-        status="active",
     )
     target_draft = db_instance.create_persona_visual_pack(
         persona_id=target_persona_id,
@@ -988,12 +1034,10 @@ async def test_persona_visual_import_commit_worker_cleans_imported_pack_when_rep
     target_persona_id = db_instance.create_persona_profile(
         {"user_id": "user-1", "name": "Worker Cleanup Target"}
     )
-    active_pack = db_instance.create_persona_visual_pack(
+    active_pack = _create_active_pack(
+        db_instance,
         persona_id=target_persona_id,
-        user_id="user-1",
         title="Active Target Visuals",
-        manifest={"manifest_version": 1, "renderer_type": "sprite_frames", "states": {}, "animations": {}},
-        status="active",
     )
     target_draft = db_instance.create_persona_visual_pack(
         persona_id=target_persona_id,
