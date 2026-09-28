@@ -23,6 +23,9 @@ FIRST_PARTY_WEBSOCKET_AUTH_FILES = (
     "tldw_Server_API/app/api/v1/endpoints/voice_assistant.py",
     "tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py",
     "tldw_Server_API/app/core/Audio/streaming_service.py",
+    # Realtime speech routes (9d6104995e) authenticate via the shared audio
+    # handshake in streaming_service, which owns the cookie resolver.
+    "tldw_Server_API/app/core/Audio/Realtime/auth.py",
 )
 
 EXPECTED_WEBSOCKET_HANDLERS = {
@@ -48,6 +51,8 @@ EXPECTED_WEBSOCKET_HANDLERS = {
         "websocket_tts",
         "websocket_tts_realtime",
     },
+    "tldw_Server_API/app/api/v1/endpoints/audio/audio_realtime.py": {"websocket_realtime"},
+    "tldw_Server_API/app/api/v1/endpoints/realtime_compat.py": {"websocket_realtime_compat"},
 }
 
 
@@ -80,5 +85,7 @@ def test_first_party_websocket_auth_files_use_shared_cookie_resolver():
         source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
         if relative_path.endswith("endpoints/meetings.py"):
             assert "get_meetings_db_for_websocket" in source, relative_path
+        elif relative_path.endswith("Audio/Realtime/auth.py"):
+            assert "_audio_ws_authenticate" in source, relative_path
         else:
             assert "resolve_single_user_cookie_websocket" in source, relative_path
