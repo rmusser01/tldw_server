@@ -44,16 +44,18 @@ full queued escalation is a later step with its own task.
       `message_store_unavailable` (503) and persists nothing — fail-closed,
       same discipline as the execution-target bound
 - [x] recurring_question previews never touch the store
-- [ ] The agent_task executor resolves the ref at dispatch (in memory
+- [x] The agent_task executor resolves the ref at dispatch (in memory
       only); an unresolvable ref is an honest failed run with a precise
-      reason
-- [ ] The read-only tool envelope executes agent_task runs; a
-      side-effecting tool call terminates the run as `approval_required`
-      with the attempted call recorded and the request carried in the
-      result notification
-- [ ] The consumer's `family_not_wired_for_execution:agent_task` skip is
-      lifted and the execution-certification matrix reports agent_task
-      execute availability only when store + envelope are operational
+      reason (no ref / unresolvable ref are distinct reasons)
+- [x] The `approval_required` terminal outcome exists end-to-end (run
+      status + `automation_run_approval_required` notification kind +
+      consumer return); tool-requesting definitions terminate with it
+      (error `tools_require_read_only_envelope`) instead of the phase-1
+      skip. Runtime envelope execution (actually running side-effect-free
+      tools in-loop) remains the open item
+- [x] The consumer's `family_not_wired_for_execution:agent_task` skip is
+      unreachable for agent_task (executor registered; dispatch sits
+      behind the deployment certification gate by DESIGN — see notes)
 - [ ] Env/config documented: `AUTOMATION_MESSAGE_ENCRYPTION_KEY` (falls
       back to `BYOK_ENCRYPTION_KEY`/secondary for rotation)
 
@@ -71,7 +73,27 @@ full queued escalation is a later step with its own task.
 
 ## Implementation Notes
 
-- Slices 1–2 (store + authoring wiring) landed first; slices 3–4 (executor,
-  envelope, certification) follow on this task.
+- Slices 1–2 (store + authoring wiring): merged via #3039.
+- Slice 3 (executor + approval_required vocabulary): agent_task executes
+  generation-only with its message resolved from the store at dispatch
+  (missing ref and unresolvable ref are distinct failure reasons);
+  tool-requesting definitions terminate `approval_required` with a
+  pass-back notification instead of the phase-1 skip; `timed_out` added to
+  the run-status Literal (latent drift — the consumer has written it since
+  the TASK-13039 era but response validation would have rejected it).
+- **Certification-gate finding (important):** agent_task dispatch sits
+  behind the Phase-4D deployment-certification program
+  (`execution_certification.py`): `current_agent_execution_stack_ready()`
+  is hardcoded False pending a reviewed execution stack, and certification
+  resolves draft_only at best without evidence receipts (build SHA,
+  isolation profile). This is a deliberate security program — enabling
+  agent_task execution in a deployment is an owner/operator action
+  (evidence + reviewed stack install), not a code flip. The executor now
+  exists so certified deployments dispatch immediately.
+- Client follow-up needed: chatbook's `NotificationKind` Literal must add
+  `automation_run_approval_required` (same latent-feed-parse class fixed
+  for the four phase-1 kinds in chatbook PR #2215).
+- Store-native re-encryption for BYOK-key rotation: follow-up (rotation
+  note recorded in-code).
 
 ADR required: covered by chatbook ADR-184 (accepted); no new server ADR.
