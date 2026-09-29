@@ -1,5 +1,9 @@
 # Fresh-install UAT: single-user and multi-user
 
+## UAT510 — PR2979 core-to-API ratchet after MCP fixture repair (TASK-13260.278.18.83)
+
+Published head `60eedcdca0f4484c5ed3328d96d884263f2e9ff2` remains based on fetched `dev` `0da68530e80c713ed3a323a741998e1fed37e3e9`. Critical browser E2E passes. The macOS 3.12 `core-utils-tooling` shard passed 2,108 tests and failed one architecture ratchet: the prior MCP bounds fixture repair removed its direct API import, but `CORE_TO_API_BASELINE` still named that file. Remove the stale baseline entry so the ratchet tightens. The exact three-test boundary module fails before and passes after locally; Ruff is clean, and Bandit reports only three unchanged LOW test assertions. Hosted rerun, the remaining CI matrix, Qodo review and merge remain open.
+
 ## UAT509 — PR2979 current-head CI acceptance (TASK-13260.278.18.83)
 
 Published head `78eba913ae601e6bb676bcc6d99e8ec1216ca1f1` is based on freshly fetched `dev` `0da68530e80c713ed3a323a741998e1fed37e3e9` (zero missing commits). The current CI run has 17 failed checks: one browser journey, 12 substantive backend shards and four aggregate shard gates. Four PostgreSQL-backed paper-search shards passed on Ubuntu 3.12/3.13, Windows 3.12 and macOS 3.12; the two Ubuntu AuthNZ unit shards were interrupted by runner shutdown at 28–31%, so their remaining tests are unverified. Qodo has posted no review newer than 2026-09-22; old review threads are resolved. Merge and fresh full UAT remain paused.

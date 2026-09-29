@@ -2,7 +2,7 @@
 
 ## Current PR acceptance stage — 2026-09-29
 
-PR2979 remains draft on fetched `dev` `0da68530`. TASK-13260.278.18.83 and UAT509 own the current-head CI burn-down: the missing media shard, PostgreSQL-sensitive MCP validation fixture, two Windows Chat tests, Windows Prompt handle, Sandbox timing oracle and Character SSE capture have local focused repairs. Hosted rerun, interrupted AuthNZ shards, Qodo's new review and merge are still required. Full four-cell UAT remains paused until that PR work is complete.
+PR2979 remains draft at `60eedcdc` on fetched `dev` `0da68530`. TASK-13260.278.18.83 and UAT509–UAT510 own the current-head CI burn-down: the missing media shard, PostgreSQL-sensitive MCP validation fixture, two Windows Chat tests, Windows Prompt handle, Sandbox timing oracle, Character SSE capture, and the MCP fixture's stale core-to-API ratchet entry have local focused repairs. Critical browser E2E passes on the published head. Hosted rerun, interrupted AuthNZ shards, Qodo's new review and merge are still required. Full four-cell UAT remains paused until that PR work is complete.
 
 > **Execution:** Continue in the main UAT task, using the existing debugging, test-first, review and verification workflows. The requester already approved this sequence and its revised review recommendations; no repeat plan approval is needed. Preserve the shared checkout before creating the integration checkout.
 
