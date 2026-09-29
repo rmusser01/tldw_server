@@ -2,7 +2,7 @@
 
 ## UAT510 — PR2979 core-to-API ratchet after MCP fixture repair (TASK-13260.278.18.83)
 
-Published head `60eedcdca0f4484c5ed3328d96d884263f2e9ff2` remains based on fetched `dev` `0da68530e80c713ed3a323a741998e1fed37e3e9`. Critical browser E2E passes. The macOS 3.12 `core-utils-tooling` shard passed 2,108 tests and failed one architecture ratchet: the prior MCP bounds fixture repair removed its direct API import, but `CORE_TO_API_BASELINE` still named that file. Remove the stale baseline entry so the ratchet tightens. The exact three-test boundary module fails before and passes after locally; Ruff is clean, and Bandit reports only three unchanged LOW test assertions. Hosted rerun, the remaining CI matrix, Qodo review and merge remain open.
+Published head `60eedcdca0f4484c5ed3328d96d884263f2e9ff2` remains based on fetched `dev` `0da68530e80c713ed3a323a741998e1fed37e3e9`. Critical browser E2E passes. The macOS and Windows 3.12 `core-utils-tooling` shards each failed only the architecture ratchet after passing 2,108 and 2,091 tests respectively (Windows also skipped 19): the prior MCP bounds fixture repair removed its direct API import, but `CORE_TO_API_BASELINE` still named that file. Remove the stale baseline entry so the ratchet tightens. The exact three-test boundary module fails before and passes after locally; Ruff is clean, and Bandit reports only three unchanged LOW test assertions. Hosted rerun, the remaining CI matrix, Qodo review and merge remain open.
 
 ## UAT509 — PR2979 current-head CI acceptance (TASK-13260.278.18.83)
 
