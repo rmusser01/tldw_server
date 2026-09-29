@@ -51,6 +51,8 @@ the distinction between transactional fixtures and native IndexedDB acceptance.
 **Tests:** Hosted checks and exact PR head/base; generated-artifact exclusion.
 **Status:** In Progress
 
+2026-09-29 refresh: latest fetched `dev` is `0f9e6917cef2deb5da36d6fc2f85b4457f0ce884`. The clean 121-commit PR replay is conflict-free and `git range-diff` reports 121 exact patch-equivalent matches, zero changed/added/removed commits; a recovery ref retains the prior head. The new upstream delta is limited to VZ boot-stall files with no repaired-path overlap. UAT419/UAT441 local repairs and real PostgreSQL checks are recorded in the tracker; publish and hosted review remain open.
+
 Previous source checkpoint `00fed1c6af` is published on dev `3d102e0d31`.
 The original publication had zero missing dev commits. Current verified local
 VAD and Character repairs were committed965ea81fc0/f435078aac before the

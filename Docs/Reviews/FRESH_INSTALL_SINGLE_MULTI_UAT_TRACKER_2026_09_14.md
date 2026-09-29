@@ -1,8 +1,8 @@
 # Fresh-install UAT: single-user and multi-user
 
-## PR2979 current CI repair checkpoint — 2026-09-28
+## PR2979 current CI repair checkpoint — 2026-09-29
 
-The draft PR branch includes fetched `dev` `414a9619cc8ae9446262ee54980017d874d2a739`; reviewed fixture repairs are published, and further inherited-CI repairs are in progress. The 46 root `IMPLEMENTATION_PLAN*` files have moved to `Docs/Plans/`; current document/task links were updated through the official Backlog CLI where needed. Generated Playwright captures remain excluded. The requester-written Change summary is already in the PR body. Full fresh-install UAT remains paused until CI/review and merge.
+The clean local PR branch is rebased onto fetched `dev` `0f9e6917cef2deb5da36d6fc2f85b4457f0ce884`; all 121 PR commits are patch-equivalent across this conflict-free replay, and the published PR still awaits the next push. The 46 root `IMPLEMENTATION_PLAN*` files have moved to `Docs/Plans/`; current document/task links were updated through the official Backlog CLI where needed. Generated Playwright captures remain excluded. The requester-written Change summary is already in the PR body. Full fresh-install UAT remains paused until CI/review and merge.
 
 The published old-head inventory has 869 checks: 736 success, 59 failure, 31 cancelled, 28 skipped, one neutral and 14 pending. The 30 long cancellations, three unavailable/shutdown runners and two aggregate cascade gates are not passes or independent product defects. The following PR-touched failures are locally repaired but still require fresh hosted acceptance:
 
