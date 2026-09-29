@@ -17,6 +17,7 @@ import {
   waitForConnection,
   waitForVisualSettle,
 } from "../../utils/helpers"
+import { revealCharacterChatSessions } from "../../utils/character-chat-phase6-surface"
 
 type ViewportTarget = {
   label: "desktop" | "tablet" | "mobile"
@@ -44,7 +45,13 @@ async function openRolePlaySetup(page: Page): Promise<void> {
   }
 
   if (!openedDirectly) {
-    await page.getByRole("button", { name: "More options" }).first().click()
+    const moreOptions = page.getByRole("button", { name: "More options" })
+    if (!(await moreOptions.first().isVisible().catch(() => false))) {
+      await page.getByRole("button", { name: "Enter focus chat" }).click()
+    }
+    // The mobile toolbar collapses while focus is outside the composer.
+    await page.getByPlaceholder(/type a message/i).first().focus()
+    await moreOptions.first().click()
     await page
       .getByRole("button", { name: "Role-play setup", exact: true })
       .click()
@@ -76,19 +83,30 @@ async function expectCharacterSessionsReachable(page: Page): Promise<void> {
   const sessions = page.getByRole("region", {
     name: "Character chat sessions",
   })
-  if (await sessions.isVisible().catch(() => false)) {
-    return
-  }
-
-  const showPanels = page.getByTestId("playground-chat-layout-mode-trigger")
-  if (await showPanels.isVisible().catch(() => false)) {
-    await showPanels.click()
-  }
-
-  const contextTab = page.getByRole("tab", { name: "Context" })
-  if (await contextTab.isVisible().catch(() => false)) {
-    await contextTab.click()
-  }
+  const cockpitShell = page.getByTestId("playground-cockpit-shell")
+  await revealCharacterChatSessions({
+    isSessionVisible: () => sessions.isVisible().catch(() => false),
+    isFocusMode: async () =>
+      (await cockpitShell.getAttribute("data-mode")) === "focus",
+    exitFocusMode: async () => {
+      await page.getByRole("button", { name: "Exit focus" }).click()
+      await expect(cockpitShell).toHaveAttribute("data-mode", "cockpit")
+    },
+    restoreDesktopContextRail: async () => {
+      await page
+        .getByTestId("playground-cockpit-left-rail-restore")
+        .click()
+    },
+    selectCompactContextTab: async () => {
+      await page
+        .getByTestId("playground-cockpit-mobile-rails")
+        .getByRole("tab")
+        .first()
+        .click()
+    },
+    getViewportWidth: () =>
+      page.evaluate(() => document.documentElement.clientWidth),
+  })
 
   await expect(sessions).toBeVisible({ timeout: 30_000 })
 }
@@ -110,11 +128,11 @@ test.describe("Character Chat Phase 6 signoff", () => {
         waitUntil: "domcontentloaded",
       })
       await waitForConnection(page)
+      await expectCharacterSessionsReachable(page)
 
       await expect(
         page.getByTestId("playground-active-chat-mode"),
       ).toContainText("Character Chat", { timeout: 30_000 })
-      await expectCharacterSessionsReachable(page)
       await expect(
         page.getByTestId("character-chat-readiness-panel"),
       ).toBeVisible({ timeout: 30_000 })

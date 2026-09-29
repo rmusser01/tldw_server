@@ -169,6 +169,21 @@ describe("HealthStatus design-system states", () => {
     clipboardWriteTextMock.mockResolvedValue(undefined)
   })
 
+  it("measures each check and recheck from its own start time", async () => {
+    let now = 0
+    let duration = 25
+    vi.spyOn(performance, "now").mockImplementation(() => now)
+    apiSendMock.mockImplementation(async () => {
+      now += duration
+      return { ok: true, status: 200, data: { status: "ok" } }
+    })
+    await renderHealth()
+    expect(screen.getAllByText("25 ms")).toHaveLength(7)
+    duration = 80
+    fireEvent.click(screen.getAllByText("Recheck")[0])
+    await waitFor(() => expect(screen.getByText("80 ms")).toBeInTheDocument())
+  })
+
   it("renders Ready when every health check passes", async () => {
     await renderHealth()
 

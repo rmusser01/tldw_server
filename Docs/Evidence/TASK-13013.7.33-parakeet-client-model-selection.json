@@ -1,0 +1,76 @@
+{
+  "artifacts_sha256": {
+    "bandit-final.json": "7d85f4325226ba25aca95843eaa236e8a01ac65fb78ff7c3d04b6eaa19ebc7ed",
+    "before.json": "75d875740ed206059f5c54a1e0f0592d8e4c6a666a4521c4bad6339c572d4fff",
+    "import-isolation.json": "8265d01dacf5f1aebf0f973157a5ec77e5b50f8210be624d81fa0f68acc849a3",
+    "ruff-baseline.json": "cffc198d8cec46fa70c884c9c6334de13087454cefe7e8a3d2e85c714b5e66f6",
+    "ruff-current.json": "cc5a4b5921b1bd0653d9c8c50ded6fa65ee97023e9980396421a36dea703c8d3",
+    "run_isolated_tests.py": "067504a19d2eab502b6605cdf54ab7283e5f5f30129aeb2f9fb0bd0fa130ce23",
+    "tests-final.log": "9d5c2c5f39488db776faa3818ff878ef19027bf0afd551a92e5e1bad8f51c247",
+    "tests-red.log": "8f44d5a69a08bb2b80282b686d64ff74e9b343fd0d15607235fae46d71a22786"
+  },
+  "bandit": {
+    "errors": [],
+    "findings": [
+      {
+        "count": 16,
+        "file": "./tldw_Server_API/tests/Audio/test_parakeet_rnnt_client_selection.py",
+        "test_id": "B101"
+      }
+    ],
+    "other_findings": 0,
+    "production_findings": 0,
+    "test_assertion_B101_findings": 16
+  },
+  "before_matches_HEAD": true,
+  "before_source_sha256": "fc841442ef437f5189ae3de9e33449c70e26dafa810728d200d8b7fd16949662",
+  "characterization": {
+    "client_value": "example.invalid/unapproved-model",
+    "error_frames": [],
+    "model_entry_calls": 1,
+    "models_imported_or_loaded": false,
+    "resolved_value": "example.invalid/unapproved-model"
+  },
+  "date": "2026-09-10",
+  "head": "84aa0c9553b3f88bfc0f3b5bb9919f680f6ae144",
+  "independent_review": {
+    "path": "/private/tmp/task-13013-7-parakeet-selection/task33-independent-review.json",
+    "result": "No actionable findings; independent 30-test isolated run passed with zero ML imports.",
+    "sha256": "74631ec36f6508b605c5bbb7a9623697d6843abe361207d9ff10cad7d70fcbb0"
+  },
+  "input_sha256": {
+    "Docs/Design/TASK-13013.7.33-parakeet-client-model-selection.md": "a04bf98889374e440d38ff8ff542ae7cb176717b552e9691ac7fe23b37dee639",
+    "tldw_Server_API/app/api/v1/endpoints/audio/audio_streaming.py": "eab3918d63231aeec3b48990e69275cb172f9d9e56b2f90c01dfc76e03a8b39e",
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Parakeet.py": "9798350ed434091270f70fbc7da79603c20bfa377386f31a8c7375512d23e868",
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Streaming_Unified.py": "9ff6a1b8899c50f2897364bcdda179c42fcbc87cb8955405e27b317015fbd51e",
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/audio_stream_protocol.py": "f21e7882691e4767685c058c5ace8d64299e44bd0a45e7afcb384fe1708e78b8",
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/model_utils.py": "7ebbc72d19fb1049eb764177031c3b16c81f9494a0e1d215b7e0623d785f229f",
+    "tldw_Server_API/tests/Audio/test_parakeet_rnnt_client_selection.py": "af783a9cadf27d6ac901e362efd910080b1f551701132857eec2b9799572dee9"
+  },
+  "lint": {
+    "black_new_test_and_inserted_block": "pass",
+    "black_whole_source": "existing baseline formatting drift remains",
+    "ruff_existing_source_findings": [
+      "I001 at line 18",
+      "E731 at line 671"
+    ],
+    "ruff_identical_except_filename": true,
+    "ruff_new_test": "pass"
+  },
+  "parent_review": "Confirmed endpoint explicit initial fields, legacy explicit mapping, callback scope, guard ordering and unchanged invalid config/model-entry boundary.",
+  "review_status": "awaiting independent parent review",
+  "scope": "First-party configuration validation only; optional NeMo/Hydra path correction, no deployed base-image CVE impact claimed. No ML/model execution, package changes, policy changes, staging or publication.",
+  "task_id": "TASK-13013.7.33",
+  "tests": {
+    "final": {
+      "model_import_attempts": [],
+      "model_modules_loaded": [],
+      "passed": 30,
+      "pytest_exit_code": 0
+    },
+    "red": {
+      "failed": 25,
+      "passed": 5
+    }
+  }
+}

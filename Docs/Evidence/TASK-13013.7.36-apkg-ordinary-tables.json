@@ -1,0 +1,1160 @@
+{
+  "confirmed_behavior": "Six normal APKG view/virtual-table replacements were accepted before ordinary-table validation. This confirms schema-substitution acceptance, not memory corruption or CVE exploitability.",
+  "design": "Docs/Design/TASK-13013.7.36-apkg-ordinary-tables.md",
+  "independent_review": {
+    "findings": [],
+    "head": "f86928db8e644a82bd316d5532174d89446c82de",
+    "initial_reviewed_sha256": {
+      "Docs/Design/TASK-13013.7.36-apkg-ordinary-tables.md": "bb7866ac5a60cc8c56ed7402368dc9d84a1b9e0a2b5930fcf146f901894b4f34",
+      "tldw_Server_API/app/core/DB_Management/OpenWebUI_DB.py": "6b4ef2dcde50d9883664020ff41c882fe16ff65f29a6517cbf3d9b1c22e3acb7",
+      "tldw_Server_API/app/core/DB_Management/sqlite_schema_helpers.py": "547e22386cc2c25a6eb9dbea06688ea6aab84951d5dcb9ea08a33b75c37459b6",
+      "tldw_Server_API/app/core/Flashcards/apkg_importer.py": "cf91a3de5b9bb8c5e646cc766dd4dce15bdd127401b479b2935b924d131a5256",
+      "tldw_Server_API/tests/Flashcards/test_apkg_schema_security.py": "b2b1854e5be3956fc0e28c9ad0f44a3eef294068d38d22c76d3379f632633c5f"
+    },
+    "limits": [
+      "No repository edits, commits, model/image/exploit execution or restricted artifact access.",
+      "Only valid ordinary exporter-generated SQLite/APKG content was used for the compatibility reproduction.",
+      "Parent broader OpenWebUI/exporter validation and lint/Bandit are separate; not represented as independently rerun."
+    ],
+    "resolved_findings": [
+      {
+        "detail": "The new set comparison is case-sensitive, while the fixed SQLite SELECTs are case-insensitive. An ordinary exporter-produced APKG with only col/notes/cards renamed to COL/NOTES/CARDS imports one row with the HEAD baseline, but the new importer rejects all three as missing ordinary tables. This changes acceptance of valid ordinary source tables beyond the intended view/virtual exclusion.",
+        "evidence": "/private/tmp/task-13013-7-sqlite-import-static/task36-case-compatibility.json",
+        "file": "tldw_Server_API/app/core/Flashcards/apkg_importer.py",
+        "line": 291,
+        "priority": "P2",
+        "resolution": "APKG normalizes ordinary table names with name.lower() before required-name comparison; shared metadata helper retains native type filtering. Six upper/title-case tests for all three names pass.",
+        "status": "resolved",
+        "suggested_change": "Normalize the required-name comparison consistently with SQLite ASCII case-insensitive identifiers, and add an ordinary mixed-case APKG regression. Preserve exact native type filtering.",
+        "title": "Preserve SQLite case-insensitive table-name compatibility"
+      }
+    ],
+    "reviewed_sha256": {
+      "Docs/Design/TASK-13013.7.36-apkg-ordinary-tables.md": "bb7866ac5a60cc8c56ed7402368dc9d84a1b9e0a2b5930fcf146f901894b4f34",
+      "tldw_Server_API/app/core/DB_Management/OpenWebUI_DB.py": "6b4ef2dcde50d9883664020ff41c882fe16ff65f29a6517cbf3d9b1c22e3acb7",
+      "tldw_Server_API/app/core/DB_Management/sqlite_schema_helpers.py": "547e22386cc2c25a6eb9dbea06688ea6aab84951d5dcb9ea08a33b75c37459b6",
+      "tldw_Server_API/app/core/Flashcards/apkg_importer.py": "cf91a3de5b9bb8c5e646cc766dd4dce15bdd127401b479b2935b924d131a5256",
+      "tldw_Server_API/tests/Flashcards/test_apkg_schema_security.py": "b2b1854e5be3956fc0e28c9ad0f44a3eef294068d38d22c76d3379f632633c5f"
+    },
+    "status": "supported",
+    "task": "TASK-13013.7.36",
+    "tests": {
+      "conftest_disabled": true,
+      "final_import_isolation": {
+        "blocked_import_attempts": [],
+        "model_modules_loaded": [],
+        "pytest_exit_code": 0
+      },
+      "final_schema_security_run": "19 passed in 0.14s, including six new case-insensitive compatibility cases",
+      "final_test_log_sha256": "50df52926decbd7030bd4e2ba76dd434e2e978c234c0ef63a130299c05a7946c",
+      "import_isolation": {
+        "blocked_import_attempts": [],
+        "model_modules_loaded": [],
+        "pytest_exit_code": 0
+      },
+      "independent_focused_run": "35 passed in 0.28s",
+      "new_missing_regression": null,
+      "plugin_autoload_disabled": true,
+      "scope": [
+        "Flashcards/test_apkg_schema_security.py",
+        "Flashcards/test_apkg_importer.py",
+        "Chatbooks/test_openwebui_db_schema_security.py"
+      ],
+      "system_temp_basetemp": true
+    },
+    "verified_behavior": [
+      "PRAGMA main.table_list native type==table excludes views, virtual tables, and shadow tables; STRICT and WITHOUT ROWID ordinary tables remain accepted.",
+      "Both supported SQLite row representations (tuples and sqlite3.Row) work with index-based helper access.",
+      "Empty unsupported PRAGMA metadata fails closed with the documented minimum-version message; APKG converts ValueError to APKGImportError.",
+      "sqlite3.Error during metadata or later SELECT remains translated by the existing outer handler. The endpoint maps APKGImportError to HTTP 400.",
+      "All three source table names are checked together before any imported-content SELECT; media asset importer calls occur later.",
+      "OpenWebUI preserves its prior native metadata/type checks; the shared helper changes only error prefix and tuple-index access.",
+      "No temporary-schema shadow path exists from uploaded APKG bytes because importer creates a fresh connection. Metadata preparation/parser behavior is explicitly outside the claimed fix."
+    ]
+  },
+  "limits": [
+    "No malformed/corrupted exploit databases, ML imports or model execution.",
+    "Metadata inspection itself can prepare schemas; not complete SQLite parser remediation.",
+    "Admin-only raw database restore remains a separate intentional authority boundary.",
+    "Retained images predate both import fixes and do not receive a SQLite exception from new source changes."
+  ],
+  "source_hashes": {
+    "tldw_Server_API/app/core/DB_Management/OpenWebUI_DB.py": "6b4ef2dcde50d9883664020ff41c882fe16ff65f29a6517cbf3d9b1c22e3acb7",
+    "tldw_Server_API/app/core/DB_Management/sqlite_schema_helpers.py": "547e22386cc2c25a6eb9dbea06688ea6aab84951d5dcb9ea08a33b75c37459b6",
+    "tldw_Server_API/app/core/Flashcards/apkg_importer.py": "cf91a3de5b9bb8c5e646cc766dd4dce15bdd127401b479b2935b924d131a5256",
+    "tldw_Server_API/tests/Flashcards/test_apkg_schema_security.py": "b2b1854e5be3956fc0e28c9ad0f44a3eef294068d38d22c76d3379f632633c5f"
+  },
+  "sqlite_caller_review": {
+    "decision_summary": {
+      "confirmed_image_cve_impact": 0,
+      "fresh_image_verification_required": true,
+      "new_source_acceptance_defects": 1,
+      "rows": 6,
+      "supported_exclusions": 0,
+      "unresolved": 6
+    },
+    "head_at_report": "c89f2cf22a8bab095a329a50df00bb31024fc27f",
+    "inventory_bindings": {
+      "image-app": {
+        "archive": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip",
+        "archive_sha256": "sha256:7acf62766a675e54b8f721419a4d80371c31ca15056e57aabf2e3a0b5ce23ef8",
+        "artifact_name": "/input@sha256:bcb9c9ba3ded77dedf77c7b255549e5e6e041bd59d95f76706bc3fc40f75425f",
+        "image_config": {
+          "architecture": "amd64",
+          "config": {
+            "ArgsEscaped": true,
+            "Cmd": [
+              "/bin/sh",
+              "-c",
+              "exec python -m tldw_Server_API.scripts.run_server_guarded_mcp --host \"$HOST\" --port \"$PORT\" --workers \"$UVICORN_WORKERS\" --log-level \"$LOG_LEVEL\" --proxy-headers"
+            ],
+            "Entrypoint": [
+              "/usr/local/bin/tldw-app-first-run"
+            ],
+            "Env": [
+              "PATH=/opt/tldw-venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+              "LANG=C.UTF-8",
+              "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+              "PYTHON_VERSION=3.12.14",
+              "PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+              "PYTHONDONTWRITEBYTECODE=1",
+              "PYTHONUNBUFFERED=1",
+              "PYTHONPATH=/app/tldw_Server_API",
+              "HOST=0.0.0.0",
+              "PORT=8000",
+              "UVICORN_WORKERS=4",
+              "LOG_LEVEL=info"
+            ],
+            "ExposedPorts": {
+              "8000/tcp": {}
+            },
+            "Healthcheck": {
+              "Interval": 30000000000,
+              "Retries": 5,
+              "Test": [
+                "CMD-SHELL",
+                "python -c \"import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/internal/ready', timeout=3).status == 200 else 1)\""
+              ],
+              "Timeout": 5000000000
+            },
+            "User": "appuser",
+            "WorkingDir": "/app"
+          },
+          "created": "2026-09-09T14:23:54.428539448Z",
+          "history": [
+            {
+              "comment": "debuerreotype 0.17",
+              "created": "2026-08-24T00:00:00Z",
+              "created_by": "# debian.sh --arch 'amd64' out/ 'trixie' '@1787529600'"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:02:59.446345026Z",
+              "created_by": "ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:02:59.446345026Z",
+              "created_by": "ENV LANG=C.UTF-8",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:02:59.446345026Z",
+              "created_by": "RUN /bin/sh -c set -eux; \tapt-get update; \tapt-get install -y --no-install-recommends \t\tca-certificates \t\tnetbase \t\ttzdata \t; \tapt-get dist-clean # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:02:59.446345026Z",
+              "created_by": "ENV GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:02:59.446345026Z",
+              "created_by": "ENV PYTHON_VERSION=3.12.14",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:02:59.446345026Z",
+              "created_by": "ENV PYTHON_SHA256=5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:12:40.004923065Z",
+              "created_by": "RUN /bin/sh -c set -eux; \t\tsavedAptMark=\"$(apt-mark showmanual)\"; \tapt-get update; \tapt-get install -y --no-install-recommends \t\tdpkg-dev \t\tg++ \t\tgcc \t\tgnupg \t\tlibbluetooth-dev \t\tlibbz2-dev \t\tlibc6-dev \t\tlibdb-dev \t\tlibffi-dev \t\tlibgdbm-dev \t\tliblzma-dev \t\tlibncursesw5-dev \t\tlibreadline-dev \t\tlibsqlite3-dev \t\tlibssl-dev \t\tmake \t\ttk-dev \t\tuuid-dev \t\twget \t\txz-utils \t\tzlib1g-dev \t; \t\twget -O python.tar.xz \"https://www.python.org/ftp/python/${PYTHON_VERSION%%[a-z]*}/Python-$PYTHON_VERSION.tar.xz\"; \techo \"$PYTHON_SHA256 *python.tar.xz\" | sha256sum -c -; \twget -O python.tar.xz.asc \"https://www.python.org/ftp/python/${PYTHON_VERSION%%[a-z]*}/Python-$PYTHON_VERSION.tar.xz.asc\"; \tGNUPGHOME=\"$(mktemp -d)\"; export GNUPGHOME; \tgpg --batch --keyserver hkps://keys.openpgp.org --recv-keys \"$GPG_KEY\"; \tgpg --batch --verify python.tar.xz.asc python.tar.xz; \tgpgconf --kill all; \trm -rf \"$GNUPGHOME\" python.tar.xz.asc; \tmkdir -p /usr/src/python; \ttar --extract --directory /usr/src/python --strip-components=1 --file python.tar.xz; \trm python.tar.xz; \t\tcd /usr/src/python; \tgnuArch=\"$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)\"; \t./configure \t\t--build=\"$gnuArch\" \t\t--enable-loadable-sqlite-extensions \t\t--enable-optimizations \t\t--enable-option-checking=fatal \t\t--enable-shared \t\t$(test \"${gnuArch%%-*}\" != 'riscv64' && echo '--with-lto') \t\t--with-ensurepip \t; \tnproc=\"$(nproc)\"; \tEXTRA_CFLAGS=\"$(dpkg-buildflags --get CFLAGS)\"; \tLDFLAGS=\"$(dpkg-buildflags --get LDFLAGS)\"; \tLDFLAGS=\"${LDFLAGS:-} -Wl,--strip-all\"; \tarch=\"$(dpkg --print-architecture)\"; arch=\"${arch##*-}\"; \tcase \"$arch\" in \t\tamd64|arm64) \t\t\tEXTRA_CFLAGS=\"${EXTRA_CFLAGS:-} -fno-omit-frame-pointer -mno-omit-leaf-frame-pointer\"; \t\t\t;; \t\ti386) \t\t\t;; \t\t*) \t\t\tEXTRA_CFLAGS=\"${EXTRA_CFLAGS:-} -fno-omit-frame-pointer\"; \t\t\t;; \tesac; \tmake -j \"$nproc\" \t\t\"EXTRA_CFLAGS=${EXTRA_CFLAGS:-}\" \t\t\"LDFLAGS=${LDFLAGS:-}\" \t; \trm python; \tmake -j \"$nproc\" \t\t\"EXTRA_CFLAGS=${EXTRA_CFLAGS:-}\" \t\t\"LDFLAGS=${LDFLAGS:-} -Wl,-rpath='\\$\\$ORIGIN/../lib'\" \t\tpython \t; \tmake install; \t\tcd /; \trm -rf /usr/src/python; \t\tfind /usr/local -depth \t\t\\( \t\t\t\\( -type d -a \\( -name test -o -name tests -o -name idle_test \\) \\) \t\t\t-o \\( -type f -a \\( -name '*.pyc' -o -name '*.pyo' -o -name 'libpython*.a' \\) \\) \t\t\\) -exec rm -rf '{}' + \t; \t\tldconfig; \t\tapt-mark auto '.*' > /dev/null; \tapt-mark manual $savedAptMark; \tfind /usr/local -type f -executable -not \\( -name '*tkinter*' \\) -exec ldd '{}' ';' \t\t| awk '/=>/ { so = $(NF-1); if (index(so, \"/usr/local/\") == 1) { next }; gsub(\"^/(usr/)?\", \"\", so); printf \"*%s\\n\", so }' \t\t| sort -u \t\t| xargs -rt dpkg-query --search \t\t| awk 'sub(\":$\", \"\", $1) { print $1 }' \t\t| sort -u \t\t| xargs -r apt-mark manual \t; \tapt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \tapt-get dist-clean; \t\texport PYTHONDONTWRITEBYTECODE=1; \tpython3 --version; \tpip3 --version # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:12:40.129211396Z",
+              "created_by": "RUN /bin/sh -c set -eux; \tfor src in idle3 pip3 pydoc3 python3 python3-config; do \t\tdst=\"$(echo \"$src\" | tr -d 3)\"; \t\t[ -s \"/usr/local/bin/$src\" ]; \t\t[ ! -e \"/usr/local/bin/$dst\" ]; \t\tln -svT \"$src\" \"/usr/local/bin/$dst\"; \tdone # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:12:40.129211396Z",
+              "created_by": "CMD [\"python3\"]",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:21:55.16703091Z",
+              "created_by": "ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:21:55.16703091Z",
+              "created_by": "RUN /bin/sh -c apt-get update && apt-get install -y --no-install-recommends         ffmpeg         libmagic1         libportaudio2         ca-certificates     && rm -rf         /var/lib/apt/lists/*         /usr/local/bin/pip*         /usr/local/lib/python*/site-packages/_distutils_hack         /usr/local/lib/python*/site-packages/pip         /usr/local/lib/python*/site-packages/pip-*.dist-info         /usr/local/lib/python*/site-packages/pkg_resources         /usr/local/lib/python*/site-packages/setuptools         /usr/local/lib/python*/site-packages/setuptools-*.dist-info # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:21:56.113888955Z",
+              "created_by": "WORKDIR /app"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:50.514377651Z",
+              "created_by": "COPY /opt/tldw-venv /opt/tldw-venv # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:51.188814881Z",
+              "created_by": "RUN /bin/sh -c useradd -m -u 10001 appuser # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:52.501081897Z",
+              "created_by": "COPY --chown=appuser:appuser tldw_Server_API /app/tldw_Server_API # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.147834161Z",
+              "created_by": "COPY --chown=appuser:appuser Docs /app/Docs # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.311110603Z",
+              "created_by": "COPY --chown=appuser:appuser Helper_Scripts /app/Helper_Scripts # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.328032352Z",
+              "created_by": "COPY --chown=appuser:appuser LICENSE /app/LICENSE # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.343301924Z",
+              "created_by": "COPY --chown=appuser:appuser LICENSES /app/LICENSES # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.35649945Z",
+              "created_by": "COPY --chown=appuser:appuser THIRD_PARTY_NOTICES.txt /app/THIRD_PARTY_NOTICES.txt # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.367254174Z",
+              "created_by": "COPY Dockerfiles/entrypoints/tldw-app-first-run.sh /usr/local/bin/tldw-app-first-run # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.428539448Z",
+              "created_by": "RUN /bin/sh -c mkdir -p /app/Databases &&     chown appuser:appuser /app/Databases &&     chmod +x /usr/local/bin/tldw-app-first-run # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.428539448Z",
+              "created_by": "USER appuser",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.428539448Z",
+              "created_by": "ARG HOST=0.0.0.0",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.428539448Z",
+              "created_by": "ARG PORT=8000",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.428539448Z",
+              "created_by": "ARG UVICORN_WORKERS=4",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.428539448Z",
+              "created_by": "ARG LOG_LEVEL=info",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.428539448Z",
+              "created_by": "ENV PATH=/opt/tldw-venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin PYTHONPATH=/app/tldw_Server_API HOST=0.0.0.0 PORT=8000 UVICORN_WORKERS=4 LOG_LEVEL=info",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.428539448Z",
+              "created_by": "EXPOSE [8000/tcp]",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.428539448Z",
+              "created_by": "HEALTHCHECK {Test:[CMD-SHELL python -c \"import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/internal/ready', timeout=3).status == 200 else 1)\"] Interval:30s Timeout:5s StartPeriod:0s StartInterval:0s Retries:5}",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.428539448Z",
+              "created_by": "ENTRYPOINT [\"/usr/local/bin/tldw-app-first-run\"]",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:54.428539448Z",
+              "created_by": "CMD [\"/bin/sh\" \"-c\" \"exec python -m tldw_Server_API.scripts.run_server_guarded_mcp --host \\\"$HOST\\\" --port \\\"$PORT\\\" --workers \\\"$UVICORN_WORKERS\\\" --log-level \\\"$LOG_LEVEL\\\" --proxy-headers\"]",
+              "empty_layer": true
+            }
+          ],
+          "os": "linux",
+          "rootfs": {
+            "diff_ids": [
+              "sha256:411a86676185cb54d695a805b238194a64e9b77e0c723f3802fbb87d333ea0b3",
+              "sha256:3070bb8623db07ca38569112f9b296043371a00bfb3ee4d9f8f63ddfd2f2efca",
+              "sha256:3d664d274420a79749a26f9e5115b2120d46037264011773ca4c52e22780b2ca",
+              "sha256:24257af4ce5bde01d3c7ebd6d366ec4a298ed27c794bbd6832ef5ce934a66170",
+              "sha256:b3f4864e5d1680d86998a464616dd4c9cfbd39fbab40223f298cae01cbd2096e",
+              "sha256:9305cb2145dd748bed608102fe80bad47c34e95a4485f511af842c9449379d81",
+              "sha256:2572cc3a34a3ef6c9a059bf2f215abd1d7a64aa4cb1193aa920eb9169f890bb8",
+              "sha256:d4819920bcf7ea6404e92f494d8a7414de2f341c1f677de6583bb789d495d1a4",
+              "sha256:59b0fb107dbee768b24edd4e48634e3cd793797d9601641e0b4599b09d4394e9",
+              "sha256:b780b29dfabb6108d6d1e73d0c27f78cd24e6e3e2adfcb2db6ebed970d0c2795",
+              "sha256:ea0725649b4e7c12409991e5e58fb4db47908e195097b37bd2a9353db9fb7946",
+              "sha256:52905837e4f0779f69a3f6b9b6e3fee8496212e9af134a1bb75bdb7d2c91fe5f",
+              "sha256:89dbe6461505cda0679c98c389ce21650a83dfbf5dc8ea4f4eca6400d1553124",
+              "sha256:f1f2101dba905acba5cbb6b1567747ba2a923762df4c7e1d40260360733d4039",
+              "sha256:26b1658cfe883aec918655b3268457f32c131c759b684733c53e734a974ba3c7",
+              "sha256:33040c3067b75b194d6208af311d23b00e61e9021bd278d455c64f18e588749a"
+            ],
+            "type": "layers"
+          }
+        },
+        "member": "trivy-image-app.json",
+        "member_sha256": "f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da",
+        "verified": true
+      },
+      "image-audio-worker": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip",
+        "archive_sha256": "sha256:7611c8f6b54a928a5e72af991aeaec602c8044bbf94ae2a638ac8e6a27fe5fea",
+        "artifact_name": "/input@sha256:c707e63b9179282eb8c42b488fad5b406787fb01d0e0bfdc0fa9e4d493a61034",
+        "image_config": {
+          "architecture": "amd64",
+          "config": {
+            "ArgsEscaped": true,
+            "Cmd": [
+              "python",
+              "-m",
+              "tldw_Server_API.app.services.audio_transcribe_gpu_worker"
+            ],
+            "Env": [
+              "PATH=/opt/tldw-venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+              "LANG=C.UTF-8",
+              "GPG_KEY=A035C8C19219BA821ECEA86B64E628F8D684696D",
+              "PYTHON_VERSION=3.11.16",
+              "PYTHON_SHA256=91bcdebfdde239a003ae93738a7fce0f9230fee5c4bc2b86f6e6e8c6f98aabe8",
+              "PYTHONUNBUFFERED=1",
+              "AUDIO_JOBS_WORKER_ENABLED=false",
+              "TLDW_CONFIG_DIR=/app/Config_Files",
+              "USER_DB_BASE_DIR=/app/Databases/user_databases",
+              "DATABASE_URL=sqlite:////app/Databases/users.db"
+            ],
+            "WorkingDir": "/app"
+          },
+          "created": "2026-09-09T14:23:38.709468014Z",
+          "history": [
+            {
+              "comment": "debuerreotype 0.17",
+              "created": "2026-08-24T00:00:00Z",
+              "created_by": "# debian.sh --arch 'amd64' out/ 'trixie' '@1787529600'"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:07:16.980957163Z",
+              "created_by": "ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:07:16.980957163Z",
+              "created_by": "ENV LANG=C.UTF-8",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:07:16.980957163Z",
+              "created_by": "RUN /bin/sh -c set -eux; \tapt-get update; \tapt-get install -y --no-install-recommends \t\tca-certificates \t\tnetbase \t\ttzdata \t; \tapt-get dist-clean # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:07:16.980957163Z",
+              "created_by": "ENV GPG_KEY=A035C8C19219BA821ECEA86B64E628F8D684696D",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:07:16.980957163Z",
+              "created_by": "ENV PYTHON_VERSION=3.11.16",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:07:16.980957163Z",
+              "created_by": "ENV PYTHON_SHA256=91bcdebfdde239a003ae93738a7fce0f9230fee5c4bc2b86f6e6e8c6f98aabe8",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:14:30.565476277Z",
+              "created_by": "RUN /bin/sh -c set -eux; \t\tsavedAptMark=\"$(apt-mark showmanual)\"; \tapt-get update; \tapt-get install -y --no-install-recommends \t\tdpkg-dev \t\tg++ \t\tgcc \t\tgnupg \t\tlibbluetooth-dev \t\tlibbz2-dev \t\tlibc6-dev \t\tlibdb-dev \t\tlibffi-dev \t\tlibgdbm-dev \t\tliblzma-dev \t\tlibncursesw5-dev \t\tlibreadline-dev \t\tlibsqlite3-dev \t\tlibssl-dev \t\tmake \t\ttk-dev \t\tuuid-dev \t\twget \t\txz-utils \t\tzlib1g-dev \t; \t\twget -O python.tar.xz \"https://www.python.org/ftp/python/${PYTHON_VERSION%%[a-z]*}/Python-$PYTHON_VERSION.tar.xz\"; \techo \"$PYTHON_SHA256 *python.tar.xz\" | sha256sum -c -; \twget -O python.tar.xz.asc \"https://www.python.org/ftp/python/${PYTHON_VERSION%%[a-z]*}/Python-$PYTHON_VERSION.tar.xz.asc\"; \tGNUPGHOME=\"$(mktemp -d)\"; export GNUPGHOME; \tgpg --batch --keyserver hkps://keys.openpgp.org --recv-keys \"$GPG_KEY\"; \tgpg --batch --verify python.tar.xz.asc python.tar.xz; \tgpgconf --kill all; \trm -rf \"$GNUPGHOME\" python.tar.xz.asc; \tmkdir -p /usr/src/python; \ttar --extract --directory /usr/src/python --strip-components=1 --file python.tar.xz; \trm python.tar.xz; \t\tcd /usr/src/python; \tgnuArch=\"$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)\"; \t./configure \t\t--build=\"$gnuArch\" \t\t--enable-loadable-sqlite-extensions \t\t--enable-optimizations \t\t--enable-option-checking=fatal \t\t--enable-shared \t\t$(test \"${gnuArch%%-*}\" != 'riscv64' && echo '--with-lto') \t\t--with-ensurepip \t; \tnproc=\"$(nproc)\"; \tEXTRA_CFLAGS=\"$(dpkg-buildflags --get CFLAGS)\"; \tLDFLAGS=\"$(dpkg-buildflags --get LDFLAGS)\"; \tLDFLAGS=\"${LDFLAGS:-} -Wl,--strip-all\"; \tmake -j \"$nproc\" \t\t\"EXTRA_CFLAGS=${EXTRA_CFLAGS:-}\" \t\t\"LDFLAGS=${LDFLAGS:-}\" \t; \trm python; \tmake -j \"$nproc\" \t\t\"EXTRA_CFLAGS=${EXTRA_CFLAGS:-}\" \t\t\"LDFLAGS=${LDFLAGS:-} -Wl,-rpath='\\$\\$ORIGIN/../lib'\" \t\tpython \t; \tmake install; \t\tcd /; \trm -rf /usr/src/python; \t\tfind /usr/local -depth \t\t\\( \t\t\t\\( -type d -a \\( -name test -o -name tests -o -name idle_test \\) \\) \t\t\t-o \\( -type f -a \\( -name '*.pyc' -o -name '*.pyo' -o -name 'libpython*.a' \\) \\) \t\t\\) -exec rm -rf '{}' + \t; \t\tldconfig; \t\tapt-mark auto '.*' > /dev/null; \tapt-mark manual $savedAptMark; \tfind /usr/local -type f -executable -not \\( -name '*tkinter*' \\) -exec ldd '{}' ';' \t\t| awk '/=>/ { so = $(NF-1); if (index(so, \"/usr/local/\") == 1) { next }; gsub(\"^/(usr/)?\", \"\", so); printf \"*%s\\n\", so }' \t\t| sort -u \t\t| xargs -rt dpkg-query --search \t\t| awk 'sub(\":$\", \"\", $1) { print $1 }' \t\t| sort -u \t\t| xargs -r apt-mark manual \t; \tapt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \tapt-get dist-clean; \t\texport PYTHONDONTWRITEBYTECODE=1; \tpython3 --version; \t\tpip3 install \t\t--disable-pip-version-check \t\t--no-cache-dir \t\t--no-compile \t\t'setuptools==79.0.1' \t\t'wheel==0.46.3' \t; \tpip3 --version # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:14:30.682171098Z",
+              "created_by": "RUN /bin/sh -c set -eux; \tfor src in idle3 pip3 pydoc3 python3 python3-config; do \t\tdst=\"$(echo \"$src\" | tr -d 3)\"; \t\t[ -s \"/usr/local/bin/$src\" ]; \t\t[ ! -e \"/usr/local/bin/$dst\" ]; \t\tln -svT \"$src\" \"/usr/local/bin/$dst\"; \tdone # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:14:30.682171098Z",
+              "created_by": "CMD [\"python3\"]",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:21:54.0181712Z",
+              "created_by": "RUN /bin/sh -c apt-get update && apt-get install -y --no-install-recommends         ffmpeg         libportaudio2     && rm -rf         /var/lib/apt/lists/*         /usr/local/bin/pip*         /usr/local/lib/python*/site-packages/_distutils_hack         /usr/local/lib/python*/site-packages/pip         /usr/local/lib/python*/site-packages/pip-*.dist-info         /usr/local/lib/python*/site-packages/pkg_resources         /usr/local/lib/python*/site-packages/setuptools         /usr/local/lib/python*/site-packages/setuptools-*.dist-info # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:21:54.798298065Z",
+              "created_by": "WORKDIR /app"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:38.028446521Z",
+              "created_by": "COPY /opt/tldw-venv /opt/tldw-venv # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:38.651344437Z",
+              "created_by": "COPY tldw_Server_API/Config_Files /app/Config_Files # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:38.709468014Z",
+              "created_by": "RUN /bin/sh -c mkdir -p /app/Databases/user_databases # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:38.709468014Z",
+              "created_by": "ENV PATH=/opt/tldw-venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin PYTHONUNBUFFERED=1 AUDIO_JOBS_WORKER_ENABLED=false TLDW_CONFIG_DIR=/app/Config_Files USER_DB_BASE_DIR=/app/Databases/user_databases DATABASE_URL=sqlite:////app/Databases/users.db",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:38.709468014Z",
+              "created_by": "CMD [\"python\" \"-m\" \"tldw_Server_API.app.services.audio_transcribe_gpu_worker\"]",
+              "empty_layer": true
+            }
+          ],
+          "os": "linux",
+          "rootfs": {
+            "diff_ids": [
+              "sha256:411a86676185cb54d695a805b238194a64e9b77e0c723f3802fbb87d333ea0b3",
+              "sha256:4d43b7f98e4c38fd2d37f37f1bf9965d2c4018b01453d3b29d924653c3275f4b",
+              "sha256:7895f75e926a456464bbd0f1285738ba25e7d70aad4aa94c32c1d274b3b9e85e",
+              "sha256:164ea7718b2462d163b7bd95ece7ebd8b669f0cdb1b094b66009aecec2f1195b",
+              "sha256:2951f16c5dd4c1c0cd6f8c51565c4ad7cb99a84399be6abef7e83e2fdcfc9565",
+              "sha256:2fa133d7f6c83001f68b0483e799856ff6ec863880bb03635f5828781cd01cea",
+              "sha256:3fbdcce93a7c648fe4891978e907d519f0d09387219a5e769a6b99d496ef5e85",
+              "sha256:3acb4a0d27ea76ff9957232905830a8b5d6c6c0c6d387ed0fdb65547c6620762",
+              "sha256:7dfdcef80e7ac9b94608904b72171aaa7d5158d5e66260f60cf70ae3f6174265"
+            ],
+            "type": "layers"
+          }
+        },
+        "member": "trivy-image-audio-worker.json",
+        "member_sha256": "4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6",
+        "verified": true
+      },
+      "image-worker": {
+        "archive": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip",
+        "archive_sha256": "sha256:f1833864ecde4526276884702b0eb74c81126f76fd1873ea2c169afafd92a4ea",
+        "artifact_name": "/input@sha256:240d731cb10be3b21dec0f35b1bc6687dbe1fd3062a30f830fe2c14111cc8e25",
+        "image_config": {
+          "architecture": "amd64",
+          "config": {
+            "ArgsEscaped": true,
+            "Cmd": [
+              "python",
+              "-m",
+              "tldw_Server_API.app.core.Embeddings.services.redis_worker",
+              "--stage",
+              "all"
+            ],
+            "Env": [
+              "PATH=/opt/tldw-venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+              "LANG=C.UTF-8",
+              "GPG_KEY=A035C8C19219BA821ECEA86B64E628F8D684696D",
+              "PYTHON_VERSION=3.11.16",
+              "PYTHON_SHA256=91bcdebfdde239a003ae93738a7fce0f9230fee5c4bc2b86f6e6e8c6f98aabe8",
+              "PYTHONPATH=/app",
+              "TLDW_CONFIG_DIR=/app/Config_Files",
+              "USER_DB_BASE_DIR=/app/Databases/user_databases",
+              "DATABASE_URL=sqlite:////app/Databases/users.db",
+              "REDIS_URL=redis://localhost:6379",
+              "EMBEDDINGS_REDIS_WORKERS_CHUNKING=1",
+              "EMBEDDINGS_REDIS_WORKERS_EMBEDDING=1",
+              "EMBEDDINGS_REDIS_WORKERS_STORAGE=1",
+              "EMBEDDINGS_REDIS_WORKERS_CONTENT=1",
+              "LOG_LEVEL=INFO"
+            ],
+            "Healthcheck": {
+              "Interval": 30000000000,
+              "Retries": 3,
+              "StartPeriod": 5000000000,
+              "Test": [
+                "CMD-SHELL",
+                "python -c \"import sys; sys.exit(0)\""
+              ],
+              "Timeout": 10000000000
+            },
+            "WorkingDir": "/app"
+          },
+          "created": "2026-09-09T14:24:18.909034462Z",
+          "history": [
+            {
+              "comment": "debuerreotype 0.17",
+              "created": "2026-08-24T00:00:00Z",
+              "created_by": "# debian.sh --arch 'amd64' out/ 'trixie' '@1787529600'"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:07:16.980957163Z",
+              "created_by": "ENV PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:07:16.980957163Z",
+              "created_by": "ENV LANG=C.UTF-8",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:07:16.980957163Z",
+              "created_by": "RUN /bin/sh -c set -eux; \tapt-get update; \tapt-get install -y --no-install-recommends \t\tca-certificates \t\tnetbase \t\ttzdata \t; \tapt-get dist-clean # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:07:16.980957163Z",
+              "created_by": "ENV GPG_KEY=A035C8C19219BA821ECEA86B64E628F8D684696D",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:07:16.980957163Z",
+              "created_by": "ENV PYTHON_VERSION=3.11.16",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:07:16.980957163Z",
+              "created_by": "ENV PYTHON_SHA256=91bcdebfdde239a003ae93738a7fce0f9230fee5c4bc2b86f6e6e8c6f98aabe8",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:14:30.565476277Z",
+              "created_by": "RUN /bin/sh -c set -eux; \t\tsavedAptMark=\"$(apt-mark showmanual)\"; \tapt-get update; \tapt-get install -y --no-install-recommends \t\tdpkg-dev \t\tg++ \t\tgcc \t\tgnupg \t\tlibbluetooth-dev \t\tlibbz2-dev \t\tlibc6-dev \t\tlibdb-dev \t\tlibffi-dev \t\tlibgdbm-dev \t\tliblzma-dev \t\tlibncursesw5-dev \t\tlibreadline-dev \t\tlibsqlite3-dev \t\tlibssl-dev \t\tmake \t\ttk-dev \t\tuuid-dev \t\twget \t\txz-utils \t\tzlib1g-dev \t; \t\twget -O python.tar.xz \"https://www.python.org/ftp/python/${PYTHON_VERSION%%[a-z]*}/Python-$PYTHON_VERSION.tar.xz\"; \techo \"$PYTHON_SHA256 *python.tar.xz\" | sha256sum -c -; \twget -O python.tar.xz.asc \"https://www.python.org/ftp/python/${PYTHON_VERSION%%[a-z]*}/Python-$PYTHON_VERSION.tar.xz.asc\"; \tGNUPGHOME=\"$(mktemp -d)\"; export GNUPGHOME; \tgpg --batch --keyserver hkps://keys.openpgp.org --recv-keys \"$GPG_KEY\"; \tgpg --batch --verify python.tar.xz.asc python.tar.xz; \tgpgconf --kill all; \trm -rf \"$GNUPGHOME\" python.tar.xz.asc; \tmkdir -p /usr/src/python; \ttar --extract --directory /usr/src/python --strip-components=1 --file python.tar.xz; \trm python.tar.xz; \t\tcd /usr/src/python; \tgnuArch=\"$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)\"; \t./configure \t\t--build=\"$gnuArch\" \t\t--enable-loadable-sqlite-extensions \t\t--enable-optimizations \t\t--enable-option-checking=fatal \t\t--enable-shared \t\t$(test \"${gnuArch%%-*}\" != 'riscv64' && echo '--with-lto') \t\t--with-ensurepip \t; \tnproc=\"$(nproc)\"; \tEXTRA_CFLAGS=\"$(dpkg-buildflags --get CFLAGS)\"; \tLDFLAGS=\"$(dpkg-buildflags --get LDFLAGS)\"; \tLDFLAGS=\"${LDFLAGS:-} -Wl,--strip-all\"; \tmake -j \"$nproc\" \t\t\"EXTRA_CFLAGS=${EXTRA_CFLAGS:-}\" \t\t\"LDFLAGS=${LDFLAGS:-}\" \t; \trm python; \tmake -j \"$nproc\" \t\t\"EXTRA_CFLAGS=${EXTRA_CFLAGS:-}\" \t\t\"LDFLAGS=${LDFLAGS:-} -Wl,-rpath='\\$\\$ORIGIN/../lib'\" \t\tpython \t; \tmake install; \t\tcd /; \trm -rf /usr/src/python; \t\tfind /usr/local -depth \t\t\\( \t\t\t\\( -type d -a \\( -name test -o -name tests -o -name idle_test \\) \\) \t\t\t-o \\( -type f -a \\( -name '*.pyc' -o -name '*.pyo' -o -name 'libpython*.a' \\) \\) \t\t\\) -exec rm -rf '{}' + \t; \t\tldconfig; \t\tapt-mark auto '.*' > /dev/null; \tapt-mark manual $savedAptMark; \tfind /usr/local -type f -executable -not \\( -name '*tkinter*' \\) -exec ldd '{}' ';' \t\t| awk '/=>/ { so = $(NF-1); if (index(so, \"/usr/local/\") == 1) { next }; gsub(\"^/(usr/)?\", \"\", so); printf \"*%s\\n\", so }' \t\t| sort -u \t\t| xargs -rt dpkg-query --search \t\t| awk 'sub(\":$\", \"\", $1) { print $1 }' \t\t| sort -u \t\t| xargs -r apt-mark manual \t; \tapt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false; \tapt-get dist-clean; \t\texport PYTHONDONTWRITEBYTECODE=1; \tpython3 --version; \t\tpip3 install \t\t--disable-pip-version-check \t\t--no-cache-dir \t\t--no-compile \t\t'setuptools==79.0.1' \t\t'wheel==0.46.3' \t; \tpip3 --version # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:14:30.682171098Z",
+              "created_by": "RUN /bin/sh -c set -eux; \tfor src in idle3 pip3 pydoc3 python3 python3-config; do \t\tdst=\"$(echo \"$src\" | tr -d 3)\"; \t\t[ -s \"/usr/local/bin/$src\" ]; \t\t[ ! -e \"/usr/local/bin/$dst\" ]; \t\tln -svT \"$src\" \"/usr/local/bin/$dst\"; \tdone # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-01T00:14:30.682171098Z",
+              "created_by": "CMD [\"python3\"]",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:26.684990974Z",
+              "created_by": "RUN /bin/sh -c apt-get update && apt-get install -y --no-install-recommends         ca-certificates     && rm -rf         /var/lib/apt/lists/*         /usr/local/bin/pip*         /usr/local/lib/python*/site-packages/_distutils_hack         /usr/local/lib/python*/site-packages/pip         /usr/local/lib/python*/site-packages/pip-*.dist-info         /usr/local/lib/python*/site-packages/pkg_resources         /usr/local/lib/python*/site-packages/setuptools         /usr/local/lib/python*/site-packages/setuptools-*.dist-info # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:23:26.693745656Z",
+              "created_by": "WORKDIR /app"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:24:18.256152571Z",
+              "created_by": "COPY /opt/tldw-venv /opt/tldw-venv # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:24:18.854092519Z",
+              "created_by": "COPY tldw_Server_API/Config_Files /app/Config_Files # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:24:18.909034462Z",
+              "created_by": "RUN /bin/sh -c mkdir -p /app/Databases/user_databases /app/Models /app/logs # buildkit"
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:24:18.909034462Z",
+              "created_by": "ENV PATH=/opt/tldw-venv/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin PYTHONPATH=/app TLDW_CONFIG_DIR=/app/Config_Files USER_DB_BASE_DIR=/app/Databases/user_databases DATABASE_URL=sqlite:////app/Databases/users.db",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:24:18.909034462Z",
+              "created_by": "ENV REDIS_URL=redis://localhost:6379",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:24:18.909034462Z",
+              "created_by": "ENV EMBEDDINGS_REDIS_WORKERS_CHUNKING=1",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:24:18.909034462Z",
+              "created_by": "ENV EMBEDDINGS_REDIS_WORKERS_EMBEDDING=1",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:24:18.909034462Z",
+              "created_by": "ENV EMBEDDINGS_REDIS_WORKERS_STORAGE=1",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:24:18.909034462Z",
+              "created_by": "ENV EMBEDDINGS_REDIS_WORKERS_CONTENT=1",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:24:18.909034462Z",
+              "created_by": "ENV LOG_LEVEL=INFO",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:24:18.909034462Z",
+              "created_by": "HEALTHCHECK {Test:[CMD-SHELL python -c \"import sys; sys.exit(0)\"] Interval:30s Timeout:10s StartPeriod:5s StartInterval:0s Retries:3}",
+              "empty_layer": true
+            },
+            {
+              "comment": "buildkit.dockerfile.v0",
+              "created": "2026-09-09T14:24:18.909034462Z",
+              "created_by": "CMD [\"python\" \"-m\" \"tldw_Server_API.app.core.Embeddings.services.redis_worker\" \"--stage\" \"all\"]",
+              "empty_layer": true
+            }
+          ],
+          "os": "linux",
+          "rootfs": {
+            "diff_ids": [
+              "sha256:411a86676185cb54d695a805b238194a64e9b77e0c723f3802fbb87d333ea0b3",
+              "sha256:4d43b7f98e4c38fd2d37f37f1bf9965d2c4018b01453d3b29d924653c3275f4b",
+              "sha256:7895f75e926a456464bbd0f1285738ba25e7d70aad4aa94c32c1d274b3b9e85e",
+              "sha256:164ea7718b2462d163b7bd95ece7ebd8b669f0cdb1b094b66009aecec2f1195b",
+              "sha256:c89928a5e9153c8bba1c73c0222185050beb2186ddde3cadac3356ed160c3ae6",
+              "sha256:6cb34d38acfd05203bc51201773c24a6880a8b0961b18fd1622cfb53d7c150db",
+              "sha256:f8b2465868f429f928980978ced127c15616e00382aa4ecbd63bc886abf00ae2",
+              "sha256:8338b9f24cdd921d5c788e5bda16a24e2e86b04ca8be8fe1064e0ad4ee29f7d5",
+              "sha256:6fea74f65d747dca99ba84dd6c4a8354e1d3d58a79375f16f04734f47f5981f6"
+            ],
+            "type": "layers"
+          }
+        },
+        "member": "trivy-image-worker.json",
+        "member_sha256": "8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3",
+        "verified": true
+      }
+    },
+    "primary_sources": [
+      "https://linux.oracle.com/cve/CVE-2026-11822.html",
+      "https://linux.oracle.com/cve/CVE-2026-11824.html",
+      "https://sqlite.org/lang_createview.html",
+      "https://sqlite.org/backup.html"
+    ],
+    "records": [
+      {
+        "classification": "unresolved",
+        "component": "image-app",
+        "fresh_image_verification_required": true,
+        "installed_version": "3.46.1-7+deb13u1",
+        "inventory_source": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip#trivy-image-app.json",
+        "inventoryhash": "sha256:f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da",
+        "package": "libsqlite3-0",
+        "policy_recommendation": "do_not_waive",
+        "primaryURL": "https://linux.oracle.com/cve/CVE-2026-11822.html",
+        "purl": "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+        "remaining_prerequisites": [
+          "Bind the actual consumer SQLite extension/library and FTS5 build support to the exact image; installed libsqlite3-0 inventory alone does not prove the active Python SQLite binding.",
+          "Determine exact downstream fix/backport status for the loaded build, not solely the upstream version number or scanner match.",
+          "Verify a fresh image digest built with TASK31 and subsequent reviewed APKG fix; retained images predate these source changes.",
+          "Do not claim confirmed CVE exploitation: this review establishes source page/caller prerequisites without malformed page execution."
+        ],
+        "role_scope": "The API image has an authenticated APKG schema-selection gap and an admin whole-database restore path. TASK31 guarded the separate OpenWebUI source reader.",
+        "severity": "HIGH",
+        "vulnerability_id": "CVE-2026-11822"
+      },
+      {
+        "classification": "unresolved",
+        "component": "image-app",
+        "fresh_image_verification_required": true,
+        "installed_version": "3.46.1-7+deb13u1",
+        "inventory_source": "/private/tmp/task-13013-7-current-ci.bvZLBs/container-app.zip#trivy-image-app.json",
+        "inventoryhash": "sha256:f88d77cf89a0f1b8a9a7e91b2eb58970b64e8094f593cf01e0252bfa825802da",
+        "package": "libsqlite3-0",
+        "policy_recommendation": "do_not_waive",
+        "primaryURL": "https://linux.oracle.com/cve/CVE-2026-11824.html",
+        "purl": "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+        "remaining_prerequisites": [
+          "Bind the actual consumer SQLite extension/library and FTS5 build support to the exact image; installed libsqlite3-0 inventory alone does not prove the active Python SQLite binding.",
+          "Determine exact downstream fix/backport status for the loaded build, not solely the upstream version number or scanner match.",
+          "Verify a fresh image digest built with TASK31 and subsequent reviewed APKG fix; retained images predate these source changes.",
+          "Do not claim confirmed CVE exploitation: this review establishes source page/caller prerequisites without malformed page execution."
+        ],
+        "role_scope": "The API image has an authenticated APKG schema-selection gap and an admin whole-database restore path. TASK31 guarded the separate OpenWebUI source reader.",
+        "severity": "HIGH",
+        "vulnerability_id": "CVE-2026-11824"
+      },
+      {
+        "classification": "unresolved",
+        "component": "image-worker",
+        "fresh_image_verification_required": true,
+        "installed_version": "3.46.1-7+deb13u1",
+        "inventory_source": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip#trivy-image-worker.json",
+        "inventoryhash": "sha256:8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3",
+        "package": "libsqlite3-0",
+        "policy_recommendation": "do_not_waive",
+        "primaryURL": "https://linux.oracle.com/cve/CVE-2026-11822.html",
+        "purl": "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+        "remaining_prerequisites": [
+          "Bind the actual consumer SQLite extension/library and FTS5 build support to the exact image; installed libsqlite3-0 inventory alone does not prove the active Python SQLite binding.",
+          "Determine exact downstream fix/backport status for the loaded build, not solely the upstream version number or scanner match.",
+          "Verify a fresh image digest built with TASK31 and subsequent reviewed APKG fix; retained images predate these source changes.",
+          "Do not claim confirmed CVE exploitation: this review establishes source page/caller prerequisites without malformed page execution."
+        ],
+        "role_scope": "The default image command is a specialized worker, not the API server. No role-specific APKG/bundle endpoint caller was established for this worker in this bounded review; app-route exposure is not automatically attributed to the worker. Shared package presence and source fixes alone are insufficient to waive the retained row.",
+        "severity": "HIGH",
+        "vulnerability_id": "CVE-2026-11822"
+      },
+      {
+        "classification": "unresolved",
+        "component": "image-worker",
+        "fresh_image_verification_required": true,
+        "installed_version": "3.46.1-7+deb13u1",
+        "inventory_source": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-worker.zip#trivy-image-worker.json",
+        "inventoryhash": "sha256:8899e5580af6b7fefc061d972a1f63f10e93d57235edaedaf9e5f572c8cc3bf3",
+        "package": "libsqlite3-0",
+        "policy_recommendation": "do_not_waive",
+        "primaryURL": "https://linux.oracle.com/cve/CVE-2026-11824.html",
+        "purl": "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+        "remaining_prerequisites": [
+          "Bind the actual consumer SQLite extension/library and FTS5 build support to the exact image; installed libsqlite3-0 inventory alone does not prove the active Python SQLite binding.",
+          "Determine exact downstream fix/backport status for the loaded build, not solely the upstream version number or scanner match.",
+          "Verify a fresh image digest built with TASK31 and subsequent reviewed APKG fix; retained images predate these source changes.",
+          "Do not claim confirmed CVE exploitation: this review establishes source page/caller prerequisites without malformed page execution."
+        ],
+        "role_scope": "The default image command is a specialized worker, not the API server. No role-specific APKG/bundle endpoint caller was established for this worker in this bounded review; app-route exposure is not automatically attributed to the worker. Shared package presence and source fixes alone are insufficient to waive the retained row.",
+        "severity": "HIGH",
+        "vulnerability_id": "CVE-2026-11824"
+      },
+      {
+        "classification": "unresolved",
+        "component": "image-audio-worker",
+        "fresh_image_verification_required": true,
+        "installed_version": "3.46.1-7+deb13u1",
+        "inventory_source": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip#trivy-image-audio-worker.json",
+        "inventoryhash": "sha256:4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6",
+        "package": "libsqlite3-0",
+        "policy_recommendation": "do_not_waive",
+        "primaryURL": "https://linux.oracle.com/cve/CVE-2026-11822.html",
+        "purl": "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+        "remaining_prerequisites": [
+          "Bind the actual consumer SQLite extension/library and FTS5 build support to the exact image; installed libsqlite3-0 inventory alone does not prove the active Python SQLite binding.",
+          "Determine exact downstream fix/backport status for the loaded build, not solely the upstream version number or scanner match.",
+          "Verify a fresh image digest built with TASK31 and subsequent reviewed APKG fix; retained images predate these source changes.",
+          "Do not claim confirmed CVE exploitation: this review establishes source page/caller prerequisites without malformed page execution."
+        ],
+        "role_scope": "The default image command is a specialized worker, not the API server. No role-specific APKG/bundle endpoint caller was established for this worker in this bounded review; app-route exposure is not automatically attributed to the worker. Shared package presence and source fixes alone are insufficient to waive the retained row.",
+        "severity": "HIGH",
+        "vulnerability_id": "CVE-2026-11822"
+      },
+      {
+        "classification": "unresolved",
+        "component": "image-audio-worker",
+        "fresh_image_verification_required": true,
+        "installed_version": "3.46.1-7+deb13u1",
+        "inventory_source": "/private/tmp/task-13013-7-23-dispositions.3bRfyp/container-audio-worker.zip#trivy-image-audio-worker.json",
+        "inventoryhash": "sha256:4c01e656130515310e5396aec02a2de5fc974c495591d4b90a033496920c81f6",
+        "package": "libsqlite3-0",
+        "policy_recommendation": "do_not_waive",
+        "primaryURL": "https://linux.oracle.com/cve/CVE-2026-11824.html",
+        "purl": "pkg:deb/debian/libsqlite3-0@3.46.1-7%2Bdeb13u1?arch=amd64&distro=debian-13.6",
+        "remaining_prerequisites": [
+          "Bind the actual consumer SQLite extension/library and FTS5 build support to the exact image; installed libsqlite3-0 inventory alone does not prove the active Python SQLite binding.",
+          "Determine exact downstream fix/backport status for the loaded build, not solely the upstream version number or scanner match.",
+          "Verify a fresh image digest built with TASK31 and subsequent reviewed APKG fix; retained images predate these source changes.",
+          "Do not claim confirmed CVE exploitation: this review establishes source page/caller prerequisites without malformed page execution."
+        ],
+        "role_scope": "The default image command is a specialized worker, not the API server. No role-specific APKG/bundle endpoint caller was established for this worker in this bounded review; app-route exposure is not automatically attributed to the worker. Shared package presence and source fixes alone are insufficient to waive the retained row.",
+        "severity": "HIGH",
+        "vulnerability_id": "CVE-2026-11824"
+      }
+    ],
+    "reviewed_callers": [
+      {
+        "entry": "Chatbook OpenWebUI SQLite upload preview/import; authorized OpenWebUI local-root attachment hydration",
+        "evidence": [
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/DB_Management/OpenWebUI_DB.py",
+            "line": 90
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/DB_Management/OpenWebUI_DB.py",
+            "line": 116
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/import_adapters/openwebui_db.py",
+            "line": 165
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/import_adapters/openwebui_db.py",
+            "line": 258
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/chatbook_service.py",
+            "line": 3847
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/chatbook_service.py",
+            "line": 3938
+          }
+        ],
+        "id": "openwebui-import-and-hydration",
+        "image_limit": "Current retained image archives predate TASK31; source-only guard cannot waive those images.",
+        "match_path": "No first-party MATCH on the uploaded connection after the guard; virtual-table/view substitution for required names is rejected. Existing TASK31 metadata-preparation limitation is retained; this is not proof against every malformed SQLite parser input.",
+        "source_pages": "Externally supplied SQLite pages are opened read-only. Required source names user/folder/chat/file/chat_file must have parsed table_list type=table before SELECT.",
+        "status": "source_guarded_since_TASK31"
+      },
+      {
+        "entry": "Authenticated POST /api/v1/flashcards/import/apkg with default import limits; admin required only for limit overrides.",
+        "evidence": [
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/flashcards.py",
+            "line": 1892
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/flashcards.py",
+            "line": 1910
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/flashcards.py",
+            "line": 1941
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Flashcards/apkg_importer.py",
+            "line": 232
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Flashcards/apkg_importer.py",
+            "line": 273
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Flashcards/apkg_importer.py",
+            "line": 279
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Flashcards/apkg_importer.py",
+            "line": 286
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Flashcards/apkg_importer.py",
+            "line": 313
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Flashcards/apkg_importer.py",
+            "line": 338
+          }
+        ],
+        "id": "apkg-upload",
+        "match_path": "Static inference from SQLite documented view semantics: these required names can be views whose SELECT evaluates uploaded FTS5 MATCH. No crafted database, SQLite fixture, or memory-corruption exploit was created or executed in this review.",
+        "needed_change": "Require ordinary source tables before content queries, with boundary regressions. Parent tracks this separately as TASK-13013.7.36. Source acceptance is confirmed; exact retained-library CVE impact remains unresolved.",
+        "source_pages": "ZIP collection.anki2/collection.anki21 bytes are written into a temporary file and opened with sqlite3.connect. col, notes and cards are SELECTed without requiring ordinary tables.",
+        "status": "confirmed_source_acceptance_gap"
+      },
+      {
+        "authority": "An administrator is authorized to replace whole databases. This is a real privileged page-ingress path, not a newly confirmed authorization defect or memory-corruption reproduction. Admin database-restore privilege is not itself proof of arbitrary native-code execution authority.",
+        "entry": "Admin-only POST /api/v1/admin/backups/bundles/import",
+        "evidence": [
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/admin/__init__.py",
+            "line": 138
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/admin/__init__.py",
+            "line": 166
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/admin/admin_bundle_ops.py",
+            "line": 274
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/admin/admin_bundle_ops.py",
+            "line": 289
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/admin/admin_bundle_ops.py",
+            "line": 303
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/services/admin_bundle_service.py",
+            "line": 779
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/services/admin_bundle_service.py",
+            "line": 845
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/services/admin_bundle_service.py",
+            "line": 851
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/services/admin_data_ops_service.py",
+            "line": 63
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/DB_Management/DB_Backups.py",
+            "line": 104
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/DB_Management/DB_Backups.py",
+            "line": 126
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/flashcards.py",
+            "line": 1285
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/flashcards.py",
+            "line": 1299
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+            "line": 35711
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+            "line": 35794
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/DB_Management/media_db/repositories/media_search_repository.py",
+            "line": 351
+          }
+        ],
+        "id": "admin-bundle-restore",
+        "match_path": "After successful chacha restore with the compatible application schema, ordinary GET /flashcards?q reaches list_flashcards/count_flashcards and flashcards_fts MATCH on restored pages. Media search independently uses media_fts MATCH. No logical row reconstruction or FTS rebuild is performed in the restore copy.",
+        "source_pages": "Caller uploads bundle manifest plus SQLite files. Size/SHA checks use the same supplied manifest and establish consistency, not trusted origin. Dataset resolution selects live chacha/media paths; restore_sqlite_database_file copies source pages using Connection.backup.",
+        "status": "confirmed_privileged_external_page_flow"
+      },
+      {
+        "entry": "Native chatbook ZIP import including conversations, notes, embeddings and stored media",
+        "evidence": [
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/chatbook_service.py",
+            "line": 1385
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/chatbook_service.py",
+            "line": 1398
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/chatbook_service.py",
+            "line": 1412
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/chatbook_service.py",
+            "line": 1447
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/chatbook_service.py",
+            "line": 6628
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/chatbook_service.py",
+            "line": 6759
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/chatbook_service.py",
+            "line": 7341
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/chatbook_service.py",
+            "line": 7415
+          }
+        ],
+        "id": "native-chatbook-import",
+        "match_path": "Conflict searches and later searches operate on the server database. Text values may influence queries but do not supply raw FTS page encodings; no package-wide safety conclusion follows.",
+        "source_pages": "Conversation/embedding content is JSON and note content is logical text/metadata; records are inserted through server database methods. Stored artifact bytes go under per-user imported_media/media_ID/UUID_filename and do not replace live database files.",
+        "status": "no_external_sqlite_page_ingress_in_reviewed_path"
+      },
+      {
+        "entry": "OpenWebUI attachment preview/hydration",
+        "evidence": [
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/api/v1/endpoints/chatbooks.py",
+            "line": 243
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/chatbook_service.py",
+            "line": 3847
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/chatbook_service.py",
+            "line": 3848
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/chatbook_service.py",
+            "line": 3938
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/chatbook_service.py",
+            "line": 3939
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/openwebui_hydration.py",
+            "line": 946
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/openwebui_hydration.py",
+            "line": 954
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/Chatbooks/openwebui_hydration.py",
+            "line": 968
+          }
+        ],
+        "id": "attachment-hydration",
+        "match_path": "Reviewed attachment-copy path opens files as bytes and processes attachment content; it does not sqlite3.connect attachment bytes. This does not claim document parser safety.",
+        "source_pages": "The separate webui.db connection receives TASK31 import and file/chat_file table guards. Attachment copies use per-user media/media_ID storage, not a database replacement destination.",
+        "status": "source_db_guarded_and_attachment_bytes_not_opened_as_sqlite"
+      },
+      {
+        "entry": "Admin existing backup snapshot restore",
+        "evidence": [
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/services/admin_data_ops_service.py",
+            "line": 318
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/services/admin_data_ops_service.py",
+            "line": 324
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/services/admin_data_ops_service.py",
+            "line": 337
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/DB_Management/DB_Backups.py",
+            "line": 443
+          },
+          {
+            "file": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design/tldw_Server_API/app/core/DB_Management/DB_Backups.py",
+            "line": 496
+          }
+        ],
+        "id": "existing-backup-snapshot-restore",
+        "match_path": "If backup bytes originated externally, the same later MATCH risk applies; otherwise this is a server-created backup. A local operator replacement of the backup file is a separate write-authority prerequisite.",
+        "source_pages": "Dataset-specific backup directory and validated backup_id select an existing backup file, followed by the same page-copy helper. This API does not itself upload new raw SQLite bytes.",
+        "status": "existing_backup_directory_authority_required"
+      }
+    ],
+    "scope": "Static SQLite external-page/caller review; no repository edits, native database/image/model execution, malformed fixtures, package installs, or exploit reproduction.",
+    "source_files_sha256": {
+      "Dockerfiles/Dockerfile.audio_gpu_worker": "164c292971453bd23c251b302e4e5b1c1f8921d31bdaf4af7eebd823786ed852",
+      "Dockerfiles/Dockerfile.prod": "41b089583aea3d2133988dca751a0ab8c4f31d4e7be9510c02790d919058db74",
+      "Dockerfiles/Dockerfile.worker": "ad33d289e1f0c7954e9aeeb36aeeb7c7b85138ed426185534bff218b9c126577",
+      "Docs/Evidence/TASK-13013.7.31-openwebui-ordinary-tables.md": "1cd10e5637393efb24ce2e032a508617a3d1c9fd4a2e8cc398c97c4154cf410b",
+      "tldw_Server_API/app/api/v1/endpoints/admin/__init__.py": "d989ad14bfc0fe35e499ac168d999eb981d4261d113499a3b0eff310b90365f8",
+      "tldw_Server_API/app/api/v1/endpoints/admin/admin_bundle_ops.py": "082a22fafecccceabb6d57fd0430778e8173be7a43922b2fdad52c74d6ad42de",
+      "tldw_Server_API/app/api/v1/endpoints/chatbooks.py": "47e2a70437511e4ec401e74476f828c67cc28e1588eaa2ca7c1881c640f3f622",
+      "tldw_Server_API/app/api/v1/endpoints/flashcards.py": "93a0bbb12182b44b3052f011db133f45e8c43ee957c02e1ddd96c1c9ae5caa13",
+      "tldw_Server_API/app/core/Chatbooks/chatbook_service.py": "5c5804a73050e57b9f646434bb6b6651b5d0b447a8cecfd501d2ccf2d9343319",
+      "tldw_Server_API/app/core/Chatbooks/import_adapters/openwebui_db.py": "3d18987aa1bf66b25584402591d7439c9a3dc55da0a02a57b290998f1b4d31a9",
+      "tldw_Server_API/app/core/Chatbooks/openwebui_hydration.py": "bd48053e09f5d10945bd4e9bddfe787bb81f99569640c2c77b8ad8fde1ef08d9",
+      "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": "78385a8d881fe6f54fe11c56982ded144470cd1c97155d662c3271966a9100df",
+      "tldw_Server_API/app/core/DB_Management/DB_Backups.py": "d7a27cb0259d9a5a87fd44de8769d017b257ba5591ac978b08d53b585c4b06b3",
+      "tldw_Server_API/app/core/DB_Management/OpenWebUI_DB.py": "44779bf76a5ea6c77e5449abf5698516add7824c2f6346779ee8aa4cf155cabc",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_search_repository.py": "f629aefa7055d1c81ce0a1496635e7cc5d7e9990e5164568fe72c9c612a94e9a",
+      "tldw_Server_API/app/core/Flashcards/apkg_importer.py": "d4fe644d582c6ef7a6e3a5a60c71ce8de06d5059ef35d903e973f9ca0f92322b",
+      "tldw_Server_API/app/services/admin_bundle_service.py": "5929aecf66a78ddbeee9435eba2af1d6e4b3f1dff3ed6c742b16f6dbb10a85b6",
+      "tldw_Server_API/app/services/admin_data_ops_service.py": "616310564848af5f9c4604b6f7334a77e46d526a7f1a5b16923dfc63d3cd91db"
+    },
+    "verification": "SHA256 reverified all three raw archives and embedded reports; each exact CVE/package/version/PURL/severity tuple matched the retained report. No new SQLite tests were executed; existing TASK31 evidence was read only.",
+    "worktree": "/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/task-13013-7-supply-chain-design"
+  },
+  "task": "TASK-13013.7.36",
+  "verification": {
+    "bandit_new_test": [
+      {
+        "filename": "./tldw_Server_API/tests/Flashcards/test_apkg_schema_security.py",
+        "issue_severity": "LOW",
+        "line_number": 50,
+        "test_id": "B101"
+      },
+      {
+        "filename": "./tldw_Server_API/tests/Flashcards/test_apkg_schema_security.py",
+        "issue_severity": "LOW",
+        "line_number": 74,
+        "test_id": "B101"
+      },
+      {
+        "filename": "./tldw_Server_API/tests/Flashcards/test_apkg_schema_security.py",
+        "issue_severity": "LOW",
+        "line_number": 91,
+        "test_id": "B101"
+      }
+    ],
+    "bandit_production": [],
+    "black": {
+      "existing_drift": "Two pre-existing Black formatting differences in sqlite_schema_helpers.py and unrelated media-rewrite blocks in apkg_importer.py remain; changed blocks conform, OpenWebUI check passes.",
+      "new_tests": "All done! \u2728 \ud83c\udf70 \u2728\n2 files would be left unchanged.\n"
+    },
+    "broader_openwebui": "63 passed in 17.67s",
+    "first_green": "51 passed after 2 initial exporter tests hit the existing temporary-path allowlist; corrected basetemp to system temporary directory",
+    "initial_red": "10 failed: 6 accepted view/virtual substitutions, 3 missing-table error expectations, 1 validation ordering check",
+    "review_regression": "6 casing tests failed before name normalization; then final focused APKG/export/OpenWebUI schema suite 57 passed in 2.58s",
+    "ruff": "All checks passed!\n",
+    "syntax": "AST parse succeeds for all four touched Python files"
+  }
+}

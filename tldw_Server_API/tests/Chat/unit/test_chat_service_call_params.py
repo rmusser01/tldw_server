@@ -775,8 +775,10 @@ def test_build_call_params_excludes_research_context() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("update_schema", [False, True])
 def test_build_call_params_negotiates_structured_response_format(
     monkeypatch: pytest.MonkeyPatch,
+    update_schema: bool,
 ) -> None:
     """Ensure shared call-param construction downgrades unsupported json_schema requests."""
 
@@ -807,6 +809,17 @@ def test_build_call_params_negotiates_structured_response_format(
         },
     )
 
+    if update_schema:
+        req.response_format.json_schema = req.response_format.json_schema.model_copy(
+            update={
+                "schema_definition": {
+                    "type": "object",
+                    "properties": {"answer": {"type": "integer"}},
+                    "required": ["answer"],
+                }
+            }
+        )
+
     params = build_call_params_from_request(
         request_data=req,
         target_api_provider="openai",
@@ -823,7 +836,7 @@ def test_build_call_params_negotiates_structured_response_format(
             "name": "answer_schema",
             "schema": {
                 "type": "object",
-                "properties": {"answer": {"type": "string"}},
+                "properties": {"answer": {"type": "integer" if update_schema else "string"}},
                 "required": ["answer"],
             },
         },

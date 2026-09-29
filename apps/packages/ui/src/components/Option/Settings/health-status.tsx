@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Tag, Card, Space, Typography, Button, Tooltip, InputNumber } from 'antd'
 import { browser } from 'wxt/browser'
 import { Link, useNavigate } from 'react-router-dom'
@@ -174,7 +174,7 @@ export default function HealthStatus() {
   const { capabilities } = useServerCapabilities()
   const storeHost = storeServerUrl ? cleanUrl(storeServerUrl) : null
 
-  const runSingle = async (c: Check): Promise<boolean> => {
+  const runSingle = useCallback(async (c: Check): Promise<boolean> => {
     setRunningChecks(prev => new Set(prev).add(c.key))
     const t0 = performance.now()
     try {
@@ -215,7 +215,7 @@ export default function HealthStatus() {
         return next
       })
     }
-  }
+  }, [])
 
   const runChecks = async (userTriggered: boolean = false) => {
     if (isRunningRef.current) return

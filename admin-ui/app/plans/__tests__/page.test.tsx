@@ -5,8 +5,8 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import PlansPage from '../page';
 import { api } from '@/lib/api-client';
+import { ConfirmProvider } from '@/components/ui/confirm-dialog';
 
-const confirmMock = vi.hoisted(() => vi.fn());
 const privilegedActionMock = vi.hoisted(() => vi.fn());
 const toastSuccessMock = vi.hoisted(() => vi.fn());
 const toastErrorMock = vi.hoisted(() => vi.fn());
@@ -27,10 +27,6 @@ vi.mock('@/components/ResponsiveLayout', () => ({
 }));
 
 vi.mock('@/components/ui/privileged-action-dialog', () => ({
-  usePrivilegedActionDialog: () => confirmMock,
-}));
-
-vi.mock('@/components/ui/privileged-action-dialog', () => ({
   usePrivilegedActionDialog: () => privilegedActionMock,
 }));
 
@@ -48,7 +44,6 @@ vi.mock('@/lib/api-client', () => ({
     createPlan: vi.fn(),
     updatePlan: vi.fn(),
     deletePlan: vi.fn(),
-    getSubscriptions: vi.fn(),
   },
 }));
 
@@ -64,7 +59,6 @@ type ApiMock = {
   createPlan: ReturnType<typeof vi.fn>;
   updatePlan: ReturnType<typeof vi.fn>;
   deletePlan: ReturnType<typeof vi.fn>;
-  getSubscriptions: ReturnType<typeof vi.fn>;
 };
 
 const apiMock = api as unknown as ApiMock;
@@ -116,7 +110,6 @@ const samplePlans = [
 
 beforeEach(() => {
   billingEnabled = true;
-  confirmMock.mockResolvedValue({ reason: 'test audit reason', adminPassword: '' });
   privilegedActionMock.mockResolvedValue({ reason: 'test audit reason', adminPassword: '' });
   toastSuccessMock.mockClear();
   toastErrorMock.mockClear();
@@ -125,7 +118,6 @@ beforeEach(() => {
   apiMock.createPlan.mockResolvedValue(samplePlans[0]);
   apiMock.updatePlan.mockResolvedValue(samplePlans[0]);
   apiMock.deletePlan.mockResolvedValue({});
-  apiMock.getSubscriptions.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -135,7 +127,7 @@ afterEach(() => {
 
 describe('PlansPage', () => {
   it('renders plan cards with names and prices', async () => {
-    render(<PlansPage />);
+    render(<PlansPage />, { wrapper: ConfirmProvider });
 
     // "Free" appears both as card title and PlanBadge, so use getAllByText
     expect((await screen.findAllByText('Free')).length).toBeGreaterThanOrEqual(1);
@@ -148,7 +140,7 @@ describe('PlansPage', () => {
   });
 
   it('shows included token credits for each plan', async () => {
-    render(<PlansPage />);
+    render(<PlansPage />, { wrapper: ConfirmProvider });
 
     expect(await screen.findByText('10,000')).toBeInTheDocument();
     expect(screen.getByText('500,000')).toBeInTheDocument();
@@ -156,7 +148,7 @@ describe('PlansPage', () => {
   });
 
   it('shows feature counts', async () => {
-    render(<PlansPage />);
+    render(<PlansPage />, { wrapper: ConfirmProvider });
 
     await screen.findByText('$0.00/mo');
     const featureCells = screen.getAllByText('Features');
@@ -165,7 +157,7 @@ describe('PlansPage', () => {
 
   it('shows billing not enabled message when billing is off', async () => {
     billingEnabled = false;
-    render(<PlansPage />);
+    render(<PlansPage />, { wrapper: ConfirmProvider });
 
     expect(await screen.findByText(/Billing is not enabled/)).toBeInTheDocument();
     expect(screen.queryByText('Create Plan')).not.toBeInTheDocument();
@@ -173,7 +165,7 @@ describe('PlansPage', () => {
 
   it('opens create plan dialog with form fields', async () => {
     const user = userEvent.setup();
-    render(<PlansPage />);
+    render(<PlansPage />, { wrapper: ConfirmProvider });
 
     await screen.findByText('$0.00/mo');
 
@@ -192,7 +184,7 @@ describe('PlansPage', () => {
   it('calls deletePlan when delete is confirmed (no subscribers)', async () => {
     apiMock.getSubscriptions.mockResolvedValue([]);
     const user = userEvent.setup();
-    render(<PlansPage />);
+    render(<PlansPage />, { wrapper: ConfirmProvider });
 
     await screen.findByText('$0.00/mo');
 
@@ -213,13 +205,25 @@ describe('PlansPage', () => {
     });
   });
 
+  it('does not delete a plan when privileged approval is canceled', async () => {
+    privilegedActionMock.mockResolvedValueOnce(null);
+    const user = userEvent.setup();
+    render(<PlansPage />, { wrapper: ConfirmProvider });
+
+    await screen.findByText('$0.00/mo');
+    await user.click(screen.getAllByRole('button', { name: /Delete/ })[0]);
+
+    expect(privilegedActionMock).toHaveBeenCalledTimes(1);
+    expect(apiMock.deletePlan).not.toHaveBeenCalled();
+  });
+
   it('warns about active subscribers before deletion', async () => {
     apiMock.getSubscriptions.mockResolvedValue([
       { id: 'sub_1', plan_id: 'plan_free', org_id: 1, status: 'active' },
       { id: 'sub_2', plan_id: 'plan_free', org_id: 2, status: 'active' },
     ]);
     const user = userEvent.setup();
-    render(<PlansPage />);
+    render(<PlansPage />, { wrapper: ConfirmProvider });
 
     await screen.findByText('$0.00/mo');
 
@@ -227,7 +231,7 @@ describe('PlansPage', () => {
     await user.click(deleteButtons[0]);
 
     await waitFor(() => {
-      expect(confirmMock).toHaveBeenCalledWith(
+      expect(privilegedActionMock).toHaveBeenCalledWith(
         expect.objectContaining({
           message: expect.stringContaining('2 active subscription'),
         })
@@ -238,7 +242,7 @@ describe('PlansPage', () => {
   it('shows warning when subscriber check fails', async () => {
     apiMock.getSubscriptions.mockRejectedValue(new Error('Network error'));
     const user = userEvent.setup();
-    render(<PlansPage />);
+    render(<PlansPage />, { wrapper: ConfirmProvider });
 
     await screen.findByText('$0.00/mo');
 
@@ -246,7 +250,7 @@ describe('PlansPage', () => {
     await user.click(deleteButtons[0]);
 
     await waitFor(() => {
-      expect(confirmMock).toHaveBeenCalledWith(
+      expect(privilegedActionMock).toHaveBeenCalledWith(
         expect.objectContaining({
           message: expect.stringContaining('Could not verify'),
         })

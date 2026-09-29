@@ -10,7 +10,6 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user, U
 from tldw_Server_API.app.main import app
 import asyncio
 import json
-from jose import jwt
 import datetime
 from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi import HTTPException, status

@@ -11,7 +11,6 @@ from tldw_Server_API.app.core.Chatbooks.import_adapters.openwebui_db import (
 )
 from tldw_Server_API.app.core.DB_Management import OpenWebUI_DB as openwebui_db_reader
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -235,19 +234,11 @@ def test_open_validated_db_uses_path_as_uri_for_read_only_connection(tmp_path, m
     db_path = tmp_path / "webui with spaces.db"
     db_path.write_bytes(b"SQLite format 3\x00")
     connect_calls: list[tuple[str, bool]] = []
-
-    class FakeConnection:
-        row_factory = None
-
-        def enable_load_extension(self, _enabled):
-            return None
-
-        def close(self):
-            return None
+    original_connect = sqlite3.connect
 
     def fake_connect(database, *, uri=False):
         connect_calls.append((database, uri))
-        return FakeConnection()
+        return original_connect(":memory:")
 
     monkeypatch.setattr(openwebui_db_reader.sqlite3, "connect", fake_connect)
     monkeypatch.setattr(openwebui_db_reader, "validate_openwebui_schema", lambda _conn: None)

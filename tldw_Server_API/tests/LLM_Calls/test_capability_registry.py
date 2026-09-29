@@ -219,3 +219,32 @@ def test_validate_payload_allows_unknown_tool_type():
     payload = {"messages": [], "model": "test", "tools": [{"type": "custom_tool", "payload": {"ok": True}}]}
     normalized = cr.validate_payload("openai", payload)
     assert normalized["tools"][0]["type"] == "custom_tool"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("provider", ["openai", "llama.cpp", "custom-openai-api-12"])
+def test_validate_payload_omits_unsupported_neutral_repetition_penalty(provider: str) -> None:
+    """Neutral character snapshot defaults do not require adapter support."""
+    payload = {"messages": [], "repetition_penalty": 1.0}
+    assert cr.validate_payload(provider, payload) == {"messages": []}
+    assert payload["repetition_penalty"] == 1.0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("penalty", [0.0, 1.1, True, "1.0"])
+def test_validate_payload_rejects_unsupported_non_neutral_repetition_penalty(penalty: object) -> None:
+    """Meaningful values and invalid types must not evade capability validation."""
+    with pytest.raises(ChatBadRequestError, match="repetition_penalty"):
+        cr.validate_payload("llama.cpp", {"messages": [], "repetition_penalty": penalty})
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("penalty", [1.0, 1.1])
+def test_validate_payload_preserves_supported_repetition_penalty(
+    monkeypatch: pytest.MonkeyPatch,
+    penalty: float,
+) -> None:
+    """An adapter that declares support keeps the requested value unchanged."""
+    monkeypatch.setitem(cr.PROVIDER_EXTENSIONS, "local-llm", {"repetition_penalty"})
+    payload = {"messages": [], "repetition_penalty": penalty}
+    assert cr.validate_payload("local-llm", payload) == payload

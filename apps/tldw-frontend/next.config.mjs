@@ -21,6 +21,11 @@ const backendRuntimeWatchIgnoreSource = backendRuntimeWatchIgnoreRoots
   .map((root) => `^${escapeRegExp(root)}(?:/|$)`)
   .join('|');
 const liveTierDistDir = process.env.TLDW_NEXT_DIST_DIR;
+const requestedBuildCpus = Number(process.env.TLDW_NEXT_BUILD_CPUS);
+const buildCpus =
+  Number.isInteger(requestedBuildCpus) && requestedBuildCpus > 0
+    ? requestedBuildCpus
+    : undefined;
 if (
   liveTierDistDir &&
   !/^\.next-live-tier-[A-Za-z0-9._-]+$/.test(liveTierDistDir)
@@ -88,6 +93,7 @@ const contentSecurityPolicy = [
 ].join('; ');
 
 const nextConfig = {
+  agentRules: false,
   reactStrictMode: true,
   reactCompiler: false,
   // Keep the optional development badge clear of sidebar and drawer actions.
@@ -177,6 +183,7 @@ const nextConfig = {
     ignoreBuildErrors: true,
   },
   experimental: {
+    ...(buildCpus ? { cpus: buildCpus, webpackMemoryOptimizations: true } : {}),
     // Generation already allows 180s on the client. Next's 30s rewrite default
     // otherwise drops valid backend responses before that budget expires.
     ...(deploymentMode === 'quickstart' ? { proxyTimeout: 180000 } : {}),

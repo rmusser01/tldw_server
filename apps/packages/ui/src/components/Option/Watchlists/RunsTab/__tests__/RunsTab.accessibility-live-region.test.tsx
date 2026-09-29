@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { RunsTab } from "../RunsTab"
 
@@ -11,15 +11,14 @@ const mocks = vi.hoisted(() => ({
   storeStateRef: { current: {} as Record<string, any> }
 }))
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (_key: string, defaultValue?: unknown, options?: Record<string, unknown>) => {
-      if (typeof defaultValue !== "string") return _key
-      if (!options) return defaultValue
-      return defaultValue.replace(/\{\{(\w+)\}\}/g, (_, token) => String(options[token] ?? ""))
-    }
-  })
-}))
+vi.mock("react-i18next", () => {
+  const t = (_key: string, defaultValue?: unknown, options?: Record<string, unknown>) => {
+    if (typeof defaultValue !== "string") return _key
+    if (!options) return defaultValue
+    return defaultValue.replace(/\{\{(\w+)\}\}/g, (_, token) => String(options[token] ?? ""))
+  }
+  return { useTranslation: () => ({ t }) }
+})
 
 vi.mock("antd", () => {
   const Select = ({ value, onChange, options = [], allowClear, ...rest }: any) => (
@@ -161,5 +160,56 @@ describe("RunsTab accessibility live-region behavior", () => {
   it("provides an explicit table label for screen readers", () => {
     render(<RunsTab />)
     expect(screen.getByTestId("runs-table")).toHaveAttribute("aria-label", "Activity runs table")
+  })
+
+  it("rechecks stalled runs on the existing polling interval", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-02-23T08:44:59Z"))
+    const runs = [buildRun("running")]
+    mocks.storeStateRef.current = baseState({
+      runs,
+      runsTotal: 1,
+      pollingActive: true,
+      activeTab: "runs"
+    })
+    mocks.fetchWatchlistRunsMock.mockResolvedValue({ items: runs, total: 1 })
+    const view = render(<RunsTab />)
+    try {
+      await act(async () => {})
+      expect(screen.queryByText(/0 failed runs and 1 stalled run need review/)).not.toBeInTheDocument()
+      await act(async () => vi.advanceTimersByTimeAsync(5000))
+      expect(screen.getByText(/0 failed runs and 1 stalled run need review/)).toBeInTheDocument()
+      view.unmount()
+      const fetchCount = mocks.fetchWatchlistRunsMock.mock.calls.length
+      await act(async () => vi.advanceTimersByTimeAsync(5000))
+      expect(mocks.fetchWatchlistRunsMock).toHaveBeenCalledTimes(fetchCount)
+    } finally {
+      view.unmount()
+      vi.useRealTimers()
+    }
+  })
+
+  it("detects a run that becomes stalled while an unchanged response is pending", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-02-23T08:44:59Z"))
+    const runs = [buildRun("running")]
+    const response = { items: runs, total: 1 }
+    let resolveRequest!: (value: typeof response) => void
+    mocks.fetchWatchlistRunsMock.mockReturnValue(new Promise<typeof response>((resolve) => {
+      resolveRequest = resolve
+    }))
+    mocks.storeStateRef.current = baseState({ runs, runsTotal: 1 })
+    const view = render(<RunsTab />)
+    try {
+      await act(async () => {})
+      expect(screen.queryByText(/0 failed runs and 1 stalled run need review/)).not.toBeInTheDocument()
+      await act(async () => vi.advanceTimersByTimeAsync(2000))
+      await act(async () => resolveRequest(response))
+      expect(screen.getByText(/0 failed runs and 1 stalled run need review/)).toBeInTheDocument()
+      expect(mocks.fetchWatchlistRunsMock).toHaveBeenCalledTimes(1)
+    } finally {
+      view.unmount()
+      vi.useRealTimers()
+    }
   })
 })

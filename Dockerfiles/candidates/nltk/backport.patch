@@ -1,0 +1,1461 @@
+diff --git a/nltk/chunk/named_entity.py b/nltk/chunk/named_entity.py
+index f1314ea..084d26c 100644
+--- a/nltk/chunk/named_entity.py
++++ b/nltk/chunk/named_entity.py
+@@ -14,17 +14,19 @@ import os
+ import re
+ 
+ from nltk.pathsec import open as pathsec_open
++from nltk.pathsec import validate_path
+ from nltk.tag import ClassifierBasedTagger, pos_tag
+ from nltk.xmlsec import parse as safe_parse
+ 
+ try:
+     from nltk.classify import MaxentClassifier
++    from nltk.classify.maxent import save_maxent_params
+ except ImportError:
+     pass
+ 
+ from nltk.chunk.api import ChunkParserI
+ from nltk.chunk.util import ChunkScore
+-from nltk.data import find
++from nltk.data import find, make_staging_dir
+ from nltk.tokenize import word_tokenize
+ from nltk.tree import Tree
+ 
+@@ -169,7 +171,7 @@ class NEChunkParser(ChunkParserI):
+         for child in sent:
+             if isinstance(child, Tree):
+                 if len(child) == 0:
+-                    print("Warning -- empty chunk in sentence")
++                    print("Warning; empty chunk in sentence")
+                     continue
+                 toks.append((child[0], f"B-{child.label()}"))
+                 for tok in child[1:]:
+@@ -232,7 +234,7 @@ def load_ace_file(textfile, fmt):
+     annfile = textfile + ".tmx.rdc.xml"
+ 
+     # Read the xml file, and get a list of entities. These ACE paths are walked
+-    # from a corpus root, so keep them inside the allowed data roots -- a
++    # from a corpus root, so keep them inside the allowed data roots; a
+     # symlinked .sgm/.xml must not resolve outside (CWE-59, GHSA-7qj2).
+     entities = []
+     with pathsec_open(annfile, context="load_ace_file") as infile:
+@@ -328,6 +330,7 @@ class Maxent_NE_Chunker(NEChunkParser):
+     def __init__(self, fmt="multiclass"):
+ 
+         self._fmt = fmt
++        self._save_dir = None
+         self._tab_dir = find(f"chunkers/maxent_ne_chunker_tab/english_ace_{fmt}/")
+         self.load_params()
+ 
+@@ -340,17 +343,51 @@ class Maxent_NE_Chunker(NEChunkParser):
+         )
+         self._tagger = NEChunkParserTagger(classifier=mc)
+ 
+-    def save_params(self):
+-        from nltk.classify.maxent import save_maxent_params
++    @property
++    def save_dir(self) -> str:
++        """This chunker's private directory for saved model artifacts.
+ 
++        Created lazily on first use with an unpredictable name and mode 0700, so
++        (unlike the old guessable ``/tmp/...``) another local user cannot
++        pre-create or symlink it to redirect or read the write (CWE-377/378).
++        The same directory is reused across calls, so a chunker's saved
++        artifacts share one known, private location.
++        """
++        if self._save_dir is None:
++            self._save_dir = make_staging_dir(prefix=f"nltk_ne_chunker_{self._fmt}_")
++        return self._save_dir
++
++    def save_params(self, tab_dir: str | None = None) -> str:
++        """Write the trained maxent parameters as tab files.
++
++        The old default was a *guessable* name in the shared, world-writable
++        system temp (``/tmp/english_ace_<fmt>/``). That is a threat by itself: on
++        a multi-user host another user can pre-create or symlink that exact path
++        to redirect or read the write (CWE-377/378), and pathsec refuses a
++        shared-temp destination anyway (so it would not even work). Default
++        instead to this chunker's :attr:`save_dir`; a private (mode 0700),
++        unpredictably-named directory that no other user can pre-plant. A caller
++        may still pass an explicit ``tab_dir``; it is validated against the NLTK
++        data sandbox before the parameter files are written, so an outside path
++        is refused (GHSA-8mgp-746c-j5xp).
++
++        :param tab_dir: destination directory; defaults to :attr:`save_dir`.
++        :type tab_dir: str or None
++        :return: the directory the parameter files were written to.
++        :rtype: str
++        """
+         classif = self._tagger._classifier
+         ecg = classif._encoding
+         wgt = classif._weights
+         mpg = ecg._mapping
+         lab = ecg._labels
+         aon = ecg._alwayson
+-        fmt = self._fmt
+-        save_maxent_params(wgt, mpg, lab, aon, tab_dir=f"/tmp/english_ace_{fmt}/")
++        if tab_dir is None:
++            tab_dir = self.save_dir
++        validate_path(tab_dir, context="Maxent_NE_Chunker.save_params")
++
++        save_maxent_params(wgt, mpg, lab, aon, tab_dir=tab_dir)
++        return tab_dir
+ 
+ 
+ def build_model(fmt="multiclass"):
+@@ -394,10 +431,11 @@ def build_model(fmt="binary"):
+             cmp_chunks(correct, guess)
+     print(chunkscore)
+ 
+-    outfilename = f"/tmp/ne_chunker_{fmt}.pickle"
++    outdir = make_staging_dir(prefix=f"nltk_ne_chunker_{fmt}_")
++    outfilename = f"{outdir}/ne_chunker_{fmt}.pickle"
+     print(f"Saving chunker to {outfilename}...")
+ 
+-    with open(outfilename, "wb") as outfile:
++    with pathsec_open(outfilename, "wb", context="build_model") as outfile:
+         pickle.dump(cp, outfile, -1)
+ 
+     return cp
+diff --git a/nltk/classify/maxent.py b/nltk/classify/maxent.py
+index 73ff4b0..a17cbed 100644
+--- a/nltk/classify/maxent.py
++++ b/nltk/classify/maxent.py
+@@ -51,6 +51,7 @@ For all values of ``feat_val`` and ``some_label``.  This mapping is
+ performed by classes that implement the ``MaxentFeatureEncodingI``
+ interface.
+ """
++
+ try:
+     import numpy
+ except ImportError:
+@@ -64,8 +65,11 @@ from nltk.classify.api import ClassifierI
+ from nltk.classify.megam import call_megam, parse_megam_weights, write_megam_file
+ from nltk.classify.tadm import call_tadm, parse_tadm_weights, write_tadm_file
+ from nltk.classify.util import CutoffChecker, accuracy, log_likelihood
+-from nltk.data import gzip_open_unicode
++from nltk.data import gzip_open_unicode, make_staging_dir
++from nltk.pathsec import open as pathsec_open
++from nltk.pathsec import validate_path
+ from nltk.probability import DictionaryProbDist
++from nltk.tabdata import MaxentEncoder
+ from nltk.util import OrderedDict
+ 
+ __docformat__ = "epytext en"
+@@ -398,7 +402,7 @@ class MaxentFeatureEncodingI:
+ 
+     def labels(self):
+         """
+-        :return: A list of the \"known labels\" -- i.e., all labels
++        :return: A list of the \"known labels\"; i.e., all labels
+             ``l`` such that ``self.encode(fs,l)`` can be a nonzero
+             joint-feature vector for some value of ``fs``.
+         :rtype: list
+@@ -452,7 +456,7 @@ class FunctionBackedMaxentFeatureEncoding(MaxentFeatureEncodingI):
+ 
+         :type labels: list
+         :param labels: A list of the \"known labels\" for this
+-            encoding -- i.e., all labels ``l`` such that
++            encoding; i.e., all labels ``l`` such that
+             ``self.encode(fs,l)`` can be a nonzero joint-feature vector
+             for some value of ``fs``.
+         """
+@@ -579,7 +583,7 @@ class BinaryMaxentFeatureEncoding(MaxentFeatureEncodingI):
+                 for label2 in self._labels:
+                     if (fname, fval, label2) in self._mapping:
+                         break  # we've seen this fname/fval combo
+-                # We haven't -- fire the unseen-value feature
++                # We haven't; fire the unseen-value feature
+                 else:
+                     if fname in self._unseen:
+                         encoding.append((self._unseen[fname], 1))
+@@ -602,7 +606,7 @@ class BinaryMaxentFeatureEncoding(MaxentFeatureEncodingI):
+                 self._inv_mapping[i] = info
+ 
+         if f_id < len(self._mapping):
+-            (fname, fval, label) = self._inv_mapping[f_id]
++            fname, fval, label = self._inv_mapping[f_id]
+             return f"{fname}=={fval!r} and label is {label!r}"
+         elif self._alwayson and f_id in self._alwayson.values():
+             for label, f_id2 in self._alwayson.items():
+@@ -919,7 +923,7 @@ class TypedMaxentFeatureEncoding(MaxentFeatureEncodingI):
+                     for label2 in self._labels:
+                         if (fname, fval, label2) in self._mapping:
+                             break  # we've seen this fname/fval combo
+-                    # We haven't -- fire the unseen-value feature
++                    # We haven't; fire the unseen-value feature
+                     else:
+                         if fname in self._unseen:
+                             encoding.append((self._unseen[fname], 1))
+@@ -942,7 +946,7 @@ class TypedMaxentFeatureEncoding(MaxentFeatureEncodingI):
+                 self._inv_mapping[i] = info
+ 
+         if f_id < len(self._mapping):
+-            (fname, fval, label) = self._inv_mapping[f_id]
++            fname, fval, label = self._inv_mapping[f_id]
+             return f"{fname}=={fval!r} and label is {label!r}"
+         elif self._alwayson and f_id in self._alwayson.values():
+             for label, f_id2 in self._alwayson.items():
+@@ -1580,27 +1584,52 @@ def load_maxent_params(tab_dir):
+     return wgt, mpg, lab, aon
+ 
+ 
+-def save_maxent_params(wgt, mpg, lab, aon, tab_dir="/tmp"):
+-
+-    from os import mkdir
+-    from os.path import isdir
++def save_maxent_params(wgt, mpg, lab, aon, tab_dir: str | None = None) -> str:
++    """Write maxent classifier parameters as tab files; return the directory.
+ 
+-    from nltk.tabdata import MaxentEncoder
++    The old default was the shared, world-writable system temp (``/tmp``); a
++    guessable destination another local user could pre-create or symlink
++    (CWE-377/378), and one pathsec refuses anyway. Default instead to a fresh
++    private (mode 0700), unpredictably-named directory. A caller-supplied
++    ``tab_dir`` is validated against the NLTK data sandbox before the directory
++    is created or any file is written (GHSA-8mgp-746c-j5xp).
+ 
++    :param tab_dir: destination directory; defaults to a fresh private one.
++    :type tab_dir: str or None
++    :return: the directory the parameter files were written to.
++    :rtype: str
++    """
+     menc = MaxentEncoder()
+-    if not isdir(tab_dir):
+-        mkdir(tab_dir)
++    if tab_dir is None:
++        tab_dir = make_staging_dir(prefix="nltk_maxent_params_")
++    validate_path(tab_dir, context="save_maxent_params")
++    if not os.path.isdir(tab_dir):
++        # 0700 so a caller-supplied output dir is private regardless of umask,
++        # matching the private default staging dir.
++        os.mkdir(tab_dir, 0o700)
+ 
+     print(f"Saving Maxent parameters in {tab_dir}")
+ 
+-    with open(f"{tab_dir}/weights.txt", "w") as f:
++    # newline="" writes LF, not the platform default, so the tab files reload
++    # cleanly on Windows (a default text write there emits CRLF, leaving a stray
++    # \r on every reloaded token).
++    with pathsec_open(
++        f"{tab_dir}/weights.txt", "w", context="save_maxent_params", newline=""
++    ) as f:
+         f.write(f"{menc.list2txt(map(repr, wgt.tolist()))}")
+-    with open(f"{tab_dir}/mapping.tab", "w") as f:
++    with pathsec_open(
++        f"{tab_dir}/mapping.tab", "w", context="save_maxent_params", newline=""
++    ) as f:
+         f.write(f"{menc.tupdict2tab(mpg)}")
+-    with open(f"{tab_dir}/labels.txt", "w") as f:
++    with pathsec_open(
++        f"{tab_dir}/labels.txt", "w", context="save_maxent_params", newline=""
++    ) as f:
+         f.write(f"{menc.list2txt(lab)}")
+-    with open(f"{tab_dir}/alwayson.tab", "w") as f:
++    with pathsec_open(
++        f"{tab_dir}/alwayson.tab", "w", context="save_maxent_params", newline=""
++    ) as f:
+         f.write(f"{menc.ivdict2tab(aon)}")
++    return tab_dir
+ 
+ 
+ def maxent_pos_tagger():
+diff --git a/nltk/data.py b/nltk/data.py
+index 77f6ec0..d0105a2 100644
+--- a/nltk/data.py
++++ b/nltk/data.py
+@@ -32,12 +32,16 @@ adds it to a resource cache; and ``retrieve()`` copies a given resource
+ to a local file.
+ """
+ 
++import atexit
+ import codecs
+ import functools
+ import os
+ import pickle
+ import re
++import shutil
++import stat
+ import sys
++import tempfile
+ import textwrap
+ import urllib.request
+ import zipfile
+@@ -51,6 +55,7 @@ from urllib.request import url2pathname
+ from nltk.pathsec import ZipFile
+ from nltk.pathsec import open as _secure_open
+ from nltk.pathsec import urlopen as _secure_urlopen
++from nltk.pathsec import validate_path as _validate_path
+ 
+ # Reject unsafe no-protocol paths: traversal segments, trailing '..', absolute paths,
+ # backslashes, Windows drive letters. Use a raw-string pattern and do not anchor only
+@@ -175,6 +180,140 @@ else:
+ ######################################################################
+ 
+ 
++_STAGING_TEMPDIR = None
++
++
++def staging_tempdir():
++    """A process-wide scratch directory INSIDE an allowed data root.
++
++    ``tempfile.mkstemp()`` and ``NamedTemporaryFile()`` default to the system
++    temp dir, which on Linux is the shared, world-writable ``/tmp`` and is
++    deliberately NOT a pathsec root. Wrappers that stage an input file for an
++    external tool therefore wrote outside the sandbox. Pass this as ``dir=`` so
++    the scratch file lands inside a root instead.
++
++    Allocated once per process and removed at exit, so callers do not leak a
++    directory per invocation the way a per-call ``make_staging_dir`` would.
++    """
++    global _STAGING_TEMPDIR
++    if _STAGING_TEMPDIR is not None and not _staging_dir_is_still_safe(
++        _STAGING_TEMPDIR
++    ):
++        _STAGING_TEMPDIR = None
++    if _STAGING_TEMPDIR is None:
++        staged = make_staging_dir(prefix="nltk_scratch_")
++        atexit.register(shutil.rmtree, staged, ignore_errors=True)
++        _STAGING_TEMPDIR = staged
++    return _STAGING_TEMPDIR
++
++
++def _staging_dir_is_still_safe(path):
++    """Re-check a cached scratch directory before handing it out again.
++
++    The cache is a module global, so it is only as trustworthy as the directory
++    it names. ``os.path.isdir`` FOLLOWS symlinks, so an attacker who removes the
++    directory and drops a symlink in its place passes that check and every later
++    scratch file lands wherever the link points. ``lstat`` is used instead, and
++    containment is re-verified, so a swapped or poisoned value is discarded and
++    a fresh directory allocated.
++    """
++    from nltk import pathsec
++
++    try:
++        info = os.lstat(path)
++    except OSError:
++        return False
++    # Not stat(): a symlink must be rejected, not followed.
++    if not stat.S_ISDIR(info.st_mode):
++        return False
++    try:
++        pathsec.validate_path(path, context="nltk.data.staging_tempdir")
++    except (PermissionError, ValueError):
++        return False
++    # A scratch dir that has become group- or world-writable is squattable:
++    # another local user can replace a file between the moment this process
++    # creates it and the moment it reads it back (CWE-377/CWE-378). Discard it
++    # and allocate a fresh 0700 one rather than reusing it.
++    if not pathsec.is_private_dir(path):
++        return False
++    return True
++
++
++def make_staging_dir(prefix="nltk_", cleanup=False):
++    """Create a fresh private directory for NLTK's own output, inside a data root.
++
++    NLTK's save helpers default here so their output lands within the security
++    sandbox (every ``nltk.data.path`` entry is an allowed root) on all platforms,
++    including Linux where the shared ``/tmp`` is deliberately not a root. The
++    directory is created with ``tempfile.mkdtemp`` (mode 0700, unpredictable name)
++    under the first ``nltk.data.path`` entry that can be written to.
++
++    :param prefix: filename prefix for the created directory. It is a *name*
++        fragment, not a path: callers build it from values such as a tagger's
++        language code, and ``tempfile.mkdtemp`` simply concatenates it onto
++        *dir*, so a ``..`` inside it would place the directory outside the data
++        root (CWE-22). Path separators and NUL are therefore refused.
++    :type prefix: str
++    :param cleanup: remove the directory when the interpreter exits. Use it for
++        scratch output nobody will look for again; leave it False for a saved
++        model, where deleting the user's artifact would be surprising. Without
++        it every call leaks a directory under the data root, since the name is
++        unpredictable and no caller can find it again to clean up.
++    :return: the absolute path of the created directory.
++
++    See also :func:`staging_tempdir`, which is this function memoised: one
++    shared scratch directory for the whole process, for callers that need a
++    *place* to put a throwaway file rather than a directory of their own.
++    Allocating a fresh directory per throwaway file is what leaked 70 of them on
++    a development machine.
++    :rtype: str
++    :raises ValueError: if *prefix* is not a plain filename fragment.
++    :raises PermissionError: if no ``nltk.data.path`` entry is a writable allowed
++        root, in which case the caller should pass an explicit destination.
++    """
++    prefix = str(prefix)
++    if (
++        "\x00" in prefix
++        or "/" in prefix
++        or "\\" in prefix
++        or os.sep in prefix
++        or (os.altsep and os.altsep in prefix)
++    ):
++        raise ValueError(
++            f"Invalid staging-dir prefix {prefix!r}: a prefix is a filename "
++            "fragment, not a path (no separators or NUL)"
++        )
++    for root in path:
++        base = os.path.expanduser(str(root.path if hasattr(root, "path") else root))
++        try:
++            # Confirm base is inside the pathsec sandbox before creating anything,
++            # so a surprising ~ / $HOME / NLTK_DATA expansion cannot make
++            # os.makedirs build a directory chain, or mkdtemp stage output,
++            # outside the allowed roots. validate_path resolves symlinks the same
++            # way the allowed roots are computed, so this never trusts more than
++            # the sandbox does.
++            _validate_path(base, context="nltk.data.make_staging_dir")
++            os.makedirs(base, exist_ok=True)
++            staged = tempfile.mkdtemp(prefix=prefix, dir=base)
++            try:
++                # Defence in depth: confirm what was actually created is inside
++                # the root just validated, not merely that the base was.
++                _validate_path(staged, context="nltk.data.make_staging_dir")
++            except BaseException:
++                os.rmdir(staged)
++                raise
++            if cleanup:
++                atexit.register(shutil.rmtree, staged, ignore_errors=True)
++            return staged
++        except (OSError, ValueError, PermissionError):
++            continue
++    raise PermissionError(
++        f"No writable in-sandbox NLTK data root to stage output in (tried "
++        f"{len(path)} nltk.data.path entries); pass an explicit destination "
++        "directory."
++    )
++
++
+ def gzip_open_unicode(
+     filename,
+     mode="rb",
+diff --git a/nltk/parse/transitionparser.py b/nltk/parse/transitionparser.py
+index 94ab45b..d839689 100644
+--- a/nltk/parse/transitionparser.py
++++ b/nltk/parse/transitionparser.py
+@@ -21,6 +21,7 @@ except ImportError:
+     pass
+ 
+ from nltk.parse import DependencyEvaluator, DependencyGraph, ParserI
++from nltk.pathsec import open as pathsec_open
+ from nltk.picklesec import allowlisted_pickle_load
+ 
+ # Modules whose globals a saved TransitionParser model legitimately needs. The
+@@ -33,9 +34,25 @@ from nltk.picklesec import allowlisted_pickle_load
+ # denied-module backstop do the heavy lifting: a crafted pickle can no longer
+ # reach ``numpy.f2py.crackfortran.myeval`` (an eval sink under the allowed
+ # ``numpy`` namespace) or a dotted ``sklearn.os.system`` (GHSA-x99w / GHSA-4489).
+-_MODEL_ALLOWED_MODULES = ("numpy", "scipy", "sklearn")
++#
++# Narrowed further to fail closed: no whole module is allowed
++# (``_MODEL_ALLOWED_MODULES = ()``); only the exact ``(module, qualname)`` pairs a
++# genuine fitted SVC pickle references are permitted (CWE-502).
++_MODEL_ALLOWED_MODULES = ()
+ # Exact primitives a fitted model's containers may reference.
+ _MODEL_ALLOWED_GLOBALS = (
++    ("sklearn.svm._classes", "SVC"),
++    ("numpy", "ndarray"),
++    ("numpy", "dtype"),
++    ("numpy.core.multiarray", "_reconstruct"),
++    ("numpy._core.multiarray", "_reconstruct"),
++    ("numpy.core.multiarray", "scalar"),
++    ("numpy._core.multiarray", "scalar"),
++    ("scipy.sparse._csr", "csr_matrix"),
++    ("scipy.sparse.csr", "csr_matrix"),
++    ("scipy.sparse._csc", "csc_matrix"),
++    ("scipy.sparse.csc", "csc_matrix"),
++    # Exact primitives a fitted model's containers may reference.
+     ("collections", "defaultdict"),
+     ("collections", "OrderedDict"),
+     ("builtins", "int"),
+@@ -561,7 +578,12 @@ class TransitionParser(ParserI):
+ 
+             model.fit(x_train, y_train)
+             # Save the model to file name (as pickle)
+-            pickle.dump(model, open(modelfile, "wb"))
++            #
++            # ``modelfile`` is a caller-supplied path, so route the write through
++            # the pathsec sandbox: an unauthorized destination is refused before
++            # any bytes are written (GHSA-8mgp-746c-j5xp).
++            with pathsec_open(modelfile, "wb", context="TransitionParser.train") as f:
++                pickle.dump(model, f)
+         finally:
+             remove(input_file.name)
+ 
+@@ -580,7 +602,11 @@ class TransitionParser(ParserI):
+         # e.g. os.system -- raises UnpicklingError instead of executing. See
+         # nltk/picklesec.py and huntr report
+         # https://huntr.com/bounties/38abc191-0525-42a1-96fd-262c1c187012
+-        with open(modelFile, "rb") as f:
++        #
++        # ``modelFile`` is a caller-supplied path, so route the read through the
++        # pathsec sandbox too: an out-of-sandbox model path is refused before it
++        # is opened (GHSA-8mgp-746c-j5xp).
++        with pathsec_open(modelFile, "rb", context="TransitionParser.parse") as f:
+             model = allowlisted_pickle_load(
+                 f,
+                 allowed_modules=_MODEL_ALLOWED_MODULES,
+diff --git a/nltk/pathsec.py b/nltk/pathsec.py
+index 0a79bc5..a02e155 100644
+--- a/nltk/pathsec.py
++++ b/nltk/pathsec.py
+@@ -9,9 +9,11 @@
+ 
+ """Centralized I/O security sentinel for NLTK."""
+ import builtins
++import errno
+ import http.client
+ import ipaddress
+ import os
++import re
+ import socket
+ import stat
+ import sys
+@@ -23,6 +25,11 @@ from functools import lru_cache
+ from pathlib import Path
+ from urllib.parse import unquote, urlparse
+ 
++# A URL is not a filesystem path: to the kernel "http://.." is the dir "http:"
++# then a ".." traversal. Anchored, whitespace-tolerant, case-insensitive match.
++_URL_SCHEME_RE = re.compile(r"^\s*(?:https?|ftp)://", re.IGNORECASE)
++_FILE_SCHEME_RE = re.compile(r"^\s*file:", re.IGNORECASE)
++
+ # Security Enforcement Toggle
+ # ENFORCE = False
+ ENFORCE = True
+@@ -39,6 +46,15 @@ _ALLOWED_ROOTS_CACHE = None
+ _LAST_DATA_PATHS = None
+ 
+ 
++# Reserved DOS device names. On Windows these resolve to a device rather than a
++# file in the current directory, whatever the surrounding path is.
++_WINDOWS_DEVICE_NAMES = frozenset(
++    ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"]
++    + [f"COM{i}" for i in range(1, 10)]
++    + [f"LPT{i}" for i in range(1, 10)]
++)
++
++
+ def is_private_dir(path):
+     """Return True if *path* is a directory safe to trust as a data root: another
+     *unprivileged local user* cannot plant files in it.
+@@ -138,24 +154,71 @@ def validate_path(path_input, context="NLTK", required_root=None):
+     :param context: Diagnostic context for warnings/errors.
+     :param required_root: If provided, enforces that the path is strictly
+                           within this specific directory (scoped sandbox).
++
++    A whitespace-only path is NOT waved through: ``"   "`` is a legal relative
++    filename, so skipping it let a caller-supplied path reach ``os.open`` with no
++    containment check and create/truncate that file in the working directory,
++    outside every allowed root (GHSA-8mgp-746c-j5xp). Only an empty/absent path
++    (nothing to open) and a file descriptor short-circuit here.
+     """
+-    if isinstance(path_input, int) or not path_input or not str(path_input).strip():
++    # An *empty* path is a no-op (nothing can open it), but a blank-but-non-empty
++    # one names a real file, so it must be validated like any other path.
++    if isinstance(path_input, int) or not path_input:
+         return
+     try:
+         raw = path_input.path if hasattr(path_input, "path") else str(path_input)
+ 
+-        if "://" in raw:
++        # Reject a URL outright: no caller validates a network URL here, and
++        # "http://../.." is a kernel traversal, not a host (GHSA-8mgp-746c-j5xp).
++        if _URL_SCHEME_RE.match(raw):
++            msg = (
++                f"Security Violation [{context}]: a URL was passed to a "
++                f"filesystem path check: {raw!r}. Use nltk.pathsec.urlopen() "
++                "for network I/O."
++            )
++            if ENFORCE:
++                raise PermissionError(msg)
++            warnings.warn(msg, RuntimeWarning, stacklevel=3)
++            return
++        if _FILE_SCHEME_RE.match(raw):
+             parsed = urlparse(raw)
+-            if parsed.scheme in ("http", "https", "ftp"):
+-                return
+-            if parsed.scheme == "file":
+-                raw = unquote(parsed.path)
++            # urllib opens Request.selector (keeps ?/#/;) but urlparse().path
++            # drops them -- that would validate a different file than opens.
++            if parsed.query or parsed.fragment or ";" in parsed.path:
++                raise PermissionError(
++                    f"Security Violation [{context}]: ambiguous file URL "
++                    f"(query/fragment/params) not allowed: {raw!r}"
++                )
++            raw = unquote(parsed.path)
++            if not raw:
++                # "file://evil" parses as netloc="evil" with an EMPTY path, so
++                # there is nothing to validate while the caller still holds the
++                # original string and opens it as the relative path "file:/evil".
++                raise PermissionError(
++                    f"Security Violation [{context}]: file URL {path_input!r} has "
++                    "no path component; it is not a usable filesystem path"
++                )
+ 
+         # Resolve path to catch symlink escapes
+         try:
+             target = Path(raw).resolve()
+         except (OSError, ValueError):
+-            # Fallback for virtual paths inside ZIPs (e.g. corpora/foo.zip/file.txt)
++            # Fallback for virtual paths inside ZIPs (e.g. corpora/foo.zip/file.txt).
++            # This validates only the prefix up to ".zip", so it must never be
++            # reached by a path that can still traverse: resolve() also fails on a
++            # NUL (ValueError) and on an over-long component (ENAMETOOLONG), and
++            # "<root>/ok.zip/<5000 chars>/../../../etc/passwd" would then be
++            # approved on its harmless prefix while normpath() collapses the long
++            # component and leaves /etc/passwd for the caller to open.
++            if "\x00" in raw or ".." in raw.replace("\\", "/").split("/"):
++                msg = (
++                    f"Security Violation [{context}]: unresolvable path with a "
++                    f"traversal or NUL component: {raw!r}"
++                )
++                if ENFORCE:
++                    raise PermissionError(msg)
++                warnings.warn(msg, RuntimeWarning, stacklevel=3)
++                return
+             lower_raw = raw.lower()
+             if ".zip" in lower_raw:
+                 zip_idx = lower_raw.find(".zip") + 4
+@@ -217,6 +280,328 @@ def validate_path(path_input, context="NLTK", required_root=None):
+             raise
+ 
+ 
++# O_NOFOLLOW on a symlink, and O_RDONLY on a socket / write-only FIFO, fail with
++# these; they mean "refused by the hardening", not "this file is broken".
++_REFUSING_ERRNOS = frozenset(
++    e
++    for e in (
++        getattr(errno, "ELOOP", None),
++        getattr(errno, "EMLINK", None),
++        getattr(errno, "ENXIO", None),
++        getattr(errno, "EOPNOTSUPP", None),
++        getattr(errno, "ENOTSUP", None),
++    )
++    if e is not None
++)
++
++
++def _reject_url_shaped(raw, context):
++    """Refuse a URL where a filesystem path is expected.
++
++    ``validate_path`` rewrites a ``file:`` URL to its path component before
++    checking it, but the caller still holds (and the tool still opens) the
++    original string. A filesystem path is never a URL, so refusing the whole
++    shape here removes that validate-one-thing/open-another gap outright.
++    """
++    if _URL_SCHEME_RE.match(raw) or _FILE_SCHEME_RE.match(raw):
++        raise PermissionError(
++            f"Security Violation [{context}]: {raw!r} is a URL, not a filesystem "
++            "path; the tool would open it verbatim as a relative path"
++        )
++
++
++def _as_path_text(value, context, error=ValueError):
++    """Resolve a caller value to a ``str`` path EXACTLY ONCE.
++
++    ``__fspath__`` is allowed to return a different answer on every call, so a
++    guard that calls it separately from the code that uses the path validates one
++    file while the tool opens another. Every caller must validate and then use
++    the single string returned here, never the original object.
++
++    Also turns a non-path (int, None, list) and a ``bytes`` path into a clean
++    security rejection instead of a TypeError that would escape a caller's
++    ``except (ValueError, PermissionError)``.
++    """
++    try:
++        text = os.fspath(value)
++    except TypeError as exc:
++        raise error(
++            f"Security Violation [{context}]: {value!r} is not a filesystem path."
++        ) from exc
++    if isinstance(text, bytes):
++        # A bytes path is a legal spelling on POSIX, so decode it rather than
++        # refusing; every check below then runs on the decoded characters.
++        try:
++            text = os.fsdecode(text)
++        except (UnicodeDecodeError, ValueError) as exc:
++            raise error(
++                f"Security Violation [{context}]: {text!r} is not decodable as a "
++                "filesystem path."
++            ) from exc
++    # os.fspath() hands back a str SUBCLASS unchanged, so every check below would
++    # run on attacker-controlled methods: a subclass overriding startswith,
++    # replace, split or __contains__ passes all of them while carrying a hostile
++    # value. str.__str__ is used rather than str(): it ignores a __str__ override
++    # and yields an exact str holding the real characters.
++    if type(text) is not str:
++        text = str.__str__(text)
++    return text
++
++
++def _reject_bad_name_syntax(text, context, error=ValueError):
++    """Syntactic checks shared by every caller-supplied model or tool path.
++
++    None of these can be a legitimate model, corpus or output file, so they are
++    refused before the value is treated as a path at all. ``..`` is checked after
++    folding ``\\`` to ``/``: a backslash is an ordinary filename character on
++    POSIX but a separator on Windows, so ``..\\..\\etc`` has to be rejected on both.
++    """
++
++    def _refuse(why):
++        # The exception type is the caller's convention: validate_model_resource
++        # reports a malformed value as ValueError, while the tool-path guards
++        # report every refusal as PermissionError.
++        raise error(f"Security Violation [{context}]: {text!r} {why}.")
++
++    if not text or not text.strip():
++        _refuse("is empty")
++    # A NUL truncates the path in a tool's native layer, so "good.ser.gz\0evil"
++    # can name a different file there than it does here.
++    if "\x00" in text:
++        _refuse("contains a NUL byte")
++    # Python 3.14's url2pathname follows the WHATWG rules and STRIPS tab, LF and
++    # CR, so ".\n./x" passes a '..' check here and becomes "../x" downstream.
++    if any(character in text for character in "\t\n\r\x0b\x0c"):
++        _refuse(
++            "contains a control character; these are stripped by URL-to-path "
++            "conversion on Python 3.14 and can turn into a '..' traversal"
++        )
++    # A leading '-' would be parsed as another option by the tool we hand it to.
++    if text.startswith("-"):
++        _refuse("looks like a command-line option (argument injection)")
++    # Stanford's loaders will fetch a URL; only local resources are permitted.
++    if "://" in text or text.lower().startswith(("file:", "jar:")):
++        _refuse("is a URL; only local resources are permitted")
++    # Nothing downstream expands '~', but a sink that did would reach $HOME.
++    if text.startswith("~"):
++        _refuse("starts with '~'; pass an already-expanded path")
++    # A Windows UNC path reaches a remote share.
++    if text.startswith("\\\\") or text.startswith("//"):
++        _refuse("is a UNC path; only local resources are permitted")
++    if ".." in text.replace("\\", "/").split("/"):
++        _refuse("contains a '..' component; it may not traverse out of the namespace")
++    # ':' names an NTFS alternate data stream, and "C:name" is drive-RELATIVE
++    # ("name in the current directory of drive C"), so it escapes the validated
++    # location. Both are Windows-only: on POSIX ':' is an ordinary filename
++    # character and refusing it would break legitimate names.
++    if os.name != "posix" and ":" in text and not re.match(r"^[A-Za-z]:[\\/]", text):
++        _refuse("contains ':', which names an NTFS alternate data stream")
++    # On Windows a leading separator with no drive is relative to the CURRENT
++    # drive, so it names a different file than the same string does on POSIX.
++    if os.name != "posix" and re.match(r"^[\\/]", text):
++        _refuse("is relative to the current drive; give a full path with a drive")
++    # Windows silently strips a trailing dot or space, so "evil.mco." is checked
++    # as one name and opened as another. Refused everywhere for determinism.
++    if text != text.rstrip(". "):
++        _refuse("ends with a dot or space, which Windows silently strips")
++    # On Windows these resolve to a device (a serial port, the null device) no
++    # matter which directory they appear in. On POSIX they are ordinary
++    # filenames, so refusing them there would be an over-block.
++    if os.name != "posix":
++        components = text.replace("\\", "/").split("/")
++        for component in components:
++            if not component:
++                continue
++            # A device name is reserved in ANY directory, and an 8.3 short name
++            # (PROGRA~1) aliases a different long name, so both must be checked on
++            # every component, not just the final one: "dir/PROGRA~1/x" traverses
++            # through the alias.
++            if (
++                component.split(".")[0].upper() in _WINDOWS_DEVICE_NAMES
++                or component.upper() in _WINDOWS_DEVICE_NAMES
++            ):
++                _refuse(f"contains a reserved Windows device ({component!r})")
++            if re.search(r"~[0-9]", component):
++                _refuse("contains an 8.3 short name, which aliases another file")
++
++
++def _reject_aliased_or_special(text, context, check_links=False):
++    """Physical checks on a path that already passed :func:`validate_path`.
++
++    A FIFO, socket or device planted in a data root would block the reader
++    forever, so only regular files and directories are accepted. Directories stay
++    legal, since corpora are passed as directories.
++
++    ``check_links`` additionally refuses a hardlinked file. ``realpath()`` cannot
++    see a hardlink, so an in-root alias of an outside file passes every
++    name-based check and the tool would overwrite the original. This is only
++    applied to paths the tool *writes*: for a read it is not an escalation (the
++    link can only be created by someone who can already write to the data root),
++    and rejecting ``st_nlink > 1`` outright would refuse ordinary
++    hardlink-deduplicated data such as ``cp -l`` or ``rsync --link-dest`` trees,
++    including the original file.
++
++    A path that does not exist yet (an output file) has nothing to check.
++    """
++    try:
++        info = os.stat(text)
++    except OSError:
++        return
++    if check_links and stat.S_ISREG(info.st_mode) and info.st_nlink > 1:
++        raise PermissionError(
++            f"Security Violation [{context}]: {text!r} has {info.st_nlink} hard "
++            "links, so writing it may overwrite a file outside the trusted NLTK "
++            "data roots."
++        )
++    if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
++        raise PermissionError(
++            f"Security Violation [{context}]: {text!r} is not a regular file or "
++            "directory; reading it could block indefinitely."
++        )
++
++
++def validate_tool_path(
++    path_input, context="NLTK tool", *, for_write=False, must_exist=True
++):
++    """Bound a filesystem path handed to an external tool to read or write.
++
++    Unlike :func:`validate_model_resource` this never accepts a bare resource
++    name: the value must be a real path inside the NLTK data roots. Use it for
++    arguments a tool opens directly, where an unbounded value is an arbitrary
++    file read and, for a write destination, an arbitrary file write.
++
++    :func:`validate_path` alone is not enough for these sinks, because it only
++    answers "does this NAME resolve inside a root". This additionally:
++
++    * runs the shared name checks (empty, NUL, control characters, option-shaped,
++      URL, ``~``, UNC, ``..``, NTFS stream, drive-relative, Windows device);
++    * refuses a hardlinked write target, whose inode may live outside the root;
++    * opens an existing path with ``O_NOFOLLOW|O_NONBLOCK`` and requires a
++      *regular* file with ``st_nlink == 1``, then re-validates the descriptor's
++      own kernel path, so a symlink or an intermediate directory swapped in after
++      the name check is refused (CWE-59);
++    * refuses a FIFO, socket, device or directory, whose open would block forever
++      or stream unbounded data (CWE-400).
++
++    A path-taking sink can never be fully race-free, since the callee re-resolves
++    the name, but every attack that does not require winning that race is
++    refused.
++
++    The resolved string is RETURNED and callers must build their argv from it:
++    ``__fspath__`` may answer differently on every call, so re-reading the
++    original would let the tool open a file the guard never saw.
++
++    :param path_input: the path about to be handed to the tool
++    :param context: diagnostic context for the raised error
++    :param for_write: True when the tool will write the path, which additionally
++        refuses a hardlinked file that could alias a target outside the roots
++    :param must_exist: when False a non-existent path is accepted after the
++        containment check, for a destination the tool will create
++    :raises ValueError: if the value is empty, option-like, a URL or traverses
++    :raises PermissionError: if the path is not usable safely
++    """
++    if isinstance(path_input, int):
++        return path_input
++    text = _as_path_text(path_input, context, error=PermissionError)
++    _reject_bad_name_syntax(text, context, error=PermissionError)
++    _reject_url_shaped(text, context)
++    validate_path(text, context=context)
++    _reject_aliased_or_special(text, context, check_links=for_write)
++    _reject_unsafe_open(text, context, must_exist)
++    return text
++
++
++def _reject_unsafe_open(raw, context, must_exist):
++    """Open-time hardening for a path already bounded by :func:`validate_path`.
++
++    Closes the window between the name check and the tool's own open: an
++    intermediate directory or the leaf itself may be swapped for a symlink in
++    between, which no name-based check can see.
++    """
++    if not ENFORCE:
++        return
++    if os.name != "posix":
++        # No O_NOFOLLOW/fstat here, so the symlink-swap race stays open on
++        # Windows, but a stat still refuses a directory or device.
++        try:
++            st = os.stat(raw)
++        except FileNotFoundError:
++            if must_exist:
++                raise
++            return
++        if not stat.S_ISREG(st.st_mode):
++            raise PermissionError(
++                f"Security Violation [{context}]: path {raw!r} is not a " "regular file"
++            )
++        return
++
++    flags = (
++        os.O_RDONLY
++        | getattr(os, "O_NOFOLLOW", 0)
++        | getattr(os, "O_NONBLOCK", 0)
++        | getattr(os, "O_CLOEXEC", 0)
++    )
++    try:
++        fd = os.open(raw, flags)
++    except FileNotFoundError:
++        if must_exist:
++            raise
++        return
++    except NotADirectoryError:
++        if must_exist:
++            raise
++        return
++    except OSError as e:
++        # Only the errnos the hardening flags produce are a security refusal;
++        # anything else (ENAMETOOLONG, EACCES, ...) is a plain OS error.
++        if e.errno in _REFUSING_ERRNOS:
++            raise PermissionError(
++                f"Security Violation [{context}]: refusing path {raw!r}: "
++                f"{e.strerror} (symlink or non-regular file, CWE-59)"
++            ) from e
++        raise
++    try:
++        st = os.fstat(fd)
++        if not stat.S_ISREG(st.st_mode):
++            raise PermissionError(
++                f"Security Violation [{context}]: path {raw!r} is not a "
++                "regular file (a FIFO/socket/device/directory can block the "
++                "loader forever or stream unbounded data, CWE-400)"
++            )
++        if st.st_nlink > 1:
++            raise PermissionError(
++                f"Security Violation [{context}]: refusing multiply-linked file "
++                f"{raw!r} (st_nlink={st.st_nlink}); a hardlink names an inode that "
++                "may live outside the sandbox (CWE-59)"
++            )
++        actual = _fd_realpath(fd)
++        validate_path(
++            actual if actual is not None else os.path.realpath(raw), context=context
++        )
++    finally:
++        os.close(fd)
++
++
++def validate_tool_dir(path_input, context="NLTK tool"):
++    """Validate a *directory* a tool or NLTK itself will write model files into.
++
++    The file-shaped physical checks in :func:`validate_tool_path` do not apply
++    (the leaf is a directory and may not exist yet), but the string-shaped ones
++    do. It shares :func:`_as_path_text` and :func:`_reject_bad_name_syntax` with
++    that guard, so a caller value resolves to a plain ``str`` exactly once (a
++    frozen ``__fspath__``, never a re-read one) and the same name refusals (blank,
++    NUL, option-shaped, URL, ``..``, NTFS stream, drive-relative, Windows device)
++    run before containment.
++    """
++    text = _as_path_text(path_input, context, error=PermissionError)
++    _reject_bad_name_syntax(text, context, error=PermissionError)
++    _reject_url_shaped(text, context)
++    validate_path(text, context=context)
++    # Returned for the same reason as validate_tool_path: the caller must build
++    # from the checked string, not re-read a value that can resolve differently.
++    return text
++
++
+ def _zip_member_is_unsafe(name_str):
+     """True if a ZIP member is written somewhere other than where it is validated.
+ 
+@@ -698,13 +1083,15 @@ def _hardened_open(raw_path, mode, context, required_root, **kwargs):
+     temp dir is not left group-/world-readable (CWE-377/378). POSIX only;
+     callers fall back to :func:`builtins.open` elsewhere.
+     """
+-    import errno
+-
+     flags = (
+         _os_open_flags(mode)
+         | getattr(os, "O_NOFOLLOW", 0)
+         | getattr(os, "O_CLOEXEC", 0)
+     )
++    # Defer O_TRUNC until after the hardlink/realpath checks: truncating at open
++    # time would zero a hardlinked outside-root target before st_nlink refuses it.
++    truncate_after = bool(flags & os.O_TRUNC)
++    flags &= ~os.O_TRUNC
+     try:
+         # 0o600 is only consulted when O_CREAT is in flags (write/append/x modes).
+         fd = os.open(raw_path, flags, 0o600)
+@@ -731,6 +1118,9 @@ def _hardened_open(raw_path, mode, context, required_root, **kwargs):
+             context=context,
+             required_root=required_root,
+         )
++        # Safe now: the fd is confirmed single-linked and inside the root.
++        if truncate_after:
++            os.ftruncate(fd, 0)
+     except BaseException:
+         os.close(fd)
+         raise
+@@ -837,6 +1227,8 @@ class ZipFile(zipfile.ZipFile):
+ 
+ __all__ = [
+     "validate_path",
++    "validate_tool_path",
++    "validate_tool_dir",
+     "validate_network_url",
+     "validate_zip_archive",
+     "open",
+diff --git a/nltk/picklesec.py b/nltk/picklesec.py
+index 194d605..c4fc158 100644
+--- a/nltk/picklesec.py
++++ b/nltk/picklesec.py
+@@ -114,6 +114,16 @@ _DENIED_MODULE_PREFIXES = (
+     "numpy.ctypeslib",
+     "numpy.distutils",
+     "numpy.testing",
++    # numpy.lib file-I/O sinks (npyio/_npyio_impl recfromtxt etc., format.open_memmap)
++    # keep __module__ under numpy.lib, dodging the export-name denylist (CWE-502).
++    "numpy.lib",
++    # scipy.io / sklearn.datasets are file-read, file-write and network (openml)
++    # sinks under the otherwise-legitimate scipy/sklearn namespaces: e.g.
++    # scipy.io.mmwrite (arbitrary file write), scipy.io.loadmat / arff.loadarff
++    # (file read), sklearn.datasets.fetch_openml (SSRF), load_files /
++    # load_svmlight_file (file read). No model pickle needs them.
++    "scipy.io",
++    "sklearn.datasets",
+     "nltk.tokenize.repp",
+     "nltk.internals",
+ )
+@@ -138,6 +148,15 @@ _DENIED_GLOBALS = frozenset(
+         ("numpy", "memmap"),
+         ("numpy", "DataSource"),
+         ("numpy", "vectorize"),
++        # numpy callables that invoke a supplied function -- a REDUCE gadget can
++        # ride them to call another reconstructed callable.
++        ("numpy", "apply_along_axis"),
++        ("numpy", "apply_over_axes"),
++        ("numpy", "frompyfunc"),
++        ("numpy", "piecewise"),
++        # scipy low-level C callback wrapper.
++        ("scipy", "LowLevelCallable"),
++        ("scipy._lib._ccallback", "LowLevelCallable"),
+         ("pandas", "read_pickle"),
+     }
+ )
+diff --git a/nltk/tag/crf.py b/nltk/tag/crf.py
+index ac878f2..45a0be1 100644
+--- a/nltk/tag/crf.py
++++ b/nltk/tag/crf.py
+@@ -14,6 +14,7 @@ import re
+ import unicodedata
+ import warnings
+ 
++from nltk.pathsec import validate_tool_path
+ from nltk.tag.api import TaggerI
+ 
+ try:
+@@ -121,6 +122,16 @@ class CRFTagger(TaggerI):
+         self._feature_cache = {}
+ 
+     def set_model_file(self, model_file):
++        """Load a trained model from ``model_file``.
++
++        ``model_file`` is caller-supplied and pycrfsuite opens it natively, so
++        the path is validated against the NLTK data sandbox first: an
++        outside-root model is refused rather than handed to the native loader
++        (GHSA-8mgp-746c-j5xp). ``pathsec.open`` cannot be used here because the
++        C extension does its own open, so containment is the check that can be
++        applied; a symlink swapped in after it is not covered.
++        """
++        model_file = validate_tool_path(model_file, context="CRFTagger.set_model_file")
+         self._model_file = model_file
+         self._tagger.open(self._model_file)
+ 
+@@ -275,12 +286,19 @@ class CRFTagger(TaggerI):
+ 
+         :param train_data: list of annotated sentences.
+         :type train_data: list(list(tuple(str,str)))
+-        :param model_file: path where the trained model will be written.
++        :param model_file: path where the trained model will be written. It must
++            be inside an allowed NLTK data root (see ``nltk.data.path``); use
++            ``nltk.data.make_staging_dir()`` for a private in-sandbox location.
+         :type model_file: str
+         """
+         if pycrfsuite is None:
+             raise ImportError("CRFTagger requires python-crfsuite to be installed.")
+ 
++        # Caller-supplied destination that pycrfsuite writes natively, so refuse
++        # an outside-root path up front rather than after the model is built.
++        # It normally does not exist yet, so existence is not required.
++        model_file = validate_tool_path(model_file, context="CRFTagger.train", must_exist=False)
++
+         trainer = pycrfsuite.Trainer(verbose=self._verbose)
+         trainer.set_params(self._training_options)
+ 
+diff --git a/nltk/tag/hunpos.py b/nltk/tag/hunpos.py
+index 8f570d9..98c68bf 100644
+--- a/nltk/tag/hunpos.py
++++ b/nltk/tag/hunpos.py
+@@ -15,6 +15,7 @@ import os
+ from subprocess import PIPE, Popen
+ 
+ from nltk.internals import find_binary, find_file
++from nltk.pathsec import validate_tool_path
+ from nltk.tag.api import TaggerI
+ 
+ _hunpos_url = "https://code.google.com/p/hunpos/"
+@@ -93,6 +94,9 @@ class HunposTagger(TaggerI):
+             path_to_model, env_vars=("HUNPOS_TAGGER",), verbose=verbose
+         )
+         self._encoding = encoding
++        # ``self._hunpos_model`` (from find_file) becomes argv to the hunpos-tag
++        # subprocess pathsec.open cannot wrap; bound it before spawning (GHSA-8mgp-746c-j5xp).
++        validate_tool_path(self._hunpos_model, context="HunposTagger.__init__")
+         self._hunpos = Popen(
+             [self._hunpos_bin, self._hunpos_model],
+             shell=False,
+@@ -122,7 +126,12 @@ class HunposTagger(TaggerI):
+         The tokens should not contain any newline characters.
+         """
+         for token in tokens:
+-            assert "\n" not in token, "Tokens should not contain newlines"
++            # Not an assert: python -O strips those, and a newline inside a token
++            # injects an extra line into the tagger's line-oriented stdin, which
++            # desynchronises every tag that follows.
++            newline = b"\n" if isinstance(token, bytes) else "\n"
++            if newline in token:
++                raise ValueError("Tokens should not contain newlines")
+             if isinstance(token, str):
+                 token = token.encode(self._encoding)
+             self._hunpos.stdin.write(token + b"\n")
+diff --git a/nltk/tag/perceptron.py b/nltk/tag/perceptron.py
+index 640839b..2181426 100644
+--- a/nltk/tag/perceptron.py
++++ b/nltk/tag/perceptron.py
+@@ -8,6 +8,7 @@
+ #
+ # This module is provided under the terms of the MIT License.
+ 
++import errno
+ import json
+ import logging
+ import os
+@@ -18,34 +19,45 @@ from pathlib import Path
+ from tempfile import gettempdir
+ 
+ from nltk import jsontags
+-from nltk.data import FileSystemPathPointer, find, open_datafile
++from nltk.data import (
++    FileSystemPathPointer,
++    find,
++    make_staging_dir,
++    open_datafile,
++)
++from nltk.pathsec import _fd_realpath
++from nltk.pathsec import open as pathsec_open
++from nltk.pathsec import validate_path, validate_tool_dir, validate_tool_path
+ from nltk.tag.api import TaggerI
+ 
+ 
+-def _authorize_private_dir(directory):
+-    """Register a private, user-owned trained-model directory on nltk.data.path
+-    so the pathsec sandbox permits reading a saved model back from it.
++def _validate_name_component(value, kind="language code"):
++    """Refuse a value that is really a path where a filename fragment is meant.
+ 
+-    The default trained-tagger location is the system temp dir, which is shared
+-    and world-writable on Linux. A directory that is private to the current user
+-    (not group-/world-writable) cannot be tampered with by another local user, so
+-    it is safe to trust; a world-writable one is deliberately NOT authorized and
+-    stays refused (CWE-377/CWE-378).
++    The model filenames are built by interpolation and then opened *relative to
++    a pinned directory descriptor*. ``O_NOFOLLOW`` and the fd only anchor the
++    base: a ``..`` inside the name walks out of the verified directory and
++    writes anywhere the process can reach, so both halves of the name (the
++    ``lang`` and the ``TAGGER_NAME`` prefix) escaped the sandbox (CWE-22).
++    Applied to the composed filename as well as to each part, so a future
++    interpolation is covered without a new check.
+     """
+-    import nltk.data
+-    from nltk import pathsec
+-
+-    try:
+-        real = os.path.realpath(str(directory))
+-    except (OSError, ValueError):
+-        return
+-    if not pathsec.is_private_dir(real):
+-        return
+-    known = [os.path.realpath(str(p)) for p in nltk.data.path if isinstance(p, str)]
+-    if real not in known:
+-        nltk.data.path.append(real)
+-        pathsec._ALLOWED_ROOTS_CACHE = None
+-        pathsec._LAST_DATA_PATHS = None
++    text = str(value)
++    if (
++        not text
++        or not text.strip()
++        or text in (".", "..")
++        or "\x00" in text
++        or "/" in text
++        or "\\" in text
++        or os.sep in text
++        or (os.altsep and os.altsep in text)
++    ):
++        raise ValueError(
++            f"Invalid tagger {kind} {value!r}: must be a single filename "
++            "component (no path separators, '..' or NUL)"
++        )
++    return text
+ 
+ 
+ def _open_private_model_dir(loc):
+@@ -54,13 +66,11 @@ def _open_private_model_dir(loc):
+ 
+     The leaf is created with ``os.mkdir`` (atomic: it either creates the real
+     directory or fails with ``FileExistsError``) and then re-opened with
+-    ``O_NOFOLLOW|O_DIRECTORY`` -- so a symlink pre-planted or raced in at the
++    ``O_NOFOLLOW|O_DIRECTORY``; so a symlink pre-planted or raced in at the
+     guessable default name is refused (``ELOOP``/``ENOTDIR``) instead of being
+     followed. The descriptor is rejected unless it is a real directory owned by
+     the current user and not group-/world-writable (CWE-59/377/378).
+     """
+-    import errno
+-
+     parent = os.path.dirname(loc) or "."
+     os.makedirs(parent, exist_ok=True)
+     try:
+@@ -85,6 +95,14 @@ def _open_private_model_dir(loc):
+                 f"Refusing non-private trained-model dir {loc!r}: not owned by "
+                 "you or group-/world-writable (CWE-377/378)"
+             )
++        # Validate where the descriptor actually landed, not the string: the
++        # containment check ran before this open, so an intermediate directory
++        # swapped in between the two would otherwise pin an outside directory.
++        landed = _fd_realpath(fd)
++        validate_path(
++            landed if landed is not None else os.path.realpath(loc),
++            context="PerceptronTagger.save_to_json",
++        )
+     except BaseException:
+         os.close(fd)
+         raise
+@@ -174,13 +192,28 @@ class AveragedPerceptron:
+             self.weights[feat] = new_feat_weights
+ 
+     def save(self, path):
+-        """Save the model weights as json"""
+-        with open(path, "w") as fout:
++        """Save the model weights as json.
++
++        ``path`` is caller-supplied, so the write goes through the pathsec
++        sandbox: a destination outside the allowed NLTK data roots (or a symlink
++        planted at one) is refused before any bytes are written, instead of the
++        builtin ``open`` that made this an arbitrary-file write
++        (GHSA-8mgp-746c-j5xp).
++        """
++        path = validate_tool_path(path, context="AveragedPerceptron.save", must_exist=False)
++        with pathsec_open(path, "w", context="AveragedPerceptron.save") as fout:
+             return json.dump(self.weights, fout)
+ 
+     def load(self, path):
+-        """Load the json model weights."""
+-        with open(path) as fin:
++        """Load the json model weights.
++
++        The read is sandboxed for the same reason as :meth:`save`: a model path
++        outside the allowed roots is refused rather than read back to the caller
++        (GHSA-8mgp-746c-j5xp).
++        """
++        # Refuse a planted FIFO/socket/device before pathsec.open blocks on it.
++        path = validate_tool_path(path, context="AveragedPerceptron.load")
++        with pathsec_open(path, context="AveragedPerceptron.load") as fin:
+             self.weights = json.load(fin)
+ 
+     def encode_json_obj(self):
+@@ -243,19 +276,43 @@ class PerceptronTagger(TaggerI):
+         self.tagdict = {}
+         self.classes = set()
+         self.lang = lang
+-        # Save trained models in tmp directory by default:
++        # Retained for backward compatibility; save_dir no longer derives from it.
+         self.TRAINED_TAGGER_PATH = gettempdir()
+         self.TAGGER_NAME = "averaged_perceptron_tagger"
+-        self.save_dir = path_join(
+-            self.TRAINED_TAGGER_PATH, f"{self.TAGGER_NAME}_{self.lang}"
+-        )
++        self._save_dir = None
+         if load:
+             self.load_from_json(lang, loc)
+ 
++    @property
++    def save_dir(self):
++        """This tagger's private directory for saved model artifacts.
++
++        Allocated lazily by ``nltk.data.make_staging_dir`` INSIDE an allowed data
++        root, with an unpredictable name and mode 0700. Because it already lives
++        in the pathsec sandbox, saving and loading a trained model needs no
++        widening of ``nltk.data.path``, and unlike the old guessable
++        ``<tempdir>/averaged_perceptron_tagger_<lang>``, another local user
++        cannot pre-create or symlink it to redirect the write (CWE-377/378).
++        """
++        if self._save_dir is None:
++            # Both parts land in a mkdtemp prefix, which is concatenated onto
++            # the data root, so a path-shaped part stages output outside it.
++            _validate_name_component(self.lang, "language code")
++            _validate_name_component(self.TAGGER_NAME, "tagger name")
++            self._save_dir = make_staging_dir(
++                prefix=f"nltk_{self.TAGGER_NAME}_{self.lang}_"
++            )
++        return self._save_dir
++
+     def param_files(self, lang="eng"):
+-        return (
+-            f"{self.TAGGER_NAME}_{lang}.{attr}.json"
+-            for attr in ["weights", "tagdict", "classes"]
++        # The one place lang and TAGGER_NAME become filenames, so validate the
++        # composed name here rather than each ingredient at each caller.
++        _validate_name_component(lang, "language code")
++        return tuple(
++            _validate_name_component(
++                f"{self.TAGGER_NAME}_{lang}.{attr}.json", "model filename"
++            )
++            for attr in ("weights", "tagdict", "classes")
+         )
+ 
+     def tag(self, tokens, return_conf=False, use_tagdict=True):
+@@ -330,11 +387,17 @@ class PerceptronTagger(TaggerI):
+             self.save_to_json(lang=self.lang, loc=save_loc)
+ 
+     def save_to_json(self, lang="xxx", loc=None):
++        # Fail before any directory is created, not once the fd is pinned.
++        _validate_name_component(lang, "language code")
+         if not loc:
+             loc = self.save_dir
+-        # On POSIX the default TRAINED_TAGGER_PATH is a shared, world-writable
+-        # temp dir (/tmp) and the save dir is a *guessable* name in it, so a
+-        # local attacker can pre-plant or race a symlink at ``loc``. A plain
++        # A caller-supplied destination is an unbounded write primitive otherwise:
++        # the helper below happily os.makedirs() a whole chain anywhere writable.
++        loc = validate_tool_dir(loc, context="PerceptronTagger.save_to_json")
++        # The default loc (save_dir) is an unpredictable 0700 dir inside a data
++        # root, but a caller may still pass any in-sandbox path here, so the
++        # atomic checks below stay: a local attacker could pre-plant or race a
++        # symlink at a caller-chosen ``loc``. A plain
+         # ``islink`` pre-check is non-atomic (TOCTOU) and misses it once created;
+         # ``_open_private_model_dir`` instead creates/re-opens the leaf atomically
+         # with O_NOFOLLOW|O_DIRECTORY, verifies it is a real, user-owned,
+@@ -346,19 +409,23 @@ class PerceptronTagger(TaggerI):
+         # plain create + write.
+         if os.name != "posix":
+             os.makedirs(loc, exist_ok=True)
+-            _authorize_private_dir(loc)
+             for param, json_file in zip(self.encode_json_obj(), self.param_files(lang)):
+-                with open(path_join(loc, json_file), "w") as fout:
++                with pathsec_open(
++                    path_join(loc, json_file),
++                    "w",
++                    context="PerceptronTagger.save_to_json",
++                ) as fout:
+                     json.dump(param, fout)
+             return
+ 
+         dir_fd = _open_private_model_dir(loc)
+         try:
+-            _authorize_private_dir(loc)
+ 
+             # Write each model file relative to the pinned directory fd (where
+             # supported) with O_NOFOLLOW (0600), so neither the dir nor the file
+             # can be redirected outside the verified directory after the check.
++            # Not pathsec.open: a dir-fd-relative name has no absolute path to
++            # validate, and the pinned fd is strictly stronger than a path check.
+             use_dir_fd = os.open in os.supports_dir_fd
+ 
+             def _no_follow_opener(path, flags):
+@@ -369,7 +436,11 @@ class PerceptronTagger(TaggerI):
+ 
+             for param, json_file in zip(self.encode_json_obj(), self.param_files(lang)):
+                 target = json_file if use_dir_fd else path_join(loc, json_file)
+-                with open(target, "w", opener=_no_follow_opener) as fout:
++                # No builtin open(): take the hardened descriptor straight from
++                # the opener and wrap it, so the write still goes through the
++                # pinned dir_fd with O_NOFOLLOW and nothing re-resolves the name.
++                fd = _no_follow_opener(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
++                with os.fdopen(fd, "w") as fout:
+                     json.dump(param, fout)
+         finally:
+             os.close(dir_fd)
+@@ -377,6 +448,17 @@ class PerceptronTagger(TaggerI):
+     def load_from_json(self, lang="eng", loc=None):
+         # Automatically find path to the tagger if location is not specified.
+         # loc can refer to zip or real FS
++        # Symmetric with save_to_json: lang reaches find() as a resource name and
++        # param_files() as a filename, so reject a path-shaped one up front.
++        _validate_name_component(lang, "language code")
++        if isinstance(loc, bytes):
++            loc = os.fsdecode(loc)
++        if isinstance(loc, (str, Path)) and not str(loc).strip():
++            # Windows strips trailing spaces from a path component, so a blank
++            # loc silently resolves to the data root itself instead of failing.
++            raise ValueError(
++                f"Invalid tagger model location {loc!r}: blank path names no model"
++            )
+         if loc is None:
+             loc = find(f"taggers/averaged_perceptron_tagger_{lang}/")
+         elif isinstance(loc, str):
+@@ -384,21 +466,21 @@ class PerceptronTagger(TaggerI):
+             # - absolute paths are explicit filesystem locations
+             # - relative strings are treated as NLTK resource names and resolved via find()
+             if os.path.isabs(loc):
++                # Bound it here, not at the eventual read: FileSystemPathPointer
++                # stats the path, so an unbounded loc is an existence oracle too.
++                validate_tool_dir(loc, context="PerceptronTagger.load_from_json")
+                 loc = FileSystemPathPointer(loc)
+             else:
+                 loc = find(loc)
+         elif isinstance(loc, Path):
+             # Explicit filesystem path
++            validate_tool_dir(str(loc), context="PerceptronTagger.load_from_json")
+             loc = FileSystemPathPointer(str(loc))
+         # else: assume loc is already a PathPointer (zip or filesystem)
+ 
+-        # A trained model saved under the (private) system-temp trained-tagger
+-        # dir lives outside nltk_data; authorize that specific private directory
+-        # so it can be read back under the pathsec sandbox.
+-        loc_path = getattr(loc, "path", None)
+-        if loc_path and os.path.isdir(loc_path):
+-            _authorize_private_dir(loc_path)
+-
++        # No sandbox widening here: save_dir is allocated inside a data root, so a
++        # model NLTK saved is already readable. Any other loc must be authorized by
++        # the application, since trusting a caller path would disarm pathsec.
+         def load_param(json_file):
+             with open_datafile(loc, json_file) as fin:
+                 return json.load(fin)
+diff --git a/nltk/tag/stanford.py b/nltk/tag/stanford.py
+index a2c2a21..64aaa3b 100644
+--- a/nltk/tag/stanford.py
++++ b/nltk/tag/stanford.py
+@@ -22,7 +22,9 @@ import warnings
+ from abc import abstractmethod
+ from subprocess import PIPE
+ 
++from nltk.data import staging_tempdir
+ from nltk.internals import find_file, find_jar, java
++from nltk.pathsec import validate_tool_path
+ from nltk.tag.api import TaggerI
+ 
+ _stanford_url = "https://nlp.stanford.edu/software"
+@@ -74,6 +76,9 @@ class StanfordTagger(TaggerI):
+         self._stanford_model = find_file(
+             model_filename, env_vars=("STANFORD_MODELS",), verbose=verbose
+         )
++        # Fail fast: the model is a JVM subprocess argument, so bound it here as
++        # well as at the hand-off, and never keep an out-of-sandbox path around.
++        validate_tool_path(self._stanford_model, context=f"{type(self).__name__}")
+ 
+         self._encoding = encoding
+         self.java_options = java_options
+@@ -96,7 +101,9 @@ class StanfordTagger(TaggerI):
+         java_succeeded = False
+         try:
+             # Create a temporary input file
+-            _input_fh, input_file_path = tempfile.mkstemp(text=True)
++            _input_fh, input_file_path = tempfile.mkstemp(
++                text=True, dir=staging_tempdir()
++            )
+             self._input_file_path = input_file_path
+ 
+             cmd = list(self._cmd)
+@@ -109,6 +116,10 @@ class StanfordTagger(TaggerI):
+                     _input = _input.encode(encoding)
+                 input_fh.write(_input)
+ 
++            # ``self._stanford_model`` (from find_file) is handed to the JVM subprocess
++            # pathsec.open cannot wrap; bound it before spawning (GHSA-8mgp-746c-j5xp).
++            validate_tool_path(self._stanford_model, context="StanfordTagger.tag_sents")
++
+             # Run the tagger and get the output
+             stanpos_output, _stderr = java(
+                 cmd,

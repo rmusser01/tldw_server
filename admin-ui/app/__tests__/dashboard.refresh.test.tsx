@@ -1,11 +1,9 @@
 /* @vitest-environment jsdom */
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, render } from '@testing-library/react';
 import DashboardPage from '../page';
 import { api } from '@/lib/api-client';
-
-const noop = () => {};
 
 const createDeferred = <T,>() => {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -110,6 +108,7 @@ vi.mock('@/lib/billing', () => ({
 vi.mock('@/lib/api-client', () => ({
   api: {
     getDashboardStats: vi.fn(),
+    getRealtimeStats: vi.fn(),
     getUsers: vi.fn(),
     getOrganizations: vi.fn(),
     getLLMProviders: vi.fn(),
@@ -140,6 +139,7 @@ vi.mock('@/lib/api-client', () => ({
 
 type ApiMock = {
   getDashboardStats: ReturnType<typeof vi.fn>;
+  getRealtimeStats: ReturnType<typeof vi.fn>;
   getUsers: ReturnType<typeof vi.fn>;
   getOrganizations: ReturnType<typeof vi.fn>;
   getLLMProviders: ReturnType<typeof vi.fn>;
@@ -171,6 +171,10 @@ const apiMock = api as unknown as ApiMock;
 
 beforeEach(() => {
   apiMock.getDashboardStats.mockResolvedValue({});
+  apiMock.getRealtimeStats.mockResolvedValue({
+    active_sessions: 0,
+    tokens_today: { prompt: 0, completion: 0, total: 0 },
+  });
   apiMock.getUsers.mockResolvedValue([]);
   apiMock.getOrganizations.mockResolvedValue([]);
   apiMock.getLLMProviders.mockResolvedValue([]);

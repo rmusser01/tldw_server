@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -264,23 +265,25 @@ def test_monitoring_upgrade_removes_only_the_detached_legacy_credential_volume()
     assert positions == sorted(positions)
 
 
-def test_reference_runbook_assigns_each_deferred_boundary_to_the_right_task() -> None:
+def test_reference_runbook_assigns_remaining_deferred_boundaries() -> None:
     text = RUNBOOK.read_text(encoding="utf-8")
     followups = {
         task: line.lower()
         for task, line in re.findall(
-            r"^- `(TASK-(?:13013\.[79]|13144))` ([^\n]+)$",
+            r"^- `(TASK-(?:13013\.9|13144))` ([^\n]+)$",
             text,
             flags=re.MULTILINE,
         )
     }
 
-    assert set(followups) == {"TASK-13013.7", "TASK-13013.9", "TASK-13144"}
-    assert "provenance" in followups["TASK-13013.7"]
+    assert set(followups) == {"TASK-13013.9", "TASK-13144"}
     for boundary in ("capacity", "restore-time", "soak"):
         assert boundary in followups["TASK-13013.9"]
     assert "client" in followups["TASK-13144"]
     assert "identity" in followups["TASK-13144"]
+    assert "TASK-13013.7" in text
+    assert "Software_Supply_Chain.md" in text
+    assert "provenance" in text.lower()
 
 
 def test_existing_deployment_guides_link_to_the_reference_and_label_legacy() -> None:
@@ -305,3 +308,18 @@ def test_published_deployment_guides_match_their_sources() -> None:
     for source in PUBLISHED_MIRRORS:
         published = Path("Docs/Published") / source.relative_to("Docs")
         assert published.read_bytes() == source.read_bytes(), source
+
+
+def test_reference_runbook_uses_the_exact_supply_chain_inventory() -> None:
+    text = RUNBOOK.read_text(encoding="utf-8")
+    inventory = json.loads(
+        Path(".github/supply-chain/reference-images.json").read_text(encoding="utf-8")
+    )
+
+    assert "Docs/Development/Software_Supply_Chain.md" in text
+    assert "tag@sha256:" in text
+    assert "subject/index digest" in text
+    assert "child manifest digest" in text
+    assert "`linux/amd64`" in text
+    for image in inventory["images"]:
+        assert image["reference"] in text

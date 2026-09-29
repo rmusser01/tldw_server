@@ -1,5 +1,5 @@
 import { browser } from "wxt/browser"
-import { useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import {
   getElevenLabsModel,
   getElevenLabsVoiceId,
@@ -49,7 +49,47 @@ export const useTTS = () => {
   const notification = useAntdNotification()
   const { t } = useTranslation("playground")
 
-  const speak = async ({ utterance, saveClip, clipMeta }: VoiceOptions) => {
+  const cancel = useCallback(() => {
+    speechGenerationRef.current++
+
+    // Settle the in-flight playAudio() promise so speak()'s loop unwinds and its
+    // `finally { URL.revokeObjectURL }` runs (pause() alone fires no event).
+    const settle = settlePlaybackRef.current
+    settlePlaybackRef.current = null
+    if (settle) settle()
+
+    // Free the current segment URL directly as a safety net (idempotent with the
+    // finally block; double-revoke is harmless).
+    if (currentUrlRef.current) {
+      try {
+        URL.revokeObjectURL(currentUrlRef.current)
+      } catch {}
+      currentUrlRef.current = null
+    }
+
+    // Prefer the ref (stable) so unmount can stop the latest audio even when the
+    // captured `audioElement` state closure is stale.
+    const activeAudio = currentAudioRef.current || audioElement
+    if (activeAudio) {
+      try {
+        activeAudio.pause()
+        activeAudio.currentTime = 0
+      } catch {}
+      currentAudioRef.current = null
+      setAudioElement(null)
+      setIsSpeaking(false)
+      return
+    }
+
+    if (isChromiumTarget && browser.runtime?.id && browser.tts) {
+      browser.tts.stop()
+    } else if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel()
+    }
+    setIsSpeaking(false)
+  }, [audioElement])
+
+  const speak = useCallback(async ({ utterance, saveClip, clipMeta }: VoiceOptions) => {
     cancel()
     const generation = speechGenerationRef.current
     const isCurrent = () => generation === speechGenerationRef.current
@@ -509,47 +549,7 @@ export const useTTS = () => {
               )
       })
     }
-  }
-
-  const cancel = () => {
-    speechGenerationRef.current++
-
-    // Settle the in-flight playAudio() promise so speak()'s loop unwinds and its
-    // `finally { URL.revokeObjectURL }` runs (pause() alone fires no event).
-    const settle = settlePlaybackRef.current
-    settlePlaybackRef.current = null
-    if (settle) settle()
-
-    // Free the current segment URL directly as a safety net (idempotent with the
-    // finally block; double-revoke is harmless).
-    if (currentUrlRef.current) {
-      try {
-        URL.revokeObjectURL(currentUrlRef.current)
-      } catch {}
-      currentUrlRef.current = null
-    }
-
-    // Prefer the ref (stable) so unmount can stop the latest audio even when the
-    // captured `audioElement` state closure is stale.
-    const activeAudio = currentAudioRef.current || audioElement
-    if (activeAudio) {
-      try {
-        activeAudio.pause()
-        activeAudio.currentTime = 0
-      } catch {}
-      currentAudioRef.current = null
-      setAudioElement(null)
-      setIsSpeaking(false)
-      return
-    }
-
-    if (isChromiumTarget && browser.runtime?.id && browser.tts) {
-      browser.tts.stop()
-    } else if (typeof window !== "undefined" && window.speechSynthesis) {
-      window.speechSynthesis.cancel()
-    }
-    setIsSpeaking(false)
-  }
+  }, [cancel, notification, t])
 
   useEffect(() => {
     return () => {

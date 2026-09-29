@@ -9,7 +9,8 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Optional
 
-from jose import JWTError, jwt
+from tldw_Server_API.app.core.Utils import jwt_compat as jwt
+from tldw_Server_API.app.core.Utils.jwt_compat import JWTError
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType

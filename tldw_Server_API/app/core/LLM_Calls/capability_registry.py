@@ -471,7 +471,7 @@ def _alias_map(provider: str) -> dict[str, str]:
 
 
 def normalize_payload(provider: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Return a normalized payload with aliases applied.
+    """Return a payload with aliases applied and unsupported neutral sampling omitted.
 
     Alias precedence:
     - Canonical keys win if both are present and non-None.
@@ -488,6 +488,10 @@ def normalize_payload(provider: str, payload: Mapping[str, Any]) -> dict[str, An
             normalized[canonical] = alias_val
         # Always drop alias to avoid duplicate keys downstream.
         normalized.pop(alias, None)
+    # Character snapshots include this neutral default even for adapters without it.
+    penalty = normalized.get("repetition_penalty")
+    if type(penalty) in (int, float) and penalty == 1.0 and "repetition_penalty" not in get_allowed_fields(provider):
+        normalized.pop("repetition_penalty")
     return normalized
 
 

@@ -197,8 +197,12 @@ export MCP_DATABASE_URL=sqlite+aiosqlite:///./Databases/mcp_unified.db
 ### 2. Install Dependencies
 
 ```bash
-pip install fastapi uvicorn loguru pydantic PyJWT passlib bcrypt aiosqlite
+pip install fastapi uvicorn loguru pydantic PyJWT "libpass>=1.9.3" bcrypt aiosqlite
 ```
+
+`libpass` provides the `passlib` import package. Use a clean environment when
+switching from the original Passlib distribution; do not install both together.
+For the full server, synchronize dependencies from the repository lockfile.
 
 ### 3. Run Tests
 

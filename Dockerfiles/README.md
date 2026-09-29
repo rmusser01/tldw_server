@@ -112,18 +112,33 @@ or its restore-backed rollback.
   - Uses a multi-stage build so compiler/dev packages stay in the builder stage.
 - WebUI image: `Dockerfiles/Dockerfile.webui` (used by WebUI overlay)
 - Worker image: `Dockerfiles/Dockerfile.worker` (used by embeddings compose)
+- Audio-worker image: `Dockerfiles/Dockerfile.audio_gpu_worker`
+- Admin UI image: `Dockerfiles/Dockerfile.admin-ui`
 
 ## Published Images
 
-For the full CI/CD pipeline details (workflow triggers, tagging conventions, attestation, and how to add new images), see [Docs/Development/Container_Image_Lifecycle.md](../Docs/Development/Container_Image_Lifecycle.md).
+For the full CI/CD pipeline details (workflow triggers, tagging conventions,
+attestation, and how to add new images), see
+[Docs/Development/Container_Image_Lifecycle.md](../Docs/Development/Container_Image_Lifecycle.md).
+The release admission, exact digest, SBOM, scan, exception, and verification
+contract is
+[Docs/Development/Software_Supply_Chain.md](../Docs/Development/Software_Supply_Chain.md).
 
-- During the pre-counsel frontend licensing freeze, WebUI and Admin UI images
-  are build-checked on pull requests but are not pushed by `publish-ghcr-main`
-  or `publish-docker`.
-- `publish-ghcr-main` publishes only the GPL backend API image with `main` and
-  `sha-<shortsha>` tags: `ghcr.io/<owner>/<repo>:main`.
-- Protected image publishing resumes only through a release-specific licensing
-  workflow after artifact notices and image separation pass their later gate.
+- WebUI and Admin UI images are built, SBOMed, vulnerability-scanned, and signed
+  as `build-and-scan-only`; neither workflow receives permission to push them.
+- `publish-ghcr-main` builds one unique GPL backend API candidate, scans and
+  admits its exact digest, then moves `main` and `sha-<shortsha>` aliases to
+  that digest.
+- `publish-docker` is manually dispatched on an existing stable-tag draft. It
+  publishes only `app`, `worker`, and `audio-worker`, and only after source,
+  five project-image, and six reference-image evidence passes. Full-version
+  aliases are verified before major, minor, and `latest` aliases move; the
+  GitHub Release is published last.
+- Production Compose inputs use a readable version tag plus the full immutable
+  subject digest (`tag@sha256:...`). The committed third-party literals live in
+  `.github/supply-chain/reference-images.json`; refresh them only through the
+  documented SBOM and scan gate. Pinning alone is not admission: known source
+  and image findings still block release certification.
 - The API image is direct-run friendly.
 - WebUI and Admin UI remain locally buildable and compose-first unless the
   operator supplies compatible runtime wiring.

@@ -142,6 +142,12 @@ const SECONDARY_IN_PRIMARY: Record<string, string> = {
   templates: "outputs" // Templates section inside Reports tab
 }
 
+const SECONDARY_EXPANSION_KEY: Record<string, string> = {
+  jobs: "monitors",
+  runs: "activity",
+  templates: "templates"
+}
+
 const readShowAllViews = (): boolean => {
   if (typeof window === "undefined") return false
   try {
@@ -458,7 +464,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   const initializedRunPollingRef = useRef(false)
   const runNotificationsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const runNotificationsPollingInFlightRef = useRef(false)
-  const sessionStartedAtMsRef = useRef<number>(Date.now())
+  const [sessionStartedAtMs] = React.useState(Date.now)
   const [guidedTourState, setGuidedTourState] = React.useState<GuidedTourState>(() => readGuidedTourState())
   const [guidedTourOpen, setGuidedTourOpen] = React.useState(false)
   const [showGuidedTourCompletion, setShowGuidedTourCompletion] = React.useState(false)
@@ -706,7 +712,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     if (isProgressive && SECONDARY_IN_PRIMARY[key]) {
       const primaryTab = SECONDARY_IN_PRIMARY[key]
       setActiveTab(primaryTab as typeof activeTab)
-      const sectionKey = key === "jobs" ? "monitors" : key === "runs" ? "activity" : "templates"
+      const sectionKey = SECONDARY_EXPANSION_KEY[key]
       setSecondaryExpanded((prev) => {
         const next = { ...prev, [sectionKey]: true }
         writeSecondaryExpanded(next)
@@ -716,6 +722,32 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
     }
     setActiveTab(key as typeof activeTab)
   }, [
+    iaExperimentEnabled,
+    isConstrained,
+    setActiveTab,
+    showAllViews,
+    watchlistsBasicsTutorialActive
+  ])
+
+  useEffect(() => {
+    const isProgressive =
+      !isConstrained &&
+      !showAllViews &&
+      !iaExperimentEnabled &&
+      !watchlistsBasicsTutorialActive
+    const primaryTab = isProgressive ? SECONDARY_IN_PRIMARY[activeTab] : undefined
+    if (!primaryTab) return
+
+    setActiveTab(primaryTab as typeof activeTab)
+    const sectionKey = SECONDARY_EXPANSION_KEY[activeTab]
+    setSecondaryExpanded((prev) => {
+      if (prev[sectionKey]) return prev
+      const next = { ...prev, [sectionKey]: true }
+      writeSecondaryExpanded(next)
+      return next
+    })
+  }, [
+    activeTab,
     iaExperimentEnabled,
     isConstrained,
     setActiveTab,
@@ -1448,7 +1480,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
         if (
           initialized &&
           !previousStatus &&
-          shouldNotifyNewTerminalRun(run, sessionStartedAtMsRef.current)
+          shouldNotifyNewTerminalRun(run, sessionStartedAtMs)
         ) {
           const status = String(run.status || "").toLowerCase()
           const kind = status === "failed" ? "failed" : "completed"
@@ -1503,6 +1535,7 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   }, [
     runNotificationsPollPlan.pageSize,
     runNotificationsPollPlan.suppressCompleted,
+    sessionStartedAtMs,
     selectedWatchlistId,
     showGroupedRunNotification,
     showRunNotification,

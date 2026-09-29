@@ -125,6 +125,7 @@ export const RunsTab: React.FC = () => {
   const [exportingRunsCsv, setExportingRunsCsv] = useState(false)
   const [runsCsvTalliesMode, setRunsCsvTalliesMode] = useState<RunsCsvTalliesMode>("none")
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null)
+  const [runsCheckedAt, setRunsCheckedAt] = useState(Date.now)
   const [cancellingRunIds, setCancellingRunIds] = useState<number[]>([])
   const [failedCancelRunIds, setFailedCancelRunIds] = useState<number[]>([])
   const [runsLoadError, setRunsLoadError] = useState<ReturnType<typeof mapWatchlistsError> | null>(null)
@@ -220,6 +221,7 @@ export const RunsTab: React.FC = () => {
         })
       )
     } finally {
+      setRunsCheckedAt(Date.now())
       if (showLoading) setRunsLoading(false)
     }
   }, [
@@ -864,7 +866,7 @@ export const RunsTab: React.FC = () => {
       .map((run) =>
         resolveStalledRunNotification(
           run,
-          Date.now(),
+          runsCheckedAt,
           RUN_STALLED_THRESHOLD_MS,
           t
         )
@@ -895,7 +897,7 @@ export const RunsTab: React.FC = () => {
       ),
       hint: failedHint || fallbackHint
     }
-  }, [runs, t])
+  }, [runs, runsCheckedAt, t])
 
   const openRunOutputs = useCallback((runId: number, jobId: number) => {
     setOutputsJobFilter(jobId)

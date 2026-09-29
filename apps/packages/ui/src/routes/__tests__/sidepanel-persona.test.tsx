@@ -389,6 +389,45 @@ describe("SidepanelPersona", () => {
     expect(mocks.navigate).toHaveBeenCalledWith("/settings")
   })
 
+  it("expires visual overrides on schedule and reschedules replacements", () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-09-27T12:00:00Z"))
+    mocks.isOnline = false
+    const override = {
+      personaId: "research_assistant",
+      sessionId: null,
+      state: "speaking" as const,
+      reason: "test",
+      expiresAt: Date.now() + 2000
+    }
+    usePersonaVisualRuntimeStore.getState().setOverride(override)
+    const view = render(<SidepanelPersona />)
+    try {
+      act(() => vi.advanceTimersByTime(1000))
+      expect(usePersonaVisualRuntimeStore.getState().override).toEqual(override)
+      const replacement = { ...override, expiresAt: Date.now() + 3000.5 }
+      act(() => usePersonaVisualRuntimeStore.getState().setOverride(replacement))
+      act(() => vi.advanceTimersByTime(1000))
+      expect(usePersonaVisualRuntimeStore.getState().override).toEqual(replacement)
+      act(() => vi.advanceTimersByTime(2000))
+      expect(usePersonaVisualRuntimeStore.getState().override).toEqual(replacement)
+      act(() => vi.advanceTimersByTime(1))
+      expect(usePersonaVisualRuntimeStore.getState().override).toBeNull()
+      act(() => usePersonaVisualRuntimeStore.getState().setOverride(override))
+      expect(usePersonaVisualRuntimeStore.getState().override).toBeNull()
+      const afterClockChange = { ...override, expiresAt: Date.now() + 1000 }
+      act(() => usePersonaVisualRuntimeStore.getState().setOverride(afterClockChange))
+      vi.setSystemTime(Date.now() - 500)
+      act(() => vi.advanceTimersByTime(1000))
+      expect(usePersonaVisualRuntimeStore.getState().override).toEqual(afterClockChange)
+      act(() => vi.advanceTimersByTime(500))
+      expect(usePersonaVisualRuntimeStore.getState().override).toBeNull()
+    } finally {
+      view.unmount()
+      vi.useRealTimers()
+    }
+  })
+
   it("shows auth guidance instead of the generic offline copy when credentials are missing", () => {
     mocks.isOnline = false
     mocks.uxState = "error_auth"

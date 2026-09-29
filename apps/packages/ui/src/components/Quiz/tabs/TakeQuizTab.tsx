@@ -828,7 +828,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
     }
   }
 
-  const handleStartStudySession = async (
+  const handleStartStudySession = React.useCallback(async (
     quizId: number,
     mode: Exclude<TakeSessionMode, "graded">
   ): Promise<boolean> => {
@@ -894,7 +894,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
     } finally {
       setStudySessionLoading(false)
     }
-  }
+  }, [messageApi, studyPoolSeedOverride, studyPoolSizePreference, t])
 
   const requestGradedStart = React.useCallback((quizId: number) => {
     setModePreference("graded")
@@ -1948,9 +1948,23 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
       timeStyle: "short"
     })
   }, [parsedAssignmentDueAt])
-  const assignmentIsOverdue = React.useMemo(() => {
-    if (!parsedAssignmentDueAt) return false
-    return parsedAssignmentDueAt.getTime() < Date.now()
+  const [assignmentIsOverdue, setAssignmentIsOverdue] = React.useState(false)
+  React.useEffect(() => {
+    if (!parsedAssignmentDueAt) {
+      setAssignmentIsOverdue(false)
+      return
+    }
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
+    const updateOverdue = () => {
+      const remaining = parsedAssignmentDueAt.getTime() - Date.now()
+      setAssignmentIsOverdue(remaining < 0)
+      if (remaining >= 0) {
+        // Browser timers accept at most a signed 32-bit delay.
+        timeoutId = setTimeout(updateOverdue, Math.min(remaining + 1, 2_147_483_647))
+      }
+    }
+    updateOverdue()
+    return () => clearTimeout(timeoutId)
   }, [parsedAssignmentDueAt])
   const assignmentContextKey = React.useMemo(
     () => [

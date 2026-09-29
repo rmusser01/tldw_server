@@ -48,7 +48,7 @@ beforeEach(() => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
-const mountQuickTest = async () => {
+const mountQuickTest = async (promptRecord: Record<string, unknown> | null = null) => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const wrapper = ({ children }: { children: React.ReactNode }) => (
     <MemoryRouter>
@@ -61,7 +61,7 @@ const mountQuickTest = async () => {
     t: (key, opts) => String(opts?.defaultValue ?? key),
     getPromptTexts: () => ({ systemText: "Be concise.", userText: "Explain this example." }),
     getPromptKeywords: () => [],
-    getPromptRecordById: () => null,
+    getPromptRecordById: () => promptRecord,
     getPromptModifiedAt: () => 0,
     getPromptUsageCount: () => 0,
     getPromptLastUsedAt: () => null,
@@ -105,6 +105,19 @@ it("retains successful Quick Test output that explains errors and filesystem pat
     await act(async () => { await result.current.runLocalQuickTest() })
     expect(result.current.localQuickTestOutput).toBe(content)
     expect(notify).not.toHaveBeenCalled()
+  } finally {
+    unmount()
+    queryClient.clear()
+  }
+})
+
+it("keeps a missing inspector creation date unknown across rerenders", async () => {
+  const { result, rerender, unmount, queryClient } = await mountQuickTest({ id: "local-prompt" })
+  try {
+    act(() => result.current.openPromptInspector("local-prompt"))
+    expect(result.current.inspectorPrompt?.createdAt).toBe(0)
+    rerender()
+    expect(result.current.inspectorPrompt?.createdAt).toBe(0)
   } finally {
     unmount()
     queryClient.clear()

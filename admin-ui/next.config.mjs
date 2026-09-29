@@ -18,6 +18,7 @@ const configDirectory = dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  agentRules: false,
   reactStrictMode: true,
   output: isRealBackendE2eBuild ? undefined : 'standalone',
   outputFileTracingRoot: resolve(configDirectory, '..'),

@@ -1,6 +1,100 @@
 # Dependabot configuration for automated dependency updates
 version: 2
 updates:
+  # Keep the Bun workspace lockfile and WebUI release baseline current.
+  - package-ecosystem: "bun"
+    directory: "/apps"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "javascript"
+    assignees:
+      - "rmusser01"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      frontend-dependencies:
+        patterns:
+          - "*"
+
+  # Keep the independently locked Admin UI release baseline current.
+  - package-ecosystem: "bun"
+    directory: "/admin-ui"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "javascript"
+    assignees:
+      - "rmusser01"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      admin-ui-dependencies:
+        patterns:
+          - "*"
+
+  # Keep the repository Python lockfile current.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+    assignees:
+      - "rmusser01"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      dev-dependencies:
+        patterns:
+          - "pytest*"
+          - "mypy"
+          - "black"
+          - "ruff"
+          - "pre-commit"
+      ml-dependencies:
+        patterns:
+          - "torch*"
+          - "transformers"
+          - "sentence-transformers"
+          - "faster-whisper"
+
+  # Keep production container base images current.
+  - package-ecosystem: "docker"
+    directory: "/Dockerfiles"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
+    assignees:
+      - "rmusser01"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      container-images:
+        patterns:
+          - "*"
+
   # Enable version updates for Python dependencies
   - package-ecosystem: "pip"
     directory: "/"

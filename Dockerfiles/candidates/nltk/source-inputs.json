@@ -1,0 +1,146 @@
+{
+  "backport": {
+    "changedFiles": [
+      {
+        "afterSha256": "e6322e0d0267cbe05fc9eae47839a369da2e51e76fc49342840ab34faa7a3fb6",
+        "beforeSha256": "ceef99da5f26866292fc0e4cb7a9c690c4aa9a9b9bba53046b373c223c0a3389",
+        "path": "nltk/chunk/named_entity.py"
+      },
+      {
+        "afterSha256": "916a3989cf726644c4c7f62f930d78c471e7ebfe2656e6d08457e2417639c79b",
+        "beforeSha256": "11f704cf6cd2a43b51cb13634e9cdbc46b0e8394e1e291e9b66036d6a59c2583",
+        "path": "nltk/classify/maxent.py"
+      },
+      {
+        "afterSha256": "a46c699cbc80dc8a8a4e39355b0f145d687c05058cafc4446a2307644ad316f4",
+        "beforeSha256": "cda75896c3639541f3c3b811d647354dc5829774c2f201a7c942896f5cb99dc8",
+        "path": "nltk/data.py"
+      },
+      {
+        "afterSha256": "d0e20a5522f3e27082f781e04bf3feedbd9cd38dc0a69d8aaf52f668d14664bf",
+        "beforeSha256": "ed55985d08ed38333d007c5e5c19170a4dc19009e871ab616d198a3da92eea70",
+        "path": "nltk/parse/transitionparser.py"
+      },
+      {
+        "afterSha256": "d69c6068587dee5ed9cda7b7b859d448ca320d7b6173f4802f5678c06f9f3329",
+        "beforeSha256": "281e42ae4298cae5bad1b898545f849d616645451281deb8262f2a5efc782a5f",
+        "path": "nltk/pathsec.py"
+      },
+      {
+        "afterSha256": "26fffdb5905c5bf6e6244151cf120052e777eb808d9aafb20211c13df0580ec5",
+        "beforeSha256": "9212ed006a7f209f0b39259f6b26793aaa18f67e77571d4dad280e5fcfddd453",
+        "path": "nltk/picklesec.py"
+      },
+      {
+        "afterSha256": "c8197a293f1f8c211b678b07641ef4068bd07a104c5634e16d31468ddc0d4f0a",
+        "beforeSha256": "e8f8e0b67943f6190c81bd22cf140a3a1730369d90117153c61e98c2810bcb54",
+        "path": "nltk/tag/crf.py"
+      },
+      {
+        "afterSha256": "0a52b3b074cda10d2cf3954b0bbd717247de3361f059048556367a97ddaf3098",
+        "beforeSha256": "6f0b8d9ed2da73bb8c2888292028b79b5badd96258713886fd6cceaf258ff6cf",
+        "path": "nltk/tag/hunpos.py"
+      },
+      {
+        "afterSha256": "f4a159fd631858c41d9246c9bfa66bbcbe46fdc0d3637b81e1a3d58275d9e4f9",
+        "beforeSha256": "9d619a5ce7533c7eb388a70fedca8dcf0fb78279e1744e2abfdfcca9abd459ea",
+        "path": "nltk/tag/perceptron.py"
+      },
+      {
+        "afterSha256": "572fa0553869110d54a85dd72fefa724a2c1020025a9c4c5f0612190d9eb2112",
+        "beforeSha256": "464e3ce29bddeb3846f576f0628d3f6e5e1f2cba18d1084440e69a91c4fb99a4",
+        "path": "nltk/tag/stanford.py"
+      }
+    ],
+    "filename": "backport.patch",
+    "sha256": "d5071d450b140c5d37ad5db59c05aa2b9542c62e92ff885739d425baf878c251"
+  },
+  "packageRoot": "nltk-3.10.3",
+  "preparationInputs": [
+    {
+      "commit": "a44a7af69bca87e92d9c4a701fcbbe4512e8d450",
+      "filename": "a44a7af69bca87e92d9c4a701fcbbe4512e8d450.patch",
+      "kind": "upstream-primary-patch",
+      "sha256": "c210fca0cdf8f25cc073ef02e9a543ebf617631881e5409b592c000c7cb27073",
+      "url": "https://github.com/nltk/nltk/commit/a44a7af69bca87e92d9c4a701fcbbe4512e8d450.patch"
+    },
+    {
+      "commit": "2a92b71827d754ae8920261e7ed0c4bb283ab2d7",
+      "filename": "2a92b71827d754ae8920261e7ed0c4bb283ab2d7.patch",
+      "kind": "upstream-primary-patch",
+      "sha256": "3458659449ae83d581438d5d147225b174f59243f660064c91e3630aa9353199",
+      "url": "https://github.com/nltk/nltk/commit/2a92b71827d754ae8920261e7ed0c4bb283ab2d7.patch"
+    },
+    {
+      "commit": "cbc98458b43de5f792f0382583c16df39e5c5117",
+      "filename": "cbc98458b43de5f792f0382583c16df39e5c5117.patch",
+      "kind": "upstream-primary-patch",
+      "sha256": "3245af7e1df564ad28cf80b0fe1bf221abfb10370500685227aa2e3fef01e081",
+      "url": "https://github.com/nltk/nltk/commit/cbc98458b43de5f792f0382583c16df39e5c5117.patch"
+    },
+    {
+      "commit": "bf51157389a6072c05ed8108947014506dda6c9d",
+      "filename": "bf51157389a6072c05ed8108947014506dda6c9d.patch",
+      "kind": "upstream-prerequisite-patch",
+      "sha256": "e53129557c9c01c6d9c2efabade57b7a0da126a0a911bddcae20d985c5f91dd1",
+      "url": "https://github.com/nltk/nltk/commit/bf51157389a6072c05ed8108947014506dda6c9d.patch"
+    },
+    {
+      "commit": "99ead96679eecec5a3b95fe6caaf2c1b29107b44",
+      "filename": "99ead96679eecec5a3b95fe6caaf2c1b29107b44.patch",
+      "kind": "upstream-prerequisite-patch",
+      "sha256": "0e4f3161b17338e4ec9360b7df305fa9f22f8b3d38f6a2093b8a661f84aef633",
+      "url": "https://github.com/nltk/nltk/commit/99ead96679eecec5a3b95fe6caaf2c1b29107b44.patch"
+    },
+    {
+      "commit": "f1329d82a2cab54cdba8471a042f2e2a9221797a",
+      "filename": "f1329d82a2cab54cdba8471a042f2e2a9221797a.patch",
+      "kind": "upstream-prerequisite-patch",
+      "sha256": "782afb416944834c90b44f1dd6fda99ae70936c8b1ad3c6e0ebdff207cae806b",
+      "url": "https://github.com/nltk/nltk/commit/f1329d82a2cab54cdba8471a042f2e2a9221797a.patch"
+    },
+    {
+      "commit": "1504cccb117714a117730586f2dfe3b29bb150fc",
+      "filename": "1504cccb117714a117730586f2dfe3b29bb150fc.patch",
+      "kind": "upstream-prerequisite-patch",
+      "sha256": "bc5302843ab650284fab3f5583293ad71a3dcf07c62e986eb063297956273b99",
+      "url": "https://github.com/nltk/nltk/commit/1504cccb117714a117730586f2dfe3b29bb150fc.patch"
+    },
+    {
+      "commit": "9e6d5f05902b9aaa1221a0a565448d17a9c9b3e8",
+      "filename": "9e6d5f05902b9aaa1221a0a565448d17a9c9b3e8.patch",
+      "kind": "upstream-prerequisite-patch",
+      "sha256": "56856e04857d8654ed38f4992455382146a7d9bcc16f600c2d59b0616527278d",
+      "url": "https://github.com/nltk/nltk/commit/9e6d5f05902b9aaa1221a0a565448d17a9c9b3e8.patch"
+    },
+    {
+      "commit": "deb6b530dcfb5f2e045dea549f9d9389bfb12d4e",
+      "filename": "data-deb6.py",
+      "kind": "upstream-parent-source",
+      "sha256": "590dacddc9adb85ee4add5a9190231dcbe7407f273893cbd9f02eeaa2fe5d670",
+      "url": "https://raw.githubusercontent.com/nltk/nltk/deb6b530dcfb5f2e045dea549f9d9389bfb12d4e/nltk/data.py"
+    },
+    {
+      "commit": "deb6b530dcfb5f2e045dea549f9d9389bfb12d4e",
+      "filename": "pathsec-deb6.py",
+      "kind": "upstream-parent-source",
+      "sha256": "1ef519870ab061d44452fd61cd903654bfb4069e58884d3f134ebbe44b46a99e",
+      "url": "https://raw.githubusercontent.com/nltk/nltk/deb6b530dcfb5f2e045dea549f9d9389bfb12d4e/nltk/pathsec.py"
+    }
+  ],
+  "releaseArtifacts": [
+    {
+      "filename": "nltk-3.10.3.tar.gz",
+      "role": "source",
+      "sha256": "bb9327a461c3811c2fa4900e03840401f2126adfb30c0072827c433bd2444ea4",
+      "url": "https://files.pythonhosted.org/packages/e0/e6/fe51d2bb1a3b446f59c5c8165999a9fee208bc346af90a7cbf7657bc0d75/nltk-3.10.3.tar.gz"
+    },
+    {
+      "filename": "nltk-3.10.3-py3-none-any.whl",
+      "role": "baseline-wheel",
+      "sha256": "ff9598a8e20518ee0d557745890cc4435b9578489e2dcbc69c4f81fa060caf7c",
+      "url": "https://files.pythonhosted.org/packages/b6/6d/ebd2af4640b12168fdf0cb74b6118df2f32a2f62ec7e0c06fbfd80706639/nltk-3.10.3-py3-none-any.whl"
+    }
+  ],
+  "schemaVersion": 1
+}

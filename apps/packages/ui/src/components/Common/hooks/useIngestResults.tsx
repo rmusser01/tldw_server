@@ -409,7 +409,7 @@ export function useIngestResults(deps: UseIngestResultsDeps) {
   const [draftCreationRetrying, setDraftCreationRetrying] = React.useState(false)
   const [reviewNavigationError, setReviewNavigationError] = React.useState<string | null>(null)
   const [reviewBatchId, setReviewBatchId] = React.useState<string | null>(null)
-  const [progressTick, setProgressTick] = React.useState<number>(0)
+  const [progressUpdatedAt, setProgressUpdatedAt] = React.useState(Date.now)
   const [lastRunProcessOnly, setLastRunProcessOnly] = React.useState(processOnly)
   const [resultsFilter, setResultsFilter] = React.useState<ResultsFilter>(RESULT_FILTERS.ALL)
 
@@ -425,10 +425,11 @@ export function useIngestResults(deps: UseIngestResultsDeps) {
 
   // Progress tick timer
   React.useEffect(() => {
+    setProgressUpdatedAt(Date.now())
     if (!runningProp) return
-    const id = window.setInterval(() => setProgressTick((t) => t + 1), 1000)
+    const id = window.setInterval(() => setProgressUpdatedAt(Date.now()), 1000)
     return () => window.clearInterval(id)
-  }, [runningProp])
+  }, [runningProp, runStartedAt])
 
   // Clean up on modal close
   React.useEffect(() => {
@@ -540,7 +541,7 @@ export function useIngestResults(deps: UseIngestResultsDeps) {
     const total = liveTotalCount || totalPlanned || 0
     const done = processedCount || results.length || 0
     const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0
-    const elapsedMs = runStartedAt ? Date.now() - runStartedAt : 0
+    const elapsedMs = runStartedAt ? progressUpdatedAt - runStartedAt : 0
     const elapsedLabel =
       elapsedMs > 0
         ? `${Math.floor(elapsedMs / 60000)}:${String(Math.floor((elapsedMs % 60000) / 1000)).padStart(2, '0')}`
@@ -556,7 +557,7 @@ export function useIngestResults(deps: UseIngestResultsDeps) {
               ? "complete"
               : "ready"
     return { total, done, pct, elapsedLabel, state, error: lastRunError }
-  }, [lastRunCancelled, lastRunError, liveTotalCount, processedCount, progressTick, results.length, runStartedAt, runningProp, totalPlanned])
+  }, [lastRunCancelled, lastRunError, liveTotalCount, processedCount, progressUpdatedAt, results.length, runStartedAt, runningProp, totalPlanned])
 
   // ---- results with outcome ----
   const resultsWithOutcome = React.useMemo(() => {

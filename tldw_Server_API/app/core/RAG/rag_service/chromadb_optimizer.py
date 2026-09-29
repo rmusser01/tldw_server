@@ -158,6 +158,7 @@ class ChromaDBOptimizer:
                 client = chromadb.PersistentClient(
                     path=path,
                     settings=Settings(
+                        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
                         anonymized_telemetry=False,
                         allow_reset=False
                     )
@@ -636,6 +637,7 @@ class OptimizedChromaStore:
         self.client = chromadb.PersistentClient(
             path=path,
             settings=Settings(
+                chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
                 anonymized_telemetry=False,
                 allow_reset=False
             )

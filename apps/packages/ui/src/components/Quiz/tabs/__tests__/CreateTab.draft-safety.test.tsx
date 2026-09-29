@@ -146,6 +146,18 @@ describe("CreateTab draft safety", () => {
     expect(event.defaultPrevented).toBe(true)
   })
 
+  it("timestamps drafts when the debounced save runs", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(1000)
+    render(<CreateTab onNavigateToTake={() => {}} />)
+    fireEvent.click(screen.getByRole("button", { name: /Add Your First Question/i }))
+    now.mockReturnValue(2000)
+
+    await waitFor(() => {
+      const saved = JSON.parse(window.localStorage.getItem("quiz-create-draft-v1") ?? "null")
+      expect(saved?.updatedAt).toBe(2000)
+    })
+  })
+
   it("shows storage warning when draft autosave cannot write", async () => {
     const storagePrototype = Object.getPrototypeOf(window.localStorage)
     const setItemSpy = vi

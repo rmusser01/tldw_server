@@ -29,8 +29,8 @@ PROMPT_TEMPLATES_DIR = (_BASE_DIR / "prompt_templates").resolve()
 if PROMPT_TEMPLATES_DIR.exists() and not PROMPT_TEMPLATES_DIR.is_dir():
     raise RuntimeError(f"Expected directory but found file at: {PROMPT_TEMPLATES_DIR}")
 
-# Create the directory if it doesn't exist
-PROMPT_TEMPLATES_DIR.mkdir(exist_ok=True)
+# Templates are optional read-only package data. An absent directory means no
+# file-backed templates; imports must also work in immutable installations.
 #
 #
 # Functions:
