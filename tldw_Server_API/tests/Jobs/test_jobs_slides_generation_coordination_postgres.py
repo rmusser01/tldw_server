@@ -103,9 +103,14 @@ def test_postgres_migration_adds_archive_indexes_shared_tables_and_narrow_uuid_c
         cur.execute("CREATE INDEX idx_jobs_archive_slides_scope ON jobs_archive(uuid)")
         cur.execute("CREATE UNIQUE INDEX idx_jobs_archive_uuid_unique ON jobs_archive(id)")
 
-    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
-    assert manager.get_slides_generation_readiness()["archive_indexes_ready"] is False
+    # Read the catalog directly: constructing a JobManager runs the migration,
+    # which would repair the indexes before readiness is checked.
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
+        assert slides_archive_indexes_ready_pg(cur) is False
     ensure_jobs_tables_pg(jobs_pg_dsn)
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
+        # The contract includes archived_at DESC; the check must see the sort order.
+        assert slides_archive_indexes_ready_pg(cur) is True
 
     with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
