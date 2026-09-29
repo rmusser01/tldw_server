@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-09-23 18:02'
-updated_date: '2026-09-29 15:46'
+updated_date: '2026-09-29 20:48'
 labels:
   - tooling
   - testing
@@ -91,6 +91,11 @@ Known local-only failures, identical on dev/0.136:
 No docs change beyond the helper's module docstring. Dependabot #2772 (to main, <0.142.0) is superseded by this.
 
 CORRECTION 2026-09-29 (Qodo on #3053): 'RG tag routing (include-time tags lost)' is wrong and was removed from the change. RGSimpleMiddleware derives its policy before routing, so scope['route'] is empty on 0.136 and on 0.141 alike, and the served_route_for_scope edit there was a no-op; middleware_simple.py is back to dev's version. The underlying gap is pre-existing: by_tag policies are never enforced, while the coverage and startup audits count them as protected. It is filed as TASK-13395 (owner decision). The new coverage-audit test now uses a by_path mapping, so it tests route visibility and does not assert tag enforcement.
+
+CORRECTION 2026-09-29 (CI on #3053): two earlier claims here were wrong.
+(1) 'Helper_Scripts/ci/route_auth_ratchet.py (already handles _IncludedRouter)': it handled one level only. effective_candidates() returns nested _IncludedRouter branches alongside route contexts, and its _route_facts gave those no path, so it skipped them. Every route two or more includes deep was invisible to the auth ratchet. That hid the two baselined audio routes (they read as stale), and it would equally have hidden a new unauthenticated nested route.
+(2) The 'known local-only failure' of route_auth_ratchet reporting GET /api/v1/audio/stream/status and /transcriptions/health stale was this same blind spot, not an environment where the audio router does not mount.
+Fix: iter_routes now walks iter_served_routes and yields API routes only. A new test puts an authenticated route two includes deep; it fails on the old walk. The ratchet passes locally (rc 0, baseline unchanged, so no hidden unauthenticated routes surfaced), and tests/lint/test_route_auth_ratchet.py has 11 passing.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
