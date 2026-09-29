@@ -1,6 +1,7 @@
 """Real verifier paths rank evidence enums by authority, not object ordering."""
 
 import asyncio
+from typing import Any
 
 import pytest
 from hypothesis import given, settings
@@ -8,6 +9,7 @@ from hypothesis import strategies as st
 
 from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
     Claim,
+    ClaimVerification,
     HybridClaimVerifier,
 )
 from tldw_Server_API.app.core.RAG.rag_service.types import (
@@ -27,8 +29,11 @@ METADATA_BY_RANK = {
 }
 
 
-async def verify_ranks(ranks, mode):
-    def analyze(*args, **kwargs):
+async def verify_ranks(ranks: list[int], mode: str) -> ClaimVerification:
+    """Exercise authority selection with controlled external inference."""
+
+    def analyze(*args: Any, **kwargs: Any) -> str:
+        """Return supported evidence for either verifier mode."""
         return '{"label":"supported","confidence":0.99,"rationale":"Evidence supports claim."}'
 
     verifier = HybridClaimVerifier(analyze)
@@ -63,7 +68,7 @@ async def verify_ranks(ranks, mode):
         ([4, 2, 3], SourceAuthority.GOVERNMENT),
     ],
 )
-def test_verifier_preserves_highest_authority_enum(ranks, expected, mode):
+def test_verifier_preserves_highest_authority_enum(ranks: list[int], expected: SourceAuthority, mode: str) -> None:
     result = asyncio.run(verify_ranks(ranks, mode))
     assert result.source_authority is expected
     if ranks:
@@ -76,7 +81,7 @@ def test_verifier_preserves_highest_authority_enum(ranks, expected, mode):
     st.lists(st.integers(min_value=1, max_value=5), min_size=1, max_size=3),
     st.sampled_from(["llm", "nli"]),
 )
-def test_authority_rank_is_order_independent(ranks, mode):
+def test_authority_rank_is_order_independent(ranks: list[int], mode: str) -> None:
     forward = asyncio.run(verify_ranks(ranks, mode))
     reverse = asyncio.run(verify_ranks(list(reversed(ranks)), mode))
     assert forward.source_authority.value == max(ranks)

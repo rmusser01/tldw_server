@@ -1,6 +1,9 @@
 """Generated quizzes must honor the selected question types before persistence."""
 
 import json
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -14,10 +17,12 @@ from tldw_Server_API.app.core.exceptions import QuizMalformedOutputError
 from tldw_Server_API.app.services import quiz_generator
 
 pytestmark = pytest.mark.integration
+QuizContext = tuple[CharactersRAGDB, dict[str, Any], dict[str, Any]]
 
 
 @pytest.fixture
-def quiz_context(tmp_path, monkeypatch):
+def quiz_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[QuizContext]:
+    """Provide real databases and a source-grounded model response."""
     monkeypatch.setenv("TEST_MODE", "0")
     db = CharactersRAGDB(str(tmp_path / "quizzes.db"), client_id="type-fidelity-test")
     media_db = MediaDatabase(str(tmp_path / "media.db"), client_id="type-fidelity-test")
@@ -53,11 +58,13 @@ def quiz_context(tmp_path, monkeypatch):
     media_db.close_connection()
 
 
-def completion(payload):
+def completion(payload: dict[str, Any]) -> dict[str, Any]:
+    """Wrap generated JSON in the provider completion format."""
     return {"choices": [{"message": {"content": json.dumps(payload)}}]}
 
 
-def grounded_verifier():
+def grounded_verifier() -> AsyncMock:
+    """Stub external claims inference without bypassing quiz persistence."""
     return AsyncMock(
         return_value=ArtifactVerificationResult(verdict="grounded", report={}, unit_results=[], metadata={})
     )
@@ -65,7 +72,9 @@ def grounded_verifier():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bad_type", ["fill_blank", "unrecognized", None])
-async def test_unselected_raw_type_fails_before_claims_or_persistence(quiz_context, monkeypatch, bad_type):
+async def test_unselected_raw_type_fails_before_claims_or_persistence(
+    quiz_context: QuizContext, monkeypatch: pytest.MonkeyPatch, bad_type: str | None
+) -> None:
     db, args, payload = quiz_context
     args["question_types"] = ["multiple_choice", "true_false"]
     payload["questions"].append({"question_type": bad_type, "question_text": "Extra item"})
@@ -81,7 +90,9 @@ async def test_unselected_raw_type_fails_before_claims_or_persistence(quiz_conte
 
 
 @pytest.mark.asyncio
-async def test_legacy_selection_allows_any_selected_type_when_count_is_smaller(quiz_context, monkeypatch):
+async def test_legacy_selection_allows_any_selected_type_when_count_is_smaller(
+    quiz_context: QuizContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db, args, payload = quiz_context
     args["question_types"] = ["multiple_choice", "true_false"]
     payload["questions"][0].update(
@@ -101,6 +112,8 @@ async def test_legacy_selection_allows_any_selected_type_when_count_is_smaller(q
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("planned", [False, True])
+@pytest.mark.parametrize("profile", ["standard_recall", "mixed_assessment"])
 @pytest.mark.parametrize(
     ("question_type", "answer"),
     [
@@ -108,14 +121,25 @@ async def test_legacy_selection_allows_any_selected_type_when_count_is_smaller(q
         ("matching", {"A": "one", "B": "two", "C": "three", "D": "four"}),
     ],
 )
-async def test_legacy_advanced_type_persists(quiz_context, monkeypatch, question_type, answer):
+async def test_advanced_type_persists_normalized_tags(
+    quiz_context: QuizContext,
+    monkeypatch: pytest.MonkeyPatch,
+    question_type: str,
+    answer: list[int] | dict[str, str],
+    planned: bool,
+    profile: str,
+) -> None:
     db, args, payload = quiz_context
     args["question_types"] = [question_type]
+    args["generation_profile"] = profile
+    if planned:
+        args["question_plan"] = [{"question_type": question_type, "count": 1}]
     payload["questions"][0].update(
         question_type=question_type,
         question_text="Which source terms match?",
         options=["A", "B", "C", "D"],
         correct_answer=answer,
+        tags=[" trial ", "TRIAL", "duration", "best-of-five", "assertion reasoning", ""],
     )
     monkeypatch.setattr(quiz_generator, "_call_quiz_generation_llm", AsyncMock(return_value=completion(payload)))
     monkeypatch.setattr(quiz_generator, "_verify_quiz_questions_against_sources", grounded_verifier())
@@ -124,11 +148,14 @@ async def test_legacy_advanced_type_persists(quiz_context, monkeypatch, question
 
     assert result["questions"][0]["question_type"] == question_type
     assert result["questions"][0]["correct_answer"] == answer
+    assert result["questions"][0]["tags"] == ["trial", "duration"]
     assert db.list_quizzes(limit=10, offset=0)["count"] == 1
 
 
 @pytest.mark.asyncio
-async def test_qualified_selected_citation_is_stored_with_canonical_source_id(quiz_context, monkeypatch):
+async def test_qualified_selected_citation_is_stored_with_canonical_source_id(
+    quiz_context: QuizContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db, args, payload = quiz_context
     source_id = str(args["sources"][0]["source_id"])
     payload["questions"][0]["source_citations"][0]["source_id"] = f"note:{source_id}"
@@ -143,7 +170,9 @@ async def test_qualified_selected_citation_is_stored_with_canonical_source_id(qu
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("source_type", ["note", "media"])
-async def test_qualified_unselected_citation_is_rejected_before_persistence(quiz_context, monkeypatch, source_type):
+async def test_qualified_unselected_citation_is_rejected_before_persistence(
+    quiz_context: QuizContext, monkeypatch: pytest.MonkeyPatch, source_type: str
+) -> None:
     db, args, payload = quiz_context
     source_id = str(args["sources"][0]["source_id"])
     payload["questions"][0]["source_citations"][0].update(
@@ -162,7 +191,9 @@ async def test_qualified_unselected_citation_is_rejected_before_persistence(quiz
 
 
 @pytest.mark.asyncio
-async def test_token_limited_reasoning_response_reports_exhaustion(quiz_context, monkeypatch):
+async def test_token_limited_reasoning_response_reports_exhaustion(
+    quiz_context: QuizContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
     db, args, _ = quiz_context
     response = {
         "choices": [

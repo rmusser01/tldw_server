@@ -765,6 +765,7 @@ def _normalize_planned_question(
     default_source_type: str = "media",
     default_source_id: str = "generated",
 ) -> dict[str, Any]:
+    """Validate a standard/mixed-profile question against its planned shape."""
     if not isinstance(raw, dict):
         raise ValueError("Generated question must be an object")
     q_type = _normalize_question_type(raw.get("question_type"))
@@ -812,7 +813,7 @@ def _normalize_planned_question(
     except (TypeError, ValueError):
         hint_penalty_points = 0
 
-    return {
+    question_payload = {
         "question_type": q_type,
         "question_text": question_text,
         "options": options,
@@ -827,6 +828,10 @@ def _normalize_planned_question(
         ),
         "points": points_val if points_val >= 0 else 1,
     }
+    tags = _coerce_question_tags(raw.get("tags"), generation_profile=DEFAULT_GENERATION_PROFILE)
+    if tags:
+        question_payload["tags"] = tags
+    return question_payload
 
 
 _QUESTION_TYPE_RULES = {
@@ -843,6 +848,7 @@ def _question_shape_example(
     plan_item: dict[str, Any],
     profile_id: str,
 ) -> dict[str, Any]:
+    """Build a prompt example using the plan's counts and the profile's required fields."""
     example: dict[str, Any] = {"question_type": q_type}
     if q_type in {"multiple_choice", "multi_select"}:
         option_count = int(plan_item.get("option_count", 5 if profile_id == "best_of_five" else 4))

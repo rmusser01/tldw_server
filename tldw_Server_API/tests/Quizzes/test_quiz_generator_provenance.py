@@ -53,7 +53,7 @@ def test_accepts_valid_citations_for_selected_sources():
     source_type=st.sampled_from(["note", "media", "flashcard_deck", "flashcard_card"]),
     source_id=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789:-_", min_size=1, max_size=40),
 )
-def test_qualified_selected_ids_canonicalize_without_changing_identity(source_type, source_id):
+def test_qualified_selected_ids_canonicalize_without_changing_identity(source_type: str, source_id: str) -> None:
     selected = [{"source_type": source_type, "source_id": source_id}]
     questions = [{"source_citations": [{"source_type": source_type, "source_id": f"{source_type}:{source_id}"}]}]
 
@@ -63,7 +63,7 @@ def test_qualified_selected_ids_canonicalize_without_changing_identity(source_ty
     _validate_strict_provenance(questions, selected)
 
 
-def test_exact_selected_id_containing_type_prefix_is_not_stripped():
+def test_exact_selected_id_containing_type_prefix_is_not_stripped() -> None:
     citation = {"source_type": "note", "source_id": "note:n1"}
 
     _canonicalize_selected_source_citations(
@@ -73,7 +73,7 @@ def test_exact_selected_id_containing_type_prefix_is_not_stripped():
     assert citation["source_id"] == "note:n1"
 
 
-def test_qualified_citation_cannot_change_source_type():
+def test_qualified_citation_cannot_change_source_type() -> None:
     questions = [{"source_citations": [{"source_type": "media", "source_id": "media:59"}]}]
     selected = [{"source_type": "note", "source_id": "59"}]
 
@@ -83,7 +83,7 @@ def test_qualified_citation_cannot_change_source_type():
         _validate_strict_provenance(questions, selected)
 
 
-def test_qualified_media_citation_retains_numeric_media_reference():
+def test_qualified_media_citation_retains_numeric_media_reference() -> None:
     citation = {"source_type": "media", "source_id": "media:59"}
 
     _canonicalize_selected_source_citations(

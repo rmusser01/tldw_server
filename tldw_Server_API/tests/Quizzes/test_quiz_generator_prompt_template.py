@@ -26,7 +26,7 @@ def test_profile_normalization_accepts_available_osce_profile():
     assert quiz_generator._normalize_generation_profile("osce") == "osce_scenario"
 
 
-def test_quiz_generation_prompt_formats_with_literal_citation_object():
+def test_quiz_generation_prompt_formats_with_literal_citation_object() -> None:
     rendered_prompt = quiz_generator._format_quiz_generation_prompt(
         num_questions=3,
         content="Sample content",
@@ -46,7 +46,7 @@ def test_quiz_generation_prompt_formats_with_literal_citation_object():
     assert "{content}" not in rendered_prompt
 
 
-def test_quiz_prompt_gives_canonical_citation_field_pairs():
+def test_quiz_prompt_gives_canonical_citation_field_pairs() -> None:
     source_contract = quiz_generator._build_source_contract(
         [
             {"source_type": "media", "source_id": "59"},
@@ -67,7 +67,7 @@ def test_quiz_prompt_gives_canonical_citation_field_pairs():
     assert '"source_id": "media:59"' not in rendered_prompt
 
 
-def test_source_contract_preserves_existing_prefix_in_canonical_id():
+def test_source_contract_preserves_existing_prefix_in_canonical_id() -> None:
     contract = quiz_generator._build_source_contract([{"source_type": "note", "source_id": "note:n1"}])
 
     assert '"source_id": "note:n1"' in contract
@@ -122,7 +122,9 @@ def test_quiz_generation_prompt_includes_all_planned_question_shapes():
         ),
     ],
 )
-def test_planned_prompt_examples_obey_selected_option_and_pair_counts(plan_item, expected_shape, forbidden_shape):
+def test_planned_prompt_examples_obey_selected_option_and_pair_counts(
+    plan_item: dict[str, Any], expected_shape: str, forbidden_shape: str
+) -> None:
     rendered_prompt = quiz_generator._format_quiz_generation_prompt(
         num_questions=1,
         content="Sample content",
@@ -148,7 +150,7 @@ def test_planned_prompt_examples_obey_selected_option_and_pair_counts(plan_item,
         ["multiple_choice", "true_false"],
     ],
 )
-def test_quiz_prompt_advertises_only_selected_question_shapes(selected_types):
+def test_quiz_prompt_advertises_only_selected_question_shapes(selected_types: list[str]) -> None:
     rendered_prompt = quiz_generator._format_quiz_generation_prompt(
         num_questions=1,
         content="The trial lasted 14 days.",
@@ -176,7 +178,7 @@ def test_quiz_prompt_advertises_only_selected_question_shapes(selected_types):
         )
     ],
 )
-def test_prompt_shape_choices_equal_selected_types_for_any_subset(selected_types):
+def test_prompt_shape_choices_equal_selected_types_for_any_subset(selected_types: list[str]) -> None:
     rendered_prompt = quiz_generator._format_quiz_generation_prompt(
         num_questions=1,
         content="Source evidence",
@@ -195,7 +197,7 @@ def test_prompt_shape_choices_equal_selected_types_for_any_subset(selected_types
 
 
 @pytest.mark.parametrize("profile", ["best_of_five", "emq", "assertion_reasoning"])
-def test_quiz_prompt_preserves_locked_profile_instructions(profile):
+def test_quiz_prompt_preserves_locked_profile_instructions(profile: str) -> None:
     rendered_prompt = quiz_generator._format_quiz_generation_prompt(
         num_questions=2,
         content="The trial lasted 14 days.",
@@ -222,7 +224,7 @@ def test_quiz_prompt_preserves_locked_profile_instructions(profile):
 
 
 @pytest.mark.parametrize("q_type", ["multi_select", "matching"])
-def test_legacy_advanced_question_type_is_normalized(q_type):
+def test_legacy_advanced_question_type_is_normalized(q_type: str) -> None:
     raw = {
         "question_type": q_type,
         "question_text": "Which terms match the source?",
@@ -341,7 +343,7 @@ def test_assertion_reasoning_profile_exposes_mcq_prompt_contract():
     assert "Do not provide hidden chain-of-thought" in instruction
 
 
-def test_assertion_reasoning_prompt_supports_required_fields_and_rules():
+def test_assertion_reasoning_prompt_supports_required_fields_and_rules() -> None:
     rendered_prompt = quiz_generator._format_quiz_generation_prompt(
         num_questions=1,
         content="Sample content",

@@ -130,6 +130,24 @@ run remains 641 passed/4 skipped; it was not repeated for this refresh.
 ADR check: no new ADR is required because this refresh preserves the existing
 generation, provenance, and module-boundary rules.
 
+## Qodo Follow-up (2026-09-29)
+
+TASK-12020.64 addresses all three findings on head `11bf4a133d`. Eight real-DB
+regressions reproduced missing tags for legacy and explicit-plan multi-select
+and matching questions across both standard and mixed profiles. The shared
+normalizer now uses existing tag coercion, preserving ordinary tags while
+deduplicating and filtering reserved profile tags. The prompt-shape helper is
+documented; new Python regression functions and helpers have type annotations.
+
+The focused plan/profile/prompt/provenance/claims suite passed 126 tests with
+four dependency warnings (`/tmp/task12020_64_regressions.log`). Ruff, test-file
+Black, and scoped Bandit passed; test Bandit excludes only ordinary assertions
+(B101). The prior full-application llama.cpp run is not a fresh tag-specific
+browser test: this follow-up verifies tags through actual database persistence,
+with external inference stubbed. Hosted final-head CI and re-review remain
+pending. ADR required: no; this restores existing metadata behavior without
+changing architecture or claims-verification policy.
+
 ## Separate Verifier Finding
 
 Two live runs with the same model failed closed at claims verification: a quiz
