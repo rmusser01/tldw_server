@@ -132,6 +132,7 @@ Files: this plan, `Docs/Reviews/UAT_ENGINEERING_SWEEP_COVERAGE_2026_09_21.md`, `
 - [ ] TASK13260.278.18.82.5: use a current UTC clock for Notes attachment upload integration tests; full module passes 32 with zero skips, native Ubuntu rerun pending.
 - [ ] TASK13260.278.18.82.6: align Notes Studio fault, task graph scope and folder conflict stub with current contracts; two affected modules pass 90 with zero skips, native Ubuntu rerun pending.
 - [ ] TASK13260.278.18.82.7: create reviewed active Persona Visual fixture packs; two affected modules pass 18 with zero skips, native Ubuntu rerun pending.
+- [ ] TASK13260.278.18.82.8: await the startup admission gate after the third reconciliation call; affected module passes 63 with zero skips, native Windows rerun pending.
 - [ ] Treat paper-search's PostgreSQL image `unknown blob` as unexecuted; require a real rerun before acceptance.
 - [ ] Maintain the latest-dev base: rebase checkpoint onto `e5186a28d9` preserved all 136 prior commits by range-diff; repeat after further upstream changes before publishing.
 - [ ] Attribute the AuthNZ property `too_slow` outlier before changing its strategy or health checks; the official PostgreSQL focused test passes locally and hosted rerun remains open.
