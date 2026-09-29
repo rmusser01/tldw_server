@@ -2534,7 +2534,7 @@ class PersonaStateStore:
             bool(include_deleted_personas),
             deleted_false,
         )
-        cursor = self.execute_query(query, params)
+        cursor = self.execute_query(query, params, read_only=True)
         return self._persona_visual_pack_row_to_dict(cursor.fetchone())
 
     def get_persona_visual_pack_for_user(
@@ -2560,6 +2560,7 @@ class PersonaStateStore:
         cursor = self.execute_query(
             query,
             (pack_id, user_id, deleted_false, deleted_false),
+            read_only=True,
         )
         return self._persona_visual_pack_row_to_dict(cursor.fetchone())
 
@@ -2599,7 +2600,7 @@ class PersonaStateStore:
             max(1, int(limit)),
             max(0, int(offset)),
         )
-        cursor = self.execute_query(query, params)
+        cursor = self.execute_query(query, params, read_only=True)
         return [
             item
             for row in cursor.fetchall()
@@ -2635,6 +2636,7 @@ class PersonaStateStore:
                 deleted_false,
                 deleted_false,
             ),
+            read_only=True,
         )
         pack = self._persona_visual_pack_row_to_dict(cursor.fetchone())
         if not pack:

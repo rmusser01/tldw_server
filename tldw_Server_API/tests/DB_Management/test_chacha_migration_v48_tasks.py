@@ -7,30 +7,24 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 pytestmark = pytest.mark.unit
 
 
-def test_sqlite_migration_adds_task_tables(tmp_path) -> None:
+def test_sqlite_migration_adds_task_tables(tmp_path, monkeypatch) -> None:
     db_path = tmp_path / "tasks.db"
-    db = CharactersRAGDB(db_path=str(db_path), client_id="bootstrap")
-    db.close_connection()
+    # Seed a genuine v47 DB. Dropping the task tables from a current-schema DB is
+    # not a real predecessor: later steps depend on the catalog they left behind
+    # (v55->v56's note_graph_suggestion_evidence FK needs uq_notes_owner_id).
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 47)
+        db = CharactersRAGDB(db_path=str(db_path), client_id="bootstrap")
+        db.close_connection()
 
     with sqlite3.connect(db_path) as conn:
-        for table in (
-            "note_attachments",
-            "note_task_scope_authority",
-            "task_projection_drifts",
-            "task_event_read_state",
-            "task_note_projections",
-            "task_events",
-            "note_task_reconciliation_state",
-            "note_tasks",
-            "tasks",
-        ):
-            conn.execute(f"DROP TABLE IF EXISTS {table}")  # nosec B608 - test-only fixed table list
-        conn.execute("DROP INDEX IF EXISTS uq_notes_owner_id")
-        conn.execute(
-            "UPDATE db_schema_version SET version = ? WHERE schema_name = ?",
-            (47, CharactersRAGDB._SCHEMA_NAME),
-        )
-        conn.commit()
+        assert conn.execute(  # nosec B101
+            "SELECT version FROM db_schema_version WHERE schema_name = ?",
+            (CharactersRAGDB._SCHEMA_NAME,),
+        ).fetchone()[0] == 47
+        assert conn.execute(  # nosec B101
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'note_tasks'"
+        ).fetchone() is None
 
     migrated = CharactersRAGDB(db_path=str(db_path), client_id="migrate")
     migrated.close_connection()

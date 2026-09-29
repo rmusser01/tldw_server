@@ -728,6 +728,34 @@ async def test_extract_failure_cleanup_preserves_replaced_output_inode(
     assert output.read_bytes() == replacement
 
 
+@pytest.mark.unit
+def test_output_cleanup_preserves_replacement_that_reused_the_inode(tmp_path: Path) -> None:
+    """Linux reuses a freed inode at once; identity alone must not authorize unlink."""
+    from tldw_Server_API.app.core.Admin_Webhooks import legacy_import as legacy_import_module
+
+    output = tmp_path / "extraction.json"
+    evidence = legacy_import_module._publish_exclusive_output(output, b"extracted-by-us")
+    # Stand-in for an unlink + recreate that got the same dev:inode back.
+    os.chmod(output, 0o600)
+    output.write_bytes(b"replacement-owned-by-another-process")
+    assert f"{output.stat().st_dev}:{output.stat().st_ino}" == evidence.identity
+
+    legacy_import_module._remove_published_output_if_same(
+        output,
+        evidence,
+        expected_payload=b"extracted-by-us",
+    )
+    assert output.read_bytes() == b"replacement-owned-by-another-process"
+
+    output.write_bytes(b"extracted-by-us")
+    legacy_import_module._remove_published_output_if_same(
+        output,
+        evidence,
+        expected_payload=b"extracted-by-us",
+    )
+    assert not output.exists()
+
+
 @pytest.mark.parametrize("closing_action", ["activity", "retirement"])
 @pytest.mark.unit
 async def test_extract_holds_migration_lock_through_plaintext_publication(

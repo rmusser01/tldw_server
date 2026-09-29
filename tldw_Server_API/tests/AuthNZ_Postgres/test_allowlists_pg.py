@@ -1,5 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
 @pytest.mark.integration
@@ -66,12 +67,7 @@ async def test_provider_model_allowlists_postgres(test_db_pool, monkeypatch):
     monkeypatch.setattr(user_db_handling, "get_api_key_manager", _get_mgr_override)
 
     # Insert user
-    import uuid
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()), "vkpg", "vkpg@example.com", "x",
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "vkpg")
+    user_id = await ensure_test_user(pool, "vkpg", "vkpg@example.com")
 
     # Create virtual key with allowlists
     res = await mgr.create_virtual_key(
@@ -156,12 +152,7 @@ async def test_missing_provider_header_allows_when_allowlist_present_postgres(te
     )
 
     # Insert user
-    import uuid
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()), "vkpg-missing", "vkpg-missing@example.com", "x",
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "vkpg-missing")
+    user_id = await ensure_test_user(pool, "vkpg-missing", "vkpg-missing@example.com")
 
     # Create virtual key with provider/model allowlists
     mgr = APIKeyManager(pool)
@@ -211,12 +202,7 @@ async def test_non_json_body_skips_model_enforcement_postgres(test_db_pool, monk
     app_settings['CSRF_ENABLED'] = False
 
     # Insert user
-    import uuid
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()), "vkpg-nonjson", "vkpg-nonjson@example.com", "x",
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "vkpg-nonjson")
+    user_id = await ensure_test_user(pool, "vkpg-nonjson", "vkpg-nonjson@example.com")
 
     mgr = APIKeyManager(pool)
     await mgr.initialize()
@@ -269,12 +255,7 @@ async def test_invalid_json_body_skips_model_enforcement_postgres(test_db_pool, 
     app_settings['CSRF_ENABLED'] = False
 
     # Insert user
-    import uuid
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()), "vkpg-badjson", "vkpg-badjson@example.com", "x",
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "vkpg-badjson")
+    user_id = await ensure_test_user(pool, "vkpg-badjson", "vkpg-badjson@example.com")
 
     mgr = APIKeyManager(pool)
     await mgr.initialize()

@@ -79,6 +79,13 @@ CREATE TABLE keyword_collections(
   deleted BOOLEAN NOT NULL DEFAULT 0
 );
 
+CREATE TABLE note_keywords(
+  note_id    TEXT    NOT NULL REFERENCES notes(id)    ON DELETE CASCADE ON UPDATE CASCADE,
+  keyword_id INTEGER NOT NULL REFERENCES keywords(id) ON DELETE CASCADE ON UPDATE CASCADE,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(note_id, keyword_id)
+);
+
 CREATE TABLE flashcards(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   front TEXT,
@@ -120,6 +127,9 @@ CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(title, content, content=
 CREATE VIRTUAL TABLE IF NOT EXISTS flashcards_fts USING fts5(front, back, notes, content='flashcards', content_rowid='id');
 """
     )
+    # Every real v9 DB has note_keywords (v4 base) and note_edges (v8->v9); the
+    # v57->v58 notes-graph step (ed5da5ffff) reads both.
+    conn.executescript(CharactersRAGDB._MIGRATION_SQL_V8_TO_V9)
     conn.commit()
     conn.close()
 

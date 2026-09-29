@@ -12,7 +12,7 @@ build-backend = "setuptools.build_meta"
 name = "tldw-server"
 version = "0.1.45"
 description = "A comprehensive research assistant and media analysis platform - Too Long; Didn't Watch Server"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 readme = "README.md"
 # Use SPDX license expression as a string to avoid deprecation warnings.
 # Project is licensed under GPLv3.
@@ -24,7 +24,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Sound/Audio :: Analysis",
@@ -1814,7 +1813,7 @@ exclude = []
 known-first-party = ["tldw_Server_API"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true

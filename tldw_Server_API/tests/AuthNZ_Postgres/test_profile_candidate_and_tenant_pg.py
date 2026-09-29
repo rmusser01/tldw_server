@@ -11,6 +11,7 @@ from tldw_Server_API.app.api.v1.endpoints.admin.admin_tenant_provisioning import
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+from tldw_Server_API.tests.helpers.authnz_seed import unmanaged_authnz_pg_connection
 
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
@@ -86,6 +87,9 @@ async def test_postgres_candidate_validation_rejects_shadow_fk_and_missing_id_de
             is_postgres=True,
         )
 
+    # A shadow ``users`` table is out-of-band damage the guarded pool refuses
+    # to create, so fabricate it on an unmanaged connection and validate there.
+    async with unmanaged_authnz_pg_connection() as conn:
         transaction = conn.transaction()
         await transaction.start()
         try:
@@ -124,6 +128,7 @@ async def test_postgres_candidate_validation_rejects_shadow_fk_and_missing_id_de
         finally:
             await transaction.rollback()
 
+    async with test_db_pool.pool.acquire() as conn:
         transaction = conn.transaction()
         await transaction.start()
         try:

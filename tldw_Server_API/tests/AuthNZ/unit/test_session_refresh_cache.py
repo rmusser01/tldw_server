@@ -10,6 +10,7 @@ import pytest
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidSessionError, SessionError
 from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, reset_settings
 
@@ -430,24 +431,15 @@ async def test_refresh_session_concurrent_rotation_allows_single_winner(isolated
 
     try:
         # Ensure a user exists for FK constraints
-        async with pool.transaction() as conn:
-            await conn.execute(
-                """
-                INSERT INTO users (id, username, email, password_hash, is_active)
-                VALUES ($1, $2, $3, $4, TRUE)
-                """,
-                1,
-                "concurrency-user",
-                "concurrency-user@example.com",
-                "hashed-password",
-            )
+        # Seeded through UsersDB: profile_user_write_guard rejects raw users writes.
+        seeded_user_id = await ensure_test_user(pool, "concurrency-user", "concurrency-user@example.com", password_hash="hashed-password")
 
         jwt_service = JWTService(settings=settings)
-        original_access = jwt_service.create_access_token(user_id=1, username="concurrency-user", role="user")
-        original_refresh = jwt_service.create_refresh_token(user_id=1, username="concurrency-user")
+        original_access = jwt_service.create_access_token(user_id=seeded_user_id, username="concurrency-user", role="user")
+        original_refresh = jwt_service.create_refresh_token(user_id=seeded_user_id, username="concurrency-user")
 
         created = await manager.create_session(
-            user_id=1,
+            user_id=seeded_user_id,
             access_token=original_access,
             refresh_token=original_refresh,
             ip_address="127.0.0.1",
@@ -456,12 +448,12 @@ async def test_refresh_session_concurrent_rotation_allows_single_winner(isolated
         session_id = int(created["session_id"])
 
         token_pair_a = (
-            jwt_service.create_access_token(user_id=1, username="concurrency-user", role="user"),
-            jwt_service.create_refresh_token(user_id=1, username="concurrency-user"),
+            jwt_service.create_access_token(user_id=seeded_user_id, username="concurrency-user", role="user"),
+            jwt_service.create_refresh_token(user_id=seeded_user_id, username="concurrency-user"),
         )
         token_pair_b = (
-            jwt_service.create_access_token(user_id=1, username="concurrency-user", role="user"),
-            jwt_service.create_refresh_token(user_id=1, username="concurrency-user"),
+            jwt_service.create_access_token(user_id=seeded_user_id, username="concurrency-user", role="user"),
+            jwt_service.create_refresh_token(user_id=seeded_user_id, username="concurrency-user"),
         )
 
         async def _attempt_refresh(new_access: str, new_refresh: str) -> tuple[str, dict | None]:
@@ -607,24 +599,15 @@ async def test_refresh_session_survives_hmac_rotation(isolated_test_environment,
     manager_rotated: SessionManager | None = None
 
     # Ensure a user exists for FK constraints
-    async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (id, username, email, password_hash, is_active)
-            VALUES ($1, $2, $3, $4, TRUE)
-            """,
-            1,
-            "alice",
-            "alice@example.com",
-            "hashed-password",
-        )
+    # Seeded through UsersDB: profile_user_write_guard rejects raw users writes.
+    seeded_user_id = await ensure_test_user(pool, "alice", "alice@example.com", password_hash="hashed-password")
 
     jwt_old = JWTService(settings=old_settings)
-    access_token_old = jwt_old.create_access_token(user_id=1, username="alice", role="user")
-    refresh_token = jwt_old.create_refresh_token(user_id=1, username="alice")
+    access_token_old = jwt_old.create_access_token(user_id=seeded_user_id, username="alice", role="user")
+    refresh_token = jwt_old.create_refresh_token(user_id=seeded_user_id, username="alice")
 
     session_info = await manager_old.create_session(
-        user_id=1,
+        user_id=seeded_user_id,
         access_token=access_token_old,
         refresh_token=refresh_token,
         ip_address="127.0.0.1",
@@ -657,7 +640,7 @@ async def test_refresh_session_survives_hmac_rotation(isolated_test_environment,
         await manager_rotated.initialize()
 
         jwt_new = JWTService(settings=rotated_settings)
-        new_access_token = jwt_new.create_access_token(user_id=1, username="alice", role="user")
+        new_access_token = jwt_new.create_access_token(user_id=seeded_user_id, username="alice", role="user")
 
         candidate_hashes = manager_rotated._token_hash_candidates(refresh_token)
         assert candidate_hashes, "expected at least one hash candidate"
@@ -710,27 +693,18 @@ async def test_validate_session_persists_last_activity(isolated_test_environment
     await pool.initialize()
 
     # Ensure a user exists for FK constraints
-    async with pool.transaction() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (id, username, email, password_hash, is_active)
-            VALUES ($1, $2, $3, $4, TRUE)
-            """,
-            1,
-            "bob",
-            "bob@example.com",
-            "bob-hashed-password",
-        )
+    # Seeded through UsersDB: profile_user_write_guard rejects raw users writes.
+    seeded_user_id = await ensure_test_user(pool, "bob", "bob@example.com", password_hash="bob-hashed-password")
 
     manager = SessionManager(db_pool=pool, settings=settings)
     await manager.initialize()
 
     jwt_service = JWTService(settings=settings)
-    access_token = jwt_service.create_access_token(user_id=1, username="bob", role="user")
-    refresh_token = jwt_service.create_refresh_token(user_id=1, username="bob")
+    access_token = jwt_service.create_access_token(user_id=seeded_user_id, username="bob", role="user")
+    refresh_token = jwt_service.create_refresh_token(user_id=seeded_user_id, username="bob")
 
     session_info = await manager.create_session(
-        user_id=1,
+        user_id=seeded_user_id,
         access_token=access_token,
         refresh_token=refresh_token,
         ip_address="127.0.0.1",

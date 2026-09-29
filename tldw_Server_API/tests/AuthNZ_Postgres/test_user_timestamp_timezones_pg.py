@@ -5,6 +5,11 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tldw_Server_API.tests.helpers.authnz_seed import (
+    ensure_test_user,
+    unmanaged_authnz_pg_connection,
+)
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -18,17 +23,22 @@ async def test_user_timestamp_repair_allows_aware_setup_self_verify(test_db_pool
     )
 
     username = f"pg-setup-{uuid.uuid4().hex[:8]}"
-    await test_db_pool.execute(
-        """
-        INSERT INTO users (uuid, username, email, password_hash, is_active)
-        VALUES ($1, $2, $3, $4, TRUE)
-        """,
-        str(uuid.uuid4()),
-        username,
-        f"{username}@example.com",
-        "hash",
-    )
-    user_id = await test_db_pool.fetchval("SELECT id FROM users WHERE username = $1", username)
+    user_id = await ensure_test_user(test_db_pool, username, f"{username}@example.com")
+    # Seeding through UsersDB already repairs the schema, so put the legacy
+    # naive timestamp columns back the way an older release left them.
+    async with unmanaged_authnz_pg_connection() as conn:
+        for column in (
+            "created_at",
+            "updated_at",
+            "last_login",
+            "locked_until",
+            "email_verified_at",
+            "password_changed_at",
+        ):
+            await conn.execute(
+                f"ALTER TABLE users ALTER COLUMN {column} "
+                f"TYPE TIMESTAMP WITHOUT TIME ZONE USING {column} AT TIME ZONE 'UTC'"
+            )
     before_type = await test_db_pool.fetchval(
         """
         SELECT data_type
@@ -53,16 +63,20 @@ async def test_user_timestamp_repair_allows_aware_setup_self_verify(test_db_pool
     )
     assert after_type == "timestamp with time zone"
 
-    await mark_user_verified(
-        test_db_pool,
-        user_id=int(user_id),
-        now_utc=datetime(2026, 7, 5, 5, 25, 52, tzinfo=timezone.utc),
-    )
-    await update_user_last_login(
-        test_db_pool,
-        user_id=int(user_id),
-        now=datetime(2026, 7, 5, 6, 25, 52),
-    )
+    # Versioned users writes run on a transaction connection, as the
+    # endpoints' get_db_transaction dependency provides in production.
+    async with test_db_pool.transaction() as conn:
+        await mark_user_verified(
+            conn,
+            user_id=int(user_id),
+            now_utc=datetime(2026, 7, 5, 5, 25, 52, tzinfo=timezone.utc),
+        )
+    async with test_db_pool.transaction() as conn:
+        await update_user_last_login(
+            conn,
+            user_id=int(user_id),
+            now=datetime(2026, 7, 5, 6, 25, 52),
+        )
 
     row = await test_db_pool.fetchrow(
         "SELECT is_verified, updated_at, last_login FROM users WHERE id = $1",

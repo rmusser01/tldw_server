@@ -22,10 +22,12 @@ from tldw_Server_API.app.core.Persona.visual_service import (
 
 @pytest.mark.unit
 def test_pack_by_user_lookup_binds_postgres_false_values() -> None:
-    calls: list[tuple[str, tuple[object, ...]]] = []
+    calls: list[tuple[str, tuple[object, ...], bool]] = []
 
-    def execute_query(query: str, params: tuple[object, ...]) -> SimpleNamespace:
-        calls.append((query, params))
+    def execute_query(
+        query: str, params: tuple[object, ...], *, read_only: bool = False
+    ) -> SimpleNamespace:
+        calls.append((query, params, read_only))
         return SimpleNamespace(fetchone=lambda: {"id": "pack-1"})
 
     db = SimpleNamespace(
@@ -43,6 +45,8 @@ def test_pack_by_user_lookup_binds_postgres_false_values() -> None:
     assert "p.deleted = ?" in calls[0][0]
     assert "pp.deleted = ?" in calls[0][0]
     assert calls[0][1] == ("pack-1", "user-1", False, False)
+    # A standalone read must settle its own PostgreSQL transaction (a510d06256).
+    assert calls[0][2] is True
 
 
 @pytest.mark.integration

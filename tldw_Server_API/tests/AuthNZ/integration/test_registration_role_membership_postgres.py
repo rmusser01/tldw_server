@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import os
-from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 import asyncpg
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import RegistrationError
 from tldw_Server_API.app.services.registration_service import RegistrationService
 
@@ -18,17 +18,6 @@ class _PasswordService:
 
     def hash_password(self, _password: str) -> str:
         return "hashed-password"
-
-
-class _PostgresPool:
-    def __init__(self, pool) -> None:
-        self.pool = pool
-
-    @asynccontextmanager
-    async def transaction(self):
-        async with self.pool.acquire() as conn:
-            async with conn.transaction():
-                yield conn
 
 
 @pytest.mark.asyncio
@@ -62,7 +51,8 @@ async def test_unknown_registration_code_role_rolls_back_every_postgres_write(
             CHROMADB_BASE_PATH=None,
         )
         service = RegistrationService(
-            db_pool=_PostgresPool(pool),
+            # The managed pool: profile_user_write_guard only honours its connections.
+            db_pool=await get_db_pool(),
             password_service=_PasswordService(),
             settings=settings,
         )

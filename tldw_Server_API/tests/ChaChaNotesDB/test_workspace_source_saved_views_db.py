@@ -649,13 +649,22 @@ def test_raw_corrupt_unsupported_and_invalid_v1_rows_remain_retrievable(
         assert db.get_workspace_source_saved_view(OWNER_A, WORKSPACE_A, view_id)["state_json"] == state_json
 
 
-def test_real_v53_sqlite_database_migrates_additively_to_v54(db_path: Path) -> None:
+def test_real_v53_sqlite_database_migrates_additively_to_v54(db_path: Path, monkeypatch) -> None:
+    # Seed below v59: the v59 attachment registry migration fails closed on a
+    # pre-existing registry, so a current-schema seed can't be replayed from v53.
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 58)
     seed = CharactersRAGDB(db_path=db_path, client_id=OWNER_A)
-    seed.upsert_workspace(WORKSPACE_A, "Workspace A")
-    seed.add_workspace_source(
-        WORKSPACE_A,
-        {"id": "source-1", "media_id": 42, "title": "Source", "source_type": "pdf"},
-    )
+    # Current workspace APIs need post-v58 columns; seed the rows directly.
+    with seed.transaction() as conn:
+        conn.execute(
+            "INSERT INTO workspaces (id, name, client_id) VALUES (?, ?, ?)",
+            (WORKSPACE_A, "Workspace A", OWNER_A),
+        )
+        conn.execute(
+            "INSERT INTO workspace_sources (id, workspace_id, media_id, title, source_type) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("source-1", WORKSPACE_A, 42, "Source", "pdf"),
+        )
     original_table_sql = seed.execute_query(
         "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'workspace_sources'"
     ).fetchone()["sql"]
@@ -666,6 +675,7 @@ def test_real_v53_sqlite_database_migrates_additively_to_v54(db_path: Path) -> N
             (CharactersRAGDB._SCHEMA_NAME,),
         )
     seed.close_all_connections()
+    monkeypatch.undo()
 
     migrated = CharactersRAGDB(db_path=db_path, client_id=OWNER_A)
     try:
@@ -678,7 +688,7 @@ def test_real_v53_sqlite_database_migrates_additively_to_v54(db_path: Path) -> N
         ).fetchone()["sql"]
         source = migrated.get_workspace_source(WORKSPACE_A, "source-1")
 
-        assert version == 54
+        assert version == CharactersRAGDB._CURRENT_SCHEMA_VERSION
         assert migrated.backend.table_exists("workspace_source_saved_views")
         assert migrated_table_sql == original_table_sql
         assert source is not None and source["title"] == "Source"

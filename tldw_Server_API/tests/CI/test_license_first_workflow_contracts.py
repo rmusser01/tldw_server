@@ -88,14 +88,13 @@ ORIGINAL_JOB_NAMES = {
     "ci.yml": (
         "http-client-patch-guard",
         "syntax-check",
-        "preflight-python-311",
+        "preflight-python-312",
         "shard-coverage",
         "quickstart-dry-run",
         "lint",
         "frontend-lint",
         "wizard-tests",
         "changes",
-        "full-suite-linux-311-smoke",
         "full-suite-linux-312-shards",
         "full-suite-linux-312-summary",
         "full-suite-linux-313-shards",
@@ -138,7 +137,6 @@ ORIGINAL_JOB_NAMES = {
 }
 ORIGINAL_DEPENDENCIES = {
     ("backend-required.yml", "backend-required"): ("changes",),
-    ("ci.yml", "full-suite-linux-311-smoke"): ("lint", "syntax-check", "changes"),
     ("ci.yml", "full-suite-linux-312-shards"): ("lint", "syntax-check", "changes"),
     ("ci.yml", "full-suite-linux-312-summary"): ("full-suite-linux-312-shards", "changes"),
     ("ci.yml", "full-suite-linux-313-shards"): ("lint", "syntax-check", "changes"),
@@ -150,7 +148,6 @@ ORIGINAL_DEPENDENCIES = {
     ("ci.yml", "full-suite-os-313-release-shards"): ("lint", "syntax-check"),
     ("ci.yml", "character-chat-rate-limits"): (
         "full-suite-linux-312-summary",
-        "full-suite-linux-313-summary",
         "changes",
     ),
     ("container-build-check.yml", "container-build-check"): ("build",),
@@ -178,10 +175,9 @@ DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | {
     ("security-required.yml", "security-required"),
 }
 NON_ADMITTED_ROOT_JOBS = {
-    ("ci.yml", "preflight-python-311"),
+    ("ci.yml", "preflight-python-312"),
 }
 BACKEND_CHANGED_JOBS = {
-    "full-suite-linux-311-smoke",
     "full-suite-linux-312-shards",
     "full-suite-linux-312-summary",
     "full-suite-linux-313-shards",
@@ -191,6 +187,15 @@ BACKEND_CHANGED_JOBS = {
     "full-suite-windows-312-shards",
     "full-suite-windows-312-summary",
     "character-chat-rate-limits",
+}
+# Too many jobs to run on every PR; main pushes, releases and manual dispatch only.
+NON_PR_FULL_SUITE_JOBS = {
+    "full-suite-linux-313-shards",
+    "full-suite-linux-313-summary",
+    "full-suite-macos-312-shards",
+    "full-suite-macos-312-summary",
+    "full-suite-windows-312-shards",
+    "full-suite-windows-312-summary",
 }
 FETCH_DEPTH_CHECKOUTS = {
     ("backend-required.yml", "changes"),
@@ -433,6 +438,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
         "${{ needs.admission.outputs.head_sha || "
         "github.event.workflow_run.pull_requests[0].head.sha || github.sha }}"
     )
+    non_pr = "github.event_name != 'pull_request' && github.event_name != 'workflow_run'"
     backend_changed = (
         "(github.event_name != 'pull_request' && "
         "github.event_name != 'workflow_run') || "
@@ -485,6 +491,8 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 extra_condition = None
                 if name == "frontend-e2e-tiers.yml":
                     extra_condition = frontend_conditions[job_name]
+                elif name == "ci.yml" and job_name in NON_PR_FULL_SUITE_JOBS:
+                    extra_condition = non_pr
                 elif name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
                     extra_condition = backend_changed
                 elif (name, job_name) in {
@@ -533,13 +541,26 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
             else:
                 assert "admission" not in needs, (name, job_name)
                 assert "await_license" not in needs, (name, job_name)
-                if name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
-                    assert _normalized(job.get("if")) == _normalized(backend_changed), (name, job_name)
-                elif (name, job_name) == ("ci.yml", "full-suite-os-313-release-shards"):
+                # admission is skipped outside workflow_run, and an implicit success()
+                # skips a job with any skipped ancestor. Downstream jobs must opt out with
+                # always() and check each direct dependency themselves, or they silently
+                # never run on pull_request/push (the full-suite shards did exactly that).
+                dependencies_succeeded = "always() && !cancelled() && " + " && ".join(
+                    f"needs.{dependency}.result == 'success'" for dependency in needs
+                )
+                if name == "ci.yml" and (
+                    job_name in NON_PR_FULL_SUITE_JOBS
+                    or job_name == "full-suite-os-313-release-shards"
+                ):
                     assert _normalized(job.get("if")) == _normalized(
-                        "github.event_name != 'pull_request' && "
-                        "github.event_name != 'workflow_run'"
-                    )
+                        f"{dependencies_succeeded} && {non_pr}"
+                    ), (name, job_name)
+                elif name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
+                    assert _normalized(job.get("if")) == _normalized(
+                        f"{dependencies_succeeded} && ({backend_changed})"
+                    ), (name, job_name)
+                elif (name, job_name) == ("jobs-suite.yml", "jobs-postgres"):
+                    assert _normalized(job.get("if")) == _normalized(dependencies_succeeded)
                 elif (name, job_name) in {
                     ("coverage-required.yml", "coverage-required"),
                     ("e2e-required.yml", "e2e-required"),
@@ -571,7 +592,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 )
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 55
+    assert checkout_count == 54
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -611,8 +632,8 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     combined_text = "\n".join(text for _, text in workflows.values())
     assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
     assert combined_text.count("github.event.pull_request.number") == 27
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 55
-    assert combined_text.count("github.event.pull_request.head.sha") == 52
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 54
+    assert combined_text.count("github.event.pull_request.head.sha") == 51
     assert combined_text.count("github.event.pull_request.base.sha") == 5
     assert combined_text.count("needs.admission.outputs.base_sha") == 11
 
@@ -882,7 +903,7 @@ def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
                         save_condition.startswith("github.event_name!='workflow_run'&&")
                     )
 
-    assert setup_helper_count == 24
+    assert setup_helper_count == 23
     assert setup_python_cache_count == 1
     assert cache_save_count == 6
     assert cache_restore_count == 6
@@ -1116,6 +1137,29 @@ def test_helper_is_the_only_checked_out_program_and_owns_all_outputs() -> None:
     assert script.count('"${GITHUB_OUTPUT}"') == 1
     assert ">>" not in script
     assert _unquoted_shell_expansions(script) == []
+
+
+_FULL_SUITE_SUMMARIES = sorted(name for name in BACKEND_CHANGED_JOBS if name.endswith("-summary"))
+
+
+@pytest.mark.unit
+def test_every_full_suite_platform_has_a_summary() -> None:
+    """Linux 3.12/3.13, macOS and Windows each report through one summary job."""
+    assert len(_FULL_SUITE_SUMMARIES) == 4
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("summary", _FULL_SUITE_SUMMARIES, ids=_FULL_SUITE_SUMMARIES)
+def test_full_suite_summaries_fail_closed_on_skipped_shards(summary: str) -> None:
+    """A summary fails unless its shard job succeeded; "skipped" is not a pass.
+
+    A summary only runs when its shards were supposed to run, so a skipped shard
+    job means the suite never executed. Accepting "skipped" hid exactly that for weeks.
+    """
+    jobs = _load_ordinary_workflows()["ci.yml"][0]["jobs"]
+    script = "\n".join(step.get("run", "") for step in jobs[summary]["steps"])
+    assert 'if [ "$r" != "success" ]; then' in script
+    assert '"skipped"' not in script
 
 
 def test_backend_required_enforces_isolation_ratchets():

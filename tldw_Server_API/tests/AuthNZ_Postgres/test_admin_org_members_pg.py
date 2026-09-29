@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
 @pytest.mark.integration
@@ -77,22 +78,9 @@ async def test_admin_org_members_endpoints_postgres(test_db_pool):
     )
 
     # Insert admin and standard user
-    import uuid
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()), "pgadmin2", "pgadmin2@example.com", "x",
-    )
-    admin_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "pgadmin2")
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()), "pgbob", "pgbob@example.com", "x",
-    )
-    bob_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "pgbob")
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()), "pgcharlie", "pgcharlie@example.com", "x",
-    )
-    charlie_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "pgcharlie")
+    admin_id = await ensure_test_user(pool, "pgadmin2", "pgadmin2@example.com")
+    bob_id = await ensure_test_user(pool, "pgbob", "pgbob@example.com")
+    charlie_id = await ensure_test_user(pool, "pgcharlie", "pgcharlie@example.com")
 
     # Override auth principal with an admin user for claim-first RBAC
     async def _principal_override(request: Request) -> AuthPrincipal:  # type: ignore[override]

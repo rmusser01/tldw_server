@@ -57,6 +57,20 @@ OWNER = "owner-notes-link"
 CREATED_AT = "2026-08-10T12:00:00+00:00"
 
 
+def _seed_at_v59(db_path: Path) -> CharactersRAGDB:
+    """Open a DB whose schema authority stops at v59.
+
+    Later migrations verify their predecessor catalogs (e.g. v60's task check),
+    so rolling a current-schema DB back to v57 would not be a real predecessor.
+    """
+    original = CharactersRAGDB._CURRENT_SCHEMA_VERSION
+    CharactersRAGDB._CURRENT_SCHEMA_VERSION = 59
+    try:
+        return CharactersRAGDB(str(db_path), client_id=OWNER)
+    finally:
+        CharactersRAGDB._CURRENT_SCHEMA_VERSION = original
+
+
 def _replace_with_v57_edge_table(
     db_path: Path,
     *,
@@ -67,7 +81,7 @@ def _replace_with_v57_edge_table(
 
     source_id = "11111111-1111-4111-8111-111111111111"
     target_id = "22222222-2222-4222-8222-222222222222"
-    db = CharactersRAGDB(str(db_path), client_id=OWNER)
+    db = _seed_at_v59(db_path)
     try:
         for note_id, title in [(source_id, "Source"), (target_id, "Target")]:
             if db.get_note_by_id(note_id) is None:
@@ -140,7 +154,7 @@ def test_sqlite_v57_to_v58_normalizes_legacy_link_and_installs_graph_state(
     migrated = CharactersRAGDB(str(db_path), client_id=OWNER)
     try:
         with migrated.transaction() as conn:
-            assert migrated._get_db_version(conn) == 59
+            assert migrated._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
             row = conn.execute("SELECT * FROM note_edges").fetchone()
             assert row["label"] == "Related"
             assert json.loads(row["properties"]) == {"context": {"kind": "research"}}
@@ -230,7 +244,7 @@ def test_sqlite_v57_to_v58_normalizes_legacy_link_and_installs_graph_state(
     reopened = CharactersRAGDB(str(db_path), client_id=OWNER)
     try:
         with reopened.transaction() as conn:
-            assert reopened._get_db_version(conn) == 59
+            assert reopened._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
             assert conn.execute("SELECT COUNT(*) FROM note_edges").fetchone()[0] == 1
     finally:
         reopened.close_connection()
@@ -242,7 +256,7 @@ def test_sqlite_v57_to_v58_queues_existing_notes_for_projection_rebuild(
     db_path = tmp_path / "notes-link-v57-existing-notes.sqlite"
     source_id = "11111111-1111-4111-8111-111111111111"
     target_id = "22222222-2222-4222-8222-222222222222"
-    db = CharactersRAGDB(str(db_path), client_id=OWNER)
+    db = _seed_at_v59(db_path)
     try:
         db.add_note("Source", f"[[id:{target_id}]]", note_id=source_id)
         db.add_note("Target", "Body", note_id=target_id)
@@ -530,7 +544,7 @@ def test_sqlite_fresh_schema_is_current_and_canonical(tmp_path: Path) -> None:
     db = CharactersRAGDB(str(tmp_path / "fresh-current.sqlite"), client_id=OWNER)
     try:
         with db.transaction() as conn:
-            assert db._get_db_version(conn) == 59
+            assert db._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
             columns = {row[1] for row in conn.execute("PRAGMA table_info(note_edges)").fetchall()}
             assert {
                 "label",

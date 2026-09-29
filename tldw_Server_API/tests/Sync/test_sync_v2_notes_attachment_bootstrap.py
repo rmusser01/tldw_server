@@ -104,6 +104,9 @@ def _bootstrap_environment(
         id_factory=next_id,
         settings=SyncV2Settings(
             supports_attachments=True,
+            # _NOW is fixed in the past while the store enforces deadlines against its
+            # real now, so any TTL would already be expired. Expiry has its own module.
+            blob_upload_session_ttl_seconds=0,
             max_attachment_bytes=2 * 1024 * 1024,
             max_blob_bytes=2 * 1024 * 1024,
             max_chunk_bytes=64 * 1024,

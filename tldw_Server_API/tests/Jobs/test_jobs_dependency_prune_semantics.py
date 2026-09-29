@@ -870,8 +870,15 @@ def test_postgres_dependency_snapshot_migration_failure_fails_closed(
     try:
         with monkeypatch.context() as context:
             context.setattr(psycopg, "connect", failing_connect)
-            with pytest.raises(RuntimeError, match="dependency snapshot"):
+            # edb7322490 wraps required-migration failures in a generic message
+            # and keeps the original as the cause.
+            with pytest.raises(RuntimeError, match="required schema migration failed") as exc_info:
                 jobs_pg_migrations.ensure_jobs_tables_pg(jobs_pg_dsn)
+            chain, cause = [], exc_info.value
+            while cause is not None:
+                chain.append(str(cause))
+                cause = cause.__cause__
+            assert any("dependency snapshot" in message for message in chain), chain
     finally:
         jobs_pg_migrations.ensure_jobs_tables_pg(jobs_pg_dsn)
     assert injected.is_set()

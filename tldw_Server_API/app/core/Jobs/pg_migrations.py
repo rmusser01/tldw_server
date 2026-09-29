@@ -143,7 +143,12 @@ def _pg_archive_index_matches(
                index_state.indisunique AS is_unique,
                index_state.indnatts AS total_attributes,
                ARRAY(
+                 -- pg_get_indexdef(index, column) omits sort order, which lives in
+                 -- indoption (bit 1 = DESC); without it "archived_at DESC" never
+                 -- matched the contract and Slides coordination stayed unavailable.
                  SELECT pg_get_indexdef(index_state.indexrelid, position, TRUE)
+                        || CASE WHEN (index_state.indoption[position - 1] & 1) = 1
+                                THEN ' DESC' ELSE '' END
                  FROM generate_series(1, index_state.indnkeyatts) AS positions(position)
                  ORDER BY position
                ) AS key_columns,
@@ -1400,7 +1405,7 @@ def _audit_slides_generation_pg(cur) -> tuple[str | None, int]:
         """
         UPDATE slides_standalone_reconciliation
         SET diagnostic_code=%s, diagnostic_count=%s,
-            diagnostic_at=CASE WHEN %s IS NULL THEN NULL ELSE NOW() END
+            diagnostic_at=CASE WHEN %s::text IS NULL THEN NULL ELSE NOW() END
         WHERE singleton_id=1
         """,
         (diagnostic_code, diagnostic_count, diagnostic_code),

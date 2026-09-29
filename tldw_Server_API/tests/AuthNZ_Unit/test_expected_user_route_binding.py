@@ -36,8 +36,15 @@ def test_expected_user_guard_is_bound_only_to_scope_bound_routes() -> None:
 
     assert guarded_routes == {
         ("character-chat-sessions", "POST", "/"),
+        # da0f1cd3a3 (reviewed history selection) scope-binds session reads,
+        # settings and the history capture routes.
+        ("character-chat-sessions", "GET", "/{chat_id}"),
+        ("character-chat-sessions", "GET", "/{chat_id}/settings"),
+        ("character-chat-sessions", "PUT", "/{chat_id}/settings"),
         ("character-messages", "POST", "/chats/{chat_id}/messages"),
         ("chat", "POST", "/completions"),
+        ("chat", "POST", "/conversations/{conversation_id}/history/selection"),
+        ("chat", "POST", "/conversations/{conversation_id}/history/legacy-projection"),
         ("rag", "POST", "/api/v1/rag/search"),
         ("research", "POST", "/websearch"),
         ("service-prompts", "DELETE", "/service-prompts/{definition_id}"),

@@ -2172,7 +2172,7 @@ async def test_concurrent_tool_continuations_do_not_cross_results_or_marks(
         if not any(message.get("role") == "tool" for message in payload["messages"]):
             return _build_llm_response_with_tool_calls()
         ready[index].set()
-        assert release.wait(timeout=2.0)
+        assert release.wait(timeout=10.0)
         if index == 0:
             invalid_result = _late_continuation_response(
                 "nested_structured_error_and_text",
@@ -2282,21 +2282,23 @@ async def test_concurrent_tool_continuations_do_not_cross_results_or_marks(
     tasks = [asyncio.create_task(invoke(index)) for index in range(2)]
     try:
         observed = await asyncio.gather(
-            *(asyncio.to_thread(event.wait, 1.0) for event in ready)
+            # Readiness barriers only; generous so a loaded CI runner cannot fail
+            # the setup before the cross-request assertions run.
+            *(asyncio.to_thread(event.wait, 10.0) for event in ready)
         )
         assert observed == [True, True]
         release.set()
         await asyncio.gather(
-            *(asyncio.wait_for(event.wait(), 1.0) for event in mark_ready)
+            *(asyncio.wait_for(event.wait(), 10.0) for event in mark_ready)
         )
         assert marked == [[], []]
         assert all(task.done() is False for task in tasks)
 
         release_mark[1].set()
-        await asyncio.wait_for(mark_done[1].wait(), timeout=1.0)
+        await asyncio.wait_for(mark_done[1].wait(), timeout=10.0)
         assert marked == [[], ["openai"]]
         release_mark[0].set()
-        await asyncio.wait_for(mark_done[0].wait(), timeout=1.0)
+        await asyncio.wait_for(mark_done[0].wait(), timeout=10.0)
         bad_response, good_response = await asyncio.gather(*tasks)
     finally:
         release.set()
@@ -2500,7 +2502,7 @@ async def test_auto_continue_cancellation_drains_sync_adapter_before_exit(
         )
     )
     try:
-        assert await asyncio.to_thread(entered.wait, 1.0)
+        assert await asyncio.to_thread(entered.wait, 10.0)
         assert mark_attempts == ["openai"]
         assert marked == []
         task.cancel()

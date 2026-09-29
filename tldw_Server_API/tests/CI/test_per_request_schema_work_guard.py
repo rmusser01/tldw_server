@@ -72,7 +72,8 @@ def test_schema_verification_memo_is_keyed_per_database(tmp_path) -> None:
     """The memo must not let a different database skip verification.
 
     Keyed on path plus device/inode, so a database recreated at the same path
-    (test teardown, a restored backup) is verified again rather than trusted.
+    (test teardown, a restored backup) with a new inode is verified again rather
+    than trusted.
     """
     from tldw_Server_API.app.core.DB_Management.media_db.schema.backends.sqlite_helpers import (
         _schema_verification_key,
@@ -98,12 +99,18 @@ def test_schema_verification_memo_is_keyed_per_database(tmp_path) -> None:
     # A different target schema version must also miss the memo.
     assert _schema_verification_key(_Db(first), 2) != key_first
 
-    # Recreating the file at the same path changes the inode, so the memo misses.
+    # The key tracks the file's current device/inode, so a recreated database misses
+    # the memo whenever it gets a new inode. Linux filesystems commonly hand the freed
+    # inode straight back, so assert the keying rule rather than inode allocation.
     first.unlink()
     first.write_bytes(b"")
-    assert _schema_verification_key(_Db(first), 1) != key_first, (
-        "a recreated database must be verified again, not served from the memo"
-    )
+    recreated = first.stat()
+    assert _schema_verification_key(_Db(first), 1) == (
+        str(first),
+        1,
+        recreated.st_dev,
+        recreated.st_ino,
+    ), "a recreated database must be keyed by its own identity, not served from the memo"
 
 
 @pytest.mark.integration

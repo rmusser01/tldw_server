@@ -251,15 +251,29 @@ class SQLiteConnectionPool(ConnectionPool):
             raise
 
     def close_all(self) -> None:
-        """Close all connections in the pool."""
+        """Close the pool and the connections no other live thread is using.
+
+        Connections are thread-local and opened with ``check_same_thread=False``,
+        which does not serialize them: closing one from here while its owning
+        thread is mid-statement segfaults the interpreter (CI shutdown did this
+        to a background loop). This thread's connection and those of exited
+        threads close now; another live thread's connection is released from the
+        pool and closes when that thread drops it. New checkouts are refused.
+        """
+        current_thread_id = threading.get_ident()
         with self._lock:
             self._closed = True
-            for conn in self._connections.values():
-                if conn:
-                    try:
-                        conn.close()
-                    except (OSError, RuntimeError, sqlite3.Error) as e:
-                        logger.exception(f"Error closing connection: {e}")
+            for thread_id, conn in self._connections.items():
+                if not conn:
+                    continue
+                owner_ref = self._thread_refs.get(thread_id)
+                owner = owner_ref() if owner_ref is not None else None
+                if thread_id != current_thread_id and owner is not None and owner.is_alive():
+                    continue
+                try:
+                    conn.close()
+                except (OSError, RuntimeError, sqlite3.Error) as e:
+                    logger.exception(f"Error closing connection: {e}")
             self._connections.clear()
             self._thread_refs.clear()
 

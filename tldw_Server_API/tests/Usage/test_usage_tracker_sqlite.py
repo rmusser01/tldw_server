@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from tldw_Server_API.app.core.Usage.usage_tracker import log_llm_usage
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
 async def _ensure_llm_tables(pool):
@@ -538,35 +539,13 @@ async def test_log_llm_usage_derives_token_name_from_key(monkeypatch):
     pool = await get_db_pool()
     await _ensure_llm_tables(pool)
 
-    if pool.pool:
-        await pool.execute(
-            """
-            INSERT INTO users (id, username, email, password_hash)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (id) DO NOTHING
-            """,
-            1,
-            "usage-test-user",
-            "usage-test-user@example.com",
-            "hash",
-        )
-    else:
-        await pool.execute(
-            """
-            INSERT OR IGNORE INTO users (id, username, email, password_hash)
-            VALUES (?, ?, ?, ?)
-            """,
-            1,
-            "usage-test-user",
-            "usage-test-user@example.com",
-            "hash",
-        )
+    user_id = await ensure_test_user(pool, "usage-test-user", "usage-test-user@example.com")
 
     key_hash = "kh-" + uuid.uuid4().hex
     if pool.pool:
         await pool.execute(
             "INSERT INTO api_keys (user_id, key_hash, name, scope) VALUES ($1, $2, $3, $4)",
-            1,
+            user_id,
             key_hash,
             "DerivedName",
             "read",
@@ -575,7 +554,7 @@ async def test_log_llm_usage_derives_token_name_from_key(monkeypatch):
     else:
         await pool.execute(
             "INSERT INTO api_keys (user_id, key_hash, name, scope) VALUES (?, ?, ?, ?)",
-            1,
+            user_id,
             key_hash,
             "DerivedName",
             "read",
@@ -584,7 +563,7 @@ async def test_log_llm_usage_derives_token_name_from_key(monkeypatch):
     assert key_id is not None
 
     await log_llm_usage(
-        user_id=1,
+        user_id=user_id,
         key_id=int(key_id),
         endpoint="POST:/api/v1/chat/completions",
         operation="chat",

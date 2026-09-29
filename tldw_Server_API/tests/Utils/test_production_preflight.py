@@ -7,6 +7,8 @@ from urllib.parse import quote
 
 import pytest
 import yaml
+from loguru import logger
+
 from Helper_Scripts.Deployment.production_preflight import (
     PreflightIssue,
     load_raw_env,
@@ -21,6 +23,20 @@ from Helper_Scripts.Deployment.production_preflight import (
 COMPOSE_PATH = Path("Dockerfiles/docker-compose.production.yml")
 PROXY_PATH = Path("Dockerfiles/Production/Caddyfile")
 _INTERPOLATION = re.compile(r"\$\{([A-Z0-9_]+):\?[^}]+\}")
+
+
+@pytest.fixture
+def preflight_log_records():
+    """Collect the CLI's Loguru records.
+
+    main() reports through Loguru since bcd91d082a. Loguru's default sink keeps the
+    stderr object from import time, so capture fixtures only see it when some earlier
+    test happened to re-add a sink; assert on the records instead.
+    """
+    records: list[dict[str, object]] = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="INFO")
+    yield records
+    logger.remove(sink_id)
 
 
 def _valid_env(tmp_path: Path) -> dict[str, str]:
@@ -1163,6 +1179,7 @@ def test_cli_accepts_compose_injected_environment_without_raw_file(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capfd: pytest.CaptureFixture[str],
+    preflight_log_records: list[dict[str, object]],
 ) -> None:
     values = _valid_env(tmp_path)
     (tmp_path / "backups").chmod(0o500)
@@ -1184,7 +1201,9 @@ def test_cli_accepts_compose_injected_environment_without_raw_file(
     captured = capfd.readouterr()
     assert exit_code == 0
     assert captured.out == ""
-    assert "Production preflight passed" in captured.err
+    assert [(r["level"].name, r["message"]) for r in preflight_log_records] == [
+        ("SUCCESS", "Production preflight passed")
+    ]
 
 
 def test_host_preflight_remains_authoritative_for_env_permissions(
@@ -1368,6 +1387,7 @@ def test_cli_rejects_runtime_backup_directory_with_raw_env_mode(
 def test_cli_prints_sorted_sanitized_errors_only_to_stderr(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    preflight_log_records: list[dict[str, object]],
 ) -> None:
     secret = "must-never-appear-" + "S" * 40
     values = _valid_env(tmp_path)
@@ -1388,11 +1408,14 @@ def test_cli_prints_sorted_sanitized_errors_only_to_stderr(
         ]
     )
     captured = capsys.readouterr()
-    lines = captured.err.splitlines()
+    # One ERROR record per issue, carrying code/field as extras (bcd91d082a).
+    issues = [(r["extra"]["issue_code"], r["extra"]["field"]) for r in preflight_log_records]
+    rendered = captured.err + repr(preflight_log_records)
 
     assert exit_code == 1
     assert captured.out == ""
-    assert lines == sorted(lines)
-    assert all(line.startswith("ERROR [") for line in lines)
-    assert secret not in captured.err
-    assert "postgresql://" not in captured.err
+    assert issues
+    assert issues == sorted(issues)
+    assert all(r["level"].name == "ERROR" for r in preflight_log_records)
+    assert secret not in rendered
+    assert "postgresql://" not in rendered

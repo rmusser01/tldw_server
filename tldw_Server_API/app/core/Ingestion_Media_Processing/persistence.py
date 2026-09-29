@@ -1881,7 +1881,7 @@ def _validate_downloaded_url_file(
     processing_filename: str | None,
     media_type: Any,
     form_data: Any,
-    file_validator: Any,
+    file_validator: Any | None,
     allowed_extensions: set[str] | None,
 ) -> None:
     """
@@ -1893,10 +1893,11 @@ def _validate_downloaded_url_file(
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import (  # type: ignore  # noqa: E501
         FileValidationError,
         _resolve_media_type_key,
+        get_default_file_validator,
         process_and_validate_file,
     )
 
-    validator = file_validator
+    validator = file_validator or get_default_file_validator()
     normalized_allowed_extensions = (
         {str(ext).lower() for ext in allowed_extensions if ext} if allowed_extensions is not None else None
     )

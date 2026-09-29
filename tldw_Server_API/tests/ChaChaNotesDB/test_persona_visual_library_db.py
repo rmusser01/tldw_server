@@ -46,9 +46,13 @@ def _create_persona_and_pack(
     return persona_id, pack
 
 
-def test_migration_v45_to_latest_creates_persona_visual_library_table(db_path: Path) -> None:
+def test_migration_v45_to_latest_creates_persona_visual_library_table(db_path: Path, monkeypatch) -> None:
+    # Seed below v59: the v59 attachment registry migration fails closed on a
+    # pre-existing registry, so a current-schema seed can't be replayed from v45.
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 58)
     seeded = CharactersRAGDB(db_path, "persona-visual-library-seed")
     seeded.close_connection()
+    monkeypatch.undo()
 
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute("PRAGMA foreign_keys = OFF")

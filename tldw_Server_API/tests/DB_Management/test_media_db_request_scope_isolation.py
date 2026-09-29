@@ -614,6 +614,25 @@ def test_media_db_factory_close_with_real_managed_sqlite_backend_avoids_pool_shu
     assert media_db_session.is_factory_managed_backend(backend) is True
 
 
+def test_media_db_factory_close_tolerates_backend_retired_by_registry_reset(tmp_path) -> None:
+    # A runtime reset (reset_media_runtime_defaults, AuthNZ reconfig) evicts and
+    # retires the shared backend while the cached factory still points at it.
+    # The registry already owns closing that pool; the lifespan shutdown's
+    # reset_media_db_cache must not crash on it.
+    factory = media_db_session.MediaDbFactory.for_sqlite_path(
+        str(tmp_path / "factory-close-retired.db"),
+        client_id="retired",
+    )
+    backend = factory.backend
+    backend.get_pool()
+    backend_factory.reset_managed_sqlite_backends(mode="hard", backends=[backend])
+    assert media_db_session.is_factory_managed_backend(backend) is False
+
+    factory.close()
+
+    assert factory.backend is None
+
+
 def test_media_db_factory_close_skips_sqlite_release_for_postgres_backend(monkeypatch) -> None:
     closed: list[str] = []
     released: list[object] = []

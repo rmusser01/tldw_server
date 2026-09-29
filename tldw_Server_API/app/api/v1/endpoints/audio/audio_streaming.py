@@ -278,6 +278,23 @@ _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS = (
     *EXPECTED_REDIS_EXC,
 )
 _AUDIO_QUOTA_DB_EXC = (*EXPECTED_DB_EXC, AudioQuotaStoreUnavailable)
+
+
+async def _await_child_task(task: Any) -> None:
+    """Await a child task (typically one we just cancelled) without leaking its cancellation.
+
+    The child's own CancelledError is expected and swallowed; it is re-raised only
+    when the current task is itself being cancelled.
+    """
+    try:
+        await task
+    except asyncio.CancelledError:
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise
+    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("audio child task failed error_type={}", type(exc).__name__)
+
 AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS = 300.0
 AUDIO_STREAM_ITERATOR_TIMEOUT_SECONDS = 5.0
 AUDIO_STREAM_NEXT_TIMEOUT_SECONDS = 300.0
@@ -3306,10 +3323,7 @@ async def websocket_audio_chat_stream(
                         ):
                             overlap_sender_task.cancel()
                         if overlap_sender_task is not None:
-                            with contextlib.suppress(
-                                *_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS
-                            ):
-                                await overlap_sender_task
+                            await _await_child_task(overlap_sender_task)
                     finally:
                         await tts_scope_stack.aclose()
 
@@ -3383,8 +3397,7 @@ async def websocket_audio_chat_stream(
                 active_turn_task.cancel()
             if active_tts_sender_task is not None and not active_tts_sender_task.done():
                 active_tts_sender_task.cancel()
-                with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
-                    await active_tts_sender_task
+                await _await_child_task(active_tts_sender_task)
                 active_tts_sender_task = None
             if had_active_turn:
                 with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
@@ -3610,8 +3623,7 @@ async def websocket_audio_chat_stream(
                         paused_audio_chunks.clear()
                         control_session.release_paused_audio()
                         if active_turn_task is not None and not active_turn_task.done():
-                            with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
-                                await active_turn_task
+                            await _await_child_task(active_turn_task)
                         if _outer_stream:
                             await _outer_stream.done()
                         break
@@ -4300,8 +4312,7 @@ async def websocket_tts_realtime(
                     await session.finish()
                 if sender_task and not sender_task.done():
                     sender_task.cancel()
-                    with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
-                        await sender_task
+                    await _await_child_task(sender_task)
 
                 try:
                     handle = await tts_service.open_realtime_session(
@@ -4388,10 +4399,7 @@ async def websocket_tts_realtime(
                         await session.finish()
                 if sender_task and not sender_task.done():
                     sender_task.cancel()
-                    with contextlib.suppress(
-                        *_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS
-                    ):
-                        await sender_task
+                    await _await_child_task(sender_task)
             finally:
                 if credential_scope is not None and credential_scope_entered:
                     await credential_scope.__aexit__(None, None, None)

@@ -421,16 +421,6 @@
       "resolved_ref": "github.sha",
       "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
     },
-    ".github/workflows/ci.yml:full-suite-linux-311-smoke:546:workflow_dispatch": {
-      "workflow": ".github/workflows/ci.yml",
-      "job": "full-suite-linux-311-smoke",
-      "checkout_line": 546,
-      "event": "workflow_dispatch",
-      "checkout_ref": "github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha",
-      "admission_guard": null,
-      "resolved_ref": "github.sha",
-      "reason": "workflow_dispatch has no pull_request/workflow_run payload; the admission job is skipped outside workflow_run, so its head_sha is empty. The fallback is the event commit github.sha, not caller-provided PR code."
-    },
     ".github/workflows/frontend-e2e-tiers.yml:features:205:workflow_dispatch": {
       "workflow": ".github/workflows/frontend-e2e-tiers.yml",
       "job": "features",

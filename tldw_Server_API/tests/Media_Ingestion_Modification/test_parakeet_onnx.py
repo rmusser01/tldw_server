@@ -1075,7 +1075,9 @@ class TestParakeetONNX:
         )
 
         assert result is not None
-        mock_load_model.assert_called_with(custom_path, 'cpu')
+        mock_load_model.assert_called_with(
+            custom_path, 'cpu', allow_download=True, execution_route=None
+        )
 
     def test_device_selection(self):
 
@@ -1105,12 +1107,8 @@ class TestParakeetONNXIntegration:
         audio_data = np.array([0.1, 0.2, 0.3])
 
         # Need to patch the variant check
-        with patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.loaded_config_data') as mock_config:
-            mock_config.return_value = {
-                'STT-Settings': {
-                    'nemo_model_variant': 'onnx'
-                }
-            }
+        with patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.get_stt_config') as mock_config:
+            mock_config.return_value = {'nemo_model_variant': 'onnx'}
 
             result = transcribe_with_parakeet(audio_data, 16000, variant='onnx')
 

@@ -209,7 +209,9 @@ async def test_global_profile_create_rolls_back_when_version_history_insert_fail
 
     monkeypatch.setattr(store, "_insert_version_row", fail_insert_version_row)
 
-    with pytest.raises(TransactionError, match="version insert failed"):
+    # The pool reports a fixed, source-free message since d7bab343d3; the inner
+    # RuntimeError text is deliberately not surfaced.
+    with pytest.raises(TransactionError, match="Transaction failed during: SQLite transaction"):
         await store.create_policy_profile(
             profile_id="rollback_policy",
             display_name="Rollback Policy",

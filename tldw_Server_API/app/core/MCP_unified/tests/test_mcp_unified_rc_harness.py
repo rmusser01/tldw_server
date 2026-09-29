@@ -661,8 +661,11 @@ def test_rc_create_venv_uses_symlinks_on_posix(
     assert captured["venv_dir"] == tmp_path / ".venv"  # nosec B101
 
 
-def test_rc_pip_dependency_outage_records_optional_skip(tmp_path: Path) -> None:
+def test_rc_pip_dependency_outage_records_optional_skip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Local dependency-index outages should be optional skips outside CI."""
+
+    # Outages are only optional off GitHub Actions; pin the local branch.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
 
     recorder = mcp_unified_rc.RcEvidenceRecorder(
         evidence_dir=tmp_path,
@@ -751,8 +754,11 @@ def test_rc_pip_dependency_outage_is_required_failure_in_ci(
     assert recorder.has_required_failures() is True  # nosec B101
 
 
-def test_rc_user_guide_uat_dependency_outage_records_optional_skip(tmp_path: Path) -> None:
+def test_rc_user_guide_uat_dependency_outage_records_optional_skip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """User-guide UAT dependency outages should be optional skips locally."""
+
+    # Outages are only optional off GitHub Actions; pin the local branch.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
 
     report_path = tmp_path / "user-guide-uat.json"
     report_path.write_text(

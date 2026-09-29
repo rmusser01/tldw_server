@@ -76,6 +76,7 @@ def test_sidecar_owned_jobs_worker_specs_use_expected_names() -> None:
 
     assert [spec.name for spec in startup_pollers.provide_sidecar_owned_jobs_worker_specs()] == [
         "reminder_jobs_task",
+        "agent_task_jobs_task",
         "admin_backup_jobs_task",
         "admin_byok_validation_jobs_task",
         "admin_maintenance_rotation_jobs_task",
@@ -91,6 +92,7 @@ def test_sidecar_owned_jobs_worker_spec_factories_delegate_to_existing_worker_lo
 
     for spec_name, factory_name in [
         ("reminder_jobs_task", "_run_reminder_jobs_worker_service"),
+        ("agent_task_jobs_task", "_run_agent_task_jobs_worker_service"),
         ("admin_backup_jobs_task", "_run_admin_backup_jobs_worker_service"),
         ("admin_byok_validation_jobs_task", "_run_admin_byok_validation_jobs_worker_service"),
         ("admin_maintenance_rotation_jobs_task", "_run_admin_maintenance_rotation_jobs_worker_service"),
@@ -110,6 +112,7 @@ def test_sidecar_owned_jobs_worker_spec_factories_delegate_to_existing_worker_lo
 
     assert calls == [
         ("reminder_jobs_task", "reminder_jobs_task-stop"),
+        ("agent_task_jobs_task", "agent_task_jobs_task-stop"),
         ("admin_backup_jobs_task", "admin_backup_jobs_task-stop"),
         ("admin_byok_validation_jobs_task", "admin_byok_validation_jobs_task-stop"),
         ("admin_maintenance_rotation_jobs_task", "admin_maintenance_rotation_jobs_task-stop"),

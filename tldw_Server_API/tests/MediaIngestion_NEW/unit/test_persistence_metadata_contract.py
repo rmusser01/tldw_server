@@ -11,7 +11,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing import (
     persistence as ingestion_persistence,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files
-from tldw_Server_API.app.api.v1.endpoints import media as media_endpoints
 
 
 pytestmark = pytest.mark.unit
@@ -136,11 +135,6 @@ async def test_process_document_like_item_applies_metadata_contract_warning(
 
     monkeypatch.setenv("MEDIA_METADATA_CONTRACT_POLICY", "warn")
     monkeypatch.setattr(
-        media_endpoints,
-        "process_document_content",
-        fake_process_document_content,
-    )
-    monkeypatch.setattr(
         ingestion_persistence,
         "persist_doc_item_and_children",
         fake_persist_doc_item_and_children,
@@ -178,6 +172,7 @@ async def test_process_document_like_item_applies_metadata_contract_warning(
         db_path=":memory:",
         client_id="test-client",
         user_id=None,
+        process_document_content=fake_process_document_content,
     )
 
     assert result.get("status") == "Success"

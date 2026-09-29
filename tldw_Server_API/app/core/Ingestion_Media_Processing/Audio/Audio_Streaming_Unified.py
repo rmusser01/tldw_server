@@ -335,6 +335,20 @@ def _get_torch_module():
     return torch
 
 
+def _vad_observe_exceptions() -> tuple[type[BaseException], ...]:
+    """Noncritical errors plus ``torch.jit.Error`` for TorchScript VAD models.
+
+    Silero runs as TorchScript, whose errors (e.g. "Input audio chunk is too
+    short" for a short client chunk) surface as ``torch.jit.Error``. That derives
+    from ``Exception``, not ``RuntimeError``, so the noncritical tuple alone lets
+    it escape the detector's fail-open handling and abort the stream.
+    """
+    jit_error = getattr(getattr(_get_torch_module(), "jit", None), "Error", None)
+    if isinstance(jit_error, type) and issubclass(jit_error, Exception):
+        return (*_AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS, jit_error)
+    return _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS
+
+
 def _get_torchaudio_module():
     global torchaudio, _TORCHAUDIO_IMPORT_ATTEMPTED
     if torchaudio is not None:
@@ -789,7 +803,7 @@ class SileroTurnDetector:
                         audio_in = audio_np
                 vad_result = self._iterator(audio_in, return_seconds=False)
                 speech_detected = self._saw_speech(vad_result)
-            except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS as err:
+            except _vad_observe_exceptions() as err:
                 logger.warning(f"Silero VAD failed during observe; disabling auto-commit: {err}")
                 self.available = False
                 self.unavailable_reason = str(err)

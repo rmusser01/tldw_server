@@ -748,6 +748,8 @@ async def test_default_controls_enforce_source_tool_permission(monkeypatch: pyte
 async def test_default_controls_require_source_tool_module_registered(monkeypatch: pytest.MonkeyPatch) -> None:
     module = RagModule(ModuleConfig(name="rag"))
     protocol = MCPProtocol()
+    # Empty registry: the global one may hold a media module from earlier tests.
+    protocol.module_registry = ModuleRegistry()
     protocol.rbac_policy = _AllowAllRBAC()
     protocol.rate_limiter = _NoopRateLimiter()
     monkeypatch.setattr(mcp_server_module, "_server", SimpleNamespace(protocol=protocol))
@@ -939,6 +941,10 @@ async def test_rag_module_jsonrpc_tools_call_smoke(monkeypatch: pytest.MonkeyPat
     protocol.rbac_policy = _AllowAllRBAC()
     protocol.rate_limiter = _NoopRateLimiter()
     _install_source_tool_registry(protocol, "media.search")
+    # RagModule resolves source modules/permissions through the global MCP
+    # server's protocol; point it at this one so the smoke test does not
+    # depend on whatever global server earlier tests left behind.
+    monkeypatch.setattr(rag_module_impl._McpRagControls, "_protocol", lambda self: protocol)
     context = RequestContext(request_id="rag-jsonrpc-smoke", user_id="1", client_id="unit")
 
     search = await protocol.process_request(

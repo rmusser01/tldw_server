@@ -491,7 +491,6 @@ def test_full_suite_pytest_steps_do_not_leak_shared_postgres_dsn() -> None:
     workflow = _load(".github/workflows/ci.yml")
     jobs = workflow["jobs"]
     step_names = {
-        "Run Python 3.11 compatibility smoke tests",
         "Run shard tests",
         "Run OS shard tests",
         "Run release OS shard tests",
@@ -652,7 +651,6 @@ def test_wait_for_postgres_action_bounds_linux_client_install() -> None:
 def test_full_suite_ffmpeg_setup_scopes_heavy_install_to_media_runtime_shards() -> None:
     workflow = _load(".github/workflows/ci.yml")
     matrix_jobs = [
-        "full-suite-linux-311-smoke",
         "full-suite-linux-312-shards",
         "full-suite-linux-313-shards",
         "full-suite-macos-312-shards",
@@ -695,11 +693,15 @@ def test_full_suite_test_result_uploads_are_non_blocking() -> None:
         if str(step.get("name", "")).startswith("Upload test results")
     ]
 
-    assert len(upload_steps) == 6
+    assert len(upload_steps) == 5
     for step in upload_steps:
         assert step.get("if") == "always()"
         assert step.get("continue-on-error") is True
         assert step.get("uses") == "actions/upload-artifact@v7"
+
+
+def _normalize_ws(text: str) -> str:
+    return " ".join(text.split())
 
 
 def test_full_suite_summaries_follow_backend_path_filter() -> None:
@@ -729,71 +731,15 @@ def test_full_suite_summaries_follow_backend_path_filter() -> None:
         "full-suite-windows-312-summary": "full-suite-windows-312-shards",
     }
 
+    # 3.13, macOS and Windows are ~550 extra jobs, so they skip PRs entirely.
+    non_pr_if = expected_if.split(") && (\n  (github.event_name")[0] + """) &&
+(github.event_name != 'pull_request' && github.event_name != 'workflow_run')"""
+
     for summary_job, shard_job in summary_to_shards.items():
         job = workflow["jobs"][summary_job]
         assert job["needs"] == [shard_job, "changes", "admission", "await_license"]
-        assert job["if"] == expected_if
-
-
-def test_linux_311_smoke_is_sharded_for_timeout_control() -> None:
-    workflow = _load(".github/workflows/ci.yml")
-    job = workflow["jobs"]["full-suite-linux-311-smoke"]
-    assert job["name"] == "Full Suite (Ubuntu / Python 3.11 / ${{ matrix.shard.name }})"
-
-    shards = job["strategy"]["matrix"]["shard"]
-    shard_paths = {shard["name"]: set(str(shard["paths"]).split()) for shard in shards}
-    assert set(shard_paths) == {
-        "authnz-unit",
-        "config-core-loaders",
-        "config-effective-api",
-        "config-module-yaml",
-        "config-routes-startup",
-        "config-runtime-env",
-        "core",
-        "utils-http",
-    }
-    assert shard_paths["authnz-unit"] == {"tldw_Server_API/tests/AuthNZ_Unit"}
-    assert shard_paths["utils-http"] == {
-        "tldw_Server_API/tests/Utils",
-        "tldw_Server_API/tests/http_client",
-    }
-    config_shards = {name for name in shard_paths if name.startswith("config-")}
-    config_paths = [path for name in config_shards for path in shard_paths[name]]
-    expected_config_paths = {
-        str(path)
-        for path in Path("tldw_Server_API/tests/Config").glob("test_*.py")
-    }
-    assert len(config_paths) == len(set(config_paths))
-    assert set(config_paths) == expected_config_paths
-    assert "tldw_Server_API/tests/Config" not in config_paths
-    assert shard_paths["config-effective-api"] == {
-        "tldw_Server_API/tests/Config/test_effective_config_api.py"
-    }
-    assert shard_paths["config-module-yaml"] == {
-        "tldw_Server_API/tests/Config/test_module_yaml_integration.py"
-    }
-    assert {
-        "tldw_Server_API/tests/test_*.py",
-        "tldw_Server_API/tests/Health",
-        "tldw_Server_API/tests/sanity_tests",
-        "tldw_Server_API/tests/schemas",
-        "tldw_Server_API/tests/unit",
-    } == shard_paths["core"]
-
-    steps = job["steps"]
-    for step_name in [
-        "Smoke start server (single-user)",
-        "Smoke health check",
-        "Print smoke server log on failure",
-        "Smoke stop server",
-    ]:
-        step = _get_step(steps, step_name)
-        assert "matrix.shard.name == 'core'" in step["if"]
-
-    run_step = _get_step(steps, "Run Python 3.11 compatibility smoke tests")
-    run_script = run_step["run"]
-    assert "${{ matrix.shard.paths }}" in run_script
-    assert "test-results-linux-3.11-smoke" not in run_script
+        wanted = expected_if if summary_job == "full-suite-linux-312-summary" else non_pr_if
+        assert _normalize_ws(job["if"]) == _normalize_ws(wanted), summary_job
 
 
 def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
@@ -909,6 +855,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "chacha-core-stores",
             "chacha-character-conversation",
             "chacha-content-persona",
+            "db-management-a-l",
             "db-privileges",
         }
         assert auth_db_shards.issubset(shard_names)
@@ -1116,6 +1063,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_transcription_models_endpoint.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py",
@@ -1255,6 +1203,8 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "core-audit-unified",
             "core-config",
             "core-security",
+            "core-security-egress",
+            "core-security-http-hop",
             "core-server-smoke",
             "core-setup-usage",
             "core-utils-tooling",
@@ -1909,3 +1859,25 @@ def test_regular_full_suite_steps_skip_dedicated_media_legacy_free_shard() -> No
     assert len(regular_shard_steps) == 5
     for step in regular_shard_steps:
         assert step.get("if") == "matrix.shard.name != 'media-legacy-free'"
+
+
+def test_full_suite_shards_fail_a_hung_test_instead_of_the_shard() -> None:
+    """Each shard loads pytest-timeout so one hung test fails alone.
+
+    PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 means pyproject's timeout settings never
+    load unless the plugin is named. Without it a single hang burned the whole
+    60-minute shard job (nine shards in one run). ``signal`` fails just the test;
+    Windows has no SIGALRM, so the mixed-OS release job picks ``thread`` there.
+    """
+    jobs = _load(".github/workflows/ci.yml")["jobs"]
+    for job_name in (
+        "full-suite-linux-312-shards",
+        "full-suite-linux-313-shards",
+        "full-suite-macos-312-shards",
+        "full-suite-os-313-release-shards",
+    ):
+        scripts = [step.get("run", "") for step in jobs[job_name]["steps"] if "$TEST_PATHS" in step.get("run", "")]
+        assert scripts, job_name
+        for script in scripts:
+            assert "-p pytest_timeout" in script, job_name
+            assert "timeout_method=" in script, job_name

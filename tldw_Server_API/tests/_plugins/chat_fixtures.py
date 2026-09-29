@@ -358,7 +358,9 @@ def mock_chacha_db(tmp_path):
     user_dir.mkdir(parents=True, exist_ok=True)
     db_path = user_dir / "ChaChaNotes.db"
 
-    db = CharactersRAGDB(str(db_path), client_id="pytest_client")
+    # 962eb92ffc: chat creation requires the DB owner to be the request
+    # user (production scopes client_id=str(user.id)); test_user.id == 1.
+    db = CharactersRAGDB(str(db_path), client_id="1")
 
     # Ensure at least one default character exists
     char_id = db.add_character_card({

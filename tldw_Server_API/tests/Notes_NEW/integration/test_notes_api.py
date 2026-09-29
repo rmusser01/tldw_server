@@ -42,7 +42,8 @@ class _FolderConflictStubDB:
         self._lookup_count += 1
         if self._lookup_count == 1:
             return None
-        return {"id": 42, "name": "Inbox", "path": "Inbox", "parent_id": None}
+        # sync_id is required on folder responses since ae88634cde.
+        return {"id": 42, "sync_id": "folder-sync-42", "name": "Inbox", "path": "Inbox", "parent_id": None}
 
     def create_note_folder_path(self, folder_path: str) -> dict[str, object]:
         raise ConflictError("Folder already exists")

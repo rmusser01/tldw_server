@@ -14,9 +14,14 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseConfig,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import (
+    ConstraintViolationError,
+    UniqueConstraintError,
+)
+from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha import schema_bootstrap
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -50,6 +55,8 @@ def test_postgres_initializer_routes_schema_v60_through_v61(
     db._uses_shared_content_backend = False
     db._backend_refresh_suspended = False
     db._local = SimpleNamespace()
+    # f5f5b63005 bootstraps on a pooled session this fake does not model.
+    monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", lambda *_args: _FakeTransaction())
 
     monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, lock=False: 60)
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
@@ -267,11 +274,13 @@ def _assert_write_rejected(
     query: str,
     params: tuple[Any, ...],
     *,
-    match: str,
+    expected: type[BackendDatabaseError],
 ) -> None:
-    with pytest.raises(BackendDatabaseError, match=match):
+    # Driver messages are redacted; the error type names the class (bcf6e2b5ed).
+    with pytest.raises(expected) as excinfo:
         with backend.transaction() as conn:
             backend.execute(query, params, connection=conn)
+    assert type(excinfo.value) is expected
 
 
 def _set_restricted_recipient(
@@ -340,7 +349,7 @@ def test_postgres_v61_executes_constraints_defaults_and_cascades(
             ("recipient-a", 2, "constraint-conversation-2", "", "workspace-a"),
             ("recipient-a", 2, "constraint-conversation-2", "   ", "workspace-a"),
         ):
-            _assert_write_rejected(backend, thread_insert, params, match="check constraint")
+            _assert_write_rejected(backend, thread_insert, params, expected=ConstraintViolationError)
 
         request_insert = """
             INSERT INTO shared_workspace_chat_requests(
@@ -355,19 +364,19 @@ def test_postgres_v61_executes_constraints_defaults_and_cascades(
             ("recipient-a", 1, "bad-lease", "fingerprint", "constraint-conversation", "in_progress", 0, "all"),
             ("recipient-a", 1, "bad-source", "fingerprint", "constraint-conversation", "in_progress", 1, "exclude"),
         ):
-            _assert_write_rejected(backend, request_insert, params, match="check constraint")
+            _assert_write_rejected(backend, request_insert, params, expected=ConstraintViolationError)
 
         _assert_write_rejected(
             backend,
             thread_insert,
             ("recipient-a", 1, "constraint-conversation-2", "owner-a", "workspace-a"),
-            match="duplicate key value",
+            expected=UniqueConstraintError,
         )
         _assert_write_rejected(
             backend,
             thread_insert,
             ("recipient-a", 2, "constraint-conversation", "owner-a", "workspace-a"),
-            match="duplicate key value",
+            expected=UniqueConstraintError,
         )
 
         with backend.transaction() as conn:
@@ -392,7 +401,7 @@ def test_postgres_v61_executes_constraints_defaults_and_cascades(
                 1,
                 "all",
             ),
-            match="duplicate key value",
+            expected=UniqueConstraintError,
         )
 
         with backend.transaction() as conn:
@@ -790,7 +799,7 @@ def test_postgres_v61_fresh_upgrade_constraints_forced_rls_and_rerun(
         )
         relations, policies = _policy_catalog(backend)
 
-        assert int(version) == 63
+        assert int(version) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
         types = {(row["table_name"], row["column_name"]): row["data_type"] for row in columns}
         assert types[("shared_workspace_chat_threads", "recipient_user_id")] == "text"
         assert types[("shared_workspace_chat_threads", "owner_user_id")] == "text"
@@ -839,12 +848,24 @@ def test_postgres_v61_fresh_upgrade_constraints_forced_rls_and_rerun(
                     ("recipient-a", 2, "wrong-share", "fingerprint-b", conversation_id, "completed"),
                 )
 
+        # PostgreSQL cannot build a genuine v60 schema (the initializer applies every
+        # step through v64), and stamping v60 on the current catalog is no real
+        # predecessor: v64->v65 fails closed on objects later steps created. So replay
+        # the v61 step itself on a catalog without its tables, then re-run the
+        # current initializer over the result.
         with backend.transaction() as conn:
             backend.execute("DROP TABLE shared_workspace_chat_requests", connection=conn)
             backend.execute("DROP TABLE shared_workspace_chat_threads", connection=conn)
             backend.execute(
                 "UPDATE db_schema_version SET version = %s WHERE schema_name = %s",
                 (60, CharactersRAGDB._SCHEMA_NAME),
+                connection=conn,
+            )
+            db._migrate_from_v60_to_v61_postgres(conn)
+            assert db._get_schema_version_postgres(conn) == 61
+            backend.execute(
+                "UPDATE db_schema_version SET version = %s WHERE schema_name = %s",
+                (CharactersRAGDB._POSTGRES_SCHEMA_VERSION, CharactersRAGDB._SCHEMA_NAME),
                 connection=conn,
             )
 
@@ -857,7 +878,7 @@ def test_postgres_v61_fresh_upgrade_constraints_forced_rls_and_rerun(
             (CharactersRAGDB._SCHEMA_NAME,),
         ).scalar
         rerun_relations, rerun_policies = _policy_catalog(backend)
-        assert int(rerun_version) == 63
+        assert int(rerun_version) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
         assert len(rerun_relations) == 2
         assert all(row["relrowsecurity"] is True for row in rerun_relations)
         assert all(row["relforcerowsecurity"] is True for row in rerun_relations)

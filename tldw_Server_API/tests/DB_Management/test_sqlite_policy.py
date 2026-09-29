@@ -138,3 +138,36 @@ async def test_configure_sqlite_connection_async_applies_standard_pragmas():
         "PRAGMA temp_store=MEMORY",
         "PRAGMA cache_size=-1024",
     ]
+
+
+class _LockedOnceWalConnection(_RecordingConnection):
+    def execute(self, sql: str):
+        if sql == "PRAGMA journal_mode=WAL" and sql not in self.statements:
+            self.statements.append(sql)
+            raise sqlite3.OperationalError("database is locked")
+        return super().execute(sql)
+
+
+def test_configure_sqlite_connection_retries_wal_switch_when_locked():
+    # SQLite returns SQLITE_BUSY for the rollback->WAL switch without calling the
+    # busy handler when another connection is writing; concurrent first opens of a
+    # legacy DB must retry instead of failing with "database is locked".
+    from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
+
+    conn = _LockedOnceWalConnection()
+    configure_sqlite_connection(conn)
+
+    assert _non_probe_statements(conn).count("PRAGMA journal_mode=WAL") == 2
+
+
+def test_configure_sqlite_connection_gives_up_wal_switch_after_busy_timeout():
+    from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
+
+    class _AlwaysLocked(_RecordingConnection):
+        def execute(self, sql: str):
+            if sql == "PRAGMA journal_mode=WAL":
+                raise sqlite3.OperationalError("database is locked")
+            return super().execute(sql)
+
+    with pytest.raises(sqlite3.OperationalError, match="locked"):
+        configure_sqlite_connection(_AlwaysLocked(), busy_timeout_ms=30)

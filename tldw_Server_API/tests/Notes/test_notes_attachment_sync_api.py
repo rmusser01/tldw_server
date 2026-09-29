@@ -29,7 +29,7 @@ from tldw_Server_API.app.api.v1.schemas.sync_v2_models import (
     SyncBlobUploadCreateRequest,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
+from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase, utcnow_iso
 from tldw_Server_API.app.core.Sync.v2.adapters import SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.attachment_refs import (
@@ -97,7 +97,9 @@ def canonical_api(
                 auth_mode="multi_user",
             ),
         ),
-        clock=lambda: "2026-08-11T20:30:00+00:00",
+        # The store checks upload expiry against wall time since 5c2356e754, so a
+        # fixed past service clock mints sessions that are already expired.
+        clock=utcnow_iso,
     )
     app = FastAPI()
     app.include_router(notes_endpoint.router, prefix="/api/v1/notes")

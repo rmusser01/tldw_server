@@ -3480,7 +3480,7 @@ async def _afetch_httpx(
                             if resp.status_code < 400:
                                 # metrics for success
                                 try:
-                                    response_url = str(resp.request.url)
+                                    response_url = _get_response_url(resp, cur_url)
                                     response_observability_url = (
                                         observability_url
                                         if sensitive_observability
@@ -4341,7 +4341,7 @@ def _fetch_httpx_response(
                         continue
                     if resp.status_code < 400:
                         try:
-                            response_url = str(resp.request.url)
+                            response_url = _get_response_url(resp, cur_url)
                             response_observability_url = (
                                 observability_url
                                 if sensitive_observability

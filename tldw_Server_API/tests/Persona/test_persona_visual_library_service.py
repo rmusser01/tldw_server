@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.Persona.visual_library_service import (
     PersonaVisualLibraryServiceError,
 )
 from tldw_Server_API.app.core.Persona.visual_service import PersonaVisualService
+from tldw_Server_API.app.core.Persona.visuals import VISUAL_STATE_IDS
 
 
 pytestmark = pytest.mark.unit
@@ -23,13 +24,8 @@ def _png_bytes(width: int = 1, height: int = 1) -> bytes:
 
 
 def _valid_manifest(asset_id: str) -> dict[str, object]:
-    states = {
-        "idle": {"animation_id": "idle"},
-        "listening": {"animation_id": "idle"},
-        "thinking": {"animation_id": "idle"},
-        "speaking": {"animation_id": "idle"},
-        "error": {"animation_id": "idle"},
-    }
+    # Activation needs every built-in state covered since 790b6d1073.
+    states = {state: {"animation_id": "idle"} for state in sorted(VISUAL_STATE_IDS)}
     return {
         "manifest_version": 1,
         "renderer_type": "sprite_frames",
@@ -164,32 +160,43 @@ def test_use_library_item_duplicates_source_to_target_as_draft(
         persona_name="Target Persona",
         pack_title="Target Active",
     )
-    asset = visual_service.create_asset_from_upload(
-        persona_id=source_persona_id,
-        user_id=user_id,
-        pack_id=source_pack["id"],
-        content=_png_bytes(width=2, height=2),
-        mime_type="image/png",
-        original_filename="idle.png",
-        asset_role="frame",
-    )
-    source_pack = db_instance.update_persona_visual_pack_manifest(
-        pack_id=source_pack["id"],
-        persona_id=source_persona_id,
-        user_id=user_id,
-        manifest=_valid_manifest(asset["id"]),
-        expected_version=source_pack["version"],
-    )
-    db_instance.activate_persona_visual_pack(
-        persona_id=source_persona_id,
-        user_id=user_id,
-        pack_id=source_pack["id"],
-    )
-    db_instance.activate_persona_visual_pack(
-        persona_id=target_persona_id,
-        user_id=user_id,
-        pack_id=target_pack["id"],
-    )
+    # Activation requires a complete manifest and a bound review since 790b6d1073.
+    activated: dict[str, dict] = {}
+    for persona_id, pack in (
+        (source_persona_id, source_pack),
+        (target_persona_id, target_pack),
+    ):
+        pack_asset = visual_service.create_asset_from_upload(
+            persona_id=persona_id,
+            user_id=user_id,
+            pack_id=pack["id"],
+            content=_png_bytes(width=2, height=2),
+            mime_type="image/png",
+            original_filename="idle.png",
+            asset_role="frame",
+        )
+        pack = db_instance.update_persona_visual_pack_manifest(
+            pack_id=pack["id"],
+            persona_id=persona_id,
+            user_id=user_id,
+            manifest=_valid_manifest(pack_asset["id"]),
+            expected_version=pack["version"],
+        )
+        review = visual_service.review_pack(
+            pack_id=pack["id"],
+            user_id=user_id,
+            reviewer_user_id=user_id,
+            expected_version=int(pack["version"]),
+        )
+        visual_service.activate_pack(
+            persona_id=persona_id,
+            user_id=user_id,
+            pack_id=pack["id"],
+            expected_version=int(pack["version"]),
+            reviewed_fingerprint=str(review["fingerprint"]),
+        )
+        activated[persona_id] = pack_asset
+    asset = activated[source_persona_id]
     item = library_service.save_pack(
         user_id=user_id,
         source_persona_id=source_persona_id,

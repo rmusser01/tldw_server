@@ -517,11 +517,16 @@ class BackendCursorWrapper:
         backend: DatabaseBackend,
         *,
         log_errors: bool = True,
+        operation_owned: bool = True,
     ):
         self._db = db
         self._connection = connection
         self._backend = backend
-        self._operation_state = current_connection_state(db) if backend.backend_type == BackendType.POSTGRESQL else None
+        self._operation_state = (
+            current_connection_state(db)
+            if operation_owned and backend.backend_type == BackendType.POSTGRESQL
+            else None
+        )
         self._log_errors = log_errors
         self._result: QueryResult | None = None
         self._adapter: BackendCursorAdapter | None = None
@@ -589,11 +594,30 @@ class BackendCursorWrapper:
 class BackendConnectionWrapper:
     """Connection wrapper that returns backend-aware cursors."""
 
-    def __init__(self, db: CharactersRAGDB, connection, backend: DatabaseBackend):
+    def __init__(
+        self,
+        db: CharactersRAGDB,
+        connection,
+        backend: DatabaseBackend,
+        *,
+        operation_owned: bool = True,
+    ):
+        """Wrap a connection.
+
+        Args:
+            operation_owned: False for a connection the backend handed out directly
+                (schema bootstrap/migration), which is never the current ChaCha
+                operation's checkout and so must not be bound to that state.
+        """
         self._db = db
         self._connection = connection
         self._backend = backend
-        self._operation_state = current_connection_state(db) if backend.backend_type == BackendType.POSTGRESQL else None
+        self._operation_owned = operation_owned
+        self._operation_state = (
+            current_connection_state(db)
+            if operation_owned and backend.backend_type == BackendType.POSTGRESQL
+            else None
+        )
 
     @_owned_wrapper_call
     def cursor(self, *, log_errors: bool = True):
@@ -604,6 +628,7 @@ class BackendConnectionWrapper:
             self._connection,
             self._backend,
             log_errors=log_errors,
+            operation_owned=self._operation_owned,
         )
 
     @_owned_wrapper_call
@@ -18277,6 +18302,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     OR COALESCE(TRIM(assistant_id), '') = '')
         """
         if self.backend_type == BackendType.POSTGRESQL:
+            # This runs on every current-schema open, which must not need a writable
+            # transaction (f5f5b63005): lock rows only when one actually needs repair.
+            if conn.execute(query + " LIMIT 1").fetchone() is None:
+                return
             query += " FOR UPDATE"
         rows = conn.execute(query).fetchall()
         for row in rows:
@@ -18451,7 +18480,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         for statement in statements:
             self.backend.execute(statement, connection=conn)
         if self._get_schema_version_postgres(conn) >= 74:
-            self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, self.backend))
+            self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, self.backend, operation_owned=False))
             return
         for statement in (
             """
@@ -25334,14 +25363,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
             if self._postgres_schema_is_current(conn):
                 if target_version >= 74:
-                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend))
+                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 return
 
         with postgres_schema_migration(backend, self._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT) as conn:
             self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
             if self._postgres_schema_is_current(conn):
                 if target_version >= 74:
-                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend))
+                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 return
             schema_exists = backend.table_exists('db_schema_version', connection=conn)
 
@@ -25411,7 +25440,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._migrate_from_v76_to_v77_persona_companion_postgres(conn)
                     current_version = 77
                 if target_version >= 74:
-                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend))
+                    self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
                 return
 
@@ -28134,7 +28163,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "SELECT * FROM workspaces "
             "WHERE deleted = 0 AND system_operation_state IS NULL ORDER BY name"
         )
-        cursor = self.execute_query(query, ())
+        cursor = self.execute_query(query, (), read_only=True)
         return [self._workspace_row_to_dict(row) for row in cursor.fetchall()]
 
     def read_workspace_clone_snapshot(self, workspace_id: str) -> WorkspaceCloneSnapshot:
@@ -28472,9 +28501,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _cascade_and_finish_soft_workspace_delete(self, workspace_id: str, expected_version: int) -> bool:
         """Run the existing per-chat cascade after durable admission closure."""
+        # read_only: settle this read's own PostgreSQL transaction, so a failed
+        # cascade does not leave the connection INTRANS and have the retry
+        # rejected by _require_outermost_workspace_delete.
         conversations = self.execute_query(
             "SELECT id, version FROM conversations WHERE workspace_id = ? AND scope_type = ? AND deleted = 0",
             (workspace_id, "workspace"),
+            read_only=True,
         ).fetchall()
         for conversation in conversations:
             conversation_id = conversation["id"] if isinstance(conversation, dict) else conversation[0]
@@ -28537,6 +28570,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         conversations = self.execute_query(
             "SELECT id FROM conversations WHERE workspace_id = ? AND scope_type = ?",
             (workspace_id, "workspace"),
+            read_only=True,
         ).fetchall()
         for conversation in conversations:
             conversation_id = conversation["id"] if isinstance(conversation, dict) else conversation[0]
@@ -28700,6 +28734,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     @staticmethod
     def _is_workspace_source_saved_view_postgres_unique_error(exc: Exception) -> bool:
         """Match only SQLSTATE 23505 for the named saved-view unique constraint."""
+        if isinstance(exc, UniqueConstraintError):
+            # The backend redacts driver diagnostics (no __cause__, no
+            # constraint name). The table's only other unique key is the
+            # uuid4 primary key, and the caller re-reads the named conflict
+            # in a fresh transaction before reporting it.
+            return True
         current: BaseException | None = exc
         while current is not None:
             sqlstate = getattr(current, "sqlstate", None) or getattr(current, "pgcode", None)
@@ -45972,6 +46012,12 @@ class TransactionContextManager:
         self.conn = self.db.get_connection()
         if not self.conn.in_transaction:
             begin_immediate_if_needed(self.conn)
+            # Load any schema another connection changed (every CharactersRAGDB open
+            # issues DDL) before the caller's first write. Otherwise SQLite re-prepares
+            # an INSERT on a table with an FTS5 trigger plus another AFTER INSERT trigger
+            # mid-statement and fails with "no such table". The write lock is held now,
+            # so the schema cannot change again inside this transaction.
+            self.conn.execute("SELECT 1 FROM sqlite_master LIMIT 1")
             self.is_outermost_transaction = True
             logger.debug(f"Transaction started (outermost) on thread {threading.get_ident()}.")
         else:
