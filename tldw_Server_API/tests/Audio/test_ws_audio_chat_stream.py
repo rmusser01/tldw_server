@@ -2750,6 +2750,28 @@ async def test_audio_chat_ws_overlap_warning_sanitizes_internal_message(monkeypa
     assert "/private/tts/cache" not in str(warnings)
 
 
+@pytest.mark.unit
+async def test_cancelled_audio_child_drain_preserves_caller_cancellation() -> None:
+    child = asyncio.create_task(asyncio.sleep(10))
+    child.cancel()
+    await audio_streaming_module._await_child_task(child)
+
+    pending = asyncio.create_task(asyncio.sleep(10))
+    entered = asyncio.Event()
+
+    async def drain() -> None:
+        entered.set()
+        await audio_streaming_module._await_child_task(pending)
+
+    caller = asyncio.create_task(drain())
+    await entered.wait()
+    caller.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await caller
+    pending.cancel()
+    await asyncio.gather(pending, return_exceptions=True)
+
+
 @pytest.mark.integration
 async def test_audio_chat_ws_interrupt_cancels_inflight_turn(monkeypatch: pytest.MonkeyPatch) -> None:
     audio_payload = _pcm16_audio([_AUDIO_LABEL_TO_SAMPLE["abc"]])

@@ -120,6 +120,7 @@ Files: this plan, `Docs/Reviews/UAT_ENGINEERING_SWEEP_COVERAGE_2026_09_21.md`, `
 - [ ] TASK13260.278.18.81.2: bound Opus pytest IDs without changing its 65,544-byte sample; collection names 89–106 characters and all 100 adapter cases pass locally, native Windows rerun pending.
 - [ ] TASK13260.278.18.81.3: replace five POSIX-only TTS executable fixture assumptions; four affected modules pass 170 locally with zero skips, native Windows rerun pending.
 - [ ] TASK13260.278.18.81.4: make STT file/parent fsync assertion and private audio path host-aware; full benchmark module passes 405 locally with zero skips, native Windows rerun pending.
+- [ ] TASK13260.278.18.81.5: drain explicitly cancelled audio WebSocket/SSE child tasks while preserving caller cancellation; six hosted failures become 88 local passes with a caller-cancel control, native Windows rerun pending.
 - [ ] TASK13260.278.18.81: attribute Windows media-audio 24 failures and two errors into shared causes; preserve the reported 44 skips, unexpected pass and native rerun gate.
 - [ ] Treat paper-search's PostgreSQL image `unknown blob` as unexecuted; require a real rerun before acceptance.
 - [ ] Maintain the latest-dev base: rebase checkpoint onto `e5186a28d9` preserved all 136 prior commits by range-diff; repeat after further upstream changes before publishing.
