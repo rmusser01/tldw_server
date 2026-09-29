@@ -758,5 +758,219 @@
     "independent_review": "No blocker in final corrections, including ordinary message rendering and privacy of the returned preparation error.",
     "historical_certificates": "Existing benchmark/earlier test receipts retain original source bindings; benchmarks were not rerun.",
     "hosted_gates": "Pending on the review-fix commit; merge will use the final exact reviewed head after required checks pass."
+  },
+  "ci_admission_dev_refresh_20260929": {
+    "dev_commit": "6110d2ae436c805c3beeda8f84427b4890534ddf",
+    "rebased_parent_commit": "c1f3dccd4f7208369cffe650b74aff00a20250e1",
+    "previous_reviewed_head": "0d21f404a13320c18970f17b355905b13f47c3d4",
+    "backup_branch": "codex/email-pr3023-qodo-before-dev-refresh-20260929",
+    "incoming_files": 247,
+    "overlap_files": [
+      "tldw_Server_API/app/core/DB_Management/backends/sqlite_backend.py",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+      "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_offline_ingestion.py",
+      "tldw_Server_API/tests/Utils/test_pagination_openapi_contract.py"
+    ],
+    "resolutions": [
+      "Retain dev's live-owner pool shutdown guard and existing bounded exception-type log.",
+      "Retain the tested pagination diagnostic using shared iter_routes; omit duplicate incoming walker.",
+      "Keep dev's offline quota fixture, removing the superseded local stub and import.",
+      "Retain dev's default file-validator fallback in the auto-merged persistence helper."
+    ],
+    "results": {
+      "combined": {
+        "passed": 374,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0,
+        "summary": "374 passed, 71 warnings in 287.20s (0:04:47) ================="
+      },
+      "real_pst": {
+        "passed": 10,
+        "failed": 0,
+        "skipped": 0,
+        "outbound": 0,
+        "model": 0
+      },
+      "compiled_pr_python_files": 92,
+      "ruff_resolution_paths": 4,
+      "bandit_production_resolution_paths": 2,
+      "bandit_findings": 0,
+      "bandit_errors": 0,
+      "openapi_fingerprint": "58fa00440a664a47cb9ad6e72350b2515a7e6ac061e81a13aca032fe803a3b47",
+      "openapi_paths": 2104,
+      "openapi_schemas": 3244
+    },
+    "tested_source_sha256": {
+      "Docs/Operations/probes/email_archive_probe_databases_2026_09_25.py": "1e5235360fe5bb17b7db94c09d91aad154fd923ac17c98143e26c3717878bd88",
+      "Docs/Operations/probes/email_archive_throughput_postgres_2026_09_25.py": "97e700887e777ac9f9c24d7ee7b271d2b6d87b376422acfe3e1c20166e52b24d",
+      "Docs/Operations/probes/email_archive_throughput_sqlite_2026_09_25.py": "1f0735567d31913bb225bd129fc8ee98760a44d9332edc0b516203f09f113675",
+      "Docs/Operations/probes/email_local_release_checks_13376.py": "7b6898f1abf8df3bc2916e5fd29e3979f271c1820b7c677c6dcbc81516cbbd82",
+      "Docs/Operations/probes/email_million_search_13376.py": "142c6b67c0a9cf4cd7369ef4d5fd8ac17b62c560740df4bb9f5fee00ea1615f4",
+      "Helper_Scripts/benchmarks/email_search_bench.py": "827c26a396b26dcadcc4ded2c9e9b1309b85ab03bdf33b17b2af232ea66fb991",
+      "tldw_Server_API/app/api/v1/API_Deps/billing_deps.py": "03a76a1288bebd024ad7a89b3339dee61c1ce4d13ad594393bcdc52532e3e6ee",
+      "tldw_Server_API/app/api/v1/API_Deps/content_org_deps.py": "9a80dc48e0bcd9784c466a2d3251aa33dbf4aa02f415ee9863b4f50c81565231",
+      "tldw_Server_API/app/api/v1/API_Deps/media_add_deps.py": "ec11bfea6a0aefc1a269beb7a15ed281919085bcc4fe4b6d82715a7fcde8e360",
+      "tldw_Server_API/app/api/v1/API_Deps/media_processing_deps.py": "0038ccfb76e15f9818978ffe95e3ae310442db94202d856bd9f431597d8eaa5f",
+      "tldw_Server_API/app/api/v1/API_Deps/storage_quota_guard.py": "83b8837db81e6e5ade071c404655c248d45b46554d783874ab6f13ba8228defc",
+      "tldw_Server_API/app/api/v1/endpoints/email.py": "bb76617d7e5e54812225ee7c53199a5e2897d46bb8403e3e2b40e4eab8b80f34",
+      "tldw_Server_API/app/api/v1/endpoints/media/add.py": "142354aa819919d2191eb258ab2b3f971cb6ff53df93ff5d1f5f9d854b1138eb",
+      "tldw_Server_API/app/api/v1/endpoints/media/process_emails.py": "35727c25ff44c8626bff3838642b34501e849db9a16fde64bc0dd2b4cf17c46b",
+      "tldw_Server_API/app/api/v1/schemas/media_request_models.py": "959e4865749594715ac582704c8dc0291f80d29d3309e010a7b63c746e2f71cf",
+      "tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py": "472fe5dc6c01311b0c0245f6543c57855ddc3258910dbbc963606307126f92b1",
+      "tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py": "2a8535761631fa18ffd75fc5af9309e83b982d5318e13cb31fbd5fb02e36c4f0",
+      "tldw_Server_API/app/core/DB_Management/Collections_DB.py": "4f9fbe5bbebda4428fdf4c70592a25909087e0a3d355a3965ddcce240b7d114e",
+      "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py": "16090522fe64c99a28bf056129b1a86c44f913910117dceb58c374b2d149adda",
+      "tldw_Server_API/app/core/DB_Management/backends/query_utils.py": "effbb887843a3ace3be2eac4fca314fe2897ce808ed673a764d3e7738e19d858",
+      "tldw_Server_API/app/core/DB_Management/backends/sqlite_backend.py": "831a64fd3714df5339256223b207a2ab4a24e89ed03b3df84c7c8c2812c40c8b",
+      "tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py": "07e311516af634c23cd2170332c91bde72da71e371cc3775a1528e83fb1587fa",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/document_versions_repository.py": "328faf405b385848c9357eabdc549f9d7ecca7acd43476a896f82b0b6f413cd0",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/keywords_repository.py": "1dfe4832785a66f36096d050adb1e97e719fb75b297e572c9fe5b8eca5392d91",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py": "ccf3232e460caec49235ce15645fd2c3c97f0d75d774c16ed404c3bac9f4b7ee",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_search_repository.py": "5d55aa5d97802142185befc289eb35ea9e52d1b48aa7aa209f75b1f3e37cf1e4",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_benchmark_fixture.py": "cb4f615bffc512779685ec1afdf3651be42a40a5427b0c4ecc87a72a59d77b6e",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_graph_persistence_ops.py": "fecc3eb7cc60164a3ed82f756bd9b6424d5f8bc5db3d3c0a7c0a395cf3c17664",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_query_ops.py": "9b3e4385a1f39d76d763361a2b4adb1f4a405adcbfbf4bf44661fdc9207332b3",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/execution_ops.py": "aed8b8b2ea4f7e02bf38da71395fec889685734035a995972120a88c41f1e3ea",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/fts_ops.py": "2a5742849a0b1c613c1715290f725d2558b69a01457879cbeeeadffbad63bece",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/sync_utility_ops.py": "4be2d97c934e49a9b2a27ec65a5d426d8b08c5cbf8595ff0f27567a30d07cfdc",
+      "tldw_Server_API/app/core/DB_Management/media_db/schema/backends/postgres_helpers.py": "c9febe54f6d2b269937fb3b5580aa468f64bf439c19dd2c86d6ca4b94e72c81b",
+      "tldw_Server_API/app/core/DB_Management/media_db/schema/email_schema_structures.py": "b9ee5e90eacca190af638e7ae82a7bdac8ac5bd8247cf35ca284b0c1b939768f",
+      "tldw_Server_API/app/core/DB_Management/media_db/schema/features/postgres_rls.py": "7236e2c6dd3957ea48d2c9bf2cb46a21fe155b797ee85324304d299df5516f52",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/Email_Processing_Lib.py": "d811d62c157c1437f81dd7127372e408a1b1907d50325a9da5822dbb3d31908f",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/attachment_policy.py": "2b64e6f130692a41854bcb62867a9a4f8997e473aa7c7d2e779b5ea90736775d",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/email_ingestion_metrics.py": "2b8d1ec859b5429aa7b1e1c2e5f69e922eedcb50fa2224d7e61da70ce9bab4d6",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Upload_Sink.py": "af14515d225c8ac3b7ea7d8815f8f899dae69443bcc4c9d9ba325772f1d5ce66",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/chunking_options.py": "f707de892ca281e42c77db26d807f4f8c8d7c73d32a3a62d3659a8e8aa88461d",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/input_sourcing.py": "3267e1ba5fd729b6dd8e9a9af3ec8bb86aa5090aedb25f571abacf2c1df8a53f",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/logging_safety.py": "67602eb927878146c2ecd720c78fb331cfe2a1523cddfabb59faf7b2d4c97b4b",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": "d1da72e63e2e2b49c51f60796a6f8d4f3e43f27507250b96cc4ef1617134a0b0",
+      "tldw_Server_API/app/core/Logging/access_log_middleware.py": "bc6aa0ea5072d7dfabe55468b757791c8a6e5c30a8149008f4a47f750be9f0d0",
+      "tldw_Server_API/app/core/Metrics/metrics_manager.py": "f3a152d6b3548357b2a1a3675a3912752992f76153d32a7a64419097a3dedba4",
+      "tldw_Server_API/app/core/Storage/quota_enforcement.py": "9d78dd8a7a0a2ae67babbfd33b5e564e83f7f1d52eb760514b444e41e46151ca",
+      "tldw_Server_API/tests/AuthNZ/integration/test_storage_quotas_postgres_bootstrap.py": "19e58d3f1b23a647d9df8f49dda35c0552e20427227514cfa2ce218f1331413f",
+      "tldw_Server_API/tests/Billing/test_billing_deps_org_header.py": "14f209659cf114d864eca2caad62a713f85fe578b66ae87c32d468a9474cf29b",
+      "tldw_Server_API/tests/Billing/test_content_org_deps.py": "6e5ddc897a0e483549eec8656f224e89488c62309262a16444eb264897dbb9a8",
+      "tldw_Server_API/tests/Billing/test_storage_quota_guard.py": "28c495dffbc74722a24da03fcdea5a3bbf12a6a15398674b179c15c4edbfbaea",
+      "tldw_Server_API/tests/Collections/test_collections_schema_bootstrap.py": "da5a8c6a0b4543f1203ab162687ca6a0663c592a9f53059676bbbfcc749a3e88",
+      "tldw_Server_API/tests/DB_Management/test_backend_utils.py": "ddad4702ab6d2ca1baf24ca8bbbdd58bc618032ae39b75537504f26a030e6f91",
+      "tldw_Server_API/tests/DB_Management/test_email_benchmark_fixture_13376.py": "a74caa8c3cf6cb5134e4303ab996dc0e26ce0efad2caec816c2c871d9efc46a1",
+      "tldw_Server_API/tests/DB_Management/test_email_benchmark_settings_13376.py": "88ac81b8436708ca3edf25f50eedbea01a4b828aa625fb61ab8e2e152bfcf2cf",
+      "tldw_Server_API/tests/DB_Management/test_email_graph_roundtrips_13376.py": "dc1aa2d36bfe7dee17c03cfed861be3a9c0059b88358172395e797beaef7ee29",
+      "tldw_Server_API/tests/DB_Management/test_email_search_scale_plan_13376.py": "bacb30d876d1c905e65be2738ca0542f5082d280d39e2a2f11452a624eadf546",
+      "tldw_Server_API/tests/DB_Management/test_legacy_media_search_scale_13376.py": "dc8897788a26718c66cebb6154aaed94b38b066568749ef9e2776787f7a9bd48",
+      "tldw_Server_API/tests/DB_Management/test_media_db_runtime_factory.py": "e78dd4f89ee18d99811a317bfd8063513a6f3fc2ade4ca0b53d56ae722a5a1c6",
+      "tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py": "babcd23feb458ecc014138c7a5f7388436f5e9c16dcebad6f64a604af66cbab9",
+      "tldw_Server_API/tests/DB_Management/test_media_search_fts_fallback.py": "20e4c9b95c765d91a57983bb17456360c1ef41542460bc0225e85bf1c486bb8b",
+      "tldw_Server_API/tests/DB_Management/test_postgres_email_archive_transaction.py": "14bdd3a186122054da12a66064613fc7cb3c3e5b74c7197705a0ab14f073dd42",
+      "tldw_Server_API/tests/DB_Management/test_postgres_email_identity_lookup_13376.py": "c2d78ba836158d23f84b08f917765cb94a9e7e4552b8adea481a67e350d408b3",
+      "tldw_Server_API/tests/DB_Management/test_postgres_email_scope_roundtrips_13376.py": "8fd70536a491b2829db3df887deee485a95cb4976bcd26695672ff938166242e",
+      "tldw_Server_API/tests/DB_Management/test_postgres_email_search_acceleration_13376.py": "f445add51073f82dda1c9da601a1b9f3089eb3476ced324488a4d926b43702b3",
+      "tldw_Server_API/tests/DB_Management/test_postgres_fts_refresh.py": "ca47eec9bc5086bb57ef024d7f07de79ec79451816747f0b9cd4122d3e6ca1c9",
+      "tldw_Server_API/tests/DB_Management/test_postgres_legacy_search_parameters_13376.py": "8a257e6654bc3ff104cb2b4b1aa07b32a569976a29544ef9d04aaff2132214fd",
+      "tldw_Server_API/tests/DB_Management/test_postgres_media_sequence_bootstrap.py": "b2b6be3f71d065c96794d1211c49d6c94da0e46689bfcf7b7fdd12d1e44c9e49",
+      "tldw_Server_API/tests/DB_Management/test_postgres_scope_installation_live_13376.py": "c01e0d1d4b8a31a7aecc2bb9ff99381ae14af312a62baca5ad825b319ec83029",
+      "tldw_Server_API/tests/DB_Management/unit/test_sqlite_pool_pruning.py": "d16438eaaf1c648d2d40ccd6f184c7afa575dc0a274f95b840dbb5da40d9a4ca",
+      "tldw_Server_API/tests/Helper_Scripts/test_email_archive_probe_cleanup.py": "4e1c3ef9cecf2a2e545196209d163394b67b30d8e00d517a02aa2413968cf917",
+      "tldw_Server_API/tests/Helper_Scripts/test_email_million_search_probe_13376.py": "dffbc844c528418e72ad56e89c9aa12d0da9d9d4b930a76327731a34227d1974",
+      "tldw_Server_API/tests/Helper_Scripts/test_email_postgres_reuse_probe_13376.py": "5409b67365b9f6243335f8d8696d3843afd8fc1d50c313f1c82fb011c4f1859b",
+      "tldw_Server_API/tests/Helper_Scripts/test_email_probe_assertion_guards_13376.py": "b4986fcf122b58a23657fdbb5d6fed3b1e1d2e04f687b490835d932ed99b99c3",
+      "tldw_Server_API/tests/Helper_Scripts/test_email_release_probe_boundaries_13376.py": "77608bb0b340407d65bd2114aa840ecd5d3ba1cc766b39812de233bb3dcead21",
+      "tldw_Server_API/tests/Helper_Scripts/test_email_search_bench_backends.py": "fa1a5c381147e42ead4dc230c8005d2e8a218d33ff06919397b56f476cffaa1b",
+      "tldw_Server_API/tests/MCP_unified/test_media_health_portable_sql.py": "7a31fe1ce7e6a01d75100858b0b706a37ba601dd3ba2a551875c4f0664d47bf6",
+      "tldw_Server_API/tests/Media/test_upload_sink_security.py": "bb4809c0d5ad664da75ae0fdd9375c8d3f2d52908b2520c938230ef5df03fee0",
+      "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_attachment_upload_13376.py": "ef656be5039e5edd87897463307102ef4112190a43467305dddfc190c35ecffa",
+      "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_authenticated_access.py": "edd418aa52afa2f8b5ed3eda400336436ac01c50377127a395d7406a6391408b",
+      "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_authenticated_upload.py": "bd5c4964e308766a0978790df9237321bfd061ded1de5143ee15243d6a2cea3f",
+      "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_sensitive_logging_13376_2.py": "0f542aa3c81fd52ac30507ab33aaf2fe6b67903643e045671d1b741249ca4e5e",
+      "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_archive_worker.py": "3827c79c51358657d081a1c86dfcf6e0110fdc8ef6827ee4263c3bd1f25610ef",
+      "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_logging_safety_13376_2.py": "f58413323f36bc6ec82e7afe7321af0b24a8b17d0835a099aadf57ee4e11411b",
+      "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_chunk_consistency.py": "aee212a188e40011ce5b141c5a512a613a0bc2fb003711d82ed62d39b521d7f8",
+      "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_ingestion_metrics.py": "298e0aadec0fda357363b7f93bdff6cafa43866e94f27452a71842b63bee8a4f",
+      "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_prep_error_logging.py": "6a658487f90db692d080069a440e785678d2a7a14bdab23adcbfdb4d52617205",
+      "tldw_Server_API/tests/Media_Ingestion_Modification/test_email_attachment_policy_13376.py": "4d546edfe9c118c7a4e3a593157aedaecfa94c14afdd4c9c40556658430784be",
+      "tldw_Server_API/tests/Media_Ingestion_Modification/test_process_emails_endpoint.py": "3d162d59ed4194006dc04c061a4668bfe5031a0dc5ade8de280cf7f2c9544bd0",
+      "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py": "1d95a8ebc889ed3d5cae6a63566cb5194f5111fddd6514d560d8b04a14c41a6d",
+      "tldw_Server_API/tests/Metrics/test_email_ingestion_metrics_13376.py": "8999a2a7645a26f7e7e06e241576cb69b9d63c0df0280e0f42399629d2806683",
+      "tldw_Server_API/tests/Metrics/test_email_search_metrics_13376.py": "d8f876cab24422c6b3c2bab15b9cc2bc7ba94cc5678497ac88d06a9f54aa6ab2",
+      "tldw_Server_API/tests/Utils/test_pagination_openapi_contract.py": "5be70535e58322b3941792086113a02ce5b48ffd3b38a179f7ce632da93f07ff"
+    },
+    "source_binding": "Working source hashes include the final formatting-only wrap in sqlite_backend.py; the following closeout commit adds docs/tracking plus that wrap.",
+    "native_receipt": {
+      "exitstatus": 0,
+      "attempts": {
+        "outbound": 0,
+        "model": 0
+      },
+      "libpff_version": "20231205",
+      "fixture_size": 271360,
+      "fixture_sha256": "24c5e6bbb8bf26a817c977283e40e7b69d2661fec0845abbe177f97efcb05fb0",
+      "outcomes": [
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[cc-carol@example.com]",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[bcc-dave@example.com]",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[date-Thu, 02 Jan 2020 03:04:05 +0000]",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[to-bob@example.com]",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_native_date_precedes_transport_header_date",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[from-alice@example.com]",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[message_id-<synthetic-pst@example.com>]",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_native_datetime_is_preserved_without_transport_headers",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_process_emails_endpoint.py::test_process_emails_endpoint_pst_with_pypff_extraction",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_process_emails_endpoint.py::test_process_emails_endpoint_pst_recipients_and_date_strict",
+          "phase": "call",
+          "outcome": "passed"
+        }
+      ]
+    },
+    "log_sha256": {
+      "regressions": "7b92c319ebff0b41f4132593c147e4f43145f7f971f9baaa852b966ee179514f",
+      "native_pst": "7e87724f4b176951c0bbdf6b5d54ed214c4f3ec7afb08fdebea11de93dbe1fca",
+      "native_receipt": "b83b94f9a1eff2de25ab7dbea973d72f406bda68a3d39d94ff014f804ccc52b5",
+      "native_guard": "b9ee4533aa61a5430939dfe636749d39fc62d415acbe07e8561db2605d104fe3",
+      "ruff": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "bandit": "914f6607711661b1a10d3de51d8d7aeecdc19e53fd77e4099e2a1f42cd8ef282",
+      "openapi_generation": "f7f41d1e1543124767316114829f5b9495b0538b2bca08c311f1fe89ba36476e",
+      "openapi_drift": "1c1207bf9b51b8b6ea4e5a97452bce4af9c64ee7134fb9232d180d9982822461",
+      "source_receipt": "39c6aa77fdecd1b28e004963752daadeff3267889e85d089054a936a2b533e91"
+    },
+    "independent_review": "No actionable regression; incoming files match dev except the two combined production paths and preserved pagination diagnostic. Offline fixture matches dev exactly.",
+    "review_state": "All nine original threads resolved; FTS native bot reply4137098686 confirms already dismissed. New-head incremental review/required gates are pending publication.",
+    "historical_evidence": "Older test and benchmark certificates retain their original source bindings; no throughput/million-message rerun."
   }
 }

@@ -258,3 +258,29 @@ overlap. Independent review found no blocker. Detailed source and log hashes are
 appended to the existing follow-up JSON. Earlier benchmark certificates retain
 their original source revisions. Required hosted checks and incremental review
 will be checked on the published correction head before the authorized merge.
+
+
+## CI admission dev refresh (2026-09-29)
+
+Dev advanced to `6110d2ae436c805c3beeda8f84427b4890534ddf` with PR3036's
+CI admission, database and fixture corrections. The rebase overlaps four files.
+It retains dev's live-thread SQLite shutdown guard with bounded error logging,
+the default file-validator fallback and the offline quota fixture. The pagination
+diagnostic retains the existing shared route walker and mounted/retired tests.
+Independent review found no actionable regression; other incoming files match dev.
+
+The refreshed combined suite passes **374 cases** with zero failures/errors/skips,
+including core email, privacy, offline upload/search, pool and pagination checks.
+All **ten guarded native PST cases** pass again with zero skips/outbound/model
+attempts. **92** current PR Python files compile; all four resolution paths pass
+Ruff and both production resolution files have zero Bandit findings/errors.
+Canonical generation and the exact hosted OpenAPI drift check pass with the
+unchanged `58fa00440a66` fingerprint: 2,104 paths / 3,244 schemas. The PR file count
+decreased because the offline ingestion fixture now matches dev exactly.
+
+Source hashes, guard outcomes and log hashes are appended to the follow-up JSON.
+The previous reviewed head remains in `codex/email-pr3023-qodo-before-dev-refresh-20260929`.
+Earlier benchmark receipts retain their original source revisions. All nine
+original Qodo threads are resolved; its native reply confirms the FTS finding is
+already dismissed. Hosted checks and incremental review must pass on the new
+published head before the authorized merge.

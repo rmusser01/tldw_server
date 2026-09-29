@@ -275,7 +275,9 @@ class SQLiteConnectionPool(ConnectionPool):
                 try:
                     conn.close()
                 except (OSError, RuntimeError, sqlite3.Error) as e:
-                    logger.error("SQLite connection close failed (error_type={})", exception_type_for_log(e))  # noqa: TRY400 - no exception data
+                    logger.error(  # noqa: TRY400 - no exception data
+                        "SQLite connection close failed (error_type={})", exception_type_for_log(e)
+                    )
             self._connections.clear()
             self._thread_refs.clear()
 

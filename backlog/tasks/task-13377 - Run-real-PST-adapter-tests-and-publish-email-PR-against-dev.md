@@ -4,7 +4,7 @@ title: Run real PST adapter tests and publish email PR against dev
 status: In Progress
 assignee: []
 created_date: '2026-09-26 21:50'
-updated_date: '2026-09-29 18:41'
+updated_date: '2026-09-29 19:14'
 labels: []
 dependencies: []
 documentation:
@@ -23,7 +23,7 @@ User requested executing the two previously skipped pypff/PST tests, fixing veri
 - [x] #2 Any verified PST regression is fixed with focused tests and lint/security validation
 - [x] #3 A reviewed pull request targets dev and links measured email evidence; human Change summary merge gate remains explicit
 - [x] #4 PR3023 documentation and backend gates are repaired at their verified causes, with affected checks passing locally
-- [x] #5 Latest dev is integrated without losing email behavior; reviewed corrections and validation are pushed to PR3023
+- [ ] #5 Latest dev is integrated without losing email behavior; reviewed corrections and validation are pushed to PR3023
 - [ ] #6 PR3023 is rebased onto latest dev; all actionable Qodo and other review comments are resolved with evidence
 - [ ] #7 Required CI and review gates pass and PR3023 is merged under the user authorization
 <!-- AC:END -->
@@ -80,6 +80,14 @@ Rebase published at1a5dcf3f3fa90a788bbc96d687750509c632c638 on latestdev0da68530
 Qodo completed nine findings at2026-09-29T18:04Z. Investigation: SQLite alias uses the FTS5 hidden table-name column and native SQLite MATCH/bm25 both succeed; add actual repository token/relevance regression rather than alter its measured CROSS JOIN plan. Latest dev already contains identical AuthNZ storage-quota table/index definitions; remove branch duplicate DDL instead of relocating the existing migration architecture. Add safe bounded function/line stack diagnostics for preparation/search/detail without exception text/locals/source filenames, with per-item opaque failure ID. Correct missing MIME-library warning, classify/format named tests, expand attachment helper contracts. Read-only Chatbook inspection confirms explicit scope payload is supported; retain intended read-key rejection and document selecting write for uploading clients. Rebased core201/native10/OpenAPI all pass; GitHub admission still queued.
 
 Qodo correction validation completed:167 affected regressions passed before final message-only rendering adjustment;4 final observable-log/preparation-response cases pass,3 official PostgreSQL quota bootstrap/failure cases pass,10 freshly guarded native PST and201 rebased core cases pass.93 current PR Python files compile;13 touched paths Ruff clean;6 touched production files Bandit0findings/errors. Independent final review clear. Preparation response now fixed and safe with matching opaque ID; ordinary logs contain bounded type/function/line diagnostics without private values. FTS concern disproved by actual MATCH/ranking/no-LIKE regression; redundant quota DDL removed; intended write scope documented. Existing report/evidence updated with explicit source/log bindings. Reviewed correction commit and PR thread replies are being published; final hosted checks/merge pending.
+
+Published reviewed Qodo correction0d21f404a13320c18970f17b355905b13f47c3d4. All9 original inline findings replied/resolved (receipt retained in /tmp/email_pr3023_qodo_resolution_receipts_20260929.json). Updated Qodo summary targets this exacthead, marks eight corrected/outdated and retains the SQLite false positive disproved by the actual MATCH/bm25/no-LIKE regression; disposition reply is posted. PR description preserves human Change summary and current evidence. Latestdev remains0da68530e8. Required hosted jobs are queued behind exact-head license audit36614038055; normal SHA-aware helper is waiting without bypass, and actualmerge remains pending.
+
+External continuation arranged: native heartbeat finish-email-pr3023-review-and-merge ACTIVE every10minutes on this thread under explicit user merge authorization. It will inspect fresh exact-head CI, dev and comments, fix any new actionable findings, and perform normal SHA-matched merge after all7 required contexts pass. Quiet while unchanged; pause after confirmed merge/closure. Qodo reply4137098686 confirms remaining FTS finding already dismissed, despite stale summary header. All9 threads resolved; current published0d21f404a1 and dev0da68530e8. Task-specific gate-wait helper stopped to avoid duplicate reruns. Required jobs remain queued with no final-head failure. Worktree/backup/validation receipts and exact temp dependencies retained for continuation; actualmerge/AC7 remains pending.
+
+Heartbeat2026-09-29T19:01Z: dev advanced to6110d2ae436c805c3beeda8f84427b4890534ddf (PR3036 CI-shard admission/database/test-fixture corrections).247 incoming files,only4 overlap reviewed PR:sqlite_backend.py,persistence.py,email_offline_ingestion test,pagination contract test. Rebase current0d21 onto freshdev preserving reviewed email privacy/query/auth protections and dev DB close/default-validator fixes. Preserve own mounted-route diagnostic using existing effective-route walker instead of dev duplicate walker. Actual requiredaudit remainsqueued; all9 Qodo threads resolved/no new comments. Reopen latest-dev criterion until refresh published; retained plan covers rebase and affected verification.
+
+Dev6110 refresh verified:374 combined core/privacy/offline/pool/pagination regressions passed,0failures/errors/skips;10 guarded native-PST cases passed,0skips/outbound/model calls.92 actual PRPython compile (offline fixture now identical dev),4 resolution paths Ruff clean,2 production paths Bandit0findings/errors. Canonical generator and hosted OpenAPI drift check pass with unchanged58fa00440a66/2104paths3244schemas. Independent refresh review clear. Source hashes and exact log/guard receipts appended; prior benchmarks/source bindings preserved. New reviewed refresh ready for force-with-lease publication against originalremote0d21. AC5/6 remain pending refreshed publication/incremental review; AC7 actualmerge pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -91,7 +99,7 @@ PR3023 rebased onto dev0da68530e8; all nine Qodo findings investigated and corre
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
+- [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
