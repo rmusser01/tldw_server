@@ -77,3 +77,11 @@ The production Chrome extension build on `5cbca66a586b75dce43c28a39fcfaa0550a220
 also passed in 117 seconds. Its exported MV3 manifest and background, options,
 and side-panel entrypoints were verified; build hashes are recorded on the PR.
 This qualifies packaging, not installed-extension interaction. Raw logs stay local.
+
+Rebased onto dev `6110d2ae436c805c3beeda8f84427b4890534ddf` after its database
+corrections. All three reviewed commits are preserved by range-diff, and apps
+sources have no base changes. Fresh checks passed 37 workspace contracts and
+25 independent-Buddy backend cases; one PostgreSQL case was skipped. The
+[separate rebase receipt](artifacts/buddy-current-dev-20260929/rebase-verification.json)
+records these results without reattributing the earlier WebUI screenshots or
+claiming fresh PostgreSQL, native or physical voice qualification.
