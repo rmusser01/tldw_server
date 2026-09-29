@@ -2019,7 +2019,12 @@ jobs:
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
           # TEST_PATHS is a matrix-provided list of pytest path arguments.
           # shellcheck disable=SC2086
-          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+          # A hang outside any single test (collection, teardown, a thread
+          # blocking interpreter exit) escapes pytest-timeout and used to hit the
+          # job limit, which discards the log. Stop pytest first, with SIGABRT so
+          # the fault handler dumps every thread's stack into the kept log.
+          PYTHONFAULTHANDLER=1 timeout --signal=ABRT --kill-after=60s 55m \
+            pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -p pytest_timeout -o timeout_method=signal \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
@@ -3535,7 +3540,12 @@ jobs:
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
           # TEST_PATHS is a matrix-provided list of pytest path arguments.
           # shellcheck disable=SC2086
-          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+          # A hang outside any single test (collection, teardown, a thread
+          # blocking interpreter exit) escapes pytest-timeout and used to hit the
+          # job limit, which discards the log. Stop pytest first, with SIGABRT so
+          # the fault handler dumps every thread's stack into the kept log.
+          PYTHONFAULTHANDLER=1 timeout --signal=ABRT --kill-after=60s 55m \
+            pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -p pytest_timeout -o timeout_method=signal \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
