@@ -366,6 +366,21 @@ def test_stdio_process_policy_defaults_block_shell_wrappers() -> None:
     assert secret_arg not in repr(exc_info.value.details)
 
 
+@pytest.mark.parametrize("shell", ["bash.exe", "sh.exe", "zsh.exe", "fish.exe"])
+def test_stdio_process_policy_blocks_windows_shell_wrappers(shell: str) -> None:
+    """Windows shell executable suffixes cannot bypass the default policy."""
+    with pytest.raises(StdioProcessPolicyViolation) as exc_info:
+        validate_stdio_process_policy(
+            server_id="docs",
+            command=(f"C:\\Git\\bin\\{shell}", "-lc", "echo unsafe"),
+            cwd=None,
+            env_allowlist=(),
+            policy=StdioProcessPolicy(),
+        )
+
+    assert exc_info.value.reason_code == "process_policy_shell_denied"
+
+
 def test_stdio_process_policy_allows_explicit_shell_executable() -> None:
     """Hosts can deliberately allow a shell executable through allowlisting."""
     shell = shutil.which("bash") or shutil.which("sh")
@@ -720,8 +735,12 @@ async def test_stdio_transport_health_marks_exited_process_disconnected(tmp_path
 
     try:
         await transport.connect()
+        process = transport._proc
+        assert process is not None
         result = await transport.call_tool("docs.exit", {})
         assert result.content == {"exiting": True}
+
+        await asyncio.wait_for(process.wait(), timeout=2.0)
 
         health = await transport.health_check()
         assert health["connected"] is False
