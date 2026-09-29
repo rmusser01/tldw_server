@@ -291,6 +291,7 @@ def test_cli_writes_failed_evidence_without_credentials(tmp_path, monkeypatch):
 
     class Collector(BaseHTTPRequestHandler):
         def do_GET(self):
+            time.sleep(0.2)
             seen_headers.append(self.headers.get("X-API-KEY"))
             body = json.dumps({"artifact_sha256": "wrong-target"}).encode()
             self.send_response(200)
@@ -309,6 +310,7 @@ def test_cli_writes_failed_evidence_without_credentials(tmp_path, monkeypatch):
         monkeypatch.setenv("SOAK_TEST_TOKEN", "DO_NOT_WRITE_THIS_CREDENTIAL")
         config = profile()
         config["base_url"] = f"http://127.0.0.1:{server.server_port}"
+        config["timeout_seconds"] = 5
         inputs = tmp_path / "profile.json"
         rows = tmp_path / "dataset.json"
         output = tmp_path / "evidence.json"

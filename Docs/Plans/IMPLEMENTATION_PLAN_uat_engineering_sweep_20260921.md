@@ -113,6 +113,11 @@ Files: this plan, `Docs/Reviews/UAT_ENGINEERING_SWEEP_COVERAGE_2026_09_21.md`, `
 - [ ] TASK13260.278.18.75: accept extra RAG keepalives while retaining ordered data events; both Windows failures reproduce locally and the full 86-case stream module passes, native Windows acceptance remains open.
 - [ ] TASK13260.278.18.76: retry SQLite busy/locked WAL setup during concurrent Slides opens; barrier red/green, 10 repeats and 46 affected controls pass locally, hosted Slides acceptance remains open.
 - [ ] TASK13260.278.18.77: normalize resolved Windows drive/UNC device spellings in shared storage containment; four boundary checks and 51 storage/retirement controls pass locally, native Windows acceptance remains open.
+- [ ] TASK13260.278.18.78: widen only the Chat fallback rotation test's bounded event/request waits; controlled delayed-start red/green preserves snapshot/lifecycle assertions; full module 217 passed, one inherited streaming TestClient skip; Windows rerun pending.
+- [ ] TASK13260.278.18.79: keep the credential-evidence privacy contract while allowing delayed loopback delivery; deterministic red/green and all 40 release-soak cases pass locally, macOS rerun pending.
+- [ ] TASK13260.278.18.80: provision Docker CLI/Compose only for macOS core-utils contract; local Compose render test and CI YAML parse pass, hosted macOS rerun pending.
+- [ ] TASK13260.278.18.81: attribute Windows media-audio 24 failures and two errors into shared causes; preserve the reported 44 skips, unexpected pass and native rerun gate.
+- [ ] Treat paper-search's PostgreSQL image `unknown blob` as unexecuted; require a real rerun before acceptance.
 - [ ] Maintain the latest-dev base: rebase checkpoint onto `e5186a28d9` preserved all 136 prior commits by range-diff; repeat after further upstream changes before publishing.
 - [ ] Attribute the AuthNZ property `too_slow` outlier before changing its strategy or health checks; the official PostgreSQL focused test passes locally and hosted rerun remains open.
 - [ ] Complete fresh hosted MCP acceptance after the full local 3,433-case suite passed with zero failures and zero skips.

@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 import threading
+import time
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
@@ -1403,7 +1404,7 @@ def test_health_fallback_keeps_model_policy_atomic_during_config_rotation(
                 self._fallback_calls += 1
                 if self._fallback_calls == 1:
                     fallback_resolution_started.set()
-                    await asyncio.to_thread(release_fallback_resolution.wait, 2.0)
+                    await asyncio.to_thread(release_fallback_resolution.wait, 20.0)
             return await issue_provider_call_credentials_async(
                 normalized,
                 api_key=f"{normalized}-runtime-key",
@@ -1461,16 +1462,20 @@ def test_health_fallback_keeps_model_policy_atomic_during_config_rotation(
         patch.object(chat_endpoint, "get_override_default_model", return_value=None),
         patch.object(chat_endpoint, "get_llm_provider_override", return_value=None),
     ):
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(
-                authenticated_client.post,
+        def post_after_slow_start():
+            # Exercise a request startup longer than the old two-second deadline.
+            time.sleep(2.1)
+            return authenticated_client.post(
                 "/api/v1/chat/completions",
                 json=request_data.model_dump(),
             )
-            assert fallback_resolution_started.wait(timeout=2.0)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(post_after_slow_start)
+            assert fallback_resolution_started.wait(timeout=20.0)
             monkeypatch.setenv("DEFAULT_MODEL_ANTHROPIC", "claude-rotated-model")
             release_fallback_resolution.set()
-            response = future.result(timeout=5.0)
+            response = future.result(timeout=25.0)
 
     assert response.status_code == status.HTTP_200_OK, response.text
     assert captured["model"] == "claude-snapshot-model"
