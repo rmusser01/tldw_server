@@ -116,6 +116,7 @@ Files: this plan, `Docs/Reviews/UAT_ENGINEERING_SWEEP_COVERAGE_2026_09_21.md`, `
 - [ ] TASK13260.278.18.78: widen only the Chat fallback rotation test's bounded event/request waits; controlled delayed-start red/green preserves snapshot/lifecycle assertions; full module 217 passed, one inherited streaming TestClient skip; Windows rerun pending.
 - [ ] TASK13260.278.18.79: keep the credential-evidence privacy contract while allowing delayed loopback delivery; deterministic red/green and all 40 release-soak cases pass locally, macOS rerun pending.
 - [ ] TASK13260.278.18.80: provision Docker CLI/Compose only for macOS core-utils contract; local Compose render test and CI YAML parse pass, hosted macOS rerun pending.
+- [ ] TASK13260.278.18.81.1: align five audiobook calls and one keyless TTS double with the current routing contract; six causal failures become 56 passing tests locally, native Windows rerun pending.
 - [ ] TASK13260.278.18.81: attribute Windows media-audio 24 failures and two errors into shared causes; preserve the reported 44 skips, unexpected pass and native rerun gate.
 - [ ] Treat paper-search's PostgreSQL image `unknown blob` as unexecuted; require a real rerun before acceptance.
 - [ ] Maintain the latest-dev base: rebase checkpoint onto `e5186a28d9` preserved all 136 prior commits by range-diff; repeat after further upstream changes before publishing.
