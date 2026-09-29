@@ -1203,6 +1203,8 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "core-audit-unified",
             "core-config",
             "core-security",
+            "core-security-egress",
+            "core-security-http-hop",
             "core-server-smoke",
             "core-setup-usage",
             "core-utils-tooling",

@@ -638,9 +638,30 @@ jobs:
           - name: core-audit-unified
             paths: >-
               tldw_Server_API/tests/Audit/test_unified_audit_service.py
+          # core-security hit the job limit four runs in a row with no log kept;
+          # split so the stuck files are named by the shard that stalls.
           - name: core-security
             paths: >-
-              tldw_Server_API/tests/Security
+              tldw_Server_API/tests/Security/test_crypto.py
+              tldw_Server_API/tests/Security/test_dependency_security_floor.py
+              tldw_Server_API/tests/Security/test_pr2761_python_boundaries.py
+              tldw_Server_API/tests/Security/test_request_id_middleware.py
+              tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
+              tldw_Server_API/tests/Security/test_secret_manager.py
+              tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_setup_access_guard.py
+              tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
+              tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
+              tldw_Server_API/tests/Security/test_text2sql_rbac_and_acl.py
+              tldw_Server_API/tests/Security/test_trusted_proxy.py
+          - name: core-security-http-hop
+            paths: >-
+              tldw_Server_API/tests/Security/test_http_hop_*.py
+          - name: core-security-egress
+            paths: >-
+              tldw_Server_API/tests/Security/test_egress*.py
+              tldw_Server_API/tests/Security/test_websearch_egress_guard.py
+              tldw_Server_API/tests/Security/test_zip_safe_extract.py
           - name: core-setup-usage
             paths: >-
               tldw_Server_API/tests/Setup
@@ -2038,7 +2059,9 @@ jobs:
             > "$PYTEST_LOG" 2>&1
           status=$?
           set -e
-          cat "$PYTEST_LOG"
+          echo "pytest exit status ${status}; output $(wc -c < "$PYTEST_LOG") bytes"
+          # Bounded, in case a runaway test flooded the output.
+          tail -c 2000000 "$PYTEST_LOG"
           echo "::group::Processes still running after pytest"
           ps -eo pid,ppid,etime,args --sort=start_time | tail -n 40
           echo "::endgroup::"
@@ -2233,9 +2256,30 @@ jobs:
           - name: core-audit-unified
             paths: >-
               tldw_Server_API/tests/Audit/test_unified_audit_service.py
+          # core-security hit the job limit four runs in a row with no log kept;
+          # split so the stuck files are named by the shard that stalls.
           - name: core-security
             paths: >-
-              tldw_Server_API/tests/Security
+              tldw_Server_API/tests/Security/test_crypto.py
+              tldw_Server_API/tests/Security/test_dependency_security_floor.py
+              tldw_Server_API/tests/Security/test_pr2761_python_boundaries.py
+              tldw_Server_API/tests/Security/test_request_id_middleware.py
+              tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
+              tldw_Server_API/tests/Security/test_secret_manager.py
+              tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_setup_access_guard.py
+              tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
+              tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
+              tldw_Server_API/tests/Security/test_text2sql_rbac_and_acl.py
+              tldw_Server_API/tests/Security/test_trusted_proxy.py
+          - name: core-security-http-hop
+            paths: >-
+              tldw_Server_API/tests/Security/test_http_hop_*.py
+          - name: core-security-egress
+            paths: >-
+              tldw_Server_API/tests/Security/test_egress*.py
+              tldw_Server_API/tests/Security/test_websearch_egress_guard.py
+              tldw_Server_API/tests/Security/test_zip_safe_extract.py
           - name: core-setup-usage
             paths: >-
               tldw_Server_API/tests/Setup
@@ -3572,7 +3616,9 @@ jobs:
             > "$PYTEST_LOG" 2>&1
           status=$?
           set -e
-          cat "$PYTEST_LOG"
+          echo "pytest exit status ${status}; output $(wc -c < "$PYTEST_LOG") bytes"
+          # Bounded, in case a runaway test flooded the output.
+          tail -c 2000000 "$PYTEST_LOG"
           echo "::group::Processes still running after pytest"
           ps -eo pid,ppid,etime,args --sort=start_time | tail -n 40
           echo "::endgroup::"
@@ -3668,9 +3714,30 @@ jobs:
           - name: core-audit-unified
             paths: >-
               tldw_Server_API/tests/Audit/test_unified_audit_service.py
+          # core-security hit the job limit four runs in a row with no log kept;
+          # split so the stuck files are named by the shard that stalls.
           - name: core-security
             paths: >-
-              tldw_Server_API/tests/Security
+              tldw_Server_API/tests/Security/test_crypto.py
+              tldw_Server_API/tests/Security/test_dependency_security_floor.py
+              tldw_Server_API/tests/Security/test_pr2761_python_boundaries.py
+              tldw_Server_API/tests/Security/test_request_id_middleware.py
+              tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
+              tldw_Server_API/tests/Security/test_secret_manager.py
+              tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_setup_access_guard.py
+              tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
+              tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
+              tldw_Server_API/tests/Security/test_text2sql_rbac_and_acl.py
+              tldw_Server_API/tests/Security/test_trusted_proxy.py
+          - name: core-security-http-hop
+            paths: >-
+              tldw_Server_API/tests/Security/test_http_hop_*.py
+          - name: core-security-egress
+            paths: >-
+              tldw_Server_API/tests/Security/test_egress*.py
+              tldw_Server_API/tests/Security/test_websearch_egress_guard.py
+              tldw_Server_API/tests/Security/test_zip_safe_extract.py
           - name: core-setup-usage
             paths: >-
               tldw_Server_API/tests/Setup
@@ -5009,9 +5076,30 @@ jobs:
           - name: core-audit-unified
             paths: >-
               tldw_Server_API/tests/Audit/test_unified_audit_service.py
+          # core-security hit the job limit four runs in a row with no log kept;
+          # split so the stuck files are named by the shard that stalls.
           - name: core-security
             paths: >-
-              tldw_Server_API/tests/Security
+              tldw_Server_API/tests/Security/test_crypto.py
+              tldw_Server_API/tests/Security/test_dependency_security_floor.py
+              tldw_Server_API/tests/Security/test_pr2761_python_boundaries.py
+              tldw_Server_API/tests/Security/test_request_id_middleware.py
+              tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
+              tldw_Server_API/tests/Security/test_secret_manager.py
+              tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_setup_access_guard.py
+              tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
+              tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
+              tldw_Server_API/tests/Security/test_text2sql_rbac_and_acl.py
+              tldw_Server_API/tests/Security/test_trusted_proxy.py
+          - name: core-security-http-hop
+            paths: >-
+              tldw_Server_API/tests/Security/test_http_hop_*.py
+          - name: core-security-egress
+            paths: >-
+              tldw_Server_API/tests/Security/test_egress*.py
+              tldw_Server_API/tests/Security/test_websearch_egress_guard.py
+              tldw_Server_API/tests/Security/test_zip_safe_extract.py
           - name: core-setup-usage
             paths: >-
               tldw_Server_API/tests/Setup
@@ -6350,9 +6438,30 @@ jobs:
           - name: core-audit-unified
             paths: >-
               tldw_Server_API/tests/Audit/test_unified_audit_service.py
+          # core-security hit the job limit four runs in a row with no log kept;
+          # split so the stuck files are named by the shard that stalls.
           - name: core-security
             paths: >-
-              tldw_Server_API/tests/Security
+              tldw_Server_API/tests/Security/test_crypto.py
+              tldw_Server_API/tests/Security/test_dependency_security_floor.py
+              tldw_Server_API/tests/Security/test_pr2761_python_boundaries.py
+              tldw_Server_API/tests/Security/test_request_id_middleware.py
+              tldw_Server_API/tests/Security/test_runtime_fixme_hotspots.py
+              tldw_Server_API/tests/Security/test_secret_manager.py
+              tldw_Server_API/tests/Security/test_security_headers_middleware.py
+              tldw_Server_API/tests/Security/test_setup_access_guard.py
+              tldw_Server_API/tests/Security/test_setup_csp_eval_policy.py
+              tldw_Server_API/tests/Security/test_standalone_html_request_admission.py
+              tldw_Server_API/tests/Security/test_text2sql_rbac_and_acl.py
+              tldw_Server_API/tests/Security/test_trusted_proxy.py
+          - name: core-security-http-hop
+            paths: >-
+              tldw_Server_API/tests/Security/test_http_hop_*.py
+          - name: core-security-egress
+            paths: >-
+              tldw_Server_API/tests/Security/test_egress*.py
+              tldw_Server_API/tests/Security/test_websearch_egress_guard.py
+              tldw_Server_API/tests/Security/test_zip_safe_extract.py
           - name: core-setup-usage
             paths: >-
               tldw_Server_API/tests/Setup
