@@ -131,6 +131,8 @@ Final focused integration passed **1095 tests, four existing macOS Bash >=4 skip
 
 ### Remaining Stage 2 Scope
 
+The [Stage 2D qualification plan](2026-09-29-persona-workspace-stage2d-qualification-plan.md), tracked by TASK-13245.9, is a documentation-only stack on pending PR #3041. Stage 2C implementation/local qualification is recorded in that PR and TASK-13245.8; hosted delivery remains open. Stage 2D prompt, saved-conversation and operational evidence gates are not complete, and broader Stages 3-5 remain separate. Earlier planning checkpoints below are historical, not current runtime status.
+
 The [current-dev executable Stage 2C plan](2026-09-27-persona-workspace-strict-startup-implementation-plan.md) is the detailed execution contract. Requester-approved follow-up amendments add idle outermost startup/replay ownership and post-commit responses, strict-only Unicode/byte/body bounds, immutable database-owner admission and typed resolver-error translation. Session preparation/preview/complete-v2 remain global-only, with deliberate Workspace rejection tests; supported Workspace Persona generation uses ordinary scoped chat. No Workspace-session support or Stage 2D completion is claimed. TASK-13245.7 must be repaired before lifecycle qualification, and a separate execution task is still required before runtime edits.
 
 **Files:**
