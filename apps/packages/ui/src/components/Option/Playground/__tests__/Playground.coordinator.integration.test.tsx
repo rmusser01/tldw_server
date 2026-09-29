@@ -967,10 +967,20 @@ describe("Playground coordinator integration", () => {
     const { PageAssistDatabase } = await import("@/db/dexie/chat")
     const { db } = await import("@/db/dexie/schema")
     const history = { id: "owned-local", title: "Owned local title", createdAt: 1, is_rag: false, server_scope_key: '["http://chat.test","multi-user","manual",null,"A",null]', local_owner_key: "local-history-v1:profile" }
+    const originalTransaction = db.transaction
     const originalProfileTable = db.userSettings
     const originalHistoryTable = db.chatHistories
+    const originalMessagesTable = db.messages
+    const originalSessionFilesTable = db.sessionFiles
+    const originalCompareTable = db.compareStates
+    // The local H1 controller reads these tables inside a Dexie transaction.
+    // Keep its real owner and capture checks; only replace the unavailable test DB.
+    db.transaction = (async (_mode: unknown, _tables: unknown, work: (tx: { abort: () => void }) => Promise<unknown>) => work({ abort: vi.fn() })) as typeof db.transaction
     db.userSettings = { ...originalProfileTable, get: vi.fn(async () => ({ id: "main", user_id: "profile", history_profile_id: "profile" })) } as unknown as typeof db.userSettings
     db.chatHistories = { ...originalHistoryTable, get: vi.fn(async (id: string) => id === history.id ? history : undefined) } as unknown as typeof db.chatHistories
+    db.messages = { ...originalMessagesTable, where: vi.fn(() => ({ equals: () => ({ toArray: async () => [] }) })) } as unknown as typeof db.messages
+    db.sessionFiles = { ...originalSessionFilesTable, get: vi.fn(async () => undefined) } as unknown as typeof db.sessionFiles
+    db.compareStates = { ...originalCompareTable, get: vi.fn(async () => undefined) } as unknown as typeof db.compareStates
     let release!: () => void
     const held = new Promise<void>(resolve => { release = resolve })
     const read = vi.spyOn(PageAssistDatabase.prototype, "getChatHistory").mockImplementation(async () => { await held; return [] })
@@ -991,8 +1001,12 @@ describe("Playground coordinator integration", () => {
       view.unmount()
       read.mockRestore()
       readInfo.mockRestore()
+      db.transaction = originalTransaction
       db.userSettings = originalProfileTable
       db.chatHistories = originalHistoryTable
+      db.messages = originalMessagesTable
+      db.sessionFiles = originalSessionFilesTable
+      db.compareStates = originalCompareTable
     }
   })
 
