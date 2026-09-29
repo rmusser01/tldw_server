@@ -19,7 +19,7 @@ TABLE = "workspace_chat_startup_receipts"
 def test_upgrade_and_reopen_retains_existing_chat(
     db_factory: Callable[[], CharactersRAGDB], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Initialize the actual prior schema, rather than rewinding a modern database."""
+    """Upgrade actual prior storage without replaying completed PostgreSQL DDL."""
     with monkeypatch.context() as old_code:
         old_code.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 73)
         old_code.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 77)
@@ -29,8 +29,23 @@ def test_upgrade_and_reopen_retains_existing_chat(
         assert old.backend.table_exists("persona_buddy_preferences")
         assert old.backend.table_exists("persona_visual_pack_reviews")
         old.close_all_connections()
+    backend_class = type(old.backend)
+    execute = backend_class.execute
+    ddl: list[str] = []
+
+    def observe_ddl(self: Any, query: str, *args: Any, **kwargs: Any) -> Any:
+        """Observe real execution without replacing migration or catalog checks."""
+        if query.lstrip().upper().startswith(("CREATE TABLE", "ALTER TABLE", "DROP TABLE")):
+            ddl.append(query)
+        return execute(self, query, *args, **kwargs)
+
     for _ in range(2):
-        upgraded = db_factory()
+        ddl.clear()
+        with monkeypatch.context() as upgrade:
+            if old.backend_type.value == "postgresql":
+                upgrade.setattr(backend_class, "execute", observe_ddl)
+            upgraded = db_factory()
+        assert all(TABLE in statement for statement in ddl), ddl
         assert upgraded.backend.table_exists(TABLE)
         assert upgraded.get_conversation_by_id(cid)["title"] == "Retained"
         assert upgraded.execute_query(
