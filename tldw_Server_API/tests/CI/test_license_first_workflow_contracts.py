@@ -1139,16 +1139,27 @@ def test_helper_is_the_only_checked_out_program_and_owns_all_outputs() -> None:
     assert _unquoted_shell_expansions(script) == []
 
 
-def test_full_suite_summaries_fail_closed_on_skipped_shards() -> None:
-    # A summary only runs when its shards were supposed to run, so a skipped shard job
-    # means the suite never executed. Accepting "skipped" hid exactly that for weeks.
+_FULL_SUITE_SUMMARIES = sorted(name for name in BACKEND_CHANGED_JOBS if name.endswith("-summary"))
+
+
+@pytest.mark.unit
+def test_every_full_suite_platform_has_a_summary() -> None:
+    """Linux 3.12/3.13, macOS and Windows each report through one summary job."""
+    assert len(_FULL_SUITE_SUMMARIES) == 4
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("summary", _FULL_SUITE_SUMMARIES, ids=_FULL_SUITE_SUMMARIES)
+def test_full_suite_summaries_fail_closed_on_skipped_shards(summary: str) -> None:
+    """A summary fails unless its shard job succeeded; "skipped" is not a pass.
+
+    A summary only runs when its shards were supposed to run, so a skipped shard
+    job means the suite never executed. Accepting "skipped" hid exactly that for weeks.
+    """
     jobs = _load_ordinary_workflows()["ci.yml"][0]["jobs"]
-    summaries = [name for name in BACKEND_CHANGED_JOBS if name.endswith("-summary")]
-    assert len(summaries) == 4
-    for name in summaries:
-        script = "\n".join(step.get("run", "") for step in jobs[name]["steps"])
-        assert 'if [ "$r" != "success" ]; then' in script, name
-        assert '"skipped"' not in script, name
+    script = "\n".join(step.get("run", "") for step in jobs[summary]["steps"])
+    assert 'if [ "$r" != "success" ]; then' in script
+    assert '"skipped"' not in script
 
 
 def test_backend_required_enforces_isolation_ratchets():
