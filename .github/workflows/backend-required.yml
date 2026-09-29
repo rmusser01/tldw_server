@@ -233,6 +233,25 @@ jobs:
             tldw_Server_API/tests/lint/test_route_auth_ratchet.py \
             tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py
 
+      # Contracts and ratchets that used to run only in ci.yml's full-suite shards,
+      # which are not required and are skipped on most PRs -- how #3013 merged with
+      # the license-first contracts red (TASK-13386). A ratchet nothing enforces is
+      # decoration: the private-coercer ratchet (TASK-13342) and the first-party
+      # source pinning (TASK-13380) need a required gate for the same reason.
+      - name: Enforce CI contracts and code ratchets
+        if: needs.changes.outputs.backend_changed == 'true'
+        env:
+          PYTHONPATH: .
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          TEST_MODE: "true"
+          DISABLE_HEAVY_STARTUP: "1"
+        run: |
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py \
+            tldw_Server_API/tests/CI/test_frontend_license_gate_workflow.py \
+            tldw_Server_API/tests/lint/test_private_coercion_ratchet.py \
+            tldw_Server_API/tests/lint/test_first_party_source_pinning.py
+
       - name: Backend unit smoke
         if: needs.changes.outputs.backend_changed == 'true'
         env:

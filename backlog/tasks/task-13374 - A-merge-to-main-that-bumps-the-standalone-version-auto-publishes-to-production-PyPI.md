@@ -3,9 +3,10 @@ id: TASK-13374
 title: >-
   A merge to main that bumps the standalone version auto-publishes to production
   PyPI
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-26 14:04'
+updated_date: '2026-09-28 19:29'
 labels:
   - security
   - ci
@@ -37,12 +38,18 @@ Owner decision on intent: if a version-bump push is meant to publish, the typed 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The push path either cannot reach publish-pypi, or reaches it only behind an equivalent explicit control
-- [ ] #2 The pypi environment has required reviewers, or the task records why it does not need them
-- [ ] #3 No path reaches production PyPI without first staging to TestPyPI, or that is recorded as intended
-- [ ] #4 test_mcp_unified_publish_workflow_is_manual_and_gated passes against the intended design
-- [ ] #5 The three sibling red assertions in the same file are triaged
+- [x] #1 The push path either cannot reach publish-pypi, or reaches it only behind an equivalent explicit control
+- [x] #2 The pypi environment has required reviewers, or the task records why it does not need them
+- [x] #3 No path reaches production PyPI without first staging to TestPyPI, or that is recorded as intended
+- [x] #4 test_mcp_unified_publish_workflow_is_manual_and_gated passes against the intended design
+- [x] #5 The three sibling red assertions in the same file are triaged
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+OWNER DECISION 2026-09-28: version bumps merged to main SHOULD auto-publish to PyPI. So: AC1: the push path reaching publish-pypi is intended; the explicit control is the reviewed PR that bumps apps/mcp-unified's version and is merged to main by the owner, and the typed confirmation stays on the manual path only. AC2: the pypi environment needs no required reviewers for the same reason. AC3: the push path skipping TestPyPI is intended. AC4: test_mcp_unified_publish_workflow_is_manual_and_gated already encodes this design on dev (triggers {workflow_dispatch, push}, push narrowed to main plus the version-carrying paths, no pull_request reachability, manual path still typed-confirm-gated) and passes. AC5: test_runtime_package_boundary.py is fully green on dev (44 passed; 6 skipped: offline package smokes that need preinstalled build requirements).
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

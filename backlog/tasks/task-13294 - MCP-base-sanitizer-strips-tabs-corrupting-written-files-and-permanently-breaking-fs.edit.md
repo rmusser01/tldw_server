@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-09-22 04:44'
-updated_date: '2026-09-22 22:28'
+updated_date: '2026-09-28 19:37'
 labels:
   - bug
   - mcp
@@ -82,7 +82,6 @@ Verification:
 - tests/sandbox + Services: 24 failed, identical with and without the change (stash-isolated)
 - AC7 bandit: clean over the five touched files, no issues at any severity. Run via `uvx bandit`; bandit is CI-only (security-required.yml), not a declared local dependency, so the venv was left untouched.
 
-
 Notes recorded on dev by the parallel core-review work (merged 2026-09-23):
 Whitespace half SHIPPED in PR #2980 (merge 8045fa2956): BaseModule.sanitize_input and the FilesystemModule override now preserve \t and \r, so fs.write no longer corrupts tab-significant files and fs.edit can match tab-indented content. Qodo correctly caught that fixing only the base class was ineffective, since the override shadows it on the production path.
 STILL OPEN - the dangerous_patterns denylist. It rejects '--', '/*', 'xp_', so ordinary Markdown rules, src/*.py pathspecs, git '-- path' and exp_ filenames are refused on data that is bound to parameterised queries. Removing it requires confirming all 22 inheriting modules actually parameterise, which is an owner decision rather than a drive-by edit.
@@ -93,7 +92,6 @@ Also still divergent and out of scope for that change: sandbox_module.py strips 
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
-
 
 Notes recorded on dev by the parallel work (merged 2026-09-27):
 Denylist half implemented on fix/mcp-denylist (commit 09671d65b7).
@@ -146,9 +144,10 @@ test_slides_module_standalone_html.py (29) and test_runtime_package_boundary.py 
 hit in a module this change touches, test_filesystem_glob_marks_file_size_unavailable,
 monkeypatches Path.stat and is unrelated to sanitization.
 
-
 Notes from the other branch (merged 2026-09-27):
 Re-checked on dev 2026-09-27: ACs 1-5 are in place (#2980, #2996). Stays open for AC #6, the unreachable exemption table in filesystem_module, which needs tool_name threaded through sanitize_input as recorded above.
+
+AC6 done 2026-09-28 by making the exemption table reachable, without threading tool_name through all 22 modules. BaseModule.verbatim_argument_keys(tool_name) returns frozenset() by default; FilesystemModule returns its _VERBATIM_ARGS entry. ToolExecutionSecurity.harden_and_sanitize_tool_arguments now takes tool_name (both call sites pass it) and leaves str values under the declared keys byte-exact. Non-str values under those keys are still fully sanitised (depth guard included), and the ownership-override strip still runs first. Duck-typed modules without the hook default to nothing verbatim. Tests: MCP_unified/tests/test_verbatim_argument_keys.py (9) covers form-feed content surviving for fs.write/fs.edit/notebook.edit_cell, per-key scope, non-str fallback, other tools and modules unchanged, and the override strip. MCP trees: the 5 remaining failures are identical on dev; one parallel-run failure passes alone and with its file.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

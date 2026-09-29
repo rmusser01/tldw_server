@@ -772,6 +772,15 @@ class BaseModule(ABC):
         del arguments, context
         raise NotImplementedError(f"Path scope candidate extraction not implemented for {tool_name}")
 
+    def verbatim_argument_keys(self, tool_name: str | None) -> frozenset[str]:
+        """Top-level argument keys of ``tool_name`` that must reach the module byte-exact.
+
+        The upstream hardening pass sanitises every argument before execute_tool runs, so
+        a module that treats a value as file content (where a form feed or ESC is data,
+        not an attack) declares the key here. Only ``str`` values are exempted.
+        """
+        return frozenset()
+
     def sanitize_input(self, input_data: Any, _depth: int = 0) -> Any:
         """
         Sanitize user input to prevent injection attacks (deep, recursive).
