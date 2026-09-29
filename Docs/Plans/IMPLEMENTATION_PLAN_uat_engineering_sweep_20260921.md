@@ -136,6 +136,7 @@ Files: this plan, `Docs/Reviews/UAT_ENGINEERING_SWEEP_COVERAGE_2026_09_21.md`, `
 - [ ] TASK13260.278.18.82.9: keep MCP filesystem fixtures LF-exact and preserve file mode without Windows `fchmod`; two affected modules pass 140 with zero skips, native Windows rerun pending.
 - [ ] TASK13260.278.18.82.10: make both MCP disk-space fixture paths work without `os.statvfs`; two local tests pass, native Windows rerun pending.
 - [ ] TASK13260.278.18.82.11: normalize Windows `.exe` shell names in the shared MCP stdio policy and await stub exit in the health oracle; full module passes 32 locally, native Windows rerun pending.
+- [ ] TASK13260.278.18.82.12: make MCP package/RC fixture paths, TOML, LF bytes and isolated subprocess environment host-aware; five modules pass 425 locally, native Windows rerun pending.
 - [ ] Treat paper-search's PostgreSQL image `unknown blob` as unexecuted; require a real rerun before acceptance.
 - [ ] Maintain the latest-dev base: rebase checkpoint onto `e5186a28d9` preserved all 136 prior commits by range-diff; repeat after further upstream changes before publishing.
 - [ ] Attribute the AuthNZ property `too_slow` outlier before changing its strategy or health checks; the official PostgreSQL focused test passes locally and hosted rerun remains open.
