@@ -830,9 +830,23 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/test*.py
               tldw_Server_API/tests/AuthNZ/property/test*.py
-          - name: auth-core-unit-a-l
+          - name: auth-core-unit-admin-api
             paths: >-
-              tldw_Server_API/tests/AuthNZ/unit/test_[a-l]*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_admin*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_alerting.py
+              tldw_Server_API/tests/AuthNZ/unit/test_api*.py
+          - name: auth-core-unit-auth
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_auth_*.py
+          - name: auth-core-unit-authnz
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_authnz_*.py
+          - name: auth-core-unit-b-d
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[b-d]*.py
+          - name: auth-core-unit-e-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[e-l]*.py
           - name: auth-core-unit-m-z
             paths: >-
               tldw_Server_API/tests/AuthNZ/unit/test_[m-z]*.py
@@ -2460,9 +2474,23 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/test*.py
               tldw_Server_API/tests/AuthNZ/property/test*.py
-          - name: auth-core-unit-a-l
+          - name: auth-core-unit-admin-api
             paths: >-
-              tldw_Server_API/tests/AuthNZ/unit/test_[a-l]*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_admin*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_alerting.py
+              tldw_Server_API/tests/AuthNZ/unit/test_api*.py
+          - name: auth-core-unit-auth
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_auth_*.py
+          - name: auth-core-unit-authnz
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_authnz_*.py
+          - name: auth-core-unit-b-d
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[b-d]*.py
+          - name: auth-core-unit-e-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[e-l]*.py
           - name: auth-core-unit-m-z
             paths: >-
               tldw_Server_API/tests/AuthNZ/unit/test_[m-z]*.py
@@ -3930,9 +3958,23 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/test*.py
               tldw_Server_API/tests/AuthNZ/property/test*.py
-          - name: auth-core-unit-a-l
+          - name: auth-core-unit-admin-api
             paths: >-
-              tldw_Server_API/tests/AuthNZ/unit/test_[a-l]*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_admin*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_alerting.py
+              tldw_Server_API/tests/AuthNZ/unit/test_api*.py
+          - name: auth-core-unit-auth
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_auth_*.py
+          - name: auth-core-unit-authnz
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_authnz_*.py
+          - name: auth-core-unit-b-d
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[b-d]*.py
+          - name: auth-core-unit-e-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[e-l]*.py
           - name: auth-core-unit-m-z
             paths: >-
               tldw_Server_API/tests/AuthNZ/unit/test_[m-z]*.py
@@ -5311,9 +5353,23 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/test*.py
               tldw_Server_API/tests/AuthNZ/property/test*.py
-          - name: auth-core-unit-a-l
+          - name: auth-core-unit-admin-api
             paths: >-
-              tldw_Server_API/tests/AuthNZ/unit/test_[a-l]*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_admin*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_alerting.py
+              tldw_Server_API/tests/AuthNZ/unit/test_api*.py
+          - name: auth-core-unit-auth
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_auth_*.py
+          - name: auth-core-unit-authnz
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_authnz_*.py
+          - name: auth-core-unit-b-d
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[b-d]*.py
+          - name: auth-core-unit-e-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[e-l]*.py
           - name: auth-core-unit-m-z
             paths: >-
               tldw_Server_API/tests/AuthNZ/unit/test_[m-z]*.py
@@ -6683,9 +6739,23 @@ jobs:
             paths: >-
               tldw_Server_API/tests/AuthNZ/test*.py
               tldw_Server_API/tests/AuthNZ/property/test*.py
-          - name: auth-core-unit-a-l
+          - name: auth-core-unit-admin-api
             paths: >-
-              tldw_Server_API/tests/AuthNZ/unit/test_[a-l]*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_admin*.py
+              tldw_Server_API/tests/AuthNZ/unit/test_alerting.py
+              tldw_Server_API/tests/AuthNZ/unit/test_api*.py
+          - name: auth-core-unit-auth
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_auth_*.py
+          - name: auth-core-unit-authnz
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_authnz_*.py
+          - name: auth-core-unit-b-d
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[b-d]*.py
+          - name: auth-core-unit-e-l
+            paths: >-
+              tldw_Server_API/tests/AuthNZ/unit/test_[e-l]*.py
           - name: auth-core-unit-m-z
             paths: >-
               tldw_Server_API/tests/AuthNZ/unit/test_[m-z]*.py
