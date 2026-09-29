@@ -284,3 +284,20 @@ Earlier benchmark receipts retain their original source revisions. All nine
 original Qodo threads are resolved; its native reply confirms the FTS finding is
 already dismissed. Hosted checks and incremental review must pass on the new
 published head before the authorized merge.
+
+
+## Metadata-only dev refresh (2026-09-29)
+
+Dev advanced from `6110d2ae436c805c3beeda8f84427b4890534ddf` to
+`5910412fba589dc0547fac295bb35948496435ce` through one unrelated Backlog task
+record. The rebase is conflict-free. Before this evidence update, every repository
+file outside Backlog is byte-identical to the reviewed `8956d0b8effd5f9fbefe601beec93a6717efd632`
+head, including all source, tests, fixtures, dependency and CI inputs. All 92
+certified Python hashes also match the previous validation receipt.
+
+The 374 combined cases and ten guarded native-PST cases were not rerun for this
+metadata-only refresh; their source bindings and security certificates remain
+unchanged. The comparison receipt is appended to the existing follow-up JSON.
+The previous head and tracking are retained in
+`codex/email-pr3023-before-dev5910-20260929`. Required hosted checks and incremental
+review must pass on the newly published head before the authorized merge.

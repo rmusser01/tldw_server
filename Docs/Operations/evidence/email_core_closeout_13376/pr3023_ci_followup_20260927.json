@@ -972,5 +972,22 @@
     "independent_review": "No actionable regression; incoming files match dev except the two combined production paths and preserved pagination diagnostic. Offline fixture matches dev exactly.",
     "review_state": "All nine original threads resolved; FTS native bot reply4137098686 confirms already dismissed. New-head incremental review/required gates are pending publication.",
     "historical_evidence": "Older test and benchmark certificates retain their original source bindings; no throughput/million-message rerun."
+  },
+  "metadata_only_dev_refresh_20260929": {
+    "previous_published_head": "8956d0b8effd5f9fbefe601beec93a6717efd632",
+    "new_dev": "5910412fba589dc0547fac295bb35948496435ce",
+    "rebased_head_before_evidence_commit": "cad5b9c8aff90def454a8ed7ec104f5d7339ed78",
+    "changed_paths": [
+      "backlog/tasks/task-13291 - 144-MCP_unified-test-files-run-in-no-CI-job.md",
+      "backlog/tasks/task-13377 - Run-real-PST-adapter-tests-and-publish-email-PR-against-dev.md"
+    ],
+    "unchanged_certified_python_files": 92,
+    "all_non_backlog_repository_files_identical": true,
+    "tests_rerun": false,
+    "validation_binding": "374 combined cases and 10 guarded native-PST cases were run before this metadata-only rebase; source, test, fixtures, CI and dependency inputs are byte-identical.",
+    "receipt_path": "/tmp/email_pr3023_dev5910_equivalence_20260929.json",
+    "receipt_sha256": "4f5aaa057bd238b53f540d0c2d2ae59803ffb64366b109f1afaea3d38a32788a",
+    "security": "No production/test/CI changes; previous scoped Bandit certificates retain identical source inputs.",
+    "review": "Conflict-free rebase; all non-Backlog repository files identical to the reviewed 8956 head before this evidence update. New published-head review/CI still required."
   }
 }
