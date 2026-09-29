@@ -281,11 +281,23 @@ async def test_store_persistent_skips_articles_without_body_content(monkeypatch)
     assert fake_db.calls[2]["content"].count("[METADATA]") == 1
     assert "Wrapped body" in fake_db.calls[2]["content"]
     assert '"source":"old"' not in fake_db.calls[2]["content"]
-    # 55fd3c977e replaced per-URL errors with a safe category message.
+    # Each failure names its source by host and path only (#3050), never the
+    # query, fragment or credentials (55fd3c977e).
+    sources = [
+        "example.com/missing",
+        "example.com/non-string",
+        "example.com/blank",
+        "example.com/envelope",
+        "example.com/crafted-envelope",
+    ]
     assert persisted["errors"] == [
-        "No readable content was extracted from the source."
-    ] * 5
-    assert persisted["extraction_failures"] == [{"code": "empty_extraction"}] * 5
+        f"{source}: No readable content was extracted from the source." for source in sources
+    ]
+    assert persisted["extraction_failures"] == [
+        {"code": "empty_extraction", "source": source} for source in sources
+    ]
+    for secret in ("password", "token=secret", "#fragment"):
+        assert secret not in str(persisted)
     warning_text = "\n".join(logger_stub.warnings)
     assert "password" not in warning_text
     assert "token=secret" not in warning_text
