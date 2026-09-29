@@ -13,7 +13,7 @@
       {
         "import_kind": "from",
         "imported_name": "is_content_page",
-        "line": 34,
+        "line": 37,
         "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
         "path": "tldw_Server_API/app/services/enhanced_web_scraping_service.py",
         "target_name": "Article_Extractor_Lib"
@@ -1049,7 +1049,7 @@
       {
         "import_kind": "from",
         "imported_name": "EnhancedWebScraper",
-        "line": 38,
+        "line": 41,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/app/services/enhanced_web_scraping_service.py",
         "target_name": "enhanced_web_scraping"
@@ -1057,7 +1057,7 @@
       {
         "import_kind": "from",
         "imported_name": "JobPriority",
-        "line": 38,
+        "line": 41,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/app/services/enhanced_web_scraping_service.py",
         "target_name": "enhanced_web_scraping"
@@ -1065,7 +1065,7 @@
       {
         "import_kind": "from",
         "imported_name": "JobStatus",
-        "line": 38,
+        "line": 41,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/app/services/enhanced_web_scraping_service.py",
         "target_name": "enhanced_web_scraping"
@@ -1073,7 +1073,7 @@
       {
         "import_kind": "from",
         "imported_name": "ScrapingJob",
-        "line": 38,
+        "line": 41,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/app/services/enhanced_web_scraping_service.py",
         "target_name": "enhanced_web_scraping"
@@ -1081,7 +1081,7 @@
       {
         "import_kind": "from",
         "imported_name": "create_enhanced_scraper",
-        "line": 38,
+        "line": 41,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/app/services/enhanced_web_scraping_service.py",
         "target_name": "enhanced_web_scraping"

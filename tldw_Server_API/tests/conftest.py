@@ -1208,3 +1208,24 @@ def bypass_api_limits(monkeypatch):
                 _ = None
 
     return _bypass
+
+
+_MAX_PARAM_ID_CHARS = 100
+
+
+def pytest_make_parametrize_id(config, val, argname):  # noqa: ANN001, ANN201 - pytest hook
+    """Keep huge string/bytes parameter values out of test ids.
+
+    pytest names a parametrized case after its value, so budget tests with MB
+    payloads produced MB-long test ids. --durations and failure reports print
+    the id, and a multi-megabyte log line stalled the CI runner's log processing
+    until the 60-minute job limit, discarding the log (core-security, 4 runs).
+    Long values get a short stable id; everything else keeps pytest's default.
+    """
+    if isinstance(val, (str, bytes)) and len(val) > _MAX_PARAM_ID_CHARS:
+        import hashlib
+
+        raw = val if isinstance(val, bytes) else val.encode("utf-8", "surrogatepass")
+        kind = "bytes" if isinstance(val, bytes) else "chars"
+        return f"{argname}-{len(val)}{kind}-{hashlib.sha256(raw).hexdigest()[:10]}"
+    return None
