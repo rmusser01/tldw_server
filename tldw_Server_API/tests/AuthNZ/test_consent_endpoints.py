@@ -14,6 +14,7 @@ import os
 
 import pytest
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.api.v1.endpoints import consent as consent_endpoint
 from tldw_Server_API.app.api.v1.endpoints.consent import (
     _get_consent_db_path,
@@ -306,7 +307,7 @@ class TestConsentRouterWiring:
         from tldw_Server_API.app.core import config as config_mod
         config_mod.clear_config_cache()
         reloaded = reload_app_main()
-        route_paths = {getattr(route, "path", "") for route in reloaded.app.routes}
+        route_paths = {getattr(route, "path", "") for route in iter_served_routes(reloaded.app.routes)}
 
         assert "/api/v1/consent/preferences" in route_paths
 
@@ -319,6 +320,6 @@ class TestConsentRouterWiring:
         from tldw_Server_API.app.core import config as config_mod
         config_mod.clear_config_cache()
         reloaded = reload_app_main()
-        route_paths = {getattr(route, "path", "") for route in reloaded.app.routes}
+        route_paths = {getattr(route, "path", "") for route in iter_served_routes(reloaded.app.routes)}
 
         assert "/api/v1/consent/preferences" not in route_paths

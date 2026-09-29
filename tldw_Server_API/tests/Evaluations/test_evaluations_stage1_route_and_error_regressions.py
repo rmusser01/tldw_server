@@ -15,6 +15,7 @@ from tldw_Server_API.app.core import config as config_mod
 from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 
 @contextmanager
@@ -89,7 +90,7 @@ def _reload_main_app(
 def _route_method_count(app: FastAPI, path: str, method: str) -> int:
     method_upper = method.upper()
     count = 0
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         route_path = getattr(route, "path", None)
         route_methods = getattr(route, "methods", set()) or set()
         if route_path == path and method_upper in route_methods:
@@ -99,7 +100,7 @@ def _route_method_count(app: FastAPI, path: str, method: str) -> int:
 
 def test_main_mounts_evaluations_routes_in_minimal_startup(monkeypatch):
     app = _reload_main_app(monkeypatch, minimal=True)
-    paths = {route.path for route in app.routes if hasattr(route, "path")}
+    paths = {route.path for route in iter_served_routes(app.routes) if hasattr(route, "path")}
     assert "/api/v1/evaluations/geval" in paths
     assert "/api/v1/evaluations/rate-limits" in paths
     assert "/api/v1/evaluations/embeddings/abtest" in paths
@@ -107,7 +108,7 @@ def test_main_mounts_evaluations_routes_in_minimal_startup(monkeypatch):
 
 def test_main_mounts_evaluations_routes_in_full_startup(monkeypatch):
     app = _reload_main_app(monkeypatch, minimal=False)
-    paths = {route.path for route in app.routes if hasattr(route, "path")}
+    paths = {route.path for route in iter_served_routes(app.routes) if hasattr(route, "path")}
     assert "/api/v1/evaluations/geval" in paths
     assert "/api/v1/evaluations/rag" in paths
     assert "/api/v1/evaluations/embeddings/abtest" in paths
@@ -120,7 +121,7 @@ def test_main_omits_evaluations_routes_in_minimal_startup_when_disabled(monkeypa
         routes_enable=None,
         routes_disable="research,evaluations",
     )
-    paths = {route.path for route in app.routes if hasattr(route, "path")}
+    paths = {route.path for route in iter_served_routes(app.routes) if hasattr(route, "path")}
     assert "/api/v1/evaluations/geval" not in paths
     assert "/api/v1/evaluations/rag" not in paths
     assert "/api/v1/evaluations/embeddings/abtest" not in paths
@@ -145,7 +146,7 @@ def test_main_has_no_duplicate_method_path_pairs_in_full_startup(monkeypatch):
     allowed_methods = {"GET", "POST", "PUT", "PATCH", "DELETE"}
     path_prefix = "/api/v1/evaluations/"
 
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         path = getattr(route, "path", None)
         methods = getattr(route, "methods", None) or set()
         if not path or not str(path).startswith(path_prefix):

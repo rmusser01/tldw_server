@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+
 def _setup_env(tmp_path) -> None:
     os.environ["AUTH_MODE"] = "single_user"
     os.environ["SINGLE_USER_API_KEY"] = "unit-test-api-key"

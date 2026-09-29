@@ -5,6 +5,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 psycopg = pytest.importorskip("psycopg")
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 
@@ -33,10 +34,10 @@ def _client_pg(monkeypatch):
     # the same router triggers duplicate-route guards in startup.
     try:
         has_queue_control = any(
-            isinstance(route, APIRoute)
+            isinstance(route.route, APIRoute)
             and route.path == "/api/v1/jobs/queue/control"
             and "POST" in (route.methods or set())
-            for route in app.routes
+            for route in iter_served_routes(app.routes)
         )
         if not has_queue_control:
             from tldw_Server_API.app.api.v1.endpoints.jobs_admin import (

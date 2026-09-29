@@ -3,6 +3,8 @@
 import importlib
 import sys
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+
 
 def test_writing_manuscripts_module_imports_cleanly() -> None:
     """The manuscript router module imports without missing dependencies."""
@@ -26,5 +28,5 @@ def test_app_main_imports_cleanly_with_writing_manuscripts_router() -> None:
     assert module.app is not None
     assert any(
         route.path.startswith("/api/v1/writing/manuscripts")
-        for route in module.app.routes
+        for route in iter_served_routes(module.app.routes)
     )

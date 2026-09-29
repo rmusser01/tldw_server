@@ -12,6 +12,7 @@ from starlette.responses import JSONResponse
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.core.exceptions import ResearchDiscoveryValidationError
 from tldw_Server_API.app.core.Research.discovery.selection import ResolvedDiscoverySelection
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.integration
 
@@ -465,4 +466,4 @@ async def test_media_add_route_maps_discovery_validation_to_422(monkeypatch):
 def test_no_research_discovery_ingest_route_exists():
     from tldw_Server_API.app.main import app
 
-    assert "/api/v1/research/discovery/ingest" not in {route.path for route in app.routes}
+    assert "/api/v1/research/discovery/ingest" not in {route.path for route in iter_served_routes(app.routes)}

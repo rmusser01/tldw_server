@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core.Sandbox.models import RunPhase, RunStatus, RuntimeType
 
 
@@ -141,7 +142,7 @@ def test_workspace_diagnostics_route_survives_disabled_sandbox_admin_policy(
     register_router_specs(app, selected_specs)
 
     assert "/api/v1/sandbox/workspaces/{workspace_id}/diagnostics" in {
-        getattr(route, "path", "") for route in app.routes
+        getattr(route, "path", "") for route in iter_served_routes(app.routes)
     }
 
 

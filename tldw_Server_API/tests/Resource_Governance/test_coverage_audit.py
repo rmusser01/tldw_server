@@ -10,6 +10,7 @@ Covers:
 from __future__ import annotations
 
 import pytest
+from fastapi import APIRouter, FastAPI
 
 from tldw_Server_API.app.core.Resource_Governance.coverage_audit import (
     DEFAULT_EXCLUDED_PREFIXES,
@@ -243,3 +244,20 @@ class TestAuditGovernorCoverage:
         assert result["unprotected_count"] == 1
         assert result["coverage_pct"] == 0.0
         assert result["unprotected_routes"][0]["reason"] == "rg_middleware_missing"
+
+    def test_routes_behind_include_router_are_audited_with_include_time_tags(self):
+        """FastAPI >= 0.137 keeps included routers out of app.routes; the audit must still count them."""
+        router = APIRouter()
+
+        @router.get("/items")
+        def items() -> list[str]:
+            return []
+
+        app = FastAPI()
+        app.include_router(router, prefix="/api/v1", tags=["items"])
+        app.user_middleware.append(_Middleware(_RGSimpleMiddleware))
+        app.state.rg_policy_loader = _Loader({"by_tag": {"items": "items.default"}})
+
+        result = audit_governor_coverage(app)
+
+        assert {"method": "GET", "path": "/api/v1/items"} in result["protected_routes"]

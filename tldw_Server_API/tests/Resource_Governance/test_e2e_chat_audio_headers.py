@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.rate_limit
 
@@ -71,7 +72,7 @@ def _reset_rg_state(app) -> None:
 
 
 def _ensure_audio_transcriptions_route(app) -> None:
-    if any(getattr(route, "path", None) == "/api/v1/audio/transcriptions" for route in app.routes):
+    if any(getattr(route, "path", None) == "/api/v1/audio/transcriptions" for route in iter_served_routes(app.routes)):
         return
 
     from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router

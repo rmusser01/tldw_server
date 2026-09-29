@@ -10,6 +10,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.testing import is_truthy as _shared_is_truthy
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -198,8 +199,9 @@ def _audit_route_map_coverage(app: Any, rg_loader: Any) -> None:
         skip_prefixes = ("/docs", "/openapi.json", "/redoc", "/static", "/favicon.ico")
         missing: list[tuple[str, list[str]]] = []
         seen_paths: set[str] = set()
-        for route in getattr(app, "routes", []):
-            path = getattr(route, "path", None)
+        # iter_served_routes: FastAPI >= 0.137 hides included routers from app.routes.
+        for route in iter_served_routes(getattr(app, "routes", [])):
+            path = route.path
             if not path or path in seen_paths:
                 continue
             if path.startswith(skip_prefixes):
@@ -216,7 +218,7 @@ def _audit_route_map_coverage(app: Any, rg_loader: Any) -> None:
             if _route_map_matches(path, by_path):
                 seen_paths.add(path)
                 continue
-            tags = list(getattr(route, "tags", []) or [])
+            tags = list(route.tags)
             if tags and any(tag in by_tag for tag in tags):
                 seen_paths.add(path)
                 continue

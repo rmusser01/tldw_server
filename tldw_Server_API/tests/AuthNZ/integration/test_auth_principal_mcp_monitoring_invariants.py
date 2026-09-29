@@ -4,6 +4,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
 
@@ -245,7 +246,7 @@ def test_monitoring_watchlists_jwt_principal_and_state_alignment(isolated_test_e
 
     app = fastapi_app
     monitoring_path = f"{API_V1_PREFIX}/monitoring/watchlists"
-    if not any(getattr(r, "path", None) == monitoring_path for r in app.routes):
+    if not any(getattr(r, "path", None) == monitoring_path for r in iter_served_routes(app.routes)):
         app.include_router(monitoring_mod.router, prefix=f"{API_V1_PREFIX}")
 
     # 5. Install the auth capture wrapper and call /api/v1/monitoring/watchlists.
