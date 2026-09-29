@@ -1,5 +1,9 @@
 # Fresh-install UAT: single-user and multi-user
 
+## UAT513 — opaque MCP grant IDs in CLI lifecycle tests (TASK-13260.278.18.83.2)
+
+Windows 3.12 `platform-mcp-inapp` failed only path-grant revocation after 3,434 passes and 12 skips. The CLI reports missing `grant_id`: the SQLite store generates URL-safe opaque IDs, which can start with `-`, and the three lifecycle callers passed them before options without an end-of-options delimiter. Deterministic single- and double-dash IDs reproduce the exact failure (two failures, one plain-ID pass). Put config options first and pass each ID after native `--` in all three sibling callers. All 127 CLI and adjacent grant-store/manager checks pass locally, zero skips. Ruff and diff checks are clean; Bandit reports only unchanged LOW findings (430 B101, one B404, one B603), no production change. Fresh hosted Windows acceptance remains required.
+
 ## UAT512 — oversized AuthNZ unit CI shard (TASK-13260.278.18.83.1)
 
 The Ubuntu 3.12 and 3.13 `auth-core-unit-a-l` jobs on head `60eedcdc` both received hosted runner shutdown signals at 31% after about 21 and 30 minutes of test execution, respectively. The prior head also lost this shard around 28–31%; none of these interrupted runs verifies its remaining tests. The job had 621 collected cases and was on pace to exceed its 60-minute limit. Partition its same file set into five non-overlapping shards: admin/api (100 cases), auth (95), authnz (165), b–d (134), and e–l (127). All five full-suite matrices use the same split. A new exact-file CI contract fails before and passes after; all 49 CI contract tests pass, and the coverage guard reports zero newly unshared files. Ruff is clean; Bandit reports 345 LOW test assertions (including this new contract) and one inherited LOW test string, with no production code changed. The replacement shards require hosted completion, including their PostgreSQL setup.
