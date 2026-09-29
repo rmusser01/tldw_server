@@ -112,6 +112,8 @@ Files: this plan, `Docs/Reviews/UAT_ENGINEERING_SWEEP_COVERAGE_2026_09_21.md`, `
 - [ ] TASK13260.278.18.74: seed the deliberate legacy SQLite API-key schema outside the managed write guard; exact test and five-case module pass locally, native hosted rerun remains open.
 - [ ] TASK13260.278.18.75: accept extra RAG keepalives while retaining ordered data events; both Windows failures reproduce locally and the full 86-case stream module passes, native Windows acceptance remains open.
 - [ ] TASK13260.278.18.76: retry SQLite busy/locked WAL setup during concurrent Slides opens; barrier red/green, 10 repeats and 46 affected controls pass locally, hosted Slides acceptance remains open.
+- [ ] TASK13260.278.18.77: normalize resolved Windows drive/UNC device spellings in shared storage containment; four boundary checks and 51 storage/retirement controls pass locally, native Windows acceptance remains open.
+- [ ] Maintain the latest-dev base: rebase checkpoint onto `e5186a28d9` preserved all 136 prior commits by range-diff; repeat after further upstream changes before publishing.
 - [ ] Attribute the AuthNZ property `too_slow` outlier before changing its strategy or health checks; the official PostgreSQL focused test passes locally and hosted rerun remains open.
 - [ ] Complete fresh hosted MCP acceptance after the full local 3,433-case suite passed with zero failures and zero skips.
 
