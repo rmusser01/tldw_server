@@ -16,6 +16,7 @@ RENEWAL = Path("Docs/Evidence/TASK-13013.7.47-sep28-admission.zip")
 DISPOSITIONS = Path("Docs/Evidence/TASK-13013.7.47-sep28-dispositions.json")
 PROPOSED_CI = Path("Docs/Evidence/TASK-13013.7.47-sep28-proposed-ci-additions.json")
 START = date(2026, 9, 28)
+ADMISSION = date(2026, 9, 29)
 END = date(2026, 10, 2)
 POLICIES = [
     (
@@ -81,7 +82,7 @@ def test_retained_reports_have_identical_coverage_and_ci_acceptance_stays_separa
 @pytest.mark.parametrize("field", ["vulnerability_id", "purl", "installed_version", "severity", "component"])
 def test_renewal_does_not_accept_changed_finding_identities(field: str) -> None:
     for filename, _, _, _ in POLICIES:
-        policy = load_policy(zipfile.Path(RENEWAL, filename), today=START)
+        policy = load_policy(Path(".github/supply-chain") / filename, today=ADMISSION)
         for record in policy.exceptions:
             values = {
                 "vulnerability_id": record.vulnerability_id,
@@ -122,12 +123,14 @@ def test_live_policy_contains_only_retained_records_and_reviewed_dispositions(fi
     renewed["exceptions"] = [record for record in renewed["exceptions"] if record["id"] not in retired]
     if filename == "vulnerability-exceptions.json":
         renewed["exceptions"] += json.loads(DISPOSITIONS.read_text())["exceptions"]
+    else:
+        renewed["exceptions"] += approved_ci_records()
     assert json.loads((Path(".github/supply-chain") / filename).read_text()) == renewed
 
 
 @pytest.mark.parametrize("component", ["app", "audio-worker", "worker", "webui", "admin-ui"])
 def test_retirement_preserves_all_current_findings_and_removes_stale_matches(component: str) -> None:
-    canonical, ci = [load_policy(Path(".github/supply-chain") / row[0], today=START) for row in POLICIES]
+    canonical, ci = [load_policy(Path(".github/supply-chain") / row[0], today=ADMISSION) for row in POLICIES]
     policy = (
         replace(canonical, exceptions=canonical.exceptions + ci.exceptions)
         if component in {"app", "audio-worker"}
@@ -136,11 +139,16 @@ def test_retirement_preserves_all_current_findings_and_removes_stale_matches(com
     with zipfile.ZipFile(RENEWAL) as archive:
         report = json.loads(archive.read(f"{component}/trivy-image-{component}.json"))
         original = json.loads(archive.read(f"{component}/scan-decision-image-{component}.json"))
-    decision = evaluate_trivy_report(report, component=f"image-{component}", policy=policy, today=START)
+    decision = evaluate_trivy_report(report, component=f"image-{component}", policy=policy, today=ADMISSION)
     reviewed = load_policy(DISPOSITIONS, today=START)
-    allowed = evaluate_trivy_report(report, component=f"image-{component}", policy=reviewed, today=START).excepted
+    reviewed = replace(
+        reviewed,
+        exceptions=reviewed.exceptions
+        + tuple(r for r in ci.exceptions if r.id.startswith("TASK-13013.7.47-SEP28-CI-")),
+    )
+    allowed = evaluate_trivy_report(report, component=f"image-{component}", policy=reviewed, today=ADMISSION).excepted
     moved = [asdict(finding) for finding in allowed]
-    assert len(moved) == (10 if component in {"app", "audio-worker"} else 0)
+    assert len(moved) == (13 if component in {"app", "audio-worker"} else 0)
     assert [asdict(finding) for finding in decision.blocking] == [
         row for row in original["blocking"] if row not in moved
     ]
@@ -154,21 +162,42 @@ def test_retirement_preserves_all_current_findings_and_removes_stale_matches(com
     assert not decision.unmatched_exception_ids
 
 
+def approved_ci_records() -> list[dict]:
+    """Bind approval metadata to the six immutable proposed finding identities."""
+    return [
+        {
+            **record,
+            "created_on": ADMISSION.isoformat(),
+            "rationale": "Requester explicitly approved these six additional app/audio CI records on 2026-09-29 through October 2. Temporary CI-only risk acceptance: current media processing reaches this native library; application exploitation is not demonstrated and non-applicability is not established.",
+            "mitigation": "Exact identity and expiry remain enforced. Full build, runtime and scanner evidence remains required. Canonical release admission continues blocking this finding. Evidence and approval scope: Docs/Evidence/TASK-13013.7.47-sep28-dispositions.md.",
+        }
+        for record in json.loads(PROPOSED_CI.read_text())["exceptions"]
+    ]
+
+
 @pytest.mark.parametrize("component", ["app", "audio-worker"])
-def test_proposed_ci_additions_are_inactive_and_leave_pcre2_blocked(component: str) -> None:
-    canonical, ci = [load_policy(Path(".github/supply-chain") / row[0], today=START) for row in POLICIES]
-    proposal = load_policy(PROPOSED_CI, today=START)
-    assert len(proposal.exceptions) == 6
-    assert {r.vulnerability_id for r in proposal.exceptions} == {"CVE-2026-96889", "CVE-2026-86138", "CVE-2026-86139"}
-    assert not {r.id for r in proposal.exceptions} & {r.id for r in canonical.exceptions + ci.exceptions}
+def test_approved_ci_additions_leave_release_and_pcre2_blocked(component: str) -> None:
+    canonical, ci = [load_policy(Path(".github/supply-chain") / row[0], today=ADMISSION) for row in POLICIES]
+    approved = tuple(r for r in ci.exceptions if r.id.startswith("TASK-13013.7.47-SEP28-CI-"))
+    assert len(approved) == 6
+    assert {r.vulnerability_id for r in approved} == {"CVE-2026-96889", "CVE-2026-86138", "CVE-2026-86139"}
+    assert not {r.id for r in approved} & {r.id for r in canonical.exceptions}
     with zipfile.ZipFile(RENEWAL) as archive:
         report = json.loads(archive.read(f"{component}/trivy-image-{component}.json"))
+    previous = replace(
+        canonical, exceptions=canonical.exceptions + tuple(r for r in ci.exceptions if r not in approved)
+    )
     active = replace(canonical, exceptions=canonical.exceptions + ci.exceptions)
-    before = evaluate_trivy_report(report, component=f"image-{component}", policy=active, today=START)
-    candidate = replace(active, exceptions=active.exceptions + proposal.exceptions)
-    after = evaluate_trivy_report(report, component=f"image-{component}", policy=candidate, today=START)
+    before = evaluate_trivy_report(report, component=f"image-{component}", policy=previous, today=ADMISSION)
+    after = evaluate_trivy_report(report, component=f"image-{component}", policy=active, today=ADMISSION)
     assert len(before.blocking) == 6 and len(after.blocking) == 3
     assert all("/libpcre2-8-0@" in finding.purl for finding in after.blocking)
     assert not after.unmatched_exception_ids
-    for record in load_policy(DISPOSITIONS, today=START).exceptions + proposal.exceptions:
-        assert record.expires_on == END
+    release = evaluate_trivy_report(report, component=f"image-{component}", policy=canonical, today=ADMISSION)
+    assert {r.vulnerability_id for r in approved} <= {f.vulnerability_id for f in release.blocking}
+    for today in (ADMISSION, END):
+        assert (
+            len(evaluate_trivy_report(report, component=f"image-{component}", policy=active, today=today).blocking) == 3
+        )
+    with pytest.raises(PolicyError, match="expires_on"):
+        load_policy(Path(".github/supply-chain/ci-image-risk-acceptance.json"), today=date(2026, 10, 3))

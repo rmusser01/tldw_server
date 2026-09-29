@@ -284,3 +284,15 @@ Ruff and scoped Bandit are clear (test assertions excluded from Bandit).
 Independent review confirmed exact removals/additions, unchanged retained
 records, supported cJSON/X11 boundaries, no librsvg exploit claim, and all six
 proposed CI records remaining inactive. The evidence archive hash matches.
+
+## September 29 authorized completion
+
+The requester approved the six prepared CI-only records through October 2.
+Activation changes approval metadata only; finding identities and expiry match
+the frozen proposal. Canonical policy remains 334 records; CI policy is 298.
+Current retained reports replay with PCRE2 still blocked, and canonical release
+admission retains the six additional findings. Fresh final-head CI is required
+to verify the already committed PCRE2 package fixes.
+
+Latest dev advanced to 0da68530e80c713ed3a323a741998e1fed37e3e9; rebase and
+current-head Qodo/required CI are being completed under existing authorization.
