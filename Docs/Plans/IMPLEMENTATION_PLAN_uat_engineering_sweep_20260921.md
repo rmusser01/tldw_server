@@ -137,6 +137,7 @@ Files: this plan, `Docs/Reviews/UAT_ENGINEERING_SWEEP_COVERAGE_2026_09_21.md`, `
 - [ ] TASK13260.278.18.82.10: make both MCP disk-space fixture paths work without `os.statvfs`; two local tests pass, native Windows rerun pending.
 - [ ] TASK13260.278.18.82.11: normalize Windows `.exe` shell names in the shared MCP stdio policy and await stub exit in the health oracle; full module passes 32 locally, native Windows rerun pending.
 - [ ] TASK13260.278.18.82.12: make MCP package/RC fixture paths, TOML, LF bytes and isolated subprocess environment host-aware; five modules pass 425 locally, native Windows rerun pending.
+- [ ] TASK-13394: repair four `dev` Playground test contracts and sync the English extension mirror; all 26 focused checks pass locally, hosted frontend acceptance pending.
 - [ ] Treat paper-search's PostgreSQL image `unknown blob` as unexecuted; require a real rerun before acceptance.
 - [ ] Maintain the latest-dev base: rebase checkpoint onto `e5186a28d9` preserved all 136 prior commits by range-diff; repeat after further upstream changes before publishing.
 - [ ] Latest-dev refresh on 2026-09-29: rebase all 157 local commits onto `641982cbe7` and preserve the three conflict resolutions; 28 Playground, 40 CI contracts and 573 MCP checks pass locally. Publish and obtain native acceptance before closing.
