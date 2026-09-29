@@ -51,7 +51,8 @@ has no assistant default. Owned frontend/backend processes were stopped.
 
 [Browser receipt](artifacts/buddy-current-dev-20260929/browser-receipt.json) and
 [verification receipt](artifacts/buddy-current-dev-20260929/verification.json)
-retain source hashes, screenshots and scoped raw logs.
+retain source hashes, screenshots and sanitized scoped results. Raw test logs
+remain in the local disposable artifacts; they are not published.
 
 ## Remaining acceptance
 
