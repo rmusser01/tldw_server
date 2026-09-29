@@ -168,5 +168,5 @@ def test_postgres_initializer_uses_postgres_safe_v33_migration(monkeypatch):
     assert CharactersRAGDB._MIGRATION_SQL_V32_TO_V33_POSTGRES in applied_scripts
     assert CharactersRAGDB._MIGRATION_SQL_V34_TO_V35 in applied_scripts
     assert "PRAGMA foreign_keys" not in CharactersRAGDB._MIGRATION_SQL_V32_TO_V33_POSTGRES
-    assert coordinator_calls == [(db._backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT)]
+    assert coordinator_calls == [(db._backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_STATEMENT_TIMEOUT)]
     assert version_reads[:3] == [(db._backend, False), (migration_connection, False), (migration_connection, True)]

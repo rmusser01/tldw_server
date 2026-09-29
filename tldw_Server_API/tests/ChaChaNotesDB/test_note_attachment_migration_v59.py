@@ -801,7 +801,7 @@ def fake_postgres_migration_coordinator(monkeypatch: pytest.MonkeyPatch) -> None
 
     @contextlib.contextmanager
     def coordinator(backend: Any, lock_timeout: str):
-        assert lock_timeout == CharactersRAGDB._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT
+        assert lock_timeout == CharactersRAGDB._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_STATEMENT_TIMEOUT
         with backend.transaction() as conn:
             yield conn
 
