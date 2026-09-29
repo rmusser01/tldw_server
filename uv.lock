@@ -13363,7 +13363,7 @@ wheels = [
 
 [[package]]
 name = "tldw-server"
-version = "0.1.43"
+version = "0.1.45"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },

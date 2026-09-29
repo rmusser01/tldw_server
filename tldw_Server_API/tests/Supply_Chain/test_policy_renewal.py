@@ -111,7 +111,7 @@ def test_renewal_does_not_accept_changed_finding_identities(field: str) -> None:
                     }
                 ]
             }
-            decision = evaluate_trivy_report(report, component=values["component"], policy=policy, today=START)
+            decision = evaluate_trivy_report(report, component=values["component"], policy=policy, today=ADMISSION)
             assert len(decision.blocking) == 1 and not decision.excepted
 
 

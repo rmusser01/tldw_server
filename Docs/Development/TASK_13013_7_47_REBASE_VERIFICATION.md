@@ -296,3 +296,19 @@ to verify the already committed PCRE2 package fixes.
 
 Latest dev advanced to 0da68530e80c713ed3a323a741998e1fed37e3e9; rebase and
 current-head Qodo/required CI are being completed under existing authorization.
+
+September 29 rebase completed without conflicts. All 150 patches are equivalent;
+181 upstream-only and 440 branch-only files are byte-identical to their respective
+inputs. Three overlapping paths preserve upstream version/source-path/license
+contracts and branch documentation/build/dependency changes.
+
+Upstream bumped project metadata to 0.1.45. Updated only the editable tldw-server
+uv.lock version from 0.1.43 to 0.1.45; pinned uv 0.12.7 offline check resolves all
+650 locked packages without changes. Downloaded the exact tool from its official
+GitHub release and verified the release checksum.
+109 current policy/license contracts and three first-party source-pinning checks
+pass; scoped Black/Ruff/Bandit and whitespace checks are clear.
+Approval record: https://github.com/rmusser01/tldw_server/pull/2869#issuecomment-5895584183.
+Final post-rebase image/dependency and upstream tenant/auth/scope/coercion
+ratchets: 115 tests passed. Negative finding-identity tests run on the September
+29 activation day so every approved CI record is active at the boundary check.
