@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import signal
 import sys
 from pathlib import Path
@@ -62,6 +63,17 @@ def packet(drill: ModuleType, tmp_path: Path) -> tuple[Path, Path, dict, dict]:
         },
     }
     return source, evidence, receipt, {bundle: allocation(drill, bundle, ["rootfs.img", "vmlinuz", "initramfs"])}
+
+
+@pytest.fixture
+def second_bundle(drill: ModuleType, packet: tuple) -> Path:
+    """Add an independently owned later allocation to the invocation fixture."""
+    _, evidence, _, allocations = packet
+    second = evidence / "image-store/runs/second/bundle"
+    second.mkdir(parents=True)
+    (second / "rootfs.img").write_bytes(b"second")
+    allocations[second] = allocation(drill, second, ["rootfs.img"])
+    return second
 
 
 @pytest.mark.unit
@@ -289,18 +301,18 @@ def test_signal_after_unlink_records_deletion_before_continuing_cleanup(
 ) -> None:
     """Signal delivery must not land between unlink and deletion bookkeeping."""
     source, evidence, receipt, allocations = packet
-    original_unlink = Path.unlink
+    original_unlink = os.unlink
     raised = False
 
-    def unlink(path: Path, *args: object, **kwargs: object) -> None:
+    def unlink(path: str, *args: object, **kwargs: object) -> None:
         """Deliver the actual handled signal immediately after a successful unlink."""
         nonlocal raised
         original_unlink(path, *args, **kwargs)
-        if path.name == "rootfs.img" and not raised:
+        if str(path) == "rootfs.img" and kwargs.get("dir_fd") is not None and not raised:
             raised = True
             signal.raise_signal(signal.SIGINT)
 
-    monkeypatch.setattr(Path, "unlink", unlink)
+    monkeypatch.setattr(os, "unlink", unlink)
     monkeypatch.setattr(drill, "disk_handles", lambda paths: {"ok": True})
     drill.cleanup_payloads(source, evidence, receipt, allocations)
     assert receipt["bundle_cleanup"]["bundles"][0]["removed"] == ["rootfs.img"]
@@ -309,24 +321,22 @@ def test_signal_after_unlink_records_deletion_before_continuing_cleanup(
 
 @pytest.mark.unit
 def test_cleanup_records_unlink_failure_and_still_cleans_other_bundles(
-    drill: ModuleType, packet: tuple, monkeypatch: pytest.MonkeyPatch
+    drill: ModuleType, packet: tuple, second_bundle: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """One operational failure must not abandon later independently owned disks."""
     source, evidence, receipt, allocations = packet
     first = next(iter(allocations))
-    second = evidence / "image-store/runs/second/bundle"
-    second.mkdir(parents=True)
-    (second / "rootfs.img").write_bytes(b"second")
-    allocations[second] = allocation(drill, second, ["rootfs.img"])
-    unlink = Path.unlink
+    second = second_bundle
+    first_inode = (first / "rootfs.img").stat().st_ino
+    unlink = os.unlink
 
-    def fail_first(path: Path, *args: object, **kwargs: object) -> None:
+    def fail_first(path: str, *args: object, **kwargs: object) -> None:
         """Inject a permission failure for one payload only."""
-        if path == first / "rootfs.img":
+        if kwargs.get("dir_fd") is not None and os.stat(path, dir_fd=kwargs["dir_fd"]).st_ino == first_inode:
             raise PermissionError("denied")
         unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "unlink", fail_first)
+    monkeypatch.setattr(os, "unlink", fail_first)
     monkeypatch.setattr(drill, "disk_handles", lambda paths: {"ok": True})
     drill.cleanup_payloads(source, evidence, receipt, allocations)
     assert (first / "rootfs.img").exists()
@@ -338,15 +348,12 @@ def test_cleanup_records_unlink_failure_and_still_cleans_other_bundles(
 @pytest.mark.unit
 @pytest.mark.parametrize("stage", ["hash", "probe", "unlink"])
 def test_cancellation_inside_cleanup_records_failure_and_continues_other_allocations(
-    drill: ModuleType, packet: tuple, monkeypatch: pytest.MonkeyPatch, stage: str
+    drill: ModuleType, packet: tuple, second_bundle: Path, monkeypatch: pytest.MonkeyPatch, stage: str
 ) -> None:
     """A signal while cleaning one disk must not orphan every later allocation."""
     source, evidence, receipt, allocations = packet
     first = next(iter(allocations))
-    second = evidence / "image-store/runs/second/bundle"
-    second.mkdir(parents=True)
-    (second / "rootfs.img").write_bytes(b"second")
-    allocations[second] = allocation(drill, second, ["rootfs.img"])
+    second = second_bundle
     raised = False
 
     def interrupt_once() -> None:
@@ -356,7 +363,7 @@ def test_cancellation_inside_cleanup_records_failure_and_continues_other_allocat
             raised = True
             raise KeyboardInterrupt("cancel cleanup")
 
-    original_digest, original_unlink = drill.digest, Path.unlink
+    original_digest, original_unlink = drill.digest, os.unlink
 
     def digest(path: Path) -> str:
         """Interrupt before the first hash can establish deletion provenance."""
@@ -370,15 +377,15 @@ def test_cancellation_inside_cleanup_records_failure_and_continues_other_allocat
             interrupt_once()
         return {"ok": True}
 
-    def unlink(path: Path, *args: object, **kwargs: object) -> None:
+    def unlink(path: str, *args: object, **kwargs: object) -> None:
         """Interrupt exactly at an allocated payload's destructive boundary."""
-        if stage == "unlink" and path.name == "rootfs.img":
+        if stage == "unlink" and str(path) == "rootfs.img" and kwargs.get("dir_fd") is not None:
             interrupt_once()
         original_unlink(path, *args, **kwargs)
 
     monkeypatch.setattr(drill, "digest", digest)
     monkeypatch.setattr(drill, "disk_handles", probe)
-    monkeypatch.setattr(Path, "unlink", unlink)
+    monkeypatch.setattr(os, "unlink", unlink)
     try:
         drill.cleanup_payloads(source, evidence, receipt, allocations)
     except KeyboardInterrupt:
@@ -437,15 +444,12 @@ def test_cleanup_does_not_delete_without_durable_provenance(
 
 @pytest.mark.unit
 def test_failed_receipt_rewrite_preserves_hashes_for_already_removed_payloads(
-    drill: ModuleType, packet: tuple, monkeypatch: pytest.MonkeyPatch
+    drill: ModuleType, packet: tuple, second_bundle: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A partial later write must not truncate the only proof for deleted disks."""
     source, evidence, receipt, allocations = packet
     first = next(iter(allocations))
-    second = evidence / "image-store/runs/second/bundle"
-    second.mkdir(parents=True)
-    (second / "rootfs.img").write_bytes(b"second")
-    allocations[second] = allocation(drill, second, ["rootfs.img"])
+    second = second_bundle
     original_write = Path.write_text
     writes = 0
 
@@ -506,7 +510,9 @@ def test_cleanup_preserves_metadata_even_if_a_manifest_selects_it_as_boot_input(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("outcome", ["success", "failure", "cancelled", "keep", "cleanup_failure"])
+@pytest.mark.parametrize(
+    "outcome", ["success", "failure", "cancelled", "setup_failed", "verification_cancelled", "keep", "cleanup_failure"]
+)
 def test_cli_finalizes_payload_cleanup_after_source_verification(
     drill: ModuleType, packet: tuple, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
 ) -> None:
@@ -533,6 +539,18 @@ def test_cli_finalizes_payload_cleanup_after_source_verification(
         "tldw_Server_API.app.core.Sandbox.macos_virtualization.helper_client",
         SimpleNamespace(MacOSVirtualizationHelperClient=object),
     )
+    fingerprint = drill.fingerprint
+    source_reads = 0
+
+    def interrupt_final_verification(module: ModuleType, path: Path) -> dict:
+        """Cancel only the final canonical read, after allocation and teardown."""
+        nonlocal source_reads
+        source_reads += 1
+        if outcome == "verification_cancelled" and source_reads == 2:
+            raise KeyboardInterrupt("cancel source verification")
+        return fingerprint(module, path)
+
+    monkeypatch.setattr(drill, "fingerprint", interrupt_final_verification)
 
     def exercise(*args: object) -> None:
         """Leave real files for finalization, but replace compilation and VM RPCs."""
@@ -540,6 +558,8 @@ def test_cli_finalizes_payload_cleanup_after_source_verification(
         actual_receipt["lifecycle"] = receipt["lifecycle"]
         if len(args) > 7:
             args[7].update(allocations)
+        if outcome == "setup_failed":
+            raise RuntimeError("offline installation failed before source baseline")
         actual_receipt["cases"] = {
             profile + suffix: {"ok": True} for profile in drill.TESTS for suffix in ("-positive", "-negative")
         }
@@ -549,16 +569,16 @@ def test_cli_finalizes_payload_cleanup_after_source_verification(
             raise KeyboardInterrupt("cancelled")
 
     monkeypatch.setattr(drill, "exercise", exercise)
-    original_unlink = Path.unlink
+    original_unlink = os.unlink
 
-    def verify_before_unlink(path: Path, *args: object, **kwargs: object) -> None:
+    def verify_before_unlink(path: str, *args: object, **kwargs: object) -> None:
         """Check persisted verification and payload hashes at the destructive boundary."""
         stored = json.loads((evidence / "receipt.json").read_text())
         assert stored["source_after"] == stored["source_before"]
-        assert stored["bundle_cleanup"]["bundles"][0]["payload_sha256"][path.name]
+        assert stored["bundle_cleanup"]["bundles"][0]["payload_sha256"][str(path)]
         original_unlink(path, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "unlink", verify_before_unlink)
+    monkeypatch.setattr(os, "unlink", verify_before_unlink)
     argv = [
         "--allow-fault-injection",
         "--source-bundle",
@@ -570,7 +590,150 @@ def test_cli_finalizes_payload_cleanup_after_source_verification(
     ]
     if outcome == "keep":
         argv.append("--keep-bundles")
-    assert drill.main(argv) == int(outcome in ("failure", "cancelled", "cleanup_failure"))
-    assert (bundle / "rootfs.img").exists() is (outcome in ("keep", "cleanup_failure"))
+    assert drill.main(argv) == int(
+        outcome in ("failure", "cancelled", "setup_failed", "verification_cancelled", "cleanup_failure")
+    )
+    assert (bundle / "rootfs.img").exists() is (outcome in ("keep", "verification_cancelled", "cleanup_failure"))
     final = json.loads((evidence / "receipt.json").read_text())
-    assert final["bundle_cleanup"]["ok"] is (outcome != "cleanup_failure")
+    assert final["bundle_cleanup"]["ok"] is (outcome not in ("verification_cancelled", "cleanup_failure"))
+    if outcome == "setup_failed":
+        assert not final.get("fault_sources")
+        assert final["bundle_cleanup"]["bundles"][0]["payload_sha256"]
+
+
+@pytest.mark.unit
+def test_clone_rejects_names_that_image_store_would_normalize(drill: ModuleType, tmp_path: Path) -> None:
+    """Reject ambiguous input before allocating a clone with different filenames."""
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "manifest.json").write_text(json.dumps({"kernel": " kernel "}))
+    for name in (" kernel ", "kernel", "rootfs.img"):
+        (source / name).write_bytes(b"small fixture")
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    materializer = drill.load_module(
+        "cleanup_real_materializer", drill.REPO / "tools/vz-linux-image/scripts/prepare-smoke-bundle.py"
+    )
+    allocations = {}
+    with pytest.raises(ValueError, match="whitespace"):
+        drill.clone(materializer, source, evidence, "ambiguous", "healthy", [], allocations)
+    assert allocations == {}
+    assert not (evidence / "image-store/runs/ambiguous/bundle").exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("replaced", ["payload", "occupied_restore", "bundle", "ancestor"])
+def test_cleanup_preserves_replacement_at_deletion_boundary(
+    drill: ModuleType, packet: tuple, monkeypatch: pytest.MonkeyPatch, replaced: str
+) -> None:
+    """Replacement after the last path check cannot redirect deletion to new files."""
+    source, evidence, receipt, allocations = packet
+    bundle = next(iter(allocations))
+    changed = False
+    unlink, rename = Path.unlink, os.rename
+
+    def replace() -> None:
+        """Substitute an object only at the final destructive namespace operation."""
+        nonlocal changed
+        if changed:
+            return
+        changed = True
+        if replaced in ("payload", "occupied_restore"):
+            (bundle / "rootfs.img").rename(bundle / "saved.img")
+        else:
+            parent = bundle if replaced == "bundle" else bundle.parent
+            parent.rename(parent.with_name("saved"))
+            bundle.mkdir(parents=True)
+        (bundle / "rootfs.img").write_bytes(b"unowned replacement")
+
+    def boundary_unlink(path: Path, *args: object, **kwargs: object) -> None:
+        """Exercise the original direct-unlink implementation."""
+        if path == bundle / "rootfs.img":
+            replace()
+        unlink(path, *args, **kwargs)
+
+    def boundary_rename(src: object, dst: object, *args: object, **kwargs: object) -> None:
+        """Exercise the atomic claim used instead of direct pathname deletion."""
+        if kwargs.get("src_dir_fd") is not None and str(src) == "rootfs.img":
+            replace()
+        rename(src, dst, *args, **kwargs)
+        if replaced == "occupied_restore" and kwargs.get("src_dir_fd") is not None:
+            (bundle / "rootfs.img").write_bytes(b"newer occupied name")
+
+    monkeypatch.setattr(Path, "unlink", boundary_unlink)
+    monkeypatch.setattr(os, "rename", boundary_rename)
+    monkeypatch.setattr(drill, "disk_handles", lambda paths: {"ok": True})
+    drill.cleanup_payloads(source, evidence, receipt, allocations)
+    assert changed
+    if replaced == "occupied_restore":
+        assert (bundle / "rootfs.img").read_bytes() == b"newer occupied name"
+        retained = Path(receipt["bundle_cleanup"]["bundles"][0]["retained_path"])
+        assert retained.read_bytes() == b"unowned replacement"
+    else:
+        assert (bundle / "rootfs.img").read_bytes() == b"unowned replacement"
+    if replaced in ("payload", "occupied_restore"):
+        assert receipt["bundle_cleanup"]["ok"] is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("stage", ["uuid", "staging_open"])
+def test_claim_setup_failure_does_not_leak_descriptors(
+    drill: ModuleType, packet: tuple, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    """Cancellation or staging failure must close every acquired descriptor."""
+    source, evidence, receipt, allocations = packet
+    opened = set()
+    original_open, original_close = os.open, os.close
+
+    def open_descriptor(path: object, *args: object, **kwargs: object) -> int:
+        """Track real descriptors and inject failure before staging is opened."""
+        if stage == "staging_open" and str(path).startswith(".payload-cleanup-"):
+            raise OSError("staging unavailable")
+        fd = original_open(path, *args, **kwargs)
+        opened.add(fd)
+        return fd
+
+    def close_descriptor(fd: int) -> None:
+        """Remove only descriptors actually closed by production code."""
+        original_close(fd)
+        opened.discard(fd)
+
+    def cancel_uuid() -> None:
+        """Model an ordinary handled cancellation during claim setup."""
+        raise KeyboardInterrupt("cancel staging name")
+
+    monkeypatch.setattr(os, "open", open_descriptor)
+    monkeypatch.setattr(os, "close", close_descriptor)
+    if stage == "uuid":
+        monkeypatch.setattr(drill, "uuid4", cancel_uuid)
+    monkeypatch.setattr(drill, "disk_handles", lambda paths: {"ok": True})
+    try:
+        drill.cleanup_payloads(source, evidence, receipt, allocations)
+        assert not opened
+        assert receipt["bundle_cleanup"]["ok"] is False
+        assert all((bundle / name).is_file() for bundle, record in allocations.items() for name in record.names)
+    finally:
+        for fd in opened:
+            original_close(fd)
+
+
+@pytest.mark.unit
+def test_cancelled_prepared_source_verification_retains_payloads(
+    drill: ModuleType, packet: tuple, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A verified canonical source cannot substitute for a canceled prepared source."""
+    source, evidence, receipt, allocations = packet
+
+    def fingerprint(materializer: object, path: Path) -> dict:
+        """Verify the canonical source, then cancel an existing prepared baseline."""
+        if path == source:
+            return receipt["source_before"]
+        raise KeyboardInterrupt("cancel prepared verification")
+
+    monkeypatch.setattr(drill, "fingerprint", fingerprint)
+    monkeypatch.setattr(drill, "disk_handles", lambda paths: pytest.fail("unverified source must retain"))
+    drill.verify_sources(None, source, evidence, receipt)
+    drill.cleanup_payloads(source, evidence, receipt, allocations)
+    assert receipt["fault_sources_unchanged"]["mismatch"] is False
+    assert receipt["bundle_cleanup"]["ok"] is False
+    assert all((bundle / name).is_file() for bundle, record in allocations.items() for name in record.names)

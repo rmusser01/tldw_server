@@ -621,10 +621,75 @@ def verify_sources(materializer: Any, source: Path, evidence: Path, receipt: dic
                 receipt["source_after"] = after
             if not unchanged:
                 raise RuntimeError("source changed")
-        except Exception as exc:  # noqa: BLE001 - independently verify every source on failure
-            receipt["errors"].append(f"{label} source verification: {exc}")
+        except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 - verify others and retain final receipt
+            if label == "canonical":
+                receipt.pop("source_after", None)
+            receipt["errors"].append(f"{label} source verification: {type(exc).__name__}: {exc}")
         if label != "canonical":
             receipt.setdefault("fault_sources_unchanged", {})[label] = unchanged
+
+
+def _unlink_owned_payload(path: Path, parent: os.stat_result, before: os.stat_result, entry: dict[str, Any]) -> None:
+    """Claim a payload in a private directory before checking and unlinking it.
+
+    Directory descriptors anchor operations across parent renames. A substituted
+    payload is restored without overwriting a newer name, or retained in the
+    recorded staging path if restoration is unavailable. Handled signals cannot
+    interrupt claim, restoration, unlink, or deletion bookkeeping.
+    """
+    staging = ".payload-cleanup-" + uuid4().hex
+    staging_fd = payload_fd = None
+    staging_created = False
+    with _defer_spawn_signals():
+        bundle_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            state = os.fstat(bundle_fd)
+            if (state.st_dev, state.st_ino) != (parent.st_dev, parent.st_ino):
+                raise ValueError("bundle replaced before payload claim")
+            payload_fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=bundle_fd)
+            current = os.fstat(payload_fd)
+            if (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns, current.st_ctime_ns) != (
+                before.st_dev,
+                before.st_ino,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            ):
+                raise ValueError("payload replaced or changed before claim")
+            os.mkdir(staging, mode=0o700, dir_fd=bundle_fd)
+            staging_created = True
+            staging_fd = os.open(staging, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=bundle_fd)
+            try:
+                os.rename(path.name, path.name, src_dir_fd=bundle_fd, dst_dir_fd=staging_fd)
+                after = os.stat(path.name, dir_fd=staging_fd, follow_symlinks=False)
+                # Rename changes ctime; the pre-claim descriptor check covers it.
+                if (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns) != (
+                    before.st_dev,
+                    before.st_ino,
+                    before.st_size,
+                    before.st_mtime_ns,
+                ):
+                    raise ValueError("payload replaced or changed at deletion boundary")
+                os.unlink(path.name, dir_fd=staging_fd)
+                entry["removed"].append(path.name)
+            except BaseException:
+                # link is exclusive: never overwrite a newly occupied original name.
+                with suppress(OSError):
+                    os.link(path.name, path.name, src_dir_fd=staging_fd, dst_dir_fd=bundle_fd, follow_symlinks=False)
+                    os.unlink(path.name, dir_fd=staging_fd)
+                with suppress(FileNotFoundError):
+                    os.stat(path.name, dir_fd=staging_fd, follow_symlinks=False)
+                    entry["retained_path"] = str(path.parent / staging / path.name)
+                raise
+        finally:
+            if staging_fd is not None:
+                os.close(staging_fd)
+            if payload_fd is not None:
+                os.close(payload_fd)
+            if staging_created:
+                with suppress(OSError):
+                    os.rmdir(staging, dir_fd=bundle_fd)
+            os.close(bundle_fd)
 
 
 def cleanup_payloads(
@@ -641,6 +706,17 @@ def cleanup_payloads(
     on-disk manifest. Metadata and other evidence stay in place. Unknown safety
     proofs retain payloads and fail acceptance; each bundle is independent.
     Payload hashes are persisted before unlinking, including failed run disks.
+    Only completed prepared sources have comparison baselines; partial setup
+    copies were never consumed as sources and still receive final payload hashes.
+
+    Args:
+        source: Canonical read-only bundle, never a cleanup candidate.
+        evidence: Private invocation directory containing the image-store runs.
+        receipt: Mutable verification and teardown results; receives cleanup results.
+        allocations: Invocation-owned payload names and original filesystem identities.
+        keep_bundles: Explicit debug override retaining payloads without deleting them.
+    Returns:
+        None; outcomes and retention reasons are recorded in receipt.
     """
     cleanup: dict[str, Any] = {
         "ok": True,
@@ -724,9 +800,7 @@ def cleanup_payloads(
                     before.st_ctime_ns,
                 ):
                     raise ValueError("payload bytes changed before unlink")
-                with _defer_spawn_signals():
-                    path.unlink()
-                    entry["removed"].append(path.name)
+                _unlink_owned_payload(path, identities[bundle], before, entry)
         except (OSError, ValueError, subprocess.SubprocessError, KeyboardInterrupt) as exc:
             entry["retained_reason"] = f"{type(exc).__name__}: {exc}"
             cleanup["ok"] = False
@@ -773,6 +847,8 @@ def clone(
     if bundle.exists() or bundle.is_symlink():
         raise ValueError("disposable bundle already exists")
     names = materializer.bundle_artifact_names(source)
+    if any(name != name.strip() for name in names):
+        raise ValueError("boot artifact name has surrounding whitespace")
     directories = [evidence, evidence / "image-store", evidence / "image-store/runs", bundle.parent, bundle]
     identities: dict[Path, tuple[int, int]] = {}
     for path in directories:
