@@ -1,8 +1,12 @@
 # Fresh-install UAT: single-user and multi-user
 
+## UAT511 — hosted AuthNZ property-generation stall (TASK-13260.278.18.83)
+
+Published head `60eedcdca0f4484c5ed3328d96d884263f2e9ff2` failed only `test_register_with_various_inputs` in Ubuntu 3.12 `auth-core-root-property` after 154 other passes. Hypothesis generated two emails in 1–2 ms, then reported one 29.491-second email draw and `HealthCheck.too_slow`; request logs have the same approximately 31-second gap before the next request. The test and its official `test_db_pool` fixture use real PostgreSQL. The exact test passes locally against PostgreSQL 18.6 with no skip, and 300 standalone `st.emails()` draws take at most 15 ms locally. This points to an isolated hosted timing outlier, but the cause is not proven. Keep the health check active and require a clean hosted rerun; do not count this shard as passed.
+
 ## UAT510 — PR2979 core-to-API ratchet after MCP fixture repair (TASK-13260.278.18.83)
 
-Published head `60eedcdca0f4484c5ed3328d96d884263f2e9ff2` remains based on fetched `dev` `0da68530e80c713ed3a323a741998e1fed37e3e9`. Critical browser E2E passes. The macOS and Windows 3.12 `core-utils-tooling` shards each failed only the architecture ratchet after passing 2,108 and 2,091 tests respectively (Windows also skipped 19): the prior MCP bounds fixture repair removed its direct API import, but `CORE_TO_API_BASELINE` still named that file. Remove the stale baseline entry so the ratchet tightens. The exact three-test boundary module fails before and passes after locally; Ruff is clean, and Bandit reports only three unchanged LOW test assertions. Hosted rerun, the remaining CI matrix, Qodo review and merge remain open.
+Published head `60eedcdca0f4484c5ed3328d96d884263f2e9ff2` remains based on fetched `dev` `0da68530e80c713ed3a323a741998e1fed37e3e9`. Critical browser E2E passes. The macOS, Windows and Ubuntu 3.12 `core-utils-tooling` shards each failed only the architecture ratchet after passing 2,108, 2,091 and 2,108 tests respectively (Windows skipped 19; Ubuntu skipped two): the prior MCP bounds fixture repair removed its direct API import, but `CORE_TO_API_BASELINE` still named that file. Remove the stale baseline entry so the ratchet tightens. The exact three-test boundary module fails before and passes after locally; Ruff is clean, and Bandit reports only three unchanged LOW test assertions. Hosted rerun, the remaining CI matrix, Qodo review and merge remain open.
 
 ## UAT509 — PR2979 current-head CI acceptance (TASK-13260.278.18.83)
 
