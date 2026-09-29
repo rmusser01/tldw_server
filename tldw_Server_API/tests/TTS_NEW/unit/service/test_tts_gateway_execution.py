@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -93,7 +95,7 @@ def specs(
             ),
             "last": gateway_config("Last/Model", "LastVoice"),
         },
-        ffmpeg_path="/usr/bin/true",
+        ffmpeg_path=sys.executable,
     )
 
 
@@ -700,7 +702,7 @@ async def test_conversion_is_buffered_strict_bounded_and_uses_pinned_timeout_pat
             "provider": "gateway:primary",
             "strict": True,
             "timeout_seconds": 4.5,
-            "ffmpeg_path": "/usr/bin/true",
+            "ffmpeg_path": str(Path(sys.executable).resolve()),
             "max_output_bytes": 2048,
         }
     ]
