@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Jobs.operations.postgres.lifecycle import (
 from tldw_Server_API.app.core.Jobs.pg_migrations import (
     ensure_jobs_rls_policies_pg,
     ensure_jobs_tables_pg,
+    slides_archive_indexes_ready_pg,
 )
 
 UTC = timezone.utc

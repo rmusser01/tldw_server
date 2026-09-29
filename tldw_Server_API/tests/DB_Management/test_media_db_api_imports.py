@@ -89,7 +89,6 @@ from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
 from tldw_Server_API.app.core.Chatbooks import chatbook_service
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import media_module as media_module_impl
 from tldw_Server_API.app.core.Sync import Sync_Client as sync_client_module
-from tldw_Server_API.app.core.Sync import server_sync_processor
 from tldw_Server_API.app.services import ingestion_sources_worker
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import quizzes_module
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import slides_module

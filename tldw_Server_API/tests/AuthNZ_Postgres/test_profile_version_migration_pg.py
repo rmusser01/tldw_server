@@ -5,7 +5,6 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-import asyncpg
 import pytest
 
 from tldw_Server_API.tests.helpers.authnz_seed import (

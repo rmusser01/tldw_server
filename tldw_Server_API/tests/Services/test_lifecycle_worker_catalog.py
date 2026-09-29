@@ -103,8 +103,6 @@ TASK5_JOB_POLLER_SPEC_NAMES = {
     "prompt_studio_jobs_task",
     "study_pack_jobs_task",
     "study_suggestions_jobs_task",
-    "notes_graph_suggestions_jobs_task",
-    "notes_graph_suggestions_maintenance_task",
     "privilege_snapshot_task",
     "audio_jobs_task",
     "audiobook_jobs_task",
@@ -148,7 +146,6 @@ TASK6_BACKGROUND_SPEC_NAMES = {
 }
 
 TASK7_SERVICE_TAIL_SPEC_NAMES = {
-    "admin_webhook_delivery_runtime_task",
     "automation_definitions_sched_task",
     "jobs_metrics_task",
     "loop_lag_task",

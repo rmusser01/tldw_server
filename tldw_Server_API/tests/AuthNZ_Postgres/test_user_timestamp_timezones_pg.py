@@ -5,11 +5,11 @@ from datetime import datetime, timezone
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 from tldw_Server_API.tests.helpers.authnz_seed import (
     ensure_test_user,
     unmanaged_authnz_pg_connection,
 )
-from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
 
 @pytest.mark.integration

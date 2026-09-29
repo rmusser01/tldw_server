@@ -1,16 +1,14 @@
 from __future__ import annotations
 
+import os
+import subprocess
 from copy import deepcopy
 from datetime import datetime, timezone
-import os
 from pathlib import Path
-import subprocess
 from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlparse
 
 import pytest
-
-from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo

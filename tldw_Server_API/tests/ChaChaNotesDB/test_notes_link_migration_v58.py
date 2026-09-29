@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 from uuid import uuid4
@@ -243,45 +244,13 @@ def test_sqlite_v57_to_v58_queues_existing_notes_for_projection_rebuild(
     db_path = tmp_path / "notes-link-v57-existing-notes.sqlite"
     source_id = "11111111-1111-4111-8111-111111111111"
     target_id = "22222222-2222-4222-8222-222222222222"
-    db = _seed_at_v59(db_path)
-    try:
-        db.add_note("Source", f"[[id:{target_id}]]", note_id=source_id)
-        db.add_note("Target", "Body", note_id=target_id)
-    finally:
-        db.close_connection()
-
-    with sqlite3.connect(db_path) as conn:
-        for trigger_name in (
-            "notes_graph_notes_ai",
-            "notes_graph_notes_au",
-            "notes_graph_notes_ad",
-            "notes_graph_edges_ai",
-            "notes_graph_edges_au",
-            "notes_graph_edges_ad",
-            "notes_graph_keywords_ai",
-            "notes_graph_keywords_au",
-            "notes_graph_keywords_ad",
-            "notes_graph_note_keywords_ai",
-            "notes_graph_note_keywords_au",
-            "notes_graph_note_keywords_ad",
-            "notes_graph_conversations_ai",
-            "notes_graph_conversations_au",
-            "notes_graph_conversations_ad",
-        ):
-            conn.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")  # nosec B608
-        for table_name in (
-            "note_attachments",
-            "note_wikilink_edges",
-            "note_graph_note_state",
-            "note_graph_dirty",
-            "note_graph_projection_state",
-            "note_graph_revisions",
-        ):
-            conn.execute(f"DROP TABLE IF EXISTS {table_name}")  # nosec B608
-        conn.execute(
-            "UPDATE db_schema_version SET version = 57 WHERE schema_name = ?",
+    _replace_with_v57_edge_table(db_path, edge_rows=[])
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.execute("UPDATE notes SET content = ? WHERE id = ?", (f"[[id:{target_id}]]", source_id))
+        assert conn.execute(
+            "SELECT version FROM db_schema_version WHERE schema_name = ?",
             (CharactersRAGDB._SCHEMA_NAME,),
-        )
+        ).fetchone()[0] == 57
 
     migrated = CharactersRAGDB(str(db_path), client_id=OWNER)
     try:

@@ -210,3 +210,32 @@ f30e8257e7. Latestdevca3b7f834a is included,0missing at the verified replay.
 Full UAT remains paused while
 these repairs, remaining CI causes, publication and current-head merge gates
 finish. Captures, runtime databases and private diagnostic artifacts stay ignored.
+
+
+## Latest dev replay and integration controls — 2026-09-29 (TASK-13260.278.18.83.5/.6)
+
+### Stage 1: Preserve and reconcile
+**Goal:** Replay all 168 commits onto current dev while retaining canonical writers, privacy, ownership and migration contracts.
+**Success Criteria:** Recovery refs retained; no skipped commits; latest upstream delta adopted.
+**Tests:** Conflict review, ancestry and range-diff.
+**Status:** Complete
+
+Reconciled onto `5910412f`, then replayed all 168 patch-equivalent commits onto `60006a2fed`. Recovery refs preserve `4c33d51d` and the first replay `b791876b`; integration checkpoint `adab81ce26` contains both rebases. Existing audio cleanup and Persona activation helpers are reused; typed unique errors and atomic transactions preserve Watchlists defaults. Genuine historical migration schemas and independent ctime/payload extraction guards remain. No new ADR is required: ADR020/049/050 continue to govern storage and ownership.
+
+### Stage 2: Repair combined integration artifacts
+**Goal:** Remove merge artifacts without changing product contracts.
+**Success Criteria:** Changed Python compiles; no added Ruff diagnostics; exact CI coverage and affected SQLite/real PostgreSQL controls pass.
+**Tests:** TTS duplicate-keyword compilation, fixture bindings, genuine v57 graph backfill, official PostgreSQL migrations/keys, archive readiness and exact CI inventory.
+**Status:** Complete
+
+UAT516 repairs duplicate declarations and stale test bindings. The first SQLite/CI run passes 133 with two contract failures; the reconciled CI module passes 49 and Notes scope passes 25. Current dev's 3.12 preflight/event policy is retained. The coverage guard covers 825 shards/4,879 files with zero new omissions. All 269 changed Python files compile; package-configured Ruff adds zero diagnostics (298 inherited). Production Bandit retains 20 findings across 58 changed files, zero added; the repair tests add one LOW historical-schema assertion only. Actionlint and diff checks pass.
+
+UAT517 removes duplicate DESC encoding from the shared PostgreSQL archive-index name query while retaining exact sort/null bits and all integrity checks. Four real failures become a full 62-case green coordination run with zero skips; independent caller review is clear. Other focused gates: AuthNZ/migrations/keys/Watchlist 102, Character/Persona 59, Audio/MCP/TTS/gateway 100, deterministic VAD 32 and cancellation/heartbeat/health 11 pass. Python 3.12 preflight characterization passes 19 with one optional curl-cffi skip; dev already fixed version-sensitive signatures.
+
+### Stage 3: Publish and qualify
+**Goal:** Publish the verified batch and handle final-head CI/Qodo before merge.
+**Success Criteria:** Final head tested, actionable review resolved, protected merge verified on dev.
+**Tests:** Fresh remote head/base, automatic PR CI, existing manually dispatched native matrix and Qodo review.
+**Status:** In Progress
+
+Old head `60eedcdc` terminal results (800 pass/14 fail/34 cancelled/30 skipped) do not qualify the new branch. Optional real VAD remains locally unverified because torchaudio is absent. Frontend type checking retains the same 23 baseline diagnostics; extension type checking passes. Focused frontend suites pass 131 and fail 40 legacy render cases due to duplicate local React installations; three resolver probes confirm the environment split. No product workaround, assertion relaxation or test suppression is added. Require fresh hosted installs and native matrix completion. Full fresh-install UAT remains paused.

@@ -1068,7 +1068,6 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_transcription_models_endpoint.py",
-            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py",
@@ -2004,7 +2003,7 @@ def test_required_backend_jobs_override_skipped_ancestor_status() -> None:
     """An intentional admission skip must not suppress successful downstream gates."""
     targets = {
         ".github/workflows/ci.yml": (
-            "full-suite-linux-311-smoke", "full-suite-linux-312-shards",
+            "full-suite-linux-312-shards",
             "full-suite-linux-313-shards", "full-suite-macos-312-shards",
             "full-suite-windows-312-shards", "full-suite-os-313-release-shards",
             "character-chat-rate-limits",
@@ -2021,7 +2020,10 @@ def test_required_backend_jobs_override_skipped_ancestor_status() -> None:
             if isinstance(dependencies, str):
                 dependencies = [dependencies]
             for dependency in dependencies:
-                assert f"needs['{dependency}'].result == 'success'" in condition, (path, name, dependency)
+                assert any(
+                    f"{reference}.result == 'success'" in condition
+                    for reference in (f"needs['{dependency}']", f"needs.{dependency}")
+                ), (path, name, dependency)
 
 
 def test_selected_full_suite_summaries_reject_unexecuted_shards(tmp_path: Path) -> None:

@@ -32,8 +32,6 @@ FIRST_PARTY_WEBSOCKET_AUTH_FILES = (
 )
 
 EXPECTED_WEBSOCKET_HANDLERS = {
-    "tldw_Server_API/app/api/v1/endpoints/audio/audio_realtime.py": {"websocket_realtime"},
-    "tldw_Server_API/app/api/v1/endpoints/realtime_compat.py": {"websocket_realtime_compat"},
     "tldw_Server_API/app/api/v1/endpoints/agent_client_protocol.py": {
         "acp_session_stream",
         "acp_session_ssh",
