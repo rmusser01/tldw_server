@@ -45,3 +45,33 @@ def test_status_bearing_network_error_is_still_status_classified() -> None:
     )
 
     assert _get_http_status_from_exception(NetworkError("HTTP 429")) == 429
+
+
+@pytest.mark.parametrize(
+    ("raised", "expected_status"),
+    [
+        pytest.param(NetworkError("Provider returned HTTP 429 Too Many Requests"), 429, id="429"),
+        pytest.param(NetworkError("connection reset by peer"), 504, id="status-less"),
+    ],
+)
+def test_chat_api_call_maps_a_network_error_through_the_real_handler(
+    monkeypatch: pytest.MonkeyPatch, raised: Exception, expected_status: int
+) -> None:
+    """End to end through chat_api_call's own except clause, not just classification.
+
+    TASK-13381: a message-only NetworkError('HTTP 429') must surface as ChatRateLimitError
+    (429), and a status-less one as ChatProviderError(504) -- never as a raw NetworkError
+    or a generic 500.
+    """
+    from tldw_Server_API.app.core.Chat import chat_orchestrator
+    from tldw_Server_API.app.core.exceptions import ChatProviderError, ChatRateLimitError
+
+    def _failing_dispatch(**_kwargs: object) -> None:
+        raise raised
+
+    monkeypatch.setattr(chat_orchestrator, "perform_chat_api_call", _failing_dispatch)
+
+    expected_type = ChatRateLimitError if expected_status == 429 else ChatProviderError
+    with pytest.raises(expected_type) as excinfo:
+        chat_orchestrator.chat_api_call("openai", [{"role": "user", "content": "hi"}])
+    assert excinfo.value.status_code == expected_status

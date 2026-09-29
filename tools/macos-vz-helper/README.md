@@ -166,15 +166,17 @@ plist before any manual cleanup. Do not add this opt-in to scheduled CI.
 
 Use this explicit, manual-only command to prepare and run the capability-mismatch,
 acknowledged-handshake readiness-timeout, guest protocol-version mismatch,
-advertised-workspace mismatch, and missing-agent startup drills.
+advertised-workspace mismatch, missing-agent startup, and initramfs boot-stall drills.
 It also runs a negative control for each drill. Production guest code, normal
 smoke behavior, and scheduled CI are unchanged.
 
 Prerequisites: Apple Silicon macOS, the project Python environment (including
 pytest-timeout), Go with this repository's agent dependencies already cached,
-an explicitly selected signed helper, and a known-good Debian arm64 bundle.
+native `cpio`, an explicitly selected signed helper, and a known-good Debian arm64 bundle.
 The bundle must use an ext4 `rootfs.img` and contain `e2fsck`, `debugfs`, `cmp`,
-`sha256sum`, `sed`, `mv`, and `/bin/sleep`. It must not be in use or modified by another process. Preparation
+`sha256sum`, `sed`, `mv`, `/bin/sleep`, and `unmkinitramfs`. The manifest must name
+a regular initrd with a simple filename, containing Debian's shell `/init` and
+its normal early-userspace utilities. It must not be in use or modified by another process. Preparation
 is offline: the command does not download Go dependencies or provision Debian.
 Use the existing build/sign instructions above for the helper.
 
@@ -190,8 +192,8 @@ python tools/macos-vz-helper/scripts/vz-failure-drill.py \
 ```
 
 The evidence directory must be new and its parent must already exist. The
-workflow builds four **test-only Go overlays** and stages one test-only shell
-launcher. A separate disposable healthy VM installs each artifact into an
+workflow builds four **test-only Go overlays** and stages a test-only shell
+launcher and initramfs wrapper. A separate disposable healthy VM prepares each artifact in an
 **offline image-store clone**, verifies the installed bytes, and checks the
 filesystem. The missing-agent installer also preserves and verifies the
 original agent under a second path. The launcher records a fresh nonce and VM
@@ -202,7 +204,7 @@ neither canonical nor prepared fault sources are booted. The command manages
 its own direct helper with a unique private socket and PID file. It never
 attaches to an existing helper, installs launchd services, or reboots the host.
 
-Exit zero requires five passing live tests, five negative controls failing at
+Exit zero requires six passing live tests, six negative controls failing at
 their specific execution assertions, no skipped tests, no cleanup errors, empty
 VM inventory, closed disposable disks, helper shutdown, and unchanged source
 boot-artifact/manifest/build-provenance hashes. This is not a full directory
@@ -218,6 +220,32 @@ separate clone of that same launcher, asks it to exec the preserved original
 agent, and requires completed real execution. Healthy recovery then runs two
 commands on one VM. This proves service startup and missing VSock connection;
 it does not prove kernel boot-hang recovery or mount isolation.
+
+The boot-stall fixture instead wraps initramfs `/init`, before mounting the rootfs
+or starting the guest agent. The preparer reads the original `/init` from the
+offline cloned initrd; the host preserves it in an appended aligned `newc`
+archive. Rootfs and kernel bytes are not modified by this preparation. Each run
+clone receives a fresh nonce and stall/continue setting. Its helper serial log
+must contain exactly one marker matching that nonce, VM ID, mode, and
+`stage=initramfs`. Missing, stale, unrelated, malformed or oversized proof fails
+acceptance; a transport timeout alone is insufficient.
+
+The positive test requires bounded `guest_transport_timeout`, no exec dispatch,
+empty reusable control state, then healthy execution and same-session reuse.
+The negative control boots the same wrapper in continue mode, executes the
+preserved original `/init`, and must complete a real command before the intended
+failure assertion. The workflow also checks VM inventory and disk handles,
+stops its helper, and verifies unchanged canonical and prepared fault-source
+hashes. Per-case initrd challenge changes are expected only in disposable run
+clones. This proves an early-userspace stall, **not** arbitrary kernel-hang or
+stalled Apple VZ start-callback recovery, host reboot recovery, or mount isolation.
+
+The rootfs installers recover any pending ext4 journal on their **offline
+disposable target** before raw `debugfs` writes. Only `e2fsck -p` status 0 (clean)
+or 1 (corrected) permits installation; other statuses fail before writes. A
+read-only filesystem check alone skips journal replay and can leave later boot
+recovery overwriting freshly installed agent data or permissions. The final
+read-only check and installed-byte verification remain mandatory.
 
 The protocol fixture changes only the guest's initial VSock handshake version
 to `999`, not the host-helper JSON protocol or guest capability metadata. A
