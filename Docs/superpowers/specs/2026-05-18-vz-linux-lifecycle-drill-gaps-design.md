@@ -370,3 +370,36 @@ acceptance. Existing source-hash and helper/disk cleanup gates remain mandatory.
 This proves advertised metadata admission, not mount isolation or path-escape
 resistance. Missing-agent, early boot-hang and host-reboot live evidence remain
 separate; no reboot, source-bundle mutation or scheduled fault injection is added.
+
+## 2026-09-26 Initramfs Boot-Stall Extension
+
+TASK-13243.10 extends the existing manual failure workflow to six profiles and
+twelve mandatory positive/negative cases. Unlike the missing-agent launcher,
+this test-only wrapper runs as initramfs PID1 before Debian's original `/init`,
+rootfs mounting, systemd, or guest-agent startup. It prints a fresh nonce,
+requested VM ID, mode, and `initramfs` stage through the helper's per-VM serial
+log, then stalls. A transport timeout without matching serial proof is a failed
+drill, not acceptance.
+
+The existing disposable healthy preparer extracts the original `/init` from an
+offline fault-source clone. Append an aligned native `newc` archive containing
+the wrapper, preserved original init, and fixture settings to that clone's
+manifest-selected initrd. Do not modify the source bundle, kernel, rootfs, or
+production agent. Each case clones that prepared image through the existing
+image store and appends only its fresh nonce/mode settings. The continue-mode
+negative control executes the preserved original init through the same wrapper;
+acceptance requires completed real fault-VM execution plus the intended failed
+assertion. Normal host validation remains enabled.
+
+Positive acceptance requires a bounded guest-transport timeout, zero exec,
+no reusable session VM state, healthy replacement execution and same-session
+reuse. Existing VM enumeration, disk-handle, helper shutdown, source-hash and
+evidence-retention gates remain mandatory. Record preparation initrd hashes and
+original-init hash as well as input hashes and live serial proof. This extends
+test fixtures only: no production fault flag, Docker dependency, default-helper
+takeover, launchd change, reboot, or default CI trigger.
+
+This is explicitly early-userspace-stall evidence, not closure of arbitrary
+kernel hangs, a stalled Virtualization.framework start callback, mount isolation,
+or host reboot recovery. Portable success does not establish live acceptance;
+the prepared-host evidence tracker must record an actual twelve-case receipt.
