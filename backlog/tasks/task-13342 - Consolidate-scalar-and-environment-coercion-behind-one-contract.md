@@ -1,10 +1,10 @@
 ---
 id: TASK-13342
 title: Consolidate scalar and environment coercion behind one contract
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-22 05:10'
-updated_date: '2026-09-28 19:39'
+updated_date: '2026-09-29 07:29'
 labels:
   - refactor
   - security
@@ -40,10 +40,10 @@ Found by the comprehensive core-module review (TASK-13293). All three defects in
 - [x] #1 Stage 1: the two fail-open parsers and the missing "y" are fixed, each test-first
 - [x] #2 A test proves an unrecognised allow_remote_base_url value leaves the loopback guard ON
 - [x] #3 Stage 2: core/Utils/coercion.py exists with the documented contract and a table test over every TRUTHY and FALSY token, including that an unmatched token returns the supplied default rather than True
-- [ ] #4 Stage 4: tests/lint/test_private_coercion_ratchet.py is seeded at current per-module counts and demonstrably fails when a new private coercer is added
-- [ ] #5 No configuration key that parses today resolves to a different value after any stage
-- [ ] #6 Bandit run for touched scope
-- [x] #7 core/testing.py:is_truthy delegates to core/Utils/coercion; MCP_unified/environment.py keeps a documented copy for the standalone package boundary
+- [x] #4 Stage 4: tests/lint/test_private_coercion_ratchet.py is seeded at current per-module counts and demonstrably fails when a new private coercer is added
+- [x] #5 Bandit run for touched scope
+- [x] #6 core/testing.py:is_truthy delegates to core/Utils/coercion; MCP_unified/environment.py keeps a documented copy for the standalone package boundary
+- [x] #7 Accepted values change only where recorded: stage 1's two intended fail-open fixes (TTS audio_cpp_config._as_bool and google_adapter._env_flag now fail closed on unrecognised input) and the additive 'y' token; stage 5 migrations each prove no other change, per the design's additive-sets rule
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -62,12 +62,14 @@ Net effect of the closure would have been to delete the only in-repo record of t
 This task stays open until either the work is done or TASK-13322 actually lands on dev. If 13322 lands, reconcile then: 13322 carries the root cause (core/testing.py:30 is_truthy imported by 140 production files from a module documented as test-mode helpers) and the OCR three-truthy-sets finding, while this task carries the google_adapter._env_flag and request_resolution._is_truthy_value defects and the explicit fail-closed acceptance criterion. Neither is a superset of the other.
 
 Reconciled 2026-09-28 against dev after #3011 merged TASK-13322 (Done). The Done status here contradicted the REOPENED note above; this task stays open for the work 13322 did not carry. Verified on dev: AC1: TTS audio_cpp_config._as_bool is gone, google_adapter._env_flag is env_bool(name, default=False), and request_resolution._is_truthy_value is parse_bool(..., default=False), all fail-closed via core/Utils/coercion. AC2: TTS_NEW/unit/adapters/test_audio_cpp_config.py::test_negative_or_unknown_allow_remote_tokens_keep_the_loopback_guard. AC3: core/Utils/coercion.py plus the 13322 table test. AC4 amended: core/testing re-exports and delegates, while MCP_unified/environment.is_truthy deliberately copies the vocabulary ('copied, not imported, for the standalone package boundary'), which is a recorded divergence, not a gap. Still open: AC5 (stage 4 private-coercion lint ratchet: tests/lint/test_private_coercion_ratchet.py does not exist on dev), AC6, AC7.
+
+Closed 2026-09-29 after #3049 merged. AC4: the ratchet is on dev and passes (4/4), enforced by backend-required's 'Enforce CI contracts and code ratchets' step. AC5 (Bandit): coercion.py 0 findings; only pytest asserts (B101) in the ratchet file. AC7 amended from 'no key resolves differently after any stage', which contradicted stage 1's intended fail-open fixes, to the design's actual rule: additive sets, and value changes stop and are recorded.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Partly delivered via TASK-13322 (#3011): stages 1-3, meaning fail-closed parsers, core/Utils/coercion.py and the table test, are on dev. Still open here: the stage 4 private-coercion lint ratchet (AC4), the no-changed-parse guarantee (AC5), and a Bandit run (AC6).
+Delivered: stages 1-3 via TASK-13322 (#3011), meaning fail-closed parsers, core/Utils/coercion.py and the table test; stage 4 via #3049, where tests/lint/test_private_coercion_ratchet.py freezes 212 private coercers in 175 modules and runs in backend-required. Stage 5 (migrating modules) proceeds opportunistically under the ratchet, each migration lowering its seed. Bandit on coercion.py: 0 findings; the test file's B101 asserts are expected in pytest.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
