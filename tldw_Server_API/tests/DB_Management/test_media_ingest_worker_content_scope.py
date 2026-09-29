@@ -318,9 +318,10 @@ async def test_worker_scope_retires_after_failed_or_cancelled_executor(ingest_st
         if exit_kind == "cancel":
             jm.cancel_job(job["id"], reason="controlled cancellation")
             task.cancel()
-            # Persistence currently converts interruption to a Warning; the worker's
-            # existing authoritative Jobs cancellation check must still return {}.
-            assert await task == {}
+            # Since 9f5373725b persistence no longer swallows CancelledError into a
+            # Warning, so cancelling the worker task propagates cooperatively.
+            with pytest.raises(asyncio.CancelledError):
+                await task
         release.set()
         if exit_kind == "error":
             result = await task

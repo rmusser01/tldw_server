@@ -10,7 +10,7 @@ import ssl
 import time
 from contextlib import contextmanager, suppress
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, status
 from loguru import logger
@@ -67,13 +67,15 @@ from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
-from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.exceptions import EgressPolicyError, RetryExhaustedError
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_ROLES
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 
 try:
     import psycopg as _psycopg

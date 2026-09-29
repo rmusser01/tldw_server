@@ -89,6 +89,7 @@ from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline
 from tldw_Server_API.app.core.Chatbooks import chatbook_service
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import media_module as media_module_impl
 from tldw_Server_API.app.core.Sync import Sync_Client as sync_client_module
+from tldw_Server_API.app.core.Sync import server_sync_processor
 from tldw_Server_API.app.services import ingestion_sources_worker
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import quizzes_module
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import slides_module
@@ -1613,11 +1614,16 @@ def test_sync_imports_db_errors_from_media_db_errors_and_not_media_db_v2(monkeyp
     monkeypatch.setattr(legacy_media_db, "InputError", object(), raising=False)
     monkeypatch.setattr(legacy_media_db, "MediaDatabase", object(), raising=False)
 
+    # The v1 processor that raises these errors moved out of the endpoint into
+    # core.Sync.server_sync_processor (8656be117f); the endpoint re-exports it.
+    processor_module = importlib.reload(server_sync_processor)
     module = importlib.reload(sync)
 
-    assert module.ConflictError is media_db_errors.ConflictError
-    assert module.DatabaseError is media_db_errors.DatabaseError
-    assert module.InputError is media_db_errors.InputError
+    assert processor_module.ConflictError is media_db_errors.ConflictError
+    assert processor_module.DatabaseError is media_db_errors.DatabaseError
+    assert processor_module.InputError is media_db_errors.InputError
+    assert "MediaDatabase" not in processor_module.__dict__
+    assert module.ServerSyncProcessor is processor_module.ServerSyncProcessor
     assert "MediaDatabase" not in module.__dict__
 
 
