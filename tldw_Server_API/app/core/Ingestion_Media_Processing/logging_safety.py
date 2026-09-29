@@ -94,3 +94,13 @@ def url_hint_for_display(value: object, *, tail_chars: int = _URL_HINT_TAIL_CHAR
     if len(path) > tail_chars:
         path = "/…" + path[-tail_chars:]
     return f"{host}{path}"
+
+
+def exception_type_for_log(exc: BaseException) -> str:
+    """Return a bounded exception class name without rendering exception data.
+
+    Exception text and tracebacks can include email bodies, headers, credentials
+    or uploaded filenames. Callers should log this summary without attaching
+    the original exception or traceback to the log record.
+    """
+    return type(exc).__name__[:80]

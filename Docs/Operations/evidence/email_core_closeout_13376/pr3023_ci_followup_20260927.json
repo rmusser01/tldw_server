@@ -1,0 +1,535 @@
+{
+  "task": "TASK-13377",
+  "date": "2026-09-27",
+  "pr": "https://github.com/rmusser01/tldw_server/pull/3023",
+  "base": "dev",
+  "dev_commit": "bd2ae757d274e7eda3edb48eb682733c401efe56",
+  "tested_commit": "0176b267b07e5209fe5f9d9873da55d449f4fbc8",
+  "python": "3.11.13",
+  "root_causes": {
+    "docs": "Canonical refresh produced an untracked attachment-policy mirror. A merge-only addition is omitted from the revision plugin creation query, causing a fallback timestamp ordering warning. Publishing the mirror in a normal commit supplies its creation history.",
+    "backend": "Blocking failure was OpenAPI fingerprint drift; mypy was advisory."
+  },
+  "corrections": [
+    "Integrated current dev and reviewed backend/auth/persistence conflict resolutions.",
+    "Generated the attachment-policy mirror with refresh_docs_published.sh.",
+    "Regenerated API fingerprint and frontend types with bun run generate:api-types."
+  ],
+  "results": {
+    "combined": {
+      "passed": 236,
+      "skipped": 0,
+      "summary": "236 passed, 10 warnings in 1239.13s (0:20:39)",
+      "log_sha256": "0f281cb401c8f918e0b25c66fe60d2c1ae42f83bdf8087119588bea653b34970"
+    },
+    "core": {
+      "passed": 110,
+      "skipped": 0,
+      "summary": "110 passed, 4 warnings in 59.04s",
+      "log_sha256": "05c2021b8fb8759f80d8766246e856ad690bf94f0eedeaecc7eb5545d1e16e46"
+    },
+    "postgres_dev": {
+      "passed": 80,
+      "skipped": 1,
+      "summary": "80 passed, 1 skipped, 4 warnings in 466.65s (0:07:46)",
+      "log_sha256": "1a177c1ec2fb00368f70cf8ce5b3eabc185b06b3f63c5fc57ad076e42f78829f",
+      "skip_reason": "PostgreSQL parameter of a SQLite-only connection-lifetime test; PostgreSQL fixture was available."
+    },
+    "real_pst": {
+      "passed": 10,
+      "skipped": 0,
+      "summary": "10 passed, 4 warnings in 25.38s",
+      "log_sha256": "5eeef47bd01b8f5b03b12336733327e9b9211b0b395a9bfa7f59b965c1309026"
+    },
+    "docs": {
+      "passed": 212,
+      "skipped": 0,
+      "summary": "212 passed, 8 warnings in 110.56s (0:01:50)",
+      "log_sha256": "d31f5d05a751619ba4e8ab99c510ea6a9ab8868ffed9828718636c258522cc46"
+    }
+  },
+  "docs_toolchain": {
+    "mkdocs": "1.6.1",
+    "material": "9.7.7",
+    "revision_date": "1.6.0",
+    "strict_build": "passed; zero counted warnings",
+    "boundaries": "public/private, command and endpoint checks passed"
+  },
+  "openapi": {
+    "note": "Regenerate with `make openapi-fingerprint`. A change here means the backend API contract drifted; regenerate the frontend types (`bun run generate:api-types` in apps/tldw-frontend) and review.",
+    "openapi_version": "3.1.0",
+    "path_count": 2104,
+    "schema_count": 3245,
+    "sha256": "dc6c9318cb1d3031f6ac596dcaa28b7a7b39e0420afa172957461ade40a3c61c"
+  },
+  "guarded_native_pst": {
+    "exitstatus": 0,
+    "attempts": {
+      "outbound": 0,
+      "model": 0
+    },
+    "libpff_version": "20231205",
+    "fixture_size": 271360,
+    "fixture_sha256": "24c5e6bbb8bf26a817c977283e40e7b69d2661fec0845abbe177f97efcb05fb0",
+    "outcomes": [
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_process_emails_endpoint.py::test_process_emails_endpoint_pst_recipients_and_date_strict",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_process_emails_endpoint.py::test_process_emails_endpoint_pst_with_pypff_extraction",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[date-Thu, 02 Jan 2020 03:04:05 +0000]",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[cc-carol@example.com]",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_native_date_precedes_transport_header_date",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[to-bob@example.com]",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[bcc-dave@example.com]",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[from-alice@example.com]",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_native_datetime_is_preserved_without_transport_headers",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[message_id-<synthetic-pst@example.com>]",
+        "phase": "call",
+        "outcome": "passed"
+      }
+    ]
+  },
+  "guard_source_reference": "real_pst_13377.json#guard_plugin; only fixture/receipt paths changed",
+  "quality": {
+    "compiled_pr_python_files": 90,
+    "ruff_paths": 47,
+    "ruff_findings": 0,
+    "bandit_findings": 8,
+    "bandit_new_findings": 0,
+    "bandit_errors": 0,
+    "baseline": "Exact flagged source/rules/issue text matches current dev after line-prefix normalization."
+  },
+  "review": "Independent reviewer found no blockers in merged backend/auth/persistence/collection/validator paths.",
+  "production_source_sha256": {
+    "Docs/Operations/probes/email_archive_probe_databases_2026_09_25.py": "1e5235360fe5bb17b7db94c09d91aad154fd923ac17c98143e26c3717878bd88",
+    "Docs/Operations/probes/email_archive_throughput_postgres_2026_09_25.py": "97e700887e777ac9f9c24d7ee7b271d2b6d87b376422acfe3e1c20166e52b24d",
+    "Docs/Operations/probes/email_archive_throughput_sqlite_2026_09_25.py": "1f0735567d31913bb225bd129fc8ee98760a44d9332edc0b516203f09f113675",
+    "Docs/Operations/probes/email_local_release_checks_13376.py": "7b6898f1abf8df3bc2916e5fd29e3979f271c1820b7c677c6dcbc81516cbbd82",
+    "Docs/Operations/probes/email_million_search_13376.py": "142c6b67c0a9cf4cd7369ef4d5fd8ac17b62c560740df4bb9f5fee00ea1615f4",
+    "Helper_Scripts/benchmarks/email_search_bench.py": "827c26a396b26dcadcc4ded2c9e9b1309b85ab03bdf33b17b2af232ea66fb991",
+    "tldw_Server_API/app/api/v1/API_Deps/billing_deps.py": "03a76a1288bebd024ad7a89b3339dee61c1ce4d13ad594393bcdc52532e3e6ee",
+    "tldw_Server_API/app/api/v1/API_Deps/content_org_deps.py": "9a80dc48e0bcd9784c466a2d3251aa33dbf4aa02f415ee9863b4f50c81565231",
+    "tldw_Server_API/app/api/v1/API_Deps/media_add_deps.py": "ec11bfea6a0aefc1a269beb7a15ed281919085bcc4fe4b6d82715a7fcde8e360",
+    "tldw_Server_API/app/api/v1/API_Deps/media_processing_deps.py": "0038ccfb76e15f9818978ffe95e3ae310442db94202d856bd9f431597d8eaa5f",
+    "tldw_Server_API/app/api/v1/API_Deps/storage_quota_guard.py": "83b8837db81e6e5ade071c404655c248d45b46554d783874ab6f13ba8228defc",
+    "tldw_Server_API/app/api/v1/endpoints/email.py": "c4fba67f4f0a201f745fddd2f1562b15ee21d07e16e6bf89d6cdaac290e0d523",
+    "tldw_Server_API/app/api/v1/endpoints/media/add.py": "142354aa819919d2191eb258ab2b3f971cb6ff53df93ff5d1f5f9d854b1138eb",
+    "tldw_Server_API/app/api/v1/endpoints/media/process_emails.py": "35727c25ff44c8626bff3838642b34501e849db9a16fde64bc0dd2b4cf17c46b",
+    "tldw_Server_API/app/api/v1/schemas/media_request_models.py": "959e4865749594715ac582704c8dc0291f80d29d3309e010a7b63c746e2f71cf",
+    "tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py": "472fe5dc6c01311b0c0245f6543c57855ddc3258910dbbc963606307126f92b1",
+    "tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py": "2a8535761631fa18ffd75fc5af9309e83b982d5318e13cb31fbd5fb02e36c4f0",
+    "tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py": "9599e1d1fab568aac424da06d99d6299ea5c6bb04da9fe531612ae3cafff9302",
+    "tldw_Server_API/app/core/DB_Management/Collections_DB.py": "4f9fbe5bbebda4428fdf4c70592a25909087e0a3d355a3965ddcce240b7d114e",
+    "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py": "16090522fe64c99a28bf056129b1a86c44f913910117dceb58c374b2d149adda",
+    "tldw_Server_API/app/core/DB_Management/backends/query_utils.py": "effbb887843a3ace3be2eac4fca314fe2897ce808ed673a764d3e7738e19d858",
+    "tldw_Server_API/app/core/DB_Management/backends/sqlite_backend.py": "e22d0af0d6ec8c0d7c413503af4c5bac899da70c3837eaa34ffb73407c23d383",
+    "tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py": "07e311516af634c23cd2170332c91bde72da71e371cc3775a1528e83fb1587fa",
+    "tldw_Server_API/app/core/DB_Management/media_db/repositories/document_versions_repository.py": "328faf405b385848c9357eabdc549f9d7ecca7acd43476a896f82b0b6f413cd0",
+    "tldw_Server_API/app/core/DB_Management/media_db/repositories/keywords_repository.py": "1dfe4832785a66f36096d050adb1e97e719fb75b297e572c9fe5b8eca5392d91",
+    "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py": "ccf3232e460caec49235ce15645fd2c3c97f0d75d774c16ed404c3bac9f4b7ee",
+    "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_search_repository.py": "5d55aa5d97802142185befc289eb35ea9e52d1b48aa7aa209f75b1f3e37cf1e4",
+    "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_benchmark_fixture.py": "cb4f615bffc512779685ec1afdf3651be42a40a5427b0c4ecc87a72a59d77b6e",
+    "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_graph_persistence_ops.py": "fecc3eb7cc60164a3ed82f756bd9b6424d5f8bc5db3d3c0a7c0a395cf3c17664",
+    "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_query_ops.py": "9b3e4385a1f39d76d763361a2b4adb1f4a405adcbfbf4bf44661fdc9207332b3",
+    "tldw_Server_API/app/core/DB_Management/media_db/runtime/execution_ops.py": "aed8b8b2ea4f7e02bf38da71395fec889685734035a995972120a88c41f1e3ea",
+    "tldw_Server_API/app/core/DB_Management/media_db/runtime/fts_ops.py": "2a5742849a0b1c613c1715290f725d2558b69a01457879cbeeeadffbad63bece",
+    "tldw_Server_API/app/core/DB_Management/media_db/runtime/sync_utility_ops.py": "4be2d97c934e49a9b2a27ec65a5d426d8b08c5cbf8595ff0f27567a30d07cfdc",
+    "tldw_Server_API/app/core/DB_Management/media_db/schema/backends/postgres_helpers.py": "c9febe54f6d2b269937fb3b5580aa468f64bf439c19dd2c86d6ca4b94e72c81b",
+    "tldw_Server_API/app/core/DB_Management/media_db/schema/email_schema_structures.py": "b9ee5e90eacca190af638e7ae82a7bdac8ac5bd8247cf35ca284b0c1b939768f",
+    "tldw_Server_API/app/core/DB_Management/media_db/schema/features/postgres_rls.py": "7236e2c6dd3957ea48d2c9bf2cb46a21fe155b797ee85324304d299df5516f52",
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/Email_Processing_Lib.py": "d811d62c157c1437f81dd7127372e408a1b1907d50325a9da5822dbb3d31908f",
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/attachment_policy.py": "e9b023d3ae924fb1385fcf8fd2f5589fe1078bc127f6824e879616c1578c8b56",
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/email_ingestion_metrics.py": "2b8d1ec859b5429aa7b1e1c2e5f69e922eedcb50fa2224d7e61da70ce9bab4d6",
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/Upload_Sink.py": "a6151af748284a8b8f2250a2eae91659cd630933808304078b722a9f1fcd22a0",
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/chunking_options.py": "f707de892ca281e42c77db26d807f4f8c8d7c73d32a3a62d3659a8e8aa88461d",
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/input_sourcing.py": "3267e1ba5fd729b6dd8e9a9af3ec8bb86aa5090aedb25f571abacf2c1df8a53f",
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/logging_safety.py": "1da367ccf35e48c325bb8ed9d2317338cdfa5f08a4673dbee627e0ba890ac874",
+    "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": "fcf02a7a21e8a5538c439c8e101f50385d0a7fb39ac9f336c883628d27e89beb",
+    "tldw_Server_API/app/core/Logging/access_log_middleware.py": "bc6aa0ea5072d7dfabe55468b757791c8a6e5c30a8149008f4a47f750be9f0d0",
+    "tldw_Server_API/app/core/Metrics/metrics_manager.py": "f3a152d6b3548357b2a1a3675a3912752992f76153d32a7a64419097a3dedba4",
+    "tldw_Server_API/app/core/Storage/quota_enforcement.py": "9d78dd8a7a0a2ae67babbfd33b5e564e83f7f1d52eb760514b444e41e46151ca"
+  },
+  "benchmark_scope": "Earlier throughput and million-message certificates retain their original source revisions; not rerun for this source.",
+  "publication": {
+    "confirmed_source_pr_head": "0176b267b07e5209fe5f9d9873da55d449f4fbc8",
+    "base": "dev",
+    "draft": true,
+    "mergeable": "MERGEABLE",
+    "ci_state": "New checks queued/in progress at source publication; local gates passed."
+  },
+  "cleanup": {
+    "removed": [
+      "/tmp/tldw-email-pst-20260927",
+      "/tmp/tldw-email-docs-toolchain-20260927",
+      "/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/email_pr3023_bandit_dev_20260927_x2n8lev7",
+      "/tmp/tldw-email-pst-20260927.pst",
+      "/tmp/email_pr3023_pst_guard_20260927.py",
+      "/tmp/__pycache__/email_pr3023_pst_guard_20260927.cpython-311-pytest-8.4.1.pyc"
+    ],
+    "verified_absent": true,
+    "preserved": [
+      "Shared project venv",
+      "Shared PostgreSQL service",
+      "Historical benchmark/PST evidence",
+      "Credential-free validation logs"
+    ]
+  },
+  "late_base_refresh": {
+    "dev_commit": "de7f453593dbb40f069a4666fd562fc5f3622817",
+    "validated_email_files_unchanged": 47,
+    "docs_gate_inputs_unchanged": true,
+    "new_dev_tests": {
+      "passed": 51,
+      "summary": "51 passed, 5 warnings in 7.07s",
+      "log_sha256": "917288e4357c6f595e220d1f82802cee664964430a9e6bbc7c2d83cdde79dedd"
+    },
+    "openapi_check": "fingerprint matches; no regeneration needed",
+    "openapi_log_sha256": "995f812076a48c25c1817a868a3b5a735c132336bf993d9be67d5a41a660d590"
+  },
+  "schema_dependency_correction_20260928": {
+    "source_parent": "d38f1dae3043bd14e3bab8a92d98bf96017ad2a4",
+    "dev_commit": "97da6c2dfec239b5739eed4116469f1fb5db7ed5",
+    "python": "3.11.13",
+    "schema_dependencies": {
+      "fastapi": "0.136.3",
+      "pydantic": "2.13.5",
+      "pydantic-core": "2.46.5",
+      "pydantic-settings": "2.15.0",
+      "starlette": "1.7.0",
+      "email-validator": "2.3.0",
+      "annotated-types": "0.8.0",
+      "typing-extensions": "4.16.0",
+      "typing-inspection": "0.4.4",
+      "anyio": "4.15.1"
+    },
+    "root_cause": "The earlier local generator used Pydantic2.11.7 below the declared2.13.5 minimum; exact CI schema dependencies reproduce hosted hash99862cf358fd.",
+    "fingerprint": {
+      "note": "Regenerate with `make openapi-fingerprint`. A change here means the backend API contract drifted; regenerate the frontend types (`bun run generate:api-types` in apps/tldw-frontend) and review.",
+      "openapi_version": "3.1.0",
+      "path_count": 2104,
+      "schema_count": 3244,
+      "sha256": "99862cf358fdd2540162c2d9e9202d3eb5a4bb33e9ea35c52e03dbc6095124ba"
+    },
+    "schema_diff": {
+      "old_hash": "dc6c9318cb1d3031f6ac596dcaa28b7a7b39e0420afa172957461ade40a3c61c",
+      "new_hash": "99862cf358fdd2540162c2d9e9202d3eb5a4bb33e9ea35c52e03dbc6095124ba",
+      "changed_top_level_sections": [
+        "components"
+      ],
+      "removed_schemas": [
+        "OscePatientContext-Input",
+        "OscePatientContext-Output"
+      ],
+      "added_schemas": [
+        "OscePatientContext"
+      ],
+      "changed_schemas": [
+        "OsceStationCreateContent",
+        "OsceStationStoredContent",
+        "OsceStationUpdateContent"
+      ],
+      "changed_paths": []
+    },
+    "semantic_check": "Full documents compare equal after consolidating two identical OscePatientContext definitions and updating three refs; all endpoint paths are unchanged.",
+    "api_contract_initial": {
+      "passed": 81,
+      "failed": 1,
+      "failure": "Existing pagination diagnostic borrowed same-name current components for unmounted legacy Admin webhook endpoints; old and supported schemas both reproduce the same mismatch."
+    },
+    "diagnostic_correction": {
+      "task": "TASK-13377.1",
+      "red": "1 failed,1 passed",
+      "green": "5 passed",
+      "behavior": "Use existing effective-route traversal and full endpoint identity before short component lookup; still reject missing pagination on mounted endpoints."
+    },
+    "results": {
+      "osce_contract_passed": 76,
+      "dev_frontend_passed": 219,
+      "python_files_compiled": 91,
+      "openapi_drift_check": "passed",
+      "fingerprint_format": "passed",
+      "ruff": "passed",
+      "bandit": "4 inherited test-assert findings match HEAD; zero new findings/errors",
+      "api_contract_final": {
+        "passed": 84,
+        "failed": 0,
+        "skipped": 0,
+        "summary": "84 passed,23 warnings in451.76s (0:07:31)"
+      }
+    },
+    "review": "Independent reviews of snapshot and diagnostic found no actionable blockers.",
+    "production_probe_files_preserved": 47,
+    "hosted_docs": {
+      "source": "d38f1dae3043bd14e3bab8a92d98bf96017ad2a4",
+      "result": "passed"
+    },
+    "log_sha256": {
+      "red_drift": "b67c17c8aa72417736be7dde14b3b2211a6ef4142d85fdfc7750b82f343a278e",
+      "green_drift": "0dd65955c3f02f401539b271f380e4c1df3e1ec8d5ade63988b5405991d2a784",
+      "canonical_generator": "ec1db659767251c322a50f88e01ab608dd50d556929604777e7b763200a0296d",
+      "osce_contract": "246ddce578bc9bd52ec63780eed6333868fb770e4c28d2f30707f503167dc274",
+      "dev_frontend": "2c34edea2e5814b0fd97b638dfebd99d30b66634ddfb07b02a04fed11d60e28e",
+      "diagnostic_red": "704721b4ab217fb4ee1321431f08a039873a956d347eac2b1a1799ecd6994852",
+      "diagnostic_green": "7b7a53a1155e5df6923e2274efbf09526f68b6865701a54c22fc88562b36f560",
+      "api_contract_final": "0d3e4193fa451a6e2b08f72fb9a92956f3d2f3a883a7a248b623fbd420569664"
+    },
+    "shared_environment": "Shared Python and frontend dependencies preserved; exact schema dependency overrides installed only in task-owned temporary target.",
+    "adr_required": false,
+    "native_pst": {
+      "exitstatus": 0,
+      "attempts": {
+        "outbound": 0,
+        "model": 0
+      },
+      "libpff_version": "20231205",
+      "fixture_size": 271360,
+      "fixture_sha256": "24c5e6bbb8bf26a817c977283e40e7b69d2661fec0845abbe177f97efcb05fb0",
+      "outcomes": [
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_native_date_precedes_transport_header_date",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_native_datetime_is_preserved_without_transport_headers",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[cc-carol@example.com]",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[date-Thu, 02 Jan 2020 03:04:05 +0000]",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[to-bob@example.com]",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[bcc-dave@example.com]",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[from-alice@example.com]",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[message_id-<synthetic-pst@example.com>]",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_process_emails_endpoint.py::test_process_emails_endpoint_pst_with_pypff_extraction",
+          "phase": "call",
+          "outcome": "passed"
+        },
+        {
+          "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_process_emails_endpoint.py::test_process_emails_endpoint_pst_recipients_and_date_strict",
+          "phase": "call",
+          "outcome": "passed"
+        }
+      ],
+      "guard_source_reference": "real_pst_13377.json:guard_plugin.source, replacing only fixture/output receipt paths with the task20260928 paths",
+      "guard_sha256": "59be69dfd408681a82294ef7ca0616b64ae31c9655ad67fd68f6a08acd935ae7",
+      "log_sha256": "4547c593235585234ca4a1edfdc4fb33481f9410da114e98199a3185a37a1724",
+      "summary": "10 passed,6 warnings in24.70s; zero skips/outbound/model attempts"
+    },
+    "publication": {
+      "source_commit": "8219e3dcd3698c71ad5fa609b4228f5423ab598c",
+      "pushed": true,
+      "ci_state": "Hosted checks rerunning; final result will be reported in the thread."
+    },
+    "cleanup": {
+      "removed": [
+        "apps/node_modules (task-created symlink only)",
+        "apps/tldw-frontend/node_modules (task-created symlink only)",
+        "apps/packages/ui/node_modules (task-created symlink only)",
+        "/tmp/email_pr3023_ci_schema_deps_20260928",
+        "/tmp/email_pr3023_pst_deps_20260928",
+        "/tmp/email_pr3023_ci_python_20260928",
+        "/tmp/email_pr3023_synthetic_pst_20260928.pst",
+        "/tmp/email_pr3023_pst_guard_20260928.py",
+        "/tmp/__pycache__/email_pr3023_pst_guard_20260928.cpython-311-pytest-8.4.1.pyc"
+      ],
+      "verified_absent": true,
+      "preserved": [
+        "Shared Python/frontend dependency installations",
+        "Historical benchmark and native-PST receipts",
+        "Credential-free diagnostic logs and canonical generated API artifacts"
+      ]
+    }
+  },
+  "dev_compute_auth_refresh_20260928": {
+    "source_parent": "d40beae3839d5d72f7aafc24513b7f58e6f085f8",
+    "dev_commit": "a2d5b1c0db789e9db7d4820e05164028ea4734ec",
+    "merge_conflicts": [
+      "apps/tldw-frontend/lib/api/openapi.fingerprint.json"
+    ],
+    "resolution": "Unchanged canonical frontend generator with the previously verified supported CI schema dependencies.",
+    "schema_dependencies": {
+      "fastapi": "0.136.3",
+      "pydantic": "2.13.5",
+      "pydantic-core": "2.46.5",
+      "pydantic-settings": "2.15.0",
+      "starlette": "1.7.0",
+      "email-validator": "2.3.0",
+      "annotated-types": "0.8.0",
+      "typing-extensions": "4.16.0",
+      "typing-inspection": "0.4.4",
+      "anyio": "4.15.1"
+    },
+    "fingerprint": {
+      "note": "Regenerate with `make openapi-fingerprint`. A change here means the backend API contract drifted; regenerate the frontend types (`bun run generate:api-types` in apps/tldw-frontend) and review.",
+      "openapi_version": "3.1.0",
+      "path_count": 2104,
+      "schema_count": 3244,
+      "sha256": "58fa00440a664a47cb9ad6e72350b2515a7e6ac061e81a13aca032fe803a3b47"
+    },
+    "schema_diff": {
+      "changed_sections": [
+        "paths"
+      ],
+      "changed_paths": [
+        "/api/v1/flashcards/generate",
+        "/api/v1/llamacpp/inference",
+        "/api/v1/llamafile/metrics",
+        "/api/v1/ocr/backends",
+        "/api/v1/ocr/points/preload"
+      ],
+      "components_unchanged": true
+    },
+    "route_auth_inventory": {
+      "red": "Existing helper reports exactly two omitted public audio probes in incoming dev baseline.",
+      "correction": "Canonical regeneration restores only GET /api/v1/audio/stream/status and GET /api/v1/audio/transcriptions/health; five compute-auth removals remain absent.",
+      "green": "178 unauthenticated routes; baseline exact.",
+      "policy": "Passive audio status remains public; warm=True continues to authenticate and require admin. Audio source and tests are identical to dev."
+    },
+    "results": {
+      "compute_endpoint_tests": {
+        "passed": 21,
+        "failed": 0,
+        "skipped": 0
+      },
+      "api_contract_tests": {
+        "passed": 84,
+        "failed": 0,
+        "skipped": 0,
+        "summary": "84 passed,21 warnings in411.04s (0:06:51)"
+      },
+      "public_audio_and_ratchet_tests": {
+        "passed": 25,
+        "failed": 0,
+        "skipped": 0,
+        "summary": "25 passed,6 warnings in20.03s"
+      },
+      "openapi_drift_check": "passed",
+      "route_auth_check": "passed",
+      "fingerprint_format": "passed",
+      "compiled_pr_python_files": 91,
+      "bandit": {
+        "inherited_dev_paths": 8,
+        "findings": 94,
+        "new_findings": 0,
+        "errors": 0,
+        "baseline": "All eight inherited Python source files exactly match dev a2d5b1c0db789e9db7d4820e05164028ea4734ec"
+      }
+    },
+    "inherited_dev_python_sha256": {
+      "tldw_Server_API/app/api/v1/endpoints/flashcards.py": "04a82f03f1e3664d49c5e18e4f904f1da983daee2ca269e472e151027ae536a4",
+      "tldw_Server_API/app/api/v1/endpoints/llamacpp.py": "1e7b2de0d060c3724db651e8e8e57be8ba4719ff58e6d44ef912bd37effc0f4d",
+      "tldw_Server_API/app/api/v1/endpoints/ocr.py": "6c803a4c0a7363a92930bf65bcf0702aa4491a0c54ca9e60af6b25594a8a7c1c",
+      "tldw_Server_API/tests/Flashcards/test_flashcards_generate_auth.py": "6481220668c3643807b206119ca71884986374c33adcebcacdf309c15d856929",
+      "tldw_Server_API/tests/LLM_Local/conftest.py": "fe6e17e9808155a533ffadab3fd392856e1e0ea2707e49520a72fe8e9aa83303",
+      "tldw_Server_API/tests/LLM_Local/test_llamacpp_inference_api.py": "84ecc704102b4f465c6ad94cf848c3f4027a81967937a3e9820433de4cf45622",
+      "tldw_Server_API/tests/LLM_Local/test_llamacpp_runtime_api.py": "f3608cc4e239a8aaf22bb44cf08f1db6cdd912132c27861a37c57d86ac27492f",
+      "tldw_Server_API/tests/Media_Ingestion_Modification/test_ocr_endpoints_auth.py": "a23b3064fb8c0538c541bee75216238cf73bbaef4c643a7d5b936b92ff4c2267"
+    },
+    "validated_production_probe_files_preserved": 47,
+    "native_and_benchmark_scope": "No native PST or benchmark rerun for this refresh; earlier source-bound receipts are preserved and all47 certified production/probe paths are unchanged.",
+    "preceding_hosted_gates": {
+      "head": "d40beae3839d5d72f7aafc24513b7f58e6f085f8",
+      "backend": {
+        "result": "success",
+        "url": "https://github.com/rmusser01/tldw_server/actions/runs/36384508282",
+        "openapi_step": "success"
+      },
+      "docs": {
+        "result": "success",
+        "url": "https://github.com/rmusser01/tldw_server/actions/runs/36384508324"
+      }
+    },
+    "review": "Independent reviews of combined generated schema and public-audio inventory policy found no blockers.",
+    "log_sha256": {
+      "dependencies": "c1287fbb5a8e9d48b31f36bdf433bb363c124a418253b197e1e1521a5ef75841",
+      "canonical_generator": "d337938091eabc150d63ed2ab13ccada435ea180e206782c38c5bdaf985a9022",
+      "endpoint_regressions": "e8a6d155ba0f8ac1fbbb2fec838c8d0b6daa5b7a65eec665d63f1662199df39e",
+      "api_contracts": "b324da20166d8d8870d7086ddea7b3e2997216293d367b6af6ebc9fe4c907321",
+      "public_audio_and_ratchet": "829a9dee17772ad93794e8ef7058cea347e8068848b17f632cdf0f571f37fb5e",
+      "drift_check": "3e7f27cf4cd4bfe451c4021fdadff7190c9556fbbd165be62da0e41a66f10271",
+      "route_auth_red": "2d3889b5e17b454e198e67d7219f73757a19289e88c56a86060185807c290406",
+      "route_auth_generation": "51bd8f103729b688c7d1dc1da9635ca9a891d9aeb8df71bd25c858d4a58323cf",
+      "route_auth_green": "ce203a59819147ccf2148f308e5de60c4f0fdefddab7cbafffda7f9de8fe4225",
+      "fingerprint_format": "1402bbccc5b5ce005658485467bb5cf13361be9110208175cb553c1fb0cdc961",
+      "bandit": "0c9500098b0450365dd83e322fff87017e9d627adaa9b0272c51f052f0e1c23d",
+      "compile": "6b9011e8c138d3758c2740a636d367b785844dff6c2b9f2e4db42a9ef0015c5e",
+      "preceding_hosted_backend": "9b3e46f09ba4736eefa131a4a41bb7b6c8fb32c543029e35099455b8646476e3",
+      "preceding_hosted_docs": "f342ad4d1915995c8aa30c5bb87a42d4618d1eab01da13372bc17dd770b93cf5"
+    },
+    "cleanup": {
+      "removed": [
+        "/tmp/email_pr3023_auth_refresh_deps_20260928",
+        "/tmp/email_pr3023_auth_refresh_python_20260928"
+      ],
+      "verified_absent": true,
+      "preserved": [
+        "Shared virtual environment and frontend installations",
+        "Credential-free logs and generated schema/type artifacts",
+        "Earlier native PST and benchmark certificates"
+      ]
+    },
+    "publication": "Verified refresh ready to publish to the existing draft PR3023; new-head hosted checks will rerun.",
+    "adr_required": false
+  }
+}

@@ -1,0 +1,143 @@
+{
+  "status": "aborted_before_final_certificate",
+  "source_revision": "455fad64fb75c35084c357f671f5d6121b3adb09",
+  "backend": "postgresql",
+  "runs": [
+    {
+      "batch": 0,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 2.9298007499892265,
+      "messages_per_second": 34.13201392632851
+    },
+    {
+      "batch": 1,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 3.064426042023115,
+      "messages_per_second": 32.63253824000942
+    },
+    {
+      "batch": 2,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 3.1002018749713898,
+      "messages_per_second": 32.25596397683711
+    },
+    {
+      "batch": 3,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 3.7499770000576973,
+      "messages_per_second": 26.666830222815072
+    },
+    {
+      "batch": 4,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 3.5974006250035018,
+      "messages_per_second": 27.797849176140247
+    },
+    {
+      "batch": 5,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 3.1588065420510247,
+      "messages_per_second": 31.65752592593709
+    },
+    {
+      "batch": 6,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 3.6491376659832895,
+      "messages_per_second": 27.403734567808968
+    },
+    {
+      "batch": 7,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 3.1753744590096176,
+      "messages_per_second": 31.492348789373796
+    },
+    {
+      "batch": 8,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 3.1933397089596838,
+      "messages_per_second": 31.315177561418196
+    },
+    {
+      "batch": 9,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 3.920569875044748,
+      "messages_per_second": 25.506496041945592
+    },
+    {
+      "batch": 10,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 3.571680958964862,
+      "messages_per_second": 27.998021421538674
+    },
+    {
+      "batch": 11,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 4.658796917065047,
+      "messages_per_second": 21.464769076690747
+    },
+    {
+      "batch": 12,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 4.315848416998051,
+      "messages_per_second": 23.170415255120663
+    },
+    {
+      "batch": 13,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 4.620914250030182,
+      "messages_per_second": 21.64073916743788
+    },
+    {
+      "batch": 14,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 3.123632458038628,
+      "messages_per_second": 32.01400976054378
+    },
+    {
+      "batch": 15,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 3.7021151250228286,
+      "messages_per_second": 27.011585707881885
+    },
+    {
+      "batch": 16,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 3.4560048750136048,
+      "messages_per_second": 28.935144369437946
+    }
+  ],
+  "messages": 1700,
+  "measured_ingestion_seconds": 60.9880275442265,
+  "aggregate_messages_per_second": 27.87432334595862,
+  "minimum_measurement_seconds": 60,
+  "local_release_failure": {
+    "query": "ArchiveThroughput",
+    "legacy_matches": 0,
+    "native_matches": 1700
+  },
+  "source_after_probe_not_recorded": true,
+  "postgres_resources": {
+    "role": "email_probe_a48927c1ab",
+    "auth_db": "email_auth_a48927c1ab",
+    "content_db": "email_content_a48927c1ab"
+  },
+  "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-tcmctat5",
+  "not_an_acceptance_certificate": true
+}

@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+from fastapi import APIRouter, FastAPI
+from Helper_Scripts.ci.route_auth_ratchet import iter_routes
+from pydantic import create_model
 
 MATRIX_PATH = Path("Docs/Design/Pagination_Completion_Matrix.md")
 UNRESOLVED_STATUSES = {"migration-candidate", "needs-confirmation"}
@@ -84,17 +90,6 @@ def _has_property_path(
     return True
 
 
-def _mounted_endpoints(routes: list[object]):
-    """Yield every endpoint callable, descending into included routers."""
-    for route in routes:
-        endpoint = getattr(route, "endpoint", None)
-        if endpoint is not None:
-            yield endpoint
-        included = getattr(route, "original_router", None)
-        if included is not None:
-            yield from _mounted_endpoints(included.routes)
-
-
 def test_pagination_matrix_has_no_unresolved_candidates() -> None:
     """Every inventoried route should be either canonicalized or explicitly exempt."""
     unresolved = [
@@ -127,27 +122,53 @@ def test_canonical_matrix_response_models_expose_pagination_when_openapi_resolva
     from tldw_Server_API.app.main import app
 
     components = app.openapi()["components"]["schemas"]
-    # Components are keyed by class name, so a row whose endpoint is not mounted would
-    # be checked against a same-named model from another route family (the legacy
-    # admin_ops webhook routes vs the canonical admin_webhooks ones, 602711075b).
-    mounted = {
+    mounted_endpoints = {
         f"{endpoint.__module__.replace('.', '/')}.py:{endpoint.__name__}"
-        for endpoint in _mounted_endpoints(app.routes)
+        for _, _, dependant in iter_routes(app)
+        if (endpoint := getattr(dependant, "call", None)) is not None
     }
     mismatches: list[str] = []
     for row in _matrix_rows():
-        if row["status"] != CANONICAL_STATUS:
-            continue
-        if row["endpoint"] not in mounted:
+        if row["status"] != CANONICAL_STATUS or row["endpoint"] not in mounted_endpoints:
             continue
         component_name = _component_name(row["response_model"])
         if component_name is None or component_name not in components:
             continue
         paths = _pagination_paths(row["response_fields"])
-        if not paths or not any(
-            _has_property_path(components[component_name], path, components)
-            for path in paths
-        ):
+        if not paths or not any(_has_property_path(components[component_name], path, components) for path in paths):
             mismatches.append(f"{row['endpoint']} -> {component_name}")
 
     assert mismatches == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mounted", [False, True])
+def test_pagination_contract_distinguishes_mounted_response_model_names(
+    monkeypatch: pytest.MonkeyPatch,
+    mounted: bool,
+) -> None:
+    """Retired rows must not borrow a live component with the same model name."""
+    app = FastAPI()
+    router = APIRouter()
+    response_model = create_model("SharedListResponse", items=(list[str], ...))
+
+    @router.get("/items", response_model=response_model)
+    def list_page() -> dict[str, list[str]]:
+        return {"items": []}
+
+    app.include_router(router, prefix="/api")
+    endpoint = f"{list_page.__module__.replace('.', '/')}.py:{list_page.__name__}"
+    row = {
+        "endpoint": endpoint if mounted else "retired.py:list_page",
+        "response_model": "SharedListResponse",
+        "response_fields": "pagination",
+        "status": CANONICAL_STATUS,
+    }
+    with monkeypatch.context() as context:
+        context.setitem(sys.modules, "tldw_Server_API.app.main", SimpleNamespace(app=app))
+        context.setattr(sys.modules[__name__], "_matrix_rows", lambda: [row])
+        if mounted:
+            with pytest.raises(AssertionError, match="list_page -> SharedListResponse"):
+                test_canonical_matrix_response_models_expose_pagination_when_openapi_resolvable()
+        else:
+            test_canonical_matrix_response_models_expose_pagination_when_openapi_resolvable()

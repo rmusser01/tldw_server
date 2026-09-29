@@ -10,6 +10,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
     get_db_transaction,
 )
+from tldw_Server_API.app.api.v1.API_Deps.content_org_deps import select_content_org
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
@@ -26,6 +27,7 @@ from tldw_Server_API.app.core.External_Sources.connectors_service import (
 from tldw_Server_API.app.core.External_Sources.connectors_service import (
     list_sources as list_connector_sources,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 
 router = APIRouter(tags=["Email"])
@@ -100,7 +102,7 @@ async def list_email_sources(
     try:
         rows = await list_connector_sources(db, user_id)
     except Exception as exc:
-        logger.error("Failed to list email sources")
+        logger.error("Failed to list email sources (error_type={})", exception_type_for_log(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list email sources.",
@@ -120,8 +122,8 @@ async def list_email_sources(
                     source_key=str(source_id),
                     tenant_id=tenant_id,
                 )
-            except (DatabaseError, InputError):
-                logger.warning("Failed to fetch email sync state")
+            except (DatabaseError, InputError) as exc:
+                logger.warning("Failed to fetch email sync state (error_type={})", exception_type_for_log(exc))
 
         sync_payload = {
             "state": _derive_sync_state(sync_state),
@@ -182,7 +184,7 @@ async def trigger_email_source_sync(
     try:
         job = await create_import_job(user_id, source_id, request_id=rid)
     except Exception as exc:
-        logger.error("Failed to queue email sync job")
+        logger.error("Failed to queue email sync job (error_type={})", exception_type_for_log(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to queue email sync job.",
@@ -198,6 +200,7 @@ async def trigger_email_source_sync(
 
 @router.get(
     "/search",
+    dependencies=[Depends(select_content_org)],
     status_code=status.HTTP_200_OK,
     summary="Search normalized email messages",
 )
@@ -269,15 +272,17 @@ async def search_email_messages(
         }
     except (InputError, DatabaseError) as exc:
         if isinstance(exc, DatabaseError):
-            logger.error("Database error during email search")
+            logger.error("Database error during email search (error_type={})", exception_type_for_log(exc))
         raise map_db_error_to_http(
             exc,
             default_detail="A database error occurred during email search.",
+            log_error=False,
         ) from exc
 
 
 @router.get(
     "/messages/{email_message_id}",
+    dependencies=[Depends(select_content_org)],
     status_code=status.HTTP_200_OK,
     summary="Get normalized email message detail",
 )
@@ -302,8 +307,9 @@ async def get_email_message_detail(
         return detail
     except (InputError, DatabaseError) as exc:
         if isinstance(exc, DatabaseError):
-            logger.error("Database error during email detail lookup")
+            logger.error("Database error during email detail lookup (error_type={})", exception_type_for_log(exc))
         raise map_db_error_to_http(
             exc,
             default_detail="A database error occurred while fetching email message detail.",
+            log_error=False,
         ) from exc

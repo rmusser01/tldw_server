@@ -1,0 +1,93 @@
+---
+id: TASK-13377
+title: Run real PST adapter tests and publish email PR against dev
+status: In Progress
+assignee: []
+created_date: '2026-09-26 21:50'
+updated_date: '2026-09-29 17:50'
+labels: []
+dependencies: []
+documentation:
+  - Docs/Operations/Email_Real_PST_Validation_2026-09-26.md
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+User requested executing the two previously skipped pypff/PST tests, fixing verified failures if necessary, updating evidence and creating a PR against dev. Use only public synthetic fixture data and isolated optional parser; preserve measured benchmark source/results and personal mail exclusion.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 Both optional installed-parser and valid-PST endpoint tests run without skips and verified results are retained
+- [x] #2 Any verified PST regression is fixed with focused tests and lint/security validation
+- [x] #3 A reviewed pull request targets dev and links measured email evidence; human Change summary merge gate remains explicit
+- [x] #4 PR3023 documentation and backend gates are repaired at their verified causes, with affected checks passing locally
+- [ ] #5 Latest dev is integrated without losing email behavior; reviewed corrections and validation are pushed to PR3023
+- [ ] #6 PR3023 is rebased onto latest dev; all actionable Qodo and other review comments are resolved with evidence
+- [ ] #7 Required CI and review gates pass and PR3023 is merged under the user authorization
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Stage1: preserve the reviewed final patch, rebase onto latest dev and verify conflict resolution. Stage2: publish ready PR, receive and address Qodo/all comments with regressions and security checks. Stage3: confirm required gates and merge the exact reviewed head; retain tracking/evidence.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Native libpff-python20231205 installed only into /tmp/tldw-real-pst-13376-python (project venv unchanged). Pinned public Apache Tika testPST_variousBodyTypes.pst revisione3c6b6b18537100a7016b55cb8d29fa06cf4233a has four fabricated body-format emails,271360bytes,sha25624c5e6bbb8bf26a817c977283e40e7b69d2661fec0845abbe177f97efcb05fb0. Existing two enabled-parser endpoint baseline:1passed1failed (native API has no recipient methods; datetime dropped by string-only helper). Eight metadata regressions RED before fix; eight+two native endpoint tests GREEN10passed. Preserve native datetime and use selected transport-header metadata fallback, without copying MIME encoding/Content-Type. Independent review has no blocking findings; Ruff and Bandit0 for changed parser. Broader88-case run:87passed1failure from missing-parser test assuming absent optional dependency; test now explicitly monkeypatches pypff unavailable and full24endpoint/metadata rerun is underway. Current dev merge preview has13 conflicts; reviewed hunk-resolution guidance preserves latest dev fallback/cancellation/context/UUID-probe changes and email tenant/transaction fixes.
+
+Dev f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07 merged with 13 resolved conflicts. Postmerge core110 and real Postgres54 passed. Combined154 run initially141passed13fixture setup errors; shared fixture registration fixed with explicit alias. Subsequent24auth cases23passed1failure exposed cached canonical-auth restoration overwriting validated selected org; synthetic trace confirmed quota selected secondorg but identity wrote firstorg. Six cached-boundary regressions RED2failed5passed then GREEN with canonical authority tests and real authenticated integration:63passed. Trusted request-local marker tied to deep-copied original principal preserves only validated org/team selectors; changed claims/raw state remain ignored. Independent review has no blockers. Final guarded native suite10passed (both realPST cases no skips; outbound/model0). Actual dev diff90Python files compiled,47production/probe +4test Ruff clean. Bandit47 scope8 inherited access/api_key/service label findings exact-matched to dev baseline;0new findings/errors. Final201case combined regression run underway; original benchmark source certificates preserved.
+
+Final combined merged-source regression suite completed:201passed,0failures/errors/skips,10warnings,228.07s. Evidence retained in Docs/Operations/evidence/email_core_closeout_13376/real_pst_13377.json; reproduction and scope in Docs/Operations/Email_Real_PST_Validation_2026-09-26.md. Stage3 complete; stage4 publishing PR underway.
+
+Published https://github.com/rmusser01/tldw_server/pull/3023 against dev, draft/OPEN/MERGEABLE confirmed. All four plan stages complete; task-specific plan retired. Final closeout contains docs/evidence/tracking only. Real OST/live Gmail/staging lag remain unverified optional scope.
+
+Reopened for user-authorized continue on2026-09-27. CI failed onboarding-docs-gate (untracked published Email attachment mirror; strict build warning likely missing Git date) and backend-required (mypy Python3.11 target parsing NumPy3.12 type statement, OpenAPI fingerprint drift). Current dev bd2ae757d2 includes shared bootstrap/OpenAPI/auth fixes and conflicts with email branch. Preserve already-correct dev changes; trace root causes and use canonical generators; no merge authorized.
+
+CI follow-up root causes confirmed: the docs refresh adds the missing published attachment-policy mirror; the backend-required blocking step is OpenAPI fingerprint drift, now regenerated with the canonical frontend generator and checked stable (2104 paths/3245 schemas). Mypy is advisory (continue-on-error) and was not the failed gate. Latest dev bd2ae757d274e7eda3edb48eb682733c401efe56 is integrated with two import-only conflicts resolved and reviewed; dev DI/admin/typed backend protections and email isolation preserved. All212 docs tests pass with the project toolchain. Exact CI Material9.7.7/revision-date1.6.0 precommit run sees fallback date warnings on new dev ADR pages because this uncommitted merge is absent from HEAD history; rerun after committing the merge. Real-PST guarded10 cases pass with0outbound/model attempts. Ruff47paths clean; Bandit8findings exactly match current dev with0new/errors. Larger email/Postgres regressions still running.
+
+CI follow-up complete: pushed source0176b267b07e5209fe5f9d9873da55d449f4fbc8 and confirmed PR3023 targetsdev/OPEN/draft/MERGEABLE. All236combined,110core,80Postgres/dev targets passed (one intentional PostgreSQL parameter skip for a SQLite-only lifetime case), guarded10native with0outbound/model,212docs with CI Material9.7.7/revision-date1.6.0 plus explicit strict build and3boundary checks. OpenAPI fingerprint stable after canonical type generation;90Python compile,47Ruff paths clean, Bandit8exact current-dev label findings/0new/errors. Final docs failure traced to creation-log omission for a merge-only addition; generated policy page moved to a normal commit without changing the tested source tree. Source merge98f6299246609b83c97afd6b9db1517a84e34912 retains currentdev bd2ae757d274e7eda3edb48eb682733c401efe56. Follow-up report/evidence recorded; earlier benchmark revisions unchanged. Requester Change summary preserved; new GitHub CI checks queued/in progress. All three follow-up plan stages complete; only own plan retired. Exact temporary parser/toolchain/fixture/guard/baseline resources removed; sharedvenv/Postgres preserved.
+
+Dev advanced after final source publication: de7f453593dbb40f069a4666fd562fc5f3622817 merges scheduled-task message-store changes in seven files. Read and traced the delta; none of the47 validated production/probe paths changed. Reopen the same CI task for a conflict-free base refresh, the new dev tests and stable OpenAPI contract; preserve measured email evidence by content hash.
+
+Late dev refresh verified: de7f453593dbb40f069a4666fd562fc5f3622817 integrated without conflicts; all47 validated production/probe files and docs gate inputs unchanged. 51 scheduled-task message-store/service regressions passed with0failures/errors/skips; OpenAPI fingerprint still matches with no regeneration. Earlier evidence remains bound to its tested source; appended content-preservation/refresh receipts. Closing and publishing this verified refresh.
+
+Reopened for user-authorized continuation. Hosted docs gate passed; backend OpenAPI contract fails at d38f1dae3043bd14e3bab8a92d98bf96017ad2a4 with 2104 paths/3244 schemas, sha256 99862cf358fdd2540162c2d9e9202d3eb5a4bb33e9ea35c52e03dbc6095124ba. Earlier local generation used Pydantic2.11.7 below current pyproject minimum2.13.5; CI uses2.13.5/core2.46.5/Starlette1.7.0. Isolate supported dependencies; preserve sharedvenv and historical test receipts. ADR required: no; this restores the existing generated-contract workflow and changes no durable architecture rule.
+
+Implementation plan: Docs/Plans/IMPLEMENTATION_PLAN_email_pr3023_schema_dependencies_20260928.md; retire only this plan when its three stages finish.
+
+Supported dependency reproduction confirms the exact hosted failing hash99862cf358fd/2104paths/3244schemas. Raw diff only consolidates two identical OscePatientContext Input/Output definitions and three refs; normalized full schemas and all paths are otherwise equal. Canonical frontend generator succeeds with exact CI schema versions via a temporary Python wrapper. Existing drift check now passes. Dev97da6c2dfec239b5739eed4116469f1fb5db7ed5 merged without conflict; all47 certified email/probe paths unchanged. Existing OSCE76 and new-dev frontend219 regressions pass. API contract82 cases still running; independent artifact review requested. No new Python source: Bandit non-code skip for this correction; previous47-path security certificate unchanged.
+
+Native PST validation repeated under the supported schema dependency set:10passed/0skips,0guarded outbound/DNS/model attempts; pinned public fixture/libpff20231205 provenance unchanged. Existing fixture and guard reused in isolated task-owned temporary paths. Details/node outcomes/log hashes retained in the existing follow-up JSON.91current PR Python files compile. Pagination false-positive correction tracked in childTASK13377.1:5focused cases pass, review clear, final84combined contracts running.
+
+Published source8219e3dcd3698c71ad5fa609b4228f5423ab598c to PR3023 against currentdev97da6c2dfec239b5739eed4116469f1fb5db7ed5. Supported Pydantic snapshot exactly matches hosted schema; final84API/pagination,76OSCE schema,219frontend,10guarded native-PST cases pass.91Python files compile; Ruff/format pass and0newsecurity findings (four inherited test assertions plus unchanged earlier production certificate). ChildTASK13377.1 Done and independent reviews clear. All three own plan stages completed; only own task plan retired. Exact temporary dependency targets, parser, fixture, guard and test symlinks removed; shared installations preserved. Historical evidence retained and new receipts appended. Hosted CI rerunning; final status will be reported in this thread.
+
+Hosted final-head backend and OpenAPI drift gate, docs, security, E2E and container checks passed. Dev advanced to a2d5b1c0db789e9db7d4820e05164028ea4734ec while frontend/coverage were running. Merge preview has one generated OpenAPI fingerprint conflict; three compute endpoints, their tests and route-auth baseline otherwise merge cleanly. Reopen the same user-authorized PR task for a canonical regeneration and endpoint regression validation; preserve all email source and historical receipts. No merge of the PR is authorized.
+
+Route-auth verification exposed an inherited generated baseline error: dev6030d1fcc5 removed two unchanged public audio probes. Audio source/tests are byte-identical to dev; _authorize_stt_health_warm explicitly keeps passive status public and authenticates/admin-gates warm=True. Independent source review confirms intended public stream/status and transcription health. Actual ratchet RED reports exactly these two entries. Regenerate the existing baseline, retain all five new compute authentication removals, and verify anonymous status plus forbidden anonymous/non-admin warm-up with existing tests. This changes generated inventory only, with no access-policy or production-code edits.
+
+Auth-refresh plan: Docs/Plans/IMPLEMENTATION_PLAN_email_pr3023_auth_refresh_20260928.md (stages1/2 complete; publication in progress). Dev a2d5b1c0db integrated with its Python bytes unchanged. Canonical fingerprint58fa00440a66/2104paths/3244schemas changes only five protected compute paths. Canonical route baseline restores exactly two existing public audio probes and passes with178 entries; five compute removals retained.21compute endpoint,84API/pagination and25public-audio/ratchet tests pass with0failures/skips.91PR Python files compile; fingerprint formatting passes. Bandit8inherited paths94findings, all identical dev source,0new/errors. Independent review clear;47certified email/probe files unchanged. Evidence/report updated; exact temporary schema target/wrapper removed, shared installations preserved. Verified refresh ready to publish; earlier guarded native10 and benchmarks keep their source binding.
+
+Published reviewed source a6f616471ec9ca1158a0bd2b3a2df1e8b2abf4f8 to PR3023; GitHub confirms draft/MERGEABLE against dev a2d5b1c0db789e9db7d4820e05164028ea4734ec. Requester Change summary preserved; PR description links updated evidence/report. All three auth-refresh plan stages complete; only own plan retired. Hosted checks rerun on the new head. Final tracking commit changes only this task record; tested source and retained certificates are unchanged.
+
+2026-09-29: User explicitly authorized rebasing PR3023 onto latest dev, addressing all Qodo/issues/comments and merging after validation. Current head963f020329 has all required hosted checks passing. Latest dev0da68530e80c713ed3a323a741998e1fed37e3e9; aggregate conflict only shared logging_safety.py, where dev adds display URL hints and email adds exception-type privacy helper. Preserve both. No Qodo review/inline comments yet; draft suppresses automatic review. Backlog MCP task view timed out; official CLI fallback used. ADR required:no, rebase/review correction preserves existing architecture. Plan: Docs/Plans/IMPLEMENTATION_PLAN_email_pr3023_qodo_merge_20260929.md.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The real-PST gap is closed:10 guarded native endpoint/metadata cases pass with zero skips/outbound/model attempts using the pinned public fabricated fixture. Email metadata, tenant/auth and validation bugs are fixed and reviewed. Draft PR3023 is published against dev a2d5b1c0db and MERGEABLE at reviewed source a6f616471e; requester Change summary retained. Actual hosted backend/OpenAPI and docs gates passed on preceding head d40beae383. Latest dev refresh and generated public-route inventory correction pass21compute endpoint,25public-audio/ratchet and84API contract cases.91PR Python files compile; zero new Bandit findings/errors;47certified email/probe files unchanged. Earlier supported-native10,76OSCE,219frontend,236combined,80Postgres/dev and benchmark receipts retain their tested-source binding. New-head CI is rerunning. Exact temporary resources cleaned, shared installations preserved, only own completed plan retired; active worktree retained for PR review.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->
