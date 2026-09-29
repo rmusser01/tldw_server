@@ -5,16 +5,39 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
 
 
-@pytest.fixture
-def client(monkeypatch):
+_API_KEY = "test-api-key-1234567890"
+
+
+def _health_app(monkeypatch) -> FastAPI:
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("AUTH_MODE", "single_user")
-    monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-1234567890")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", _API_KEY)
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
+    reset_settings()
     app = FastAPI()
     app.include_router(audio_router, prefix="/api/v1/audio")
-    with TestClient(app) as c:
+    return app
+
+
+@pytest.fixture
+def client(monkeypatch):
+    """An authenticated caller: the STT health endpoint requires a signed-in user."""
+    with TestClient(_health_app(monkeypatch), headers={"X-API-KEY": _API_KEY}) as c:
         yield c
+
+
+@pytest.fixture
+def anonymous_client(monkeypatch):
+    with TestClient(_health_app(monkeypatch)) as c:
+        yield c
+
+
+@pytest.mark.unit
+def test_transcriptions_health_rejects_anonymous_status(anonymous_client: TestClient):
+    """Model/provider status is not public: anonymous callers get 401."""
+    assert anonymous_client.get("/api/v1/audio/transcriptions/health").status_code == 401
 
 
 @pytest.mark.unit
@@ -41,14 +64,16 @@ def test_transcriptions_health_basic_status(client: TestClient):
 
 
 @pytest.mark.unit
-def test_transcriptions_health_rejects_anonymous_warm_up(monkeypatch, client: TestClient):
+def test_transcriptions_health_rejects_anonymous_warm_up(monkeypatch, anonymous_client: TestClient):
     """An anonymous health probe must not download or initialize a model."""
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
 
     calls = []
     monkeypatch.setattr(atlib, "get_whisper_model", lambda *args, **kwargs: calls.append((args, kwargs)))
 
-    response = client.get("/api/v1/audio/transcriptions/health", params={"model": "whisper-1", "warm": "true"})
+    response = anonymous_client.get(
+        "/api/v1/audio/transcriptions/health", params={"model": "whisper-1", "warm": "true"}
+    )
     assert response.status_code == 401
     assert calls == []
 
@@ -76,9 +101,13 @@ async def test_transcriptions_health_rejects_non_admin_warm_up(monkeypatch):
     ("GET", "/api/v1/audio/voices/catalog"),
     ("POST", "/api/v1/audio/reset-metrics"),
     ("POST", "/api/v1/audio/stream/test"),
+    ("GET", "/api/v1/audio/stream/status"),
+    ("GET", "/api/v1/audio/transcriptions/health"),
 ])
-def test_model_initializing_diagnostics_require_auth(client: TestClient, method: str, path: str):
-    response = client.request(method, path)
+def test_model_initializing_diagnostics_require_auth(
+    anonymous_client: TestClient, method: str, path: str
+):
+    response = anonymous_client.request(method, path)
     assert response.status_code == 401
 
 
