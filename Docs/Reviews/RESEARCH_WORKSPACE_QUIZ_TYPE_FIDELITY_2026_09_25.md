@@ -148,6 +148,19 @@ with external inference stubbed. Hosted final-head CI and re-review remain
 pending. ADR required: no; this restores existing metadata behavior without
 changing architecture or claims-verification policy.
 
+## Dev6110 Refresh (2026-09-29)
+
+After PR3036 advanced `dev` to `6110d2ae43`, all five PR commits rebased
+without conflicts. `git range-diff` confirms identical patches. A fresh run
+on Python 3.12.11 (the new supported minimum) passed 145 quiz, plan, profile,
+prompt, provenance, authority, and artifact-verification tests with 12 warnings
+in 93.72 seconds (`/tmp/task12020_64_dev6110_py312.log`). Ruff, test-file Black,
+Bandit on both production modules, whitespace checks, and the updated shard
+guard passed (`new_uncovered=0`). Earlier browser and full-Quizzes runs remain
+historical evidence, not fresh runs on this base. Final-head hosted CI and
+review must complete before protected merge. ADR assessment is unchanged:
+no new architectural decision is introduced by this refresh.
+
 ## Separate Verifier Finding
 
 Two live runs with the same model failed closed at claims verification: a quiz
