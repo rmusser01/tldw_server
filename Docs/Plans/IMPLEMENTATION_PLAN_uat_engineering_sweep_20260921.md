@@ -134,6 +134,7 @@ Files: this plan, `Docs/Reviews/UAT_ENGINEERING_SWEEP_COVERAGE_2026_09_21.md`, `
 - [ ] TASK13260.278.18.82.7: create reviewed active Persona Visual fixture packs; two affected modules pass 18 with zero skips, native Ubuntu rerun pending.
 - [ ] TASK13260.278.18.82.8: await the startup admission gate after the third reconciliation call; affected module passes 63 with zero skips, native Windows rerun pending.
 - [ ] TASK13260.278.18.82.9: keep MCP filesystem fixtures LF-exact and preserve file mode without Windows `fchmod`; two affected modules pass 140 with zero skips, native Windows rerun pending.
+- [ ] TASK13260.278.18.82.10: make both MCP disk-space fixture paths work without `os.statvfs`; two local tests pass, native Windows rerun pending.
 - [ ] Treat paper-search's PostgreSQL image `unknown blob` as unexecuted; require a real rerun before acceptance.
 - [ ] Maintain the latest-dev base: rebase checkpoint onto `e5186a28d9` preserved all 136 prior commits by range-diff; repeat after further upstream changes before publishing.
 - [ ] Attribute the AuthNZ property `too_slow` outlier before changing its strategy or health checks; the official PostgreSQL focused test passes locally and hosted rerun remains open.
