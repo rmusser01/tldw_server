@@ -1415,6 +1415,7 @@ def test_caldav_account_verify_and_discover_use_stored_secret(
         }
     ]
     assert provider.verify_requests[0]["password"] == "app-secret"
+    assert provider.verify_requests[0]["account_id"] == account_id
     assert provider.discovery_requests[0]["password"] == "app-secret"
     assert "app-secret" not in verify_response.text
     assert "app-secret" not in discover_response.text
@@ -1490,9 +1491,12 @@ def test_provider_request_allows_same_origin_or_complete_explicit_credentials(
     assert response.status_code == 200, response.text
     provider = client.caldav_provider  # type: ignore[attr-defined]
     requests = provider.verify_requests if operation == "verify" else provider.discovery_requests
-    assert requests == [{"server_url": replacement["server_url"],
-                         "username": replacement.get("username", "reader@example.test"),
-                         "password": replacement.get("password", replacement.get("token", "app-secret"))}]
+    expected: dict[str, Any] = {"server_url": replacement["server_url"],
+                "username": replacement.get("username", "reader@example.test"),
+                "password": replacement.get("password", replacement.get("token", "app-secret"))}
+    if operation == "verify":
+        expected["account_id"] = account["id"]
+    assert requests == [expected]
 
 
 @pytest.mark.parametrize("kind", ["event", "todo"])

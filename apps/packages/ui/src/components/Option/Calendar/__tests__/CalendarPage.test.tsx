@@ -1,6 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -285,6 +285,63 @@ describe("CalendarPage", () => {
       "[server-endpoint]"
     )
     expect(mocks.listCalendars).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "New calendar" }).hasAttribute("disabled")).toBe(true)
+    expect(mocks.createCalendar).not.toHaveBeenCalled()
+  })
+
+  it.each(["focus", "visibilitychange"])(
+    "advances mounted agenda and week windows on %s without resetting the view or filters",
+    async (event) => {
+      const user = userEvent.setup()
+      renderPage()
+
+      expectPresent(await screen.findByText("Research"))
+      await user.click(screen.getByLabelText("Lab"))
+      await user.click(screen.getByText("Week"))
+
+      vi.setSystemTime(new Date(2026, 5, 8, 12))
+      await act(async () => (event === "focus" ? window : document).dispatchEvent(new Event(event)))
+
+      await waitFor(() => expect(mocks.getCalendarAgenda).toHaveBeenCalledWith(
+        expect.objectContaining({
+          start_at: new Date(2026, 5, 8).toISOString(),
+          calendar_ids: [1]
+        })
+      ))
+      expect(mocks.getCalendarWeek).toHaveBeenCalledWith(
+        expect.objectContaining({ week_start: "2026-06-08", calendar_ids: [1] })
+      )
+      expect((screen.getByRole("radio", { name: "Week" }) as HTMLInputElement).checked).toBe(true)
+      expect((screen.getByLabelText("Lab") as HTMLInputElement).checked).toBe(false)
+    }
+  )
+
+  it("schedules the next local midnight and refreshes both windows when it arrives", async () => {
+    const today = new Date(2026, 2, 8)
+    const tomorrow = new Date(2026, 2, 9)
+    vi.setSystemTime(today)
+    const timeoutSpy = vi.spyOn(globalThis, "setTimeout")
+    try {
+      renderPage()
+      expectPresent(await screen.findByText("Research"))
+
+      const midnightTimer = timeoutSpy.mock.calls.find(
+        ([callback, delay]) => typeof callback === "function" && delay === tomorrow.getTime() - today.getTime()
+      )
+      expect(midnightTimer).toBeDefined()
+
+      vi.setSystemTime(new Date(2026, 2, 9, 0, 1))
+      await act(async () => (midnightTimer?.[0] as () => void)())
+
+      await waitFor(() => expect(mocks.getCalendarAgenda).toHaveBeenCalledWith(
+        expect.objectContaining({ start_at: tomorrow.toISOString() })
+      ))
+      expect(mocks.getCalendarWeek).toHaveBeenCalledWith(
+        expect.objectContaining({ week_start: "2026-03-09" })
+      )
+    } finally {
+      timeoutSpy.mockRestore()
+    }
   })
 
   it("renders local, provider-owned, and linked projection ownership labels distinctly", async () => {

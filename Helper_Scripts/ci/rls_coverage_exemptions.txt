@@ -17,3 +17,13 @@ share_tokens: Public share links are redeemed anonymously. GET /api/v1/sharing/p
 shared_workspaces: Recipients read shares granted to them, not shares they own. get_active_share_for_user (AuthNZ/repos/shared_workspace_repo.py:215) selects by team and organization membership, so an owner-scoped policy would hide every share from the people it was shared with. The membership predicate in that query is the access control.
 
 automation_messages: Not a PostgreSQL table. Automation_Message_Store_DB keeps it in a separate per-owner SQLite file opened with sqlite3 (ADR-184), never on the shared PostgreSQL content database, so an RLS policy has nothing to attach to; isolation is the per-owner file plus its encryption. Confirmed: its only DDL is in that store, and the store has no PostgreSQL backend.
+
+# CalendarDatabase defines these six tables only in Databases/calendar.db via sqlite3.connect.
+# It has no PostgreSQL backend or migration; tenant/user checks remain in its query methods.
+# A PostgreSQL Calendar backend must replace these exemptions with RLS policies.
+calendar_external_account_secrets: CalendarDatabase SQLite-only DDL; no PostgreSQL table exists for an RLS policy.
+calendar_sync_admissions: CalendarDatabase SQLite-only DDL; no PostgreSQL table exists for an RLS policy.
+calendar_sync_events: CalendarDatabase SQLite-only DDL; no PostgreSQL table exists for an RLS policy.
+calendars: CalendarDatabase SQLite-only DDL; no PostgreSQL table exists for an RLS policy.
+external_calendar_accounts: CalendarDatabase SQLite-only DDL; no PostgreSQL table exists for an RLS policy.
+external_calendar_bindings: CalendarDatabase SQLite-only DDL; no PostgreSQL table exists for an RLS policy.
