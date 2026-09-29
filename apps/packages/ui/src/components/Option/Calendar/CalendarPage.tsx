@@ -75,10 +75,36 @@ export const CalendarPage: React.FC = () => {
   const [creatingCalendar, setCreatingCalendar] = useState(false)
   const [selectedItem, setSelectedItem] = useState<CalendarViewItemResponse | null>(null)
 
-  const now = useMemo(() => new Date(), [])
+  const [now, setNow] = useState(() => new Date())
   const agendaStart = useMemo(() => startOfDay(now), [now])
   const agendaEnd = useMemo(() => addDays(agendaStart, 14), [agendaStart])
   const weekStart = useMemo(() => startOfWeek(now), [now])
+
+  React.useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>
+    const refreshDate = () => {
+      const current = new Date()
+      setNow((previous) => localDate(previous) === localDate(current) ? previous : current)
+      scheduleMidnight(current)
+    }
+    const scheduleMidnight = (current: Date) => {
+      clearTimeout(timer)
+      const next = new Date(current.getFullYear(), current.getMonth(), current.getDate() + 1)
+      timer = setTimeout(refreshDate, Math.max(1, next.getTime() - current.getTime()))
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshDate()
+    }
+
+    scheduleMidnight(new Date())
+    window.addEventListener("focus", refreshDate)
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener("focus", refreshDate)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+    }
+  }, [])
 
   React.useEffect(() => {
     if (connectionConfigLoading) return
@@ -236,7 +262,7 @@ export const CalendarPage: React.FC = () => {
 
   const handleCreateCalendar = async () => {
     const name = newCalendarName.trim()
-    if (!name) return
+    if (calendarSupported !== true || !name) return
     setCreatingCalendar(true)
     try {
       await createCalendar({
@@ -330,7 +356,7 @@ export const CalendarPage: React.FC = () => {
               { label: "Sync", value: "sync" }
             ]}
           />
-          <Button icon={<Plus size={16} />} onClick={() => setCalendarModalOpen(true)}>
+          <Button icon={<Plus size={16} />} onClick={() => setCalendarModalOpen(true)} disabled={calendarSupported !== true}>
             New calendar
           </Button>
           <Button type="primary" onClick={openCreateDrawer} disabled={calendars.length === 0 || calendarSupported === false}>
@@ -439,7 +465,7 @@ export const CalendarPage: React.FC = () => {
         title="New calendar"
         open={calendarModalOpen}
         okText="Create calendar"
-        okButtonProps={{ disabled: !newCalendarName.trim() }}
+        okButtonProps={{ disabled: calendarSupported !== true || !newCalendarName.trim() }}
         confirmLoading={creatingCalendar}
         onOk={() => void handleCreateCalendar()}
         onCancel={() => setCalendarModalOpen(false)}

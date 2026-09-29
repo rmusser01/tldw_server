@@ -409,12 +409,14 @@ def test_verification_logs_safe_diagnostics_and_does_not_expose_credentials() ->
     sink = logger.add(messages.append, format="{message} {extra}")
     try:
         result = CalDavProvider(http_client=Client()).verify_account(
-            server_url="https://calendar.example.test/", username="user", password="private-secret"
+            server_url="https://calendar.example.test/", username="user", password="private-secret",
+            account_id=17,
         )
     finally:
         logger.remove(sink)
     assert result.error == "CalDAV verification failed (ConnectError)"
     assert "verify_account" in "".join(messages)
+    assert "'account_id': 17" in "".join(messages)
     assert "private-secret" not in repr(result) + "".join(messages)
     assert "private-token" not in repr(result) + "".join(messages)
 

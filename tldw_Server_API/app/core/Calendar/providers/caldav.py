@@ -92,7 +92,9 @@ class CalDavProvider:
         self.max_response_bytes = max_response_bytes
         self.max_ics_bytes = max_ics_bytes
 
-    def verify_account(self, *, server_url: str, username: str, password: str) -> CalDavVerificationResult:
+    def verify_account(
+        self, *, server_url: str, username: str, password: str, account_id: int | None = None
+    ) -> CalDavVerificationResult:
         safe_url = self._validate_http_url(server_url)
         try:
             response = self._request(
@@ -103,7 +105,7 @@ class CalDavProvider:
             )
             self._raise_for_status(response)
         except (httpx.HTTPError, OSError, CalendarValidationError) as exc:
-            log_calendar_failure("verify_account", exc)
+            log_calendar_failure("verify_account", exc, **({"account_id": account_id} if account_id is not None else {}))
             return CalDavVerificationResult(
                 verified=False, status="error", error=f"CalDAV verification failed ({type(exc).__name__})"
             )
