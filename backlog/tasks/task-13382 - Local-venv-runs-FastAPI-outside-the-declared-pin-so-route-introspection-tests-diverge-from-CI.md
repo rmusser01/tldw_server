@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-09-23 18:02'
-updated_date: '2026-09-29 15:26'
+updated_date: '2026-09-29 15:46'
 labels:
   - tooling
   - testing
@@ -89,6 +89,8 @@ Known local-only failures, identical on dev/0.136:
 - test_auth_dependency_contract media leaf RequirePermission
 
 No docs change beyond the helper's module docstring. Dependabot #2772 (to main, <0.142.0) is superseded by this.
+
+CORRECTION 2026-09-29 (Qodo on #3053): 'RG tag routing (include-time tags lost)' is wrong and was removed from the change. RGSimpleMiddleware derives its policy before routing, so scope['route'] is empty on 0.136 and on 0.141 alike, and the served_route_for_scope edit there was a no-op; middleware_simple.py is back to dev's version. The underlying gap is pre-existing: by_tag policies are never enforced, while the coverage and startup audits count them as protected. It is filed as TASK-13395 (owner decision). The new coverage-audit test now uses a by_path mapping, so it tests route visibility and does not assert tag enforcement.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

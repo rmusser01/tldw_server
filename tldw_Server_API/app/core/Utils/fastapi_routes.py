@@ -7,8 +7,9 @@ walks ``app.routes`` and filters on ``getattr(route, "path")`` or
 ``isinstance(route, APIRoute)`` therefore silently sees only the top-level routes.
 
 The same split applies at request time: ``request.scope["route"]`` is the router's
-original route (local path, local tags, no include-time dependencies), so middleware
-reading it mislabels metrics and misses tag policies and include-time guards.
+original route (local path, local tags, no include-time dependencies), so code reading
+it after routing mislabels metrics and misses include-time guards. Before routing (for
+example in an ASGI middleware ahead of the router) neither is populated yet.
 
 ``iter_served_routes`` flattens included routers through FastAPI's
 ``iter_route_contexts`` and ``served_route_for_scope`` resolves the route serving a

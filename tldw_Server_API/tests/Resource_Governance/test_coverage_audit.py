@@ -245,7 +245,8 @@ class TestAuditGovernorCoverage:
         assert result["coverage_pct"] == 0.0
         assert result["unprotected_routes"][0]["reason"] == "rg_middleware_missing"
 
-    def test_routes_behind_include_router_are_audited_with_include_time_tags(self):
+    @pytest.mark.unit
+    def test_routes_behind_include_router_are_audited_at_their_served_path(self):
         """FastAPI >= 0.137 keeps included routers out of app.routes; the audit must still count them."""
         router = APIRouter()
 
@@ -254,9 +255,9 @@ class TestAuditGovernorCoverage:
             return []
 
         app = FastAPI()
-        app.include_router(router, prefix="/api/v1", tags=["items"])
+        app.include_router(router, prefix="/api/v1")
         app.user_middleware.append(_Middleware(_RGSimpleMiddleware))
-        app.state.rg_policy_loader = _Loader({"by_tag": {"items": "items.default"}})
+        app.state.rg_policy_loader = _Loader({"by_path": {"/api/v1/items": "items.default"}})
 
         result = audit_governor_coverage(app)
 

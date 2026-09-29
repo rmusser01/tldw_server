@@ -19,8 +19,6 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from tldw_Server_API.app.core.Utils.fastapi_routes import served_route_for_scope
-
 from .deps import derive_client_ip, derive_entity_key
 from .governor import RGRequest
 from .tenant import TenantScopeConfig, parse_tenant_config
@@ -142,9 +140,7 @@ class RGSimpleMiddleware:
         except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
             by_tag = {}
         try:
-            # served_route_for_scope: include-time tags are missing from scope["route"]
-            # under FastAPI >= 0.137.
-            route = served_route_for_scope(request.scope)
+            route = request.scope.get("route")
             tags = list(getattr(route, "tags", []) or [])
             for t in tags:
                 if t in by_tag:

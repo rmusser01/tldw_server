@@ -17,7 +17,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from starlette.staticfiles import StaticFiles
 
-from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes, served_route_for_scope
+from tldw_Server_API.app.core.Utils.fastapi_routes import ServedRoute, iter_served_routes, served_route_for_scope
 
 pytestmark = pytest.mark.unit
 
@@ -70,7 +70,7 @@ def _app(seen: dict | None = None) -> FastAPI:
     return app
 
 
-def _served(path: str):
+def _served(path: str) -> ServedRoute:
     return next(r for r in iter_served_routes(_app().routes) if r.path == path)
 
 
