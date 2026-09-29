@@ -128,6 +128,7 @@ Files: this plan, `Docs/Reviews/UAT_ENGINEERING_SWEEP_COVERAGE_2026_09_21.md`, `
 - [ ] TASK13260.278.18.82.1: accept canonical macOS `/var` temp-root aliases while still rejecting upload symlinks and escapes; 75 affected audio tests pass locally, new-head native macOS rerun pending.
 - [ ] TASK13260.278.18.82.2: gate the POSIX VZ guest-launcher fixture on Windows while retaining portable proof checks; native Windows rerun pending.
 - [ ] TASK13260.278.18.82.3: gate documented POSIX-only secure snapshot cases on Windows without hiding ordinary llama.cpp runtime or fail-closed coverage; six modules pass 230 on POSIX, native Windows rerun pending.
+- [ ] TASK13260.278.18.82.4: seed genuine v65 conversations via the managed transaction API; full buddy module passes 26 including official real PostgreSQL with zero skips, native Ubuntu rerun pending.
 - [ ] Treat paper-search's PostgreSQL image `unknown blob` as unexecuted; require a real rerun before acceptance.
 - [ ] Maintain the latest-dev base: rebase checkpoint onto `e5186a28d9` preserved all 136 prior commits by range-diff; repeat after further upstream changes before publishing.
 - [ ] Attribute the AuthNZ property `too_slow` outlier before changing its strategy or health checks; the official PostgreSQL focused test passes locally and hosted rerun remains open.
