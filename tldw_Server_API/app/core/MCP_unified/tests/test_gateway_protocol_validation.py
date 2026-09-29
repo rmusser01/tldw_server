@@ -1471,14 +1471,12 @@ async def test_sigterm_ignoring_worker_gets_post_kill_reap_budget(
         )
     )
     await _wait_for_process(context)
-    # Readiness is interpreter start-up in a subprocess: 1s was too tight on loaded
-    # CI runners. The reap budget under test is unaffected by how long this takes.
-    for _ in range(5000):
-        if ready.is_set():
-            break
-        await asyncio.sleep(0.002)
-    else:
-        pytest.fail("SIGTERM-ignoring worker did not become ready")
+    # Allow interpreter startup independently of the unchanged reap budget.
+    if not await asyncio.to_thread(ready.wait, 10):
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await manager.close()
+        pytest.fail(f"SIGTERM-ignoring worker did not become ready (exitcode={context.processes[0].exitcode})")
 
     if shutdown == "close":
         await manager.close()
