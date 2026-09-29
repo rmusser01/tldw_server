@@ -113,7 +113,24 @@ The broader Quizzes suite passed: 641 passed, 4 skipped, and 4 warnings in
 672 seconds. Log: `/tmp/task12020_61_quizzes_final.log`. The earlier disk-blocked
 attempts remain recorded above, but are superseded by this completed run.
 
-## Separate verifier finding
+## Latest-dev Refresh (2026-09-29)
+
+TASK-12020.63 rebased the three PR commits onto `dev` at `0da68530e8` without
+conflicts. `git range-diff` confirms identical patches. The refreshed branch
+passed 127 focused quiz, claims, property, and artifact tests; the shard guard,
+Ruff, Bandit, scoped ESLint, and frontend typecheck also passed.
+
+The real llama.cpp full-application Chromium quiz workflow passed again:
+one executed, zero skipped/flaky/unexpected, with grounded claims, canonical
+persisted selected-source citations, requested question types, and native page
+access. Evidence: `/tmp/task12020_63_uat_evidence.json` and
+`/tmp/task12020_63_uat_report.json` (local, ephemeral). The prior full Quizzes
+run remains 641 passed/4 skipped; it was not repeated for this refresh.
+
+ADR check: no new ADR is required because this refresh preserves the existing
+generation, provenance, and module-boundary rules.
+
+## Separate Verifier Finding
 
 Two live runs with the same model failed closed at claims verification: a quiz
 answer that 55 should be flagged invalid was marked refuted although the source
