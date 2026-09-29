@@ -973,7 +973,7 @@ async def verify_external_calendar_account(
             account_id=account_id,
             overrides=payload.model_dump(exclude_unset=True) if payload else None,
         )
-        verification = _provider_result_dict(await call_provider(provider.verify_account, **credentials))
+        verification = _provider_result_dict(await call_provider(provider.verify_account, **credentials, account_id=account_id))
     except (CalendarNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
         raise _map_calendar_error(exc) from exc
     return CalDavAccountVerifyResponse(
