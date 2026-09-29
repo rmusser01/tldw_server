@@ -6,6 +6,8 @@ The published draft PR head `26b6be11114bfe08547024f6fb9486e4f290bfb74` is based
 
 The local worktree was subsequently rebased onto fetched `dev` `e5186a28d9b4f09af60bc8fd53073c1b6d5c0603`; range-diff marks all 136 checkpoint commits patch-equivalent, with a recovery ref retained. Hosted checks below still describe the published draft head until the next push.
 
+On 2026-09-29 the local branch was rebased again onto fetched `dev` `641982cbe7dc8165cfceb4f9092600a28e9e0859`. The pre-rebase recovery ref is `refs/codex/recovery/uat-engineering-sweep-pre-dev-20260929`; range-diff retains all 157 commits, with only three conflict commits adapted to keep both the new `dev` history-link and CI contract controls. Post-rebase local checks pass: 28 Playground history tests, 40 license-first CI contracts and 573 affected MCP tests, zero skips. The published PR head still predates this local rebase until the next push; native Windows and PostgreSQL acceptance remains open.
+
 The published old-head inventory has 869 checks: 736 success, 59 failure, 31 cancelled, 28 skipped, one neutral and 14 pending. The 30 long cancellations, three unavailable/shutdown runners and two aggregate cascade gates are not passes or independent product defects. The following PR-touched failures are locally repaired but still require fresh hosted acceptance:
 
 | UAT419 subgroup | Root cause and bounded verification | Open gate |
