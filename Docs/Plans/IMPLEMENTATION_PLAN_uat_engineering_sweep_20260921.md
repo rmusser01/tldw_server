@@ -105,6 +105,7 @@ Files: this plan, `Docs/Reviews/UAT_ENGINEERING_SWEEP_COVERAGE_2026_09_21.md`, `
 - [ ] TASK13260.278.18.67: bring three Persona Visuals fixtures through draft, review and activation, adding the asset before sealing; all 13 module tests pass locally, hosted acceptance remains open.
 - [ ] TASK13260.278.18.68: give Knowledge stub tests explicit source-tool permission and a private aggregation registry; nine focused checks pass locally, full MCP/hosted acceptance remains open.
 - [ ] TASK13260.278.18.69: pin writable policy for MCP idempotency unit cases while preserving explicit disabled-policy coverage; 15 cases pass under denied ambient policy, full MCP/hosted acceptance remains open.
+- [ ] TASK13260.278.18.70: restore MCP HTTP bounds fixture environment and caches; exact bounds→media provider sequence and adjacent controls pass locally, full MCP/hosted acceptance remains open.
 
 ## Stage 4: Integrated frozen-candidate sweep
 
