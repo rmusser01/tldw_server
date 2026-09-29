@@ -1,0 +1,334 @@
+{
+  "version": "0.1.44",
+  "release_url": "https://github.com/rmusser01/tldw_server/releases/tag/v0.1.44",
+  "release_published_at": "2026-09-27T19:18:31Z",
+  "tag_commit": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d",
+  "candidate_commit": "7dd50003131137ece83a6b93e26ff0c558ec1359",
+  "candidate_tree_equals_tag": true,
+  "candidate_ci": {
+    "passed": 104,
+    "skipped": 38,
+    "failed": 0,
+    "pending": 0,
+    "superseded_audit_cancelled": 1
+  },
+  "approval": "Requester explicitly approved release/date2026-09-27, Countdown2028-09-27T12:00:00Z, PR3027-specific human-summary waiver, immutable GitHub tag/release, server-only PyPI and three GHCR images, and main-to-dev synchronization. On 2026-09-27 the requester also explicitly granted the PR3033-specific human-written Change summary waiver.",
+  "pypi": {
+    "status": "published_verified",
+    "version_endpoint_http_status": 200,
+    "version_endpoint": "https://pypi.org/pypi/tldw-server/0.1.44/json",
+    "run": "https://github.com/rmusser01/tldw_server/actions/runs/36343502649",
+    "workflow_result": "success",
+    "actions_artifact_id": 10939998174,
+    "files": [
+      {
+        "filename": "tldw_server-0.1.44-py3-none-any.whl",
+        "sha256": "c162e9f1a5a7915a0374f017f945213e2529c6edbb26f7cfa5434433be5f72e6",
+        "size": 18445946,
+        "url": "https://files.pythonhosted.org/packages/52/ab/b43af3b6ef518d6d9c17cb8f44b42b6219a71c3cdd914962e686abfe2a58/tldw_server-0.1.44-py3-none-any.whl",
+        "upload_time": "2026-09-27T19:29:08.987789Z",
+        "matches_actions_artifact": true
+      },
+      {
+        "filename": "tldw_server-0.1.44.tar.gz",
+        "sha256": "59ffe81d414c9885323da274793b1157274487b22ed1a68b7323da07e99b1c5d",
+        "size": 16511619,
+        "url": "https://files.pythonhosted.org/packages/c2/f7/37b924ed8a3e80c61978922576249b8ab3fdae113d98c5f1b43ad3d48444/tldw_server-0.1.44.tar.gz",
+        "upload_time": "2026-09-27T19:29:12.792696Z",
+        "matches_actions_artifact": true
+      }
+    ],
+    "validation": [
+      "Registry files exactly match Actions distributions",
+      "SHA-256 agrees with PyPI metadata",
+      "Twine metadata checks pass",
+      "Backend/API-only contents checks pass"
+    ]
+  },
+  "docker_run": "https://github.com/rmusser01/tldw_server/actions/runs/36343874852",
+  "sync_status": "local_verification_complete_required_ci_and_integration_pending",
+  "sync_base_dev": "0da68530e80c713ed3a323a741998e1fed37e3e9",
+  "protected_source": "3d6cbf2757a320b3286a1d14e1e755c288e70ab3",
+  "protected_manifest_sha256": "1739e25a6dd4bdcfc5d7385366e4b0d9c620f99bf4ae95d3b049cfba37d8a58e",
+  "scope_limits": [
+    "Protected frontend publication is source-only; no frontend binary publication",
+    "Fresh full UAT is not claimed; prior reproducible broader frontend failures remain explicitly documented",
+    "Chat NetworkErrorTASK13381 and native fork recovery/synchronization remain separately tracked",
+    "Later dev PR3029/3030/3031/3032 preserved in sync; excluded from immutable 0.1.44 tag",
+    "TASK-13264.12 frontend restoration repairs are development-only and excluded from immutable 0.1.44 source/binaries"
+  ],
+  "verified_at": "2026-09-27T19:48:12.445632+00:00",
+  "docker_result": "success",
+  "images": [
+    {
+      "image": "worker",
+      "subject": {
+        "name": "ghcr.io/rmusser01/tldw_server-worker",
+        "digest": {
+          "sha256": "afaebf2410a0094de3c990fa0eb5696d385da785ef18f2b68c9b1c5a5f1d16d4"
+        }
+      },
+      "registry_tag": "0.1.44",
+      "registry_manifest_digest": "sha256:afaebf2410a0094de3c990fa0eb5696d385da785ef18f2b68c9b1c5a5f1d16d4",
+      "registry_manifest_media_type": "application/vnd.oci.image.index.v1+json",
+      "source": {
+        "digest": {
+          "gitCommit": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d"
+        },
+        "uri": "git+https://github.com/rmusser01/tldw_server@refs/tags/v0.1.44"
+      },
+      "workflow": {
+        "path": ".github/workflows/publish-docker.yml",
+        "ref": "refs/tags/v0.1.44",
+        "repository": "https://github.com/rmusser01/tldw_server"
+      },
+      "invocation": "https://github.com/rmusser01/tldw_server/actions/runs/36343874852/attempts/1",
+      "certificate": {
+        "certificateIssuer": "CN=sigstore-intermediate,O=sigstore.dev",
+        "subjectAlternativeName": "https://github.com/rmusser01/tldw_server/.github/workflows/publish-docker.yml@refs/tags/v0.1.44",
+        "issuer": "https://token.actions.githubusercontent.com",
+        "githubWorkflowTrigger": "release",
+        "githubWorkflowSHA": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d",
+        "githubWorkflowName": "Publish Docker images",
+        "githubWorkflowRepository": "rmusser01/tldw_server",
+        "githubWorkflowRef": "refs/tags/v0.1.44",
+        "buildSignerURI": "https://github.com/rmusser01/tldw_server/.github/workflows/publish-docker.yml@refs/tags/v0.1.44",
+        "buildSignerDigest": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d",
+        "runnerEnvironment": "github-hosted",
+        "sourceRepositoryURI": "https://github.com/rmusser01/tldw_server",
+        "sourceRepositoryDigest": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d",
+        "sourceRepositoryRef": "refs/tags/v0.1.44",
+        "sourceRepositoryIdentifier": "794199679",
+        "sourceRepositoryOwnerURI": "https://github.com/rmusser01",
+        "sourceRepositoryOwnerIdentifier": "1444720",
+        "buildConfigURI": "https://github.com/rmusser01/tldw_server/.github/workflows/publish-docker.yml@refs/tags/v0.1.44",
+        "buildConfigDigest": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d",
+        "buildTrigger": "release",
+        "runInvocationURI": "https://github.com/rmusser01/tldw_server/actions/runs/36343874852/attempts/1",
+        "sourceRepositoryVisibilityAtSigning": "public"
+      },
+      "verified_timestamps": [
+        {
+          "type": "Tlog",
+          "uri": "https://rekor.sigstore.dev",
+          "timestamp": "2026-09-27T12:39:34-07:00"
+        }
+      ],
+      "signature_verified": true,
+      "digest_matches_actions_build_output": true
+    },
+    {
+      "image": "audio-worker",
+      "subject": {
+        "name": "ghcr.io/rmusser01/tldw_server-audio-worker",
+        "digest": {
+          "sha256": "1dd52825207b9260e0bf2df4eca4c7ccad9e1705951c3ee922885bd2822ee4fb"
+        }
+      },
+      "registry_tag": "0.1.44",
+      "registry_manifest_digest": "sha256:1dd52825207b9260e0bf2df4eca4c7ccad9e1705951c3ee922885bd2822ee4fb",
+      "registry_manifest_media_type": "application/vnd.oci.image.index.v1+json",
+      "source": {
+        "digest": {
+          "gitCommit": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d"
+        },
+        "uri": "git+https://github.com/rmusser01/tldw_server@refs/tags/v0.1.44"
+      },
+      "workflow": {
+        "path": ".github/workflows/publish-docker.yml",
+        "ref": "refs/tags/v0.1.44",
+        "repository": "https://github.com/rmusser01/tldw_server"
+      },
+      "invocation": "https://github.com/rmusser01/tldw_server/actions/runs/36343874852/attempts/1",
+      "certificate": {
+        "certificateIssuer": "CN=sigstore-intermediate,O=sigstore.dev",
+        "subjectAlternativeName": "https://github.com/rmusser01/tldw_server/.github/workflows/publish-docker.yml@refs/tags/v0.1.44",
+        "issuer": "https://token.actions.githubusercontent.com",
+        "githubWorkflowTrigger": "release",
+        "githubWorkflowSHA": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d",
+        "githubWorkflowName": "Publish Docker images",
+        "githubWorkflowRepository": "rmusser01/tldw_server",
+        "githubWorkflowRef": "refs/tags/v0.1.44",
+        "buildSignerURI": "https://github.com/rmusser01/tldw_server/.github/workflows/publish-docker.yml@refs/tags/v0.1.44",
+        "buildSignerDigest": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d",
+        "runnerEnvironment": "github-hosted",
+        "sourceRepositoryURI": "https://github.com/rmusser01/tldw_server",
+        "sourceRepositoryDigest": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d",
+        "sourceRepositoryRef": "refs/tags/v0.1.44",
+        "sourceRepositoryIdentifier": "794199679",
+        "sourceRepositoryOwnerURI": "https://github.com/rmusser01",
+        "sourceRepositoryOwnerIdentifier": "1444720",
+        "buildConfigURI": "https://github.com/rmusser01/tldw_server/.github/workflows/publish-docker.yml@refs/tags/v0.1.44",
+        "buildConfigDigest": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d",
+        "buildTrigger": "release",
+        "runInvocationURI": "https://github.com/rmusser01/tldw_server/actions/runs/36343874852/attempts/1",
+        "sourceRepositoryVisibilityAtSigning": "public"
+      },
+      "verified_timestamps": [
+        {
+          "type": "Tlog",
+          "uri": "https://rekor.sigstore.dev",
+          "timestamp": "2026-09-27T12:33:38-07:00"
+        }
+      ],
+      "signature_verified": true,
+      "digest_matches_actions_build_output": true
+    },
+    {
+      "image": "app",
+      "subject": {
+        "name": "ghcr.io/rmusser01/tldw_server",
+        "digest": {
+          "sha256": "ff4e3ee7d8e46e41b80e535c55123d91ed16c30e13936ce66b43467e89eabca1"
+        }
+      },
+      "registry_tag": "0.1.44",
+      "registry_manifest_digest": "sha256:ff4e3ee7d8e46e41b80e535c55123d91ed16c30e13936ce66b43467e89eabca1",
+      "registry_manifest_media_type": "application/vnd.oci.image.index.v1+json",
+      "source": {
+        "digest": {
+          "gitCommit": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d"
+        },
+        "uri": "git+https://github.com/rmusser01/tldw_server@refs/tags/v0.1.44"
+      },
+      "workflow": {
+        "path": ".github/workflows/publish-docker.yml",
+        "ref": "refs/tags/v0.1.44",
+        "repository": "https://github.com/rmusser01/tldw_server"
+      },
+      "invocation": "https://github.com/rmusser01/tldw_server/actions/runs/36343874852/attempts/1",
+      "certificate": {
+        "certificateIssuer": "CN=sigstore-intermediate,O=sigstore.dev",
+        "subjectAlternativeName": "https://github.com/rmusser01/tldw_server/.github/workflows/publish-docker.yml@refs/tags/v0.1.44",
+        "issuer": "https://token.actions.githubusercontent.com",
+        "githubWorkflowTrigger": "release",
+        "githubWorkflowSHA": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d",
+        "githubWorkflowName": "Publish Docker images",
+        "githubWorkflowRepository": "rmusser01/tldw_server",
+        "githubWorkflowRef": "refs/tags/v0.1.44",
+        "buildSignerURI": "https://github.com/rmusser01/tldw_server/.github/workflows/publish-docker.yml@refs/tags/v0.1.44",
+        "buildSignerDigest": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d",
+        "runnerEnvironment": "github-hosted",
+        "sourceRepositoryURI": "https://github.com/rmusser01/tldw_server",
+        "sourceRepositoryDigest": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d",
+        "sourceRepositoryRef": "refs/tags/v0.1.44",
+        "sourceRepositoryIdentifier": "794199679",
+        "sourceRepositoryOwnerURI": "https://github.com/rmusser01",
+        "sourceRepositoryOwnerIdentifier": "1444720",
+        "buildConfigURI": "https://github.com/rmusser01/tldw_server/.github/workflows/publish-docker.yml@refs/tags/v0.1.44",
+        "buildConfigDigest": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d",
+        "buildTrigger": "release",
+        "runInvocationURI": "https://github.com/rmusser01/tldw_server/actions/runs/36343874852/attempts/1",
+        "sourceRepositoryVisibilityAtSigning": "public"
+      },
+      "verified_timestamps": [
+        {
+          "type": "Tlog",
+          "uri": "https://rekor.sigstore.dev",
+          "timestamp": "2026-09-27T12:45:16-07:00"
+        }
+      ],
+      "signature_verified": true,
+      "digest_matches_actions_build_output": true
+    }
+  ],
+  "sync_pr": "https://github.com/rmusser01/tldw_server/pull/3033",
+  "preserved_post_release_dev_prs": [
+    3029,
+    3030,
+    3031,
+    3032,
+    2817
+  ],
+  "verification_command": "gh attestation verify oci://<subject.name>@<registry_manifest_digest> --repo rmusser01/tldw_server --format json --cert-identity https://github.com/rmusser01/tldw_server/.github/workflows/publish-docker.yml@refs/tags/v0.1.44 --source-digest 8ec12c73556e2cb0e671a26fb7fbe142d3426c5d --source-ref refs/tags/v0.1.44 --signer-digest 8ec12c73556e2cb0e671a26fb7fbe142d3426c5d --deny-self-hosted-runners",
+  "post_release_development_changes": {
+    "tracking_task": "TASK-13264.12",
+    "excluded_from_published_version": "0.1.44",
+    "paths": [
+      "apps/packages/ui/src/hooks/useLoadLocalConversation.ts",
+      "apps/packages/ui/src/hooks/__tests__/useLoadLocalConversation.history-selection.test.tsx",
+      "apps/packages/ui/src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx",
+      "apps/packages/ui/src/store/option/slices/server-chat-slice.ts",
+      "apps/packages/ui/src/store/__tests__/chat-account-privacy.test.ts"
+    ],
+    "verification": {
+      "coordinator_loader_privacy_tests": 86,
+      "ownership_cancellation_tests": 90,
+      "development_release_docs_contracts": 95,
+      "lint_errors": 0,
+      "added_lint_warnings": 0,
+      "syntax_diagnostic_errors": 0,
+      "independent_review": "no_actionable_blocker",
+      "required_ci": "all_seven_success_on_b2773de89ae10c469991d64083da78f21ceb8f0c; refreshed_head_required"
+    },
+    "immutable_release_checkout_equality": "Not claimed for development checkout; tagged protected trees match approved source, and published manifest/legal grants are unchanged.",
+    "security_scope": "The repair retains all mount/generation/principal/restore/selection fences and does not alter the history controller or automatic restoration guards. Newer incoming dev TASK13390 explicit URL handoff behavior is preserved. Bandit does not analyze TypeScript; required security/CodeQL remain gates.",
+    "verified_at": "2026-09-27T21:28:27Z",
+    "also_excluded_from_published_version": "0.1.45; all five repair paths still differ from its main tag commit 96bf0996eb69fe33f59c6a3b6efd2d1944d52536."
+  },
+  "latest_dev_integration": {
+    "commit": "df1fcc7a52306f400b843c8b0ea0bc90d0396056",
+    "pr": 2817,
+    "rls_resolution": "Incoming dev retained exactly, including five native policies and two Persona policies.",
+    "workflow_contract_resolution": "Preserved strict refusal and job shape checks alongside new upstream exact-head/base status tests.",
+    "independent_review": "no_actionable_findings",
+    "bandit": {
+      "production_findings": 0,
+      "new_findings_relative_to_parents": 0,
+      "errors": 0
+    },
+    "required_ci": "all_seven_success_on_b2773de89ae10c469991d64083da78f21ceb8f0c; superseded_by_current_dev_integration",
+    "concurrent_release_sync_pr": 3035,
+    "concurrent_release_sync_scope": "Separate 0.1.45 synchronization; no publication changes or verification claimed by this work.",
+    "coordinator_store_tests": 79,
+    "loader_ownership_tests": 103,
+    "ruff_errors": 0,
+    "immutable_tag_commit": "8ec12c73556e2cb0e671a26fb7fbe142d3426c5d",
+    "incoming_frontend_files_exactly_retained": 42,
+    "sqlite_guard_identical_to_reviewed_head": true,
+    "expanded_backend_contract_tests": "Two 290-test attempts ran all test bodies without reported failures but stalled in pytest garbage collection at roughly19GB RSS; interrupted exit130/143, neither counted as a clean pass.",
+    "focused_workflow_rls_tests": 64,
+    "focused_autoincrement_guard_tests": 13
+  },
+  "current_dev_integration": {
+    "resumed_at": "2026-09-29",
+    "commit": "0da68530e80c713ed3a323a741998e1fed37e3e9",
+    "release_sync_pr": 3035,
+    "scope": "Preserve current dev and 0.1.45 release notes; remaining PR3033 delta is saved-history restoration repairs, test metadata and publication/closure records.",
+    "preservation": "Incoming product Playground, history controller, PostgreSQL policies, strict SQLite guard and licensing workflow contracts retained exactly. Coordinator fixture also retains upstream history-context reset on persisted-session clear.",
+    "qodo_url_handoff": "Earlier declined recommendation is historical; current dev TASK13390 implements the separately verified explicit URL handoff exemption, retained by this integration.",
+    "prior_ci_head": "b2773de89ae10c469991d64083da78f21ceb8f0c",
+    "prior_required_checks": {
+      "success": 7,
+      "failure": 0,
+      "pending": 0
+    },
+    "backend_release_workflow_docs_contracts": 128,
+    "loader_ownership_privacy_tests": 120,
+    "required_ci": "queued; all seven current-head contexts still required before normal merge",
+    "independent_review": "no_actionable_findings",
+    "bandit": {
+      "unchanged_test_assert_findings": 2,
+      "new_findings": 0,
+      "errors": 0
+    },
+    "syntax_errors": 0,
+    "coordinator_search_tests": 86,
+    "frontend_test_count": 206,
+    "coordinator_search_test_timeout_ms": 15000,
+    "node_heap_limit_mb": 4096,
+    "coordinator_search_skipped": 0,
+    "lint_errors": 0,
+    "unchanged_lint_warnings": 16,
+    "local_verification_status": "Complete; standalone120 loader/ownership/privacy and86 coordinator/search groups exited0,128 contracts exited0.",
+    "ci_head": "a3794a45b8f9091371be23372e550e92cf40cdb2",
+    "ci_checked_at": "2026-09-29T18:25:08.377737+00:00",
+    "license_audit_run": "https://github.com/rmusser01/tldw_server/actions/runs/36609668925",
+    "actions_queue_diagnostics": {
+      "actions_enabled": true,
+      "runner_label": "ubuntu-latest",
+      "pending_deployment_approvals": 0,
+      "repository_auto_merge_enabled": false
+    }
+  }
+}
