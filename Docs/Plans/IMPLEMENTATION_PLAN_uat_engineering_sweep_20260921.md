@@ -101,6 +101,7 @@ Files: this plan, `Docs/Reviews/UAT_ENGINEERING_SWEEP_COVERAGE_2026_09_21.md`, `
 - [ ] For each application defect found in Stage2, create a bounded plan with its exact failing test, causal edit and verification commands. Commit complete reviewed units with their task records; never stage unrelated files or bypass hooks.
 - [ ] TASK13260.278.18.64: shorten the oversized Workflows pytest parameter ID without shrinking its 65,537-character input; collection and all 171 adapter tests pass locally, native Windows CI remains the acceptance gate.
 - [ ] TASK13260.278.18.65: isolate the MCP RC harness's two local optional-outage oracles from the inherited CI environment; all 34 RC harness tests pass under `GITHUB_ACTIONS=true`, hosted acceptance remains open.
+- [ ] TASK13260.278.18.66: bind the RAG JSON-RPC smoke to its authorized protocol and isolate the absent-source registry; 36 RAG tests pass locally, hosted acceptance remains open.
 
 ## Stage 4: Integrated frozen-candidate sweep
 
