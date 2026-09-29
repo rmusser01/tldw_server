@@ -4,7 +4,7 @@ title: Run real PST adapter tests and publish email PR against dev
 status: In Progress
 assignee: []
 created_date: '2026-09-26 21:50'
-updated_date: '2026-09-29 21:55'
+updated_date: '2026-09-29 21:58'
 labels: []
 dependencies: []
 documentation:
@@ -114,12 +114,14 @@ Heartbeat21:02Z: published17b4/latestdev5910 unchanged, exact-head Qodo0 and all
 Heartbeat21:32Z: published17b4/latestdev5910 unchanged; exact-head Qodo0/all9threadsresolved, no new comments/replies/reviews. Backend-requiredPASS21:26:28Z, adding to security/coverage/e2e/trustedlicensePASS. Five of seven required contexts pass; frontend/container queued on original runattempt1, no failure. ACTIVE heartbeat snapshot refreshed; actualmerge/AC7 remains pending remainingtwo, with no rerun/bypass/source edit.
 
 Heartbeat21:53Z: dev advanced5910->60006a2fed2532d900d27accbc2cda87cb08c24b via PR3051. Incoming7files are3VZ Backlog records plus VZ README/orchestration/cleanup tests/operator script; no overlap with email PR. Rebase required by strict up-to-date policy. Preserve current17b4 reviewed/Qodo0 source and pending tracking as backup; verify all email/backend/frontend/dependency/CI inputs unchanged and incoming paths exactlydev, then run portable incoming regressions/compile/scoped security before publication. Six of seven17b4requiredcontextsPASS; frontendqueued; refreshed-head checks must pass anew.
+
+Dev6000 refresh verified: conflict-free rebase, seven incoming VZ paths exactlydev, all other repository inputs and92certifiedPython hashes unchanged from reviewed17b4 before evidence update. Incoming portable cleanup/orchestration97passed/0failures/errors/skips; threePythoncompile/Ruffclean; inherited productionVZscriptBandit0findings/errors. No liveVMdrill or repeat email/native/benchmark run; existing374/native10 source-bound evidence retained. Existing report/JSON append equality and log/source hashes; backup codex/email-pr3023-before-dev6000-20260929 preserved. Self-review of exact scope/content is clear; publication/new-headQodo/CI/actualmerge pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR3023 ready at17b4120933abb9df91f8e8e9a3db78d87b61d660 on latestdev5910412fba. Exact-head Qodo0/all9threadsresolved. Required backend/security/coverage/e2e/trustedlicensePASS; frontend/containerqueued without failures, actualmerge/AC7 pending. Source-bound374combined/native10 evidence and92certifiedPython hashes retained across metadata-only rebase. Human recurring authorization/Change summary preserved; ACTIVE heartbeat continues quietly.
+PR3023 rebased conflict-free onto dev60006a2fed with unrelated VZ tool changes exactlydev. All email/backend/frontend/dependency/CI inputs and92certifiedPython hashes remain identical to reviewed17b4; incoming97portabletests pass with0failures/errors/skips,3compile/Ruffclean,productionBandit0. Existing374/native10 and historical benchmark certificates retain source bindings. Evidence recorded; refreshed publication, exact-head review/requiredCI and actualmerge pending. User recurring authorization and exact Change summary preserved.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

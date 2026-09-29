@@ -989,5 +989,64 @@
     "receipt_sha256": "4f5aaa057bd238b53f540d0c2d2ae59803ffb64366b109f1afaea3d38a32788a",
     "security": "No production/test/CI changes; previous scoped Bandit certificates retain identical source inputs.",
     "review": "Conflict-free rebase; all non-Backlog repository files identical to the reviewed 8956 head before this evidence update. New published-head review/CI still required."
+  },
+  "vz_tool_dev_refresh_20260929": {
+    "previous_published_head": "17b4120933abb9df91f8e8e9a3db78d87b61d660",
+    "new_dev": "60006a2fed2532d900d27accbc2cda87cb08c24b",
+    "rebased_head_before_evidence_commit": "69c7a4e67a3ca65ac9d71401e61ba99d61b17ce7",
+    "incoming_paths": [
+      "backlog/tasks/task-13243.11 - Clean-up-retained-September-26-VZ-disposable-bundles.md",
+      "backlog/tasks/task-13243.12 - Remove-VZ-drill-disposable-payloads-by-default-after-verified-teardown.md",
+      "backlog/tasks/task-13243.13 - Publish-VZ-drill-payload-cleanup.md",
+      "tools/macos-vz-helper/README.md",
+      "tools/macos-vz-helper/Tests/test_failure_orchestration.py",
+      "tools/macos-vz-helper/Tests/test_failure_payload_cleanup.py",
+      "tools/macos-vz-helper/scripts/vz-failure-drill.py"
+    ],
+    "changed_paths": [
+      "backlog/tasks/task-13243.11 - Clean-up-retained-September-26-VZ-disposable-bundles.md",
+      "backlog/tasks/task-13243.12 - Remove-VZ-drill-disposable-payloads-by-default-after-verified-teardown.md",
+      "backlog/tasks/task-13243.13 - Publish-VZ-drill-payload-cleanup.md",
+      "backlog/tasks/task-13377 - Run-real-PST-adapter-tests-and-publish-email-PR-against-dev.md",
+      "tools/macos-vz-helper/README.md",
+      "tools/macos-vz-helper/Tests/test_failure_orchestration.py",
+      "tools/macos-vz-helper/Tests/test_failure_payload_cleanup.py",
+      "tools/macos-vz-helper/scripts/vz-failure-drill.py"
+    ],
+    "unchanged_certified_python_files": 92,
+    "all_other_repository_files_identical": true,
+    "incoming_paths_byte_identical_to_dev": true,
+    "email_tests_rerun": false,
+    "validation_binding": "374 combined and 10 native-PST cases were previously run; all email/backend/frontend/dependency/CI inputs remain byte-identical.",
+    "incoming_regressions": {
+      "tests": 97,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "incoming_compiled_python_files": 3,
+    "incoming_ruff": "3 files clean",
+    "incoming_bandit": {
+      "scope": "tools/macos-vz-helper/scripts/vz-failure-drill.py",
+      "findings": 0,
+      "errors": 0
+    },
+    "incoming_source_sha256": {
+      "backlog/tasks/task-13243.11 - Clean-up-retained-September-26-VZ-disposable-bundles.md": "43e1abab91ce703322ce7794fdb28b9160c96f5f55db9aa3cc6f2047b8cd74a6",
+      "backlog/tasks/task-13243.12 - Remove-VZ-drill-disposable-payloads-by-default-after-verified-teardown.md": "777812e3fd023d17fa4a645462732076340a94206fe64fbad018c4aae02e053d",
+      "backlog/tasks/task-13243.13 - Publish-VZ-drill-payload-cleanup.md": "cc92166963bc28d8aef2a7fe4429426aae8c4102d310190ee7b292a26dd9653d",
+      "tools/macos-vz-helper/README.md": "e3e4fc499fa8da0691974f0040c2e0fdb1d61f80d9e865dd49d34615abf6afa7",
+      "tools/macos-vz-helper/Tests/test_failure_orchestration.py": "a8f962dd35a1e6447bf1ee789806c035e795ca7148b85ac0f47c406a1f3ef253",
+      "tools/macos-vz-helper/Tests/test_failure_payload_cleanup.py": "07ea6e86ec6bc78f17b6a819b34e1fbb8477233d6b560ff33c4af4a05150e8b7",
+      "tools/macos-vz-helper/scripts/vz-failure-drill.py": "3e0f27d3782037d43301ee428effd6072bfd6376bdf89061af10a957962f04af"
+    },
+    "logs_sha256": {
+      "/tmp/email_pr3023_dev6000_equivalence_20260929.json": "1244944686dce1709423e1a335a2338c5611e3afd031d9f584892a1c926dd9d9",
+      "/tmp/email_pr3023_dev6000_incoming_tests_20260929.xml": "4572c13a4b8e4347b1c2df254be0eb74d722cf9aab272b6234dfee5f17376597",
+      "/tmp/email_pr3023_dev6000_incoming_tests_20260929.log": "418e727ec525c00a963d164aa77146299cbfebec5e6eb1d7bf2cd1ebde46859a",
+      "/tmp/email_pr3023_dev6000_ruff_20260929.log": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "/tmp/email_pr3023_dev6000_bandit_20260929.json": "6514ff460d32f9e676000d224ff253da82f268bb0d0dc9a07b03e66a49d357bc"
+    },
+    "review": "Conflict-free rebase; every incoming path exactly matches dev and all other source/test/dependency/CI inputs match reviewed17b4. Existing independent email review remains source-bound; no new email/source correction. New-head hosted review/CI pending."
   }
 }

@@ -301,3 +301,23 @@ unchanged. The comparison receipt is appended to the existing follow-up JSON.
 The previous head and tracking are retained in
 `codex/email-pr3023-before-dev5910-20260929`. Required hosted checks and incremental
 review must pass on the newly published head before the authorized merge.
+
+
+## VZ tool dev refresh (2026-09-29)
+
+Dev advanced to `60006a2fed2532d900d27accbc2cda87cb08c24b` with an unrelated
+macOS VM drill cleanup correction: three Backlog records and four tool/doc/test
+files, with no overlap with this PR. The rebase is conflict-free and all seven
+incoming paths match dev byte for byte. All other repository inputs match the
+reviewed `17b4120933abb9df91f8e8e9a3db78d87b61d660` head before this evidence
+update, including all 92 certified Python hashes and the email/backend/frontend,
+dependency and CI inputs. Existing email tests and benchmarks were not rerun.
+
+The incoming portable cleanup/orchestration tests pass **97 cases** with zero
+failures/errors/skips. All three incoming Python files compile and pass Ruff;
+the incoming production script has zero Bandit findings/errors. This uses tiny
+temporary fixtures and mocked VM boundaries, not a live VM drill. Source equality
+and verification log hashes are appended to the existing follow-up JSON. The
+prior reviewed head and tracking remain in
+`codex/email-pr3023-before-dev6000-20260929`. Fresh exact-head review and required
+hosted checks remain necessary before the authorized merge.
