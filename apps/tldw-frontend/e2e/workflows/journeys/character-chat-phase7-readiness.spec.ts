@@ -10,7 +10,7 @@ import { test, expect, skipIfServerUnavailable } from "../../utils/fixtures"
 import { captureAllApiCalls, expectNoApiCall } from "../../utils/api-assertions"
 import { ChatPage } from "../../utils/page-objects"
 import { fetchWithApiKey, TEST_CONFIG, waitForConnection } from "../../utils/helpers"
-import { waitForStreamComplete } from "../../utils/journey-helpers"
+import { captureStreamedResponseBody, waitForStreamComplete } from "../../utils/journey-helpers"
 
 import { readStore } from "../../../../extension/tests/e2e/utils/history-selection"
 import type { HistoryBookmark, HistoryTurnRecovery } from "../../../../packages/ui/src/db/dexie/types"
@@ -725,6 +725,7 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
       const question = "Reply with one short sentence for Phase 7."
       const answer = "onboarding UAT ready. The mock provider returned a deterministic success response."
       const chat = new ChatPage(page)
+      const readCompletionBody = await captureStreamedResponseBody(page, "/api/v1/chat/completions")
       const completed = page.waitForResponse(response => nativeCompletionCallPredicate(response.url(), response.request().method()))
       await page.getByPlaceholder(/type a message/i).first().fill(question)
       await clickPrimaryComposerAction(page, /send/i)
@@ -743,7 +744,7 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
       await waitForStreamComplete(page, 90_000)
       await expect.poll(async () => (await chat.getMessages()).filter(row => row.role === "assistant").map(row => row.content)).toEqual([answer])
 
-      const frames = (await completion.text()).split("\n")
+      const frames = (await readCompletionBody()).split("\n")
         .filter(line => line.startsWith("data: ") && line.slice(6) !== "[DONE]")
         .map(line => JSON.parse(line.slice(6)))
       const admission = frames.find(frame => frame.tldw_history_admission_v1)?.tldw_history_admission_v1

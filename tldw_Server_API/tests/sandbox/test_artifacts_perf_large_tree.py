@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Dict
 
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.main import app
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType
+from tldw_Server_API.app.main import app
 
 
 def _force_docker_preflight_available(monkeypatch) -> None:
@@ -63,14 +62,16 @@ def test_artifacts_list_perf_large_tree(tmp_path: Path, monkeypatch) -> None:
         # Seed a moderately large nested tree of artifacts
         from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
 
-        files: Dict[str, bytes] = {}
+        files: dict[str, bytes] = {}
         # 300 small files across 6 directories
         for i in range(300):
             sub = f"d{i // 50}"
             rel = f"{sub}/file_{i}.txt"
-            files[rel] = f"payload-{i}".encode("utf-8")
+            files[rel] = f"payload-{i}".encode()
         sb._service._orch.store_artifacts(run_id, files)  # type: ignore[attr-defined]
 
+        # Keep periodic janitor work out of the cached-listing measurement.
+        sb._service._orch._maybe_prune_expired_artifacts()  # type: ignore[attr-defined]
         # List artifacts and assert it completes quickly and returns full set
         t0 = time.perf_counter()
         lr = client.get(f"/api/v1/sandbox/runs/{run_id}/artifacts")

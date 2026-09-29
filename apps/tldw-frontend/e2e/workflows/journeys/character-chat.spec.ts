@@ -9,7 +9,7 @@ import type { HistoryBookmark } from "../../../../packages/ui/src/db/dexie/types
 
 import { test, expect } from "../../utils/fixtures"
 import { CharactersPage, ChatPage } from "../../utils/page-objects"
-import { waitForStreamComplete } from "../../utils/journey-helpers"
+import { captureStreamedResponseBody, waitForStreamComplete } from "../../utils/journey-helpers"
 import { TEST_CONFIG, fetchWithApiKey, waitForConnection } from "../../utils/helpers"
 
 const SYSTEM = "You are E2E-TestBot. Always respond with exactly: BEEP BOOP."
@@ -66,6 +66,7 @@ test.describe("Create Character -> Chat journey", () => {
       )
       await chat.selectCharacter(characterName)
       await chat.selectModel(model!)
+      const readCompletionBody = await captureStreamedResponseBody(page, "/api/v1/chat/completions")
       const completed = page.waitForResponse(response =>
         response.request().method() === "POST" && /^\/api\/v1\/chat\/completions$/.test(new URL(response.url()).pathname)
       )
@@ -92,7 +93,7 @@ test.describe("Create Character -> Chat journey", () => {
       const answer = ANSWER
       expect((await chat.getMessages()).filter(row => row.role === "assistant").map(row => row.content)).toEqual([answer])
 
-      const frames = (await completion.text()).split("\n")
+      const frames = (await readCompletionBody()).split("\n")
         .filter(line => line.startsWith("data: ") && line.slice(6) !== "[DONE]")
         .map(line => JSON.parse(line.slice(6)))
       const admission = frames.find(frame => frame.tldw_history_admission_v1)?.tldw_history_admission_v1

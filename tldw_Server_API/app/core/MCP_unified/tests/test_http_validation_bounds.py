@@ -1,8 +1,8 @@
 import asyncio
 import os
 import tempfile
-import pytest
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -45,10 +45,13 @@ def _setup_env(monkeypatch: pytest.MonkeyPatch):
 def client():
     monkeypatch = pytest.MonkeyPatch()
     _setup_env(monkeypatch)
-    from fastapi import FastAPI
-    from tldw_Server_API.app.api.v1.endpoints.mcp_unified_endpoint import router as mcp_router
-    from tldw_Server_API.app.core.MCP_unified.server import reset_mcp_server
+    from tldw_Server_API.app.core.MCP_unified import get_mcp_server
     from tldw_Server_API.app.core.MCP_unified.config import get_config
+    from tldw_Server_API.app.core.MCP_unified.server import reset_mcp_server
+    from tldw_Server_API.app.core.MCP_unified.tests.support import (
+        build_mcp_admin_auth_override,
+        build_mcp_test_client,
+    )
 
     try:
         get_config.cache_clear()  # type: ignore[attr-defined]
@@ -57,10 +60,13 @@ def client():
 
     _run(reset_mcp_server())
 
-    app = FastAPI()
-    app.include_router(mcp_router, prefix="/api/v1")
     try:
-        with TestClient(app) as c:
+        with build_mcp_test_client(auth_principal_override=build_mcp_admin_auth_override()) as c:
+            class _AllowAll:
+                async def check_permission(self, *args, **kwargs):
+                    return True
+
+            get_mcp_server().protocol.rbac_policy = _AllowAll()
             yield c
     finally:
         monkeypatch.undo()

@@ -900,6 +900,26 @@ export async function createNote(
   return opts.title
 }
 
+/** Capture an SSE fetch in the page before Chromium discards its network body. */
+export async function captureStreamedResponseBody(page: Page, pathname: string): Promise<() => Promise<string>> {
+  await page.evaluate((targetPath) => {
+    const originalFetch = window.fetch.bind(window)
+    const captured = window as typeof window & { __uatStreamBody?: Promise<string> }
+    window.fetch = async (...args) => {
+      const response = await originalFetch(...args)
+      if (response.url && new URL(response.url).pathname === targetPath) {
+        captured.__uatStreamBody = response.clone().text()
+      }
+      return response
+    }
+  }, pathname)
+  return () => page.evaluate(async () => {
+    const body = (window as typeof window & { __uatStreamBody?: Promise<string> }).__uatStreamBody
+    if (!body) throw new Error("No streamed response body was captured")
+    return body
+  })
+}
+
 /**
  * Wait for streaming response to complete in chat.
  */

@@ -1047,6 +1047,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_media_upload_failures.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_original_file_replacement.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_research_discovery_handoff.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py",
         }
         assert shard_path_sets["media-ingestion-new-unit-mediawiki"] == {
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_mediawiki_*.py",

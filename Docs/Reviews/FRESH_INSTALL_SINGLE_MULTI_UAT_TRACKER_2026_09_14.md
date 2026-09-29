@@ -1,5 +1,20 @@
 # Fresh-install UAT: single-user and multi-user
 
+## UAT509 — PR2979 current-head CI acceptance (TASK-13260.278.18.83)
+
+Published head `78eba913ae601e6bb676bcc6d99e8ec1216ca1f1` is based on freshly fetched `dev` `0da68530e80c713ed3a323a741998e1fed37e3e9` (zero missing commits). The current CI run has 17 failed checks: one browser journey, 12 substantive backend shards and four aggregate shard gates. Four PostgreSQL-backed paper-search shards passed on Ubuntu 3.12/3.13, Windows 3.12 and macOS 3.12; the two Ubuntu AuthNZ unit shards were interrupted by runner shutdown at 28–31%, so their remaining tests are unverified. Qodo has posted no review newer than 2026-09-22; old review threads are resolved. Merge and fresh full UAT remain paused.
+
+| Finding | Root cause and local result | Remaining gate |
+| --- | --- | --- |
+| Missing media test in all five CI matrices | New `test_url_hint_for_display.py` had no media-ingestion shard path. Add its exact path and update the exact-set contract; the contract fails before and passes after. | Hosted gap shards. |
+| Character journey streamed body | The UI and saved answer passed, then Chromium's network-body lookup returned `No data found for resource`. Capture a clone of the real fetch stream inside the page before it is consumed; retain every wire admission, settlement and content assertion in both Character journeys. Browser capture smoke and touched ESLint pass; the separate Phase 7 wire journey already passed hosted. | Fresh hosted critical browser journey. |
+| MCP HTTP argument bounds on PostgreSQL | All four OS shards returned 403 before reaching the 400 input validator. The test fixture relied on implicit AuthNZ RBAC state; dedicated real PostgreSQL reproduction failed the same way after official schema bootstrap. Use the existing authenticated MCP test context and an explicit allow policy confined to these validation tests. Four exact cases and 43 combined PostgreSQL HTTP cases pass, zero skips; production permissions unchanged. | Fresh hosted MCP shards. |
+| Windows Prompt teardown | The rollback test's `with sqlite3.connect(...)` committed a transaction but did not close the observer handle, so Windows could not delete its DB. `contextlib.closing` releases it; both parametrizations and 26 other focused tests pass locally. | Native Windows prompts shard. |
+| Windows Chat synchronization and stream budget | One cancellation test used a second `asyncio.to_thread` worker merely to wait for the first worker's entry, allowing executor contention. Signal an `asyncio.Event` from the worker instead, retaining the one-second bound and cancellation assertions in both sibling tests. The stream-prime test mixed a 10ms wall clock with its one-frame contract; freeze its clock and await seam while separate tests continue to cover elapsed limits. Focused 28 tests pass. | Native Windows Chat shards. |
+| Windows Sandbox cached-list timing | The five-second measurement included periodic artifact janitor work before the cached listing. Run the janitor before starting the measurement; retain the original five-second threshold, 300-file count and cached/no-filesystem-walk checks. Both focused tests pass locally. | Native Windows sandbox shard. |
+
+Touched frontend typecheck still reports 23 existing dependency/type errors outside the changed E2E files; touched ESLint has zero errors and four inherited helper warnings. This is not recorded as a passing typecheck. The full PostgreSQL and native Windows rerun, any new Qodo findings, and merge remain open.
+
 ## PR2979 current CI repair checkpoint — 2026-09-29
 
 The published draft PR head `26b6be11114bfe08547024f6fb9486e4f290bfb74` is based on fetched `dev` `e5186a28d9b4f09af60bc8fd53073c1b6d5c0603`. Further inherited-CI repairs remain local while fresh hosted checks run. The 46 root `IMPLEMENTATION_PLAN*` files have moved to `Docs/Plans/`; current document/task links were updated through the official Backlog CLI where needed. Generated Playwright captures remain excluded. The requester-written Change summary is already in the PR body. Full fresh-install UAT remains paused until CI/review and merge.

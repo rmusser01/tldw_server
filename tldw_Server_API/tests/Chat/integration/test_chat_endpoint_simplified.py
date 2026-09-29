@@ -5782,6 +5782,12 @@ async def test_stream_prime_allows_finite_metadata_then_output(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_prime_budget_stops_after_first_output(monkeypatch):
     monkeypatch.setattr(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_ELAPSED_SECONDS", 0.01, raising=False)
+    monkeypatch.setattr(chat_endpoint, "_provider_stream_monotonic", lambda: 0.0)
+    # Elapsed-time bounds have separate tests; isolate the one-frame budget here.
+    async def await_frame(operation, _timeout):
+        return await operation
+
+    monkeypatch.setattr(chat_endpoint, "_await_provider_stream_operation", await_frame)
     monkeypatch.setattr(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_BUFFERED_BYTES", 10_000, raising=False)
     monkeypatch.setattr(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_BUFFERED_CHUNKS", 1, raising=False)
     closed = asyncio.Event()
