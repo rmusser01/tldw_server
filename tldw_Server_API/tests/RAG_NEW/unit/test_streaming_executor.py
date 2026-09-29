@@ -69,6 +69,8 @@ async def test_slow_retrieval_emits_keepalive_and_preserves_result(monkeypatch, 
     async def retrieve(**kwargs):
         started.set()
         await release.wait()
+        # A heartbeat can arrive after release while retrieval finishes.
+        await asyncio.sleep(0.05)
         return UnifiedSearchResult(query=kwargs["query"], documents=[], metadata={})
 
     stream = stream_rag_events(
@@ -82,7 +84,9 @@ async def test_slow_retrieval_emits_keepalive_and_preserves_result(monkeypatch, 
         assert await asyncio.wait_for(stream.__anext__(), 0.2) == {"type": "heartbeat"}
         release.set()
         events = [event async for event in stream]
-        assert [event["type"] for event in events] == ["contexts", "reasoning", "delta", "complete"]
+        assert [event["type"] for event in events if event["type"] != "heartbeat"] == [
+            "contexts", "reasoning", "delta", "complete",
+        ]
         assert events[-2]["text"] == "answer text"
     finally:
         release.set()
