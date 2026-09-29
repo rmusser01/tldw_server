@@ -169,3 +169,16 @@ def test_sqlite_bootstraps_in_normal_runtime(tmp_path):
         "admin": True,
         "primary_key": True,
     }
+
+
+@pytest.mark.integration
+def test_sqlite_bootstrap_accepts_cp1252_output(tmp_path):
+    env = _runtime_env(tmp_path, f"sqlite:///{tmp_path / 'auth.db'}", backend="sqlite")
+    env["PYTHONIOENCODING"] = "cp1252"
+    assert _run_runtime(tmp_path, env, BOOTSTRAP_SCRIPT) == {
+        "setup": True,
+        "bootstrap": [True, True],
+        "backend": "sqlite",
+        "admin": True,
+        "primary_key": True,
+    }
