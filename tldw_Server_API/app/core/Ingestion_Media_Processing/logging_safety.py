@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+from collections import deque
 from collections.abc import Iterable
+from traceback import walk_tb
 from urllib.parse import urlsplit, urlunsplit
 
 
@@ -104,3 +106,21 @@ def exception_type_for_log(exc: BaseException) -> str:
     the original exception or traceback to the log record.
     """
     return type(exc).__name__[:80]
+
+
+def exception_frames_for_log(exc: BaseException) -> list[str]:
+    """Return the last 16 traceback function names and line numbers for an error.
+
+    Args:
+        exc: The caught exception; its message and chained values are not rendered.
+
+    Returns:
+        Bounded code locations without source paths, source text or frame locals.
+        An exception without a traceback produces an empty list.
+    """
+    return list(
+        deque(
+            (f"{frame.f_code.co_name[:80]}:{line}" for frame, line in walk_tb(exc.__traceback__)),
+            maxlen=16,
+        )
+    )

@@ -61,6 +61,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.email_ingestion_m
     record_email_native_persist,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import (
+    exception_frames_for_log,
     exception_type_for_log,
     redact_url_for_log,
 )
@@ -5202,8 +5203,26 @@ async def process_document_like_item(
             with contextlib.suppress(_PERSISTENCE_NONCRITICAL_EXCEPTIONS):
                 downloaded_path_exists = downloaded_path.exists()
 
+        correlation_id = str(uuid4()) if media_type == "email" else None
         if media_type == "email":
-            logger.bind(stage="process_document_like_item").error("Email ingestion event")
+            safe_error_type = exception_type_for_log(prep_err)
+            stack_frames = exception_frames_for_log(prep_err)
+            logger.bind(
+                stage="email_file_preparation",
+                correlation_id=correlation_id,
+                error_type=safe_error_type,
+                stack_frames=stack_frames,
+                is_url=is_url,
+                temp_dir_exists=temp_dir_exists,
+                processing_source_exists=processing_source_exists,
+                processing_filepath_exists=processing_filepath_exists,
+                downloaded_path_exists=downloaded_path_exists,
+            ).error(
+                "Email file preparation/download failed (error_id={}, error_type={}, stack_frames={})",
+                correlation_id,
+                safe_error_type,
+                stack_frames,
+            )
         else:
             logger.exception(
                 "File preparation/download error for {}: {} ({}) | context: "
@@ -5233,9 +5252,15 @@ async def process_document_like_item(
         final_result.update(
             {
                 "status": "Error",
-                "error": f"File preparation/download failed: {error_detail}",
+                "error": (
+                    "File preparation/download failed."
+                    if media_type == "email"
+                    else f"File preparation/download failed: {error_detail}"
+                ),
             },
         )
+        if correlation_id:
+            final_result["error"] += f" [error_id={correlation_id}]"
         if not final_result.get("warnings"):
             final_result["warnings"] = None
         return final_result

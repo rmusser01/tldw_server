@@ -4,7 +4,7 @@ title: Run real PST adapter tests and publish email PR against dev
 status: In Progress
 assignee: []
 created_date: '2026-09-26 21:50'
-updated_date: '2026-09-29 17:50'
+updated_date: '2026-09-29 18:41'
 labels: []
 dependencies: []
 documentation:
@@ -23,7 +23,7 @@ User requested executing the two previously skipped pypff/PST tests, fixing veri
 - [x] #2 Any verified PST regression is fixed with focused tests and lint/security validation
 - [x] #3 A reviewed pull request targets dev and links measured email evidence; human Change summary merge gate remains explicit
 - [x] #4 PR3023 documentation and backend gates are repaired at their verified causes, with affected checks passing locally
-- [ ] #5 Latest dev is integrated without losing email behavior; reviewed corrections and validation are pushed to PR3023
+- [x] #5 Latest dev is integrated without losing email behavior; reviewed corrections and validation are pushed to PR3023
 - [ ] #6 PR3023 is rebased onto latest dev; all actionable Qodo and other review comments are resolved with evidence
 - [ ] #7 Required CI and review gates pass and PR3023 is merged under the user authorization
 <!-- AC:END -->
@@ -74,12 +74,18 @@ Auth-refresh plan: Docs/Plans/IMPLEMENTATION_PLAN_email_pr3023_auth_refresh_2026
 Published reviewed source a6f616471ec9ca1158a0bd2b3a2df1e8b2abf4f8 to PR3023; GitHub confirms draft/MERGEABLE against dev a2d5b1c0db789e9db7d4820e05164028ea4734ec. Requester Change summary preserved; PR description links updated evidence/report. All three auth-refresh plan stages complete; only own plan retired. Hosted checks rerun on the new head. Final tracking commit changes only this task record; tested source and retained certificates are unchanged.
 
 2026-09-29: User explicitly authorized rebasing PR3023 onto latest dev, addressing all Qodo/issues/comments and merging after validation. Current head963f020329 has all required hosted checks passing. Latest dev0da68530e80c713ed3a323a741998e1fed37e3e9; aggregate conflict only shared logging_safety.py, where dev adds display URL hints and email adds exception-type privacy helper. Preserve both. No Qodo review/inline comments yet; draft suppresses automatic review. Backlog MCP task view timed out; official CLI fallback used. ADR required:no, rebase/review correction preserves existing architecture. Plan: Docs/Plans/IMPLEMENTATION_PLAN_email_pr3023_qodo_merge_20260929.md.
+
+Rebase published at1a5dcf3f3fa90a788bbc96d687750509c632c638 on latestdev0da68530e8 with exact force-with-lease. Original history retained in codex/email-pr3023-pre-rebase-20260929. Full final patch consolidated before real rebase to preserve prior merge resolutions. Shared logging conflict retains all dev URL helpers plus exact email exception helper.19logging tests pass;91Python compile;47Ruff paths clean;8inherited Bandit findings matchdev,0new/errors. Independent rebase review clear. Canonical generator produces unchanged58fa00440a66/2104paths/3244schemas. PR marked ready under merge authorization; Qodo started review at2026-09-29T17:58:26Z. Native/core suites and hostedchecks are running.
+
+Qodo completed nine findings at2026-09-29T18:04Z. Investigation: SQLite alias uses the FTS5 hidden table-name column and native SQLite MATCH/bm25 both succeed; add actual repository token/relevance regression rather than alter its measured CROSS JOIN plan. Latest dev already contains identical AuthNZ storage-quota table/index definitions; remove branch duplicate DDL instead of relocating the existing migration architecture. Add safe bounded function/line stack diagnostics for preparation/search/detail without exception text/locals/source filenames, with per-item opaque failure ID. Correct missing MIME-library warning, classify/format named tests, expand attachment helper contracts. Read-only Chatbook inspection confirms explicit scope payload is supported; retain intended read-key rejection and document selecting write for uploading clients. Rebased core201/native10/OpenAPI all pass; GitHub admission still queued.
+
+Qodo correction validation completed:167 affected regressions passed before final message-only rendering adjustment;4 final observable-log/preparation-response cases pass,3 official PostgreSQL quota bootstrap/failure cases pass,10 freshly guarded native PST and201 rebased core cases pass.93 current PR Python files compile;13 touched paths Ruff clean;6 touched production files Bandit0findings/errors. Independent final review clear. Preparation response now fixed and safe with matching opaque ID; ordinary logs contain bounded type/function/line diagnostics without private values. FTS concern disproved by actual MATCH/ranking/no-LIKE regression; redundant quota DDL removed; intended write scope documented. Existing report/evidence updated with explicit source/log bindings. Reviewed correction commit and PR thread replies are being published; final hosted checks/merge pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-The real-PST gap is closed:10 guarded native endpoint/metadata cases pass with zero skips/outbound/model attempts using the pinned public fabricated fixture. Email metadata, tenant/auth and validation bugs are fixed and reviewed. Draft PR3023 is published against dev a2d5b1c0db and MERGEABLE at reviewed source a6f616471e; requester Change summary retained. Actual hosted backend/OpenAPI and docs gates passed on preceding head d40beae383. Latest dev refresh and generated public-route inventory correction pass21compute endpoint,25public-audio/ratchet and84API contract cases.91PR Python files compile; zero new Bandit findings/errors;47certified email/probe files unchanged. Earlier supported-native10,76OSCE,219frontend,236combined,80Postgres/dev and benchmark receipts retain their tested-source binding. New-head CI is rerunning. Exact temporary resources cleaned, shared installations preserved, only own completed plan retired; active worktree retained for PR review.
+PR3023 rebased onto dev0da68530e8; all nine Qodo findings investigated and corrected or disproved with evidence. Latest native PST10, rebased core201, affected review167, final message4 and official PG quota3 pass.93Python files compile; touched scope lint/security clean; independent review clear. Publication, final incremental review and required hosted checks precede the explicitly authorized merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

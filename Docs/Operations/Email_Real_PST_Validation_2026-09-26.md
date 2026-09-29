@@ -110,7 +110,7 @@ follow-up closes its real-PST fixture gap.
 The [core closeout report](Email_Core_Closeout_Validation_2026-09-26.md) and its
 SQLite/PostgreSQL throughput and million-message JSON certificates keep their
 original source revisions. Those benchmarks were not rerun for this merged source.
-The PR targets `dev` and remains draft. The requester's supplied `Change summary`
+At this initial validation, the PR targeted `dev` and remained draft. The requester's supplied `Change summary`
 is retained verbatim in its description. Creating the PR is not the separate
 owner release approval.
 
@@ -222,3 +222,39 @@ benchmark receipts retain their tested-source binding; neither was rerun for thi
 refresh. Independent review found no blockers. Exact temporary schema dependencies
 and wrapper were removed, preserving shared installations and credential-free
 receipts. New-head hosted checks will rerun after publication.
+
+
+## Latest-dev rebase and Qodo corrections (2026-09-29)
+
+PR3023 is ready and rebased onto dev `0da68530e80c713ed3a323a741998e1fed37e3e9`,
+with the prior branch history retained in `codex/email-pr3023-pre-rebase-20260929`.
+The shared logging conflict preserves dev's URL display helpers and email privacy.
+The requester explicitly authorized addressing review comments and merging after
+required checks pass; the supplied Change summary remains verbatim.
+
+All nine Qodo comments have concrete corrections or evidence. Preparation, search
+and detail errors retain bounded function/line diagnostics in ordinary logs,
+without exception values, filenames or locals. Preparation failures return a
+fixed safe message with an opaque ID matching the log. The MIME fallback warning,
+attachment helper contracts and test classification/formatting are corrected.
+Duplicate quota DDL is removed because dev already provides it. Actual SQLite
+boolean matching and ranking disprove the alias concern without LIKE fallback.
+Read-key upload rejection remains intentional; the runbook documents creating a
+read/write key for connected ingestion and replacing existing read-only keys.
+
+| Rebase/review validation | Result |
+| --- | --- |
+| Rebased ingestion/auth/core suite | 201 passed; zero failures/errors/skips |
+| Guarded native PST endpoints/metadata | 10 passed; zero skips/outbound/model attempts |
+| Affected review regressions | 167 passed; zero failures/errors/skips |
+| Final ordinary-log rendering and preparation response checks | 4 passed |
+| Official PostgreSQL quota bootstrap/failure propagation | 3 passed; zero skips |
+| Compile/Ruff/Bandit | 93 PR Python files compile; 13 touched paths lint clean; six touched production paths have zero findings/errors |
+| Canonical OpenAPI | Unchanged fingerprint `58fa00440a66`; 2,104 paths / 3,244 schemas |
+
+The 167-case run preceded the final message-only diagnostic rendering change;
+the four final cases verify those messages and the safe client response. Suites
+overlap. Independent review found no blocker. Detailed source and log hashes are
+appended to the existing follow-up JSON. Earlier benchmark certificates retain
+their original source revisions. Required hosted checks and incremental review
+will be checked on the published correction head before the authorized merge.

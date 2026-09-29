@@ -462,7 +462,7 @@ class FileValidator:
             logging.warning("Yara scanning disabled: optional dependency unavailable")
 
         if not self.magic_available and not self.python_magic_available:
-            logging.warning("Yara scanning configured to permit scanner errors")
+            logging.warning("puremagic and python-magic unavailable; MIME validation relies on extension guesses")
 
         self._custom_media_configs: dict[str, dict] = {}
         if custom_media_configs:

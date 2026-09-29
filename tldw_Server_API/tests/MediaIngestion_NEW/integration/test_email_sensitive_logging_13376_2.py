@@ -134,6 +134,11 @@ async def test_email_search_failure_logs_type_without_query_or_exception_data(mo
         await email_endpoint.search_email_messages(q=ECHO, limit=50, offset=0, cursor=None, db=SimpleNamespace(search_email_messages=fail_search))
     assert error.value.status_code == 500
     assert any("DatabaseError" in message.record["message"] for message in captured_logs)
+    assert any("fail_search:" in message.record["message"] for message in captured_logs)
+    assert any(
+        any(frame.startswith("fail_search:") for frame in message.record["extra"].get("stack_frames", []))
+        for message in captured_logs
+    )
     assert_private(captured_logs)
 
 
@@ -652,4 +657,23 @@ def test_email_sqlite_schema_failure_logs_safe_diagnostics_and_preserves_cause(m
             CollectionsDatabase.ensure_schema(SimpleNamespace(backend=backend))
     assert raised.value.__cause__ is failure
     assert any("OperationalError" in str(message) for message in captured_logs)
+    assert_private(captured_logs)
+
+
+@pytest.mark.asyncio
+async def test_email_detail_failure_retains_safe_stack_without_exception_data(monkeypatch, captured_logs):
+    def fail_detail(**_kwargs):
+        raise DatabaseError(ECHO)
+
+    monkeypatch.setitem(email_endpoint.settings, "EMAIL_OPERATOR_SEARCH_ENABLED", True)
+    with pytest.raises(HTTPException) as error:
+        await email_endpoint.get_email_message_detail(
+            email_message_id=1, db=SimpleNamespace(get_email_message_detail=fail_detail)
+        )
+    assert error.value.status_code == 500
+    assert any("fail_detail:" in message.record["message"] for message in captured_logs)
+    assert any(
+        any(frame.startswith("fail_detail:") for frame in message.record["extra"].get("stack_frames", []))
+        for message in captured_logs
+    )
     assert_private(captured_logs)

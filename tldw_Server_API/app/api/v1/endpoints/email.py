@@ -27,7 +27,10 @@ from tldw_Server_API.app.core.External_Sources.connectors_service import (
 from tldw_Server_API.app.core.External_Sources.connectors_service import (
     list_sources as list_connector_sources,
 )
-from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import (
+    exception_frames_for_log,
+    exception_type_for_log,
+)
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id
 
 router = APIRouter(tags=["Email"])
@@ -272,7 +275,12 @@ async def search_email_messages(
         }
     except (InputError, DatabaseError) as exc:
         if isinstance(exc, DatabaseError):
-            logger.error("Database error during email search (error_type={})", exception_type_for_log(exc))
+            stack_frames = exception_frames_for_log(exc)
+            logger.bind(stage="email_search", stack_frames=stack_frames).error(
+                "Database error during email search (error_type={}, stack_frames={})",
+                exception_type_for_log(exc),
+                stack_frames,
+            )
         raise map_db_error_to_http(
             exc,
             default_detail="A database error occurred during email search.",
@@ -307,7 +315,12 @@ async def get_email_message_detail(
         return detail
     except (InputError, DatabaseError) as exc:
         if isinstance(exc, DatabaseError):
-            logger.error("Database error during email detail lookup (error_type={})", exception_type_for_log(exc))
+            stack_frames = exception_frames_for_log(exc)
+            logger.bind(stage="email_detail", stack_frames=stack_frames).error(
+                "Database error during email detail lookup (error_type={}, stack_frames={})",
+                exception_type_for_log(exc),
+                stack_frames,
+            )
         raise map_db_error_to_http(
             exc,
             default_detail="A database error occurred while fetching email message detail.",

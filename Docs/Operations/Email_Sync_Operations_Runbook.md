@@ -97,6 +97,13 @@ validated, and the selected organization is used for quota, billing and content.
 Without an explicit selector, a validated JWT active organization takes priority
 over the first membership. An org-scoped API key cannot select outside its scope.
 
+For Chatbook and other connected clients, create the upload key explicitly with
+`scope: ["read", "write"]` through `POST /api/v1/users/api-keys`, then configure
+that key as the client's server API key. Read remains the least-privilege default
+for key creation; a read-only key cannot upload and receives HTTP 403. Existing
+read-only keys must be replaced with a write-capable key for ingestion; rotating
+a key retains its scopes. JWT-authenticated uploads use the user's RBAC role.
+
 ## Local Reference Release Validation
 
 TASK-13376 uses one loopback Uvicorn worker with synthetic users and mail,

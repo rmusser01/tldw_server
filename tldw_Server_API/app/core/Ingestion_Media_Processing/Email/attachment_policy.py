@@ -1,4 +1,5 @@
 """Minimal MIME selection for the existing nested EML extraction path."""
+
 from __future__ import annotations
 
 import re
@@ -8,7 +9,19 @@ _MIME_PATTERN = re.compile(r"(?:[a-z0-9!#$&^_.+-]+/(?:[a-z0-9!#$&^_.+-]+|\*)|\*/
 
 
 def normalize_attachment_mime_patterns(value: list[str] | str | None) -> list[str] | None:
-    """Normalize repeated/comma-separated MIME rules; preserve omitted/empty values."""
+    """Normalize repeated/comma-separated MIME rules.
+
+    Args:
+        value: A string or list/tuple of strings containing MIME rules, or None.
+            Rules accept type/subtype, type/* and */*.
+
+    Returns:
+        Unique lowercase rules; None for omitted input and [] for an empty list.
+
+    Raises:
+        ValueError: Input is not strings, a rule is invalid or exceeds 128
+            characters, or more than 64 unique rules are supplied.
+    """
     if value is None:
         return None
     entries = [value] if isinstance(value, str) else value
@@ -33,7 +46,18 @@ def attachment_mime_skip_reason(
     allowlist: list[str] | None,
     denylist: list[str] | None,
 ) -> str | None:
-    """Select only supported nested EMLs, with denies preceding compatibility fallback."""
+    """Select supported nested EMLs, applying deny rules first.
+
+    Args:
+        content_type: Declared attachment MIME type.
+        filename: Optional attachment name; .eml supplies the legacy MIME fallback.
+        allowlist: Normalized rules, or None for the default message/rfc822 policy.
+        denylist: Normalized rules, or None to deny no MIME types.
+
+    Returns:
+        None when extraction is allowed; otherwise mime_denied, mime_not_allowed
+        or unsupported_mime. Explicit allowlists match only the declared MIME.
+    """
     declared_type = content_type.lower()
     eml_named = bool(filename and filename.lower().endswith(".eml"))
     candidates = [declared_type]
