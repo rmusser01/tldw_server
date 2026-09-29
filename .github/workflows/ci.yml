@@ -1223,6 +1223,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_transcription_models_endpoint.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
@@ -2017,19 +2018,31 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
+          # A step only ends once its output pipe closes. A process a test leaves
+          # running would inherit that pipe and hold the step open until the job
+          # limit, which discards the log (core-security: 3 runs). So pytest writes
+          # to a file that is printed afterwards, and any survivors are listed.
+          # timeout + SIGABRT + PYTHONFAULTHANDLER: a hang outside a single test
+          # (which pytest-timeout cannot see) dumps every thread's stack.
+          PYTEST_LOG="$RESULTS_DIR/${SHARD_NAME}-pytest.log"
+          set +e
           # TEST_PATHS is a matrix-provided list of pytest path arguments.
           # shellcheck disable=SC2086
-          # A hang outside any single test (collection, teardown, a thread
-          # blocking interpreter exit) escapes pytest-timeout and used to hit the
-          # job limit, which discards the log. Stop pytest first, with SIGABRT so
-          # the fault handler dumps every thread's stack into the kept log.
           PYTHONFAULTHANDLER=1 timeout --signal=ABRT --kill-after=60s 55m \
             pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -p pytest_timeout -o timeout_method=signal \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \
-            --junit-xml="$RESULTS_DIR/${SHARD_NAME}.xml"
+            --junit-xml="$RESULTS_DIR/${SHARD_NAME}.xml" \
+            > "$PYTEST_LOG" 2>&1
+          status=$?
+          set -e
+          cat "$PYTEST_LOG"
+          echo "::group::Processes still running after pytest"
+          ps -eo pid,ppid,etime,args --sort=start_time | tail -n 40
+          echo "::endgroup::"
+          exit "$status"
 
       - name: Run legacy-free media checks
         if: matrix.shard.name == 'media-legacy-free'
@@ -2806,6 +2819,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_transcription_models_endpoint.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
@@ -3538,19 +3552,31 @@ jobs:
           mkdir -p "$RESULTS_DIR"
           export DATABASE_URL="sqlite:///./Databases/users.db"
           unset TEST_DATABASE_URL POSTGRES_TEST_DB
+          # A step only ends once its output pipe closes. A process a test leaves
+          # running would inherit that pipe and hold the step open until the job
+          # limit, which discards the log (core-security: 3 runs). So pytest writes
+          # to a file that is printed afterwards, and any survivors are listed.
+          # timeout + SIGABRT + PYTHONFAULTHANDLER: a hang outside a single test
+          # (which pytest-timeout cannot see) dumps every thread's stack.
+          PYTEST_LOG="$RESULTS_DIR/${SHARD_NAME}-pytest.log"
+          set +e
           # TEST_PATHS is a matrix-provided list of pytest path arguments.
           # shellcheck disable=SC2086
-          # A hang outside any single test (collection, teardown, a thread
-          # blocking interpreter exit) escapes pytest-timeout and used to hit the
-          # job limit, which discards the log. Stop pytest first, with SIGABRT so
-          # the fault handler dumps every thread's stack into the kept log.
           PYTHONFAULTHANDLER=1 timeout --signal=ABRT --kill-after=60s 55m \
             pytest -q --disable-warnings -p pytest_asyncio.plugin \
             -p pytest_timeout -o timeout_method=signal \
             -m "not jobs and not e2e" \
             $TEST_PATHS \
             --durations=50 \
-            --junit-xml="$RESULTS_DIR/${SHARD_NAME}.xml"
+            --junit-xml="$RESULTS_DIR/${SHARD_NAME}.xml" \
+            > "$PYTEST_LOG" 2>&1
+          status=$?
+          set -e
+          cat "$PYTEST_LOG"
+          echo "::group::Processes still running after pytest"
+          ps -eo pid,ppid,etime,args --sort=start_time | tail -n 40
+          echo "::endgroup::"
+          exit "$status"
 
       - name: Run legacy-free media checks
         if: matrix.shard.name == 'media-legacy-free'
@@ -4228,6 +4254,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_transcription_models_endpoint.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
@@ -5568,6 +5595,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_transcription_models_endpoint.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py
@@ -6908,6 +6936,7 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_transcription_models_endpoint.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py

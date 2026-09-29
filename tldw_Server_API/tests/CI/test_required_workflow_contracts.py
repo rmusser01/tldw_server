@@ -1063,6 +1063,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_batch_media_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_transcription_models_endpoint.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_url_hint_for_display.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_utils_time_conversion.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_video_*.py",
             "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_visual_ingestion.py",
