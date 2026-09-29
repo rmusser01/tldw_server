@@ -19,7 +19,7 @@ describe("Playground hook JSX extension guard", () => {
       },
       {
         path: resolveHookPath("usePlaygroundPersistence"),
-        marker: "<Button"
+        marker: "<button"
       }
     ]
 
