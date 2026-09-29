@@ -5,7 +5,7 @@
 **Goal:** Repair cycle4 findings and confirmed scope gaps, then repeat the authoritative fresh single/multi workflow matrices.
 **Architecture:** Retain current UI/store/API boundaries; repair missing acknowledgements, competing state writers, stale configuration and inaccurate failure outcomes at their owners.
 **Tech stack:** Next.js, shared React/Zustand/Dexie, Vitest/Playwright, FastAPI/pytest/SQLite and real llama.cpp.
-**Spec:** [Cycle4 repair design](Docs/Design/2026-09-16-uat-cycle-4-repairs.md).
+**Spec:** [Cycle4 repair design](../Design/2026-09-16-uat-cycle-4-repairs.md).
 
 ## Global constraints
 
@@ -208,4 +208,4 @@ Both Biology five-card journeys, ordinary two-turn Chat/reload and Chat→Note b
 
 08:48UTC update: natural expiry passed at08:39:30 after1830.947seconds, real refresh200 followed by own Notes200. Multi failed-provider Retry retains canonical user identity and successful response; new TestBot complete-v2/reload passes. Single analysis failure preserves prior result and explicit reanalysis/save/reload passes; exact Wikipedia is access-blocked with truthful feedback. New130/TASK13260.70 covers initial Analysis catalog identity fallback, distinct from the repaired explicit-selection writer. Read-only actual component probes reproduce127,128 and130 with passing comparison cases; no repository source/test changes. Five new findings remain open. Subsequent repair work must preserve these frozen results and use permanent regressions before implementation.
 
-Cycle5 execution ended2026-09-16 around09:32UTC on unchanged product ab527eb3b4. Final single/multi/controller reports and exact limitations are retained with the running tracker. Ten new findings126–135 plus reopened068 have separate bounded repair tasks/designs; current implementation and subsequent targeted/full verification now follow IMPLEMENTATION_PLAN_uat_cycle_5.md. Four isolated runtimes were paused after native actions; profiles remain. This closes execution of the old full-run stage, not product acceptance.
+Cycle5 execution ended2026-09-16 around09:32UTC on unchanged product ab527eb3b4. Final single/multi/controller reports and exact limitations are retained with the running tracker. Ten new findings126–135 plus reopened068 have separate bounded repair tasks/designs; current implementation and subsequent targeted/full verification now follow Docs/Plans/IMPLEMENTATION_PLAN_uat_cycle_5.md. Four isolated runtimes were paused after native actions; profiles remain. This closes execution of the old full-run stage, not product acceptance.

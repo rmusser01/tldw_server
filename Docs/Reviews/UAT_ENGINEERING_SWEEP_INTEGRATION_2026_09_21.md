@@ -51,7 +51,7 @@ Private logs and JSON/XML receipts remain outside the PR. The initial187-test JU
 
 ## Outstanding gates
 
-UAT393 source verification/review and UAT394 frontend diagnostic repair are complete. UAT393 remains open for native acceptance. Existing UAT261/351/352/354/356/359–361/365/375/388–392 retain their original obligations. No new candidate is frozen. Exact executable variants/case accounting, all43-family source review, recovery qualification, four-cell UAT, installation and upgrades remain in the [approved plan](../../IMPLEMENTATION_PLAN_uat_engineering_sweep_20260921.md). Native evidence from earlier candidates cannot certify this changed source or dependency set.
+UAT393 source verification/review and UAT394 frontend diagnostic repair are complete. UAT393 remains open for native acceptance. Existing UAT261/351/352/354/356/359–361/365/375/388–392 retain their original obligations. No new candidate is frozen. Exact executable variants/case accounting, all43-family source review, recovery qualification, four-cell UAT, installation and upgrades remain in the [approved plan](../Plans/IMPLEMENTATION_PLAN_uat_engineering_sweep_20260921.md). Native evidence from earlier candidates cannot certify this changed source or dependency set.
 
 ## Workflow repair checkpoint after c2b7ab1fe8
 

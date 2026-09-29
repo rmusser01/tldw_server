@@ -5,7 +5,7 @@
 **Goal:** Resolve every new finding from the frozen four-configuration matrix, including follow-up findings discovered during repair (now258), and verify its original workflow before another full UAT.
 **Architecture:** Make bounded corrections in the existing schema, authorization, proxy, UI state and scheduling paths. Keep independent work in disjoint files and review each unit before integration.
 **Tech stack:** FastAPI/Python, SQLite/PostgreSQL, Next16.1.4, React/TypeScript, pytest/Vitest, native Playwright CLI.
-**Design:** [Repair decisions](Docs/Design/2026-09-17-fresh-matrix-repairs-231-246.md).
+**Design:** [Repair decisions](../Design/2026-09-17-fresh-matrix-repairs-231-246.md).
 **Task:** TASK13260 and children173–200.
 
 ## Global constraints

@@ -2,7 +2,7 @@
 
 **Authoritative task:** TASK13260.278; baseline/audit TASK13260.278.1. **Date:** 2026-09-21.
 
-The requester approved a comprehensive engineering sweep before further full UAT and migrated execution into the main UAT task. This changes sequence, not the required workflows or PostgreSQL coverage. The [implementation plan](../../IMPLEMENTATION_PLAN_uat_engineering_sweep_20260921.md) preserves that approval and its gates. The [release playbook](../Development/RELEASE_UAT_PLAYBOOK.md) is the workflow authority; task13262 produced a specification, not a complete runner or binary fixture pack.
+The requester approved a comprehensive engineering sweep before further full UAT and migrated execution into the main UAT task. This changes sequence, not the required workflows or PostgreSQL coverage. The [implementation plan](../Plans/IMPLEMENTATION_PLAN_uat_engineering_sweep_20260921.md) preserves that approval and its gates. The [release playbook](../Development/RELEASE_UAT_PLAYBOOK.md) is the workflow authority; task13262 produced a specification, not a complete runner or binary fixture pack.
 
 **Current outcome:** Source checkpoint verified. Family inventory created. Test discovery and assertion gaps identified. Latest-dev integration, complete call-path review, executable case-manifest freeze, integrated regression and full UAT remain outstanding. No UAT browser or application workflow ran during this audit.
 

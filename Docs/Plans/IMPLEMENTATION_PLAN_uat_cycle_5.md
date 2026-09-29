@@ -1,4 +1,4 @@
-Current checkpoint 2026-09-17: all 48 frozen matrix outcomes are recorded across four configurations and independently reviewed. Sixteen new findings (231–246) remain unresolved. Apps and browsers are stopped; official PostgreSQL holders and data are retained. Stage 4 execution and retention are complete, with failures explicitly recorded. Repairs continue in IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md; no full acceptance or next-matrix release.
+Current checkpoint 2026-09-17: all 48 frozen matrix outcomes are recorded across four configurations and independently reviewed. Sixteen new findings (231–246) remain unresolved. Apps and browsers are stopped; official PostgreSQL holders and data are retained. Stage 4 execution and retention are complete, with failures explicitly recorded. Repairs continue in Docs/Plans/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md; no full acceptance or next-matrix release.
 
 # Cycle 5 repair and verification plan
 
@@ -8,11 +8,11 @@ Latest checkpoint 2026-09-17 11:52UTC:230findings,229verified/1unresolved230. UA
 
 Current Stage3 checkpoint (2026-09-17): 229 unique findings — 228 verified, 1 awaiting native acceptance (225), 0 unresolved implementations. Current ledger: output/playwright/cycle5-repair-verification-2026-09-16/reconciliation/cycle5-issue-reconciliation-001-229-all-repairs-reviewed.json. Complete225B independently passes173focused+200adjacent tests with zero skips and static/hash checks clear. Task168 is Done. Original administrator native reads on the committed repair remain the final acceptance gate. Stage4 full matrix remains Not Started; harness166 is reviewed.
 
-Parent TASK13260. Design: [cycle5 repairs](Docs/Design/2026-09-16-uat-cycle-5-repairs.md). Running tracker: [fresh single/multi UAT](Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md).
+Parent TASK13260. Design: [cycle5 repairs](../Design/2026-09-16-uat-cycle-5-repairs.md). Running tracker: [fresh single/multi UAT](../Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md).
 
 ## Mandatory entry gate for another full UAT
 
-**Current gate (2026-09-18 UTC): full matrix RELEASED with UAT261 explicitly open.** PR2967 is verified merged at `3cff7962721a60b768464221c1f7fe2a8b25e4d5`. The first resumed original PostgreSQL single-user TestBot call completed/persisted/reloaded but omitted the exact criterion final period. The requester explicitly answered “Continue the matrix; keep UAT261 open.” The running tracker has282 findings,281verified and261open. Execute the unchanged12 named journeys across fresh SQLite/PostgreSQL × single/multi-user profiles, including actual image attachment, at that frozen merged revision. Keep every failure; no criterion relaxation or full acceptance is implied. Current outcomes: [post-merge matrix](Docs/Reviews/FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
+**Current gate (2026-09-18 UTC): full matrix RELEASED with UAT261 explicitly open.** PR2967 is verified merged at `3cff7962721a60b768464221c1f7fe2a8b25e4d5`. The first resumed original PostgreSQL single-user TestBot call completed/persisted/reloaded but omitted the exact criterion final period. The requester explicitly answered “Continue the matrix; keep UAT261 open.” The running tracker has282 findings,281verified and261open. Execute the unchanged12 named journeys across fresh SQLite/PostgreSQL × single/multi-user profiles, including actual image attachment, at that frozen merged revision. Keep every failure; no criterion relaxation or full acceptance is implied. Current outcomes: [post-merge matrix](../Reviews/FRESH_INSTALL_UAT_MATRIX_2026_09_18.md).
 
 The checkpoints below are historical and do not override that current gate.
 

@@ -5,7 +5,7 @@
 **Goal:** Repair all findings from the frozen cycle3 fresh single/multi UAT, then repeat both full workflow matrices.
 **Architecture:** Preserve the current shared UI/API/store boundaries. Establish ownership before asynchronous work, reconcile saved state without dropping drafts, and report confirmed processing/status results.
 **Tech stack:** Next.js, shared React/Zustand/Dexie, Vitest/Playwright, FastAPI/pytest/SQLite and real llama.cpp.
-**Spec:** [Cycle3 repair design](Docs/Design/2026-09-15-uat-cycle-3-repairs.md).
+**Spec:** [Cycle3 repair design](../Design/2026-09-15-uat-cycle-3-repairs.md).
 
 ## Global constraints
 

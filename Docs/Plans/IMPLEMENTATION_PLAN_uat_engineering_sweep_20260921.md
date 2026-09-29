@@ -8,7 +8,7 @@
 
 **Stack:** Existing TypeScript/Vitest/Playwright frontend tools; Python/pytest/Bandit backend tools; SQLite; official PostgreSQL fixtures; existing llama.cpp/mmproj service.
 
-**Approved specification:** [Release UAT playbook](Docs/Development/RELEASE_UAT_PLAYBOOK.md), plus the migrated user-approved sweep sequence recorded in TASK13260.278. Task13262 created the playbook only; it did not implement fixtures or a complete runner.
+**Approved specification:** [Release UAT playbook](../Development/RELEASE_UAT_PLAYBOOK.md), plus the migrated user-approved sweep sequence recorded in TASK13260.278. Task13262 created the playbook only; it did not implement fixtures or a complete runner.
 
 ## Current execution order — requester update 2026-09-22
 
