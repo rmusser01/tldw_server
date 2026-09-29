@@ -159,7 +159,8 @@ vi.mock("@/db/dexie/schema", () => ({ db: {
       if (index < 0) mocks.rows.push(row)
       else mocks.rows[index] = row
       return row.id
-    }
+    },
+    delete: async (id: string) => { mocks.rows = mocks.rows.filter(row => row.id !== id) }
   }
 } }))
 vi.mock("@/hooks/useSelectedAssistant", () => ({
@@ -508,10 +509,15 @@ describe("saved normal Chat pipeline with autosave", () => {
       history: [{ role: "assistant", content: "Cedar reply" }],
       replyTarget: { id: replyKind === "local" ? localId : serverId, role: "assistant", text: "Cedar reply" }
     })
+    // Since 977e118e57 a server-mirrored row is removed through
+    // removeAcknowledgedServerMirrorMessage, which refuses unless the local mirror is
+    // provably bound to this server chat. Seed that binding and the unique mirror row.
+    mocks.mirrorHistories.set("mirror", { id: "mirror", server_chat_id: "cedar", server_scope_key: "scope-A" })
+    mocks.rows.push({ id: localId, history_id: "mirror", serverMessageId: serverId, role: "assistant", content: "Cedar reply" })
     const { result } = renderWorkspace()
     await act(async () => { await result.current.actions.deleteMessage(0) })
     expect(mocks.deleteMessage).toHaveBeenCalledWith(serverId, 2, "cedar")
-    expect(mocks.removeMessageById).toHaveBeenCalledWith("mirror", localId)
+    expect(mocks.rows.find(row => row.id === localId)).toBeUndefined()
     expect(useStoreMessageOption.getState().messages).toEqual([])
     expect(useStoreMessageOption.getState().replyTarget).toBeNull()
   })

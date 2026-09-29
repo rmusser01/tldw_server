@@ -57,7 +57,7 @@ from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statement
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection_async,
 )
-from tldw_Server_API.app.core.exceptions import TransactionPassthroughError
+from tldw_Server_API.app.core.exceptions import TransactionPassthroughError, exception_type_chain
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime, is_test_mode
 
 _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS = (
@@ -1307,11 +1307,16 @@ class DatabasePool:
             ):
                 raise DatabaseConcurrencyConflict() from None
             if isinstance(primary_failure, Exception):
+                # The TransactionError below is raised outside any except block, so
+                # nothing downstream can recover the cause; this line must carry it.
                 logger.bind(
                     backend="postgresql",
                     operation=failure_operation,
                     error_type=type(primary_failure).__name__,
-                ).error("PostgreSQL transaction failed")
+                ).error(
+                    "PostgreSQL transaction failed: cause={}",
+                    exception_type_chain(primary_failure),
+                )
                 raise TransactionError("PostgreSQL transaction") from None
             raise primary_failure from None
 
@@ -1377,11 +1382,13 @@ class DatabasePool:
         ):
             raise DatabaseLockError() from None
         if isinstance(failure, Exception):
+            # Type chain in the message text: the TransactionError below drops the
+            # cause (`from None`) and bound extras are not printed by the CI log format.
             logger.bind(
                 backend="sqlite",
                 operation=failure_operation,
                 error_type=type(failure).__name__,
-            ).error("SQLite transaction failed")
+            ).error("SQLite transaction failed: cause={}", exception_type_chain(failure))
             raise TransactionError("SQLite transaction") from None
         raise failure from None
 

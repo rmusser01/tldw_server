@@ -85,7 +85,11 @@ describe("chat submit result contract", () => {
     for (const path of wrapperPaths) {
       const source = readUiSource(path)
       expect(source, path).toMatch(/Promise<ChatSubmitResult>/)
-      expect(source, path).toMatch(/return\s+(?:await\s+)?runChatPipeline\(/)
+      // Either return the pipeline call directly, or keep its result in a variable
+      // (normalChatMode follows the history result first) and return that variable.
+      expect(source, path).toMatch(
+        /return\s+(?:await\s+)?runChatPipeline\(|const\s+(\w+)\s*=\s*await\s+runChatPipeline\([\s\S]*?\breturn\s+\1\b/
+      )
     }
   })
 
