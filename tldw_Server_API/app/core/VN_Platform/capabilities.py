@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core.VN_Assets.constants import (
     DEFAULT_VN_ASSET_PACK_ITEM_LIMIT,
     DEFAULT_VN_ASSET_SLOT_VARIANT_LIMIT,
@@ -124,26 +125,21 @@ def build_vn_capabilities(routes: Iterable[Any]) -> dict[str, Any]:
 
 
 def _route_paths(routes: Iterable[Any]) -> set[str]:
-    """Return the FastAPI route paths registered in the current app."""
-    return {
-        path
-        for route in routes
-        if isinstance(path := getattr(route, "path", None), str)
-    }
+    """Return the served route paths, including routes behind include_router."""
+    return {route.path for route in iter_served_routes(routes) if route.path}
 
 
 def _route_methods(routes: Iterable[Any]) -> set[tuple[str, str]]:
     """Return registered (path, HTTP method) pairs for FastAPI routes."""
-    pairs: set[tuple[str, str]] = set()
-    for route in routes:
-        path = getattr(route, "path", None)
-        methods = getattr(route, "methods", None)
-        if not isinstance(path, str) or not isinstance(methods, Iterable):
-            continue
-        for method in methods:
-            if isinstance(method, str):
-                pairs.add((path, method.upper()))
-    return pairs
+    # FastAPI >= 0.137 keeps included routers as one _IncludedRouter entry without
+    # .path, so walking app.routes directly reported every VN module disabled.
+    return {
+        (route.path, method.upper())
+        for route in iter_served_routes(routes)
+        if route.path
+        for method in route.methods
+        if isinstance(method, str)
+    }
 
 
 def _has_registered_resource(paths: set[str], resource_path: str) -> bool:

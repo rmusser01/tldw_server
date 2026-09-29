@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError, InputError
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 
 class _LoggerStub:
@@ -104,7 +105,7 @@ def _build_app_with_overrides(
         # per-route token-scope/rate-limit enforcement dependencies.
         return None
 
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         dependant = getattr(route, "dependant", None)
         if dependant is None:
             continue

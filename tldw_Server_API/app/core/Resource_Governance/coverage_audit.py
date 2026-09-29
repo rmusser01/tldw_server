@@ -11,6 +11,8 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+
 # Default prefixes excluded from governor enforcement (health, docs, etc.)
 DEFAULT_EXCLUDED_PREFIXES = [
     "/docs",
@@ -47,10 +49,10 @@ def audit_governor_coverage(
     prefixes = excluded_prefixes if excluded_prefixes is not None else list(DEFAULT_EXCLUDED_PREFIXES)
 
     routes: list[dict[str, Any]] = []
-    for route in app.routes:
-        if hasattr(route, "methods") and hasattr(route, "path"):
-            for method in route.methods:
-                routes.append({"method": method, "path": route.path, "tags": list(getattr(route, "tags", []) or [])})
+    # iter_served_routes: FastAPI >= 0.137 hides included routers from app.routes.
+    for route in iter_served_routes(app.routes):
+        for method in route.methods:
+            routes.append({"method": method, "path": route.path, "tags": list(route.tags)})
 
     protected: list[dict[str, str]] = []
     unprotected: list[dict[str, str]] = []

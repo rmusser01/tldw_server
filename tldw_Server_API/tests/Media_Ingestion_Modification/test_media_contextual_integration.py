@@ -13,12 +13,13 @@ import io
 import tempfile
 from pathlib import Path
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 
 
 def _ensure_media_add_route_registered(app) -> None:
     """Mount the media router when another test package disables it at collection time."""
-    if any(getattr(route, "path", None) == "/api/v1/media/add" for route in app.routes):
+    if any(getattr(route, "path", None) == "/api/v1/media/add" for route in iter_served_routes(app.routes)):
         return
 
     from tldw_Server_API.app.api.v1.endpoints.media import router as media_router

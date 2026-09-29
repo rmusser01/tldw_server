@@ -12,15 +12,16 @@ if not _RUN:
     pytestmark.append(pytest.mark.skip(reason="FIXME: Postgres outbox tests disabled by default; set RUN_PG_JOBS_TESTS=1 to enable"))
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 
 def _ensure_jobs_router_registered(app) -> None:
     has_events_route = any(
-        isinstance(route, APIRoute)
+        isinstance(route.route, APIRoute)
         and route.path == "/api/v1/jobs/events"
         and "GET" in (route.methods or set())
-        for route in app.routes
+        for route in iter_served_routes(app.routes)
     )
     if has_events_route:
         return

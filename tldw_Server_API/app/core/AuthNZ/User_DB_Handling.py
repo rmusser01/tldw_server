@@ -48,6 +48,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope, set_scope
 from tldw_Server_API.app.core.exceptions import InactiveUserError
 from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode, is_truthy
+from tldw_Server_API.app.core.Utils.fastapi_routes import served_route_for_scope
 
 _USER_DB_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -596,7 +597,9 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
     if has_scoped_claim:
         def _route_declares_scope_enforcement(req: Request) -> bool:
             try:
-                route = getattr(req, "scope", {}).get("route") if req is not None else None
+                # served_route_for_scope: under FastAPI >= 0.137 scope["route"] lacks the
+                # include-time dependencies where require_token_scope is usually attached.
+                route = served_route_for_scope(getattr(req, "scope", {})) if req is not None else None
                 dependant = getattr(route, "dependant", None)
                 if dependant is None:
                     return False

@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
     RealtimePipelineTranscriptDone,
     RealtimePipelineTurnDone,
 )
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.tests.Audio.ws_test_helpers import ws_client_without_lifespan
 
 pytestmark = pytest.mark.integration
@@ -308,7 +309,7 @@ def test_audio_realtime_route_toggle_removes_native_and_compat_routes(
     config_mod._route_toggle_policy.cache_clear()
     app = _build_app(monkeypatch)
 
-    paths = {getattr(route, "path", "") for route in app.routes}
+    paths = {getattr(route, "path", "") for route in iter_served_routes(app.routes)}
 
     assert "/v1/realtime" not in paths
     assert "/api/v1/audio/realtime" not in paths

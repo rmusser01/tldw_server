@@ -35,6 +35,7 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import (  # noqa: E
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (  # noqa: E402
     CharactersRAGDB,
 )
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.main import app as fastapi_app  # noqa: E402
 from tldw_Server_API.app.services.osce_practice import (  # noqa: E402
     materialize_station_content,
@@ -164,7 +165,7 @@ def test_station_list_calls_compact_projection_for_every_internal_row(
     )
     route = next(
         route
-        for route in fastapi_app.routes
+        for route in iter_served_routes(fastapi_app.routes)
         if getattr(route, "name", None) == "list_osce_stations"
     )
     endpoint_globals = route.endpoint.__globals__

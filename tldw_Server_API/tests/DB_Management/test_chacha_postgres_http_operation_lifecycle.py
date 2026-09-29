@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBack
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeManager
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.integration
 
@@ -98,8 +99,8 @@ def pg_http(request, pg_database_config, tmp_path, monkeypatch):
                 app.dependency_overrides[child.call] = lambda: None
             override_rate_dependencies(child)
 
-    for route in app.routes:
-        if hasattr(route, "dependant"):
+    for route in iter_served_routes(app.routes):
+        if route.dependant is not None:
             override_rate_dependencies(route.dependant)
 
     # The dependency's compatibility check imports main.app, but no main app
@@ -138,8 +139,8 @@ async def _run(f, operation):
     """Exercise actual async dependencies and one deterministic AnyIO worker."""
     # Observe endpoint work separately from the real dependency's health and
     # default-character workers, without replacing any dependency or handler.
-    for route in f.app.routes:
-        if not hasattr(route, "dependant"):
+    for route in iter_served_routes(f.app.routes):
+        if route.dependant is None:
             continue
         original = route.dependant.call
 

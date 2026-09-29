@@ -5,6 +5,7 @@ from types import ModuleType
 import types
 
 import pytest
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 
 def _module_names(*names: str) -> list[str]:
@@ -84,7 +85,7 @@ def test_audio_router_import_survives_broken_streaming_module(monkeypatch):
 
     try:
         audio_module = importlib.import_module(audio_module_name)
-        route_paths = {route.path for route in audio_module.router.routes}
+        route_paths = {route.path for route in iter_served_routes(audio_module.router.routes)}
 
         assert "/transcriptions" in route_paths
         assert "/transcriptions/health" in route_paths
