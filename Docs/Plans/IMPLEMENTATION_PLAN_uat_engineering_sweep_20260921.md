@@ -109,6 +109,8 @@ Files: this plan, `Docs/Reviews/UAT_ENGINEERING_SWEEP_COVERAGE_2026_09_21.md`, `
 - [ ] TASK13260.278.18.71: decode prompt renderer golden JSON as UTF-8; scoped cp1252 and 274 normal/adjacent cases pass, native Windows acceptance remains open.
 - [ ] TASK13260.278.18.72: replace the one-second spawned-worker readiness poll with a bounded Event wait and timeout cleanup; gateway module and induced-delay controls pass locally, full MCP/hosted acceptance remains open.
 - [ ] TASK13260.278.18.73: close the OCR named file before failed-write cleanup; three simulated Windows cases fail before and pass after, all 15 lifetime controls pass locally, native Windows CI remains open.
+- [ ] TASK13260.278.18.74: seed the deliberate legacy SQLite API-key schema outside the managed write guard; exact test and five-case module pass locally, native hosted rerun remains open.
+- [ ] Attribute the AuthNZ property `too_slow` outlier before changing its strategy or health checks; the official PostgreSQL focused test passes locally and hosted rerun remains open.
 - [ ] Complete fresh hosted MCP acceptance after the full local 3,433-case suite passed with zero failures and zero skips.
 
 ## Stage 4: Integrated frozen-candidate sweep
