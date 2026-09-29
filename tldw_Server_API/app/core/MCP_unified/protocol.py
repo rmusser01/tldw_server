@@ -887,8 +887,12 @@ class MCPProtocol:
         self,
         module: BaseModule,
         tool_args: Any,
+        *,
+        tool_name: str | None = None,
     ) -> Any:
-        return self._tool_execution_security.harden_and_sanitize_tool_arguments(module, tool_args)
+        return self._tool_execution_security.harden_and_sanitize_tool_arguments(
+            module, tool_args, tool_name=tool_name
+        )
 
     def _prepared_tool_call_payload(
         self,
@@ -1760,7 +1764,9 @@ class MCPProtocol:
                     module = await self.module_registry.find_module_for_tool(resource_id)
                     if module is not None:
                         tool_def = await self._resolve_tool_definition(module, resource_id)
-                        tool_args = self._harden_and_sanitize_tool_arguments(module, tool_args)
+                        tool_args = self._harden_and_sanitize_tool_arguments(
+                            module, tool_args, tool_name=resource_id
+                        )
                         is_write = self._resolve_write_classification(
                             module,
                             resource_id,

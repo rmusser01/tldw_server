@@ -19,11 +19,17 @@ const h1 = vi.hoisted(() => ({ enabled: false, legacyNative: false, controller: 
 const timelineReveal = vi.hoisted(() => ({ current: null as null | (() => Promise<boolean>) }))
 const h1Key = (scope: any, owner: any) => JSON.stringify([scope.profile_id, scope.client_session_id, owner.owner_key, owner.conversation_id])
 
-const forkPresentation = vi.hoisted(() => ({controller: null as HistorySelectionController | null, mode: null as "ordinary" | "pending" | "fork" | null, settings: null as {authorNote: string} | null}))
+const forkPresentation = vi.hoisted(() => ({controller: null as HistorySelectionController | null, mode: null as "ordinary" | "pending" | "fork" | null, settings: null as {authorNote: string} | null, blockAutomaticLoad: false, storedReferenceInvalid: false, opened: [] as unknown[]}))
 vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => {
   const actual = await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
   return {...actual, useHistorySelectionContext: () => {
     const controller = actual.useHistorySelectionContext()
+    if (forkPresentation.blockAutomaticLoad) return {
+      ...controller,
+      canAutomaticallyLoad: () => false,
+      ...(forkPresentation.storedReferenceInvalid ? {getStoredReference: () => { throw new Error("invalid_history_reference") }} : {}),
+      open: (...args: Parameters<typeof controller.open>) => { forkPresentation.opened.push(args[0]); return controller.open(...args) },
+    }
     return forkPresentation.controller ?? (forkPresentation.mode ? {...controller, settingsMode: () => forkPresentation.mode!, forkSettings: forkPresentation.settings} : controller)
   }}
 })
@@ -363,6 +369,7 @@ describe("Playground thread search integration", () => {
     h1.legacyNative = false
     forkPresentation.mode = null
     forkPresentation.settings = null
+    forkPresentation.blockAutomaticLoad = false
     routerState.hashRouter = false
     storageState.value.clear()
     mobileViewportState.value = false
@@ -925,6 +932,48 @@ describe("Playground H1 URL initialization with the mounted session/controller",
     h1.bookmarks.set(h1Key(reference, view), record)
     return reference
   }
+  it("TASK-13390: a blocked automatic restore stays silent even when the stored reference is malformed", async () => {
+    // Without a link, a blocked restore must return quietly. Reading the stored
+    // reference before the gate turned a malformed stored value into a visible
+    // "unavailable" state after every account change.
+    forkPresentation.blockAutomaticLoad = true
+    forkPresentation.storedReferenceInvalid = true
+    forkPresentation.opened = []
+    try {
+      window.history.replaceState({}, "", "/chat")
+      const page = render(<Playground />)
+      await waitFor(() => expect(screen.getByTestId("playground-chat")).toBeInTheDocument())
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)) })
+      expect(forkPresentation.opened).not.toContainEqual(expect.objectContaining({ code: "invalid_history_reference" }))
+      page.unmount()
+    } finally {
+      forkPresentation.blockAutomaticLoad = false
+      forkPresentation.storedReferenceInvalid = false
+      forkPresentation.opened = []
+    }
+  })
+
+  it("TASK-13390: an explicit history link still opens after an account change invalidates automatic loading", async () => {
+    // After an account/config change the native-history lease is invalid, so
+    // canAutomaticallyLoad() is false. That must stop AUTOMATIC restores only; a
+    // historySelection link the user followed is deliberate, as the loader already
+    // treats deliberate selections. initializePlayground runs once, so an early
+    // return here drops the link for as long as the page stays mounted.
+    forkPresentation.blockAutomaticLoad = true
+    try {
+      const reference = seed()
+      window.history.replaceState({}, "", "/chat?historySelection=" + encodeURIComponent(JSON.stringify(reference)))
+      const page = render(<Playground />)
+      await waitFor(() =>
+        expect(screen.getByTestId("playground-chat")).toHaveAttribute("data-selected-history", "chat-one answer A")
+      )
+      page.unmount()
+    } finally {
+      // This describe's beforeEach does not reset the flag, so reset it here.
+      forkPresentation.blockAutomaticLoad = false
+    }
+  })
+
   it.each(["query", "hash", "hash-router"])(
     "consumes a %s handoff once and restores destination choice, conversation switch and empty reset",
     async (route) => {

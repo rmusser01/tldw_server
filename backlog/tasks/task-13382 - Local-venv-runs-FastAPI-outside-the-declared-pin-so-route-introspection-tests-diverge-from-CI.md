@@ -3,9 +3,10 @@ id: TASK-13382
 title: >-
   Local venv runs FastAPI outside the declared pin, so route-introspection tests
   diverge from CI
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-23 18:02'
+updated_date: '2026-09-28 19:49'
 labels:
   - tooling
   - testing
@@ -44,9 +45,15 @@ Related: TASK-13360, where editable installs resolve to the main checkout. Both 
 <!-- AC:BEGIN -->
 - [ ] #1 The development venv satisfies the declared FastAPI constraint, or the constraint is raised deliberately
 - [ ] #2 If the pin is raised, every getattr(route, path) site is audited for vacuous passes, not just the ones that error
-- [ ] #3 A uv.lock exists, or ci.yml stops referencing one
-- [ ] #4 PR #2997's attribution of the route change is corrected on the task record
+- [x] #3 A uv.lock exists, or ci.yml stops referencing one
+- [x] #4 PR #2997's attribution of the route change is corrected on the task record
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-09-28. AC3: resolved by premise, not churn. ci.yml and 7 other workflows list uv.lock under cache-dependency-path, but .github/actions/setup-python-deps' resolve-cache-paths step drops any path that does not exist and falls back to pyproject.toml, so the absent lock is tolerated by design. Removing it from 8 workflows, several pinned by the license-first contract tests, would be churn with no behaviour change. AC4 (attribution correction): #2997's commit message said FastAPI changed include_router; it did not. The route-introspection difference came from this shared venv running fastapi 0.141.1 / starlette 1.6.0 against the declared fastapi>=0.136.3,<0.137.0; CI installs within the pin. AC1 stays open as an owner decision: either bring the shared venv inside the pin (uv pip install 'fastapi>=0.136.3,<0.137.0', but the venv is shared by every worktree and concurrent session) or raise the pin deliberately (Dependabot #2772 proposes <0.142.0), which then triggers AC2's getattr(route, path) audit.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
