@@ -48,7 +48,6 @@ PR2934 Qodo findings 1, 3 and 5 follow-up: move optional catalog generation meta
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fresh WebUI selected Pixel Migu without Persona, attached New Research workspace, retained the visible Buddy on Watchlists, opened scoped interaction there, saved Static mode, and verified Cancel preserves None before saving Research Assistant for future conversations. Provider catalog failure traced to blank optional *_max_tokens in shipped defaults; scoped repair added to acceptance before implementation.
 Qualification reconciled in Docs/Reviews/2026-09-09-buddy-v1-qualification.md with curated receipts/source hashes. Fresh WebUI: independent Pixel Migu, None/Research Assistant workspace defaults and inheritance, Static/Dynamic artwork, exact conversation Buddy reply completed after Watchlists-to-Workspace navigation, selected workspace conversation increased from 5 to 7 messages while sibling stayed at 5, and one acknowledged result left the sibling unread. Original blank-config catalog defect repaired with 5 focused/adjacent tests; assistant-only readable error rendering repaired with 8 component/decoder tests and quoted-user-envelope preservation. Backend 51 passed/1 unavailable-PostgreSQL skip; frontend artwork/lifecycle 81 passed. Bandit and touched regression formatting passed; unchanged source lint debt recorded. Final Chrome production build, shared-token sync, manifest targets and ZIP integrity passed. TASK-13211 investigation reconciled without speculative repair. AC2 covers typed reply and result receipt/acknowledgement semantics; real audible queue playback remains unqualified. AC1 remains open: native Chrome permissions unavailable, Terminal explicitly prohibited by Computer Use, upgraded-profile WebUI journey and native Chatbook interaction incomplete. No full suite or human-voice pass claimed. ADR-005 remains the governing contract.
@@ -65,18 +64,14 @@ PR2934 Qodo backend findings 1, 3 and 5 follow-up completed. Catalog generation 
 
 2026-09-10 follow-up published Trenchcoat imported via real authenticated HTTP worker, activated in WebUI, and copied independently by API. This exposed and repaired lost credits in TASK13242. Final HTTP export/reimport and actual Chatbook native importer pass. Native Chrome control blocked by Computer Use permissions; no installed-extension/terminal or physical voice qualification claimed. See Docs/Reviews/2026-09-10-buddy-followup.md; task remains open.
 
+2026-09-29 qualification on dev0da68530: reproduced workspace collection307 causing Buddy management to hide choices; TASK13395 repairs the single shared path and keeps redirect:error. Supported quickstart WebUI with disposable backend and pre-existing browser settings loaded all7 previews, selected independent Pixel Migu with Persona None, attached an API-seeded workspace, retained Static mode and visible Buddy after Chat-to-Watchlists navigation, then persisted Dynamic. Final targeted checks:37 domain contracts,13 redirect security,37 management components and1 route lifecycle passed. Cold compilation caused one5s component timeout; it passed2.2s after runtime stopped and the whole component pair passed. Baseline lint/format debt unchanged. Browser screenshots, source hashes, raw focused logs and precise limits retained in Docs/Reviews/2026-09-29-buddy-current-dev-qualification.md. No native installed-extension, upgraded WebUI, physical voice or live active-run claim; AC1 remains open. TASK13211 historical trigger remains unproven. Owned runtime processes stopped; user main checkouts untouched.
+
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
-2026-09-29 qualification on dev0da68530: reproduced workspace collection307 causing Buddy management to hide choices; TASK13395 repairs the single shared path and keeps redirect:error. Supported quickstart WebUI with disposable backend and pre-existing browser settings loaded all7 previews, selected independent Pixel Migu with Persona None, attached an API-seeded workspace, retained Static mode and visible Buddy after Chat-to-Watchlists navigation, then persisted Dynamic. Final targeted checks:37 domain contracts,13 redirect security,37 management components and1 route lifecycle passed. Cold compilation caused one5s component timeout; it passed2.2s after runtime stopped and the whole component pair passed. Baseline lint/format debt unchanged. Browser screenshots, source hashes, raw focused logs and precise limits retained in Docs/Reviews/2026-09-29-buddy-current-dev-qualification.md. No native installed-extension, upgraded WebUI, physical voice or live active-run claim; AC1 remains open. TASK13211 historical trigger remains unproven. Owned runtime processes stopped; user main checkouts untouched.
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
 

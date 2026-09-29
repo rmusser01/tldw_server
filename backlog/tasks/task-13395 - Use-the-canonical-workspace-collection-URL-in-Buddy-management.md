@@ -36,9 +36,10 @@ ADR required: no. ADR path: backlog/decisions/005-independent-buddy-bindings-and
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Corrected the shared listWorkspaces collection path to /api/v1/workspaces/ after real authenticated HTTP reproduced a307 and Buddy management failed under redirect:error. Updated two existing contract assertions, both RED before the one-line repair. Final scoped checks:37 workspace contracts,13 redirect security,37 Buddy management components and1 route lifecycle passed. Real quickstart WebUI selected Pixel Migu without Persona, attached the API-seeded disposable workspace, retained Static mode and visible Buddy on Watchlists, then persisted Dynamic. Independent review has no findings; diff check passes. Existing ESLint1 error/52 warnings and3-file Prettier debt unchanged against HEAD; Bandit N/A for TypeScript-only changes. No full suite. Existing ADR005 applies. Evidence and exact native/extension/voice/upgrade limits: Docs/Reviews/2026-09-29-buddy-current-dev-qualification.md and source-hashed artifact receipts. TASK13227 stays In Progress.
-<!-- SECTION:NOTES:END -->
+PR3056 Qodo follow-up: removed nested NOTES/final-summary markers from TASK13227, moved the qualification note into its existing canonical Implementation Notes section, and normalized this new task to the same marker spelling. Verified historical content preservation and parsed-section behavior with the repository Python Backlog tooling; temporary-copy append/summary edits retain exactly one section. Production Chrome build on5cbca66a passed117s and exported MV3 background/options/side-panel entrypoints validated; installed-extension interaction remains open. Build hashes recorded on PR3056; raw logs stay local.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

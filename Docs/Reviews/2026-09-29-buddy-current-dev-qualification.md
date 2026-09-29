@@ -63,3 +63,17 @@ tied to its original source. Advanced cross-origin browser connection failures
 were not established; the supported quickstart transport was used successfully.
 TASK-13211's original visual-load trigger remains unproven. No provider account,
 microphone, audible queue playback or native drag qualification is claimed.
+
+## PR #3056 review follow-up
+
+Qodo found nested note/summary markers introduced by the installed JavaScript
+Backlog editor. The repository parser reproduced a missing canonical notes
+section and marker text parsed as the summary. Both touched tasks now have one
+canonical notes/summary pair; every historical content line is preserved. Real
+append-note and replace-summary edits on disposable task copies retained one
+section and their original history. Further edits use the repository Python CLI.
+
+The production Chrome extension build on `5cbca66a586b75dce43c28a39fcfaa0550a2208a`
+also passed in 117 seconds. Its exported MV3 manifest and background, options,
+and side-panel entrypoints were verified; build hashes are recorded on the PR.
+This qualifies packaging, not installed-extension interaction. Raw logs stay local.
