@@ -9,6 +9,7 @@ from PIL import Image
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.chacha.message_store import MAX_CHAT_ATTACHMENT_READ_BYTES
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, InputError
+from tldw_Server_API.app.core.Utils.image_validation import MAX_IMAGE_PIXELS, validate_image_pixel_limit
 
 
 def _detect_image_mime_type(data: bytes) -> Optional[str]:
@@ -73,11 +74,16 @@ def _complete_message_images(message: dict[str, Any]) -> list[str]:
         if len(data) > int(settings.get("MAX_MESSAGE_IMAGE_BYTES", 5 * 1024 * 1024)):
             raise HTTPException(status_code=413, detail="A saved chat attachment exceeds the image read limit.")
         try:
+            validate_image_pixel_limit(data)
             with Image.open(io.BytesIO(data)) as decoded:
+                if decoded.width * decoded.height > MAX_IMAGE_PIXELS:
+                    raise HTTPException(status_code=413, detail="A saved chat attachment exceeds the image pixel limit.")
                 decoded.verify()
             with Image.open(io.BytesIO(data)) as decoded:
                 decoded.load()
-        except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
+        except Image.DecompressionBombError as exc:
+            raise HTTPException(status_code=413, detail="A saved chat attachment exceeds the image pixel limit.") from exc
+        except (OSError, ValueError, SyntaxError) as exc:
             raise HTTPException(status_code=409, detail="A saved chat attachment is incomplete or invalid.") from exc
         result.append(f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}")
     return result
@@ -109,7 +115,7 @@ def read_messages_with_images(
         saved image options and may have placeholder text normalized for completion.
 
     Raises:
-        HTTPException: 409 for invalid or incomplete images, 413 for byte limits,
+        HTTPException: 409 for invalid or incomplete images, 413 for byte or pixel limits,
             or 503 when the database cannot supply a complete image/metadata read.
     """
     try:
