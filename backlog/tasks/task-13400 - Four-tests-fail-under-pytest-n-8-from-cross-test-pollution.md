@@ -4,6 +4,7 @@ title: Four tests fail under pytest -n 8 from cross-test pollution
 status: To Do
 assignee: []
 created_date: '2026-09-30 07:02'
+updated_date: '2026-09-30 09:47'
 labels:
   - tests
 dependencies: []
@@ -24,6 +25,14 @@ Each points at shared process state (patched builtins, middleware or env) that a
 - [ ] #1 The four tests pass under the same -n 8 command
 - [ ] #2 Each polluting fixture restores the state it patches (monkeypatch or finally)
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+More xdist pollution seen in the final-fix run, reproduced at 2d62baa055:
+- test_legacy_openai_transient_failure_retains_retry_policy: the system_log_buffer writer thread's 0.05 s flock poll lands in the test's patched global time.sleep.
+- 3 test_orchestrator_summary nodes: the redis_client fixture runs flushdb on the shared localhost:6379/0 while other workers are mid-test.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
