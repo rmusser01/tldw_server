@@ -1810,6 +1810,8 @@ def test_root_close_after_release_cannot_close_reused_descriptor(
 ) -> None:
     lock_root = tmp_path / "locks"
     lock_root.mkdir(mode=0o700)
+    monkeypatch.setattr(generator, "os", SimpleNamespace(**vars(generator.os)))
+    owners = _install_tracking_owned_descriptors(monkeypatch)
     real_open = generator.os.open
     real_close = generator.os.close
     real_fstat = generator.os.fstat
@@ -1844,20 +1846,15 @@ def test_root_close_after_release_cannot_close_reused_descriptor(
         nonlocal replacement_descriptor
         if descriptor == root_descriptor:
             root_close_attempts.append(descriptor)
-            real_close(descriptor)
             if len(root_close_attempts) == 1:
-                while replacement_descriptor is None:
-                    candidate = real_open(
-                        replacement_path,
-                        os.O_CREAT | os.O_RDWR,
-                        0o600,
-                    )
-                    replacement_descriptors.append(candidate)
-                    if candidate == descriptor:
-                        replacement_descriptor = candidate
-                    elif candidate > descriptor:
-                        raise AssertionError("root descriptor was reused externally")
+                candidate = real_open(replacement_path, os.O_CREAT | os.O_RDWR, 0o600)
+                # Atomically release and reuse our slot before another thread can acquire it.
+                os.dup2(candidate, descriptor)
+                real_close(candidate)
+                replacement_descriptor = descriptor
+                replacement_descriptors.append(descriptor)
                 raise OSError(f"{sensitive_marker} at {sensitive_path}")
+            real_close(descriptor)
             return
         if descriptor == lock_descriptor:
             lock_close_attempts.append(descriptor)
@@ -1884,9 +1881,12 @@ def test_root_close_after_release_cannot_close_reused_descriptor(
         assert lock_close_attempts == [lock_descriptor]
         assert replacement_descriptor == root_descriptor
         real_fstat(replacement_descriptor)
-        with pytest.raises(OSError) as lock_closed:
-            real_fstat(lock_descriptor)
-        assert lock_closed.value.errno == errno.EBADF
+        assert len(owners) == 2
+        lock_owner = owners[1]
+        assert lock_owner.initial_descriptor == lock_descriptor
+        assert lock_owner.close_calls == lock_owner.detach_calls == 1
+        with pytest.raises(RuntimeError, match="^Descriptor ownership has already been released$"):
+            lock_owner.fileno()
         formatted_diagnostic = "".join(
             traceback.format_exception(
                 type(exc_info.value),
@@ -1903,12 +1903,15 @@ def test_root_close_after_release_cannot_close_reused_descriptor(
                 real_close(replacement)
             except OSError:
                 pass
-        for descriptor in (lock_descriptor, root_descriptor):
-            if descriptor is not None:
-                try:
-                    real_close(descriptor)
-                except OSError:
-                    pass
+        for owner in owners:
+            try:
+                descriptor = owner.fileno()
+            except RuntimeError:
+                continue
+            try:
+                real_close(descriptor)
+            except OSError:
+                pass
 
 
 @pytest.mark.skipif(
@@ -1927,6 +1930,8 @@ def test_direct_root_close_baseexception_closes_lock_and_preserves_root_error(
 
     lock_root = tmp_path / "locks"
     lock_root.mkdir(mode=0o700)
+    monkeypatch.setattr(generator, "os", SimpleNamespace(**vars(generator.os)))
+    owners = _install_tracking_owned_descriptors(monkeypatch)
     real_open = generator.os.open
     real_close = generator.os.close
     real_fstat = generator.os.fstat
@@ -2001,16 +2006,33 @@ def test_direct_root_close_baseexception_closes_lock_and_preserves_root_error(
             final_tail = final_tail.tb_next
         assert final_tail is recorded_tail
         real_fstat(root_descriptor)
-        with pytest.raises(OSError) as lock_closed:
-            real_fstat(lock_descriptor)
-        assert lock_closed.value.errno == errno.EBADF
+        assert len(owners) == 2
+        lock_owner = owners[1]
+        assert lock_owner.initial_descriptor == lock_descriptor
+        assert lock_owner.close_calls == lock_owner.detach_calls == 1
+        with pytest.raises(RuntimeError, match="^Descriptor ownership has already been released$"):
+            lock_owner.fileno()
     finally:
-        for descriptor in (lock_descriptor, root_descriptor):
-            if descriptor is not None:
-                try:
-                    real_close(descriptor)
-                except OSError:
-                    pass
+        for owner in owners:
+            try:
+                descriptor = owner.fileno()
+            except RuntimeError:
+                continue
+            try:
+                real_close(descriptor)
+            except OSError:
+                pass
+        # The root's injected failure precedes native close; the lock slot is released.
+        if root_descriptor is not None:
+            try:
+                root_metadata = real_fstat(root_descriptor)
+                expected_root = lock_root.stat()
+                if (root_metadata.st_dev, root_metadata.st_ino) == (
+                    expected_root.st_dev, expected_root.st_ino,
+                ):
+                    real_close(root_descriptor)
+            except OSError:
+                pass
 
 
 @pytest.mark.parametrize("body_raises", [True, False], ids=["primary-error", "unlock-only"])
@@ -2461,6 +2483,7 @@ def test_publication_lock_failed_view_cannot_close_reused_descriptor(
     close_message = "direct standalone close failure"
     close_error = DirectCloseFailure(close_message)
     primary_tracebacks: list[Any] = []
+    monkeypatch.setattr(generator, "os", SimpleNamespace(**vars(generator.os)))
     lock_files = _install_direct_close_failing_fdopen(
         monkeypatch,
         close_error,
@@ -2477,21 +2500,16 @@ def test_publication_lock_failed_view_cannot_close_reused_descriptor(
 
     def _close_and_reuse(descriptor: int) -> None:
         nonlocal replacement_descriptor
-        real_close(descriptor)
         if lock_files and descriptor == lock_files[0].descriptor:
             raw_close_attempts.append(descriptor)
             if replacement_descriptor is None:
-                while replacement_descriptor is None:
-                    candidate = os.open(
-                        replacement_path,
-                        os.O_CREAT | os.O_RDWR,
-                        0o600,
-                    )
-                    replacement_descriptors.append(candidate)
-                    if candidate == descriptor:
-                        replacement_descriptor = candidate
-                    elif candidate > descriptor:
-                        raise AssertionError("lock descriptor was reused externally")
+                candidate = os.open(replacement_path, os.O_CREAT | os.O_RDWR, 0o600)
+                os.dup2(candidate, descriptor)
+                real_close(candidate)
+                replacement_descriptor = descriptor
+                replacement_descriptors.append(descriptor)
+                return
+        real_close(descriptor)
 
     monkeypatch.setattr(generator.os, "close", _close_and_reuse)
 

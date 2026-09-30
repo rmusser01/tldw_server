@@ -681,3 +681,15 @@ Retain job109745901883 metadata/annotations and unavailable-log result, preserve
 Native stack pins logger thread reading handles in the global unlink spy while main closes SQLite connections. Reuse existing SimpleNamespace only for this test module os unlink/path binding; no production or pool change.
 
 Local qualification: 17 moderation cases pass with zero skips and normal exit. Independent source/evidence review is clear and verifies preserved assertion/definition ASTs; hosted Windows acceptance remains open. Evidence: /private/tmp/pr2979-uat544-{red,green}.log/.xml and Bandit JSON.
+
+
+### UAT545 — fixture descriptor observation (TASK-13260.278.18.83.34)
+
+**Goal:** Make descriptor reuse and close checks independent of unrelated process allocation.
+**Success Criteria:** Controlled native reuse exposes old allocation/EBADF assumptions; exact once-only ownership, native replacement usability and exception precedence remain checked. No production change.
+**Tests:** Two hosted failures, sibling lock-file reuse case, full fixture-generator module, missing-close mutation, Ruff/Bandit, independent review.
+**Status:** In Progress
+
+Native macOS integrations job109745920407 has2failed3327passed9existing skips; a released root slot was externally occupied, and a closed lock slot was already reused. Reuse existing descriptor-owner tracker and native atomic dup2 on the still-owned slot; do not retry ambiguous close or assume numeric descriptors stay unused. Preserve native failure evidence and final hosted gate.
+
+UAT545 local qualification complete: final179cases/zero skips/normal exit; controlled native collision3green from2causalred. Missing-close2 and unsafe-retry1 mutants fail preserved close-count assertions with live globals. Independent review notes (fdopen facade ordering and armed-owner failure teardown) are resolved; final source/evidence review clear. Four net LOW test assertions only, Ruff/compile/diff clean, no production change. Initial copied-namespace probe failures are invalid evidence and preserved; hosted acceptance remains open.
