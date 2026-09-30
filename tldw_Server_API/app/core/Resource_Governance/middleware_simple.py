@@ -134,8 +134,10 @@ class RGSimpleMiddleware:
         session = request.cookies.get(settings.SINGLE_USER_SESSION_COOKIE_NAME)
         if not (auth_header or api_key is not None or session):
             return None
-        # Every credential the resolver may read is in the key; raw values are never stored.
-        creds = (("bearer", auth_header), ("x-api-key", api_key), ("session-cookie", session))
+        # Every credential the resolver may read is in the key, plus the client IP because
+        # validation is IP-gated (per-key allowed_ips); raw values are never stored.
+        client_ip = str(getattr(request.state, "rg_client_ip", "") or "")
+        creds = (("ip", client_ip), ("bearer", auth_header), ("x-api-key", api_key), ("session-cookie", session))
         key = hashlib.sha256("\0".join(f"{kind}\0{value}" for kind, value in creds if value is not None).encode()).hexdigest()
         now = time.monotonic()
         hit = self._identity_cache.get(key)

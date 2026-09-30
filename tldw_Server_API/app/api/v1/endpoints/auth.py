@@ -1126,18 +1126,23 @@ async def _reserve_auth_rg_requests(
 
     # Skip when ingress already charged this request to this policy. rg_ingress_entity
     # is set only after an allowed ingress reservation, so a fail-open ingress never
-    # skips. Ingress entities come only from a validated credential or the IP, never
-    # from an unvalidated header, so an ip:-keyed auth reservation is covered by
-    # whichever entity ingress charged; the two IP derivations (AuthNZ trusted proxies
-    # vs RG_TRUSTED_PROXIES, TASK-13144) can disagree, so the IP itself isn't compared.
+    # skips. user:/api_key: ingress entities come from a validated credential and ip:
+    # from the connection, so an ip:-keyed auth reservation is covered by whichever of
+    # those ingress charged; the two IP derivations (AuthNZ trusted proxies vs
+    # RG_TRUSTED_PROXIES, TASK-13144) can disagree, so the IP itself isn't compared.
+    # A tenant: entity comes from an unvalidated header and never stands in for it.
     # Reservations keyed on some other entity (a per-email throttle, or the per-user MFA
     # limit when ingress charged the IP) still apply.
     state = getattr(request, "state", None)
-    ingress_entity = getattr(state, "rg_ingress_entity", None)
+    ingress_entity = str(getattr(state, "rg_ingress_entity", None) or "")
+    ingress_kind = ingress_entity.split(":", 1)[0]
     if (
         getattr(state, "rg_policy_id", None) == policy_id
         and ingress_entity
-        and (rg_entity == ingress_entity or rg_entity.startswith("ip:"))
+        and (
+            rg_entity == ingress_entity
+            or (rg_entity.startswith("ip:") and ingress_kind in {"user", "api_key", "ip"})
+        )
     ):
         return True, None
 

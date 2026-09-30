@@ -141,8 +141,14 @@ def test_cached_invalid_credential_is_never_promoted_to_an_entity(client):
     # The negative entry means "no principal", not "the first caller's ip:" bucket.
     _from_ip(client, "10.0.0.1").get("/api/v1/thing", headers={"X-API-KEY": "fake"})
     _from_ip(client, "10.0.0.2").get("/api/v1/thing", headers={"X-API-KEY": "fake"})
-    assert client.principal_calls == ["fake"]
     assert _charged_entities(client) == {"ip:10.0.0.1", "ip:10.0.0.2"}
+
+
+def test_cached_identity_is_per_client_ip(client):
+    # validate_api_key enforces per-key allowed_ips, so another IP is another resolution.
+    _from_ip(client, "10.0.0.1").get("/api/v1/thing", headers={"X-API-KEY": "7"})
+    _from_ip(client, "10.0.0.2").get("/api/v1/thing", headers={"X-API-KEY": "7"})
+    assert client.principal_calls == ["7", "7"]
 
 
 def test_valid_identity_expires_after_ttl(client, monkeypatch):

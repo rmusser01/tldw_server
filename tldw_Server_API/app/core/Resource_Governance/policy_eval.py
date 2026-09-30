@@ -11,6 +11,7 @@ safety-net rule is that no configuration can produce a permanent 429.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -74,7 +75,10 @@ def effective_policy(get_policy: Callable[[str], Mapping[str, Any] | None], poli
     requests = policy["requests"]
     rpm = float(requests["rpm"])
     if rpm * max(1.0, float(requests.get("burst") or 1.0)) < 1:
-        policy["requests"] = {**requests, "burst": 1 / rpm}
+        burst = 1 / rpm
+        while rpm * burst < 1:  # float rounding: 0.41 * (1 / 0.41) == 0.9999999999999999
+            burst = math.nextafter(burst, math.inf)
+        policy["requests"] = {**requests, "burst": burst}
     return policy
 
 

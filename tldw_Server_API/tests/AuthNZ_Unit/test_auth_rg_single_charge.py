@@ -73,6 +73,13 @@ async def test_ingress_charged_user_skips_ip_reservation(spy):
     assert allowed and spy.entities == []
 
 
+async def test_ingress_charged_tenant_still_reserves_ip(spy):
+    # A tenant: ingress entity comes from an unvalidated header; rotating it must not
+    # stand in for the per-IP auth charge.
+    await auth_ep._reserve_auth_rg_requests(_request(_POLICY, "tenant:acme"), policy_id=_POLICY, entity=_IP)
+    assert spy.entities == [_IP]
+
+
 async def test_ingress_charged_other_policy_still_reserves(spy):
     await auth_ep._reserve_auth_rg_requests(_request("authnz.default", _IP), policy_id=_POLICY, entity=_IP)
     assert spy.entities == [_IP]
