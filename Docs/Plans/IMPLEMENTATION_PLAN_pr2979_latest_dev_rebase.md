@@ -693,3 +693,15 @@ Local qualification: 17 moderation cases pass with zero skips and normal exit. I
 Native macOS integrations job109745920407 has2failed3327passed9existing skips; a released root slot was externally occupied, and a closed lock slot was already reused. Reuse existing descriptor-owner tracker and native atomic dup2 on the still-owned slot; do not retry ambiguous close or assume numeric descriptors stay unused. Preserve native failure evidence and final hosted gate.
 
 UAT545 local qualification complete: final179cases/zero skips/normal exit; controlled native collision3green from2causalred. Missing-close2 and unsafe-retry1 mutants fail preserved close-count assertions with live globals. Independent review notes (fdopen facade ordering and armed-owner failure teardown) are resolved; final source/evidence review clear. Four net LOW test assertions only, Ruff/compile/diff clean, no production change. Initial copied-namespace probe failures are invalid evidence and preserved; hosted acceptance remains open.
+
+
+### UAT546 — synthetic cleanup retry effects (TASK-13260.278.18.83.35)
+
+**Goal:** Test retry scheduling without invoking process-wide collection for a synthetic lock.
+**Success Criteria:** Six original transient retries, six collection requests and six100ms delay requests are verified through module-local fakes; fixture cleanup and its40-attempt cap remain identical. Native shard completion/exit required.
+**Tests:** Controlled unexpected collector causal red, full database module, collection-removal mutation, Ruff/Bandit, independent review.
+**Status:** In Progress
+
+Native macOS job109745920271 emits1190-case XML with1failure/95skips, timeout at gc.collect in this retry unit, then host cancels at1hour after summary. Underlying collector/destructor and post-summary exit causes unproven; do not infer real production cleanup repaired or waive native acceptance.
+
+UAT546 unit isolation locally qualified: controlled collector1red to1green; full affectedSQLite module47pass/two original concurrency skips/normalexit,2.73s. One assertion verifies six ordered collect/100ms delay pairs; live-global missingcollect and wrongdelay mutants fail it. Original helper/40cap/101asserts/19otherdefs unchanged. Independent source/artifact review clear, Ruff17inherited/0added, BanditoneLOWassert added/noerrors, compile/diff clean. Underlying nativecollector and post-summary shutdown stall remain unproven; final hosted normal exit required.
