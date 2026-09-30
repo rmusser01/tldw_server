@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-09-29
-**Task:** TASK-13396 (closes TASK-13395)
+**Task:** TASK-13405 (closes TASK-13395)
 **Amends:** ADR-018 and ADR-044
 
 ## Decision
