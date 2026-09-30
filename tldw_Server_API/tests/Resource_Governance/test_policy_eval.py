@@ -42,6 +42,18 @@ def test_policy_without_requests_inherits_default_requests():
     assert out["tokens"] == {"per_min": 100}
 
 
+def test_fractional_rpm_capacity_is_raised_to_one_unit():
+    src = {"requests": {"rpm": 0.5, "burst": 1.0}, "scopes": ["user"]}
+    out = effective_policy(_getter({"p": src}), "p")
+    assert out["requests"] == {"rpm": 0.5, "burst": 2.0}
+    assert src["requests"] == {"rpm": 0.5, "burst": 1.0}  # the store's dict is not mutated
+
+
+def test_fractional_rpm_with_enough_burst_is_unchanged():
+    pol = {"requests": {"rpm": 0.3, "burst": 10.0}}
+    assert effective_policy(_getter({"p": pol}), "p")["requests"] == {"rpm": 0.3, "burst": 10.0}
+
+
 def test_getter_errors_are_treated_as_unknown():
     def boom(_pid):
         raise RuntimeError("store down")

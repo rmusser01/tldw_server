@@ -70,6 +70,11 @@ def effective_policy(get_policy: Callable[[str], Mapping[str, Any] | None], poli
     if not _has_requests(policy):
         fallback = _lookup(get_policy, DEFAULT_POLICY_ID)
         policy["requests"] = dict((fallback if _has_requests(fallback) else BUILTIN_DEFAULT_POLICY)["requests"])
+    # A bucket that can't hold one request denies forever: raise burst so capacity is 1.
+    requests = policy["requests"]
+    rpm = float(requests["rpm"])
+    if rpm * max(1.0, float(requests.get("burst") or 1.0)) < 1:
+        policy["requests"] = {**requests, "burst": 1 / rpm}
     return policy
 
 

@@ -173,6 +173,22 @@ async def test_policy_store_failure_is_logged_once_and_default_applies(backend, 
     assert len([m for m in seen if "'p'" in m and "PolicyLoader not initialized" in m]) == 1, seen
 
 
+async def test_fractional_rpm_admits_then_refills(backend):
+    # The shipped authnz.magic_link.email policy. Redis once used int(rpm) == 0 here.
+    clock = FakeTime()
+    gov, _ = _gov(backend, {"p": {"requests": {"rpm": 0.3, "burst": 10.0}, "scopes": ["user"]}}, clock)
+    first = await _admits(gov, _req("user:1", "p"), 5)
+    assert first[0] and not first[-1], first
+    clock.advance(201)  # one unit refills in 60 / 0.3 = 200 s
+    assert await _admits(gov, _req("user:1", "p"), 1) == [True]
+
+
+async def test_fractional_rpm_bucket_holds_at_least_one_unit(backend):
+    # rpm * burst < 1 used to be a bucket that could never hold one request.
+    gov, _ = _gov(backend, {"p": {"requests": {"rpm": 0.5, "burst": 1.0}, "scopes": ["user"]}}, FakeTime())
+    assert (await _admits(gov, _req("user:1", "p"), 3))[0] is True
+
+
 async def test_memory_evicts_full_idle_buckets_only():
     clock = FakeTime()
     policies = {
