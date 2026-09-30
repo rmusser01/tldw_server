@@ -1073,6 +1073,11 @@ def _auth_rg_policy_defined(request: Request, policy_id: str, governor: Any) -> 
 
 
 async def _get_auth_endpoint_rg_governor(request: Request) -> Optional[Any]:
+    from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
+
+    if not bool(_rg_enabled_flag(True)):
+        return None
+
     try:
         app = request.app
         state = getattr(app, "state", None)

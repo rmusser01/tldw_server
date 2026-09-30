@@ -1977,8 +1977,9 @@ def _rg_enabled_for_request(request: Request) -> bool:
 
 
 def _rg_enabled_flag() -> bool:
-    raw = os.getenv("RG_ENABLED", "")
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+    from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled
+
+    return bool(_rg_enabled(True))
 
 
 def _log_auth_deps_rg_diagnostics_only_shim(

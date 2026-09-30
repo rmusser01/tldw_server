@@ -2526,7 +2526,7 @@ async def _maybe_rg_shadow_chat_decision(
         return
 
     try:
-        if not bool(_rg_enabled_flag(False)):  # type: ignore[arg-type]
+        if not bool(_rg_enabled_flag(True)):  # type: ignore[arg-type]
             return
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001 - defensive
         logger.debug("RG shadow: rg_enabled check failed, skipping shadow comparison: {}", exc)
@@ -3972,7 +3972,7 @@ async def create_chat_completion(
             try:
                 from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
 
-                rg_active = bool(_rg_enabled_flag(False))
+                rg_active = bool(_rg_enabled_flag(True))
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(
                     "Chat RG: rg_enabled lookup failed; disabling RG path: {}",

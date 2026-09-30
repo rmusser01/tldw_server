@@ -76,7 +76,7 @@ def validate_auth_rg_startup_guards(
 
     from tldw_Server_API.app.core.config import rg_enabled
 
-    if not bool(rg_enabled(False)):
+    if not bool(rg_enabled(True)):
         logger.warning(
             "Resource Governor is disabled in production-like environment (RG_ENABLED=0). "
             "Startup will continue; auth routes rely on non-RG limiter paths."

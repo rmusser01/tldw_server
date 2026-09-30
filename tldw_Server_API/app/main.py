@@ -2067,7 +2067,7 @@ try:
     from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag  # noqa: E402
 
     try:
-        _rg_global_enabled = bool(_rg_enabled_flag(False))
+        _rg_global_enabled = bool(_rg_enabled_flag(True))
     except _STARTUP_GUARD_EXCEPTIONS:
         _rg_global_enabled = False
 
