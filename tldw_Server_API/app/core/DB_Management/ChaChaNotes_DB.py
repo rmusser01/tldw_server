@@ -787,6 +787,7 @@ class CharactersRAGDB:
     """
     _CURRENT_SCHEMA_VERSION = 74  # Permanent Workspace startup receipts after Companion storage
     _POSTGRES_SCHEMA_VERSION = 78
+    _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
     _NOTE_TASK_V60_TABLES = (
@@ -25408,7 +25409,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 return
 
-        with postgres_schema_migration(backend, self._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT) as conn:
+        with postgres_schema_migration(backend, self._POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT) as conn:
             self._configure_notes_moodboard_studio_v61_postgres_transaction(conn)
             if self._postgres_schema_is_current(conn):
                 if target_version >= 74:

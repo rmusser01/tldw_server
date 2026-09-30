@@ -2,6 +2,7 @@
 
 import asyncio
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from dataclasses import replace
@@ -14,6 +15,7 @@ import pytest
 from tldw_Server_API.app.api.v1.endpoints import notes
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError, FTSQuery
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap import postgres_schema_migration
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
 pytestmark = pytest.mark.integration
@@ -265,6 +267,54 @@ def test_failed_bootstrap_can_retry_on_the_same_backend(
         if replacement is not None:
             replacement.close_connection()
         backend.get_pool().close_all()
+
+
+def test_cold_worker_waits_for_schema_owner_beyond_ddl_lock_budget(
+    pg_database_config: DatabaseConfig, tmp_path: Path,
+) -> None:
+    """A delayed schema owner must not prevent another worker's first Notes use."""
+    owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    waiter_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+
+    class ObservedBootstrap(CharactersRAGDB):
+        """Observe effective migration deadlines before delegating unchanged DDL."""
+
+        def _apply_schema_v4_postgres(self, conn: object) -> None:
+            """The acquisition budget must not leak into the first schema write."""
+            assert self.backend.execute(
+                "SELECT current_setting('lock_timeout') AS lock_timeout, "
+                "current_setting('statement_timeout') AS statement_timeout",
+                connection=conn,
+            ).rows[0] == {"lock_timeout": "5s", "statement_timeout": "30s"}
+            super()._apply_schema_v4_postgres(conn)
+
+    def create_owner_note() -> str:
+        """Initialize a cold worker and round-trip an owner-bound note."""
+        db = ObservedBootstrap(tmp_path / "waiter.db", client_id="2", backend=waiter_backend)
+        try:
+            note = db.add_note(title="Delayed bootstrap", content="Waiter can persist content")
+            return db.get_note_by_id(note)["content"]
+        finally:
+            db.close_connection()
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as workers:
+            with postgres_schema_migration(owner_backend, "100ms") as owner_connection:
+                waiter = workers.submit(create_owner_note)
+                deadline = time.monotonic() + 10
+                while not owner_backend.execute(
+                    "SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND NOT granted "
+                    "AND database=(SELECT oid FROM pg_database WHERE datname=current_database())",
+                    connection=owner_connection,
+                ).scalar:
+                    assert not waiter.done(), "Cold worker finished before waiting for the schema owner"
+                    assert time.monotonic() < deadline, "Cold worker did not reach the schema lock"
+                    time.sleep(0.01)
+                owner_backend.execute("SELECT pg_sleep(5.5)", connection=owner_connection)
+            assert waiter.result(timeout=30) == "Waiter can persist content"
+    finally:
+        for backend in (owner_backend, waiter_backend):
+            backend.get_pool().close_all()
 
 
 @pytest.mark.parametrize("reuse_backend", [True, False], ids=["one-worker", "separate-workers"])
