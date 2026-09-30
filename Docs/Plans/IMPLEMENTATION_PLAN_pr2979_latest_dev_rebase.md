@@ -833,3 +833,42 @@ UAT550 local qualification complete: only pagination target now executes sequent
 ## UAT552 retained native latency diagnostic — 2026-09-30
 
 UAT552 read-only investigation complete, with no justified source patch. Native macOS first GET took 1.201851833s against unchanged 0.70s; the hosted cause remains unproven. Three local investigations retain all 23 assertions, 300 sources, 120 jobs, 3,000 runs, all five latency limits and throughput20 requests/s. Original baseline passes in1.98s; private observers pass in2.15s; private cProfile passes in2.04s. Each has one pass, zero skips, 3,730 inherited warnings and normal exit0. Observer first GET0.151985s includes97 real route-context builds0.139754s; DB listing0.006946s, whole endpoint0.007458s, serialization0.000482s. Repeated GETs0.00775-0.00840s have no further route builds. Profile first GET0.268323s includes diagnostic overhead: 96 API route dependency/response populations,717 model fields/TypeAdapters; this identifies local cold framework work without proving the hosted delay. No warm-up, work shifted outside timer, workload/budget change, warnings suppression or speculative production/dependency/CI patch. Existing warmed-performance tests have different contracts and do not justify weakening this cold request measurement. Source bytes/AST identical to frozen baseline; root verifies23assertions and SHAfb497c7df8e349af7372db1a1760fdcd6fb8fb1f9c6b58838f50a61be00ab09b. Evidence /private/tmp/pr2979-uat552-readonly-evidence-20260930.json, baseline/observed/profile logs and raw profile/report. No active test sessions or source edits remain; no Bandit/lint execution claimed for this documentation-only tracking. Final exact-head native acceptance remains open; retain failed job109867122964 and investigate actual native profile if this recurs on the final replayed head.
+
+
+## UAT553 — Diagnose production HTTP relay debt recovery failure UAT553
+
+**Task:** TASK-13260.278.18.83.42
+
+**Goal:** Automatic Ubuntu job109951569093 fails only production relay recovery after restart: push recovery does not complete pending publication.447passes/183deselected/onefailure,182.88s. Root cause unproven; trace real HTTP relay, persistent debt/retry/owner and test observation before any source change.
+
+**Tests:** Trace all shared callers and test ownership, compare existing patterns, reproduce exact original failure with controlled causal evidence. Record the smallest justified plan before edits; preserve original assertions, timing limits, actual I/O and rollback/cleanup/debt contracts. Qualify affected scopes, meaningful mutation, compile/Ruff/Bandit and independent review after any change. Use required official PostgreSQL fixture when affected; no dependency or CI workaround. Final actual-head hosted/native acceptance remains open.
+
+**Status:** In Progress
+
+
+## UAT554 — Diagnose PostgreSQL prune transaction batch observation UAT554
+
+**Task:** TASK-13260.278.18.83.43
+
+**Goal:** Required Jobs PostgreSQL job109892524722 fails bounded fixed-candidate prune batch assertion: observed[2,2,2,2,1,1], expected[2,2,1].521passes/threeoriginalskips/1199deselected/onefailure,906.18s. Root cause unproven; distinguish real transaction retries from spy overlap using official PostgreSQL18.6 fixture.
+
+**Tests:** Trace all shared callers and test ownership, compare existing patterns, reproduce exact original failure with controlled causal evidence. Record the smallest justified plan before edits; preserve original assertions, timing limits, actual I/O and rollback/cleanup/debt contracts. Qualify affected scopes, meaningful mutation, compile/Ruff/Bandit and independent review after any change. Use required official PostgreSQL fixture when affected; no dependency or CI workaround. Final actual-head hosted/native acceptance remains open.
+
+**Status:** In Progress
+
+
+## UAT554 causal plan — 2026-09-30
+
+UAT554 causal evidence and edit plan, recorded before source edits: the official jobs_pg_dsn -> pg_temp_db fixture queries PostgreSQL 18.6 with RUN_JOBS=1, TLDW_TEST_NO_DOCKER=1 and TLDW_TEST_POSTGRES_REQUIRED=1. The unchanged test fails once, zero skips, six warnings, 2.20 seconds, normal exit 1. Its second recording_batch spy calls the already-installed record_prune_batch spy, so both append each real batch length. Trace proves one connection and transaction, one locked candidate selection, three real batches [1,2], [3,4], [5], three archive inserts and deletes, and successful transaction exit. The observed [2,2,2,2,1,1] is test double-counting; production batches are [2,2,1]. Minimal plan: delete only the redundant second spy block and its two-line comment in test_jobs_ttl_prune_transaction_boundaries.py. Retain the first typed spy, SQL tracing, official fixtures, all eight target and 77 module assertion ASTs, and production behavior. Require the same causal probe green, full affected transaction-boundary module with required PostgreSQL, a batch-contract mutation, compile/Ruff/Bandit baseline comparison and independent review. The initial invocation without RUN_JOBS=1 skipped collection and is invalid causal evidence. Artifacts: /private/tmp/pr2979-uat554-causal-red-20260930.log and .json; /private/tmp/pr2979-uat554-baseline-preservation-20260930.json. Final hosted Jobs PostgreSQL acceptance remains open.
+
+
+## UAT555 native package setup interruptions — 2026-09-30
+
+UAT555 native setup diagnostics: exact-head Python 3.13 jobs 109867133352 (llm-calls-property) and 109867133548 (product-evaluations-abtest) were cancelled by their existing one-hour job limit during step 4, Install FFmpeg and PortAudio (Linux). GitHub annotations explicitly report the maximum execution time. Logs end inside apt-get update after repeated Azure Ubuntu mirror Ign entries and archive.ubuntu.com InRelease downloads; Python/dependency setup and all test steps were skipped, and no JUnit files were produced. The precise package-manager/network stall remains unproven. Preserve logs, metadata and annotations; no speculative source, dependency, CI, mirror, timeout or cancellation change. Both scopes require replacement qualification on the actual final published native head. Evidence: /private/tmp/pr2979-native-109867133352.log and corresponding -meta.json/-annotations.json; same artifacts for 109867133548. This is tracking only; no tests, compile, Ruff or Bandit execution is claimed for Markdown.
+
+**Status:** In Progress; final hosted acceptance is open.
+
+
+## UAT553 retained hosted recovery diagnostic — 2026-09-30
+
+UAT553 retained diagnostic disposition: no justified source repair. The unchanged target passes in isolation (one pass, five inherited warnings, 13.51 seconds, normal exit 0) and with private ownership/stage observers. The actual push uses a frozen relay deadline, completes old debt sequence 4, and can legitimately leave new ingress sequence 5 pending until its materialization receipt finalizes; later pull completes that work. A private 1.05-second source-selection delay reproduces the exact old-debt assertion through correct durable lease-renewal refusal, but hosted push lasts about 171 milliseconds and contains no matching trace. This proves only a sufficient ownership-loss cause, not the hosted cause. A module-local fixed lease clock comparison was invalid because separate activation ownership validation rejects it first; retain and exclude it from causal acceptance. Unchanged full certification module with required official PostgreSQL fixtures: 26 passes, six inherited warnings, zero skips, 45.84 seconds and normal exit 0, including both PostgreSQL controls. Root verifies JUnit, source byte identity and 43 target _require call ASTs. Source SHA256 ad802e7f646acfb6f9b243385b948391a8d32b88bc89a7ef54a93c93c5061b3b. Preserve durable lease-loss pending/fail-closed behavior, actual HTTP relay/restart/debt contracts, timing limits and production. Artifacts /private/tmp/pr2979-uat553-certification-pg.log/.xml, source-preservation.json and root-verification.json. On a recurrence, obtain actual hosted content-free owner/lease claim-renew/current-row/completion-guard and stage traces before edits. Final automatic sync-pc-rest acceptance remains open. No Bandit/lint run is claimed for this tracking-only documentation.
