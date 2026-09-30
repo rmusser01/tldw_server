@@ -985,3 +985,35 @@ Native CI36762723116 job110059189037 on published64bab60 fails the unchanged col
 Hosted log and artifact11127233728 contain only ordinary timings and JUnit, no request-stage profile. Actual FastAPI0.141.1/Pydantic2.13.5/core2.46.5/Starlette1.7.0 on macOS26.6.2/Python3.12.10 are recorded. The runner-capacity notice describes queue delay and does not prove request-time contention. Earlier local cold route-construction profiling cannot attribute this hosted excess. No source fix, warmup, timer/workload/warning/dependency/CI change or local rerun is justified.
 
 Preserve active automatic/native diagnostics and defer replay/publication. Once useful runs are terminal, obtain content-free native cold-request boundary/profile evidence before repair: route/dependency construction, SQL, response serialization and elapsed versus CPU/scheduling. Keep the workload and budgets intact; instrumented diagnosis is separate from final acceptance. Tracking-only update; no compile/Ruff/Bandit/pytest run applies. Evidence /private/tmp/pr2979-uat552-native-recurrence-2144.json SHA4eda4b9c2843c6f282a45c489a1f9c7911135d73b05cd824ee80649c1bea6f44; native110059189037 log/meta/annotations/zip/XML retained.
+
+
+## UAT557 Windows extraction cleanup synchronization — 2026-09-30
+
+**Task:** TASK-13260.278.18.83.46. **Status:** In Progress.
+
+### Stage 1: Establish the causal failure
+**Goal:** Distinguish production lifecycle failure from the test's nominal polling budget.
+**Success Criteria:** Original assertion fails under a controlled coarse clock and cleanup hold; identical fine-clock control passes; actual cleanup remains real.
+**Tests:** Three coarse failures and three fine-clock passes on unchanged source, both normal exits; native JUnit confirms 3,304 passes, one failure, 33 original skips.
+**Status:** Complete
+
+### Stage 2: Preserve the lifecycle contract
+**Goal:** Use a real finite one-second setup wait in the single failing test.
+**Success Criteria:** Same real reload/cleanup collision, worker-release ordering and all original assertions; no replacement or later admission; no production budget changes.
+**Tests:** Actual-source coarse probe, full executor module and adjacent lifecycle controls, effective replacement mutant, compile/Ruff/Bandit, source/assertion preservation and independent review.
+**Status:** Complete
+
+### Stage 3: Qualify the published native head
+**Goal:** Safely publish the reviewed batch after useful diagnostics finish and obtain actual Windows acceptance.
+**Success Criteria:** Fresh remote/recovery/replay qualification, exact-head strict required/native success and settled reviews.
+**Tests:** Direct native/automatic job APIs, normal Windows shard exit; no old-head acceptance.
+**Status:** Not Started
+
+Controlled 15.625 ms loop resolution plus a 250 ms cleanup-thread hold makes 100 nominal 10 ms polls finish in 3–5 ms: three failures at the retained SHUTDOWN assertion. Identical fine-clock controls pass three times. Real cleanup subsequently succeeds; the hosted scheduler timing is unlogged, so exact attribution remains unproven. Replace only that polling count with `asyncio.timeout(1.0)` around the original state/sleep loop. Preserve the nominal one-second setup limit, real cleanup, every assertion and production behavior. Evidence /private/tmp/pr2979-uat557-{coarse-red,fine-control}.{log,xml,json}. The initial duplicate-timeout-plugin bootstrap reached zero test bodies and is excluded.
+
+
+### UAT557 final local verification
+
+Actual repaired source: three coarse-clock collision passes and 40 full-module passes, zero skips, normal exits 0; five inherited warnings per run. The live replacement-after-terminal-state mutant fails the retained final SHUTDOWN assertion three times; a 1.25-second cleanup-entry hold triggers the finite one-second setup TimeoutError. All 109 original assertion ASTs and 40 other definitions remain identical; production matches publication. Compile/Ruff pass; 111 inherited LOW Bandit findings remain identical, zero new/errors, nonzero status retained. Actual FastAPI 0.141.1/Pydantic 2.13.5/core 2.46.5/Starlette 1.7.0/Python 3.12.11 and managed imports verified.
+
+Independent source/artifact review is clear and verifies all 28 hashes/sizes; no independent pytest or PostgreSQL claim. Evidence /private/tmp/pr2979-uat557-final-evidence.json SHA76596cc7a32e0a27f6fa66f8751a1b400a49514f0b0145185a8593a00ea2d254; /private/tmp/pr2979-uat557-independent-review.json SHAf19c10be6ec7d271062dc6733c88a918745c7f32a484c6bd07f05c22af3c6142. Bootstrap/plugin and initial Ruff-cache errors are retained/excluded. Local AC1/2 checked; exact hosted scheduling attribution and final published-head Windows AC3 remain open. Preserve useful active diagnostics and defer publication.
