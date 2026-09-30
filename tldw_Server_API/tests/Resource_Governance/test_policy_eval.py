@@ -85,3 +85,7 @@ def test_clamp_leaves_fitting_and_unbounded_reservations_alone():
     cats = {"tokens": {"units": 50}}
     assert clamp_token_units({"tokens": {"per_min": 100}}, cats, capacity_includes_burst=True) == cats
     assert clamp_token_units({}, {"tokens": {"units": 10**9}}, capacity_includes_burst=True) == {"tokens": {"units": 10**9}}
+
+
+def test_malformed_store_value_is_treated_as_unknown():
+    assert effective_policy(lambda pid: "oops", "p") == BUILTIN_DEFAULT_POLICY

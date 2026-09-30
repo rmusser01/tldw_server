@@ -32,9 +32,9 @@ _warned_unknown: set[str] = set()
 def _lookup(get_policy: Callable[[str], Mapping[str, Any] | None], policy_id: str) -> dict[str, Any]:
     try:
         pol = get_policy(policy_id)
+        return dict(pol) if pol else {}
     except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
         return {}
-    return dict(pol) if pol else {}
 
 
 def _has_requests(policy: Mapping[str, Any]) -> bool:
