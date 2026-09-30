@@ -1124,6 +1124,21 @@ async def _reserve_auth_rg_requests(
 
     rg_entity = entity or f"ip:{_auth_request_client_ip(request)}"
 
+    # Skip only when ingress actually charged this request to this policy's per-IP
+    # bucket: rg_ingress_entity is set only after an allowed ingress reservation, so a
+    # fail-open ingress or one keyed on a (possibly fake, rotating) API key never skips.
+    # The two IP derivations (AuthNZ trusted proxies vs RG_TRUSTED_PROXIES) can
+    # disagree, so compare the entity kind, not the IP. Reservations keyed on email or
+    # user (e.g. MFA per-user limits) must still apply. See TASK-13144 for unifying the
+    # IP derivations.
+    state = getattr(request, "state", None)
+    if (
+        rg_entity.startswith("ip:")
+        and getattr(state, "rg_policy_id", None) == policy_id
+        and str(getattr(state, "rg_ingress_entity", None)).startswith("ip:")
+    ):
+        return True, None
+
     governor = await _get_auth_endpoint_rg_governor(request)
     if governor is None:
         _log_auth_rg_diagnostics_only_shim(reason="governor_unavailable", policy_id=policy_id)
