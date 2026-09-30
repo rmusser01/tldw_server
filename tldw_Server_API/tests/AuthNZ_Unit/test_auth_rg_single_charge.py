@@ -1,10 +1,10 @@
 """Auth endpoints charge a policy's RG bucket once per request.
 
-When RG ingress already charged this request to the same policy, the auth handler
-skips its own reservation if that reservation is keyed on the same entity or on
-the IP (ingress entities come only from a validated credential or the IP). It must
-not skip when ingress failed open and charged nothing, when ingress resolved a
-different policy, or when the auth reservation is keyed on some other email or user.
+When RG ingress already charged this request to the same policy and entity, the
+auth handler skips its own reservation. It must not skip when ingress failed open
+and charged nothing, when ingress resolved a different policy, or when ingress
+charged any other entity (a user, API key or tenant standing in for the IP would
+let a caller rotating accounts evade the per-IP limit).
 """
 
 from types import SimpleNamespace
@@ -67,10 +67,11 @@ async def test_ingress_charged_same_user_skips_user_reservation(spy):
     assert allowed and spy.entities == []
 
 
-async def test_ingress_charged_user_skips_ip_reservation(spy):
-    # A logged-in caller of forgot-password: ingress charged the global bucket as user:7.
-    allowed, _ = await auth_ep._reserve_auth_rg_requests(_request(_POLICY, "user:7"), policy_id=_POLICY, entity=_IP)
-    assert allowed and spy.entities == []
+async def test_ingress_charged_user_still_reserves_ip(spy):
+    # A logged-in caller of forgot-password: ingress charged user:7. Rotating valid accounts
+    # would give each request a fresh user bucket, so the per-IP auth charge still applies.
+    await auth_ep._reserve_auth_rg_requests(_request(_POLICY, "user:7"), policy_id=_POLICY, entity=_IP)
+    assert spy.entities == [_IP]
 
 
 async def test_ingress_charged_tenant_still_reserves_ip(spy):
