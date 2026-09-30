@@ -70,6 +70,10 @@ Actual Git Windows checkout filters on all57existing contractfiles reproduce the
 
 Local verified repair: Actual Git Windows checkout filters reproduce hosted CRLF digest abfac676 from unchanged57pinned blobs. Four narrow LF rules restore exact expected421672c5 digest and every filtered byte; all worktree/e49/HEAD blobs remain unchanged. Original Personalization module3passed/0skip,exit0. Independent verification checks exact57file selection and digest; root review clear. Attributes-only scope: Bandit inapplicable; diff clean. Native Windows final-head digest acceptance remains open.
 
+## Final repair-batch publication checkpoint — 2026-09-30
+
+Final publication rebase: newestdev955b1d9626a055ca44336a00d3d4c144949cb00f advances only unrelated TASK13392 record viaPR3062. All194reviewed branch commits replay cleanly from607431 onto955b: range-diff194equal/0changed/0added/0removed; resultingtree differs only thatupstreamtask. Qualified source head58ae540d67a9ebf8c954cbeedf9d686cc05a012f, all292changedPythonfiles compile; no source or dependency change invalidates focused checks. Clean tree/diff; freshls-remote confirms955bdev and expectede49publishedhead. Recoveryqualified-before-push-20260930 preserves b2bf3dcdec. FullUAT remainspaused; finalpublishedhead hosted and Qodogates remainpending.
+
 ## UAT541 — external deadline test assumes timer equals monotonic expiry (TASK-13260.278.18.83.30)
 
 Native20ms process-creation test fails because asyncio can fire a timer early within coarse15.625ms resolution after another5ms wakeup. Actual globaltime still has14ms remaining, so ProbeTimeout matches explicit spec and plan504. The communicate sibling shares this test assumption. Eight controlled elapsed/positive-remaining boundary probes retain actual cancellation/cleanup and exact20ms caps; uncapped mutant fails. Keep production semantics and use existingFakeClock for elapsed test state, pin remaining-positive outcome separately; no tolerance, timeout widening or skips. Final test repair/native acceptance pending.

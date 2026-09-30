@@ -645,3 +645,7 @@ Authorize only existing test_phase3_preflight_external_tools.py. Thin opt-in del
 **Status:** In Progress
 
 Two elapsed-deadline tests now use existingFakeClock advanced only after real delegated cancellation. Original20ms overall deadline/cap and raises/asserts remain;40ms local fixture proves cap selection. Both positive-remaining boundary controls pin contract-correct ProbeTimeout. Original coarse2red becomes4green; uncappedmutation4expectedfailures. Fullextool48plusadjacent301=349passed0skip5.82s; root and independent frozen-source review clear, independentcombined178passed0skip. Ruff0/Bandit15newLOWassertions only; compile/diff/AST preservation pass. No production, global asyncio, timer tolerance, skip or budget change. Native Windows final-head acceptance remains open.
+
+## Final publication qualification — 2026-09-30
+
+Final publication rebase: newestdev955b1d9626a055ca44336a00d3d4c144949cb00f advances only unrelated TASK13392 record viaPR3062. All194reviewed branch commits replay cleanly from607431 onto955b: range-diff194equal/0changed/0added/0removed; resultingtree differs only thatupstreamtask. Qualified source head58ae540d67a9ebf8c954cbeedf9d686cc05a012f, all292changedPythonfiles compile; no source or dependency change invalidates focused checks. Clean tree/diff; freshls-remote confirms955bdev and expectede49publishedhead. Recoveryqualified-before-push-20260930 preserves b2bf3dcdec. FullUAT remainspaused; finalpublishedhead hosted and Qodogates remainpending.
