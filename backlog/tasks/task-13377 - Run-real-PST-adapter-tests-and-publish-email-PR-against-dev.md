@@ -4,7 +4,7 @@ title: Run real PST adapter tests and publish email PR against dev
 status: In Progress
 assignee: []
 created_date: '2026-09-26 21:50'
-updated_date: '2026-09-30 00:00'
+updated_date: '2026-09-30 00:11'
 labels: []
 dependencies: []
 documentation:
@@ -130,6 +130,8 @@ Heartbeat23:23Z: current39e3/latestdev6000 unchanged, Qodoexact0/all9threadsreso
 Heartbeat23:43Z: current39e3/latestdev6000 unchanged; exact Qodo0/all9threadsresolved and no new feedback. Coverage-required36636758502SUCCESS23:31:24Z joins security/trustedlicensePASS. Backend/frontend/e2e/container remainqueued on originalattempt1, no current-headfailure. Three of seven requiredcontexts pass; ACTIVE heartbeat snapshot refreshed, actualmerge/AC7 pending remainingfour, no rerun/bypass/source edit.
 
 Dev advanced6000->607431154cf10129b5d9afa8f9b57d46636466fc through PR3053 (FastAPI0.141.1 and served-route introspection). Incoming76paths overlap only User_DB_Handling.py. Preserve dev include-time token scope guards and email tenancy/privacy protections; rebase, use isolated supported FastAPI dependencies, verify affected auth/email/nativePST/route/schema behavior, compile/lint/Bandit and review before publication. Prior39e3 gates are historical after refresh; AC5 publication and AC7 actualmerge pending.
+
+Dev6074 refresh verified: conflict-free rebase with75 incoming paths exactlydev and only User_DB_Handling.py combined; canonical authority/validated organization selection preserved alongside dev effective-route scoped-JWT guards. Isolated FastAPI0.141.1/Pydantic2.13.5/Starlette1.7.0:746combined auth/email/route and13monitoring cases pass,0failures/errors/skips; guarded nativePST10pass,0skips/outbound/model.92PR and72incomingPython compile (163unique);2resolutionpaths Ruffclean; all104incoming Ruff findings matchdev exactly;9production/script Bandit3inherited labels/0new/errors. Canonical generation/drift unchanged58fa00440a66/2104paths3244schemas; routeauth178baselineexact. Independent review clear. Existing report/JSON appended source/dependency/log/guard hashes; older receipts retained. Ready for exact-lease publication; AC5/published refresh and AC7/new-headQodo/CI/actualmerge pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -321,3 +321,33 @@ and verification log hashes are appended to the existing follow-up JSON. The
 prior reviewed head and tracking remain in
 `codex/email-pr3023-before-dev6000-20260929`. Fresh exact-head review and required
 hosted checks remain necessary before the authorized merge.
+
+
+## FastAPI route dev refresh (2026-09-29)
+
+Dev advanced to `607431154cf10129b5d9afa8f9b57d46636466fc` with the
+FastAPI 0.141.1 pin and shared served-route inspection. The rebase is conflict-free:
+75 of 76 incoming paths match dev exactly. The combined `User_DB_Handling.py`
+retains canonical authority and validated organization selection while using dev's
+effective route to detect include-time token-scope guards. The existing pagination
+diagnostic uses the same shared walker. Independent review found no actionable
+regression. The other 91 certified email Python hashes remain unchanged.
+
+With isolated FastAPI **0.141.1**, Pydantic **2.13.5** and Starlette **1.7.0**,
+the combined email/auth/route suite passes **746 cases**, and HTTP metrics plus
+monitoring scope checks pass **13 cases**, all with zero failures/errors/skips.
+All **ten guarded native PST endpoint/metadata cases** pass again with zero
+skips/outbound/model attempts. Suites overlap. All **92** PR Python files and
+**72** incoming Python files compile (**163** unique paths). Both retained
+resolution paths pass Ruff; the incoming 72-path Ruff findings match dev exactly
+(104 inherited, zero new). Nine incoming production/script paths have three
+Bandit token-type-label findings matching dev, with zero new findings/errors.
+
+Canonical generation and the hosted OpenAPI drift check pass with the unchanged
+`58fa00440a66` fingerprint: 2,104 paths / 3,244 schemas. The route-auth ratchet
+reports exactly 178 reviewed unauthenticated routes. The shared virtual environment
+is unchanged. Source, dependency, native-guard and log hashes are appended to the
+existing follow-up JSON. Previous receipts retain their original bindings; no
+benchmark or live VM drill was repeated. The previous head and tracking remain in
+`codex/email-pr3023-before-dev6074-20260929`. Fresh exact-head Qodo review and all
+seven required contexts must pass before the authorized merge.
