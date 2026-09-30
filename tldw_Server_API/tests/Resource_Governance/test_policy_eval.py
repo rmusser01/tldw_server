@@ -85,8 +85,9 @@ def test_scope_pairs_add_global_only_when_listed():
     assert scope_pairs({"scopes": ["user"]}, "user", "1") == [("user", "1")]
 
 
-def test_scope_pairs_default_scopes_are_global_plus_entity():
-    assert scope_pairs({}, "user", "1") == [("global", "*"), ("user", "1")]
+def test_scope_pairs_default_scopes_are_entity_only():
+    # A server-wide bucket is opt-in (ADR-057: global only for shared resources).
+    assert scope_pairs({}, "user", "1") == [("user", "1")]
 
 
 def test_clamp_caps_oversized_token_reservation_at_capacity():

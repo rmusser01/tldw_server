@@ -189,6 +189,19 @@ async def test_fractional_rpm_bucket_holds_at_least_one_unit(backend):
     assert (await _admits(gov, _req("user:1", "p"), 3))[0] is True
 
 
+async def test_policy_without_scopes_has_no_server_wide_bucket(backend):
+    gov, _ = _gov(backend, {"p": {"requests": {"rpm": 1, "burst": 1.0}}}, FakeTime())
+    assert await _admits(gov, _req("user:1", "p"), 1) == [True]
+    assert await _admits(gov, _req("user:2", "p"), 1) == [True]  # user:1 spent only its own bucket
+
+
+async def test_memory_refund_without_scopes_creates_no_global_bucket():
+    gov, _ = _gov("memory", {"p": {"requests": {"rpm": 100}, "tokens": {"per_min": 100}}}, FakeTime())
+    _dec, handle = await gov.reserve(_req("user:1", "p", tokens={"units": 10}), op_id="r")
+    await gov.commit(handle, actuals={"tokens": 5})
+    assert [k for k in gov._buckets if k[2] == "global"] == []
+
+
 async def test_memory_evicts_full_idle_buckets_only():
     clock = FakeTime()
     policies = {

@@ -81,13 +81,13 @@ def effective_policy(get_policy: Callable[[str], Mapping[str, Any] | None], poli
 def scope_pairs(policy: Mapping[str, Any], entity_scope: str, entity_value: str) -> list[tuple[str, str]]:
     """Return the (scope, value) buckets a request charges.
 
-    A policy's ``scopes`` decide whether a server-wide bucket exists. They never
-    remove the caller's own bucket: a request whose entity kind the policy does not
-    list is charged a per-entity bucket instead of being denied (the ADR-044 bug
-    class).
+    A policy's ``scopes`` decide whether a server-wide bucket exists; it is opt-in
+    (listed ``global``), never implied by omitting ``scopes``. They never remove the
+    caller's own bucket: a request whose entity kind the policy does not list is
+    charged a per-entity bucket instead of being denied (the ADR-044 bug class).
     """
     raw = policy.get("scopes")
-    scopes = [str(s) for s in raw] if isinstance(raw, list) and raw else ["global", "entity"]
+    scopes = [str(s) for s in raw] if isinstance(raw, list) else []
     pairs: list[tuple[str, str]] = [("global", "*")] if "global" in scopes else []
     pairs.append((entity_scope, entity_value))
     return pairs

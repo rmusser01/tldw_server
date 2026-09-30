@@ -328,12 +328,6 @@ class MemoryResourceGovernor(ResourceGovernor):
     def _category_limits(self, policy: dict[str, Any], category: str) -> dict[str, Any]:
         return dict(policy.get(category, {}))
 
-    def _scopes(self, policy: dict[str, Any]) -> list[str]:
-        s = policy.get("scopes")
-        if isinstance(s, list) and s:
-            return [str(x) for x in s]
-        return ["global", "entity"]
-
     def _compute_headroom_requests_tokens(
         self,
         *,
@@ -735,15 +729,11 @@ class MemoryResourceGovernor(ResourceGovernor):
                         burst = float(cfg.get("burst") or 1.0)
                         refill_per_sec = per_min / 60.0
                         capacity = per_min * max(1.0, burst)
-                    # global
-                    if "global" in self._scopes(pol):
-                        b = self._get_bucket(h.policy_id, category, "global", "*", capacity=capacity, refill_per_sec=refill_per_sec)
+                    # Refund exactly the buckets reserve() charged.
+                    for sc, ev in scope_pairs(pol, entity_scope, entity_value):
+                        b = self._get_bucket(h.policy_id, category, sc, ev, capacity=capacity, refill_per_sec=refill_per_sec)
                         b.refill(now)
                         b.tokens = min(b.capacity, b.tokens + refund_units)
-                    # entity
-                    b = self._get_bucket(h.policy_id, category, entity_scope, entity_value, capacity=capacity, refill_per_sec=refill_per_sec)
-                    b.refill(now)
-                    b.tokens = min(b.capacity, b.tokens + refund_units)
                     if get_metrics_registry:
                         get_metrics_registry().increment(
                             "rg_refunds_total",
@@ -818,15 +808,11 @@ class MemoryResourceGovernor(ResourceGovernor):
                     burst = float(cfg.get("burst") or 1.0)
                     refill_per_sec = per_min / 60.0
                     capacity = per_min * max(1.0, burst)
-                # global
-                if "global" in self._scopes(pol):
-                    b = self._get_bucket(h.policy_id, category, "global", "*", capacity=capacity, refill_per_sec=refill_per_sec)
+                # Refund exactly the buckets reserve() charged.
+                for sc, ev in scope_pairs(pol, entity_scope, entity_value):
+                    b = self._get_bucket(h.policy_id, category, sc, ev, capacity=capacity, refill_per_sec=refill_per_sec)
                     b.refill(now)
                     b.tokens = min(b.capacity, b.tokens + refund_units)
-                # entity
-                b = self._get_bucket(h.policy_id, category, entity_scope, entity_value, capacity=capacity, refill_per_sec=refill_per_sec)
-                b.refill(now)
-                b.tokens = min(b.capacity, b.tokens + refund_units)
                 if get_metrics_registry:
                     get_metrics_registry().increment(
                         "rg_refunds_total",
