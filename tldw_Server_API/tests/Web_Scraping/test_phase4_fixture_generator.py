@@ -12,6 +12,7 @@ import tempfile
 import traceback
 import unicodedata
 import warnings
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -79,6 +80,17 @@ def test_checked_fixture_manifest_includes_router_category() -> None:
             "router.json",
             "selectors.json",
         }
+
+
+def test_checked_phase4_fixtures_require_lf_checkout() -> None:
+    fixture_paths = sorted(
+        path.relative_to(generator.REPO_ROOT).as_posix()
+        for path in PHASE4_FIXTURE_ROOT.glob("*.json")
+    )
+    attributes = _run_git(generator.REPO_ROOT, "check-attr", "eol", "--", *fixture_paths)
+
+    assert len(fixture_paths) == 7
+    assert all(line.endswith(": eol: lf") for line in attributes.splitlines())
 
 
 def test_router_fixture_replay_is_self_contained() -> None:
@@ -773,11 +785,20 @@ def test_unresolvable_output_symlink_is_rejected_before_payload_build(
     [("..",), ("..", "..")],
     ids=["effective-source", "effective-source-parent"],
 )
+@pytest.mark.parametrize("normalize_lexically", [False, True], ids=["native", "windows-normalization"])
 def test_parent_traversal_through_missing_output_is_rejected_without_mutation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     parent_parts: tuple[str, ...],
+    normalize_lexically: bool,
 ) -> None:
+    if normalize_lexically:
+        real_resolve = Path.resolve
+
+        def _lexical_resolve(path: Path, *, strict: bool = False) -> Path:
+            return real_resolve(Path(os.path.normpath(path)), strict=strict)
+
+        monkeypatch.setattr(Path, "resolve", _lexical_resolve)
     source_root, source_commit = _create_clean_source_root(tmp_path)
     missing = source_root / "absent"
     output = missing.joinpath(*parent_parts)
@@ -802,10 +823,19 @@ def test_parent_traversal_through_missing_output_is_rejected_without_mutation(
     assert str(source_root) not in str(exc_info.value)
 
 
+@pytest.mark.parametrize("normalize_lexically", [False, True], ids=["native", "windows-normalization"])
 def test_output_resolution_preserves_parent_traversal_after_valid_symlink(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    normalize_lexically: bool,
 ) -> None:
+    if normalize_lexically:
+        real_resolve = Path.resolve
+
+        def _lexical_resolve(path: Path, *, strict: bool = False) -> Path:
+            return real_resolve(Path(os.path.normpath(path)), strict=strict)
+
+        monkeypatch.setattr(Path, "resolve", _lexical_resolve)
     source_root, _source_commit = _create_clean_source_root(tmp_path)
     source_child = source_root / "child"
     source_child.mkdir()
@@ -824,6 +854,27 @@ def test_output_resolution_preserves_parent_traversal_after_valid_symlink(
 
     _assert_fixture_marker(source_root / "generated" / "fixtures", "alias")
     assert not (alias_root / "generated").exists()
+
+
+def test_output_resolution_rejects_non_directory_prefix_before_parent_traversal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    non_directory = source_root / "file"
+    non_directory.write_bytes(b"unchanged")
+    real_resolve = Path.resolve
+
+    def _lexical_resolve(path: Path, *, strict: bool = False) -> Path:
+        return real_resolve(Path(os.path.normpath(path)), strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", _lexical_resolve)
+
+    with pytest.raises(ValueError, match="^output path could not be resolved$"):
+        generator._resolve_output_path(non_directory / ".." / "fixtures", source_root)
+    assert non_directory.read_bytes() == b"unchanged"
+    assert not (source_root / "fixtures").exists()
 
 
 def test_output_child_inside_source_root_remains_supported(
@@ -1052,7 +1103,7 @@ def test_publication_key_normalizes_case_and_unicode_aliases(
     assert generator._recovery_path_for_output(first_output) == generator._recovery_path_for_output(second_output)
     first_backup = _publication_backup_path(first_output, "a" * 32)
     second_backup = _publication_backup_path(second_output, "a" * 32)
-    assert first_backup != second_backup
+    assert first_backup.name != second_backup.name
     assert first_backup.name == f".{first_name}.backup-{'a' * 32}"
     assert second_backup.name == f".{second_name}.backup-{'a' * 32}"
 
@@ -2932,6 +2983,87 @@ def test_cooperative_reader_cannot_observe_two_rename_publication_gap(tmp_path: 
     ]
 
 
+@pytest.fixture
+def windows_text_descriptors(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Emulate CRT newline translation over real, always-binary descriptors."""
+    real_open = generator.os.open
+    real_write = generator.os.write
+    real_read = generator.os.read
+    real_close = generator.os.close
+    native_binary = getattr(os, "O_BINARY", 0)
+    binary_flag = native_binary or 1 << 29
+    text_modes: dict[int, bool] = {}
+    os_facade = SimpleNamespace(**vars(generator.os))
+    os_facade.O_BINARY = binary_flag
+
+    def _open(path: Any, flags: int, *args: Any, **kwargs: Any) -> int:
+        descriptor = real_open(path, (flags & ~binary_flag) | native_binary, *args, **kwargs)
+        text_modes[descriptor] = not bool(flags & binary_flag)
+        return descriptor
+
+    def _write(descriptor: int, data: bytes) -> int:
+        raw = data.replace(b"\n", b"\r\n") if text_modes[descriptor] else data
+        assert real_write(descriptor, raw) == len(raw)
+        return len(data)
+
+    def _read(descriptor: int, size: int) -> bytes:
+        raw = real_read(descriptor, size)
+        return raw.replace(b"\r\n", b"\n") if text_modes[descriptor] else raw
+
+    def _close(descriptor: int) -> None:
+        real_close(descriptor)
+        text_modes.pop(descriptor)
+
+    os_facade.open = _open
+    os_facade.write = _write
+    os_facade.read = _read
+    os_facade.close = _close
+    monkeypatch.setattr(generator, "os", os_facade)
+    try:
+        yield
+    finally:
+        for descriptor in text_modes:
+            real_close(descriptor)
+
+
+def test_recovery_journal_preserves_exact_bytes_with_windows_text_descriptors(
+    tmp_path: Path,
+    windows_text_descriptors: None,
+) -> None:
+    output = tmp_path / "fixtures"
+    staging = tmp_path / "staging"
+    _write_valid_fixture_set(output, "1" * 40, "old")
+    _write_valid_fixture_set(staging, "2" * 40, "new")
+    old_snapshot = generator._validate_fixture_set(output, predecessor_commit=None)
+    new_snapshot = generator._validate_fixture_set(staging, predecessor_commit=None)
+
+    record = generator._write_recovery_record(
+        output,
+        tmp_path / f".fixtures.backup-{'a' * 32}",
+        generator._path_identity(tmp_path, "parent changed"),
+        old_snapshot,
+        new_snapshot,
+    )
+
+    assert record.path.read_bytes() == record.raw
+    assert not list(tmp_path.glob(f"{record.path.name}.tmp-*"))
+
+
+def test_recovery_read_preserves_raw_crlf_bytes_with_windows_text_descriptors(
+    tmp_path: Path,
+    windows_text_descriptors: None,
+) -> None:
+    path = tmp_path / "recovery.json"
+    original = b"{}\r\n"
+    path.write_bytes(original)
+    path.chmod(0o600)
+
+    identity, raw = generator._read_recovery_file(path)
+
+    assert raw == original
+    assert identity == generator._path_identity(path, "record changed")
+
+
 def test_recovery_journal_is_validated_and_closed_before_atomic_publication(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2991,7 +3123,10 @@ def test_recovery_journal_is_validated_and_closed_before_atomic_publication(
         if target == canonical:
             assert path.parent == canonical.parent
             assert path.name.startswith(f"{canonical.name}.tmp-")
-            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+            metadata = path.stat()
+            assert generator._valid_lock_file_metadata(metadata)
+            if os.name == "posix":
+                assert stat.S_IMODE(metadata.st_mode) == 0o600
             assert writer_fsynced
             assert writer_closed
             assert temp_validated
@@ -3772,6 +3907,7 @@ def test_recovery_write_preserves_body_baseexception_over_close_failure(
 
     def _fail_close(descriptor: int) -> None:
         if descriptor in descriptors:
+            real_close(descriptor)
             raise OSError("secondary close failure")
         real_close(descriptor)
 
@@ -3854,14 +3990,22 @@ def test_recovery_directory_fsync_preserves_body_baseexception_over_close_failur
     parent_identity = generator._path_identity(tmp_path, "parent changed")
     real_open = generator.os.open
     real_close = generator.os.close
+    real_fstat = generator.os.fstat
+    directory_metadata = tmp_path.stat()
     descriptors: list[int] = []
     primary = PrimaryFsyncFailure("primary fsync failure")
 
     def _record_open(path: Any, *args: Any, **kwargs: Any) -> int:
-        descriptor = real_open(path, *args, **kwargs)
         if Path(path) == tmp_path:
+            descriptor = real_open(tmp_path / "directory-sync-descriptor", os.O_CREAT | os.O_RDWR, 0o600)
             descriptors.append(descriptor)
-        return descriptor
+            return descriptor
+        return real_open(path, *args, **kwargs)
+
+    def _directory_fstat(descriptor: int) -> os.stat_result:
+        if descriptor in descriptors:
+            return directory_metadata
+        return real_fstat(descriptor)
 
     def _fail_fsync(descriptor: int) -> None:
         if descriptor in descriptors:
@@ -3875,6 +4019,7 @@ def test_recovery_directory_fsync_preserves_body_baseexception_over_close_failur
 
     monkeypatch.setattr(generator.os, "open", _record_open)
     monkeypatch.setattr(generator.os, "fsync", _fail_fsync)
+    monkeypatch.setattr(generator.os, "fstat", _directory_fstat)
     monkeypatch.setattr(generator.os, "close", _fail_close)
     try:
         with pytest.raises(PrimaryFsyncFailure) as exc_info:

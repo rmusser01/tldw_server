@@ -438,7 +438,7 @@ Recovery reader/writer omit O_BINARY; real-descriptor probe proves text translat
 **Goal:** Preserve journal bytes and resolve physical prefixes before parent traversal.
 **Success Criteria:** Binary flags, minimal prefix resolution and three portable test controls pass without altering locking, identity, size/hash, source-root, recovery or durability guards.
 **Tests:** Durable causal regressions and full generator/consuming fixture modules; compile/Ruff/Bandit; unchanged seven frozen blobs.
-**Status:** In Progress
+**Status:** Complete
 
 Authorize only Helper_Scripts/web_scraping_phase4_fixtures.py, existing test_phase4_fixture_generator.py and narrow phase4JSON LF attributes. No custom path abstraction, platform-wide skip, fake Windows chmod or permission weakening. Reject missing/non-directory prefixes before parent traversal; keep existing nearest-parent validation. Root owns independent security-sensitive source review.
 
@@ -446,7 +446,9 @@ Authorize only Helper_Scripts/web_scraping_phase4_fixtures.py, existing test_pha
 **Goal:** Require native Windows and supported POSIX final-head acceptance.
 **Success Criteria:** Exact fixture contracts remain active and final automatic/native checks pass.
 **Tests:** Native hosted publication, reader and crash/recovery controls on final head.
-**Status:** Not Started
+**Status:** In Progress
+
+Seven causal failures become15focused and457full generator/allfive consuming-module passes, zero skips25.54seconds. Root and independent security-sensitive review are clear; helper changes only13lines and retains all physical-path/source-root/identity/hash/lock/recovery/durability guards. Allseven frozen blobs and canonical bytes independently match e49. Ruff/compile/diff pass; helper Bandit0before/after, tests add ten LOW assertions with inherited subprocess findings unchanged. Native Windows final-head acceptance remains open.
 
 ## Exact WebScraping inventory refresh — UAT535 (TASK-13260.278.18.83.23)
 

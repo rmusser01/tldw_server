@@ -1,3 +1,4 @@
 tldw_Server_API/app/core/MCP_unified/tests/fixtures/mcp_protocol/*/schema.json text eol=lf
 tldw_Server_API/app/core/Research/discovery/*.py text eol=lf
 tldw_Server_API/tests/fixtures/research_discovery_gateway_adapters/* text eol=lf
+tldw_Server_API/tests/Web_Scraping/fixtures/phase4/*.json text eol=lf
