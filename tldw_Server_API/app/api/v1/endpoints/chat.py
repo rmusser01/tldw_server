@@ -65,8 +65,8 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     get_override_model_priority,
     validate_provider_override,
 )
-from tldw_Server_API.app.core.Utils.base64url import SignatureMismatchError, verify_signed_token
 from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+from tldw_Server_API.app.core.Utils.base64url import SignatureMismatchError, verify_signed_token
 from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
     validate_image_url,
@@ -3488,6 +3488,7 @@ async def create_chat_completion(
                 _verify_conversation_ownership,
                 chat_db, request_data.conversation_id, current_user, supplied_scope,
                 use_stored_scope=supplied_scope is None,
+                conceal_foreign=True,
             )
             conversation_scope = _resolve_conversation_scope(**_scoped_conversation_fields(conversation))
             if conversation_scope.scope_type == "workspace":
@@ -6483,21 +6484,26 @@ def _verify_conversation_ownership(
     scope: ConversationScopeParams | None = None,
     *,
     use_stored_scope: bool = False,
+    conceal_foreign: bool = False,
 ) -> dict[str, Any]:
-    """Verify a live owned target before using stored scope for id-only chat turns."""
+    """Verify ownership and scope, retaining Chat's concealed foreign-target denial."""
     conversation = db.get_conversation_by_id(conversation_id)
     if not conversation or conversation.get("deleted"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
     conv_client_id = conversation.get("client_id")
     user_id = current_user.id
+    ownership_error = HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND if conceal_foreign else status.HTTP_403_FORBIDDEN,
+        detail="Conversation not found" if conceal_foreign else "Forbidden for this conversation",
+    )
     if conv_client_id is None or user_id is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden for this conversation")
+        raise ownership_error
     try:
         if int(conv_client_id) != int(user_id):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden for this conversation")
+            raise ownership_error
     except (TypeError, ValueError):
         if str(conv_client_id) != str(user_id):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden for this conversation") from None
+            raise ownership_error from None
     expected_scope = scope or (
         _resolve_conversation_scope(**_scoped_conversation_fields(conversation))
         if use_stored_scope else ConversationScopeParams()
