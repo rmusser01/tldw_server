@@ -456,6 +456,7 @@ async def test_log_llm_usage_repo_backend_error_is_best_effort(monkeypatch):
     assert "/private/usage-db" not in str(logger_stub.debugs)
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_tokens_ledger_op_id_ignores_client_request_id(monkeypatch):
     # The ledger dedupes on op_id; a client-repeatable X-Request-ID must not skip a charge.

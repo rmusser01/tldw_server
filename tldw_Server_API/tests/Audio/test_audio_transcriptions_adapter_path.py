@@ -128,6 +128,7 @@ def test_audio_transcriptions_uses_adapter_base_dir(
         assert captured_conversion["overwrite"] is True
 
 
+@pytest.mark.unit
 def test_audio_transcriptions_minutes_op_id_ignores_client_request_id(
     monkeypatch: pytest.MonkeyPatch,
     bypass_api_limits: Any,
