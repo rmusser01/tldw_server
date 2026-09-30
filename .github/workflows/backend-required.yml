@@ -231,6 +231,7 @@ jobs:
           pytest -q --disable-warnings -p pytest_asyncio.plugin \
             tldw_Server_API/tests/CI/test_rls_coverage_ratchet.py \
             tldw_Server_API/tests/lint/test_route_auth_ratchet.py \
+            tldw_Server_API/tests/lint/test_rg_route_map_lint.py \
             tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py
 
       # Contracts and ratchets that used to run only in ci.yml's full-suite shards,

@@ -305,7 +305,6 @@ route_map:
   by_tag:
     health: health.default
     authentication: authnz.default
-    auth: authnz.default
     users: core.default
     organizations: core.default
     org-team-keys: core.default
@@ -327,7 +326,6 @@ route_map:
     authnz-debug: core.default
     sandbox: core.default
     setup: core.default
-    subscriptions-deprecated: core.default
     chunking: core.default
     chunking-templates: core.default
     connectors: core.default
@@ -336,8 +334,6 @@ route_map:
     media: media.access
     media-embeddings: embeddings.default
     audio: audio.default
-    audio-websocket: audio.default
-    audio-ws: audio.default
     audio-jobs: audio.default
     web-scraping: web_scraping.default
     research: research.default
@@ -373,12 +369,7 @@ route_map:
     llm: core.default
     llamacpp: core.default
     mcp-unified: mcp.default
-    mcp-catalogs: mcp.default
     mcp-catalogs-scope: mcp.default
-    mcp.ingestion: mcp.ingestion
-    embeddings_server: embeddings_server.default
-    character_chat: character_chat.default
-    web_scraping: web_scraping.default
     workflows: workflows.default
     rag: rag.default
     watchlists: watchlists.default
@@ -386,8 +377,6 @@ route_map:
     audio-realtime: audio.default
   by_path:
     "/health": health.default
-    "/healthz": health.default
-    "/readyz": health.default
     "/metrics": core.default
     "/setup*": core.default
     "/v1/rerank": core.default
@@ -416,11 +405,9 @@ route_map:
     "/api/v1/chats*": character_chat.default
     "/api/v1/messages*": character_chat.default
     "/api/v1/characters*": character_chat.default
-    "/api/v1/dictionaries*": chat.default
-    "/api/v1/documents*": chat.default
     "/api/v1/chat/*": chat.default
     "/api/v1/embeddings*": embeddings.default
-    "/api/v1/vector-stores*": embeddings.default
+    "/api/v1/vector_stores*": embeddings.default
     "/v1/realtime": audio.default
     "/api/v1/audio*": audio.default
     "/api/v1/evaluations*": evals.default
@@ -442,7 +429,6 @@ route_map:
     "/api/v1/media*": media.access
     "/api/v1/watchlists/*": watchlists.default
     "/api/v1/watchlists*": watchlists.default
-    "/api/v1/subscriptions*": core.default
     "/api/v1/billing*": core.default
     "/api/v1/auth/forgot-password": authnz.forgot_password
     "/api/v1/auth/reset-password": authnz.reset_password
@@ -450,7 +436,8 @@ route_map:
     "/api/v1/auth/magic-link/request": authnz.magic_link.request
     "/api/v1/auth/mfa/verify": authnz.mfa.verify
     "/api/v1/auth/mfa/login": authnz.mfa.login
-    "/api/v1/auth*": authnz.default
+    "/api/v1/auth": authnz.default
+    "/api/v1/auth/*": authnz.default
     "/api/v1/authnz*": core.default
     "/api/v1/users*": core.default
     "/api/v1/orgs*": core.default
