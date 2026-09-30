@@ -11,7 +11,7 @@ from tldw_Server_API.app.core.Resource_Governance import MemoryResourceGovernor,
 
 pytestmark = [pytest.mark.unit, pytest.mark.rate_limit, pytest.mark.asyncio]
 
-BACKENDS = ["memory"]  # Task 3 appends "redis"
+BACKENDS = ["memory", "redis"]
 _ns = itertools.count()
 
 
