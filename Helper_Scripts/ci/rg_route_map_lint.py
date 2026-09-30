@@ -19,7 +19,8 @@ ALLOWLIST = Path(__file__).resolve().parent / "rg_route_map_lint_allowlist.txt"
 def lint(route_map: Mapping[str, Any], served: list[Any], allow: set[str]) -> list[str]:
     from tldw_Server_API.app.core.Resource_Governance.policy_resolver import compile_route_glob
 
-    paths = [r.path for r in served if getattr(r, "path", None) and getattr(r, "methods", None)]
+    http = [r for r in served if getattr(r, "path", None) and getattr(r, "methods", None)]
+    paths = [r.path for r in http]
     patterns = [(str(p), compile_route_glob(str(p))) for p in (route_map.get("by_path") or {})]
     problems: list[str] = []
     for i, (raw, rx) in enumerate(patterns):
@@ -30,8 +31,12 @@ def lint(route_map: Mapping[str, Any], served: list[Any], allow: set[str]) -> li
             problems.append(f"by_path {raw} is shadowed by earlier patterns")
     used_tags = {t for r in served for t in (getattr(r, "tags", None) or ())}
     for tag in route_map.get("by_tag") or {}:
+        tagged = [r.path for r in http if str(tag) in (getattr(r, "tags", None) or ())]
         if str(tag) not in used_tags:
             problems.append(f"by_tag {tag} is used by no served route")
+        elif tagged and all(any(rx.match(p) for _r, rx in patterns) for p in tagged):
+            # by_path wins, so this tag can never resolve a policy.
+            problems.append(f"by_tag {tag} is shadowed by by_path entries")
     return [p for p in problems if p not in allow]
 
 

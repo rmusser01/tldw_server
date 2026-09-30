@@ -43,6 +43,12 @@ def test_unused_tag_is_reported():
     assert lint({"by_path": {}, "by_tag": {"ghost": "p", "notes": "q"}}, _served(), set()) == ["by_tag ghost is used by no served route"]
 
 
+def test_tag_whose_routes_all_match_a_path_is_reported():
+    # by_path wins over by_tag, so this tag mapping can never take effect.
+    rm = {"by_path": {"/api/v1/notes*": "p"}, "by_tag": {"notes": "q"}}
+    assert lint(rm, _served(), set()) == ["by_tag notes is shadowed by by_path entries"]
+
+
 def test_allowlisted_problem_is_suppressed():
     problem = "by_tag ghost is used by no served route"
     assert lint({"by_path": {}, "by_tag": {"ghost": "p"}}, _served(), {problem}) == []
