@@ -239,3 +239,31 @@ UAT517 removes duplicate DESC encoding from the shared PostgreSQL archive-index 
 **Status:** In Progress
 
 Old head `60eedcdc` terminal results (800 pass/14 fail/34 cancelled/30 skipped) do not qualify the new branch. Optional real VAD remains locally unverified because torchaudio is absent. Frontend type checking retains the same 23 baseline diagnostics; extension type checking passes. Focused frontend suites pass 131 and fail 40 legacy render cases due to duplicate local React installations; three resolver probes confirm the environment split. No product workaround, assertion relaxation or test suppression is added. Require fresh hosted installs and native matrix completion. Full fresh-install UAT remains paused.
+
+## FastAPI route audit follow-up — UAT518 (TASK-13260.278.18.83.7)
+
+### Stage 1: Reproduce the upstream gap
+**Goal:** Establish whether included routes escape the pagination audit under dev's FastAPI version.
+**Success Criteria:** The same missing-pagination endpoint is detected at root but missed when nested on 0.141.1.
+**Tests:** Two-level router probe on FastAPI 0.136.3 and 0.141.1; durable existing model-collision controls expanded to nested routes.
+**Status:** Complete
+
+Private probe confirms a false pass only for the nested 0.141.1 route. Local all-169-commit replay onto dev `607431154c` succeeds with recovery ref preserving published `e49fab`; candidate `bef6421cd95dfeb9605df00896d5e47bb4382b64` remains unpushed. Published diagnostic CI continues unchanged.
+
+### Stage 2: Reuse the served-route walker
+**Goal:** Make the existing audit inspect every public schema using dev's shared route traversal.
+**Success Criteria:** Existing exact endpoint/model/property expectations detect the same missing pagination through root and nested routers.
+**Tests:** Durable red/green on FastAPI 0.141.1, full pagination module, shared route traversal and auth-ratchet controls.
+**Status:** Complete
+
+Keep APIRoute metadata, use served full paths for OpenAPI lookup, and preserve native path-format normalization. Remove the unused duplicate endpoint walker. No production schema or assertion is relaxed. Durable red has two nested failures/eight passes; the final actual-FastAPI route/pagination/auth/coverage scope passes 46 cases, zero skips. Independent review is clear.
+
+### Stage 3: Qualify and publish
+**Goal:** Verify the latest-dev candidate while preserving current remote diagnostics, then publish a single tested batch.
+**Success Criteria:** Compilation/lint/Bandit clear; affected application contracts pass; final head gets hosted and Qodo acceptance before merge.
+**Tests:** Focused route/API contracts with actual 0.141.1, ancestry/range-diff, protected CI and review gates.
+**Status:** In Progress
+
+Private dependency overlay leaves the shared 0.136.3 environment unchanged. Full UAT remains paused. Current remote head is `e49fab`, with final newer-dev acceptance still required.
+
+Latest-dev HTTP qualification passes all 68 PostgreSQL lifecycle/media controls with required official fixtures, zero skips and normal exit. The 269 changed Python files compile, Ruff passes, and the route test retains five baseline LOW Bandit assertions. Fresh Qodo e49 review adds image-memory, async Character reads, Sidepanel subscription/storage, missing handoff locales and downstream Chatbook capability findings; tasks .83.8-.11 track the server repair units before publication.

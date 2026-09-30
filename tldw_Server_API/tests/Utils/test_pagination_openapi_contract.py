@@ -3,9 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.routing import APIRoute
 from pydantic import create_model
+from starlette.routing import compile_path
+
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 MATRIX_PATH = Path("Docs/Design/Pagination_Completion_Matrix.md")
 UNRESOLVED_STATUSES = {"migration-candidate", "needs-confirmation"}
@@ -88,17 +91,6 @@ def _has_property_path(
     return True
 
 
-def _mounted_endpoints(routes: list[object]):
-    """Yield every endpoint callable, descending into included routers."""
-    for route in routes:
-        endpoint = getattr(route, "endpoint", None)
-        if endpoint is not None:
-            yield endpoint
-        included = getattr(route, "original_router", None)
-        if included is not None:
-            yield from _mounted_endpoints(included.routes)
-
-
 def test_pagination_matrix_has_no_unresolved_candidates() -> None:
     """Every inventoried route should be either canonicalized or explicitly exempt."""
     unresolved = [
@@ -131,15 +123,17 @@ def _pagination_mismatches(app: FastAPI, rows: list[dict[str, str]]) -> list[str
     document = app.openapi()
     components = document["components"]["schemas"]
     response_schemas: dict[tuple[str, str, str], list[dict[str, object]]] = {}
-    for route in app.routes:
+    for served in iter_served_routes(app.routes):
+        route = served.route
         if not isinstance(route, APIRoute) or not route.include_in_schema:
             continue
         endpoint = f"{route.endpoint.__module__.replace('.', '/')}.py:{route.endpoint.__name__}"
         model_name = getattr(route.response_model, "__name__", None)
         if model_name is None:
             continue
-        for method in route.methods:
-            operation = document["paths"].get(route.path_format, {}).get(method.lower())
+        path_format = compile_path(served.path)[1]
+        for method in served.methods:
+            operation = document["paths"].get(path_format, {}).get(method.lower())
             if operation is None:
                 continue
             response = operation["responses"][str(route.status_code or 200)]
@@ -161,6 +155,7 @@ def _pagination_mismatches(app: FastAPI, rows: list[dict[str, str]]) -> list[str
     return mismatches
 
 
+@pytest.mark.parametrize("mount_nested", [False, True])
 @pytest.mark.parametrize(
     ("include_legacy", "include_current", "endpoint_name", "missing_pagination"),
     [
@@ -176,7 +171,9 @@ def test_matrix_resolves_colliding_models_by_endpoint(
     include_current: bool,
     endpoint_name: str,
     missing_pagination: bool,
+    mount_nested: bool,
 ) -> None:
+    """Audit colliding response names through root and doubly included routers."""
     app = FastAPI()
     legacy_model = create_model(
         "SharedResponse", __module__="legacy_models", pagination=(dict[str, int], ...)
@@ -191,10 +188,15 @@ def test_matrix_resolves_colliding_models_by_endpoint(
     def current_list():
         return {"items": []}
 
+    target = APIRouter() if mount_nested else app
     if include_legacy:
-        app.add_api_route("/legacy", legacy_list, response_model=legacy_model)
+        target.add_api_route("/legacy", legacy_list, response_model=legacy_model)
     if include_current:
-        app.add_api_route("/current", current_list, response_model=current_model)
+        target.add_api_route("/current", current_list, response_model=current_model)
+    if mount_nested:
+        outer = APIRouter()
+        outer.include_router(target, prefix="/inner")
+        app.include_router(outer, prefix="/outer")
     endpoint = f"{__name__.replace('.', '/')}.py:{endpoint_name}"
     rows = [{
         "method": "GET",
