@@ -330,13 +330,13 @@ UAT528 local root review is clear:8causal cases pass and full affected modules/c
 **Goal:** Trace outer hosted timeout and historical fixture ownership on e49 versus latest dev.
 **Success Criteria:** Exact logs and official required PostgreSQL evidence identify or bound the cause.
 **Tests:** Historical survivor module, relevant standalone read/DDL controls and full-shard budget evidence.
-**Status:** In Progress
+**Status:** Complete
 
 ### Stage 2: Repair a confirmed shared cause
 **Goal:** Apply the smallest existing ownership or scheduling pattern after causal proof.
 **Success Criteria:** Original schema/survivor/transaction assertions remain intact and focused real PostgreSQL passes.
 **Tests:** Causal red/green, adjacent schema migrations, Ruff/Bandit and independent review.
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 3: Require hosted acceptance
 **Goal:** Qualify this shard on the final latest-dev head before merge.
@@ -345,3 +345,29 @@ UAT528 local root review is clear:8causal cases pass and full affected modules/c
 **Status:** Not Started
 
 UAT529 qualified locally:32causal failures/11neutral passes become43controls green; supported POSIX full93pass/0skip with official PostgreSQL required. Capability facade49pass/44explicit POSIX skips retains repository/parser/rejection/native-negative coverage. Original bodies/args are AST-identical; root independent review is clear, Ruff/compile/diff clean, production Bandit0findings and28new LOW test assertions only. Native final-head platform acceptance is still required.
+
+UAT531 diagnosis:8required PG/SQLite pass and4native-plugin PG pass; observed zero blockers/query age at most3seconds, hosted fixture activity13seconds before global55minute cutoff. Partition a-c/d-l exact1744nodes in allfive matrices using the existing CI pattern; retain all timeouts/PG assertions, no speculative production change.
+
+UAT531 final local review is clear. Exact1744nodes/all358PGcases preserved in allfive partitions; full50workflow contracts, actionlint1.7.12 and zero-added-omission coverage guard pass. New path invariant corrected to as_posix after causal Windows-path red/green. Ruff/compile/diff clean; four new LOW Bandit assertions only. Final hosted completion remains the open acceptance gate.
+
+## Mixed audio external dispatch — UAT532 (TASK-13260.278.18.83.19)
+
+### Stage 1: Isolate the real provider dispatch
+**Goal:** Prove the original aggregation contract calls a real model provider.
+**Success Criteria:** An opt-in tripwire fails before model dispatch without downloads.
+**Tests:** Exact original mixed audio case and native successful-case evidence.
+**Status:** In Progress
+
+### Stage 2: Reuse the existing transcription mock seam
+**Goal:** Keep real conversion, batching, chunking and URL error behavior with controlled segments.
+**Success Criteria:** Original mixed-result assertions pass and transcript content/one-call checks are causal.
+**Tests:** Exact case, adjacent audio preflight/summary controls, broader141 Media scope where feasible.
+**Status:** Not Started
+
+### Stage 3: Verify, review and qualify
+**Goal:** Record complete evidence and require final hosted acceptance.
+**Success Criteria:** No added skips, compile/Ruff/Bandit clear, independent review and final native checks accepted.
+**Tests:** Changed-scope quality and final-head automatic/native matrix.
+**Status:** Not Started
+
+UAT532 caller tracing expands the same one-file repair to three existing audio API contracts (upload success, URL success, mixed status), using one explicit opt-in controlled-transcription fixture and lower-provider tripwire. Do not deselect these known callers from final broader141 verification. First clean causal red intercepts before model loading; mixed+adjacent seams35pass. First BaseException-based tripwire disrupted TestClient and is retained as failed harness evidence; ordinary guarded Mock plus immediate assert_not_called yields clean red.

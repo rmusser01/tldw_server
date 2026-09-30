@@ -908,15 +908,18 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
-          # Cold ChaCha bootstraps run in chacha-core-stores to fit the 55m guard.
-          - name: db-management-a-l
+          # Cold ChaCha bootstraps stay in chacha-core-stores; split remaining database cases.
+          - name: db-management-a-c
             paths: >-
-              tldw_Server_API/tests/DB_Management/test_[a-bd-l]*.py
+              tldw_Server_API/tests/DB_Management/test_[a-b]*.py
               tldw_Server_API/tests/DB_Management/test_character_*.py
               tldw_Server_API/tests/DB_Management/test_chat_*.py
               tldw_Server_API/tests/DB_Management/test_claims_*.py
               tldw_Server_API/tests/DB_Management/test_con*.py
               tldw_Server_API/tests/DB_Management/test_core_*.py
+          - name: db-management-d-l
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[d-l]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
@@ -2551,15 +2554,18 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
-          # Cold ChaCha bootstraps run in chacha-core-stores to fit the 55m guard.
-          - name: db-management-a-l
+          # Cold ChaCha bootstraps stay in chacha-core-stores; split remaining database cases.
+          - name: db-management-a-c
             paths: >-
-              tldw_Server_API/tests/DB_Management/test_[a-bd-l]*.py
+              tldw_Server_API/tests/DB_Management/test_[a-b]*.py
               tldw_Server_API/tests/DB_Management/test_character_*.py
               tldw_Server_API/tests/DB_Management/test_chat_*.py
               tldw_Server_API/tests/DB_Management/test_claims_*.py
               tldw_Server_API/tests/DB_Management/test_con*.py
               tldw_Server_API/tests/DB_Management/test_core_*.py
+          - name: db-management-d-l
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[d-l]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
@@ -4034,15 +4040,18 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
-          # Cold ChaCha bootstraps run in chacha-core-stores to fit the 55m guard.
-          - name: db-management-a-l
+          # Cold ChaCha bootstraps stay in chacha-core-stores; split remaining database cases.
+          - name: db-management-a-c
             paths: >-
-              tldw_Server_API/tests/DB_Management/test_[a-bd-l]*.py
+              tldw_Server_API/tests/DB_Management/test_[a-b]*.py
               tldw_Server_API/tests/DB_Management/test_character_*.py
               tldw_Server_API/tests/DB_Management/test_chat_*.py
               tldw_Server_API/tests/DB_Management/test_claims_*.py
               tldw_Server_API/tests/DB_Management/test_con*.py
               tldw_Server_API/tests/DB_Management/test_core_*.py
+          - name: db-management-d-l
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[d-l]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
@@ -5428,15 +5437,18 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
-          # Cold ChaCha bootstraps run in chacha-core-stores to fit the 55m guard.
-          - name: db-management-a-l
+          # Cold ChaCha bootstraps stay in chacha-core-stores; split remaining database cases.
+          - name: db-management-a-c
             paths: >-
-              tldw_Server_API/tests/DB_Management/test_[a-bd-l]*.py
+              tldw_Server_API/tests/DB_Management/test_[a-b]*.py
               tldw_Server_API/tests/DB_Management/test_character_*.py
               tldw_Server_API/tests/DB_Management/test_chat_*.py
               tldw_Server_API/tests/DB_Management/test_claims_*.py
               tldw_Server_API/tests/DB_Management/test_con*.py
               tldw_Server_API/tests/DB_Management/test_core_*.py
+          - name: db-management-d-l
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[d-l]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
@@ -6813,15 +6825,18 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
-          # Cold ChaCha bootstraps run in chacha-core-stores to fit the 55m guard.
-          - name: db-management-a-l
+          # Cold ChaCha bootstraps stay in chacha-core-stores; split remaining database cases.
+          - name: db-management-a-c
             paths: >-
-              tldw_Server_API/tests/DB_Management/test_[a-bd-l]*.py
+              tldw_Server_API/tests/DB_Management/test_[a-b]*.py
               tldw_Server_API/tests/DB_Management/test_character_*.py
               tldw_Server_API/tests/DB_Management/test_chat_*.py
               tldw_Server_API/tests/DB_Management/test_claims_*.py
               tldw_Server_API/tests/DB_Management/test_con*.py
               tldw_Server_API/tests/DB_Management/test_core_*.py
+          - name: db-management-d-l
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[d-l]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB

@@ -859,7 +859,8 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "chacha-core-stores",
             "chacha-character-conversation",
             "chacha-content-persona",
-            "db-management-a-l",
+            "db-management-a-c",
+            "db-management-d-l",
             "db-privileges",
         }
         assert auth_db_shards.issubset(shard_names)
@@ -1832,6 +1833,40 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
                     covered_workflow_files[filename] = shard_name
 
         assert set(covered_workflow_files) == workflow_files
+
+
+def test_db_management_partitions_cover_each_file_once() -> None:
+    """Bound the slow database shard without dropping or duplicating any test file."""
+    workflow = _load(".github/workflows/ci.yml")
+    root = Path("tldw_Server_API/tests/DB_Management")
+    files = {path.as_posix() for path in root.glob("test_[a-l]*.py")}
+    patterns = {
+        "db-management-a-c": ("test_[a-c]*.py",),
+        "db-management-d-l": ("test_[d-l]*.py",),
+    }
+    jobs = (
+        "full-suite-linux-312-shards",
+        "full-suite-linux-313-shards",
+        "full-suite-macos-312-shards",
+        "full-suite-windows-312-shards",
+        "full-suite-os-313-release-shards",
+    )
+    for job in jobs:
+        shards = {
+            shard["name"]: set(str(shard["paths"]).split())
+            for shard in workflow["jobs"][job]["strategy"]["matrix"]["shard"]
+        }
+        assert "db-management-a-l" not in shards
+        covered: list[str] = []
+        for name, globs in patterns.items():
+            expected = {(root / pattern).as_posix() for pattern in globs}
+            assert shards[name] == expected
+            covered.extend(
+                filename for filename in files
+                if any(fnmatch.fnmatch(filename, pattern) for pattern in expected)
+            )
+        assert len(covered) == len(set(covered))
+        assert set(covered) == files
 
 
 def test_auth_core_unit_partitions_cover_each_file_once() -> None:
