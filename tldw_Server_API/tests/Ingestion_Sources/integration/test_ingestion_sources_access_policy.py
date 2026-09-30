@@ -440,11 +440,12 @@ def test_capabilities_endpoint_uses_explicit_response_model(ingestion_sources_po
     from tldw_Server_API.app.api.v1.schemas.ingestion_sources import (
         IngestionSourceCapabilitiesResponse,
     )
+    from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
-    route = next(
-        route
-        for route in ingestion_sources_policy_client["app"].routes
-        if getattr(route, "path", None) == "/api/v1/ingestion-sources/capabilities"
+    served = next(
+        served
+        for served in iter_served_routes(ingestion_sources_policy_client["app"].routes)
+        if served.path == "/api/v1/ingestion-sources/capabilities"
     )
 
-    assert route.response_model is IngestionSourceCapabilitiesResponse
+    assert served.route.response_model is IngestionSourceCapabilitiesResponse
