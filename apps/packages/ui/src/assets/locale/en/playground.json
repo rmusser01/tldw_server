@@ -1,4 +1,11 @@
 {
+  "mediaHandoff": {
+    "conflictLabel": "Media handoff conflict",
+    "conflict": "Your composer already has a draft. Insert the media source, replace your draft, or cancel the import.",
+    "insert": "Insert media source",
+    "replace": "Replace current draft",
+    "cancel": "Cancel import"
+  },
   "tips": {
     "title": "Tips",
     "quickIngest": "Use Quick ingest to add documents and web pages.",
