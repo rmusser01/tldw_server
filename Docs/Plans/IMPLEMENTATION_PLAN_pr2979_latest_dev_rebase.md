@@ -1017,3 +1017,32 @@ Controlled 15.625 ms loop resolution plus a 250 ms cleanup-thread hold makes 100
 Actual repaired source: three coarse-clock collision passes and 40 full-module passes, zero skips, normal exits 0; five inherited warnings per run. The live replacement-after-terminal-state mutant fails the retained final SHUTDOWN assertion three times; a 1.25-second cleanup-entry hold triggers the finite one-second setup TimeoutError. All 109 original assertion ASTs and 40 other definitions remain identical; production matches publication. Compile/Ruff pass; 111 inherited LOW Bandit findings remain identical, zero new/errors, nonzero status retained. Actual FastAPI 0.141.1/Pydantic 2.13.5/core 2.46.5/Starlette 1.7.0/Python 3.12.11 and managed imports verified.
 
 Independent source/artifact review is clear and verifies all 28 hashes/sizes; no independent pytest or PostgreSQL claim. Evidence /private/tmp/pr2979-uat557-final-evidence.json SHA76596cc7a32e0a27f6fa66f8751a1b400a49514f0b0145185a8593a00ea2d254; /private/tmp/pr2979-uat557-independent-review.json SHAf19c10be6ec7d271062dc6733c88a918745c7f32a484c6bd07f05c22af3c6142. Bootstrap/plugin and initial Ruff-cache errors are retained/excluded. Local AC1/2 checked; exact hosted scheduling attribution and final published-head Windows AC3 remain open. Preserve useful active diagnostics and defer publication.
+
+
+## UAT558 Windows abandoned activation deadline investigation — 2026-09-30
+
+**Task:** TASK-13260.278.18.83.47. **Status:** In Progress; all acceptance criteria remain open.
+
+### Stage 1: Preserve and distinguish the failure
+**Goal:** Preserve native failure and unchanged real-storage controls.
+**Success Criteria:** Native JUnit parity, exact source preservation and content-free real-lease/budget/stage observations; controlled reproduction is distinguished from hosted attribution.
+**Tests:** Two unchanged baseline passes, two exact assertion failures after a real acquired-lease 150 ms hold, and 32 unchanged full-module passes; zero skips and normal exits.
+**Status:** Complete
+
+### Stage 2: Identify the actual native cause
+**Goal:** Obtain native first-deferral, deadline, durable ownership and source-stage evidence before any repair.
+**Success Criteria:** Trace identifies why no row was inspected while retaining the 100 ms deadline, one-second lease, row budget one and all privacy/coverage assertions.
+**Tests:** Content-free native boundary and ownership observations; no private frozen clock, budget increase or bypass.
+**Status:** Not Started
+
+### Stage 3: Qualify any justified repair on the final head
+**Goal:** Safely publish only a proven reviewed repair after useful diagnostics are terminal.
+**Success Criteria:** Preserved assertions, relevant causal/full/static checks and independent review if source changes; actual final Windows Notes/Persona and all strict required/native gates succeed.
+**Tests:** Actual final-head direct job APIs and normal native exits, settled review/Chatbook disposition.
+**Status:** Not Started
+
+Native job 110059205903 on published 64bab60 fails legacy=True `inspected_rows == 1`, observing zero with legitimate pending continuation. Artifact 11129170032 confirms 2,014 cases: 1,999 passes, one failure, 14 original skips, zero errors. Native log/JUnit contain no first-deferral, lease, deadline or source-stage trace. Setup/teardown timestamps cannot attribute the cause.
+
+Unchanged content-free baseline passes both legacy variants in 1.24 seconds. Real lease acquisition and source selection finish within roughly 3 ms locally. A controlled 150 ms hold after actual acquisition exceeds the original 100 ms relay deadline before either lookup: both cases fail the original inspected-row assertion in 1.57 seconds. Real monotonic and durable-lease wall clocks remain intact; this is a sufficient controlled cause, not exact hosted attribution. The unchanged full activation module passes 32 cases in 2.06 seconds. Each run has six inherited warnings, zero skips and a normal exit (red exit 1, green exit 0).
+
+All 63 original assertion ASTs and 36 definitions remain preserved through exact source-byte equality; test and both relay/store production files match publication. Test SHA256 0b594717650b124aafb0fa44f254ca0de89fe352641c261b0566fe0f3d53aef6. No source, database-policy, deadline, dependency, warning or CI change is justified; no PostgreSQL or independent pytest claim. No static checks apply to Markdown-only tracking. Manifest /private/tmp/pr2979-uat558-readonly-verification-manifest.json SHA256 f240debbc934fd044d626bae15f11622e62f44db39b8de38e464b1383be0ab63 verifies 18 artifacts. The unavailable initial artifact read is excluded; the successful read and JUnit are retained. Preserve useful active diagnostics and defer replay/publication. UAT553 remains a distinct restart/push debt investigation.
