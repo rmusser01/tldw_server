@@ -445,3 +445,18 @@ Python certificate paths are listed explicitly; older validation is not recertif
 for modified paths. No full repository suite, native-PST, throughput benchmark,
 million-message benchmark or live VM drill rerun is claimed. Publication, latest
 dev integration and fresh exact-head review/CI remain pending at this receipt.
+
+
+## Playground dev refresh on September 30 — TASK-13377
+
+After the reviewed CI repair, latest dev 2256bc82afa154891c635df3ef955ed7a6bc61b3
+was integrated without conflicts. All seven incoming Playground test/locale and
+Backlog paths match dev; the other 22,377 non-Backlog tracked entries and all
+16 repaired Python hashes are unchanged before this evidence update. All 27
+affected Playground tests passed across four files with zero failures/errors/skips
+using the existing Bun 1.3.2, Node 26.0.0 and Vitest 4.0.18 installations. Exact
+temporary dependency links were removed; shared installations were unchanged.
+Independent integration review is clear. Equality, source, command and log/XML
+receipts are appended under playground_dev_refresh_20260930. Earlier JSON values
+and original benchmark/native-PST/schema bindings are preserved without reruns.
+Fresh exact-head review and all seven required contexts still gate the merge.

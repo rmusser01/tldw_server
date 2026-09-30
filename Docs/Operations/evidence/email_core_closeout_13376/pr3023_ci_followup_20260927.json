@@ -1965,5 +1965,94 @@
       "email_pr3023_ci_fix_review_complete_20260930.patch": "a83b0ee768a3efa47464e51cee832418fdabb15be8113e0216846f49b651132b"
     },
     "publication_state": "Verified fixes not yet published; latest dev refresh, exact-head Qodo and all seven required contexts must pass before merge."
+  },
+  "playground_dev_refresh_20260930": {
+    "previous_head": "38f144207ff53523bd5cc601856472fed9cc3855",
+    "rebased_head": "d2a4ce005f6fb0d2e35f653e2b46d5d234a86548",
+    "dev": "2256bc82afa154891c635df3ef955ed7a6bc61b3",
+    "incoming_paths": [
+      "apps/packages/ui/src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx",
+      "apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundHooks.jsx-extension.guard.test.ts",
+      "apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundModalFooters.design-system.test.tsx",
+      "apps/packages/ui/src/components/Option/Playground/__tests__/playground-locale-mirror.test.ts",
+      "apps/packages/ui/src/public/_locales/en/playground.json",
+      "backlog/tasks/task-13391 - Playground-coordinator-test-fails-intermittently-saved-transcript-not-restored-on-remount.md",
+      "backlog/tasks/task-13394 - 15-Playground-tests-fail-on-dev-in-4-files-research-context-hooks-guard-modal-footers-locale-mirror.md"
+    ],
+    "all_incoming_exact_dev": true,
+    "other_non_backlog_count": 22377,
+    "other_entries_identical_before_evidence": true,
+    "fixed_python_paths": 16,
+    "fixed_python_sha256": {
+      "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": "b641a6c7dc85e5eb137528c9f2d520c1c7d0800a132c346ddf18de1b37bf07e7",
+      "tldw_Server_API/app/core/DB_Management/Collections_DB.py": "77ae981aa72702598564598933b29ac095b82400053ad2b3db7495f69f333c29",
+      "tldw_Server_API/tests/AuthNZ/integration/test_storage_quotas_bootstrap_postgres.py": "b25084755498193b8179141bdbf35d3e0ea294797c2938ca63a3f1d72e7cb279",
+      "tldw_Server_API/tests/CI/test_required_workflow_contracts.py": "8a99955c8305ef0138723455fbc2ae8247b867fc5367249219e97e32c8198676",
+      "tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v61.py": "80aa082caa6aac82360a6e018be1d08efef1c1692caae2e2579c7c7a7bc02221",
+      "tldw_Server_API/tests/DB_Management/test_media_db_runtime_factory.py": "5a865b9de273cabe3b991713414cd16f736d38c556fe223f76ec2696109283d7",
+      "tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py": "c35bfd08954b20bd4e70a28b1e25e131e521748a77fd1d1510dd84444c8abdee",
+      "tldw_Server_API/tests/DB_Management/test_media_ingest_worker_content_scope.py": "cfce7354c4ca2fcc39bfc40a3c908c645f367a0a1dc3a313e6fb11c08f6c0059",
+      "tldw_Server_API/tests/DB_Management/test_media_postgres_migrations.py": "a65f47f871c7dd409f170b6b9611613680839c83c0147f4d5b131455b38a75b7",
+      "tldw_Server_API/tests/DB_Management/test_media_postgres_support.py": "ef2918dafac286f43c4a545d9e4d808c62268e27648ac1fe6f3999adae7adee9",
+      "tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_access_policy.py": "3c757ee0d8a033aaa624603dba7712a93754f959229d4eedb6f79fd21b00b4a8",
+      "tldw_Server_API/tests/Media/unit/test_media_upload_cleanup.py": "559bb98a77c3a95d2ec6b36028d959737bc9434b7b98804400c977cc9e9d26e1",
+      "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_attachment_upload_13376.py": "d2af156797c0823765d5c6b5ee565464626844d48ba393b7ae3c94a3c4a7bd85",
+      "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_research_discovery_media_add.py": "37ef2e29780a5812bceaeaebe2cd4b04187dbefd50bf0aff7e51e5fe77f1fc35",
+      "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py": "313e502a1805f7d3960f6fc73c834af4f1fab5b5b7e1e2b96e52c3f3fe04c72b",
+      "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_url_limits.py": "dc69ea939ba8348d3d0bf9f27bb9f8c16630157c695aadeacdc2ec3a06895fc2"
+    },
+    "fixed_python_unchanged": true,
+    "frontend_validation": {
+      "tests": 27,
+      "failures": 0,
+      "errors": 0,
+      "skips": 0,
+      "files": 4,
+      "bun": "1.3.2",
+      "node": "v26.0.0",
+      "vitest": "4.0.18",
+      "execution": {
+        "command": [
+          "/Users/macbook-dev/.bun/bin/bun",
+          "run",
+          "test",
+          "src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx",
+          "src/components/Option/Playground/__tests__/PlaygroundHooks.jsx-extension.guard.test.ts",
+          "src/components/Option/Playground/__tests__/PlaygroundModalFooters.design-system.test.tsx",
+          "src/components/Option/Playground/__tests__/playground-locale-mirror.test.ts",
+          "--maxWorkers=1",
+          "--no-file-parallelism",
+          "--reporter=default",
+          "--reporter=junit",
+          "--outputFile.junit=/tmp/email_pr3023_dev2256_frontend_20260930.xml"
+        ],
+        "cwd": "apps/packages/ui",
+        "dependency_links": {
+          "node_modules": "/Users/macbook-dev/Documents/GitHub/tldw_server2/node_modules",
+          "apps/packages/ui/node_modules": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/packages/ui/node_modules",
+          "apps/tldw-frontend/node_modules": "/Users/macbook-dev/Documents/GitHub/tldw_server2/apps/tldw-frontend/node_modules"
+        },
+        "temporary_links_removed": true,
+        "shared_installations": "unchanged; no installation or write to shared dependencies",
+        "exit_code": 0
+      },
+      "log_sha256": "73dde5e697937efe7e01fc7e981966b406e2544435a807ae36d5084ed58c5524",
+      "xml_sha256": "9de7ba2d764a96fb266b1ec7c9848c54fdb4c7b890dd1054ce806b269693810e"
+    },
+    "incoming_source_sha256": {
+      "apps/packages/ui/src/components/Option/Playground/__tests__/Playground.research-context.integration.test.tsx": "8dc840ce56dbedcbf0e093067dd1fa98bcb357865f83cc106bcffb510ab99302",
+      "apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundHooks.jsx-extension.guard.test.ts": "0a259074146dc692c8132c832826b975440efa5f639e7d4108d69156f2368b55",
+      "apps/packages/ui/src/components/Option/Playground/__tests__/PlaygroundModalFooters.design-system.test.tsx": "719e17d450522ba2d9b05b3e8265346fefd61f711919ab11b070a297d41c7794",
+      "apps/packages/ui/src/components/Option/Playground/__tests__/playground-locale-mirror.test.ts": "0976bbfe0f703a1973fb88f8834a1807eadfa5f1fe35c057cda5196ce0a5deb1",
+      "apps/packages/ui/src/public/_locales/en/playground.json": "011f6c4acd8f61b944160ea0921406a6b22627ab357e3c233a5afbcdb0aa92f3"
+    },
+    "independent_review": {
+      "result": "clear",
+      "head": "d2a4ce005f6fb0d2e35f653e2b46d5d234a86548",
+      "scope": "Four Playground harness/JSX/type/locale tests, English locale mirror and two Backlog records. No email/auth/backend/dependency/CI/OpenAPI overlap or concrete blocker."
+    },
+    "backup_branch": "codex/email-pr3023-before-dev2256-20260930",
+    "historical_evidence": "Earlier values preserved; final repair source is unchanged across this rebase. Historical benchmark/PST/schema receipts retain their original tested bindings and were not rerun.",
+    "publication_state": "Latest dev integrated and verified. New reviewed head publication and all fresh required contexts remain pending."
   }
 }

@@ -4,7 +4,7 @@ title: Run real PST adapter tests and publish email PR against dev
 status: In Progress
 assignee: []
 created_date: '2026-09-26 21:50'
-updated_date: '2026-09-30 19:32'
+updated_date: '2026-09-30 19:38'
 labels: []
 dependencies: []
 documentation:
@@ -198,12 +198,14 @@ Heartbeat 16:12Z: published c49c08b4916919ac9fec0baae97c2963aa64bd90/latest dev 
 2026-09-30 18:12Z broad nonrequired CI36723727218 completed with 14 failing test shards and one aggregate failure; all 219 jobs across three API pages inspected, logs fetched for all 15 failed jobs. Required frontend remains active; six other contexts pass. Root-caused collection persistence KeyError from _column vs SQL {column} selector, reproduced locally before fix; child TASK-13377.2 tracks the minimal correction. Additional stale email/archive fixtures and unrelated dev failures are under investigation; do not merge until regressions are repaired and reviewed. No required jobs cancelled or weakened. Existing historical validation remains source-bound to c49 and earlier revisions.
 
 Broad CI fixes independently reviewed and verified: contracts253, Collections254, officialPG110, ChaCha30 and catalog/privacy12 pass; Watchlists708pass with existing skip/deselections/xpass documented. Child13377.2/.3/.4 complete. Production Ruff/Bandit0; test findings inherited baseline. Source-bound report/JSON appended under full_suite_ci_repair_20260930. Latestdev2256bc82af adds frontend PR3054 and tracking-only PR3059; commit/rebase/publication/fresh exact-head review and required CI pending. Seven old c49 required contexts pass but cannot certify modified source; do not merge old head.
+
+Latestdev2256bc82afa154891c635df3ef955ed7a6bc61b3 integrated conflict-free after reviewed CI fixes. Seven incoming paths exactlydev;22377 other nonBacklog entries and all16 repaired Python hashes identical before evidence update. Playground27tests/4files0fail/errors/skips; existing dependencies unchanged and exact temporary links removed. Independent integration review clear. Receipts appended under playground_dev_refresh_20260930; source publication and fresh exact-head Qodo/CI pending, old c49 successes not credited.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Broad CI fixes independently reviewed and verified: contracts253, Collections254, officialPG110, ChaCha30 and catalog/privacy12 pass; Watchlists708pass with existing skip/deselections/xpass documented. Child13377.2/.3/.4 complete. Production Ruff/Bandit0; test findings inherited baseline. Source-bound report/JSON appended under full_suite_ci_repair_20260930. Latestdev2256bc82af adds frontend PR3054 and tracking-only PR3059; commit/rebase/publication/fresh exact-head review and required CI pending. Seven old c49 required contexts pass but cannot certify modified source; do not merge old head.
+Latestdev2256bc82afa154891c635df3ef955ed7a6bc61b3 integrated conflict-free after reviewed CI fixes. Seven incoming paths exactlydev;22377 other nonBacklog entries and all16 repaired Python hashes identical before evidence update. Playground27tests/4files0fail/errors/skips; existing dependencies unchanged and exact temporary links removed. Independent integration review clear. Receipts appended under playground_dev_refresh_20260930; source publication and fresh exact-head Qodo/CI pending, old c49 successes not credited.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
