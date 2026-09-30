@@ -2054,5 +2054,235 @@
     "backup_branch": "codex/email-pr3023-before-dev2256-20260930",
     "historical_evidence": "Earlier values preserved; final repair source is unchanged across this rebase. Historical benchmark/PST/schema receipts retain their original tested bindings and were not rerun.",
     "publication_state": "Latest dev integrated and verified. New reviewed head publication and all fresh required contexts remain pending."
+  },
+  "governor_dev_refresh_20260930": {
+    "published_head_before_refresh": "47c3c02f77c6dead856998a31e61f6350ee762ba",
+    "latest_dev": "f3f1b4fdbe3fe461b371ece30887c5fff8476d9d",
+    "rebase_head_before_repairs": "c2747e2b805bb080779d2f40f196eb19b4888397",
+    "verified_at_utc": "2026-09-30T23:11:48.582941+00:00",
+    "rebase": {
+      "incoming_paths": 21,
+      "incoming_paths_exact_dev_before_repairs": 21,
+      "other_non_backlog_entries_identical_before_repairs": 22371,
+      "conflict": "The capabilities-route test had equivalent nested FastAPI fixes; retained the entire exact dev file.",
+      "retained_previous_repair_python_hashes": 15,
+      "previous_repair_hash_changed_to_exact_dev": [
+        "tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_access_policy.py"
+      ],
+      "final_incoming_paths_exact_dev": 19,
+      "incoming_paths_with_reviewed_repairs": [
+        "tldw_Server_API/app/core/Resource_Governance/governor.py",
+        "tldw_Server_API/app/core/Resource_Governance/governor_redis.py"
+      ]
+    },
+    "repairs": {
+      "TASK-13377.5": "Endpoint-first import eagerly imported main before router initialization and permanently omitted protected diagnostic/admin routes. Removed eager app import and cached fallback; use the existing lazy _get_app boundary.",
+      "TASK-13377.6": "Token minute clamping also clamped durable daily check/consume. Both backends now retain original daily units; minute windows still clamp, fallback preserves original request, and admin/auth behavior is unchanged."
+    },
+    "verification": {
+      "pre_fix_rebased": {
+        "cases": 369,
+        "passed": 359,
+        "failures": 8,
+        "errors": 0,
+        "ordinary_skips": 0,
+        "existing_xfails": [
+          "tldw_Server_API.tests.Resource_Governance.test_governor_redis_property::test_requests_retry_after_monotonic_and_burst_vs_steady",
+          "tldw_Server_API.tests.Resource_Governance.test_governor_redis::test_requests_burst_and_retry_after_behavior"
+        ],
+        "xml": "/tmp/email_pr3023_devf3f1_contracts_20260930.xml",
+        "xml_sha256": "f72e4d0bf78e84972045d8cc4656d350de2aa2366b455c3196dbb83226d722fa",
+        "log": "/tmp/email_pr3023_devf3f1_contracts_20260930.log",
+        "log_sha256": "3d076b3cbc3ff53e334dcb16fcdfc0f1516e02f6acbbf0a59faa75b8b7cac8a1"
+      },
+      "pre_fix_immutable_dev": {
+        "cases": 369,
+        "passed": 359,
+        "failures": 8,
+        "errors": 0,
+        "ordinary_skips": 0,
+        "existing_xfails": [
+          "tldw_Server_API.tests.Resource_Governance.test_governor_redis_property::test_requests_retry_after_monotonic_and_burst_vs_steady",
+          "tldw_Server_API.tests.Resource_Governance.test_governor_redis::test_requests_burst_and_retry_after_behavior"
+        ],
+        "xml": "/tmp/email_pr3023_devf3f1_dev_full_20260930.xml",
+        "xml_sha256": "324a23f04a6fea6b3bc4faa962ea1ff5fcde0ed55f1397d5a10c356f50c7a5db",
+        "log": "/tmp/email_pr3023_devf3f1_dev_full_20260930.log",
+        "log_sha256": "3e78394209adb1a0c841eefa80a7a5ea5a5fec1e56ba3f21de826510f945cd9e"
+      },
+      "import_order_red": {
+        "cases": 1,
+        "passed": 0,
+        "failures": 1,
+        "errors": 0,
+        "ordinary_skips": 0,
+        "existing_xfails": [],
+        "xml": "/tmp/email_pr3023_rg_import_red_20260930.xml",
+        "xml_sha256": "f5b263395e52441593fcce61182a497a02d8ca4c39773ff04425b6844d67cc7e",
+        "log": "/tmp/email_pr3023_rg_import_red_20260930.log",
+        "log_sha256": "54b5813159a1adc2472ecddf1560bf5bae11d01eaaacd07676dcd3f7b830c9f9"
+      },
+      "daily_token_red": {
+        "cases": 4,
+        "passed": 0,
+        "failures": 4,
+        "errors": 0,
+        "ordinary_skips": 0,
+        "existing_xfails": [],
+        "xml": "/tmp/email_pr3023_rg_daily_red_20260930.xml",
+        "xml_sha256": "b9c61dfd997c20d928aee243d29b2b3768865f6e373939691a51474392dc7a15",
+        "log": "/tmp/email_pr3023_rg_daily_red_20260930.log",
+        "log_sha256": "3235d96cde3d7807fb5fd5be3af6be8ff4c8e0f84ab7faff3e0a4c1e8a39b474"
+      },
+      "focused_green": {
+        "cases": 42,
+        "passed": 42,
+        "failures": 0,
+        "errors": 0,
+        "ordinary_skips": 0,
+        "existing_xfails": [],
+        "xml": "/tmp/email_pr3023_rg_green_20260930.xml",
+        "xml_sha256": "04049f2ff11240a81da01c5fd293e80e2dc686f3058e12d9043e088a62e707ae",
+        "log": "/tmp/email_pr3023_rg_green_20260930.log",
+        "log_sha256": "765d8926a8336b64dcd51ef95d096d69fe404f0db5ed274ad55a32df552153ad"
+      },
+      "affected_governor_auth_ingestion_sources": {
+        "cases": 374,
+        "passed": 372,
+        "failures": 0,
+        "errors": 0,
+        "ordinary_skips": 0,
+        "existing_xfails": [
+          "tldw_Server_API.tests.Resource_Governance.test_governor_redis_property::test_requests_retry_after_monotonic_and_burst_vs_steady",
+          "tldw_Server_API.tests.Resource_Governance.test_governor_redis::test_requests_burst_and_retry_after_behavior"
+        ],
+        "xml": "/tmp/email_pr3023_rg_final_20260930.xml",
+        "xml_sha256": "6b1be6e843e4d3bf9debc0cbf6cf6759fbf63af0dd8333aa1a7fc73d23b51b8a",
+        "log": "/tmp/email_pr3023_rg_final_20260930.log",
+        "log_sha256": "f5e882420982a790691704068881b924d8ead86b1d5a62e079b5212ada4e5240"
+      },
+      "retained_email_auth_route_contracts": {
+        "cases": 343,
+        "passed": 343,
+        "failures": 0,
+        "errors": 0,
+        "ordinary_skips": 0,
+        "existing_xfails": [],
+        "xml": "/tmp/email_pr3023_rg_email_20260930.xml",
+        "xml_sha256": "e909ee7e34423b6c7f874abcf4552b0c1a6b511a22a17f89bb9f676f135e3212",
+        "log": "/tmp/email_pr3023_rg_email_20260930.log",
+        "log_sha256": "dbb4da4fc2cb40ecd20eabfdb642e995f8f5eb2854f8973a25cfce13ef2d457d"
+      },
+      "seed_reproducing_import_order": 4293640905,
+      "scope": "Suites overlap; these are affected-scope validations, not a full repository suite. The two xfails are pre-existing requests burst/steady stub cases. The initial incomplete dev archive had a missing MCP package error; the complete immutable archive reproduces exactly the same eight404 failures, superseding that setup diagnostic."
+    },
+    "dependencies": {
+      "python": "3.11.13 (main, Aug 14 2025, 16:05:31) [Clang 20.1.4 ]",
+      "packages": {
+        "fastapi": "0.141.1",
+        "pydantic": "2.13.5",
+        "pydantic_core": "2.46.5",
+        "starlette": "1.7.0",
+        "pytest": "8.4.1",
+        "pytest-randomly": "4.1.0"
+      },
+      "wrapper": "/tmp/email_pr3023_dev6074_python_20260929",
+      "wrapper_sha256": "8124c9eac5121b300798ed6b1a8226b2ce7594f29b2acebd12766a477503fc1a",
+      "overlay": "/tmp/email_pr3023_dev6074_deps_20260929",
+      "shared_installations_changed": false
+    },
+    "source_sha256": {
+      "tldw_Server_API/app/api/v1/endpoints/auth.py": "9e0cc63419ac2f374bd93556bf98bcabd49185921555897db2168d4e63a43161",
+      "tldw_Server_API/app/core/MCP_unified/auth/rate_limiter.py": "3969417f36e9cf574ba8043f0bca8a066d1a281a3163786508593b3d4bff1ed3",
+      "tldw_Server_API/app/core/Resource_Governance/governor.py": "1aea0f69d29b1a4508b4d5b74bb6ebee67df1f2f9b8c724176cdc8fc871d2f93",
+      "tldw_Server_API/app/core/Resource_Governance/governor_redis.py": "c69d396e7714edaf28c44dd1dce8f57d1bf7b1a728c9b031a02f07901377bc88",
+      "tldw_Server_API/app/core/Resource_Governance/middleware_simple.py": "fd7057afd593984172791a956f8b539eb28e3b9f153342499918bdbea7cf33f3",
+      "tldw_Server_API/app/core/Resource_Governance/policy_eval.py": "7027d86a56fb9600c018232119a1b1436fb3d4783dd541e836bcd9e2664d017c",
+      "tldw_Server_API/app/services/startup_resource_governor.py": "83f042f24fa59178d29a9385f9f181f409ea40f5cc20f52d123ea6cb0c9aab26",
+      "tldw_Server_API/tests/AuthNZ_Unit/test_auth_rg_single_charge.py": "ca59222759797b8c121271b9e044bba804a142e82cf4773b7f72fe8c1c9de1c1",
+      "tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_access_policy.py": "966ba9354766d4b2a52e6a99fcf4606173ce28dcdd3a299b655919b32b7eb63d",
+      "tldw_Server_API/tests/Resource_Governance/test_governor_redis.py": "d52be23a5c07492929a6ab35d8b450e1f11d9cd7e65a4ef0da9882a82ae02081",
+      "tldw_Server_API/tests/Resource_Governance/test_governor_safety_net.py": "68978e2fe9cdfe1f6f860b5decc808524f81094d9d5c693cf509722776d16163",
+      "tldw_Server_API/tests/Resource_Governance/test_mcp_category_fallback.py": "b7bc947b4205cfd9c69f6c9d798e22f5b01d9df205aa7af38b97e3dce8bdf695",
+      "tldw_Server_API/tests/Resource_Governance/test_middleware_cookie_owner.py": "2f3811cca92c785878988689f451ae60089f46fd338bd6a7c0c0aea7b176d670",
+      "tldw_Server_API/tests/Resource_Governance/test_middleware_simple.py": "749d940c004a549a56749ef87a6401788062226ad585d529f64798c0c26b6c2d",
+      "tldw_Server_API/tests/Resource_Governance/test_policy_eval.py": "7f5217f2cc03d3f85a23956bcbdabbd9a6d5ac858c095c711a64eff272d520a4",
+      "tldw_Server_API/tests/Resource_Governance/test_policy_reference_consistency.py": "ff7ec84071081d93b14bbf0d458476f428300b3cb5a1e0eda0311bca71c1567e",
+      "tldw_Server_API/tests/Resource_Governance/test_policy_yaml_safety_net.py": "a1faa7221bbe2965dca49e45420a46ec6c858581efbcb98fadde94fdb897462b",
+      "tldw_Server_API/app/api/v1/endpoints/resource_governor.py": "e3f578e0aad3fe40261b39c9f411c0d21d0fbe5cbfbc9b0e5fb654810c88829b",
+      "tldw_Server_API/tests/Resource_Governance/test_tokens_daily_cap.py": "cca17367f02fdda0b1052b493db50f1ce6ee1d20ece2698f12d92c5c3efa2413",
+      "tldw_Server_API/tests/Resource_Governance/test_resource_governor_import_order.py": "f552b35ff15e0b1e90632cea9e744c20c3a95b016cb85ad5e04ce46b812fc4ba"
+    },
+    "compiled_python": 20,
+    "quality": {
+      "ruff": {
+        "current_findings": 7,
+        "baseline_findings": 7,
+        "new_findings": [],
+        "removed_findings": []
+      },
+      "bandit_production": {
+        "current_findings": 11,
+        "baseline_findings": 11,
+        "new_findings": [],
+        "removed_findings": []
+      },
+      "bandit_tests": {
+        "current_findings": 0,
+        "baseline_findings": 0,
+        "new_findings": [],
+        "removed_findings": []
+      }
+    },
+    "quality_scope": "Eight production and twelve test files, including all17incoming Python paths and three additional repair/regression paths. Production Bandit has no exclusions; eleven auth token-type B106 labels match immutable baseline. Test scan excludes B101 assertions and has only specifically justified B404/B603 annotations on a fixed interpreter/literal child code. No new findings or errors. Ruff seven findings match identically configured baseline; no source improvement inferred from the superseded baseline missing per-file ignores.",
+    "independent_review": {
+      "integration": "All21incoming paths exactdev before repairs; no faulty conflict disposition or email integration regression. Review discovered and verified the daily-token issue, repaired here.",
+      "final_patch_sha256": "c6f1d4c03e658d791d3aa50dd9550f0e57d42ca4a9c43ccec9cd341ebb04f292",
+      "result": "Clear; no critical/important/minor findings. Final annotation-only patch has identical test AST and matching source hashes."
+    },
+    "fresh_schema": {
+      "note": "Regenerate with `make openapi-fingerprint`. A change here means the backend API contract drifted; regenerate the frontend types (`bun run generate:api-types` in apps/tldw-frontend) and review.",
+      "openapi_version": "3.1.0",
+      "path_count": 2104,
+      "schema_count": 3244,
+      "sha256": "58fa00440a664a47cb9ad6e72350b2515a7e6ac061e81a13aca032fe803a3b47",
+      "check_exit_code": 0,
+      "route_auth_unauthenticated_routes": 178,
+      "route_auth_baseline": "exact",
+      "route_auth_exit_code": 0
+    },
+    "historical_certified_python_paths_changed_by_this_refresh": [
+      "tldw_Server_API/app/services/startup_resource_governor.py"
+    ],
+    "historical_certified_python_paths_changed_since_original_certificate": [
+      "tldw_Server_API/app/core/DB_Management/Collections_DB.py",
+      "tldw_Server_API/app/services/startup_resource_governor.py",
+      "tldw_Server_API/tests/DB_Management/test_media_db_runtime_factory.py",
+      "tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py",
+      "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_attachment_upload_13376.py",
+      "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_research_discovery_media_add.py"
+    ],
+    "historical_validation": "The original FastAPI validation (746 auth/email/routes,13monitoring,10guarded native-PST) retains original source/dependency bindings and was not rerun in full. Fresh343 email/auth/route contracts and372 affected governor/auth cases plus2existing xfails cover this refresh. Native-PST, throughput/million-message benchmarks and live VM drill were not rerun. Prior receipts and all historical JSON values remain unchanged.",
+    "receipt_sha256": {
+      "/tmp/email_pr3023_devf3f1_equality_20260930.json": "35747b7471063149599fbc187f5bb9f029656d256e53f1bde2a5b46e372882d8",
+      "/tmp/email_pr3023_devf3f1_incoming_20260930.patch": "35daea9f4568441ed8a2cbf7a916670ebe26af09f2096b19aaaf780256102a28",
+      "/tmp/email_pr3023_devf3f1_route_trace_20260930.jsonl": "ed70a907977b0cf7f4cc0e47858b519033a8a56df3ff961f24a49772ef117e1b",
+      "/tmp/email_pr3023_devf3f1_contracts_command_20260930.json": "9cbd862c73fb2112740cdab3ad775799f4a0c31b288ccb90fbfe7eba180a34b4",
+      "/tmp/email_pr3023_devf3f1_dev_full_command_20260930.json": "04e71755155136b331b76559b5e87e782389513c64c7cd5b6b1524b3423432de",
+      "/tmp/email_pr3023_rg_final_command_20260930.json": "47b5d020b02d0048a14aadd919a7d1a21446d601698f7d0362b96f41e1df3f53",
+      "/tmp/email_pr3023_rg_green_command_20260930.json": "6ed8567dd8149d07db2f774100b672e51fb3c0ff4c54d1d072a99e70eae5b185",
+      "/tmp/email_pr3023_rg_daily_red_command_20260930.json": "7140caef468171f1991c87c856e8b362b2d71e6c007a593701e560adf55c7098",
+      "/tmp/email_pr3023_rg_email_command_20260930.json": "bb4fd3b396b00a9968ca80771bf61b406050e8f76cbfa36beb0d8f9326beff17",
+      "/tmp/email_pr3023_rg_quality_20260930.json": "9dc293462b65265ca55f382e66139a9fd0ab2fb93515dc0f98134adc40843417",
+      "/tmp/email_pr3023_rg_followup_review_final_20260930.json": "7b72201013332bb5befc0db9b21c3f67589020b0a10549eca8e512e53e6c01a4",
+      "/tmp/email_pr3023_rg_followup_review_final_20260930.patch": "c6f1d4c03e658d791d3aa50dd9550f0e57d42ca4a9c43ccec9cd341ebb04f292",
+      "/tmp/email_pr3023_rg_schema_auth_commands_20260930.json": "23096db2d832d5f9c25ad912a3396881ee0f44fdad554a0afe976890d796138f",
+      "/tmp/email_pr3023_rg_schema_20260930.json": "e39e38c025320cef062107b699681bd5480a7e0afa8e21689cff5e50add4d78a",
+      "/tmp/email_pr3023_rg_schema_20260930.log": "8e78254f8b041667bce826acdad172fbafc2638bd18d5d4afc424c2ffd099e65",
+      "/tmp/email_pr3023_rg_route_auth_20260930.log": "7b10dd3838563f32907a17e0cbc6ce363df4545cc23f62f5405b432e89ae46f3",
+      "/tmp/email_pr3023_rg_bandit_import_before_annotations_20260930.json": "ef3dbe3a1b7074dc894f28024c685fcb7c0a5efe7bcf574e6233ac440d25b7a2",
+      "/tmp/email_pr3023_devf3f1_daily_token_probe_20260930.py": "f108d89b30da796147a9a34d26ff4794cddbf698075170a7d79160777ee871d3"
+    },
+    "publication_state": "Verified locally; publication, exact-head Qodo and all seven hosted required contexts remain pending. Old47c3 checks cannot certify the refreshed source."
   }
 }
