@@ -61,10 +61,33 @@ def test_outer_tag_applies_when_inner_tag_unmapped():
     assert _resolver(rm).resolve("/api/v1/writing/docs/7", "GET") == "content.policy"
 
 
+def _prefix_group_app():
+    """Same shape as _app(), but /docs/{doc_id} and /docs/search carry distinct route-level
+    tags so a test can tell which one the resolver actually picked (both would otherwise
+    inherit only "writing", making the pick unobservable)."""
+    inner = APIRouter(tags=["writing"])
+
+    @inner.get("/docs/{doc_id}", tags=["byid"])
+    def doc(doc_id: str) -> dict:
+        return {}
+
+    @inner.get("/docs/search", tags=["search"])
+    def search() -> dict:
+        return {}
+
+    middle = APIRouter()
+    middle.include_router(inner, prefix="/writing")
+    app = FastAPI()
+    app.include_router(middle, prefix="/api/v1", tags=["content"])
+    return app
+
+
 def test_first_served_match_wins_within_a_prefix_group():
-    # /docs/{doc_id} and /docs/search share the 4-segment group; served order decides, as in Starlette.
-    rm = {"by_path": {}, "by_tag": {"writing": "writing.policy"}}
-    assert _resolver(rm).resolve("/api/v1/writing/docs/search", "GET") == "writing.policy"
+    # /docs/{doc_id} (served first) and /docs/search share the 4-segment group and both
+    # match "/api/v1/writing/docs/search"; served order decides, as Starlette would route it.
+    rm = {"by_path": {}, "by_tag": {"byid": "byid.policy", "search": "search.policy"}}
+    resolver = _resolver(rm, app=_prefix_group_app())
+    assert resolver.resolve("/api/v1/writing/docs/search", "GET") == "byid.policy"
 
 
 def test_method_mismatch_falls_back_to_default():
