@@ -63,19 +63,22 @@ def governed_cookie_app(monkeypatch: pytest.MonkeyPatch) -> GovernedCookieApp:
 
 async def test_cookie_sessions_share_owner_quota_and_cached_auth(governed_cookie_app: GovernedCookieApp) -> None:
     app, validations, governor = governed_cookie_app
+    # character_chat.default is now rpm=300/burst=2.0 (capacity 600) per the
+    # safety-net defaults (spec §3), so exhausting the per-user bucket takes
+    # 600 requests instead of 60.
     with TestClient(app) as client:
-        for index in range(60):
+        for index in range(600):
             response = client.get(
                 "/api/v1/persona/profiles", headers={"Cookie": f"custom_session=session-{'a' if index % 2 else 'b'}"}
             )
             assert response.status_code == 200
         denied = client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=session-b"})
     assert denied.status_code == 429
-    assert len(validations) == 61  # Canonical endpoint resolver reused the request cache.
+    assert len(validations) == 601  # Canonical endpoint resolver reused the request cache.
     owner_quota = await governor.peek_with_policy("user:1", ["requests"], "character_chat.default")
     other_owner_quota = await governor.peek_with_policy("user:2", ["requests"], "character_chat.default")
     assert owner_quota["requests"]["remaining"] == 0
-    assert other_owner_quota["requests"]["remaining"] == 60
+    assert other_owner_quota["requests"]["remaining"] == 600
 
 
 async def test_invalid_cookie_returns_canonical_auth_failure(governed_cookie_app: GovernedCookieApp) -> None:
@@ -87,7 +90,8 @@ async def test_invalid_cookie_returns_canonical_auth_failure(governed_cookie_app
     assert response.json()["detail"] == "Not authenticated (provide Bearer token or X-API-KEY)"
     assert validations == ["invalid"]
     owner_quota = await governor.peek_with_policy("user:1", ["requests"], "character_chat.default")
-    assert owner_quota["requests"]["remaining"] == 60
+    # capacity is rpm=300 * burst=2.0 = 600 under the safety-net defaults (spec §3).
+    assert owner_quota["requests"]["remaining"] == 600
 
 
 @pytest.mark.parametrize(
@@ -152,7 +156,8 @@ async def test_cookie_preflight_does_not_fail_open_on_resolver_failure(
     with TestClient(app) as client, pytest.raises(RuntimeError, match="auth unavailable"):
         client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=session-a"})
     owner_quota = await governor.peek_with_policy("user:1", ["requests"], "character_chat.default")
-    assert owner_quota["requests"]["remaining"] == 60
+    # capacity is rpm=300 * burst=2.0 = 600 under the safety-net defaults (spec §3).
+    assert owner_quota["requests"]["remaining"] == 600
 
 
 def test_valid_cookie_does_not_bypass_missing_policy(governed_cookie_app):

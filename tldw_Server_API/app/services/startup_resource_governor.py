@@ -110,6 +110,7 @@ async def init_resource_governor(app: Any) -> None:
 
         _update_policy_snapshot_state(app, rg_loader)
         _register_policy_snapshot_callback(app, rg_loader)
+        log_undefined_policy_references(rg_loader)
         _audit_route_map_coverage(app, rg_loader)
     except _IMPORT_EXCEPTIONS as _rg_err:
         logger.warning(f"ResourceGovernor policy loader initialization skipped: {_rg_err}")
@@ -181,6 +182,22 @@ def _register_policy_snapshot_callback(app: Any, rg_loader: Any) -> None:
         rg_loader.add_on_change(_on_rg_change)
     except _STARTUP_GUARD_EXCEPTIONS:
         pass
+
+
+def log_undefined_policy_references(loader: Any) -> list[str]:
+    """Log route-map targets that name no policy. They fall back to ``default`` at runtime."""
+    try:
+        snap = loader.get_snapshot()
+        route_map = dict(getattr(snap, "route_map", {}) or {})
+        policies = set((getattr(snap, "policies", {}) or {}).keys())
+    except _STARTUP_GUARD_EXCEPTIONS:
+        return []
+    targets = set(str(v) for v in (route_map.get("by_path") or {}).values())
+    targets |= set(str(v) for v in (route_map.get("by_tag") or {}).values())
+    missing = sorted(targets - policies)
+    for pid in missing:
+        logger.error("RG route_map names undefined policy {!r}; requests fall back to 'default'", pid)
+    return missing
 
 
 def _audit_route_map_coverage(app: Any, rg_loader: Any) -> None:
