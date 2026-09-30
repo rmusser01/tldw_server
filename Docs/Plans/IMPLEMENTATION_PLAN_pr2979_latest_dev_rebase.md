@@ -1046,3 +1046,38 @@ Native job 110059205903 on published 64bab60 fails legacy=True `inspected_rows =
 Unchanged content-free baseline passes both legacy variants in 1.24 seconds. Real lease acquisition and source selection finish within roughly 3 ms locally. A controlled 150 ms hold after actual acquisition exceeds the original 100 ms relay deadline before either lookup: both cases fail the original inspected-row assertion in 1.57 seconds. Real monotonic and durable-lease wall clocks remain intact; this is a sufficient controlled cause, not exact hosted attribution. The unchanged full activation module passes 32 cases in 2.06 seconds. Each run has six inherited warnings, zero skips and a normal exit (red exit 1, green exit 0).
 
 All 63 original assertion ASTs and 36 definitions remain preserved through exact source-byte equality; test and both relay/store production files match publication. Test SHA256 0b594717650b124aafb0fa44f254ca0de89fe352641c261b0566fe0f3d53aef6. No source, database-policy, deadline, dependency, warning or CI change is justified; no PostgreSQL or independent pytest claim. No static checks apply to Markdown-only tracking. Manifest /private/tmp/pr2979-uat558-readonly-verification-manifest.json SHA256 f240debbc934fd044d626bae15f11622e62f44db39b8de38e464b1383be0ab63 verifies 18 artifacts. The unavailable initial artifact read is excluded; the successful read and JUnit are retained. Preserve useful active diagnostics and defer replay/publication. UAT553 remains a distinct restart/push debt investigation.
+
+
+## Latest-dev f3f1 Resource Governance reconciliation — 2026-09-30
+
+**Task:** TASK-13260.278.18.83. **Status:** Deferred until useful published-head diagnostics are terminal; no replay or publication performed.
+
+### Stage 1: Record the upstream delta
+**Goal:** Identify affected behavior and overlap before replay.
+**Success Criteria:** Fresh verified dev/published refs, commit/file inventory, explicit overlap and retained upstream evidence.
+**Tests:** Read-only diff and intersection; no source or acceptance test run.
+**Status:** Complete
+
+### Stage 2: Preserve and reconcile the batch
+**Goal:** Replay the held repair/documentation batch onto freshly verified latest dev.
+**Success Criteria:** New recovery ref, patch equivalence with every duplicate/conflict disposition recorded, original assertion preservation, upstream task/design/plan history retained.
+**Tests:** Range-diff, exact tree/source/AST/assertion comparisons and auth binding/served-route contract review.
+**Status:** Not Started
+
+### Stage 3: Qualify actual reconciled dependencies and behavior
+**Goal:** Qualify new shared rate-governance/auth behavior and retained UAT repairs on the actual head.
+**Success Criteria:** Relevant Resource Governance memory/Redis, auth, MCP and route/HTTP checks succeed; applicable official PostgreSQL fixtures exercised, static/coverage/diff checks and independent review clear.
+**Tests:** Resource_Governance scopes including shared fallback, quantum accounting/refunds, leases, reload/eviction and ingress operation IDs; auth single-charge and magic-link binding controls; MCP fallback; capabilities response-model/HTTP controls; affected adjacent scopes, actual dependency versions, compile/Ruff/Bandit and original coverage guard.
+**Status:** Not Started
+
+### Stage 4: Publish and qualify final hosted installations
+**Goal:** Safely publish the reviewed batch after active diagnostics finish.
+**Success Criteria:** Fresh lease/recovery/body verification; human summary unchanged; exact-head automatic/native required gates succeed normally and actionable reviews including Chatbook settled.
+**Tests:** Direct job inventories including manual failures, strict required checks and whole native macOS Prompt Studio normal exit. No older-head result accepts the new head.
+**Status:** Not Started
+
+Fresh dev `f3f1b4fdbe3fe461b371ece30887c5fff8476d9d` through PR #3066 adds 27 commits including merge and 21 files since 2256. It changes backend Resource Governance, auth, MCP and policy configuration; no dependency or CI files change. Shared fallback/scope/token policy evaluation, memory reload/eviction, Redis quantum windows/refunds and scoped leases, server-generated ingress operation IDs, actual-IP ingress single-charge guard, MCP fallback and startup auditing all require actual-head qualification. Most shipped global buckets are removed; three email-sending auth policies retain global controls.
+
+Direct overlap is two files. Retain upstream `_reserve_auth_rg_requests` policy/IP/actual-charge guard alongside this PR's `verify_magic_link` login-connection dependency. The capabilities audit duplicates UAT542's served-route repair with another import/variable form; reconcile its real nested traversal while preserving the original response-model assertion. Preserve upstream TASK-13396 design/plan/task histories and every prior UAT, canonical workspace, temporary-chat, locale and JSX contract. Upstream notes report four broad xdist ordering failures; upstream local results do not accept PR #2979.
+
+GitHub now reports DIRTY; published 64bab60 and the held four-commit local d308 batch remain unchanged. Useful automatic/native diagnostics remain active: at 22:34 automatic has 222 jobs (60 successes, 12 running, 142 queued, eight configured skips, no failures); native has 790 (781 successes, three known failures, one whole macOS Prompt Studio running, three queued, two configured skips). Preserve runs and defer replay/publication. Human Change summary remains 672 bytes with its original hash; Qodo and new comments are unchanged. Record this documentation-only delta normally. Evidence /private/tmp/pr2979-monitor-2234-dev-delta.txt, -dev-intersection.json, snapshots and task-update.log. No source/test/static run applies to Markdown; final gates, unproven native causes and pending Chatbook decision remain open.
