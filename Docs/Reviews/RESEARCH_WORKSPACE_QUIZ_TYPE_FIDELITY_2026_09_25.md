@@ -161,6 +161,25 @@ historical evidence, not fresh runs on this base. Final-head hosted CI and
 review must complete before protected merge. ADR assessment is unchanged:
 no new architectural decision is introduced by this refresh.
 
+## Dev6074 Refresh (2026-09-30)
+
+After PR3053 advanced `dev` to `607431154c` with FastAPI 0.141.1 and nested
+route-introspection compatibility changes, all eight PR patches rebased without
+conflicts and remained identical by `git range-diff`. A separate temporary
+Python 3.12.11 environment using FastAPI 0.141.1 and Starlette 1.7.0 passed
+230 quiz, plan, profile, prompt, provenance, authority, artifact, multi-source
+generation endpoint, and quiz endpoint integration tests: 2,618 warnings in
+205.40 seconds (`/tmp/task12020_64_dev6074_py312.log`). Ruff, test-file Black,
+Bandit on both production modules (zero findings/errors), whitespace checks,
+and the shard guard (`new_uncovered=0`) passed. No fresh llama.cpp browser run
+is claimed. Hosted checks and Qodo review must finish on the refreshed head.
+
+The preceding head's UX smoke job failed its no-flaky-tests gate after an
+initial health-probe socket reset; the cockpit test passed on its own retry.
+One unchanged-job rerun was requested, but remains queued at publication.
+Diagnostics are retained at `/tmp/pr3018-ux-smoke-36636268090`; this is not
+reported as a successful UX gate. ADR assessment remains unchanged.
+
 ## Separate Verifier Finding
 
 Two live runs with the same model failed closed at claims verification: a quiz
