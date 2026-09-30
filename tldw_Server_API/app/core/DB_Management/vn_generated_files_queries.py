@@ -63,8 +63,9 @@ class VNGeneratedFilesQueries:
             """,
             (user_id, source_feature, source_ref),
         )
-        row = await cursor.fetchone()
-        return dict(zip((col[0] for col in cursor.description), row)) if row is not None else None
+        async with cursor:
+            row = await cursor.fetchone()
+            return dict(zip((col[0] for col in cursor.description), row)) if row is not None else None
 
     async def find_live_by_storage_path(
         self, *, user_id: int, storage_path: str,
@@ -88,5 +89,6 @@ class VNGeneratedFilesQueries:
             """,
             (user_id, storage_path),
         )
-        row = await cursor.fetchone()
-        return dict(zip((col[0] for col in cursor.description), row)) if row is not None else None
+        async with cursor:
+            row = await cursor.fetchone()
+            return dict(zip((col[0] for col in cursor.description), row)) if row is not None else None

@@ -7,7 +7,7 @@ import json
 import sqlite3
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
+from contextlib import AbstractContextManager, closing
 from contextvars import copy_context
 from functools import partial
 from threading import Lock
@@ -23,7 +23,7 @@ LegacyActivityReader = Callable[
 ]
 
 _VARIANT_OUTCOME_QUERY = """
-    SELECT outcome_status, item_id, claim_token, claim_lease_id
+    SELECT outcome_status, item_id, claim_token, claim_lease_id, deleted_item_json
     FROM vn_asset_generation_recipes
     WHERE batch_id = ? AND slot_id = ? AND variant_index = ?
 """
@@ -137,6 +137,7 @@ CREATE TABLE IF NOT EXISTS vn_asset_generation_recipes (
     recipe_json TEXT NOT NULL,
     outcome_status TEXT NOT NULL DEFAULT 'planned',
     item_id INTEGER REFERENCES vn_asset_items(id),
+    deleted_item_json TEXT,
     claim_lease_id TEXT,
     claim_token TEXT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -317,6 +318,15 @@ class VNAssetPacksRepository:
     def initialize_schema(self) -> None:
         ensure_vn_asset_tables(self.db)
         self._schema_initialized = True
+
+    def generation_transaction(self) -> AbstractContextManager[Any]:
+        """Admit a complete generation/receipt operation on the owning database.
+
+        Returns:
+            The native transaction context, retaining nested rollback and
+            connection ownership. Database admission errors propagate.
+        """
+        return self.db.transaction()
 
     def get_idempotency_record(
         self,
@@ -1599,8 +1609,9 @@ class VNAssetPacksRepository:
     def delete_item(self, item_id: int) -> bool:
         """Delete an inactive item while retaining terminal recipes and depth children.
 
-        Clear reference links in the same transaction for existing NO ACTION
-        schemas. Active variant reservations remain protected from deletion.
+        Retain an identity-only receipt for deliberately deleted completed items,
+        and clear reference links in the same transaction for NO ACTION schemas.
+        Active variant reservations remain protected from deletion.
         """
         self._ensure_schema_initialized()
         with self.db.transaction() as conn:
@@ -1617,6 +1628,26 @@ class VNAssetPacksRepository:
             if active is not None:
                 raise VNAssetGenerationError(
                     "vn_asset_variant_in_progress", retryable=True, item_id=item_id,
+                )
+            with closing(conn.execute(
+                """
+                SELECT item.id, item.generated_file_id, item.pack_id, item.slot_id,
+                       recipe.variant_index, recipe.batch_id, pack.owner_user_id
+                FROM vn_asset_generation_recipes AS recipe
+                JOIN vn_asset_items AS item ON item.id = recipe.item_id
+                JOIN vn_asset_batches AS batch ON batch.id = recipe.batch_id AND batch.pack_id = item.pack_id
+                JOIN vn_asset_packs AS pack ON pack.id = item.pack_id AND pack.owner_user_id = batch.requested_by_user_id
+                WHERE item.id = ? AND recipe.outcome_status = 'completed' AND batch.recipe_version = 1
+                  AND recipe.slot_id = item.slot_id AND recipe.variant_index = item.variant_index
+                  AND item.generated_file_id > 0
+                """, (item_id,),
+            )) as cursor:
+                deleted_variants = [dict(row) for row in cursor.fetchall()]
+            for identity in deleted_variants:
+                conn.execute(
+                    "UPDATE vn_asset_generation_recipes SET deleted_item_json = ? "
+                    "WHERE batch_id = ? AND slot_id = ? AND variant_index = ?",
+                    (json.dumps(identity, sort_keys=True), identity["batch_id"], identity["slot_id"], identity["variant_index"]),
                 )
             conn.execute(
                 "UPDATE vn_asset_generation_recipes SET item_id = NULL WHERE item_id = ?",
@@ -3031,6 +3062,8 @@ def _ensure_recipe_outcome_columns(conn: Any) -> None:
         )
     if "item_id" not in columns:
         conn.execute("ALTER TABLE vn_asset_generation_recipes ADD COLUMN item_id INTEGER")
+    if "deleted_item_json" not in columns:
+        conn.execute("ALTER TABLE vn_asset_generation_recipes ADD COLUMN deleted_item_json TEXT")
     if "claim_lease_id" not in columns:
         conn.execute("ALTER TABLE vn_asset_generation_recipes ADD COLUMN claim_lease_id TEXT")
     if "claim_token" not in columns:

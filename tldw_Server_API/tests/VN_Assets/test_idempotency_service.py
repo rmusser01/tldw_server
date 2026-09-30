@@ -1,5 +1,6 @@
 """Core receipt recovery and response persistence without endpoint callbacks."""
 
+import inspect
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,74 @@ def pack_id(service: VNAssetPackService) -> int:
     pack = service.create_pack(VNAssetPackCreate(title="Receipt Pack", primary_character_id=character_id))
     service.create_slot(pack.id, VNAssetSlotCreate(asset_type="sprite", slot_key="primary", variant_count=1))
     return pack.id
+
+
+@pytest.mark.parametrize("operation", ("start", "recover", "claim"))
+def test_generation_transactions_enter_through_database_boundary(
+    service: VNAssetPackService,
+    pack_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    """Keep real generation/receipt transactions owned by the database layer.
+
+    Args:
+        service: Isolated real metadata and Jobs databases.
+        pack_id: Owned pack with one variant.
+        monkeypatch: Guard transaction admission without replacing its behavior.
+        operation: Service entrypoint whose complete atomic scope is exercised.
+
+    Returns:
+        None after checking the original batch and persisted receipt outcome.
+    """
+    receipt = {
+        "scope": "vn_asset_generate", "resource_id": f"pack:{pack_id}",
+        "idempotency_key": "db-owned-transaction", "payload_hash": "payload",
+    }
+    if operation != "start":
+        service.repo.claim_idempotency_record(owner_user_id=42, **receipt)
+        original = service.start_generation(pack_id, idempotency_receipt=receipt)
+        record = service.repo.get_idempotency_record(
+            owner_user_id=42, **{key: value for key, value in receipt.items() if key != "payload_hash"},
+        )
+    native_transaction = service.repo.db.transaction
+
+    def database_owned_transaction(*args: Any, **kwargs: Any) -> Any:
+        """Reject service-owned admission while retaining the native transaction.
+
+        Args:
+            args: Unchanged native positional transaction arguments.
+            kwargs: Unchanged native keyword transaction arguments.
+
+        Returns:
+            The real database transaction context manager.
+        """
+        frame = inspect.currentframe()
+        try:
+            assert frame.f_back.f_globals["__name__"].startswith(
+                "tldw_Server_API.app.core.DB_Management."
+            ), "Generation transaction admission must be database-owned"
+        finally:
+            del frame
+        return native_transaction(*args, **kwargs)
+
+    monkeypatch.setattr(service.repo.db, "transaction", database_owned_transaction)
+    if operation == "start":
+        response = service.start_generation(pack_id)
+    elif operation == "recover":
+        response = service.recover_generation_receipt(record, pack_id=pack_id)
+    else:
+        response = VNAssetGenerationStatusResponse(**service.claim_or_replay_idempotency(
+            owner_user_id=42, generation_pack_id=pack_id, **receipt,
+        ))
+        assert service.repo.get_idempotency_record(
+            owner_user_id=42, **{key: value for key, value in receipt.items() if key != "payload_hash"},
+        )["status"] == "completed"
+    assert response.status == "queued"
+    assert len(service.repo.list_batches(pack_id)) == 1
+    assert len(service.jobs_manager.list_jobs(domain="vn_assets")) == 1
+    if operation != "start":
+        assert response.batch_id == original.batch_id
 
 
 @pytest.mark.parametrize("scope", GENERATION_SCOPES)

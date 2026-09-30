@@ -1,5 +1,833 @@
 # PR 3016 VN Durability Review Implementation Plan
 
+## Approved Follow-Up: 2026-09-30
+
+Human instruction: "approved and continue". Task59 and the bounded Tasks60-63
+design are approved for local implementation, focused TDD and independent review.
+The separate guarded PR Verification update remains unapproved and untouched.
+Human destination instruction on 2026-09-30: "stack the pr". Publish the reviewed
+follow-up on codex/vn3016-followup-stack, targeting #3016's unchanged branch at
+68861f5a229365c867db8deb3432028207cd8848. No parent dev reconciliation or merge
+is implied. Existing tracking and frozen artifacts remain preserved.
+
+### Stage 1: Fixture Probe And Cursor Lifetime
+**Goal:** Admit asyncio only in the affected nested probe and close borrowed
+SQLite lookup cursors without changing SQL or connection ownership.
+**Tests:** Sensitive bad/good fixture bridges; real SQLite lookup resource
+lifetime on rows, misses and read errors, with caller transactions preserved.
+**Status:** Complete
+
+### Stage 2: Database Boundary And Deliberate Deletion Replay
+**Goal:** Apply the approved named transaction boundary, test-only corruption
+fixtures/routed HTTP checks, and explicit completed-deletion receipt.
+**Tests:** Same transaction/rollback/enqueue scopes; unchanged corruption
+fail-closed behavior; successful public generation then deliberate deletion and
+redelivery without adapter/saver, counters/approval rewrite or resurrection.
+**Status:** Complete
+
+### Stage 3: Review And Integration
+**Goal:** Independent SPEC/QUALITY review, scoped checks, and normal publication
+only to the chosen destination; fresh exact-head external gates before merge.
+**Tests:** Bounded affected regressions, scoped Ruff/Bandit, review of the new
+delta. Historical missing raw evidence is not reconstructed or re-credited.
+**Status:** In Progress
+
+Local Tasks59-63 implementations and independent SPEC/QUALITY reviews are
+complete, uncommitted and unpublished. Native SQLite deletion/rollback/upgrade/
+corruption checks and focused caller/replay controls pass; decoder-limit
+sensitivity was separately RED/GREEN and independently rechecked. Scoped
+baseline/final lint/security diagnostics are unchanged, not blanket clean.
+The PR destination question is answered: a separate stacked PR is authorized.
+Scoped publication checks, normal hooks/commit and new-branch push are in
+progress; guarded parent Verification body edit remains unapproved. AC5/AC6/DoD
+remain pending external review/CI, parent reconciliation and normal merge gates.
+
+Publication verification on the stacked branch: 30 passed, 23 warnings, 26.97s
+in focused local checks; no failures/errors/skips. All 12 changed Python files
+compile. Bandit retains 18 inherited B106 findings and Ruff two inherited BLE001
+findings, both identical to the recorded baseline; scanner exit1 is not clean.
+Approved 13 source/design snapshots and 234 frozen inputs match read-only.
+No native Linux/pytest9, new PostgreSQL or changed-dev integration credit.
+Normal scoped hooks, commit and stacked PR publication are next.
+
+## Current Dev Update: 2026-09-29T23:57Z
+
+Protected dev607431154cf10129b5d9afa8f9b57d46636466fc was read twice
+stable. Fresh60006a...607431 exhausts one page/ahead5/behind0/five unique
+commits and76 unique paths; mergedPR3053 identities match. Fresh72 unique
+committed-owned paths overlap only tldw_Server_API/tests/Jobs/conftest.py,
+new relative to the historical ten and later pg_migrations.py inventory.
+Source, helper, pyproject.toml, tests and tracking changed, not documentation-
+or unrelated-test-only; no workflow increment, earlier workflows unaudited.
+Subjects/paths are not source/behavioral/security/test-quality audits, actual
+dependency-version verification, test execution or Task59 repair evidence.
+Path inventory is not local conflict/integration/rebase/preservation proof;
+no fresh cumulative path/overlap count is claimed. Head68861 OPEN/unmerged,
+RESTfalse/dirty and GraphQLDIRTY are server conflict, not local reproduction;
+both PRbase fields lag8b25. Reviews110/threads92/five unresolved/comments52
+fully exhausted and unchanged; body equals durable23:47 only. All97 checks
+complete/allseven required succeed; JobsSQLite remains FAILED, not changed-
+dev verification or whole Jobs/repositorygreen. Separate dev-607431 report
+and durable heartbeat2357 inputs/11-entry diagnosis manifest are new evidence
+only, not recovered historical inputs. Three approvals/AC5/AC6/DoD pending;
+only owned tracking changes unpushed, no implementation/tests/scanners/agents/
+body edit/fetch/rebase/conflict resolution/merge/push/backup-stash operation.
+Notify this new fixture-path integration risk once; quiet while unchanged.
+
+## Current Dev Update: 2026-09-29T21:46Z
+
+Protected dev60006a2fed2532d900d27accbc2cda87cb08c24b was read twice
+stable. Fresh591041...60006a exhausts one page/ahead10/behind0/ten unique
+commits and seven paths; mergedPR3051 identities match. Fresh72 unique
+committed-owned paths have zero increment overlaps. Unrelated VZ-tool
+script/tests/docs/tracking changed, not documentation-only; no workflow
+increment, and previous workflows remain unaudited. Subjects/paths are
+not source/behavioral/cleanup-safety audits, test execution, dependency
+verification, Task59 repair or historical evidence-loss cause/recovery.
+Path inventory is not local conflict/integration/rebase/preservation proof.
+Head68861 OPEN/unmerged; RESTnull/unknown and GraphQLUNKNOWN inconclusive,
+not permission or clearance of the known conflict; both PRbase fields lag8b25.
+Reviews110/threads92/five unresolved/comments52 fully exhausted and unchanged;
+body equals durable21:36 only. All97 checks complete/allseven required succeed;
+JobsSQLite remains FAILED, not changed-dev or whole-repository verification.
+Separate dev-60006a report and durable heartbeat2146 inputs are new evidence
+only, not historical recovery. Three approvals/AC5/AC6/DoD remain pending;
+tracking-only unpushed, no implementation/tests/rebase/body edit/merge.
+This unrelated advance adds no actionable blocker; remain quiet.
+
+## Current Dev Update: 2026-09-29T20:13Z
+
+Protected dev5910412fba589dc0547fac295bb35948496435ce was read twice
+stable. Fresh6110d2...591041 exhausts one page/ahead2/behind0/two unique
+commits and one Backlog task path; mergedPR3057 identities match. Fresh72
+unique committed-owned paths have zero increment overlaps. Documentation
+only, no source/test/workflow increment; previous workflows unaudited.
+Subjects/paths are not test/CI execution, Task59 repair, behavioral audit,
+runtime verification or local conflict/integration/preservation proof.
+Head68861 OPEN/unmerged; RESTnull/unknown inconclusive, GraphQLDIRTY
+server status, base8b25 lagging. Reviews110/threads92/five unresolved/
+comments52 fully exhausted and unchanged; body equals durable20:03 only.
+All97 checks complete/allseven required succeed; JobsSQLite remains FAILED.
+Separate dev-591041 report and durable heartbeat2013 inputs are new evidence
+only, not historical recovery. Three approvals/AC5/AC6/DoD remain pending;
+tracking-only unpushed, no implementation/tests/rebase/body edit/merge.
+Documentation-only advance adds no actionable blocker; remain quiet.
+
+## Current Dev Update: 2026-09-29T19:02Z
+
+Protected dev is now 6110d2ae436c805c3beeda8f84427b4890534ddf,
+read twice stable. Fresh 0da685...6110d2 comparison exhausts two commit
+pages (100/49): ahead149/behind0, 149 unique commits, 247 file entries,
+248 changed paths including one rename's prior name. Merged PR #3036's
+REST merge commit matches the comparison terminal head. Fresh 72 unique
+committed PR-owned paths overlap Jobs/pg_migrations.py and exceptions.py.
+The former is new relative to the historical ten-overlap inventory; the
+latter repeats a known overlap. No fresh cumulative inventory is claimed.
+ci.yml, e2e-smoke.yml, frontend-required.yml and jobs-suite.yml changed;
+these and earlier workflows remain unaudited. This is path-level risk,
+not source/behavioral/test-quality audit, environment/dependency-version
+verification, Task59 fix, local conflict, safe integration or preservation
+proof. Python-related paths/commit subjects do not verify a runtime floor.
+
+Head68861 remains OPEN/unmerged, RESTfalse/dirty and GraphQLDIRTY server
+status, PRbase8b25 lagging. Reviews110, threads92/five unresolved, all
+nested replies complete, comments52 metadata unchanged; body equals the
+durable18:52 snapshot, never mutated. All97 exact-head checks complete,
+allseven required succeed; JobsSQLite108581674056 remains FAILED. These
+checks do not verify the changed dev workflows or whole Jobs/repository.
+
+Separate dev-6110d2-integration-diagnosis.md and heartbeat-20260929-1902
+durable inputs qualify this new increment only. Historical missing /tmp
+inputs remain unrecovered; original manifests are not refreshed. Three
+separate approvals remain unanswered; AC5/AC6/DoD pending. Only tracking
+records changed, unpushed; no implementation/tests/scanners/agents, body
+mutation, fetch/rebase/conflict resolution, merge/push or backup/stash
+operation. Notify once for the newly overlapping Jobs migration path,
+then stay quiet while known blockers and approvals remain unchanged.
+
+## Current Dev Update: 2026-09-29T03:59Z
+
+Protected dev is now e5186a28d9b4f09af60bc8fd53073c1b6d5c0603,
+read twice stable. Fresh 0f9e691...e5186a compare is one complete page:
+ahead 6 / behind 0, six unique commits, seven Quick Ingest and media-
+ingestion source/test paths, merged PR #3050. Fresh 72 committed PR-owned
+paths have zero incremental overlap; no workflow path changed this
+increment. Earlier workflows and historical ten owned overlaps remain
+unaudited/unreconstructed. This path check is not source/behavioral/privacy
+or test-quality audit, test execution, Task 59 fix, local conflict, safe
+integration/rebase, or preservation proof.
+
+Head 68861 remains OPEN/unmerged; REST false/dirty, GraphQL DIRTY server
+status, PR base 8b25 lags. Reviews 110, threads 92/five unresolved, all
+nested replies complete, comments 52 metadata unchanged; whole PR body
+equals the durable 03:49 snapshot, never mutated. All 97 exact-head
+checks are complete and all seven required succeed; Jobs (SQLite)
+108581674056 still FAILED. No changed-dev workflow or whole-repository-
+green claim.
+
+Separate dev-e5186a-integration-diagnosis.md and ignored heartbeat-
+20260929-0359/SHA256SUMS cover new inputs only. No historical missing
+/tmp recovery or old-manifest refresh. Three separate approvals remain
+unanswered; AC5/AC6/DoD pending. Tracking notes only, unpushed. No
+implementation, tests/scanners/agents, body mutation, fetch/rebase,
+conflict resolution, merge/push, or backup/stash operation. This unrelated
+source-level advance adds no actionable blocker; monitoring stays ACTIVE
+and QUIET.
+
+## Current Dev Update: 2026-09-29T02:17Z
+
+Protected dev is now 0f9e6917cef2deb5da36d6fc2f85b4457f0ce884,
+read twice stable. Fresh 414a961...0f9e691 compare exhausts one page:
+ahead 9 / behind 0, nine unique commits, 17 VZ sandbox/helper and
+tracking paths, merged PR #3022. Fresh 72 committed PR-owned paths have
+zero incremental overlap; no workflow path changed in this increment.
+Earlier workflow changes and historical ten owned overlaps remain
+unaudited/unreconstructed. Path inventory is not source/behavioral/test-
+quality audit, test execution, Task 59 fix, local conflict, safe integration,
+rebase, or preservation proof.
+
+Head 68861 remains OPEN/unmerged; REST false/dirty, GraphQL UNKNOWN,
+PR base 8b25 lags. Reviews 110, threads 92/five unresolved, all nested
+replies complete, and comments 52 metadata unchanged; whole PR body
+equals the durable 02:07 snapshot, never mutated. All 97 exact-head
+checks are complete and all seven required succeed; Jobs (SQLite)
+108581674056 still FAILED. No changed-dev workflow or whole-repository-
+green claim.
+
+Separate dev-0f9e69-integration-diagnosis.md and ignored heartbeat-
+20260929-0217/SHA256SUMS cover new inputs only. No historical missing
+/tmp recovery or old-manifest refresh. Three separate approvals remain
+unanswered; AC5/AC6/DoD pending. Tracking notes only, unpushed. No
+implementation, tests/scanners/agents, body mutation, fetch/rebase,
+conflict resolution, merge/push, or backup/stash operation. This unrelated
+VZ advance adds no actionable blocker; monitoring remains ACTIVE and QUIET.
+
+## Current Dev Update: 2026-09-29T00:55Z
+
+Protected dev is now 414a9619cc8ae9446262ee54980017d874d2a739,
+read twice stable. The fresh fae6ee6...414a961 compare is one exhausted
+page, ahead3/behind0, three unique commits/four unique paths. It changes
+three Backlog records and one unrelated Chat unit test. Fresh72 committed
+PR-owned paths have zero incremental overlap; no workflow path changed
+this increment. Earlier workflow changes and historical ten owned overlaps
+remain unaudited/unreconstructed. This path check is not source/behavioral
+or test-quality audit, test execution, Task59 fix, local conflict, safe
+integration, rebase, or preservation proof.
+
+Head68861 remains OPEN/unmerged; RESTfalse/dirty, GraphQLDIRTY server
+status, PRbase8b25 lag. Reviews110/threads92/five unresolved/all nested
+complete/comments52 metadata unchanged; whole PR body equal to durable
+00:14 snapshot, never mutated. All97 exact-head checks complete/all7
+required SUCCESS, but JobsSQLite108581674056 still FAILED. No
+changed-dev workflow or whole-repository-green claim.
+
+Separate dev-414a96-integration-diagnosis.md and ignored
+heartbeat-20260929-0055/SHA256SUMS8entries match (new JSON only).
+No historical missing /tmp recovery or old-manifest refresh. Three
+separate approvals unanswered, AC5/AC6/DoD pending. No implementation,
+tests/scanners/agents/body mutation/fetch/rebase/merge/push/backup-stash
+operation. Tracking notes only, unpushed. This docs-plus-unrelated-test
+advance adds no actionable blocker; monitoring ACTIVE and QUIET.
+
+## Current Dev Update: 2026-09-28T21:50Z
+
+Actual protected dev is fae6ee6c80db4867156314ee072c7026c00071de,
+read twice stable. Freshca3b7f...fae6ee compare exhausts one page:
+ahead2/behind0/two unique commits/two unique chat-test paths/merged PR3046;
+base/merge-base/terminal head/counts verified. Fresh72committed-owned paths:
+ZEROincrement owned overlaps. Test-only, not documentation-only; no workflow
+path changed this increment, earlier workflow changes remain unaudited.
+Subjects/paths are not source/behavioral/test-quality audits, test execution,
+dependency verification or Task59 fix. Path inventory is not local conflict,
+safe integration/rebase/preservation proof; historical1169paths/TENoverlaps
+was not reconstructed.
+
+Head68861 unchanged; independent RESTfalse/dirty/OPEN/unmerged, GraphQLUNKNOWN
+not permission/local reproduction, PRbase8b25 lags. Reviews110 both exhausted,
+threads92/five unresolved/all nested replies complete, comments52 metadata
+unchanged; whole PR body equal only to durable21:40 snapshot, never mutated.
+All97checks complete/all7required exactheadSUCCESS; JobsSQLite108581674056
+still FAILED, not changed-dev verification or whole Jobs/repository green.
+
+Separate dev-fae6ee report and heartbeat-20260928-2150 manifest11entries
+read-only match (ten new JSON plus report only), not historical evidence
+recovery. Old reports/manifests untouched; known missing-input qualification
+remains. Three separate approvals unanswered; AC5/AC6/DoD pending. Only
+tracking records advanced/unpushed, no source-test-workflow edits/tests/scanners/
+agents/body mutation/fetch/rebase/conflict resolution/merge/push/backup-stash
+operation or repeated questions. Monitoring ACTIVE; unrelated chat-test-only
+advance adds no owned overlap or actionable blocker, remain QUIET.
+
+## Current Dev Update: 2026-09-28T20:18Z
+
+Actual protected dev is now ca3b7f834abc10ba0889caeae868afe9d290009b,
+read twice stable. Fresh3d102e...ca3b7f compare: one exhausted page,
+ahead3/behind0/three unique commits/six unique paths, includes merged PR3047.
+Fresh72committed-owned-path inventory intersects only core/exceptions.py,
+an already-known historical overlap; no new owned overlap in this increment.
+AuthNZ/Users_DB source and AuthNZ tests also changed. Not documentation-only;
+no workflow path changed this increment, earlier workflow changes unaudited.
+Commit subjects are not behavioral/security/dependency audits or Task59 fix.
+Path inventory is not local conflict, safe integration or preservation proof.
+Prior cumulative1169paths/TENoverlaps remains historical, not reconstructed.
+
+Head68861 unchanged; RESTfalse/dirty/OPEN/unmerged, GraphQLUNKNOWN not merge
+permission/local reproduction, PR base8b25 lags. Reviews110 exhausted,
+threads92/five unresolved/all nested replies complete, comments52 unchanged
+against durable20:08 snapshots; whole PR body equal to that snapshot only.
+All97checks complete/all7required exactheadSUCCESS; JobsSQLite108581674056
+still FAILED, not new-dev verification or whole-repository green.
+
+New dev-ca3b7f-integration-diagnosis.md and heartbeat-20260928-2018 evidence:
+11manifest entries read-only hash matches, ten new raw JSON inputs plus report.
+No missing historical input recovery or old-manifest refresh. Three separate
+approvals remain unanswered; AC5/AC6/DoD pending. Tracking only, no repeated
+questions/source-test-workflow edits/tests/scanners/agents/body mutation/
+fetch/rebase/conflict resolution/merge/push; monitoring ACTIVE.
+
+## Evidence Preservation Qualification: 2026-09-28
+
+The 16:57 heartbeat found prior /tmp raw inputs missing. Read-only audit of
+27 selected historical manifests: 1077 entries, 542 readable hash matches,
+535 missing-file references, zero mismatches among readable entries. These
+are manifest entries, not unique files; all 27 checks exit1. Latest dev-3d102e
+package: report1match/raw12missing. Earlier FULLMATCH statements remain
+historical, not current preservation proof. Original manifests/reports were
+not refreshed, recreated or removed; cause and recovery are not established.
+Native temporary-directory search was limited by protected-directory errors.
+
+Fresh durable snapshots still show head68861, protected dev3d102e twice
+stable, RESTfalse/dirty/OPEN/unmerged and GraphQLDIRTY, reviews110 exhausted,
+threads92/five unresolved/all nested replies exhausted, comments52. No review
+or comment updated after the prior 16:47 poll; exact historical metadata/body
+byte comparison is unavailable because old raw inputs are missing. Requester
+paragraph is present verbatim. All97checks complete/all7required exacthead
+SUCCESS; JobsSQLite108581674056 remains FAILED, not whole-repository green.
+Prior cumulative1169paths/TENoverlaps is historical inventory, not a fresh
+inventory or integration/preservation proof. Five backup refs and three
+relevant stash OIDs still present; no full stash-list equality claim.
+
+See evidence-loss-20260928-1657.md and its new ignored evidence directory.
+New snapshots do not replace missing historical evidence.
+
+New qualification manifest70entries fullmatch; all27 original manifest bytes
+unchanged. This verifies the new record only, not the missing old raw inputs.
+Automation remains ACTIVE with schedule/target/all other settings unchanged;
+evidence-loss guard prepended and prior prompt retained verbatim.
+
+Three approvals remain separately unanswered; AC5/AC6/DoD pending. Tracking qualification
+only; no source/test/workflow edits, tests/scanners, agents, body mutation,
+fetch/rebase/conflict resolution, merge or push.
+
+## Latest Dev Advance: 3d102e0d3
+
+15:27 protected dev 3d102e0d31667d6d1fc2a74402dafc2416fed3d4 read twice
+stable. Compare5f9815...3d102e valid1page/2ahead/0behind/2unique commits/
+1 already-inventoried Backlog path via PR3045; base/head identities verified.
+ZERO owned increment overlaps; cumulative1169paths/TENowned overlaps retained.
+No workflow/source/test path changed this increment; earlier workflows
+unaudited. Task-closure messages not release-publication verification/audit/
+tests/Task59-fix credit; path inventory not local conflict/integration proof.
+Head68861/RESTfalse-dirty-OPEN/GraphQLUNKNOWN/PRbase8b25lag/bodybyteequal.
+Reviews110/threads92five unresolved/comments52 unchanged/all pages exhausted.
+All97checks complete/all7required exactheadSUCCESS/JobsSQLiteFAILED; no
+changed-dev workflow or whole-repository-green claim. See separate
+dev-3d102e diagnosis/evidence; 26 prior manifests/1064entries fullmatch.
+Documentation-only advance leaves known blockers and three unanswered
+approvals unchanged; AC5/AC6/DoD pending/no implementation or merge.
+Earlier5f9815 and older bases historical where contradicted.
+
+## Latest Dev Advance: 5f9815293
+
+15:01 heartbeat protected dev 5f9815293bdd72c9b013aed80aad95daca04f6b2
+read twice stable. Compare 38c145...5f9815 valid1page/24ahead/0behind/
+24unique commits/76paths including merged PR3035; compare identities verified.
+Structured72owned ZERO increment overlaps; cumulative1169paths/TENowned
+overlaps retained. backend-required.yml changed; this and earlier workflows
+unaudited. Messages not source/behavioral/privacy/security/release/licensing/
+workflow/ratchet audit, environment/dependency verification, tests or Task59
+fix credit. Path inventory not local conflict/safe integration/rebase or
+preservation proof. RESTfalse/dirty/OPEN/unmerged; GraphQLDIRTY is server
+conflict, not local reproduction; PRbase8b25 lags. Head68861/reviews110/
+threads92five unresolved/comments52 unchanged/all pages exhausted/PRbody
+byte-equal. All97checks complete/all7required exactheadSUCCESS not changed-dev
+verification; JobsSQLiteFAILED.
+See dev-5f9815-integration-diagnosis.md and separate evidence;
+twenty-five prior manifests/1051entries fullmatch/read-only/no old refresh.
+Initial display truncation and subject-projection parser failure qualified;
+corrected separate inventory/subjects/path reads exit0/no test-CI credit.
+Three approvals separately unanswered; AC5/AC6/DoD pending.
+No fetch/rebase/source/test/workflow edit/agents/body mutation/conflict
+resolution/merge/push. Earlier38c145 and older bases historical where
+contradicted.
+
+## Latest Dev Advance: 38c1455d4
+
+13:48 heartbeat protected dev 38c1455d468a5591e1cbef1f0307837ee169f20a
+read twice stable. Compare 960fdf...38c145 valid1page/2ahead/0behind/2paths,
+including merged PR3044; compare identities verified. Structured72owned ZERO
+increment overlaps; cumulative1117paths/TENowned overlaps retained.
+No workflow path changed this increment; earlier workflow changes unaudited.
+Messages not ratchet source/behavioral/security/route-auth/RLS-exemption audit,
+environment/dependency verification, tests or Task59-fix credit. Ratchet list
+changes unaudited; path inventory not local conflict/safe integration/rebase
+or preservation proof. RESTfalse/dirty/OPEN/unmerged; GraphQLUNKNOWN not
+permission; PRbase8b25 lags. Head68861/reviews110/threads92five unresolved/
+comments52 unchanged/all pages exhausted/PRbody byte-equal. All97checks
+complete/all7required exactheadSUCCESS not changed-dev ratchet/workflow
+verification; JobsSQLiteFAILED.
+See dev-38c145-integration-diagnosis.md and separate evidence;
+twenty-four prior manifests/1038entries fullmatch/read-only/no old refresh.
+Three approvals separately unanswered; AC5/AC6/DoD pending.
+No fetch/rebase/source/test edit/agents/body mutation/conflict resolution/
+merge/push. Earlier960fdf and older bases historical where contradicted.
+
+## Latest Dev Advance: 960fdfe5b
+
+13:28 heartbeat protected dev 960fdfe5bac24c248b94be9d1801b6d8acb4eb5d
+read twice stable. Compare 26deeb...960fdf valid1page/8ahead/0behind/4paths,
+including merged PR3038; compare identities verified. Structured72owned ZERO
+increment overlaps; all four paths previously inventoried/cumulative1116paths/
+TENowned overlaps retained. No workflow path changed this increment; earlier
+workflow changes unaudited. Messages not temporary-chat behavioral/privacy/
+zero-write or LLM SSE source audit, dependency verification, tests or Task59
+fix credit. Path inventory not local conflict/safe integration/rebase proof.
+RESTfalse/dirty/OPEN/unmerged; GraphQLUNKNOWN not permission; PRbase8b25 lags.
+Head68861/reviews110/threads92five unresolved/comments52 unchanged/all pages
+exhausted/PRbody byte-equal. All97checks complete/all7required exactheadSUCCESS
+not changed-dev verification; JobsSQLiteFAILED.
+See dev-960fdf-integration-diagnosis.md and separate evidence;
+twenty-three prior manifests/1025entries fullmatch/read-only/no old refresh.
+Three approvals separately unanswered; AC5/AC6/DoD pending.
+No fetch/rebase/source/test edit/agents/body mutation/conflict resolution/
+merge/push. Earlier26deeb and older bases historical where contradicted.
+
+## Latest Dev Advance: 26deeb652
+
+07:38 heartbeat protected dev 26deeb65255af99d3daa698d33627c40d914e392
+read twice stable. Compare 197886...26deeb valid1page/10ahead/0behind/17paths,
+including merged PR3040; compare identities verified. Structured72owned ZERO
+increment overlaps; cumulative1116paths/TENowned overlaps retains all ten.
+No workflow path changed this increment; earlier workflow changes unaudited.
+Messages not LLM SSE source/behavioral/error/status/privacy or credential-retry
+audit, dependency verification, tests or Task59-fix credit. Path inventory not
+local conflict/safe integration/rebase/preservation proof.
+RESTfalse/dirty/OPEN/unmerged; GraphQLUNKNOWN not permission; PRbase8b25 lags.
+Head68861/reviews110/threads92five unresolved/comments52 unchanged/all pages
+exhausted/PRbody byte-equal. All97checks complete/all7required exactheadSUCCESS
+not changed-dev verification; JobsSQLiteFAILED.
+See dev-26deeb-integration-diagnosis.md and separate evidence;
+twenty-two prior manifests/1012entries fullmatch/read-only/no old refresh.
+Three approvals separately unanswered; AC5/AC6/DoD pending.
+No fetch/rebase/source/test edit/agents/body mutation/conflict resolution/
+merge/push. Earlier197886 and older bases historical where contradicted.
+
+## Latest Dev Advance: 197886226
+
+07:08 heartbeat protected dev 1978862260b599c26f9acb416122c849a6db02ab
+read twice stable. Compare a2d5b1...197886 valid1page/5ahead/0behind/5paths,
+including merged PR3037; compare identities verified. Structured72owned ZERO
+increment overlaps; cumulative1102paths/TENowned overlaps retains all ten.
+No workflow path changed this increment; earlier workflow changes unaudited.
+Messages not RAG source/behavioral/security or PyPI settings audit, verified
+deployment protection, dependency verification, tests or Task59-fix credit.
+Path inventory not local conflict/safe integration/rebase/preservation proof.
+RESTfalse/dirty/OPEN/unmerged; GraphQLUNKNOWN not permission; PRbase8b25 lags.
+Head68861/reviews110/threads92five unresolved/comments52 unchanged/all pages
+exhausted/PRbody byte-equal. All97checks complete/all7required exactheadSUCCESS
+not changed-dev verification; JobsSQLiteFAILED.
+See dev-197886-integration-diagnosis.md and separate evidence;
+twenty-one prior manifests/999entries
+fullmatch/read-only/no old refresh. Three approvals separately unanswered;
+AC5/AC6/DoD pending. No fetch/rebase/source/test edit/agents/body mutation/
+conflict resolution/merge/push.
+
+## Latest Dev Advance: a2d5b1c0
+
+06:07 heartbeat protected dev a2d5b1c0db789e9db7d4820e05164028ea4734ec
+read twice stable. Compare 97da6c...a2d5b1 valid1page/7ahead/0behind/10paths,
+including merged PR3003; compare identities verified. Structured72owned ZERO
+increment overlaps; cumulative1099paths/TENowned overlaps retains all ten.
+No workflow path changed this increment; earlier workflow changes unaudited.
+Messages not auth-route source/behavioral/security or OpenAPI/baseline audit,
+dependency verification, tests or Task59-fix credit. Path inventory not local
+conflict/safe integration/rebase/preservation proof. RESTfalse/dirty/OPEN/
+unmerged; GraphQLUNKNOWN not permission; PRbase8b25 lags. Head68861/reviews110/
+threads92five unresolved/comments52 unchanged/all pages exhausted/PRbody byte-equal.
+All97checks complete/all7required exactheadSUCCESS not changed-dev verification;
+JobsSQLiteFAILED. See dev-a2d5b1-integration-diagnosis.md and separate evidence;
+twenty prior manifests/986entries fullmatch/read-only/no old refresh.
+Three approvals separately unanswered; AC5/AC6/DoD pending. No fetch/rebase/
+source/test edit/agents/body mutation/conflict resolution/merge/push.
+
+## Latest Dev Advance: 97da6c2d
+
+05:07 heartbeat protected dev 97da6c2dfec239b5739eed4116469f1fb5db7ed5
+read twice stable. Compare de7f45...97da6c valid1page/31ahead/0behind/16paths,
+including merged PR3028. Structured72owned TWO REPEATED workbench/component
+test overlaps, ZERO new; cumulative1092paths/TENowned overlaps retains all ten.
+No workflow path changed this increment; earlier workflow changes unaudited.
+Messages not VN recovery/shared-auth source or behavioral audit, dependency
+verification, tests or Task59-fix credit. Path inventory not local conflict/
+safe integration/rebase/preservation proof. RESTfalse/dirty/OPEN/unmerged;
+GraphQLUNKNOWN not permission; PRbase8b25 lags. Head68861/reviews110/threads92
+five unresolved/comments52 unchanged/all pages exhausted/PRbody byte-equal.
+All97checks complete/all7required exactheadSUCCESS not changed-dev verification;
+JobsSQLiteFAILED. See dev-97da6c-integration-diagnosis.md and separate evidence;
+nineteen prior manifests/973entries fullmatch/read-only/no old refresh.
+Three approvals separately unanswered; AC5/AC6/DoD pending. No fetch/rebase/
+source/test edit/agents/body mutation/conflict resolution/merge/push.
+
+## Latest Dev Advance: de7f4535
+
+03:16 heartbeat actual protected dev de7f453593dbb40f069a4666fd562fc5f3622817
+read twice stable. Compare bd2ae7...de7f45 valid1page/3ahead/0behind/7paths,
+including merged PR3039. Structured72owned ZERO increment overlaps;
+cumulative1080paths/TENowned overlaps retains all earlier ten. No workflow
+path changed this increment; earlier workflow changes unaudited. Messages not
+scheduled-task/AuthNZ source/behavioral or encryption audit, dependency-version
+verification, tests or Task59-fix credit. Path inventory not local conflict/
+safe integration/rebase/preservation proof. RESTfalse/dirty/OPEN/unmerged;
+GraphQLUNKNOWN not permission; PRbase8b25 lags. Head68861/reviews110/threads92
+five unresolved/comments52 unchanged/all pages exhausted. All97checks complete/
+all7required exactheadSUCCESS not changed-dev verification; JobsSQLiteFAILED.
+See dev-de7f45-integration-diagnosis.md and separate evidence; eighteen prior
+manifests fullmatch/read-only/no old refresh. Three approvals separately
+unanswered; AC5/AC6/DoD pending. No fetch/rebase/source/test edit/agents/body
+mutation/conflict resolution/merge/push.
+
+## Latest Dev Advance: bd2ae757
+
+02:35 heartbeat actual protected dev bd2ae757d274e7eda3edb48eb682733c401efe56
+read twice stable. Compare 3c9d97...bd2ae7 valid1page/3ahead/0behind/13paths,
+including merged PR3008. Structured72owned comparison finds one REPEATED
+VN endpoint overlap/ZERO new owned overlaps; cumulative1073paths/TENoverlaps.
+No workflow path changed this increment; earlier workflow changes unaudited.
+Messages not auth/VN behavioral/source audit, dependency-version verification,
+tests or Task59-fix credit. Path inventory not local conflict/safe integration/
+rebase/preservation proof. RESTfalse/dirty/OPEN/unmerged; GraphQLUNKNOWN not
+permission; PRbase8b25 lags. Head68861/reviews110/threads92five unresolved/
+comments52 unchanged/all pages exhausted. All97checks complete/all7required
+exactheadSUCCESS not changed-dev verification; JobsSQLite108581674056FAILED.
+See dev-bd2ae7-integration-diagnosis.md and separate evidence; seventeen prior
+manifests fullmatch/read-only/no old refresh. Three approvals separately
+unanswered; AC5/AC6/DoD pending. No fetch/rebase/source/test edit/agents/body
+mutation/conflict resolution/merge/push.
+
+## Latest Dev Advance: 3c9d97c5
+
+23:41 heartbeat actual protected dev3c9d97c56b29abc4c0396274b9560859aee06959
+read twice stable. Comparedf1fcc...3c9d97 valid3commit pages/242ahead/0behind;
+the compare API's 300-file list is incomplete. Complete nontruncated recursive
+trees give611incremental paths, including one new owned overlap: Jobs/manager.py.
+Structured72owned comparison gives1068cumulative paths/TENowned overlaps,
+retaining all earlier nine. backend-required.yml and ci.yml changed; this and
+earlier workflow changes unaudited. Commit messages not source/behavioral audit,
+dependency-version verification, tests or Task59-fix credit. Path inventory not
+behavioral contract/local conflict/rebase/preservation proof. RESTfalse/dirty/OPEN/
+unmerged; GraphQLDIRTY/server conflict only; PRbase8b25 lags. Head68861/reviews110/
+threads92five unresolved/comments52 unchanged/all pages exhausted. All97checks
+complete/all7required exactheadSUCCESS not changed-dev-workflow verification;
+JobsSQLite108581674056 STILLFAILED. See dev-3c9d97-integration-diagnosis.md and new
+separate evidence; sixteen prior manifests fullmatch/read-only/no old refresh.
+Three approvals separate unanswered; AC5/AC6/DoD pending. No fetch/rebase/source/
+test edit/agents/body mutation/conflict resolution/merge/push.
+
+## Latest Dev Advance: df1fcc7a
+
+22:00 heartbeat actual protected devdf1fcc7a52306f400b843c8b0ea0bc90d0396056
+read twice stable. Compare19215e...df1fcc valid1page/16ahead/0behind/95paths
+includes merged Persona ambient Buddy Stage1 PR2817. Structured72owned ONE new
+overlap: core/exceptions.py. Cumulative491unique base paths retain earlier eight
+VN overlaps plus central exceptions, NINE total. ci.yml changed again; this and
+earlier workflow changes unaudited. Commit messages not source/behavioral audit,
+dependency-version verification, tests or Task59-fix credit. Path inventory not
+behavioral contract/local conflict/rebase/preservation proof. RESTfalse/dirty/OPEN/
+unmerged; GraphQLDIRTY/server conflict only; PRbase8b25 lags. Head68861/reviews110/
+threads92five unresolved/comments52 unchanged/all pages exhausted. All97checks
+complete/all7required exactheadSUCCESS not changed-dev-workflow verification;
+JobsSQLite108581674056 STILLFAILED. See dev-df1fcc-integration-diagnosis.md and new
+separate evidence; old artifacts untouched. Three approvals separate unanswered;
+AC5/AC6/DoD pending. No fetch/rebase/source/test edit/agents/body mutation/merge/push.
+
+## Latest Dev Advance: 19215eb8
+
+20:39 heartbeat actual protected dev19215eb89ba658b13babe28fc2185d6821a0c462
+read twice stable. Comparef4b69e...19215e valid1page/4ahead/0behind/2Backlog paths
+includes merged PR3031. Structured72owned ZERO new overlap; cumulative404unique
+base paths retain earlier eight VN overlaps. No workflow path changed in this
+increment; earlier changes unaudited. Messages qualify license-test provenance,
+not verified workflow/run audit/AuthNZ diagnosis/version/tests or Task59-fix credit.
+Path inventory not behavioral contract/local conflict/rebase/preservation proof.
+RESTfalse/dirty/OPEN/unmerged; GraphQLDIRTY/server conflict only; PRbase8b25 lags.
+Head68861/reviews110/threads92five unresolved/comments52 unchanged/all pages exhausted.
+All97checks complete/all7required exactheadSUCCESS not changed-dev-workflow verification;
+JobsSQLite108581674056 STILLFAILED. See dev-19215e-integration-diagnosis.md and new
+separate evidence; old artifacts untouched. Three approvals separate unanswered;
+AC5/AC6/DoD pending. No fetch/rebase/source/test edit/agents/body mutation/merge/push.
+
+## Latest Dev Advance: f4b69eab
+
+19:38 heartbeat actual protected devf4b69eabea7a1c72013cbb66275ce4d187e2dd69
+read twice stable. Comparef4bcc9...f4b69e valid1page/2ahead/0behind/3paths includes
+merged license-verdict PR3032. Structured72owned ZERO new overlap; cumulative403
+unique base paths retain earlier eight VN overlaps. License workflow changed again;
+this and earlier changes unaudited. Path inventory not behavioral audit/local
+conflict/rebase/preservation proof; no live cancellation/tests/source audit or
+Task59-fix credit inferred from messages. RESTfalse/dirty/OPEN/unmerged; GraphQLDIRTY
+server conflict only; PRbase8b25 lags. Head68861/reviews110/threads92five unresolved/
+comments52 unchanged/all pages exhausted. All97checks complete/all7required exacthead
+SUCCESS not changed-dev-workflow verification; JobsSQLite108581674056 STILLFAILED.
+See dev-f4b69e-integration-diagnosis.md and new separate evidence; older artifacts
+unchanged. Three approvals separate unanswered; AC5/AC6/DoD pending. No fetch/rebase/
+source/test edit/agents/body mutation/merge/push; tracking only/no fresh tests.
+
+## Latest Dev Advance: f4bcc9bd
+
+18:58 heartbeat actual protected devf4bcc9bd70b12e2aae71d1633bff0053946d0314
+read twice stable. Comparea3d5...f4bc valid1page/4ahead/0behind/11paths includes
+merged license-gate/backlog PR3029. Structured72owned ZERO new overlap;
+cumulative403unique base paths retain earlier eight VN overlaps. License-gate
+workflow changed; this and earlier workflow changes unaudited. Path inventory
+not behavioral audit/local conflict/rebase/preservation proof; no live cancellation
+observation/tests/source audit or Task59-fix credit inferred from commit messages.
+Independent RESTfalse/dirty/OPEN/unmerged; GraphQLDIRTY/server conflict only; PRbase8b25
+lags. Head68861/reviews110/threads92five unresolved/comments52 unchanged/all pages
+exhausted. All97checks complete/all7required exactheadSUCCESS not changed-dev-workflow
+verification; JobsSQLite108581674056 STILLFAILED. See dev-f4bcc9-integration-diagnosis.md
+and separate evidence; older artifacts unchanged. No fetch/rebase/conflict resolution/
+source/test edit/agents/body mutation/merge/push. Three separate approvals unanswered;
+AC5/AC6/DoD pending. Tracking only/no tracking-only commit/push or fresh tests.
+
+## Latest Dev Advance: a3d52f30
+
+18:38 heartbeat actual protected deva3d52f30b0d21b8528d426d16e06c4a013414807
+read twice stable. Compare35d6...a3d5: one valid page,3ahead/0behind/3paths,
+including merged AuthNZ bootstrap PR3030. Structured72owned ZERO new overlap;
+cumulative394unique base paths retain earlier eight VN overlaps. No workflow
+change in this increment; earlier workflow changes unaudited. No AuthNZ behavioral
+audit/local tests/package verification or Task59-fix credit inferred from titles.
+Initial inputless jq exit4/no result; corrected -n inventory exit0, not CI credit.
+Independent RESTfalse/dirty/OPEN/unmerged; GraphQLUNKNOWN not permission; PRbase8b25
+lags. Head68861/reviews110/threads92five unresolved/comments52 unchanged/all pages
+exhausted. All97checks completed/all7required exactheadSUCCESS; JobsSQLite108581674056
+STILLFAILED. See dev-a3d52f-integration-diagnosis.md/separate evidence; older artifacts
+unchanged. No fetch/rebase/conflict resolution/source/test edit/agents/body mutation/
+merge/push. Three separate approvals unanswered; AC5/AC6/DoD pending. Tracking only,
+no tracking-only commit/push or fresh tests.
+
+## Latest Dev Advance: 35d6dd90
+
+16:27 heartbeat actual protected dev35d6dd90d4c3b703a753efdbd926e30af4f9eac5
+read twice stable. Compare718c...35d6: one valid page,7ahead/0behind/10paths,
+including merged MCP test follow-up PR3025. Structured72owned-path intersection
+ZERO new overlap; cumulative391unique base paths retain the earlier eight VN
+overlaps. No workflow change in this increment; earlier workflow changes remain
+unaudited. Inventory is not a behavioral audit, local conflict, rebase or
+preservation proof. No MCP source/test behavioral audit or local tests performed.
+Independent RESTmergeable=false/dirty/OPEN/unmerged; GraphQLUNKNOWN is not merge
+permission and both PRbase8b25 fields lag. Head68861 unchanged;110reviews/
+92threads5unresolved/52comments unchanged, all outer and nested pages exhausted.
+All97checks completed/all7required exactheadSUCCESS; JobsSQLite108581674056
+STILLFAILED. See dev-35d6dd-integration-diagnosis.md and separate evidence; prior
+records remain qualified and unchanged. No fetch/rebase/conflict resolution/source/
+test edit/agents/body mutation/merge/push. Task59 focused fix/Tasks60-63 design/
+guardedVerification approvals remain separate unanswered; AC5/AC6/DoD pending.
+Only owned tracking records changed; no tracking-only commit/push or fresh tests.
+
+## Latest Dev Advance: 718c1910
+
+15:45 heartbeat actual protected dev718c191082f1d6372fb6fe000ac763dcc07ffcbd
+read twice stable. Comparef283...718c: one valid page,4ahead/0behind/4paths,
+including merged audio resampler PR3024. Structured72owned-path intersection ZERO
+new overlap; cumulative381unique base paths retain the earlier eight VN overlaps.
+No workflow change in this increment; earlier workflow changes remain unaudited.
+Inventory is not a behavioral audit, local conflict, rebase or preservation proof.
+Independent RESTmergeable=false/dirty/OPEN/unmerged; GraphQLUNKNOWN is not merge
+permission and both PRbase8b25 fields lag. Head68861 unchanged;110reviews/
+92threads5unresolved/52comments unchanged, all outer and nested pages exhausted.
+All97checks completed/all7required exactheadSUCCESS; JobsSQLite108581674056
+STILLFAILED. See dev-718c19-integration-diagnosis.md and separate evidence; prior
+records remain qualified and unchanged. No fetch/rebase/conflict resolution/source/
+test edit/agents/body mutation/merge/push. Task59 focused fix/Tasks60-63 design/
+guardedVerification approvals remain separate unanswered; AC5/AC6/DoD pending.
+Only owned tracking records changed; no tracking-only commit/push or fresh tests.
+
+## Latest Dev Advance: f2830058
+
+15:25 heartbeat actual protected devf2830058d5f2ce697c9128551623e12547aaf13f
+read twice stable. Compare9668...f283: one valid page,3ahead/0behind/1path,
+including merged Backlog-only Chat NetworkError PR3026. Structured72owned-path
+intersection ZERO new overlap; cumulative377unique base paths retain the earlier
+eight VN overlaps. No workflow change in this increment; earlier workflow changes
+remain unaudited. Inventory is not a behavioral audit, local conflict, rebase or
+preservation proof. Initial jq inventory used an extra array traversal and exited5;
+corrected structured reread exited0 with complete counts, not test/CI credit.
+Independent RESTmergeable=false/dirty/OPEN/unmerged; GraphQLDIRTY and both PRbase8b25
+fields lag. Head68861 unchanged;110reviews/92threads5unresolved/52comments unchanged,
+all outer and nested pages exhausted. All97checks completed/all7required exacthead
+SUCCESS; JobsSQLite108581674056 STILLFAILED. See dev-f28300-integration-diagnosis.md
+and separate evidence; prior records remain qualified and unchanged. No fetch/rebase/
+source/test edit/agents/body mutation/merge/push. Task59 focused fix/Tasks60-63 design/
+guardedVerification approvals remain separate unanswered; AC5/AC6/DoD pending.
+Only owned tracking records changed; no tracking-only commit/push or fresh tests.
+
+## Latest Dev Advance: 9668e145
+
+13:25 heartbeat actual protected dev9668e1454b0b28b7a4de13e1a35496fa0b368c42
+read twice stable. Compare46db...9668: one valid page,14ahead/0behind/57paths,
+including merged Chatbook H2 PR3002. Structured72owned-path intersection ZERO
+new overlap; cumulative376unique base paths retain the earlier eight VN overlaps.
+ci.yml unchanged in this increment; earlier workflow changes remain unaudited.
+Inventory is not a behavioral audit, local conflict, rebase or preservation proof.
+Independent RESTmergeable=false/dirty/OPEN/unmerged; GraphQLUNKNOWN and both
+PRbase8b25 fields lag. Head68861 unchanged;110reviews/92threads5unresolved/
+52comments unchanged/all outer and nested pages exhausted. All97checks completed/
+all7required exacthead SUCCESS; JobsSQLite108581674056 STILLFAILED. See separate
+dev-9668e1-integration-diagnosis.md/evidence; earlier records remain qualified.
+No fetch/rebase/source/test edit/agents/body mutation/merge/push. Task59 focused
+fix/Tasks60-63 design/guardedVerification approvals remain separate unanswered;
+AC5/AC6/DoD pending/only owned tracking records changed/no tracking-only push.
+
+## Latest Dev Advance: 46db4688
+
+12:24 heartbeat actual protected dev46db4688c10f9fb80604032332788b2bc94e5917
+read twice stable. Compare056d...46db: one valid page,16ahead/0behind/234paths,
+including merged Chatbook H1 PR2968. Structured72owned-path intersection ZERO
+new overlap; cumulative332unique base paths retain the earlier eight VN overlaps.
+ci.yml changed again; inventory is not a behavioral workflow audit, local conflict,
+rebase or preservation proof. Initial full path output truncated; complete raw
+JSON retained and separate compact structured reread validates these counts.
+Independent RESTmergeable=false/dirty/OPEN/unmerged; GraphQLUNKNOWN and both
+PRbase8b25 fields still lag. Head68861 unchanged;110reviews/92threads5unresolved/
+52comments unchanged/all outer and nested pages exhausted. All97checks completed/
+all7required exacthead SUCCESS; JobsSQLite108581674056 STILLFAILED. See separate
+dev-46db46-integration-diagnosis.md/evidence; earlier records remain qualified.
+No fetch/rebase/source/test edit/agents/body mutation/merge/push. Task59 focused
+fix/Tasks60-63 design/guardedVerification approvals remain separate unanswered;
+AC5/AC6/DoD pending/only owned tracking records changed/no tracking-only push.
+
+## Latest Dev Advance: 056d9adb
+
+10:44 heartbeat actual protected dev056d9adbb3f50243183ba8c6a3e9b367a21f1799
+read twice stable. Compare0727...056d: one valid page,35ahead/0behind/61paths,
+including merged Persona PR2963. Structured72owned-path intersection ZERO new
+overlap; cumulative105unique base paths retain the earlier eight VN overlaps.
+Workflow ci.yml also changed, but path analysis is not a behavioral contract
+audit, local conflict/rebase attempt or preservation proof. Independent REST
+mergeable=false/dirty/OPEN/unmerged; GraphQLUNKNOWN and PRbase8b25 still lag.
+Head68861 unchanged;110reviews/92threads5unresolved/52comments unchanged and
+all outer/nested pages exhausted. All97checks completed/all7required exacthead
+SUCCESS; JobsSQLite108581674056 STILLFAILED. See new dev-056d9a-integration-
+diagnosis.md/separate immutable evidence; historical records below stay qualified.
+No fetch/rebase/source/test edit/agents/body mutation/merge/push. Task59 focused
+fix/Tasks60-63 design/guardedVerification approvals remain separate unanswered;
+AC5/AC6/DoD pending/only owned tracking notes changed/no tracking-only push.
+
+## Latest Dev Advance: 0727e9ee
+
+09:54 heartbeat actual protected dev0727e9ee3278569032d492532d9931cc6a0d5f6b
+was read twice stable. Compare bfa343...0727: one valid page,34commits ahead,
+0behind,27paths including merged Chat Macros PR2951. Structured comparison
+against72owned paths has ZERO new exact overlap; cumulative earlier VN recipe
+changes still contain eight overlapping paths across45unique base paths.
+This is read-only path analysis, not local conflict/rebase/preservation proof.
+GitHub REST still mergeable=false/dirty/OPEN/unmerged; GraphQLUNKNOWN and both
+PRbase fields lag8b25. Head68861 unchanged;110reviews/92threads5unresolved/
+52comments unchanged/all outer+nested pages exhausted. All97checks completed,
+all7required exact-head SUCCESS, JobsSQLite108581674056 STILLFAILED.
+See dev-0727e9-integration-diagnosis.md/new immutable evidence. Initial unquoted
+check endpoint failed zsh expansion before network/no CI credit; corrected
+quoted command has one valid page/pipefail exit0. No fetch/rebase/source/test
+edit/agent/body mutation/merge/push;59/60-63/body approvals remain separate and
+unanswered. Only owned tracking notes changed/no tracking-only push.
+
+GitHub conflict status09:04: GraphQLDIRTY and RESTmergeable=false/
+mergeable_state=dirty on current68861, OPEN/unmerged. Both PRbase fields still
+8b25 lag actual protected devbfa343, unchanged. This is GitHub-reported conflict
+status, NOT a locally attempted/reproduced rebase or a result pinned to stalebase.
+Raw /tmp/vn3016-heartbeat0904-pr-mergeability.json retained. No Git mutation/source
+edit/agentdispatch; existing59/60-63/body approvals unanswered. All7requiredPASS,
+JobsSQLite remainsFAILED/five findings unresolved/no merge/no repeated questions.
+
+## Overlapping Dev Base: Integration Pending
+
+Actual protected dev is now bfa343a6082b85ba71244483806f6fce3c2a7bfc,
+read twice stable during08:54 heartbeat; GraphQLbaseRefOid still8b25 lags.
+Comparison8b25...bfa:22commits ahead/0behind/19paths, merged VN recipe PR3015.
+EXACT8paths overlap72owned: Workbench component/test, VNendpoint, repository,
+service, worker, generationtest and repositorytest. This is path-level risk,
+not an observed Git conflict or completed preservation/rebase proof.
+See new dev-bfa343-integration-diagnosis.md. No fetch/rebase/resolution/push;
+preserve both branches contracts/frozen inputs before any future integration.
+All7required exact68861 contexts now SUCCESS, but JobsSQLite stillFAILED and
+five review findings remain unresolved. No blanket CI-green/merge-ready claim.
+59focusedfix/60-63boundeddesign/guardedVerification approvals still unanswered;
+no implementation/agentdispatch/bodymutation/repeatedquestions. Current checkout
+and evidence retained; only owned tracking notes dirty/no tracking-only push.
+
+## Current-Head CI: Task59 Approval Pending
+
+Exact68861 Jobs(SQLite) job108581674056/run36305369000 FAILED08:42:49Z.
+Actual LinuxPython3.12.14/pytest9.1.1:1296pass/1fail/4skip/577deselect/
+4211warnings1314.55s, NOTgreen. Sole nested fixture-bridge probe has3setup
+errors rather than intended1pass2assertion failures because its disabled-autoload
+command lacks pytest_asyncio.plugin; asyncio_mode is unknown/goodbridge not reached.
+See new task-59-current-head-ci.md/raw108581674056 log. Historical45dd diagnosis
+and all frozen inputs remain unchanged; no local rerun or Task59 source edit.
+Existing focused-fix approval still UNANSWERED; do not repeat or infer approval.
+Fresh97checks96complete1running: backend/security/coverage/e2e/container and
+trustedlicense SUCCESS/frontend-required RUNNING. Backend gate success is not
+Jobs-suite green. Fresh110reviews/92threads5unresolved/52comments unchanged;
+all outer/nested pages exhausted. Actualdev8b25 unchanged/no rebase/no merge.
+Tasks60-63 bounded-design and guarded Verification approvals separately unanswered.
+Only owned tracking records updated/no tracking-only push/all sessions CLOSED.
+
+## New Review: Tasks60-63 Await Approval
+
+Full exact68861 review COMPLETED5329502602 at08:22:46Z/updated08:22:47Z;
+terminal5854172260 at08:22:52Z exact head, busy5854129200 removed/fresh404.
+Fresh110reviews exhausted both pages/92threads5NEWunresolved/allnestedpages/
+52comments. Findings4114636477/6483/6488/6494/6497 are code-backed: owned SQLite
+lookup cursors lack close, service enters repo.db transactions, corruption tests
+use raw SQL/private mapper, deliberate completed deletion loses replay result.
+No native reproduction/new test/scanner credit yet. Scope proposal60cursor/
+61transaction ownership/62test boundary/63intentional-deletion receipt is awaiting
+NEW explicit bounded-design approval; async question submitted08:29Z/unanswered.
+No agent dispatched or source/test edits for60-63. The receipt proposal preserves
+original Jobs result/no recreation; unmarked missing state remains failclosed.
+This approval is separate from Task59 CI fix and guarded body update, both still
+unanswered. AC5reopened/AC6DoDtaskpending; Tasks1-58 stay frozen/approved/CLOSED.
+Current84checks75complete9running/nofailure; security+e2e+trustedlicenseSUCCESS,
+backendcoveragefrontendRUNNING/containerabsent. Actualdev8b25unchanged/no rebase.
+
+## Current Integration: 68861f5a22
+
+New task5558-integration-evidence/SHA256SUMS693 fully verified after recording:
+all72 committed owned hashes/70current nonrecord hashes/466prior frozen inputs.
+Manifest and mutable proof excluded before inventory. Initial sandbox write denial
+did not freeze anything; authorized scoped write then succeeded. No old overwrite.
+
+Tasks1-58 LOCAL COMPLETE/frozen/independently approved; all needed sessions CLOSED.
+Normal eleven-file commit94589a72, conflict-free26commit rebase onto actualdev
+8b25dc729cec12d4e7c3b28b575b70812ecc772e, exact45dd lease push/GitHub verified
+68861f5a229365c867db8deb3432028207cd8848. Fifth backup retains94589a72.
+All26 patches equal/all72 complete raw diffs+source hashes identical/all466 frozen
+inputs matched after rebase/tests. Initial range-diff spacing parser failed;
+corrected full verification succeeded, not product failure or initial proof credit.
+Separate fresh typed3pass6warnings0.80/XML0.353 and takeover1pass6warnings2.95/
+XML2.543, zero failures/errors/skips; overlap NOTsum/no broad or PG/scanner repeat.
+See task-55-58-integration.md; all old artifacts and qualified manifests preserved.
+Six replies exact-body/linkage verified/all6threads resolved; fresh109reviews/
+87threads0unresolved/all outer+nested pages exhausted/50comments before request.
+Full EXACT68861 request5854127918 at08:15:40Z PENDING/busy5854129200 at08:15:53Z;
+no duplicate. Current64checks37complete12running15queued/no actionablefailure;
+e2erequired running/other5requiredcheckcontexts absent; trustedlicense55019394296
+SUCCESS. Old45dd checks/fullreview historical; not merge-ready.
+AC5checked/AC6DoDtaskpending. Task59 focused CI test fix and guarded Verification
+update approvals UNANSWERED/no changes; human paragraph/current Cubic preserved.
+Owned integration notes remain local only/NO tracking-only push.
+
 ## Current Review Wave: Tasks55-58
 
 FINAL local independent SPEC/QUALITY/changed-contract PASS55-58/FeynmanCLOSED.

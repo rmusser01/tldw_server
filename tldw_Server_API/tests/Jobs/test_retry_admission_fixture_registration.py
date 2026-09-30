@@ -68,6 +68,7 @@ def test_bridge_resolution_preserves_jobs_loop_and_isolation(
             monkeypatch,
             f"registration-{bridge}",
             "-p", "no:randomly",
+            "-p", "pytest_asyncio.plugin",
         )
         result.assert_outcomes(passed=3 - failed, failed=failed)
         if failed:

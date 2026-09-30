@@ -130,7 +130,7 @@ class VNAssetPackService:
                 retryable=True,
                 operation="claim_or_replay_idempotency",
             )
-        with self.repo.db.transaction():
+        with self.repo.generation_transaction():
             # Another client may have completed the receipt after our claim.
             current = self.repo.get_idempotency_record(
                 owner_user_id=owner_user_id,
@@ -715,7 +715,7 @@ class VNAssetPackService:
         request = request or VNAssetGenerationRequest()
         requested_by_user_id = self.owner_user_id if user_id is None else int(user_id)
         selected_slot_ids = set(request.slot_ids)
-        with self.repo.db.transaction():
+        with self.repo.generation_transaction():
             pack = self._require_pack(pack_id)
             slots = self.repo.list_slots(pack_id)
             if selected_slot_ids:
@@ -793,7 +793,7 @@ class VNAssetPackService:
         is recovered only for active, incomplete fanout. Raises VNAssetGenerationError
         for receipt ownership/link errors; Jobs/database failures propagate.
         """
-        with self.repo.db.transaction():
+        with self.repo.generation_transaction():
             return VNAssetGenerationStatusResponse(
                 **self._recover_generation_receipt_data(record, pack_id=pack_id, jobs_manager=jobs_manager)
             )
