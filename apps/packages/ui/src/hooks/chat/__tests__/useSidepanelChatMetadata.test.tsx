@@ -82,6 +82,31 @@ const mountQueue = (prepare = async () => {}, connected = true, complete: (guard
 }
 
 describe("saved sidepanel conversation readiness", () => {
+  it("does not rerender metadata for streamed message updates while retaining readiness updates", async () => {
+    const state = useStoreMessageOption.getState()
+    state.setServerChatMetaLoaded(true)
+    io.getChat.mockReturnValue(held<typeof characterChat>().promise)
+    let renders = 0
+    const hook = renderHook(() => {
+      renders++
+      return useSidepanelChatMetadata(io.selection)
+    })
+    const initialRenders = renders
+    act(() => {
+      state.setMessages([{ isBot: true, name: "Assistant", message: "Partial reply", sources: [] }])
+      state.setStreaming(true)
+    })
+    expect(renders).toBe(initialRenders)
+    await act(async () => { state.setServerChatMetaLoaded(false) })
+    expect(hook.result.current.isReady).toBe(false)
+    act(() => { state.setServerChatLoadState("failed") })
+    expect(hook.result.current.failed).toBe(true)
+    act(() => { state.setServerChatMetaLoaded(true) })
+    expect(hook.result.current.isReady).toBe(true)
+    expect(hook.result.current.failed).toBe(false)
+    hook.unmount()
+  })
+
   it.each(["preflight", "completion"])("does not mutate Alice's restored queue when old %s settles after remount", async phase => {
     const pending = held<void>()
     const originalQueue = useStoreMessageOption.getState().queuedMessages

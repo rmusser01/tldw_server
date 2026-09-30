@@ -22,7 +22,9 @@ export type QueuedDispatchGuard = (() => void) & {
 export const useSidepanelChatMetadata = (
   setSelectedAssistant: (selection: AssistantSelection | null, options?: SelectedAssistantCommitOptions) => Promise<unknown> | void
 ) => {
-  const { serverChatId, serverChatMetaLoaded, serverChatLoadState } = useStoreMessageOption()
+  const serverChatId = useStoreMessageOption((state) => state.serverChatId)
+  const serverChatMetaLoaded = useStoreMessageOption((state) => state.serverChatMetaLoaded)
+  const serverChatLoadState = useStoreMessageOption((state) => state.serverChatLoadState)
   const selectionSetter = React.useRef(setSelectedAssistant)
   selectionSetter.current = setSelectedAssistant
   const [retryRevision, retry] = React.useReducer((value: number) => value + 1, 0)

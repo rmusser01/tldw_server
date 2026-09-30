@@ -27,7 +27,7 @@ export type SidepanelTabsState = {
 }
 
 export const getTabsStorageKey = (id: number | null | undefined, ownerKey: string) =>
-  `sidepanelChatTabsState:v2:${encodeURIComponent(ownerKey)}:${id != null ? `tab-${id}` : "global"}`
+  `sidepanelChatTabsState:v2:${encodeURIComponent(ownerKey)}:${id !== null && id !== undefined ? `tab-${id}` : "global"}`
 
 /** Recover a completed durable reply when its tab snapshot still has a stream cursor. */
 const recoverCompletedSnapshotReplies = async (

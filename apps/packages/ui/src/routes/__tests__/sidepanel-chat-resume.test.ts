@@ -62,9 +62,15 @@ describe("hasResumableSidepanelChat", () => {
     await expect(pending).resolves.toBe(false)
   })
 
-  it("treats a stored tabs snapshot with real chat state as resumable", async () => {
+  it.each([
+    [7, "tab-7"],
+    [0, "tab-0"],
+    [null, "global"],
+    [undefined, "global"]
+  ])("treats stored real chat state as resumable for runtime tab %s", async (tabId, storageSuffix) => {
+    mocks.sendMessage.mockResolvedValue({ tabId })
     mocks.storageGet.mockImplementation(async (key: string) => {
-      if (key === `sidepanelChatTabsState:v2:${encodeURIComponent('["http://chat.test","multi-user","manual",null,"alice",null]')}:tab-7`) {
+      if (key === `sidepanelChatTabsState:v2:${encodeURIComponent('["http://chat.test","multi-user","manual",null,"alice",null]')}:${storageSuffix}`) {
         return {
           version: 2, ownerKey: '["http://chat.test","multi-user","manual",null,"alice",null]',
           tabs: [{ id: "tab-1" }],
