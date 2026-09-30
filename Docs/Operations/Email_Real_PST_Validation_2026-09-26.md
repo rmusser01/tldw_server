@@ -351,3 +351,23 @@ existing follow-up JSON. Previous receipts retain their original bindings; no
 benchmark or live VM drill was repeated. The previous head and tracking remain in
 `codex/email-pr3023-before-dev6074-20260929`. Fresh exact-head Qodo review and all
 seven required contexts must pass before the authorized merge.
+
+
+## Metadata-only dev refresh (2026-09-30)
+
+Dev advanced from `607431154cf10129b5d9afa8f9b57d46636466fc` to
+`955b1d9626a055ca44336a00d3d4c144949cb00f` through PR3062, which updates one
+unrelated Backlog task record. The rebase is conflict-free. Before this evidence
+update, all 22,370 tracked entries outside Backlog match the reviewed
+`df1781b27e9c07f1b41df07f42173af68c5f1aa1` head exactly, including every
+source, test, fixture, dependency and CI input. All 163 certified Python hashes
+match the latest FastAPI validation receipt.
+
+The 746 combined auth/email/route cases, 13 monitoring cases and ten guarded
+native-PST cases retain their original source/dependency bindings and were not
+rerun. Existing Ruff, Bandit, OpenAPI and route-auth certificates remain unchanged;
+this metadata-only refresh introduces no new code/security scope. Benchmarks were
+not rerun. The comparison receipt is appended to the existing follow-up JSON.
+The reviewed head and tracking remain in
+`codex/email-pr3023-before-dev955b-20260930`. Fresh exact-head incremental review
+and all seven required hosted contexts must pass before the authorized merge.

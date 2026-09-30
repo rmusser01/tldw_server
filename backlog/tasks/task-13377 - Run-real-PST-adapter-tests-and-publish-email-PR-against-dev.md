@@ -4,7 +4,7 @@ title: Run real PST adapter tests and publish email PR against dev
 status: In Progress
 assignee: []
 created_date: '2026-09-26 21:50'
-updated_date: '2026-09-30 04:32'
+updated_date: '2026-09-30 04:35'
 labels: []
 dependencies: []
 documentation:
@@ -24,7 +24,7 @@ User requested executing the two previously skipped pypff/PST tests, fixing veri
 - [x] #3 A reviewed pull request targets dev and links measured email evidence; human Change summary merge gate remains explicit
 - [x] #4 PR3023 documentation and backend gates are repaired at their verified causes, with affected checks passing locally
 - [ ] #5 Latest dev is integrated without losing email behavior; reviewed corrections and validation are pushed to PR3023
-- [x] #6 PR3023 is rebased onto latest dev; all actionable Qodo and other review comments are resolved with evidence
+- [ ] #6 PR3023 is rebased onto latest dev; all actionable Qodo and other review comments are resolved with evidence
 - [ ] #7 Required CI and review gates pass and PR3023 is merged under the user authorization
 <!-- AC:END -->
 
@@ -148,12 +148,14 @@ Heartbeat 03:59Z: exact df178/latest dev6074 unchanged; Qodo exact-head zero act
 Heartbeat 04:19Z: exact df178/latest dev6074 unchanged; Qodo exact-head zero active findings, all nine threads resolved and no new or edited feedback. E2E-required36649177505 SUCCESS04:15:09Z joins backend, coverage, security, container and trusted license/audit PASS. Frontend36649177398 remains queued without failures. Six of seven required contexts pass; actual merge/AC7 awaits frontend. Active job left alone; no rerun, bypass or source edit.
 
 Heartbeat04:29Z: dev advanced6074 to955b1d9626a055ca44336a00d3d4c144949cb00f through PR3062. The incoming diff changes exactly one unrelated Backlog task13392 record; no source/test/fixture/dependency/CI input changes or overlap with this PR. Preserve published df178 plus pending own tracking, then conflict-free rebase and compare every non-Backlog repository input and all163 certified Python hashes. Existing746/13/native10 and security evidence remains source-bound without redundant reruns. Prior df178 Qodo0/allnine resolved and six of seven gates PASS; frontend queued. Refreshed head must obtain fresh exact-head Qodo and allseven contexts; actual merge/AC7 pending.
+
+Dev955b metadata-only refresh verified: conflict-free rebase, all22370 non-Backlog tracked entries exactly reviewed df178 before evidence update, incoming task13392 exactly dev and all163 certified Python hashes unchanged. Source/test/fixture/dependency/CI bytes unchanged; previous FastAPI0.141.1 746combined/13monitoring/native10 validation and quality/schema/route-auth certificates retain original bindings without rerun. No new Bandit scope; metadata/docs/tracking only. Existing report/JSON append equality receipt; backup codex/email-pr3023-before-dev955b-20260930 preserves reviewed head and tracking. Self-review of incoming scope and exact tree comparison is clear; publication/current-headQodo/CI and actual merge pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR3023 ready at df1781b27e9c07f1b41df07f42173af68c5f1aa1 on latest dev607431154cf10129b5d9afa8f9b57d46636466fc. Exact-head Qodo zero active findings; all nine threads resolved, no new feedback. Backend, coverage, security, container, E2E and trusted license/audit PASS; frontend queued without failures. Actual merge/AC7 pending frontend. Verified746 combined/13 monitoring/native10 evidence and human recurring authorization/Change summary preserved; ACTIVE follow-up continues quietly.
+Metadata-only dev955b rebase verified at cfac7e0c2ad7e3f907adf21f077c7813a549413e: every non-Backlog input and all163 certified Python hashes identical to reviewed df178. Existing746/13/native10 and security/schema evidence remains source-bound; no reruns. Prior df178 had Qodo0/allnine resolved and six of seven gates passing, but refreshed-head review/CI must pass anew. Publishing refreshed evidence under preserved human authorization; actual merge/AC7 pending.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

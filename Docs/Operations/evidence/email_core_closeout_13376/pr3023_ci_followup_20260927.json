@@ -1649,5 +1649,27 @@
     },
     "historical_evidence": "Older validation retains its original source/dependency bindings. 91 of 92 prior certified email Python hashes still match; UserDB changed with incoming dev. The current affected suite and native PST tests were rerun under FastAPI0.141.1. No benchmark or live VM drill rerun.",
     "publication_state": "Verified source ready for publication; fresh exact-head Qodo and seven required contexts remain necessary before merge."
+  },
+  "metadata_only_dev_refresh_20260930": {
+    "recorded_at": "2026-09-30T04:34:02.899887+00:00",
+    "previous_reviewed_head": "df1781b27e9c07f1b41df07f42173af68c5f1aa1",
+    "previous_dev": "607431154cf10129b5d9afa8f9b57d46636466fc",
+    "dev_commit": "955b1d9626a055ca44336a00d3d4c144949cb00f",
+    "rebased_parent_commit": "cfac7e0c2ad7e3f907adf21f077c7813a549413e",
+    "backup_branch": "codex/email-pr3023-before-dev955b-20260930",
+    "incoming_paths": [
+      "backlog/tasks/task-13392 - useChatActions.saved-normal.integration-2-mirror-delete-tests-fail-on-dev.md"
+    ],
+    "incoming_paths_exact_dev": true,
+    "all_non_backlog_tree_entries_identical_before_evidence_update": true,
+    "non_backlog_tree_entry_count": 22370,
+    "certified_python_paths": 163,
+    "certified_python_hashes_unchanged": true,
+    "source_certificate": "/tmp/email_pr3023_dev6074_sources_20260929.json",
+    "source_certificate_sha256": "07074bfcfe9e42935e93d16934bd524fb88a345a74bca2160367acc3dba912c6",
+    "validation": "No source, test, fixture, dependency or CI input changes. Existing FastAPI0.141.1 validation remains source-bound; no test/schema/benchmark rerun or new Bandit scope.",
+    "comparison_receipt_sha256": "63f1ac62019d99cb17c374834692ac5af9202029e30d8470d8a73857d96db177",
+    "prior_validation_binding": "fastapi_routes_dev_refresh_20260929:746 combined auth/email/route cases,13 monitoring cases,10 guarded native-PST cases;163 unique compiled Python hashes,zero new Ruff/Bandit findings,unchanged OpenAPI/route-auth baseline. Suites overlap; no rerun.",
+    "publication_state": "Ready for refreshed-head publication; exact-head incremental Qodo review and all seven required contexts must pass before merge."
   }
 }
