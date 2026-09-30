@@ -373,3 +373,137 @@ UAT531 final local review is clear. Exact1744nodes/all358PGcases preserved in al
 UAT532 caller tracing expands the same one-file repair to three existing audio API contracts (upload success, URL success, mixed status), using one explicit opt-in controlled-transcription fixture and lower-provider tripwire. Do not deselect these known callers from final broader141 verification. First clean causal red intercepts before model loading; mixed+adjacent seams35pass. First BaseException-based tripwire disrupted TestClient and is retained as failed harness evidence; ordinary guarded Mock plus immediate assert_not_called yields clean red.
 
 UAT532 final all141scope is green with110pass/29existing skips/2existing xpasses140.41seconds. No added skip/deselection or model artifacts; URL availability remains an explicit limitation. Allthree callers use one opt-in seam, root independent review is clear, Ruff adds zero findings and Bandit adds five LOW assertions only. Final native hosted acceptance remains open.
+
+## Sandbox test clock isolation — UAT534 (TASK-13260.278.18.83.20)
+
+### Stage 1: Prove shared clock mutation
+**Goal:** Trace the real native artifact failure and all heartbeat sleep fakes.
+**Success Criteria:** Actual fixture identity/duration red shows unrelated background clocks are changed.
+**Tests:** Fixture regression and original5second artifact guard.
+**Status:** Complete
+
+The autouse fixture and two heartbeat tests mutate sb.asyncio.sleep on the shared stdlib module. Actual source probe redirects unrelated300second and2second sleeps to0.01second; native logs show accelerated MCP/Jobs loops. HTTP200/all300artifacts remain correct. Repair the test boundary before inferring any production performance cause.
+
+### Stage 2: Reuse a module-local test facade
+**Goal:** Keep native asyncio globally and accelerate only the endpoint10second heartbeat.
+**Success Criteria:** Allthree fake callers use one local fixture boundary; other durations/functions/identities remain native.
+**Tests:** Durable fixture regression, artifact/admin and heartbeat/idle/stream controls, compile/Ruff/Bandit.
+**Status:** In Progress
+
+Only sandbox test conftest, heartbeat tests and existing test regression scope are authorized. Keep the exact5second artifact threshold and all sizes/paths/no-walk assertions. No production/core-pool or process-wide asyncio changes.
+
+### Stage 3: Review and qualify
+**Goal:** Require independent source review and native final-head acceptance.
+**Success Criteria:** No new skip, assertion weakening or production security finding; hosted gates pass.
+**Tests:** Full affected sandbox controls and final automatic/native matrix.
+**Status:** Not Started
+
+## Claims worker setup watchdog — UAT533 (TASK-13260.278.18.83.21)
+
+### Stage 1: Prove premature setup cancellation
+**Goal:** Separate the outer test watchdog from durable export lifecycle assertions.
+**Success Criteria:** Controlled cold setup reproduces cancellation in the completed callback.
+**Tests:** Original completion and first-failure retry worker callers.
+**Status:** In Progress
+
+Native logs record durable completed state before the2second watchdog cancels the completion callback. The design requires bounded worker lifecycle, with no2second latency SLA. Both test callers must use the same finite setup watchdog; no production worker or feature deadline changes.
+
+### Stage 2: Apply one bounded test budget
+**Goal:** Retain real worker/DB/callback stop behavior with enough cold setup budget.
+**Success Criteria:** Original download, ownership, completion, retry and late-failure guards stay active.
+**Tests:** Full worker E2E and adjacent Claims controls, compile/Ruff/Bandit.
+**Status:** Not Started
+
+### Stage 3: Review and qualify
+**Goal:** Require independent source review and final native Claims acceptance.
+**Success Criteria:** No new skip or security finding; final-head hosted checks pass.
+**Tests:** Automatic and native matrix.
+**Status:** Not Started
+
+## Windows development fixture publication — UAT535 (TASK-13260.278.18.83.22)
+
+### Stage 1: Trace real bytes, path aliases and descriptor ownership
+**Goal:** Diagnose53native fixture failures without changing guards.
+**Success Criteria:** Real descriptor CRT and path-resolution probes reproduce the byte/physical-path causes; original fixture blobs remain exact.
+**Tests:** Journal3996to4165byte expansion, missing-prefix and symlink-parent probes, held-close and directory-sync controls, Git checkout byte check.
+**Status:** Complete
+
+Recovery reader/writer omit O_BINARY; real-descriptor probe proves text translation trips exact-size validation. Windows realpath normalizes parent traversal before resolving symlinks. Three test fakes assume POSIX path/descriptor behavior. Frozen JSON canonical LF becomes CRLF on checkout. Current/e49/dev helper and affected test source are identical.
+
+### Stage 2: Repair the existing shared boundary
+**Goal:** Preserve journal bytes and resolve physical prefixes before parent traversal.
+**Success Criteria:** Binary flags, minimal prefix resolution and three portable test controls pass without altering locking, identity, size/hash, source-root, recovery or durability guards.
+**Tests:** Durable causal regressions and full generator/consuming fixture modules; compile/Ruff/Bandit; unchanged seven frozen blobs.
+**Status:** In Progress
+
+Authorize only Helper_Scripts/web_scraping_phase4_fixtures.py, existing test_phase4_fixture_generator.py and narrow phase4JSON LF attributes. No custom path abstraction, platform-wide skip, fake Windows chmod or permission weakening. Reject missing/non-directory prefixes before parent traversal; keep existing nearest-parent validation. Root owns independent security-sensitive source review.
+
+### Stage 3: Review and qualify actual platforms
+**Goal:** Require native Windows and supported POSIX final-head acceptance.
+**Success Criteria:** Exact fixture contracts remain active and final automatic/native checks pass.
+**Tests:** Native hosted publication, reader and crash/recovery controls on final head.
+**Status:** Not Started
+
+## Exact WebScraping inventory refresh — UAT535 (TASK-13260.278.18.83.23)
+
+### Stage 1: Inspect generated delta
+**Goal:** Identify stale data without changing import surfaces or assertions.
+**Success Criteria:** Current causal failure and exact line-only delta recorded.
+**Tests:** Original10inventory contracts and existing generator comparison.
+**Status:** Complete
+
+### Stage 2: Regenerate through the official helper
+**Goal:** Refresh only JSON/Markdown artifacts after final related test edits.
+**Success Criteria:** Reviewed exact generated delta and repeat stability; all10contracts pass.
+**Tests:** Full inventory module and repeated generation digest.
+**Status:** Not Started
+
+### Stage 3: Review and qualify
+**Goal:** Commit tracking/evidence and require final hosted integrations acceptance.
+**Success Criteria:** No manual record edit, scanner/import behavior change or assertion weakening.
+**Tests:** Final-head automatic/native integrations matrix.
+**Status:** Not Started
+
+## Local safe-regex platform fakes — UAT535 (TASK-13260.278.18.83.24)
+
+### Stage 1: Preserve native process identity
+**Goal:** Prove four posture simulations mutate stdlib os/sys globally.
+**Success Criteria:** Durable native-identity checks fail original fakes.
+**Tests:** Four existing posture cases, exact Windows pytest failure evidence.
+**Status:** Complete
+
+### Stage 2: Use existing stdlib namespace facades
+**Goal:** Replace only safe_regex module references during simulations.
+**Success Criteria:** Every original CPU/address-space assertion remains, native globals unchanged and full module passes.
+**Tests:** Posture red/green, full safe-regex module, Ruff/Bandit baseline.
+**Status:** In Progress
+
+### Stage 3: Review and qualify
+**Goal:** Review the one test file and require native Windows final-head acceptance.
+**Success Criteria:** No production change, new skip or guard weakening.
+**Tests:** Final automatic/native integrations checks.
+**Status:** Not Started
+
+## Chat post-output cleanup test phase — UAT536 (TASK-13260.278.18.83.25)
+
+### Stage 1: Prove first-frame setup race
+**Goal:** Distinguish cold factory from cold sanitizer inspection under the10ms idle timer.
+**Success Criteria:** Controlled50ms first-frame red reproduces missing readiness; factory delay control passes.
+**Tests:** Three private modes and current/e49/dev critical source comparison.
+**Status:** Complete
+
+Native logs do not identify the exact delayed operation. The causal probe records provider output_started while handler semantic_output_seen stays false and the wire lacks ok. A phased probe preserves every original assertion.
+
+### Stage 2: Arm the unchanged deadline after semantic output
+**Goal:** Use the existing factory/handler and on_first_output callback with a finite1second setup bound.
+**Success Criteria:** The unchanged10ms idle deadline governs the intended post-output phase; finally cleanup includes readiness failure.
+**Tests:** Warm/cold target cases, all streaming controls, compile/Ruff/Bandit and assertion preservation.
+**Status:** In Progress
+
+Authorize only tests/Chat/unit/test_streaming_utils.py; preserve sanitizer/factory behavior and original cleanup/healthy-stream/wire assertions. Capture the real handler using an existing test pattern and arm its public idle budget through the first-output callback. No production policy/API or timeout guard changes.
+
+### Stage 3: Review and require native qualification
+**Goal:** Qualify this test on final-head Ubuntu3.13.
+**Success Criteria:** Independent source review and automatic/native hosted checks pass without added skips.
+**Tests:** Full applicable streaming module and final native matrix.
+**Status:** Not Started
