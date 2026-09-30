@@ -508,7 +508,7 @@ Native logs do not identify the exact delayed operation. The causal probe record
 **Goal:** Use the existing factory/handler and on_first_output callback with a finite1second setup bound.
 **Success Criteria:** The unchanged10ms idle deadline governs the intended post-output phase; finally cleanup includes readiness failure.
 **Tests:** Warm/cold target cases, all streaming controls, compile/Ruff/Bandit and assertion preservation.
-**Status:** In Progress
+**Status:** Complete
 
 Authorize only tests/Chat/unit/test_streaming_utils.py; preserve sanitizer/factory behavior and original cleanup/healthy-stream/wire assertions. Capture the real handler using an existing test pattern and arm its public idle budget through the first-output callback. No production policy/API or timeout guard changes.
 
@@ -516,4 +516,78 @@ Authorize only tests/Chat/unit/test_streaming_utils.py; preserve sanitizer/facto
 **Goal:** Qualify this test on final-head Ubuntu3.13.
 **Success Criteria:** Independent source review and automatic/native hosted checks pass without added skips.
 **Tests:** Full applicable streaming module and final native matrix.
+**Status:** In Progress
+
+Controlled first-frame setup causal red becomes warm/cold green while preserving the original10ms post-output idle budget and all existing waits/wire/cleanup guards. Full Chat scope:2008collected,2007passed,one unchanged heartbeat skip,exit0 in196.52s under Python3.12.11/FastAPI0.141.1. Initial44fail/116error run used a basetemp outside the approved native macOS temp root; corrected invocation clears every failure without a database-policy change. Original evidence retained. Ruff0/Bandit258to259 adds one LOW assertion only; AST/compile/diff pass. Root and independent source review clear. Native final-head acceptance remains open.
+
+## Secure Notes capability coverage — UAT537 (TASK-13260.278.18.83.26)
+
+### Stage 1: Map exact secure descriptor callers
+**Goal:** Verify the intentional unsupported-host boundary before file operations.
+**Success Criteria:** All missing regular/directory flag probes produce closed unsupported error with zero opens.
+**Tests:** Exact four native failures and neutral/negative caller mapping.
+**Status:** Complete
+
+### Stage 2: Preserve supported and unsupported test contracts
+**Goal:** Apply capability-based applicability only to four secure-descriptor positives.
+**Success Criteria:** Original positive assertions remain; unmarked native unsupported controls prove no opens/reads/scans, and DB pagination/ownership/route confinement/pure guards stay active.
+**Tests:** Full supportedPOSIX module, unsupported capability facade, Ruff/Bandit/AST review.
+**Status:** Complete
+
+Authorize only test_legacy_attachment_source.py. No production edit, permission fallback, platform-directory omission or blanket module skip. Existing Sync bootstrap source errors remain sanitized and readiness stays fail-closed.
+
+### Stage 3: Review and qualify native behavior
+**Goal:** Require independent source review and final-head native Windows plus POSIX coverage.
+**Success Criteria:** Native negative tests and all supported controls pass under unchanged security contract.
+**Tests:** Final native matrix and protected automatic gates.
+**Status:** In Progress
+
+Exact four secure-descriptor positives get capability-based applicability; all seven original bodies and20assertions remain AST-identical. Four causal failures become supportedPOSIX21passed/0skip; unsupported private facade17passed/4exact skips, each exit0. Fourteen new unmarked cases cover native/missing capability no-I/O rejection plus cursor/limit guards. DB pagination, ownership and route confinement remain unmarked. Production source unchanged. Root independent source review clear; Ruff0/Bandit20to33 adds only13 LOW assertion notices; compile/diff pass. Actual Windows final-head negative coverage remains mandatory.
+
+## Pinned ProfileCore checkout bytes — UAT538 (TASK-13260.278.18.83.27)
+
+### Stage 1: Reproduce the exact native digest
+**Goal:** Trace all57contractfiles through actual Windows Git checkout filters.
+**Success Criteria:** Exact hosted abfac676digest reproduced from unchanged blobs, versus expected421672c5LF digest.
+**Tests:** Existing contract file inventory and actual Git cat-file filters.
+**Status:** Complete
+
+### Stage 2: Preserve bytes through native LF attributes
+**Goal:** Add four narrow rules matching pyproject, source, schemas and v1fixture inventory.
+**Success Criteria:** Every blob/expected digest/assertion unchanged; Windows filters restore exact expected digest and original Personalization checks pass.
+**Tests:** Actual Git filter/hash green and full original contract module.
+**Status:** Complete
+
+Only .gitattributes changes; no fixture regeneration, expected-digest update or broad package normalization. Bandit inapplicable to the attribute-only scope.
+
+### Stage 3: Review and qualify native Windows
+**Goal:** Require final-head frozen-contract check.
+**Success Criteria:** Exact Windows pinned digest passes in final native matrix.
+**Tests:** Protected automatic and native checks.
+**Status:** In Progress
+
+Actual Git Windows checkout filters reproduce hosted CRLF digest abfac676 from unchanged57pinned blobs. Four narrow LF rules restore exact expected421672c5 digest and every filtered byte; all worktree/e49/HEAD blobs remain unchanged. Original Personalization module3passed/0skip,exit0. Independent verification checks exact57file selection and digest; root review clear. Attributes-only scope: Bandit inapplicable; diff clean. Native Windows final-head digest acceptance remains open.
+
+## Real-child reap versus scheduler overrun — UAT539 (TASK-13260.278.18.83.28)
+
+### Stage 1: Trace real cleanup and deterministic allocation
+**Goal:** Distinguish observed ownership/reap failure from positive-wait assertion timing.
+**Success Criteria:** Controlled200ms overrun reproduces assertion with bothchildren killed/reaped,2permits released,0livechildren/receivers; native inference limits recorded.
+**Tests:** Real-child warm/overrun and fake-clock serial-allocation mutation control.
+**Status:** Complete
+
+Production source is unchanged across e49/current/latestdev. Native close/outcome assertions succeeded; its semaphore observer already verifies all real children dead/reaped before release. Exact hosted scheduler delay is inferred, not captured. Current shared injected-clock phases provide positive allocations; a serial mutant violates the new invariant while passing prior budget/reap checks.
+
+### Stage 2: Keep real process checks and deterministic fairness
+**Goal:** Repair only the existing gateway protocol validation test module.
+**Success Criteria:** Warm/overrun cases retain readiness/kill/exitcode/reap/permits/live-count/budget checks; existing fake-clock case retains positive allocation invariant catching serial starvation.
+**Tests:** Causal red/green and full affected validation tests, compile/Ruff/Bandit/AST review.
+**Status:** In Progress
+
+No production code, timeout increase, signal/capability weakening or skip addition. Root owns independent review.
+
+### Stage 3: Review and qualify native macOS
+**Goal:** Require final-head native process cleanup acceptance.
+**Success Criteria:** Native matrix and all protected gates pass.
+**Tests:** Final automatic/native checks.
 **Status:** Not Started
