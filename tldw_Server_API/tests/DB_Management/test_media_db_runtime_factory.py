@@ -195,6 +195,7 @@ def test_validate_postgres_content_backend_uses_factory_validator(monkeypatch):
         ("sync_log", "sync_scope_personal"),
         ("sync_log", "sync_scope_org"),
         ("sync_log", "sync_scope_team"),
+        ("operationownedclonekeywords", "owned_clone_pending_keyword_access"),
     ]
     assert StubMediaDatabase.instances[-1].closed is True
 

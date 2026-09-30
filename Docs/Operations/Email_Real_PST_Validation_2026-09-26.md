@@ -419,3 +419,29 @@ binding and was not rerun. No Python code changed, no new Bandit scope is introd
 and no benchmark was rerun. The prior reviewed head and tracking remain in
 `codex/email-pr3023-before-dev0304-20260930`. Fresh exact-head incremental Qodo
 review and all seven required hosted contexts must pass before the authorized merge.
+
+
+## Broad CI repair on September 30 — TASK-13377.2/.3/.4
+
+Broad CI 36723727218 exposed a shared collection selector KeyError, a real
+PostgreSQL bootstrap lock inversion, stale fixtures, and two email unit modules
+missing from five full-suite matrices. The selector now interpolates its existing
+column whitelist with bound values. The v61 verifier reads stored pg_policy trees
+without deparsing them; exact tenant-policy names, schema, forced RLS and both
+policy expressions remain mandatory. No retry, authentication or CI gate was weakened.
+
+Final verification: 253 contract cases, 254 Collections cases, 110 affected official
+PostgreSQL cases, 30 ChaCha migration/concurrency/shared-chat cases, and 12 final
+catalog/privacy cases passed. Watchlists passed 708 cases with one existing
+live-ingestion skip, four deselections and one existing xpass. Suites overlap.
+Both production files are Ruff-clean and Bandit reports no findings or errors.
+The 26 remaining test Ruff findings match the published baseline (27 before);
+test-only Bandit comparison excludes expected B101 assertions and retains one
+inherited B105 warning for the --cov option label, with no new finding.
+Independent final patch review is clear. Source, XML/log and comparison hashes
+are appended under full_suite_ci_repair_20260930 in the existing follow-up JSON.
+Historical values and benchmark receipts remain unchanged. Changed historical
+Python certificate paths are listed explicitly; older validation is not recertified
+for modified paths. No full repository suite, native-PST, throughput benchmark,
+million-message benchmark or live VM drill rerun is claimed. Publication, latest
+dev integration and fresh exact-head review/CI remain pending at this receipt.

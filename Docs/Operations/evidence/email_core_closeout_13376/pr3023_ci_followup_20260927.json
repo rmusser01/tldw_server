@@ -1805,5 +1805,165 @@
     "comparison_receipt_sha256": "f621e80764b6a6a3bf7d712f363e7a9e1fdd62feead46c94e624621bd44cde4c",
     "prior_validation_binding": "fastapi_routes_dev_refresh_20260929:746 combined auth/email/route cases,13 monitoring cases,10 guarded native-PST cases;163 unique compiled Python hashes,zero new Ruff/Bandit findings,unchanged OpenAPI/route-auth baseline. Suites overlap; no rerun.",
     "publication_state": "Ready for refreshed-head publication; exact-head incremental Qodo review and all seven required contexts must pass before merge."
+  },
+  "full_suite_ci_repair_20260930": {
+    "published_head_before_fix": "c49c08b4916919ac9fec0baae97c2963aa64bd90",
+    "hosted_failure": {
+      "workflow": 36723727218,
+      "jobs": 219,
+      "pages": 3,
+      "failed_shards": 14,
+      "failed_aggregate": 1
+    },
+    "tasks": [
+      "TASK-13377.2",
+      "TASK-13377.3",
+      "TASK-13377.4"
+    ],
+    "root_causes": {
+      "collections": "Selector loop variable did not match interpolated column. Fixed existing whitelist interpolation; values stay bound. Existing real contentless FTS upsert/update/delete reproduced KeyError before fix.",
+      "postgres_bootstrap": "pg_policies deparses stored policy expressions during v61 verification and interacts with concurrent RLS DDL. Original PR concurrency failed 3/3 vs dev passed 3/3; raw pg_policy verifier passed 2/2 while retaining optimized policies. Fixed catalog lookup avoids deparsing and preserves exact names, schema, forced RLS and both stored expressions.",
+      "contracts_and_shards": "Stale direct-route, privacy, archive, schema/ranking and migration fixtures corrected to current behavior. Two missing email unit modules added to all five full-suite matrices; no tests or gates weakened."
+    },
+    "verification": {
+      "contracts": {
+        "cases": 253,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "xml": "/tmp/email_pr3023_contract_complete_20260930.xml",
+        "xml_sha256": "757578ccbc9908a6e4e559c561e2e00d7f175cffd709950f00ce2703fdcd64e6",
+        "log": "/tmp/email_pr3023_contract_complete_20260930.log",
+        "log_sha256": "202b333614eba8c1bfd8307d425a15f2d76ec57e79e25007c220fd8ff154469b"
+      },
+      "collections": {
+        "cases": 254,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "xml": "/tmp/email_pr3023_collections_final_all_20260930.xml",
+        "xml_sha256": "7419834d17fafa4341a78cd53818dbd35831222f9189586e24bd520078dc8e75",
+        "log": "/tmp/email_pr3023_collections_final_all_20260930.log",
+        "log_sha256": "cf5176196032f4ac8d7e84fba27d33a6e17f0cf12473a2bdb38e30fa0b7d6696"
+      },
+      "watchlists": {
+        "cases": 710,
+        "failures": 0,
+        "errors": 0,
+        "skips": 1,
+        "xml": "/tmp/email_pr3023_watchlists_final_all_20260930.xml",
+        "xml_sha256": "9cad11cd02f1bd58b4755ac650312bc7959296d52f71ab9c769291f51e620640",
+        "log": "/tmp/email_pr3023_watchlists_final_all_20260930.log",
+        "log_sha256": "12e79e29141de549a059180bc6b68049b760c8a65f36becdd48984adb93fa849"
+      },
+      "postgres": {
+        "cases": 110,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "xml": "/tmp/email_pr3023_pg_contract_20260930.xml",
+        "xml_sha256": "f7ef95ad43edd94a9886f85ed8581712aafcb1dfd3992705d252cd3f5e6b83d5",
+        "log": "/tmp/email_pr3023_pg_contract_20260930.log",
+        "log_sha256": "443124e0881ff8e26b4e5145004db1bf8645f186a515d510a42fb53c123f21b4"
+      },
+      "chacha": {
+        "cases": 30,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "xml": "/tmp/email_pr3023_chacha_final_20260930.xml",
+        "xml_sha256": "07efe9c242b7ec9e8d12b70ef31a2ca529f416a9d637344d04cd1dae579a0b75",
+        "log": "/tmp/email_pr3023_chacha_final_20260930.log",
+        "log_sha256": "1991a282cd1ed8b1c5eb2c16198a1024ff60ac607599f4fb9401b87a492dc259"
+      },
+      "catalog_and_privacy": {
+        "cases": 12,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "xml": "/tmp/email_pr3023_catalog_privacy_final_20260930.xml",
+        "xml_sha256": "7a6efb48dce0003502808407b01e30deaf5e6030106b3e31b6531fc083d72f75",
+        "log": "/tmp/email_pr3023_catalog_privacy_final_20260930.log",
+        "log_sha256": "2ee471d96386ce09167d6e1c8f67cde1c8e6d2d1799923090e86b80a86c49745"
+      }
+    },
+    "scope_notes": "Suites overlap; counts are not unique. Watchlists retains one documented existing live-ingestion skip, four deselections and one existing xpass. Contracts include three precise catalog rejection cases. Earlier failed and diagnostic receipts are retained. No full repository suite, native-PST, benchmark, million-message or live VM rerun claimed.",
+    "source": {
+      "head_before_fix": "c49c08b4916919ac9fec0baae97c2963aa64bd90",
+      "python": "3.11.13 (main, Aug 14 2025, 16:05:31) [Clang 20.1.4 ]",
+      "compiled_paths": 16,
+      "sha256": {
+        "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py": "b641a6c7dc85e5eb137528c9f2d520c1c7d0800a132c346ddf18de1b37bf07e7",
+        "tldw_Server_API/app/core/DB_Management/Collections_DB.py": "77ae981aa72702598564598933b29ac095b82400053ad2b3db7495f69f333c29",
+        "tldw_Server_API/tests/AuthNZ/integration/test_storage_quotas_bootstrap_postgres.py": "b25084755498193b8179141bdbf35d3e0ea294797c2938ca63a3f1d72e7cb279",
+        "tldw_Server_API/tests/CI/test_required_workflow_contracts.py": "8a99955c8305ef0138723455fbc2ae8247b867fc5367249219e97e32c8198676",
+        "tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v61.py": "80aa082caa6aac82360a6e018be1d08efef1c1692caae2e2579c7c7a7bc02221",
+        "tldw_Server_API/tests/DB_Management/test_media_db_runtime_factory.py": "5a865b9de273cabe3b991713414cd16f736d38c556fe223f76ec2696109283d7",
+        "tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py": "c35bfd08954b20bd4e70a28b1e25e131e521748a77fd1d1510dd84444c8abdee",
+        "tldw_Server_API/tests/DB_Management/test_media_ingest_worker_content_scope.py": "cfce7354c4ca2fcc39bfc40a3c908c645f367a0a1dc3a313e6fb11c08f6c0059",
+        "tldw_Server_API/tests/DB_Management/test_media_postgres_migrations.py": "a65f47f871c7dd409f170b6b9611613680839c83c0147f4d5b131455b38a75b7",
+        "tldw_Server_API/tests/DB_Management/test_media_postgres_support.py": "ef2918dafac286f43c4a545d9e4d808c62268e27648ac1fe6f3999adae7adee9",
+        "tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_access_policy.py": "3c757ee0d8a033aaa624603dba7712a93754f959229d4eedb6f79fd21b00b4a8",
+        "tldw_Server_API/tests/Media/unit/test_media_upload_cleanup.py": "559bb98a77c3a95d2ec6b36028d959737bc9434b7b98804400c977cc9e9d26e1",
+        "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_attachment_upload_13376.py": "d2af156797c0823765d5c6b5ee565464626844d48ba393b7ae3c94a3c4a7bd85",
+        "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_research_discovery_media_add.py": "37ef2e29780a5812bceaeaebe2cd4b04187dbefd50bf0aff7e51e5fe77f1fc35",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py": "313e502a1805f7d3960f6fc73c834af4f1fab5b5b7e1e2b96e52c3f3fe04c72b",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_url_limits.py": "dc69ea939ba8348d3d0bf9f27bb9f8c16630157c695aadeacdc2ec3a06895fc2"
+      }
+    },
+    "historical_certified_python_paths_changed_by_this_fix": [
+      "tldw_Server_API/app/core/DB_Management/Collections_DB.py",
+      "tldw_Server_API/tests/DB_Management/test_media_db_runtime_factory.py",
+      "tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py",
+      "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_attachment_upload_13376.py",
+      "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_research_discovery_media_add.py"
+    ],
+    "historical_validation": "Historical JSON and earlier source/dependency/benchmark bindings preserved; the listed paths now have new affected-suite receipts. No claim that all historical 163 hashes still match.",
+    "quality": {
+      "production_bandit_findings": 0,
+      "production_bandit_errors": 0,
+      "production_ruff_findings": 0,
+      "ruff": {
+        "current_findings": 26,
+        "baseline_findings": 27,
+        "new_findings": 0,
+        "removed_findings": [
+          [
+            "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2/tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py",
+            "I001",
+            "Import block is un-sorted or un-formatted"
+          ]
+        ]
+      },
+      "test_bandit": {
+        "test_assertions_excluded": "B101 only in test files; production scanned without exclusions",
+        "current_findings": 1,
+        "baseline_findings": 1,
+        "new_findings": 0,
+        "errors": 0,
+        "findings": [
+          [
+            "tldw_Server_API/tests/CI/test_required_workflow_contracts.py",
+            "B105",
+            "Possible hardcoded password: '--cov'",
+            "191         for index, token in enumerate(tokens)\n192         if token == \"--cov\" or token.startswith(\"--cov=\")\n193     }\n"
+          ]
+        ]
+      },
+      "test_assertion_scan_note": "All-scope Bandit also recorded 1078 B101 test assertions; test-only comparison excludes B101 and preserves the inherited --cov label B105. Production scan has no exclusions."
+    },
+    "independent_review": {
+      "result": "clear",
+      "patch_sha256": "a83b0ee768a3efa47464e51cee832418fdabb15be8113e0216846f49b651132b",
+      "scope": "17 implementation paths; final privacy and exact PostgreSQL catalog invariants reviewed; git diff --check clean."
+    },
+    "receipt_sha256": {
+      "email_pr3023_ci_fix_sources_final_20260930.json": "13a8200ed364d893a57d119647649864177f911a8c50e9a737085a1c8610a0ce",
+      "email_pr3023_ci_fix_ruff_comparison_final_20260930.json": "27bd67d5d359b9bc13fe7941bff33a7ca04ebc3e1334a0794cd8d28f23097683",
+      "email_pr3023_ci_fix_bandit_20260930.json": "b7a7f9496e192ca7cea85a75179babb9569d91580eb17c291885ca778f231e79",
+      "email_pr3023_ci_fix_test_bandit_comparison_20260930.json": "957755b93133bfcd424d7cfc5e4510f535ce9f98eb05c528afa5d573725fa679",
+      "email_pr3023_ci_fix_review_complete_20260930.patch": "a83b0ee768a3efa47464e51cee832418fdabb15be8113e0216846f49b651132b"
+    },
+    "publication_state": "Verified fixes not yet published; latest dev refresh, exact-head Qodo and all seven required contexts must pass before merge."
   }
 }

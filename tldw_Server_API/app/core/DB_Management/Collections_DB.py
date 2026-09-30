@@ -3757,15 +3757,15 @@ class CollectionsDatabase:
             selectors.append(("url", url))
 
         def _lookup_existing() -> tuple[dict[str, Any] | None, int | None]:
-            for _column, value in selectors:
+            for column, value in selectors:
                 row = self.backend.execute(
-                    """
+                    f"""
                     SELECT id, user_id, origin, origin_type, origin_id, url, canonical_url, domain,
                            title, summary, notes, content_hash, word_count, published_at, status, favorite,
                            metadata_json, media_id, job_id, run_id, source_id, read_at, created_at, updated_at
                     FROM content_items
                     WHERE user_id = ? AND {column} = ?
-                    """.format_map(locals()),  # nosec B608
+                    """,  # nosec B608
                     (self.user_id, value),
                 ).first
                 if row:

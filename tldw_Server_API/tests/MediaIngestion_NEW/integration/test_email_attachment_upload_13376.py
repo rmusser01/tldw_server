@@ -186,7 +186,13 @@ def test_archive_skips_invalid_empty_nodes_and_preserves_failed_archive_guard(of
     good = lib.process_email_task(file_bytes=_message(), filename="outer.eml", perform_chunking=False)
     invalid = {"status": bad_status, "media_type": "email", "content": "", "metadata": bad_metadata}
     monkeypatch.setattr(lib, "process_eml_archive_bytes", lambda **_kwargs: [invalid, good])
-    result = upload(offline_client, "synthetic.zip", b"synthetic archive bytes", accept_archives="true")
+    import io
+    import zipfile
+
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("outer.eml", _message())
+    result = upload(offline_client, "synthetic.zip", archive.getvalue(), accept_archives="true")
     expected_subjects = [] if bad_status == "Error" else ["Outer synthetic"]
     assert len(result.get("child_db_results") or []) == len(expected_subjects)
     found = offline_client.get("/api/v1/email/search", params={"q": ""})
