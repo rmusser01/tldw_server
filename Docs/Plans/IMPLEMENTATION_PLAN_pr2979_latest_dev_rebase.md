@@ -267,3 +267,55 @@ Keep APIRoute metadata, use served full paths for OpenAPI lookup, and preserve n
 Private dependency overlay leaves the shared 0.136.3 environment unchanged. Full UAT remains paused. Current remote head is `e49fab`, with final newer-dev acceptance still required.
 
 Latest-dev HTTP qualification passes all 68 PostgreSQL lifecycle/media controls with required official fixtures, zero skips and normal exit. The 269 changed Python files compile, Ruff passes, and the route test retains five baseline LOW Bandit assertions. Fresh Qodo e49 review adds image-memory, async Character reads, Sidepanel subscription/storage, missing handoff locales and downstream Chatbook capability findings; tasks .83.8-.11 track the server repair units before publication.
+
+## Fresh Qodo e49 repair batch — 2026-09-30 (TASK-13260.278.18.83.8-.12)
+
+### Stage 1: Trace each finding
+**Goal:** Verify new findings against current source and actual callers before repairs.
+**Success Criteria:** Shared pixel budget, all Character read callers, UI subscribers, locale namespaces and current downstream schema traced.
+**Tests:** Compact PNG decoding red, route worker ownership red, real-store rerender red, missing locale contract and exact Chatbook typed-model probe.
+**Status:** Complete
+
+The saved-image helper lacks a decoded pixel guard despite compressed byte limits; reuse existing 16MP cap. Three async Character callers missed the existing fourth caller's threadpool pattern. Sidepanel whole-store subscription and five absent handoff locale keys are confirmed. Current Chatbook main still lacks the optional field and drops it on typed spec resave; this downstream gap remains open until a companion repair or accepted scope disposition.
+
+### Stage 2: Apply minimal existing patterns
+**Goal:** Repair the shared causes without changing account, image or failure semantics.
+**Success Criteria:** Relevant controls pass, official PostgreSQL lifecycle retained, no new production Ruff/Bandit findings.
+**Tests:** Shared saved-image limit, complete Character images/operation release, Sidepanel readiness/resume and supported locale/mirror contracts.
+**Status:** In Progress
+
+UAT521 passes 33 native UI controls after a causal render failure; strict-equality lint passes. Existing 8GB frontend type script retains 23 source baseline diagnostics plus a sandbox ignored-cache write error; no changed-file diagnostic is reported. Bandit is inapplicable to TS/TSX. UAT519 compactPNG red becomes three size-control passes with clean Ruff and no production Bandit findings; full Character SQLite/PostgreSQL controls and independent review remain running. UAT523 companion patch is concrete: exact client schema red fourfail/sixpass, patched/replayed tenpass, zero production Bandit findings. Separate-repository scope is awaiting requester clarification; no client checkout or PR changed. UAT520 final Character module passes108 with required official PostgreSQL and no skips, including all12offload/operation-return cases. UAT522 adds exactlyfivekeys to eachof18source/21publiclocales; focusedlocalecontracts3pass, officialsyncdryrun0writes, priorcontent preserved. Independent UAT519 review reproduces eager ICO/GIF/APNG allocation before the first guard; refined CORE metadata bound is in progress before acceptance. Release priority is explicit: PR2979 blocks the next release/private beta, carries release-blocker label, and dev has no configured merge queue. Protected final-head qualification remains required.
+
+### Stage 3: Review, publish and qualify
+**Goal:** Publish the reviewed batch on newest dev and settle every applicable Qodo finding before merge.
+**Success Criteria:** Source/evidence replies, honest downstream disposition, final-head automatic and native matrix accepted and merge landed on dev.
+**Tests:** Independent scoped review, recovery/lease verification, hosted checks and exact final-head review.
+**Status:** Not Started
+
+Published diagnostic head remains e49fab; local UAT518 is committed7920983dbc on dev607431. Full UAT stays paused and generated captures remain excluded.
+
+## Native e49 matrix follow-up — UAT524–529 (TASK-13260.278.18.83.13–.16)
+
+### Stage 1: Diagnose native failures
+**Goal:** Trace every new native failure to its actual API, fixture or platform cause.
+**Success Criteria:** Exact failure evidence retained; tests and production contracts stay active.
+**Tests:** Nine failed job logs, actual PostgreSQL binding red, Windows-like fixture byte/capability probes and real SQLite handle lifetime.
+**Status:** Complete
+
+### Stage 2: Apply bounded shared repairs
+**Goal:** Repair verified causes using existing writers, transports, fixture lifetimes and platform security patterns.
+**Success Criteria:** Causal regressions and adjacent modules pass; no added production lint/security findings.
+**Tests:** Full auth/database bindings, exact Research fixture hashes/tripwires, Media processing/config and handle release, secure legacy artifact controls.
+**Status:** In Progress
+
+UAT524–526 preserves committed-version and owner/SQL assertions; exact four failures become258 full-module passes with required official PostgreSQL and zero skips. Research and Media repairs are delegated in separate scopes. Windows legacy private-artifact semantics require further diagnosis. The final UAT519 refinement passes73 affected controls and75 independent controls, with zero production Bandit findings and a clear independent review; initial failed guards remain recorded. Local Character, Sidepanel and locale repairs are committed868310db45,84a6920747 and80f1699052. Downstream UAT523 companion schema patch is concrete, but separate-repository scope remains pending requester clarification.
+
+### Stage 3: Review and publish
+**Goal:** Publish one reviewed batch on latest dev after current useful diagnostics settle.
+**Success Criteria:** Recovery/lease checks, final automatic and native matrix, exact Qodo disposition, protected merge verified on dev.
+**Tests:** Current-head hosted gates and native matrix; all newly actionable findings.
+**Status:** Not Started
+
+Published e49 diagnostics have388 native passes,9failures and384 queued/running jobs at the latest saved snapshot. These results do not qualify newer local dev607431. PR2979 is a labelled release blocker; no dev merge queue exists. Merge immediately when gates pass; full UAT remains paused.
+
+Latest local repair commits are d7ab76c6d4 (UAT519),7bf152e251 (UAT524–526) and0b2d9c91ac (UAT527). The image scope has a clear independent75-case review; the complete auth/database scope passes258 and Research passes1615, all with zero skips. Native e49 diagnostics now have513pass/14fail/254queued-or-running plus2configuredskip; four additional failures repeat existing causes, one new UAT530 is moderation temporary DB ownership. UAT528 releases its fixture's main-thread handle before client shutdown to prevent backend eviction hiding it from final reset; strict actual pytest lifetime acceptance continues. UAT529 applies the requester-approved POSIX artifact boundary with native negative coverage and individual supported-platform positives. Child17 tracks UAT530. No final-head publication or hosted acceptance is claimed.
