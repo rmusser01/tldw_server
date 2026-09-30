@@ -3,7 +3,7 @@ import { PlaygroundChat } from "@/components/Option/Playground/PlaygroundChat"
 import React from "react"
 import { act, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PlaygroundMessage } from "../Message"
 import { IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE } from "@/utils/image-generation-chat"
 
@@ -120,21 +120,27 @@ vi.mock("@/hooks/useFeedback", () => ({
   })
 }))
 
-vi.mock("@/hooks/useImplicitFeedback", () => ({
-  useImplicitFeedback: () => ({
+const implicitFeedback = vi.hoisted(() => ({
+  available: false,
+  hook: vi.fn((_options: { enabled?: boolean }) => ({
     trackCopy: vi.fn(),
     trackSourcesExpanded: vi.fn(),
     trackSourceClick: vi.fn(),
     trackCitationUsed: vi.fn(),
     trackDwellTime: vi.fn()
-  })
+  }))
+}))
+
+vi.mock("@/hooks/useImplicitFeedback", () => ({
+  useImplicitFeedback: (options: { enabled?: boolean }) =>
+    implicitFeedback.hook(options)
 }))
 
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({
     capabilities: {
       hasFeedbackExplicit: false,
-      hasFeedbackImplicit: false
+      hasFeedbackImplicit: implicitFeedback.available
     }
   })
 }))
@@ -273,6 +279,34 @@ const baseProps: React.ComponentProps<typeof PlaygroundMessage> = {
   isStreaming: false,
   conversationInstanceId: "conversation-1"
 }
+
+describe("PlaygroundMessage implicit feedback in temporary mode", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    implicitFeedback.available = true
+  })
+
+  afterEach(() => {
+    implicitFeedback.available = false
+  })
+
+  it.each([
+    [true, false],
+    [false, true]
+  ])("temporaryChat=%s leaves passive feedback enabled=%s on a saved chat", (temporaryChat, enabled) => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        serverChatId="chat-1"
+        serverMessageId="message-1"
+        temporaryChat={temporaryChat}
+      />
+    )
+    expect(implicitFeedback.hook).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled })
+    )
+  })
+})
 
 describe("PlaygroundMessage error recovery integration", () => {
   beforeEach(() => {

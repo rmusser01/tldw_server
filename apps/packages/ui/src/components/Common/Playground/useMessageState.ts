@@ -809,7 +809,8 @@ export function useMessageState(props: MessageStateProps) {
     messageId: props.serverMessageId ?? null,
     query: props.feedbackQuery ?? null,
     sources: props.sources ?? [],
-    enabled: feedbackImplicitAvailable
+    // Temporary mode reads saved chats without passive server writes.
+    enabled: feedbackImplicitAvailable && !props.temporaryChat
   })
 
   // ── Derived: feedback UI ──────────────────────────────────────────────────

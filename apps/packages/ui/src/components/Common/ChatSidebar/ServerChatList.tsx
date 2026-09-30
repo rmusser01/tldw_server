@@ -56,6 +56,8 @@ interface ServerChatListProps {
   searchQuery: string
   className?: string
   selectionMode?: boolean
+  /** Temporary mode: saved chats open read-only, without pin or management actions. */
+  readOnly?: boolean
   onConversationSelected?: () => void
 }
 
@@ -72,6 +74,7 @@ export function ServerChatList({
   searchQuery,
   className,
   selectionMode: selectionModeProp,
+  readOnly = false,
   onConversationSelected
 }: ServerChatListProps) {
   const { t } = useTranslation([
@@ -1345,6 +1348,7 @@ export function ServerChatList({
                   isTrashView={isTrashView}
                   isPinned={pinnedChatSet.has(chat.id)}
                   isActive={serverChatId === chat.id}
+                  readOnly={readOnly}
                   openMenuFor={openMenuFor}
                   setOpenMenuFor={setOpenMenuFor}
                   onSelectChat={handleRowClick}
@@ -1376,6 +1380,7 @@ export function ServerChatList({
                   isTrashView={isTrashView}
                   isPinned={pinnedChatSet.has(chat.id)}
                   isActive={serverChatId === chat.id}
+                  readOnly={readOnly}
                   openMenuFor={openMenuFor}
                   setOpenMenuFor={setOpenMenuFor}
                   onSelectChat={handleRowClick}
