@@ -323,3 +323,25 @@ Latest local repair commits are d7ab76c6d4 (UAT519),7bf152e251 (UAT524–526) an
 UAT530 local repair qualifies all16 moderation cleanup callers with a durable held-handle control and unrelated DB isolation: full17pass/0skip, unchanged original assertions/exception handlers, Ruff/compile/diff clean, seven added LOW Bandit assertions only. Root independent source review is clear; current-final-head native acceptance remains open (TASK.83.17).
 
 UAT528 local root review is clear:8causal cases pass and full affected modules/classes collect85 (72pass/11existing skip/2existing xpass). The broader141-case attempt times out during an unchanged live Whisper download; retain that failure and investigate separately rather than claiming full acceptance. Generated cache artifacts are preserved privately, excluded from Git. Zero added Ruff/non-assert Bandit findings; six LOW test assertions. Latest native e49 snapshot576success/17failure/188queued-or-running/2configuredskip includes two repeated Media/Claims failures plus a new db-management-a-l timeout in a PostgreSQL historical fixture, requiring separate diagnosis.
+
+## Native PostgreSQL timeout — UAT531 (TASK-13260.278.18.83.18)
+
+### Stage 1: Distinguish timeout from a proven transaction wait
+**Goal:** Trace outer hosted timeout and historical fixture ownership on e49 versus latest dev.
+**Success Criteria:** Exact logs and official required PostgreSQL evidence identify or bound the cause.
+**Tests:** Historical survivor module, relevant standalone read/DDL controls and full-shard budget evidence.
+**Status:** In Progress
+
+### Stage 2: Repair a confirmed shared cause
+**Goal:** Apply the smallest existing ownership or scheduling pattern after causal proof.
+**Success Criteria:** Original schema/survivor/transaction assertions remain intact and focused real PostgreSQL passes.
+**Tests:** Causal red/green, adjacent schema migrations, Ruff/Bandit and independent review.
+**Status:** Not Started
+
+### Stage 3: Require hosted acceptance
+**Goal:** Qualify this shard on the final latest-dev head before merge.
+**Success Criteria:** Exact final-head shard and protected gates pass without skips or timeout suppression.
+**Tests:** Automatic and manually dispatched native matrix.
+**Status:** Not Started
+
+UAT529 qualified locally:32causal failures/11neutral passes become43controls green; supported POSIX full93pass/0skip with official PostgreSQL required. Capability facade49pass/44explicit POSIX skips retains repository/parser/rejection/native-negative coverage. Original bodies/args are AST-identical; root independent review is clear, Ruff/compile/diff clean, production Bandit0findings and28new LOW test assertions only. Native final-head platform acceptance is still required.
