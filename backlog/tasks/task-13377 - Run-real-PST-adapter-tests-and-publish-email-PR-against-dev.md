@@ -4,7 +4,7 @@ title: Run real PST adapter tests and publish email PR against dev
 status: In Progress
 assignee: []
 created_date: '2026-09-26 21:50'
-updated_date: '2026-09-29 21:58'
+updated_date: '2026-09-30 00:00'
 labels: []
 dependencies: []
 documentation:
@@ -116,12 +116,26 @@ Heartbeat21:32Z: published17b4/latestdev5910 unchanged; exact-head Qodo0/all9thr
 Heartbeat21:53Z: dev advanced5910->60006a2fed2532d900d27accbc2cda87cb08c24b via PR3051. Incoming7files are3VZ Backlog records plus VZ README/orchestration/cleanup tests/operator script; no overlap with email PR. Rebase required by strict up-to-date policy. Preserve current17b4 reviewed/Qodo0 source and pending tracking as backup; verify all email/backend/frontend/dependency/CI inputs unchanged and incoming paths exactlydev, then run portable incoming regressions/compile/scoped security before publication. Six of seven17b4requiredcontextsPASS; frontendqueued; refreshed-head checks must pass anew.
 
 Dev6000 refresh verified: conflict-free rebase, seven incoming VZ paths exactlydev, all other repository inputs and92certifiedPython hashes unchanged from reviewed17b4 before evidence update. Incoming portable cleanup/orchestration97passed/0failures/errors/skips; threePythoncompile/Ruffclean; inherited productionVZscriptBandit0findings/errors. No liveVMdrill or repeat email/native/benchmark run; existing374/native10 source-bound evidence retained. Existing report/JSON append equality and log/source hashes; backup codex/email-pr3023-before-dev6000-20260929 preserved. Self-review of exact scope/content is clear; publication/new-headQodo/CI/actualmerge pending.
+
+Published39e307f8ca6aeb2cce8b50c279b3c990d02567bf on dev60006a2fed with exact lease against17b4. Fresh PR OPEN, current evidence links and human Change summary preserved. All originalthreadsresolved; prior exact17b4 Qodo0/6of7gatesPASS remain historical and cannot satisfy39e3. New-head incrementalQodo/requiredCI pending; no duplicate review/rerun requested. AC5/6 complete locally; actualmerge/AC7 pending.
+
+Final21:59Z dev6000/publication39e3 snapshot: latestdev/headunchanged, PR OPEN/BLOCKED. New license audit36636845448queued automatically supersedes cancelled36636755086; all six new-head requiredworkflowsqueued, no failure/trustedstatusyet. Qodo still reviews prior17b4/0findings; all9threadsresolved/no new actionablecomments or replies. ACTIVE heartbeat updated with new head/base, incoming97test evidence and workflow IDs. No helper left running or duplicate rerun/review request; actualmerge/AC7 pending.
+
+Heartbeat22:13Z: Qodo summary5895816283 updated22:11:12Z now reviews exactpublished39e307f8ca6aeb2cce8b50c279b3c990d02567bf with0activebugs/rules/cross-repo/skills. All9threadsresolved, no new/edited comments/replies/reviews. Latestdev6000 unchanged; new-head licenseaudit36636845448 and allsix requiredworkflowsqueued, no failure/trustedstatusyet. ACTIVE heartbeat refreshed with exact review; leave queuedjobsalone. Actualmerge/AC7 pending allseven current-headCI contexts.
+
+Heartbeat22:23Z: current39e3/dev6000 unchanged; exact-headQodo0/all9threadsresolved, no new feedback. Licenseaudit36636845448 and requiredtrustedlicense contextSUCCESS22:23:59Z. Allsix formalrequiredworkflows stillqueued with no current-headfailure; originalattempt1 untouched. ACTIVE heartbeat refreshed; actualmerge/AC7 pending six formalgates, no rerun/bypass/source edits.
+
+Heartbeat23:23Z: current39e3/latestdev6000 unchanged, Qodoexact0/all9threadsresolved, no newfeedback. Security-required36636758268SUCCESS23:15:56Z; trustedlicensePASS. Coverage36636758502inprogress; backend/frontend/e2e/containerqueued, originalattempt1/no failure. Two of seven current-headcontexts pass; ACTIVE heartbeat refreshed. Actualmerge/AC7 pending remainingfive with no rerun/bypass/source edits.
+
+Heartbeat23:43Z: current39e3/latestdev6000 unchanged; exact Qodo0/all9threadsresolved and no new feedback. Coverage-required36636758502SUCCESS23:31:24Z joins security/trustedlicensePASS. Backend/frontend/e2e/container remainqueued on originalattempt1, no current-headfailure. Three of seven requiredcontexts pass; ACTIVE heartbeat snapshot refreshed, actualmerge/AC7 pending remainingfour, no rerun/bypass/source edit.
+
+Dev advanced6000->607431154cf10129b5d9afa8f9b57d46636466fc through PR3053 (FastAPI0.141.1 and served-route introspection). Incoming76paths overlap only User_DB_Handling.py. Preserve dev include-time token scope guards and email tenancy/privacy protections; rebase, use isolated supported FastAPI dependencies, verify affected auth/email/nativePST/route/schema behavior, compile/lint/Bandit and review before publication. Prior39e3 gates are historical after refresh; AC5 publication and AC7 actualmerge pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR3023 rebased conflict-free onto dev60006a2fed with unrelated VZ tool changes exactlydev. All email/backend/frontend/dependency/CI inputs and92certifiedPython hashes remain identical to reviewed17b4; incoming97portabletests pass with0failures/errors/skips,3compile/Ruffclean,productionBandit0. Existing374/native10 and historical benchmark certificates retain source bindings. Evidence recorded; refreshed publication, exact-head review/requiredCI and actualmerge pending. User recurring authorization and exact Change summary preserved.
+PR3023 ready at39e307f8ca6aeb2cce8b50c279b3c990d02567bf on latestdev60006a2fed. Exact-head Qodo0/all9threadsresolved. Requiredcoverage/security/trustedlicensePASS; backend/frontend/e2e/containerqueued without failures; actualmerge/AC7 pending remainingfour. Source-bound374/native10,92Pythonhashes and incoming97portabletests/3compile/Ruffclean/Bandit0 evidence retained. Human recurring authorization/Change summary preserved; ACTIVE heartbeat continues quietly.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
