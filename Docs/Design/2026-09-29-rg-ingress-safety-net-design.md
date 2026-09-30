@@ -61,7 +61,7 @@ Add `resolve_policy(path: str, method: str) -> str | None` in a new module, `Res
 1. **`by_path`.** Glob patterns in YAML order; the first match wins. The matching code is unchanged. This keeps the strict `authnz.*` and `chatbooks.*` policies ahead of any tag.
 2. **`by_tag`.** Look the request up in the route index (below).
    - If the path and method match a served route, take its merged tags from the innermost to the outermost. The innermost is the router closest to the endpoint. The first tag present in `by_tag` wins.
-   - Routes are matched in served order, the same order Starlette uses.
+   - Candidate routes are grouped by the leading static segments of their served path (up to four). The group for the longest static prefix is tried first, in served order within each group, as Starlette itself matches.
 3. **`default`.** Any other path under `/api/` resolves to a new `default` policy.
 4. **Ungoverned.** Everything else (docs, static files, the frontend) returns None.
 
@@ -96,7 +96,7 @@ This generalises the ADR-044 preflight to every auth mode and every policy.
 ### 3. Safety-net defaults
 
 Changes to `resource_governor_policies.yaml`:
-- **Remove `global`** from every policy except those that send outbound email: `authnz.forgot_password`, `authnz.resend_verification`, `authnz.magic_link.request` and `authnz.magic_link.email`. Mail-sending capacity and sender reputation are shared by the whole server, and legitimate users rarely call these endpoints, so a server-wide cap costs self-hosters nothing. Operators who want an aggregate cap elsewhere can add `global` back.
+- **Remove `global`** from every policy except the three request policies that trigger outbound email: `authnz.forgot_password`, `authnz.resend_verification` and `authnz.magic_link.request`. Mail-sending capacity and sender reputation are shared by the whole server, and legitimate users rarely call these endpoints, so a server-wide cap costs self-hosters nothing. `authnz.magic_link.email` is already keyed per email address (`scopes: [entity]`) and is unchanged. Operators who want an aggregate cap elsewhere can add `global` back.
 - **Add `default`:** `requests` at 600 rpm, burst 2.0 (capacity 1200), scopes `[user, api_key, ip]`.
 
 | Policy | Today (rpm / burst) | New (per entity) |
@@ -112,7 +112,8 @@ Changes to `resource_governor_policies.yaml`:
 | `authnz.default` (`/auth/me`, `/auth/refresh`, login) | 60 / 1.0, global | 300 / 2.0 |
 | `research.default`, `evals.default` (ingress) | 30 / 1.0 | 120 / 2.0 |
 | `rag.default` | 120 / 1.2 | 300 / 2.0 |
-| `authnz.forgot_password`, `resend_verification`, `magic_link.request`, `magic_link.email` (send email) | as today, global | as today, **global kept** |
+| `authnz.forgot_password`, `resend_verification`, `magic_link.request` (send email) | as today, global | as today, **global kept** |
+| `authnz.magic_link.email` | 0.3 / 10.0, per email | unchanged |
 | `authnz.reset_password`, `mfa.*` | as today, global | as today, per entity only |
 | `chatbooks.*`, `health.default`, `media.*`, `flashcards`, `quizzes`, `prompt_studio`, `audio.default` | as today | as today (`health` loses `global`) |
 
@@ -137,6 +138,7 @@ These numbers are starting points. The WebUI replay test (see [Testing](#testing
   The IP strings are deliberately not compared. The auth endpoints derive client IP with `AuthNZ.ip_allowlist.resolve_client_ip`, which uses settings-based trusted proxies, while ingress uses `Resource_Governance.deps.derive_client_ip`, which uses `RG_TRUSTED_PROXIES`. The two can disagree, so a comparison would never match. Unifying them is TASK-13144.
 
   Reservations keyed on something else still apply, for example the per-email-hash and per-user throttles.
+- **Missing per-category config.** A defined policy with no usable `requests` block inherits `default`'s `requests` limits instead of denying every request. A category with no `per_min` (tokens) or `max_concurrent` (streams, jobs) is unbounded. Today both deny; the unbounded treatment is what the tokens category already does.
 - **Oversized token reservation.** In the token category, a reservation larger than the bucket's capacity is admitted when the bucket is full, and it drains the bucket to zero. Otherwise it waits for a full bucket, so `retry_after` is computed against capacity. It is never denied permanently.
 - **Bounded memory.** The memory governor never drops a bucket today; `_buckets` only shrinks on an explicit `reset`. With `default` governing every `/api/` route, anonymous traffic from many IPs would grow memory without bound on an internet-exposed install.
   - Buckets that have refilled to capacity are evicted once they have been idle for 10 minutes. A full bucket is indistinguishable from a fresh one, so eviction is lossless.
@@ -226,7 +228,7 @@ Every item below is a pytest test, and each defect fix gets a test that fails be
    - Full, idle buckets are evicted, while partially drained buckets are kept.
    - `RG_ENABLED=false` means zero governor calls (spy on `reserve`).
    - The CI consistency test fails on an unknown referenced policy ID, and runtime startup logs and continues.
-   - The four email-sending auth policies keep a server-wide bucket.
+   - The three email-sending auth request policies keep a server-wide bucket.
 7. **Invalid credentials** reach the route's 401 and are charged to the IP bucket.
 8. **Route-map lints (§6):**
    - No `by_path` pattern is dead or fully shadowed.
@@ -236,9 +238,9 @@ Every item below is a pytest test, and each defect fix gets a test that fails be
 
 ## Delivery
 
-Three PRs against `dev`, in order:
-1. **Resolver, route index, identity and audits.** This closes TASK-13395. Tests 1–4 and 7, plus the audit part of test 9.
-2. **Safety-net defaults, the permanent-429 fixes in both backends, bucket eviction, route-map lints and their fixes.** Tests 5, 6 (except the switch test) and 8.
+Three PRs against `dev`. They ship relief first, then wider coverage, so no intermediate state throttles more than today. If tag enforcement shipped first, about 57 more routes would be governed by today's server-wide `core.default` until the defaults changed.
+1. **Relief: safety-net defaults, the permanent-429 fixes in both backends, bucket eviction, the MCP and auth fixes.** Test 6 (except the switch test).
+2. **Coverage: resolver, route index, identity, audits, route-map lints and their fixes, and the WebUI replay.** This closes TASK-13395. Tests 1–5, 7, 8 and the audit part of 9.
 3. **The single switch, config hygiene, the DB-store upgrade note, ADR-056 and docs.** The switch test in 6.
 
 ## Out of scope
