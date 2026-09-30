@@ -1851,6 +1851,7 @@ async def test_audio_chat_ws_partial_success_cancellation_drains_before_runtime_
     lifecycle: list[str] = []
     waiting_for_release = threading.Event()
     release_stream = threading.Event()
+    runtime_closed = asyncio.Event()
 
     class Runtime:
         async def resolve(self, _provider: str, *, model: str | None = None):
@@ -1865,6 +1866,7 @@ async def test_audio_chat_ws_partial_success_cancellation_drains_before_runtime_
 
         async def close(self) -> None:
             lifecycle.append("runtime_close")
+            runtime_closed.set()
 
     class BlockingSyncStream:
         def __init__(self) -> None:
@@ -1932,10 +1934,7 @@ async def test_audio_chat_ws_partial_success_cancellation_drains_before_runtime_
 
     assert any(message.get("type") == "llm_delta" for message in ws.sent_json)
     assert any(message.get("type") == "interrupted" for message in ws.sent_json)
-    for _ in range(100):
-        if "runtime_close" in lifecycle:
-            break
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(runtime_closed.wait(), timeout=1.0)
     assert lifecycle.count("mark_used") == 1
     assert lifecycle.index("stream_close") < lifecycle.index("runtime_close")
 
