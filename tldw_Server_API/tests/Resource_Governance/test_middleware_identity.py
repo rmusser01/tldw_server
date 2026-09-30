@@ -249,6 +249,16 @@ def test_cache_hits_do_not_spend_resolution_budget(client, budget_of_two):
     assert client.principal_calls == ["7", "8"]
 
 
+def test_bearer_jwt_is_resolved_even_when_the_budget_is_spent(client, budget_of_two):
+    # The JWT check is signature-only (no DB, no key derivation), so fake-key floods that
+    # spend an IP's budget must not push JWT (WebUI) users into the shared IP bucket.
+    caller = _from_ip(client, "10.0.0.1")
+    for key in ("fake-a", "fake-b"):
+        caller.get("/api/v1/thing", headers={"X-API-KEY": key})
+    caller.get("/api/v1/thing", headers={"Authorization": "Bearer a.valid.jwt"})
+    assert "user:42" in _charged_entities(client)
+
+
 class _TenantSnap:
     route_map = {"by_path": {"/api/v1/*": "p"}, "by_tag": {}}
     tenant = {"enabled": True, "header": "X-TLDW-Tenant"}

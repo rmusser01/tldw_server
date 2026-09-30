@@ -308,11 +308,7 @@ route_map:
     health: health.default
     organizations: core.default
     org-team-keys: core.default
-    authnz-debug: core.default
-    connectors: core.default
-    benchmarks: evals.default
     writing: core.default
-    personalization: core.default
     llamacpp: core.default
     mcp-catalogs-scope: mcp.default
     resource-governor: core.default

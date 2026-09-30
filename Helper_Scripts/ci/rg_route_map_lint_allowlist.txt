@@ -12,16 +12,12 @@ by_path /api/v1/mcp/ws* matches no served route # websocket route (mcp_unified_e
 # Routers gated by a route_key whose default_stable=False and that is not in
 # config.txt's [API-Routes] enable list, so they are not mounted by the app
 # load_app() builds (or by the shipped default config). Once an operator
-# enables the route_key, the router mounts with exactly this tag/prefix.
+# enables the route_key, the router mounts under exactly this prefix.
 by_path /api/v1/benchmarks* matches no served route # benchmark_api.py router (route_key=benchmarks, default_stable=False); not enabled by default config
-by_tag benchmarks is used by no served route # benchmark_api.py router (route_key=benchmarks, default_stable=False); not enabled by default config
 by_path /api/v1/connectors* matches no served route # connectors.py router (route_key=connectors, default_stable=False); not enabled by default config
-by_tag connectors is used by no served route # connectors.py router (route_key=connectors, default_stable=False); not enabled by default config
 by_path /api/v1/personalization* matches no served route # personalization.py router (route_key=personalization, default_stable=False); not enabled by default config
-by_tag personalization is used by no served route # personalization.py router (route_key=personalization, default_stable=False); not enabled by default config
 
 # authnz_debug.py mounts with default_stable=_is_explicit_pytest_runtime(),
 # so it is only ever included under an explicit pytest run, never in the
 # production wiring load_app() builds (nor in a normal server process).
 by_path /api/v1/authnz* matches no served route # authnz_debug.py router only mounts under explicit pytest runtime (default_stable=_is_explicit_pytest_runtime())
-by_tag authnz-debug is used by no served route # authnz_debug.py router only mounts under explicit pytest runtime (default_stable=_is_explicit_pytest_runtime())

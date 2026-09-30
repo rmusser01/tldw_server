@@ -45,12 +45,15 @@ _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
 _IDENTITY_TTL_SEC = 60.0
 _IDENTITY_NEGATIVE_TTL_SEC = 30.0
 _IDENTITY_CACHE_MAX = 4096
-# ponytail: per-process, fixed-window budget of identity-cache misses per RG client IP, so
-# rotating fake credentials cannot buy a KDF per request before the rate limit. A NAT with
-# more than 120 distinct credentials a minute degrades to IP charging, never to denial by
-# itself. A shared (Redis) budget would make it cluster-wide if that ever matters.
+# ponytail: per-process, fixed-window budget of expensive identity resolutions (API key,
+# cookie: DB lookup plus key derivation) per RG client IP, so rotating fake credentials
+# cannot buy a KDF per request before the rate limit. JWTs are signature-only and never
+# spend it. Once an IP's budget is spent, its uncached API-key and cookie callers are
+# charged to that IP's shared bucket, which the flood also drains, so they can see 429s
+# until the window rolls over. A shared (Redis) budget would make it cluster-wide.
 _IDENTITY_RESOLVE_BUDGET_PER_MIN = 120
 _IDENTITY_RESOLVE_WINDOW_SEC = 60.0
+_BUDGET_SPENT = object()  # _resolve_principal_entity sentinel: charge the IP, cache nothing
 _IDENTITY_BUDGET_IPS_MAX = 4096
 
 
@@ -168,9 +171,9 @@ class RGSimpleMiddleware:
         if hit is not None and hit[0] > now:
             self._identity_cache.move_to_end(key)
             return hit[1]
-        if not self._spend_resolve_budget(client_ip, now):
+        entity = await self._resolve_principal_entity(request, settings, auth_header or "", client_ip, now)
+        if entity is _BUDGET_SPENT:
             return None  # budget spent: charge the IP and cache nothing
-        entity = await self._resolve_principal_entity(request, settings, auth_header or "")
         self._identity_cache[key] = (now + (_IDENTITY_TTL_SEC if entity else _IDENTITY_NEGATIVE_TTL_SEC), entity)
         self._identity_cache.move_to_end(key)
         while len(self._identity_cache) > _IDENTITY_CACHE_MAX:
@@ -188,7 +191,9 @@ class RGSimpleMiddleware:
             self._resolve_budget.popitem(last=False)
         return allowed
 
-    async def _resolve_principal_entity(self, request: Request, settings, auth_header: str) -> str | None:
+    async def _resolve_principal_entity(
+        self, request: Request, settings, auth_header: str, client_ip: str, now: float
+    ) -> str | None | object:
         token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
         if token and token.count(".") == 2 and settings.AUTH_MODE != "single_user":
             from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
@@ -202,6 +207,9 @@ class RGSimpleMiddleware:
                     return None
             else:
                 return f"user:{sub}" if sub else None
+        # Only this path costs a DB lookup and a key derivation, so only it spends the budget.
+        if not self._spend_resolve_budget(client_ip, now):
+            return _BUDGET_SPENT
         from tldw_Server_API.app.core.AuthNZ import auth_principal_resolver
 
         try:
