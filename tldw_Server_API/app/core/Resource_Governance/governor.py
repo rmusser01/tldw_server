@@ -19,6 +19,7 @@ memory governor implements only in-memory counting for the 'minutes' category.
 
 import contextlib
 import dataclasses
+import itertools
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -205,7 +206,6 @@ class MemoryResourceGovernor(ResourceGovernor):
 
         # Idle-bucket eviction bookkeeping
         self._last_evict = self._time()
-        self._evict_cursor = 0
 
         # Metrics
         ensure_rg_metrics_registered()
@@ -258,17 +258,16 @@ class MemoryResourceGovernor(ResourceGovernor):
         if now - self._last_evict < _EVICT_INTERVAL_SEC:
             return
         self._last_evict = now
-        keys = list(self._buckets.keys())
-        if keys:
-            start = self._evict_cursor % len(keys)
-            batch = keys[start:start + _EVICT_BATCH]
-            self._evict_cursor = start + len(batch)
-            for k in batch:
-                b = self._buckets.get(k)
-                if b is not None and now - b.last_used >= _EVICT_IDLE_SEC and b.available(now) >= b.capacity:
-                    del self._buckets[k]
-        for k in [k for k, m in self._leases.items() if not m]:
-            del self._leases[k]
+        # Rotate in place: pop the oldest-visited keys and re-insert the survivors at
+        # the end, so successive sweeps cover every key even as evictions shrink the dict.
+        for k in list(itertools.islice(self._buckets, _EVICT_BATCH)):
+            b = self._buckets.pop(k)
+            if not (now - b.last_used >= _EVICT_IDLE_SEC and b.available(now) >= b.capacity):
+                self._buckets[k] = b
+        for k in list(itertools.islice(self._leases, _EVICT_BATCH)):
+            m = self._leases.pop(k)
+            if m:
+                self._leases[k] = m
 
     # --- Leases ---
     def _get_lease_map(self, policy_id: str, category: str, scope: str, entity_value: str) -> dict[str, _Lease]:

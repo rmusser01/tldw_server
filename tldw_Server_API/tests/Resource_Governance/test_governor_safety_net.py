@@ -163,3 +163,24 @@ async def test_memory_evicts_full_idle_buckets_only():
     keys = set(gov._buckets)
     assert ("fast", "requests", "user", "1") not in keys  # refilled and idle: evicted
     assert ("slow", "requests", "user", "1") in keys  # still draining: kept
+
+
+async def test_memory_eviction_sweeps_rotate_through_every_bucket(monkeypatch):
+    from tldw_Server_API.app.core.Resource_Governance import governor as governor_mod
+
+    monkeypatch.setattr(governor_mod, "_EVICT_BATCH", 2)
+    clock = FakeTime()
+    policies = {
+        "fast": {"requests": {"rpm": 600, "burst": 1.0}, "scopes": ["user"]},
+        "slow": {"requests": {"rpm": 0.01, "burst": 100.0}, "scopes": ["user"]},
+    }
+    gov, _ = _gov("memory", policies, clock)
+    # Insertion order: kept, evictable, evictable, kept. Batch size 2, so two sweeps
+    # cover 4 slots; every bucket must be visited even as evictions shrink the dict.
+    for user, pid in ((1, "slow"), (2, "fast"), (3, "fast"), (4, "slow")):
+        await _admits(gov, _req(f"user:{user}", pid), 1)
+    clock.advance(601)
+    gov._maybe_evict_idle(clock())
+    clock.advance(61)
+    gov._maybe_evict_idle(clock())
+    assert {k[3] for k in gov._buckets} == {"1", "4"}
