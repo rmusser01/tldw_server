@@ -18,6 +18,7 @@ memory governor implements only in-memory counting for the 'minutes' category.
 """
 
 import contextlib
+import dataclasses
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -27,6 +28,7 @@ from loguru import logger
 
 from .daily_caps import check_daily_cap, consume_daily_cap
 from .metrics_rg import _labels, ensure_rg_metrics_registered, rg_metrics_entity_label_enabled
+from .policy_eval import clamp_token_units, effective_policy, scope_pairs
 from .tenant import hash_entity
 
 try:
@@ -37,6 +39,12 @@ except (ImportError, ModuleNotFoundError):  # pragma: no cover - metrics optiona
 
 
 TimeSource = Callable[[], float]
+
+# Idle-bucket eviction. A bucket that has refilled to capacity is indistinguishable
+# from a fresh one, so dropping it is lossless.
+_EVICT_IDLE_SEC = 600.0
+_EVICT_INTERVAL_SEC = 60.0
+_EVICT_BATCH = 5000
 
 
 @dataclass(frozen=True)
@@ -101,6 +109,7 @@ class _Bucket:
     refill_per_sec: float
     tokens: float
     last_refill: float
+    last_used: float = 0.0
 
     def refill(self, now: float) -> None:
         if now <= self.last_refill:
@@ -114,6 +123,7 @@ class _Bucket:
         return self.tokens
 
     def consume(self, units: float, now: float) -> bool:
+        self.last_used = now
         self.refill(now)
         if self.tokens >= units:
             self.tokens -= units
@@ -193,11 +203,15 @@ class MemoryResourceGovernor(ResourceGovernor):
         self._handles: dict[str, _ReservationHandle] = {}
         self._ops: dict[str, dict[str, Any]] = {}  # op_id → {type, handle_id}
 
+        # Idle-bucket eviction bookkeeping
+        self._last_evict = self._time()
+        self._evict_cursor = 0
+
         # Metrics
         ensure_rg_metrics_registered()
 
     # --- Policy helpers ---
-    def _get_policy(self, policy_id: str) -> dict[str, Any]:
+    def _lookup_policy(self, policy_id: str) -> dict[str, Any] | None:
         if self._policy_loader is not None:
             try:
                 pol = self._policy_loader.get_policy(policy_id)  # type: ignore[attr-defined]
@@ -205,7 +219,10 @@ class MemoryResourceGovernor(ResourceGovernor):
                     return pol
             except (AttributeError, RuntimeError, TypeError, ValueError) as e:
                 logger.debug(f"Policy loader failed; falling back to static policies: {e}")
-        return self._policies.get(policy_id, {})
+        return self._policies.get(policy_id)
+
+    def _get_policy(self, policy_id: str) -> dict[str, Any]:
+        return effective_policy(self._lookup_policy, policy_id)
 
     @staticmethod
     def _parse_entity(entity: str) -> tuple[str, str]:
@@ -222,10 +239,36 @@ class MemoryResourceGovernor(ResourceGovernor):
     def _get_bucket(self, policy_id: str, category: str, scope: str, entity_value: str, *, capacity: float, refill_per_sec: float) -> _Bucket:
         k = self._bucket_key(policy_id, category, scope, entity_value)
         b = self._buckets.get(k)
+        now = self._time()
         if b is None:
-            b = _Bucket(capacity=float(capacity), refill_per_sec=float(refill_per_sec), tokens=float(capacity), last_refill=self._time())
+            b = _Bucket(capacity=float(capacity), refill_per_sec=float(refill_per_sec), tokens=float(capacity), last_refill=now, last_used=now)
             self._buckets[k] = b
+        elif b.capacity != float(capacity) or b.refill_per_sec != float(refill_per_sec):
+            # A policy reload changed the limit: apply it now rather than at restart.
+            # Raising grants the added capacity immediately; lowering clamps.
+            b.refill(now)
+            old_capacity = b.capacity
+            b.capacity = float(capacity)
+            b.refill_per_sec = float(refill_per_sec)
+            b.tokens = min(b.capacity, b.tokens + max(0.0, b.capacity - old_capacity))
         return b
+
+    def _maybe_evict_idle(self, now: float) -> None:
+        """Drop buckets that have refilled and sat idle; bounded work per call."""
+        if now - self._last_evict < _EVICT_INTERVAL_SEC:
+            return
+        self._last_evict = now
+        keys = list(self._buckets.keys())
+        if keys:
+            start = self._evict_cursor % len(keys)
+            batch = keys[start:start + _EVICT_BATCH]
+            self._evict_cursor = start + len(batch)
+            for k in batch:
+                b = self._buckets.get(k)
+                if b is not None and now - b.last_used >= _EVICT_IDLE_SEC and b.available(now) >= b.capacity:
+                    del self._buckets[k]
+        for k in [k for k, m in self._leases.items() if not m]:
+            del self._leases[k]
 
     # --- Leases ---
     def _get_lease_map(self, policy_id: str, category: str, scope: str, entity_value: str) -> dict[str, _Lease]:
@@ -318,12 +361,7 @@ class MemoryResourceGovernor(ResourceGovernor):
             return False, 60, {"limit": 0, "used": 0, "remaining": 0}
 
         # Evaluate strictest across scopes: global + entity scope
-        scopes = self._scopes(policy)
-        scope_keys: list[tuple[str, str]] = []
-        if "global" in scopes:
-            scope_keys.append(("global", "*"))
-        if entity_scope in scopes or "entity" in scopes:
-            scope_keys.append((entity_scope, entity_value))
+        scope_keys = scope_pairs(policy, entity_scope, entity_value)
 
         remainings = []
         retry_after_candidates = []
@@ -363,14 +401,9 @@ class MemoryResourceGovernor(ResourceGovernor):
         limit = int(cfg.get("max_concurrent") or 0)
         ttl_sec = int(cfg.get("ttl_sec") or 60)
         if limit <= 0:
-            return False, 1, {"limit": 0, "remaining": 0}
+            return True, 0, {"limit": 0, "remaining": 10**9, "unbounded": True}
 
-        scopes = self._scopes(policy)
-        scope_keys: list[tuple[str, str]] = []
-        if "global" in scopes:
-            scope_keys.append(("global", "*"))
-        if entity_scope in scopes or "entity" in scopes:
-            scope_keys.append((entity_scope, entity_value))
+        scope_keys = scope_pairs(policy, entity_scope, entity_value)
 
         remainings = []
         retry_after_candidates = []
@@ -442,6 +475,7 @@ class MemoryResourceGovernor(ResourceGovernor):
         now = self._time()
         policy_id = req.tags.get("policy_id") or "default"
         pol = self._get_policy(policy_id)
+        req = dataclasses.replace(req, categories=clamp_token_units(pol, req.categories, capacity_includes_burst=True))
         entity_scope, entity_value = self._parse_entity(req.entity)
         backend = self._backend_label
 
@@ -549,6 +583,7 @@ class MemoryResourceGovernor(ResourceGovernor):
         now_purge = self._time()
         self._purge_expired_handles(now_purge)
         self._purge_expired_ops(now_purge)
+        self._maybe_evict_idle(now_purge)
         # Idempotency: return previous outcome for same op_id
         reserve_key = self._op_key("reserve", op_id) if op_id else None
         if reserve_key and reserve_key in self._ops:
@@ -556,6 +591,8 @@ class MemoryResourceGovernor(ResourceGovernor):
             hid = rec.get("handle_id")
             return rec.get("decision"), hid  # type: ignore[return-value]
 
+        _pol_for_clamp = self._get_policy(req.tags.get("policy_id") or "default")
+        req = dataclasses.replace(req, categories=clamp_token_units(_pol_for_clamp, req.categories, capacity_includes_burst=True))
         dec = await self.check(req)
         if not dec.allowed:
             if reserve_key:
@@ -612,22 +649,17 @@ class MemoryResourceGovernor(ResourceGovernor):
                     burst = float(cfg.get("burst") or 1.0)
                     refill_per_sec = per_min / 60.0
                     capacity = per_min * max(1.0, burst)
-                # global
-                if "global" in self._scopes(pol):
-                    b = self._get_bucket(policy_id, category, "global", "*", capacity=capacity, refill_per_sec=refill_per_sec)
+                for sc, ev in scope_pairs(pol, entity_scope, entity_value):
+                    b = self._get_bucket(policy_id, category, sc, ev, capacity=capacity, refill_per_sec=refill_per_sec)
                     _ = b.consume(units, now)
-                # entity
-                b = self._get_bucket(policy_id, category, entity_scope, entity_value, capacity=capacity, refill_per_sec=refill_per_sec)
-                _ = b.consume(units, now)
 
             elif category in ("streams", "jobs"):
                 cfgc = self._category_limits(pol, category)
                 limit = int(cfgc.get("max_concurrent") or 0)
                 ttl_sec = int(cfgc.get("ttl_sec") or 60)
                 # Acquire for global and entity scopes (when configured)
-                scopes = self._scopes(pol)
-                for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                    if sc not in scopes and not (sc == entity_scope and "entity" in scopes):
+                for sc, ev in scope_pairs(pol, entity_scope, entity_value):
+                    if limit <= 0:
                         continue
                     m = self._get_lease_map(policy_id, category, sc, ev)
                     self._purge_expired_leases(m, now)
@@ -721,10 +753,7 @@ class MemoryResourceGovernor(ResourceGovernor):
         # Release any concurrency leases
         for category in list(h.categories.keys()):
             if category in ("streams", "jobs"):
-                scopes = self._scopes(pol)
-                for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                    if sc not in scopes and not (sc == entity_scope and "entity" in scopes):
-                        continue
+                for sc, ev in scope_pairs(pol, entity_scope, entity_value):
                     m = self._get_lease_map(h.policy_id, category, sc, ev)
                     self._purge_expired_leases(m, now)
                     # Remove leases for this handle
@@ -817,10 +846,7 @@ class MemoryResourceGovernor(ResourceGovernor):
         pol = self._get_policy(h.policy_id)
         for category in list(h.categories.keys()):
             if category in ("streams", "jobs"):
-                scopes = self._scopes(pol)
-                for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                    if sc not in scopes and not (sc == entity_scope and "entity" in scopes):
-                        continue
+                for sc, ev in scope_pairs(pol, entity_scope, entity_value):
                     m = self._get_lease_map(h.policy_id, category, sc, ev)
                     # Renew leases for this handle
                     for lid, lease in list(m.items()):
@@ -865,11 +891,8 @@ class MemoryResourceGovernor(ResourceGovernor):
                     burst = float(cfg.get("burst") or 1.0)
                     refill_per_sec = per_min / 60.0
                     capacity = per_min * max(1.0, burst)
-                scopes = self._scopes(pol)
                 remainings = []
-                for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                    if sc not in scopes and not (sc == entity_scope and "entity" in scopes):
-                        continue
+                for sc, ev in scope_pairs(pol, entity_scope, entity_value):
                     b = self._get_bucket(policy_id, category, sc, ev, capacity=capacity, refill_per_sec=refill_per_sec)
                     remainings.append(int(b.available(now)))
                 out[category] = {"remaining": (min(remainings) if remainings else None), "reset": 0}
