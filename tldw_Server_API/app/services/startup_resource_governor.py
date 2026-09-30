@@ -193,8 +193,8 @@ def log_undefined_policy_references(loader: Any) -> list[str]:
     except _STARTUP_GUARD_EXCEPTIONS as exc:
         logger.warning("RG policy snapshot unavailable ({!r}); undefined policy references were not checked", exc)
         return []
-    targets = set(str(v) for v in (route_map.get("by_path") or {}).values())
-    targets |= set(str(v) for v in (route_map.get("by_tag") or {}).values())
+    targets = {str(v) for v in (route_map.get("by_path") or {}).values()}
+    targets |= {str(v) for v in (route_map.get("by_tag") or {}).values()}
     missing = sorted(targets - policies)
     for pid in missing:
         logger.error("RG route_map names undefined policy {!r}; requests fall back to 'default'", pid)
