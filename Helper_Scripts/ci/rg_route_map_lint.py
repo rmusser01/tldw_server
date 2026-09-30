@@ -17,6 +17,18 @@ ALLOWLIST = Path(__file__).resolve().parent / "rg_route_map_lint_allowlist.txt"
 
 
 def lint(route_map: Mapping[str, Any], served: list[Any], allow: set[str]) -> list[str]:
+    """Check a route_map against the routes the app serves.
+
+    Args:
+        route_map: The policy snapshot's ``route_map`` (``by_path`` globs, ``by_tag``).
+        served: Served routes (``iter_served_routes``); each has ``path``, ``methods``
+            and ``tags``. Only routes with HTTP methods are matched against globs.
+        allow: Problem strings to suppress (the allowlist file's entries).
+
+    Returns:
+        Problem strings (dead or shadowed ``by_path`` patterns, unused or shadowed
+        ``by_tag`` entries) that are not in ``allow``; empty when clean.
+    """
     from tldw_Server_API.app.core.Resource_Governance.policy_resolver import compile_route_glob
 
     http = [r for r in served if getattr(r, "path", None) and getattr(r, "methods", None)]
