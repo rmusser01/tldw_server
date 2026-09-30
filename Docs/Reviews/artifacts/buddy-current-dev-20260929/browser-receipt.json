@@ -1,0 +1,86 @@
+{
+  "production_base": "0da68530e80c713ed3a323a741998e1fed37e3e9",
+  "runtime": {
+    "mode": "quickstart",
+    "frontend": "http://127.0.0.1:18180",
+    "backend": "http://127.0.0.1:18181",
+    "data": "disposable SQLite",
+    "generation": "mock only",
+    "browser_storage": "pre-existing; not a fresh browser profile",
+    "workspace_fixture": "API seeded; Buddy selection/attachment performed through real UI"
+  },
+  "route_before": {
+    "path": "/api/v1/workspaces",
+    "status": 307
+  },
+  "route_after": {
+    "path": "/api/v1/workspaces/",
+    "status": 200
+  },
+  "buddy_before_navigation": [
+    {
+      "id": "2eed0471e0c743d88f18c444c7fecce6",
+      "name": "pixel-migu",
+      "optional_persona_id": null,
+      "display_mode": "static",
+      "version": 2
+    }
+  ],
+  "buddy_final": [
+    {
+      "id": "2eed0471e0c743d88f18c444c7fecce6",
+      "name": "pixel-migu",
+      "optional_persona_id": null,
+      "display_mode": "dynamic",
+      "version": 3
+    }
+  ],
+  "attachment": {
+    "client_slot": "default",
+    "version": 1,
+    "attachment": {
+      "buddy_id": "2eed0471e0c743d88f18c444c7fecce6",
+      "scope_type": "workspace",
+      "scope_id": "buddy-acceptance-20260929"
+    },
+    "target": {
+      "title": "Buddy acceptance 20260929",
+      "workspace_id": "buddy-acceptance-20260929"
+    },
+    "unavailable_reason": null
+  },
+  "workspace": {
+    "id": "buddy-acceptance-20260929",
+    "name": "Buddy acceptance 20260929",
+    "assistant_defaults": null,
+    "effective_assistant_default": {
+      "status": "none",
+      "source": "none",
+      "assistant_kind": null,
+      "assistant_id": null,
+      "label": null,
+      "persona_memory_mode": null,
+      "degraded_reason": null
+    }
+  },
+  "source_sha256": {
+    "apps/packages/ui/src/services/tldw/domains/workspace-api.ts": "c7e9be83b24e4676de67dc762d187b37836ecfe6bebb43134d40eec4d93dcfbf",
+    "apps/packages/ui/src/services/tldw/domains/__tests__/workspace-api.status-capabilities.test.ts": "af92d78e0218863353e833ddceab4d8071d7646b58f33a8a40ef7ea359d62dd4",
+    "apps/packages/ui/src/services/__tests__/tldw-api-client.workspace-api.test.ts": "fd3200cb9d4513194b46d2459c55a06132d432b7519c3656857788d61ef64b2e"
+  },
+  "artifact_sha256": {
+    "watchlists-dynamic-buddy.jpg": "39d12c9cdb8583e244c996bf451946aeccd698250192b148213b4edcb0815a64",
+    "workspace-redirect-before.jpg": "4b5d8169c180faa42dc77387e709111d23208da8a201628bede5edae9400815d",
+    "watchlists-static-buddy.jpg": "4fc31471e56913b485ad401a14dacfe515c04a4698c698a793beb70e78aa261b",
+    "workspace-choice-after.jpg": "ca73c1fe9a69e662710c97b547ef223e1052836149fe239e9df58b8fab9bfcd1",
+    "watchlists-visible-buddy.jpg": "84c4356739cc93f4eaa0c4559231770d91f50dfc18a99fb304e1fac19504cfe7"
+  },
+  "limits": [
+    "No installed-extension qualification",
+    "No native Chatbook terminal UI qualification",
+    "No physical microphone or audible playback",
+    "No fresh browser or upgraded WebUI journey",
+    "No live reply or active-run navigation test in this run",
+    "Advanced cross-origin browser connection failure remains unestablished; supported quickstart was used"
+  ]
+}
