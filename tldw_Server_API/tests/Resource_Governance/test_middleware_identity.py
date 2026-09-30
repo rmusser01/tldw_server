@@ -188,6 +188,12 @@ def test_identity_cache_cap_evicts_oldest(client, monkeypatch):
     assert client.principal_calls == ["1", "2", "3", "1"]  # "1" was evicted by "3"
 
 
+def test_invalid_jwt_falls_back_to_api_key_like_route_auth(client):
+    # get_auth_principal drops a failed bearer JWT for X-API-KEY, so ingress must too.
+    client.get("/api/v1/thing", headers={"Authorization": "Bearer forged.jwt.x", "X-API-KEY": "7"})
+    assert _charged_entities(client) == {"user:7"}
+
+
 class _TenantSnap:
     route_map = {"by_path": {"/api/v1/*": "p"}, "by_tag": {}}
     tenant = {"enabled": True, "header": "X-TLDW-Tenant"}

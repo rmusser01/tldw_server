@@ -159,9 +159,12 @@ class RGSimpleMiddleware:
             try:
                 sub = get_jwt_service().decode_access_token(token).get("sub")
             except Exception as exc:  # noqa: BLE001 - identity is best-effort; route auth still decides
-                logger.debug("RG ingress JWT identity fell back to IP: {}", type(exc).__name__)
-                return None
-            return f"user:{sub}" if sub else None
+                logger.debug("RG ingress JWT identity failed: {}", type(exc).__name__)
+                # get_auth_principal drops a failed JWT for X-API-KEY; charge whom the route will.
+                if not request.headers.get("X-API-KEY"):
+                    return None
+            else:
+                return f"user:{sub}" if sub else None
         from tldw_Server_API.app.core.AuthNZ import auth_principal_resolver
 
         try:
