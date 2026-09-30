@@ -873,15 +873,6 @@ def test_prune_postgres_processes_fixed_candidates_in_bounded_batches(
             traces,
         ),
     )
-    # 9cd728aae8 locks the whole candidate ID set once, then archives and deletes
-    # it in _PRUNE_BATCH_SIZE slices; record each slice's size.
-    original_batch = jm._prune_postgres_batch
-
-    def recording_batch(cur: Any, candidate_ids: list[int], **kwargs: Any) -> int:
-        batch_lengths.append(len(candidate_ids))
-        return original_batch(cur, candidate_ids, **kwargs)
-
-    monkeypatch.setattr(jm, "_prune_postgres_batch", recording_batch)
 
     assert (
         jm.prune_jobs(
