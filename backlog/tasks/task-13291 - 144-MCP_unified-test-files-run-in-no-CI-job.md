@@ -1,10 +1,10 @@
 ---
 id: TASK-13291
 title: 144 MCP_unified test files run in no CI job
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-22 04:34'
-updated_date: '2026-09-28 19:25'
+updated_date: '2026-09-29 19:01'
 labels:
   - ci
   - mcp
@@ -39,7 +39,7 @@ Found by the comprehensive core-module review; independently verified by the orc
 - [x] #1 The in-app tree is run locally and every current failure is triaged and recorded before any gating change
 - [x] #2 The known red test (filesystem glob / unguarded is_symlink at filesystem_module.py:1778) is fixed or explicitly quarantined with a reason
 - [x] #3 tldw_Server_API/app/core/MCP_unified/tests is added to the platform-mcp-core shard (ci.yml:1758-1761 and its four siblings) or another required gate
-- [ ] #4 A green run of that gate is recorded with its observed output
+- [x] #4 A green run of that gate is recorded with its observed output
 - [x] #5 The naming collision between tests/MCP_unified and app/core/MCP_unified/tests is documented so the next reader does not assume the gate covers both
 <!-- AC:END -->
 
@@ -138,14 +138,22 @@ OS/Python job), so assigning a path means editing all 5 copies -- a single edit 
 jobs still skipping the file.
 
 2026-09-28: AC4 is still unmet, and the gate may never have run. The platform-mcp-inapp shard is defined in ci.yml (full-suite-linux-312/313, macos, windows and release shard jobs), but those jobs run on a PR only when the changes job reports backend_changed == 'true', and none appeared in #3035's 22-job CI run. ci.yml has also not run on a push to dev since February. So no green run of the in-app MCP gate has been observed. The shard-skipping itself is being worked separately (branch fix/ci-shards-skipped-by-admission).
+
+2026-09-29: AC4 met. The platform-mcp-inapp shard had never actually run in CI: every full-suite shard was skipped on pull_request and push because the admission job (workflow_run only) was a skipped ancestor and the shard jobs lacked always(); the summaries counted 'skipped' as a pass. #3036 fixed that. Recorded green run: CI run 36586587382 (PR #3036 head 6fac56a81a), job 109469463723 'Full Suite shard (Ubuntu / Python 3.12 / platform-mcp-inapp)': pytest exit 0, 3439 passed, 3 skipped in 379.94s.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The in-app MCP_unified test tree runs in its own full-suite shard (platform-mcp-inapp), its known red test is fixed, the quarantine was drained (TASK-13343), and a green CI run is recorded (run 36586587382: 3439 passed, 3 skipped). The shard only started running once #3036 stopped the full suite being silently skipped.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
+- [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

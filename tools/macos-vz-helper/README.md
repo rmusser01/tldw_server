@@ -268,10 +268,33 @@ path-escape resistance.
 Retained artifacts include `receipt.json` (including hashes of helperctl and
 the image-store materializer), per-case `result.json`, JUnit and
 guest receipts, build overlays/binaries/hashes, installation logs, helper/serial
-logs, and the image store. Treat these as private operator evidence; review them
-before sharing. **Evidence and disks are deliberately not deleted.** After review,
-remove only that run's evidence directory when its cleanup receipt confirms the
-helper and VMs are gone. A failure retains logs and returns nonzero; unavailable
+logs, and image-store manifests/provenance. Treat these as private operator evidence;
+review them before sharing. **Disposable rootfs/kernel/initrd payloads are removed
+by default**, including after failed or canceled drills. Removal happens only
+after canonical/completed prepared-source hash verification, confirmed VM/helper teardown,
+and a fresh closed-handle check. `receipt.json` records final payload hashes,
+removed filenames and any retention/cleanup failure. Bundle metadata, test
+binaries, wrappers, logs and receipts remain; canonical inputs and older evidence
+are never cleanup candidates. Partial copies are tracked before materialization.
+Setup copies that fail before becoming prepared sources have no completed-source
+baseline; their final payload hashes are retained before removal under the same
+ownership and teardown checks. Interrupted final source verification retains
+payloads, records the failure and still writes the final receipt.
+Receipt rewrites are atomic. Allocation-time filesystem identities and final
+payload size/change timestamps are rechecked before deletion. Directory handles
+anchor each atomic claim into a private staging directory; a claimed replacement
+is restored without overwriting newer names, or retained at the receipt's
+`retained_path` if restoration fails. Replacement trees are not adopted as owned
+bundles. Handled signals are deferred across claim/restore/unlink and
+its deletion record. An interruption during one bundle's cleanup records a failure and
+retains its remaining payloads while still attempting other safe allocations.
+
+Pass `--keep-bundles` only when disk inspection or reuse is deliberately needed;
+this retains all allocated boot payloads and records the override in the receipt.
+Unknown safety checks, changed source hashes, invalid paths or deletion failures
+retain affected payloads and make the run fail. Review the receipt before any
+manual deletion. No background cleanup scans or removes previous runs.
+A failure retains logs and returns nonzero; unavailable
 cleanup checks are not reported as empty. Ctrl-C/SIGTERM and command timeouts
 terminate the active build/test process group and reap its direct child before
 helper cleanup (three-second TERM grace, then KILL). Signals arriving during
@@ -280,7 +303,8 @@ child ownership is registered; later signals retain their normal behavior.
 An installation error stays primary if preparer cleanup also fails, with the
 cleanup diagnostic attached to the retained traceback.
 SIGKILL, a host crash, or power loss can bypass cleanup. In that case inspect the
-receipt's unique runtime/socket/PID paths before manual recovery. Never enable
+receipt's unique runtime/socket/PID paths and any `.payload-cleanup-*` staging
+directory in an owned bundle before manual recovery. Never enable
 these fault fixtures on a production guest or run this in scheduled CI.
 
 The standalone tests below remain useful when operating an already isolated

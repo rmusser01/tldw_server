@@ -11,6 +11,8 @@ from functools import lru_cache
 
 import pytest
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+
 # ---------------------------------------------------------------------------
 # Helper: collect all route paths from the app
 # ---------------------------------------------------------------------------
@@ -21,7 +23,7 @@ def _get_all_route_paths() -> frozenset[str]:
     from tldw_Server_API.tests.helpers.app_main_state import reload_app_main
 
     app = reload_app_main().app
-    return frozenset(route.path for route in app.routes if hasattr(route, "path"))
+    return frozenset(route.path for route in iter_served_routes(app.routes) if hasattr(route, "path"))
 
 
 # ---------------------------------------------------------------------------

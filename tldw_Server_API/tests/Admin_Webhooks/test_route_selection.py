@@ -9,10 +9,11 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.endpoints import admin as admin_endpoints
 from tldw_Server_API.app.api.v1.endpoints.admin import admin_ops
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 
 def _pairs(router: APIRouter) -> list[tuple[str, str]]:
-    return [(method, route.path) for route in router.routes for method in (route.methods or set())]
+    return [(method, route.path) for route in iter_served_routes(router.routes) for method in (route.methods or set())]
 
 
 def _build(environ: dict[str, str]) -> APIRouter:

@@ -8,6 +8,7 @@ from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     verify_api_key,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 
 def _walk_dependants(deps: Iterable[object]) -> Iterable[object]:
@@ -26,7 +27,7 @@ def test_scoped_routes_include_auth_dependency_chain() -> None:
     scoped_routes: list[str] = []
     missing_auth_chain: list[str] = []
 
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         dependant = getattr(route, "dependant", None)
         if dependant is None:
             continue

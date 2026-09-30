@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
@@ -209,8 +210,8 @@ def test_persona_voice_command_routes_include_rate_limit_dependency():
     }
 
     seen_routes: set[tuple[str, str]] = set()
-    for route in fastapi_app.routes:
-        if not isinstance(route, APIRoute):
+    for route in iter_served_routes(fastapi_app.routes):
+        if not isinstance(route.route, APIRoute):
             continue
         for method in route.methods:
             key = (route.path, method)

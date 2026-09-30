@@ -552,6 +552,7 @@ def test_exercise_isolates_twelve_cases_and_unwinds_failed_runs(
 
     builder, installer = Mock(side_effect=build_agent), Mock(side_effect=install_agent)
     disk_probe = Mock(return_value={"ok": True})
+    allocations: dict[Path, Any] = {}
     monkeypatch.setattr(drill, "build_agent", builder)
     monkeypatch.setattr(drill, "install_agent", installer)
     monkeypatch.setattr(drill, "run_case", run_case)
@@ -559,9 +560,11 @@ def test_exercise_isolates_twelve_cases_and_unwinds_failed_runs(
     if failure:
         error = OSError if failure == "raised" else RuntimeError
         with pytest.raises(error, match="case interrupted|failed acceptance"):
-            drill.exercise(materializer, ctl, source_bundle, tmp_path / "helper", evidence, receipt, factory)
+            drill.exercise(
+                materializer, ctl, source_bundle, tmp_path / "helper", evidence, receipt, factory, allocations
+            )
     else:
-        drill.exercise(materializer, ctl, source_bundle, tmp_path / "helper", evidence, receipt, factory)
+        drill.exercise(materializer, ctl, source_bundle, tmp_path / "helper", evidence, receipt, factory, allocations)
     expected = [
         (profile, negative)
         for profile in ("mismatch", "readiness", "protocol", "workspace", "missing_agent", "boot_stall")
@@ -620,3 +623,11 @@ def test_exercise_isolates_twelve_cases_and_unwinds_failed_runs(
     assert {path / "rootfs.img" for path in run_paths}.issubset(set(tracked_disks))
     if failure:
         helper.terminate_vm.assert_called_once_with("leftover")
+    assert len(allocations) == (6 if failure else 36)
+    drill.verify_sources(materializer, source_bundle, evidence, receipt)
+    assert all(receipt["fault_sources_unchanged"].values())
+    drill.cleanup_payloads(source_bundle, evidence, receipt, allocations)
+    assert receipt["bundle_cleanup"]["ok"] is True
+    assert all(not (bundle / name).exists() for bundle, allocation in allocations.items() for name in allocation.names)
+    assert all((bundle / "manifest.json").is_file() for bundle in allocations)
+    assert {path.name: path.read_bytes() for path in source_bundle.iterdir()} == source_before

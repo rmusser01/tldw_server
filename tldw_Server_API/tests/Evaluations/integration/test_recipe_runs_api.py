@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     get_eval_request_user,
 )
@@ -188,7 +189,7 @@ def _set_reuse_mapping(
 
 
 def test_evaluations_unified_router_registers_recipe_routes_before_eval_id_routes() -> None:
-    paths = [route.path for route in evaluations_unified_router.routes if hasattr(route, "path")]
+    paths = [route.path for route in iter_served_routes(evaluations_unified_router.routes) if hasattr(route, "path")]
 
     assert "/evaluations/recipes" in paths
     assert "/evaluations/recipe-runs/{run_id}" in paths

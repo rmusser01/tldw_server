@@ -164,63 +164,21 @@ def _load_app() -> Any:
     return app
 
 
-def _route_facts(obj: Any) -> tuple[str | None, list[str], Any]:
-    """Return ``(path, methods, dependant)`` for a route or an effective context.
-
-    Falls back to ``original_route`` for contexts that do not carry the fields
-    directly.  ``path`` is ``None`` when it cannot be determined.
-    """
-    path = getattr(obj, "path", None)
-    dependant = getattr(obj, "dependant", None)
-    methods = sorted(getattr(obj, "methods", None) or [])
-    if path is None:
-        original = getattr(obj, "original_route", None)
-        if original is not None:
-            path = getattr(original, "path", None)
-            methods = methods or sorted(getattr(original, "methods", None) or [])
-            dependant = dependant or getattr(original, "dependant", None)
-    return path, methods, dependant
-
-
 def iter_routes(app: Any) -> Iterator[tuple[str | None, list[str], Any]]:
-    """Yield ``(path, methods, dependant)`` for every route the app can serve.
+    """Yield ``(path, methods, dependant)`` for every API route the app serves.
 
-    Raises ``RatchetError`` if an included router refuses to resolve, rather
-    than silently under-reporting the route inventory.
+    Walks served routes, so routes behind nested ``include_router`` calls are seen
+    at their full path with their include-time dependencies merged in. Reading
+    ``app.routes`` directly misses them on FastAPI >= 0.137, where a nested include
+    is an opaque ``_IncludedRouter`` branch rather than a route.
     """
     from fastapi.routing import APIRoute
 
-    for route in app.routes:
-        if isinstance(route, APIRoute):
-            yield _route_facts(route)
-            continue
-        # Older FastAPI releases flatten included routers into APIRoute
-        # instances and do not expose the private _IncludedRouter type.
-        if not any(
-            hasattr(route, name)
-            for name in ("effective_candidates", "effective_low_priority_routes")
-        ):
-            continue
-        # FastAPI defers inclusion, so the real routes (carrying the merged
-        # parent-router dependencies) only exist inside the included router.
-        seen: set[tuple] = set()
-        for getter in ("effective_candidates", "effective_low_priority_routes"):
-            resolve = getattr(route, getter, None)
-            if resolve is None:
-                continue
-            try:
-                contexts = resolve() or []
-            except Exception as exc:  # noqa: BLE001
-                raise RatchetError(
-                    f"could not resolve {getter} for an included router: {exc}"
-                ) from exc
-            for context in contexts:
-                facts = _route_facts(context)
-                key = (facts[0], tuple(facts[1]))
-                if not facts[0] or key in seen:
-                    continue
-                seen.add(key)
-                yield facts
+    from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+
+    for route in iter_served_routes(app.routes):
+        if isinstance(route.route, APIRoute):
+            yield route.path, sorted(route.methods), route.dependant
 
 
 def _walk(dependant: Any, seen: set[int] | None = None) -> Iterator[Any]:
