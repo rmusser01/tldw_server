@@ -1,4 +1,4 @@
-# ADR-056: Permanent Owner-Bound Workspace Startup Receipts
+# ADR-057: Permanent Owner-Bound Workspace Startup Receipts
 
 **Status:** Proposed
 **Date:** 2026-09-27
