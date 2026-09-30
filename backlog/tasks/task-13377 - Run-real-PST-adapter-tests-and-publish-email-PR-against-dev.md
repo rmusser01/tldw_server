@@ -4,7 +4,7 @@ title: Run real PST adapter tests and publish email PR against dev
 status: In Progress
 assignee: []
 created_date: '2026-09-26 21:50'
-updated_date: '2026-09-30 00:11'
+updated_date: '2026-09-30 04:32'
 labels: []
 dependencies: []
 documentation:
@@ -132,12 +132,28 @@ Heartbeat23:43Z: current39e3/latestdev6000 unchanged; exact Qodo0/all9threadsres
 Dev advanced6000->607431154cf10129b5d9afa8f9b57d46636466fc through PR3053 (FastAPI0.141.1 and served-route introspection). Incoming76paths overlap only User_DB_Handling.py. Preserve dev include-time token scope guards and email tenancy/privacy protections; rebase, use isolated supported FastAPI dependencies, verify affected auth/email/nativePST/route/schema behavior, compile/lint/Bandit and review before publication. Prior39e3 gates are historical after refresh; AC5 publication and AC7 actualmerge pending.
 
 Dev6074 refresh verified: conflict-free rebase with75 incoming paths exactlydev and only User_DB_Handling.py combined; canonical authority/validated organization selection preserved alongside dev effective-route scoped-JWT guards. Isolated FastAPI0.141.1/Pydantic2.13.5/Starlette1.7.0:746combined auth/email/route and13monitoring cases pass,0failures/errors/skips; guarded nativePST10pass,0skips/outbound/model.92PR and72incomingPython compile (163unique);2resolutionpaths Ruffclean; all104incoming Ruff findings matchdev exactly;9production/script Bandit3inherited labels/0new/errors. Canonical generation/drift unchanged58fa00440a66/2104paths3244schemas; routeauth178baselineexact. Independent review clear. Existing report/JSON appended source/dependency/log/guard hashes; older receipts retained. Ready for exact-lease publication; AC5/published refresh and AC7/new-headQodo/CI/actualmerge pending.
+
+Published df1781b27e9c07f1b41df07f42173af68c5f1aa1 on dev607431154cf10129b5d9afa8f9b57d46636466fc using exact force-with-lease against39e3. Fresh PR OPEN/MERGEABLE/BLOCKED; human Change summary preserved verbatim and validation/source links updated.746combined/13monitoring/native10 pass and review is clear. New-head Qodo and allseven required CI contexts are being checked; no prior-head results can satisfy merge. AC5 publication complete, AC7 actualmerge pending.
+
+Final00:12Z snapshot: exact published df1781b27e9c07f1b41df07f42173af68c5f1aa1 on dev6074. Qodo summary5895816283 updated2026-09-30T00:12:37Z reviews exactdf178 with0activebugs/rules/crossrepo/skills; all9originalthreadsresolved and no new/edited thread replies or formalreviews. Latest audit36649220796queued automatically supersedes cancelled36649175138. New-head backend36649177317/security36649177468/coverage36649177416/frontend36649177398/e2e36649177505/container36649177520 allqueued with no failure/trustedlicense statusyet. Do not credit stale-head or skipped/cancelled checks. Actualmerge/AC7 pending allseven contexts; no rerun/bypass/unrelated cancellation.
+
+Heartbeat02:28Z: exact df178/latestdev6074 unchanged; Qodo exact-head0/all9threadsresolved, no new or edited feedback. License audit36649220796SUCCESS and requiredfrontend-license-policy/trusted/devSUCCESS at2026-09-30T02:20:28Z. Allsix formalrequiredworkflows remainqueued on currenthead, no failures; cancelled initialaudit not credited. One of seven contexts nowpasses; actualmerge/AC7 awaits the remainingsix, no rerun/cancellation/bypass/source edit.
+
+Heartbeat 03:29Z: exact df178/latest dev6074 unchanged; Qodo reviews the exact head with zero active findings, all nine threads resolved and no new or edited feedback. Security-required36649177468 SUCCESS03:28:04Z joins the trusted license/audit PASS. Backend36649177317 in progress; coverage36649177416, frontend36649177398, e2e36649177505 and container36649177520 queued, with no current-head required failure. Two of seven required contexts pass; actual merge/AC7 awaits the remaining five. Leave active jobs alone; no rerun, bypass or source edit.
+
+Heartbeat 03:49Z: exact df178/latest dev6074 unchanged; Qodo exact-head zero active findings, all nine threads resolved and no new or edited feedback. Backend-required36649177317 SUCCESS03:44:43Z and coverage-required36649177416 SUCCESS03:47:30Z join security and trusted license/audit PASS. Frontend36649177398, e2e36649177505 and container36649177520 remain queued without failures. Four of seven required contexts pass; actual merge/AC7 awaits the remaining three. Active jobs left alone; no rerun, bypass or source edit.
+
+Heartbeat 03:59Z: exact df178/latest dev6074 unchanged; Qodo exact-head zero active findings, all nine threads resolved and no new or edited feedback. Container-build-check36649177520 SUCCESS03:59:16Z joins backend, coverage, security and trusted license/audit PASS. E2E36649177505 in progress; frontend36649177398 queued without failures. Five of seven required contexts pass; actual merge/AC7 awaits E2E and frontend. Active jobs left alone; no rerun, bypass or source edit.
+
+Heartbeat 04:19Z: exact df178/latest dev6074 unchanged; Qodo exact-head zero active findings, all nine threads resolved and no new or edited feedback. E2E-required36649177505 SUCCESS04:15:09Z joins backend, coverage, security, container and trusted license/audit PASS. Frontend36649177398 remains queued without failures. Six of seven required contexts pass; actual merge/AC7 awaits frontend. Active job left alone; no rerun, bypass or source edit.
+
+Heartbeat04:29Z: dev advanced6074 to955b1d9626a055ca44336a00d3d4c144949cb00f through PR3062. The incoming diff changes exactly one unrelated Backlog task13392 record; no source/test/fixture/dependency/CI input changes or overlap with this PR. Preserve published df178 plus pending own tracking, then conflict-free rebase and compare every non-Backlog repository input and all163 certified Python hashes. Existing746/13/native10 and security evidence remains source-bound without redundant reruns. Prior df178 Qodo0/allnine resolved and six of seven gates PASS; frontend queued. Refreshed head must obtain fresh exact-head Qodo and allseven contexts; actual merge/AC7 pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR3023 ready at39e307f8ca6aeb2cce8b50c279b3c990d02567bf on latestdev60006a2fed. Exact-head Qodo0/all9threadsresolved. Requiredcoverage/security/trustedlicensePASS; backend/frontend/e2e/containerqueued without failures; actualmerge/AC7 pending remainingfour. Source-bound374/native10,92Pythonhashes and incoming97portabletests/3compile/Ruffclean/Bandit0 evidence retained. Human recurring authorization/Change summary preserved; ACTIVE heartbeat continues quietly.
+PR3023 ready at df1781b27e9c07f1b41df07f42173af68c5f1aa1 on latest dev607431154cf10129b5d9afa8f9b57d46636466fc. Exact-head Qodo zero active findings; all nine threads resolved, no new feedback. Backend, coverage, security, container, E2E and trusted license/audit PASS; frontend queued without failures. Actual merge/AC7 pending frontend. Verified746 combined/13 monitoring/native10 evidence and human recurring authorization/Change summary preserved; ACTIVE follow-up continues quietly.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
