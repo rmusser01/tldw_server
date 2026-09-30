@@ -91,20 +91,29 @@ async def test_invalid_cookie_returns_canonical_auth_failure(governed_cookie_app
 
 
 @pytest.mark.parametrize(
-    "headers",
+    "headers,expected_validations",
     [
-        {},
-        {"Cookie": "unrelated=session-a"},
-        {"Cookie": "custom_session=session-a", "Authorization": ""},
-        {"Cookie": "custom_session=session-a", "X-API-KEY": ""},
+        # No credentials at all: RG admits the anonymous entity (safety-net scope-mismatch
+        # fix, spec §4), so the request now reaches the real auth dependency, which falls
+        # back to (and exhausts) the cookie check before failing closed with 401.
+        ({}, [None]),
+        ({"Cookie": "unrelated=session-a"}, [None]),
+        # Explicit headers, even empty ones, still take precedence over cookies: the
+        # resolver never attempts cookie validation in these two cases.
+        ({"Cookie": "custom_session=session-a", "Authorization": ""}, []),
+        ({"Cookie": "custom_session=session-a", "X-API-KEY": ""}, []),
     ],
 )
-def test_cookie_preflight_preserves_absence_and_explicit_header_precedence(governed_cookie_app, headers):
+def test_cookie_preflight_preserves_absence_and_explicit_header_precedence(governed_cookie_app, headers, expected_validations):
     app, validations, _ = governed_cookie_app
     with TestClient(app) as client:
         response = client.get("/api/v1/persona/profiles", headers=headers)
-    assert response.status_code == 429
-    assert not validations
+    # Was 429: an anonymous entity kind (ip) not listed in character_chat.default's
+    # scopes used to get no bucket at all and so was denied forever. Safety-net fix
+    # (spec §4, scope mismatch) now charges it its own per-entity bucket, admitting it
+    # into the real auth dependency, which correctly reports 401 (no credentials).
+    assert response.status_code == 401
+    assert validations == expected_validations
 
 
 def test_ungoverned_cookie_does_not_trigger_authentication(governed_cookie_app):
@@ -120,8 +129,15 @@ def test_cookie_preflight_does_not_apply_in_multi_user_mode(governed_cookie_app)
     resolver.get_settings().AUTH_MODE = "multi_user"
     with TestClient(app) as client:
         response = client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=session-a"})
-    assert response.status_code == 429
-    assert not validations
+    # Was 429: the anonymous ip entity used to be permanently denied by the
+    # scope-mismatch bug before ever reaching the endpoint's own auth dependency.
+    # Safety-net fix (spec §4) admits it, so the request reaches the real endpoint,
+    # whose Depends(get_auth_principal) authenticates the cookie normally (the
+    # RG middleware's own early cookie-preflight shortcut still does not run here,
+    # since it is gated to single_user mode).
+    assert response.status_code == 200
+    assert response.json() == {"user_id": 1}
+    assert validations == ["session-a"]
 
 
 async def test_cookie_preflight_does_not_fail_open_on_resolver_failure(
@@ -144,9 +160,14 @@ def test_valid_cookie_does_not_bypass_missing_policy(governed_cookie_app):
     app.state.rg_policy_loader.get_policy = lambda _: {}
     with TestClient(app) as client:
         response = client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=session-a"})
-    assert response.status_code == 429
-    assert not validations
-    assert response.json()["policy_id"] == "character_chat.default"
+    # Was 429 with the error body's policy_id echoing "character_chat.default": an
+    # unresolvable policy (the loader here returns {} for every id, including the
+    # "default" fallback) used to deny forever. Safety-net fix (spec §4, unknown
+    # policy) falls back further to the compiled-in BUILTIN_DEFAULT_POLICY, which
+    # admits the request; the valid cookie is then authenticated normally.
+    assert response.status_code == 200
+    assert response.json() == {"user_id": 1}
+    assert validations == ["session-a"]
 
 
 @pytest.mark.parametrize("scopes", [["global", "ip"], ["user", "api_key", "ip"], ["entity"]])
