@@ -125,18 +125,13 @@ async def test_tokens_oversized_single_reservation_is_admitted_clamped_to_capaci
         def get_policy(self, pid):
             return {"tokens": {"per_min": 2, "burst": 1.0}, "scopes": ["global", "user"]}
 
+    from tldw_Server_API.app.core.Infrastructure.redis_factory import InMemoryAsyncRedis
+
     ft = FakeTime(0.0)
-    ns = "rg_t_tokens_oversized"
-    rg = RedisResourceGovernor(policy_loader=_Loader(), time_source=ft, ns=ns)
-    # Clean up window/op-idempotency keys from a prior run against a real Redis;
-    # this test uses a fixed op_id, so a cached decision would otherwise persist.
-    client = await rg._client_get()
-    try:
-        _cur, keys = await client.scan(match=f"{ns}:*")
-        for k in keys:
-            await client.delete(k)
-    except Exception:
-        _ = None
+    rg = RedisResourceGovernor(policy_loader=_Loader(), time_source=ft, ns="rg_t_tokens_oversized")
+    # Inject the in-process stub so this test never reaches a real Redis on :6379
+    # (the fixed op_id would otherwise replay a cached decision from a prior run).
+    rg._client = InMemoryAsyncRedis()
     req = RGRequest(entity="user:oversized", categories={"tokens": {"units": 3}}, tags={"policy_id": "ptok_big"})
 
     decision, handle_id = await rg.reserve(req, op_id="oversized-1")
