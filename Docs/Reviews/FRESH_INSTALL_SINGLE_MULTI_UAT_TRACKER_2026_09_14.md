@@ -1,5 +1,10 @@
 # Fresh-install UAT: single-user and multi-user
 
+## PR2979 native failure checkpoint — 2026-09-30 14:09 UTC
+
+Published d5c9 remains behind dev03043d1c10; local3d5249 contains the prior tracking-only delta. Current automatic36700923574 has11jobs/twosuccess/eightqueued/oneconfiguredskip. Native36701102894 has787jobs/452success/twofailures/38running/293queued/twoconfiguredskips. New failures are UAT547/TASK-13260.278.18.83.36 (Ubuntu AuthNZ bootstrap pool is closing,141pass/onefail/no skips) and UAT548/TASK-13260.278.18.83.37 (Windows Chat fallback call count,657pass/onefail/41original skips). Their complete logs and metadata are retained under /private/tmp/pr2979-native-109867100475* and -109867106765*. Cause investigation and controlled tests precede source edits; no repair or final-head acceptance is claimed. All19review threads remain resolved, Qodo unchanged; Chatbook disposition still pending. Keep useful CI intact, defer rebase/publication, full UAT paused and UAT261open.
+
+
 ## Release priority — PR2979
 
 The requester identifies this PR as a blocker for the next release and hosted private beta. GitHub confirms no merge queue is configured on dev; its rulesets still require protected status checks and merge-only integration. PR2979 is labelled `release-blocker`. Merge immediately once final-head checks/native matrix and applicable review findings are accepted, without bypassing those gates. Full UAT remains paused.
@@ -5296,3 +5301,10 @@ Canonical production Turbopack WebUI build passes, including token sync and the 
 Final changed-scope lint has zero errors and zero added diagnostics versus the checkpoint (124 to 123 inherited warnings across the ten-file comparison). Frontend harness lint has zero errors; journey-helpers retains four existing warnings. TypeScript passes. Root reviewed the storage/caller/authority paths and completed the local failure/retry checks; no new independent agent review is claimed. Backlog tasks remain open for the new native production follow-up. The original checkout index remains unchanged.
 
 Diagnostic3 repair checkpoint: Chrome production build also passes48.87MB32.9s (/tmp/uat402403-extension.log). Root source review confirms preserved Sentry reporting/fallback and explicit model choice; Content Review unit response now matches actual MediaDetailResponse. Original checkout index remains empty/unchanged. Generated captures remain outside Git.
+
+
+## UAT547 local qualification and UAT549 native finding — 2026-09-30
+
+UAT547 officialPG18.6 causal foreign-loop retirement red becomes three same-collision passes with all nine original assertions and three body bytes/ASTs retained. Fifteen affected/adjacent bootstrap/refresh checks pass without skips and exit normally in30.96s. Test-only portal wrappers, unchanged fixture/productionpool/refresh. Ruff/compile/diff clean; Bandit unchanged nineLOWassertions; independent source/artifact review clear, no reviewerPG rerun claimed. Final nativeAC3 remains open. UAT548 corrected two-definition clock/factory/metadata fixtures pass two focused coarse-clock probes; full scope/review still running. The complete-cap mutant fails the original502 guard withactual200, then has nativeC++post-assert abort whose cause remains unproven; no mutant normal exit or acceptance claimed. Earlier first-definition green/cap-survival used the bad kwargs seam and is invalid deadline-path evidence.
+
+UAT549/TASK-13260.278.18.83.38 records new Windowsmedia-audio109867106734:4021pass/onefail/46oldskip/one xfail/one xpass,missing stream_close in partial cancellation lifecycle. Cause investigation read-only. Current native snapshot at14:38:787jobs/548success/three knownfailures/38running/196queued/twoconfiguredskips. RemotePRd5c9/dev03043 unchanged by freshlsremote; useful diagnostics remain active and rebase/publication stays deferred. FullUATpaused,UAT261open,Chatbookdecisionpending.
