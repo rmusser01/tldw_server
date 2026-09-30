@@ -1976,12 +1976,6 @@ def _rg_enabled_for_request(request: Request) -> bool:
     return bool(state is not None and getattr(state, "rg_policy_id", None))
 
 
-def _rg_enabled_flag() -> bool:
-    from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled
-
-    return bool(_rg_enabled(True))
-
-
 def _log_auth_deps_rg_diagnostics_only_shim(
     *,
     dependency: str,
