@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-Minimal ASGI middleware that derives a policy_id from route tags or path and
+Minimal ASGI middleware that derives a policy_id via policy_resolver (path, tag, default) and
 calls the Resource Governor before and after handlers.
 
 This is a thin adapter for Stage 1/2 validation and can be replaced by a
@@ -41,8 +41,6 @@ _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
 class RGSimpleMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
-        # Compile simple path matchers from stub mapping
-        self._compiled_map: list[tuple[re.Pattern[str], str]] = []
 
     async def _ensure_loader_matches_env(self, request: Request) -> None:
         """Ensure app.state.rg_policy_loader reflects current RG_POLICY_PATH.
@@ -75,88 +73,16 @@ class RGSimpleMiddleware:
             # Best-effort only; never block the request
             pass
 
-    def _init_route_map(self, request: Request) -> None:
-        try:
-            loader = getattr(request.app.state, "rg_policy_loader", None)
-            if not loader:
-                return
-            snap = loader.get_snapshot()
-            route_map = getattr(snap, "route_map", {}) or {}
-            by_path = dict(route_map.get("by_path") or {})
-            compiled = []
-            for pat, pol in by_path.items():
-                # Convert glob patterns (supports '*' anywhere, anchored unless trailing '*')
-                pat = str(pat)
-                if "*" in pat:
-                    regex = re.escape(pat).replace("\\*", ".*")
-                    if not pat.endswith("*"):
-                        regex += "$"
-                else:
-                    regex = re.escape(pat) + "$"
-                compiled.append((re.compile(regex), str(pol)))
-            self._compiled_map = compiled
-        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug(f"RGSimpleMiddleware: route_map init skipped: {e}")
-
     def _derive_policy_id(self, request: Request) -> str | None:
-        # Prefer path-based routing (works even before route resolution)
-        try:
-            # Use compiled route_map if available
-            if not self._compiled_map:
-                self._init_route_map(request)
-            path = request.url.path or "/"
-            for pat, pol in self._compiled_map:
-                try:
-                    if pat.match(path):
-                        return str(pol)
-                except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
-                    continue
-            # Fallback to simple string matching from snapshot if compiled map unavailable
-            loader = getattr(request.app.state, "rg_policy_loader", None)
-            snap = loader.get_snapshot() if loader else None
-            route_map = getattr(snap, "route_map", {}) or {}
-            by_path = dict(route_map.get("by_path") or {})
-            # Simple wildcard matching: '*' anywhere, anchored unless trailing '*'
-            for pat, pol in by_path.items():
-                pat = str(pat)
-                if "*" in pat:
-                    regex = re.escape(pat).replace("\\*", ".*")
-                    if not pat.endswith("*"):
-                        regex += "$"
-                    if re.match(regex, path):
-                        return str(pol)
-                elif path == pat:
-                    return str(pol)
-        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
-            pass
+        """Path, then the innermost mapped tag, then default (ADR-056)."""
+        from .policy_resolver import get_policy_resolver
 
-        # Fallback to tag-based routing (may not be available early in ASGI pipeline)
         try:
-            by_tag = {}
-            loader = getattr(request.app.state, "rg_policy_loader", None)
-            snap = loader.get_snapshot() if loader else None
-            route_map = getattr(snap, "route_map", {}) or {}
-            by_tag = dict(route_map.get("by_tag") or {})
-        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
-            by_tag = {}
-        try:
-            route = request.scope.get("route")
-            tags = list(getattr(route, "tags", []) or [])
-            for t in tags:
-                if t in by_tag:
-                    return str(by_tag[t])
-        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
-            pass
-        # Heuristic fallback by path segments for common endpoints
-        try:
-            p = request.url.path or "/"
-            if p.startswith("/api/v1/chat/") or p == "/api/v1/chat/completions":
-                return "chat.default"
-            if p.startswith("/api/v1/audio/"):
-                return "audio.default"
-        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
-            pass
-        return None
+            resolver = get_policy_resolver(request.app)
+            return resolver.resolve(request.url.path or "/", request.method) if resolver else None
+        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug("RGSimpleMiddleware: policy resolution failed: {}", exc)
+            return None
 
     def _derive_tenant_config(self, request: Request) -> TenantScopeConfig | None:
         try:
@@ -227,9 +153,6 @@ class RGSimpleMiddleware:
         request = Request(scope, receive=receive)
         # Make sure loader (and its route_map) tracks current env path
         await self._ensure_loader_matches_env(request)
-        # Compile route map for fast path matches (best-effort)
-        with contextlib.suppress(_RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS):
-            self._init_route_map(request)
         policy_id = self._derive_policy_id(request)
         if not policy_id:
             await self.app(scope, receive, send)
