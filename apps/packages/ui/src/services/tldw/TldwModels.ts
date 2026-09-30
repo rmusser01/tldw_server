@@ -1,4 +1,9 @@
-import { tldwClient, TldwModel, type TldwConfig } from "./TldwApiClient"
+import {
+  tldwClient,
+  TldwModel,
+  type TldwConfig,
+  isActiveCookieSessionConfig
+} from "./TldwApiClient"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { isPlaceholderApiKey } from "@/utils/api-key"
 import { getRuntimeSingleUserApiKeyOverride } from "@/services/tldw/runtime-auth-override"
@@ -321,7 +326,11 @@ export class TldwModelsService {
       return Boolean(String(config.accessToken || "").trim())
     }
 
-    return hasUsableApiKey(getRuntimeSingleUserApiKeyOverride()) || hasUsableApiKey(config.apiKey)
+    return (
+      isActiveCookieSessionConfig(config) ||
+      hasUsableApiKey(getRuntimeSingleUserApiKeyOverride()) ||
+      hasUsableApiKey(config.apiKey)
+    )
   }
 
   private buildCacheScope(config: TldwConfig | null): string {
@@ -333,7 +342,7 @@ export class TldwModelsService {
       hasUsableApiKey(config.apiKey) ||
       hasUsableApiKey(getRuntimeSingleUserApiKeyOverride())
     const orgId = config.orgId != null ? String(config.orgId) : "none"
-    return `${serverUrl}|${authMode}|${hasAccessToken ? "token" : hasApiKey ? "key" : "none"}|${orgId}`
+    return `${serverUrl}|${authMode}|${hasAccessToken ? "token" : isActiveCookieSessionConfig(config) ? "cookie" : hasApiKey ? "key" : "none"}|${orgId}`
   }
 
   /**

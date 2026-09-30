@@ -13,7 +13,10 @@ const mocks = vi.hoisted(() => ({
   >()
 }))
 
-vi.mock("@/services/tldw/TldwApiClient", () => ({
+vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => ({
+  isActiveCookieSessionConfig: (
+    await importOriginal<typeof import("@/services/tldw/TldwApiClient")>()
+  ).isActiveCookieSessionConfig,
   tldwClient: {
     getConfig: (...args: unknown[]) =>
       (mocks.getConfig as (...args: unknown[]) => unknown)(...args),
@@ -24,7 +27,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
-vi.mock("@/utils/safe-storage", () => ({
+vi.mock("@/utils/safe-storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/utils/safe-storage")>()),
   createSafeStorage: () => ({
     get: (...args: unknown[]) =>
       (mocks.storageGet as (...args: unknown[]) => unknown)(...args),
@@ -62,6 +66,7 @@ const deferred = <T>() => {
 describe("TldwModelsService caching", () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
     vi.resetModules()
     mocks.getConfig.mockReset()
     mocks.initialize.mockReset()
@@ -113,6 +118,36 @@ describe("TldwModelsService caching", () => {
       })
     )
   })
+
+  it.each([
+    ["quickstart", "http://localhost:3000", "single-user", "cookie-session", true],
+    ["quickstart", "http://127.0.0.1:8000", "single-user", "cookie-session", false],
+    ["advanced", "http://localhost:3000", "single-user", "cookie-session", false],
+    ["quickstart", "http://localhost:3000", "multi-user", "cookie-session", false],
+    ["quickstart", "http://localhost:3000", "single-user", undefined, false]
+  ])(
+    "admits models only for an active cookie session (%s, %s, %s, %s)",
+    async (deploymentMode, serverUrl, authMode, authSource, allowed) => {
+      vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", deploymentMode)
+      vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+      mocks.getConfig.mockResolvedValue({ serverUrl, authMode, authSource })
+      mocks.getModels.mockResolvedValue([
+        { id: "cookie-model", name: "Cookie Model", provider: "llama", type: "chat" }
+      ])
+      const { TldwModelsService } = await importService()
+      const models = await new TldwModelsService().getModels()
+      expect(models.map((model) => model.id)).toEqual(allowed ? ["cookie-model"] : [])
+      expect(mocks.getModels).toHaveBeenCalledTimes(allowed ? 1 : 0)
+      if (allowed) {
+        expect(mocks.storageSet).toHaveBeenCalledWith(
+          "tldwModelsCache",
+          expect.objectContaining({
+            scope: "http://localhost:3000|single-user|cookie|none"
+          })
+        )
+      }
+    }
+  )
 
   it.each(["CHANGE_ME_TO_SECURE_API_KEY", "   "])(
     "does not treat invalid runtime single-user auth %s as model-ready",
