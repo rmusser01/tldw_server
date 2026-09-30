@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+
 import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
@@ -8,7 +10,8 @@ from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_rou
 _API_KEY = "test-api-key-1234567890"
 
 
-def _health_app(monkeypatch) -> FastAPI:
+def _health_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+    """Mount the audio router on a bare app in single-user mode with a known API key."""
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     monkeypatch.setenv("TEST_MODE", "true")
@@ -22,14 +25,15 @@ def _health_app(monkeypatch) -> FastAPI:
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     """An authenticated caller: the STT health endpoint requires a signed-in user."""
     with TestClient(_health_app(monkeypatch), headers={"X-API-KEY": _API_KEY}) as c:
         yield c
 
 
 @pytest.fixture
-def anonymous_client(monkeypatch):
+def anonymous_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """A caller that sends no credentials."""
     with TestClient(_health_app(monkeypatch)) as c:
         yield c
 
@@ -106,7 +110,8 @@ async def test_transcriptions_health_rejects_non_admin_warm_up(monkeypatch):
 ])
 def test_model_initializing_diagnostics_require_auth(
     anonymous_client: TestClient, method: str, path: str
-):
+) -> None:
+    """Diagnostics that can initialize models or reveal provider status reject anonymous callers."""
     response = anonymous_client.request(method, path)
     assert response.status_code == 401
 
