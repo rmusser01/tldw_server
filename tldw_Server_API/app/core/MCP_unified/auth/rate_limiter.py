@@ -232,7 +232,8 @@ async def _maybe_enforce_with_rg_mcp(*, key: str, category: str) -> dict[str, ob
     try:
         if _rg_mcp_loader is not None and not _rg_mcp_loader.get_policy(policy_id):
             policy_id = "mcp.default"  # categories without their own policy share mcp.default
-    except Exception:  # noqa: BLE001 - a lookup failure must not deny the tool call
+    except Exception as exc:  # noqa: BLE001 - a lookup failure must not deny the tool call
+        logger.warning("MCP RG policy lookup for category {!r} failed ({!r}); using mcp.default", category, exc)
         policy_id = "mcp.default"
     op_id = f"mcp-{category}-{key}-{time.time_ns()}"
     try:

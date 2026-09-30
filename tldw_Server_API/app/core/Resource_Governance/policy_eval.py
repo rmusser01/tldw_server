@@ -27,13 +27,18 @@ BUILTIN_DEFAULT_POLICY: dict[str, Any] = {
 }
 
 _warned_unknown: set[str] = set()
+_warned_lookup_errors: set[tuple[str, str]] = set()
 
 
 def _lookup(get_policy: Callable[[str], Mapping[str, Any] | None], policy_id: str) -> dict[str, Any]:
     try:
         pol = get_policy(policy_id)
         return dict(pol) if pol else {}
-    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as exc:
+        key = (policy_id, type(exc).__name__)
+        if key not in _warned_lookup_errors:
+            _warned_lookup_errors.add(key)
+            logger.error("Resource Governor policy store lookup for {!r} failed: {!r}; treating it as undefined", policy_id, exc)
         return {}
 
 

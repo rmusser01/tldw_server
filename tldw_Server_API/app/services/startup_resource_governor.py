@@ -190,7 +190,8 @@ def log_undefined_policy_references(loader: Any) -> list[str]:
         snap = loader.get_snapshot()
         route_map = dict(getattr(snap, "route_map", {}) or {})
         policies = set((getattr(snap, "policies", {}) or {}).keys())
-    except _STARTUP_GUARD_EXCEPTIONS:
+    except _STARTUP_GUARD_EXCEPTIONS as exc:
+        logger.warning("RG policy snapshot unavailable ({!r}); undefined policy references were not checked", exc)
         return []
     targets = set(str(v) for v in (route_map.get("by_path") or {}).values())
     targets |= set(str(v) for v in (route_map.get("by_tag") or {}).values())

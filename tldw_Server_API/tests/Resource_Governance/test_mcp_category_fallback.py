@@ -43,3 +43,27 @@ async def test_undefined_category_uses_mcp_default(monkeypatch):
 async def test_defined_category_keeps_its_policy(monkeypatch):
     gov, _ = await _run(monkeypatch, "read")
     assert gov.policy_ids == ["mcp.read"]
+
+
+async def test_lookup_failure_falls_back_and_is_logged(monkeypatch):
+    from loguru import logger
+
+    class _BrokenLoader:
+        def get_policy(self, pid):
+            raise RuntimeError("store down")
+
+    gov = _SpyGov()
+
+    async def _get():
+        return gov
+
+    monkeypatch.setattr(mcp_rl, "_get_mcp_rg_governor", _get)
+    monkeypatch.setattr(mcp_rl, "_rg_mcp_loader", _BrokenLoader())
+    seen = []
+    sink = logger.add(lambda m: seen.append(str(m)), level="WARNING")
+    try:
+        await mcp_rl._maybe_enforce_with_rg_mcp(key="user:1", category="browser")
+    finally:
+        logger.remove(sink)
+    assert gov.policy_ids == ["mcp.default"]
+    assert any("'browser'" in m and "store down" in m for m in seen), seen

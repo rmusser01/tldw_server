@@ -1,5 +1,8 @@
 """Shared policy evaluation: the decisions both governor backends must agree on."""
 
+from collections.abc import Callable, Mapping
+from typing import Any
+
 import pytest
 
 from tldw_Server_API.app.core.Resource_Governance import policy_eval
@@ -13,7 +16,7 @@ from tldw_Server_API.app.core.Resource_Governance.policy_eval import (
 pytestmark = [pytest.mark.unit, pytest.mark.rate_limit]
 
 
-def _getter(policies):
+def _getter(policies: Mapping[str, Any]) -> Callable[[str], Any]:
     return lambda pid: policies.get(pid)
 
 
@@ -89,3 +92,23 @@ def test_clamp_leaves_fitting_and_unbounded_reservations_alone():
 
 def test_malformed_store_value_is_treated_as_unknown():
     assert effective_policy(lambda pid: "oops", "p") == BUILTIN_DEFAULT_POLICY
+
+
+def test_store_lookup_error_is_logged_once_and_falls_back(monkeypatch):
+    from loguru import logger
+
+    monkeypatch.setattr(policy_eval, "_warned_lookup_errors", set(), raising=False)
+    monkeypatch.setattr(policy_eval, "_warned_unknown", set())
+
+    def boom(_pid: str) -> None:
+        raise RuntimeError("store down")
+
+    seen: list[str] = []
+    sink = logger.add(lambda m: seen.append(str(m)), level="ERROR")
+    try:
+        results = [effective_policy(boom, "p"), effective_policy(boom, "p")]
+    finally:
+        logger.remove(sink)
+    assert results == [BUILTIN_DEFAULT_POLICY, BUILTIN_DEFAULT_POLICY]
+    lookup_errors = [m for m in seen if "'p'" in m and "RuntimeError" in m]
+    assert len(lookup_errors) == 1, seen
