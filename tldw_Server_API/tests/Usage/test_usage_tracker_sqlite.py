@@ -457,6 +457,61 @@ async def test_log_llm_usage_repo_backend_error_is_best_effort(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_tokens_ledger_op_id_ignores_client_request_id(monkeypatch):
+    # The ledger dedupes on op_id; a client-repeatable X-Request-ID must not skip a charge.
+    from tldw_Server_API.app.core.Usage import usage_tracker as usage_tracker_module
+
+    class _Repo:
+        def __init__(self, _pool):
+            pass
+
+        async def get_api_key_name(self, *, key_id: int):  # noqa: ARG002
+            return None
+
+        async def insert_llm_usage_log(self, **_kwargs):
+            return None
+
+    class _Ledger:
+        def __init__(self) -> None:
+            self.op_ids: list[str] = []
+
+        async def add(self, entry) -> None:
+            self.op_ids.append(entry.op_id)
+
+    async def _fake_get_db_pool():
+        return object()
+
+    ledger = _Ledger()
+
+    async def _get_ledger():
+        return ledger
+
+    monkeypatch.setattr(usage_tracker_module, "get_settings", _safe_usage_settings)
+    monkeypatch.setattr(usage_tracker_module, "get_db_pool", _fake_get_db_pool)
+    monkeypatch.setattr(usage_tracker_module, "AuthnzUsageRepo", _Repo)
+    monkeypatch.setattr(usage_tracker_module, "_get_tokens_daily_ledger", _get_ledger)
+
+    for _ in range(2):
+        await usage_tracker_module.log_llm_usage(
+            user_id=1,
+            key_id=None,
+            endpoint="POST:/api/v1/embeddings",
+            operation="embeddings",
+            provider="test",
+            model="test-model",
+            status=200,
+            latency_ms=1,
+            prompt_tokens=5,
+            completion_tokens=0,
+            total_tokens=5,
+            request_id="replayed-req-id",
+        )
+
+    assert len(set(ledger.op_ids)) == 2, ledger.op_ids
+    assert not any("replayed-req-id" in op_id for op_id in ledger.op_ids)
+
+
+@pytest.mark.asyncio
 async def test_log_llm_usage_persists_router_enrichment(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)

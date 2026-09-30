@@ -128,6 +128,70 @@ def test_audio_transcriptions_uses_adapter_base_dir(
         assert captured_conversion["overwrite"] is True
 
 
+def test_audio_transcriptions_minutes_op_id_ignores_client_request_id(
+    monkeypatch: pytest.MonkeyPatch,
+    bypass_api_limits: Any,
+) -> None:
+    """The minutes ledger dedupes on op_id; a replayed X-Request-ID must not skip a charge."""
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", TEST_API_KEY)
+
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio as audio_ep
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter as stt_adapter
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+
+    async def _fake_get_request_user() -> User:
+        return User(id=1, username="single_user")
+
+    async def _allow_job(*_args: object, **_kwargs: object) -> tuple[bool, None]:
+        return True, None
+
+    async def _noop_async(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    operation_ids: list[str | None] = []
+
+    async def _capture_consume(_user_id: int, _minutes: float, *, operation_id: str | None = None):
+        operation_ids.append(operation_id)
+        return True, None
+
+    class _StubAdapter:
+        def transcribe_batch(self, audio_path: str, **kwargs: Any) -> dict[str, Any]:
+            return {"text": "stub transcript", "language": "en", "segments": [], "metadata": {"provider": "external"}}
+
+    class _StubRegistry:
+        def resolve_provider_for_model(self, _model: object) -> tuple[str, str, None]:
+            return "external", "external:stub", None
+
+        def get_adapter(self, _provider: object) -> _StubAdapter:
+            return _StubAdapter()
+
+    for name in ("can_start_job", "check_daily_minutes_allow"):
+        monkeypatch.setattr(audio_ep, name, _allow_job)
+    for name in ("increment_jobs_started", "finish_job", "add_daily_minutes"):
+        monkeypatch.setattr(audio_ep, name, _noop_async)
+    monkeypatch.setattr(audio_tx, "_consume_daily_minutes", _capture_consume)
+    monkeypatch.setattr(stt_adapter, "get_stt_provider_registry", lambda: _StubRegistry())
+    monkeypatch.setattr(atlib, "convert_to_wav", lambda path, *_a, **_k: path)
+
+    app = FastAPI()
+    app.dependency_overrides[get_request_user] = _fake_get_request_user
+    app.include_router(audio_router, prefix="/api/v1/audio")
+
+    with bypass_api_limits(app), TestClient(app) as client:
+        resp = client.post(
+            "/api/v1/audio/transcriptions",
+            headers={"X-API-KEY": TEST_API_KEY, "X-Request-ID": "replayed-req-id"},
+            files={"file": ("sample.wav", io.BytesIO(_make_wav_bytes()), "audio/wav")},
+            data={"model": "external:stub", "response_format": "json"},
+        )
+    assert resp.status_code == 200, resp.text
+    assert operation_ids and not any("replayed-req-id" in str(op) for op in operation_ids), operation_ids
+
+
 @pytest.mark.asyncio
 async def test_audio_cpp_transcription_uses_real_registry_without_fallback(
     monkeypatch: pytest.MonkeyPatch,
