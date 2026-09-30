@@ -24,7 +24,6 @@ import {
   useServerChatHistory
 } from "@/hooks/useServerChatHistory"
 import { useClearChat } from "@/hooks/chat/useClearChat"
-import { useStoreMessageOption } from "@/store/option"
 import { useFolderStore } from "@/store/folder"
 import { useRouteTransitionStore } from "@/store/route-transition"
 import {
@@ -96,7 +95,6 @@ export function ChatSidebar({
     !collapsed && recentHistoryVisible && currentTab === "server"
 
   const clearChat = useClearChat()
-  const temporaryChat = useStoreMessageOption((state) => state.temporaryChat)
   const startRouteTransition = useRouteTransitionStore((state) => state.start)
 
   // Folder conversation count for tab badge
@@ -577,12 +575,8 @@ export function ChatSidebar({
               />
             </div>
 
-            {/* Tab Content */}
-            <div
-              className={
-                temporaryChat ? "pointer-events-none opacity-50" : ""
-              }
-            >
+            {/* Tab Content: stays usable in temporary mode, which opens saved chats read-only (H1). */}
+            <div>
               {currentTab === "server" && (
                 <ServerChatList
                   searchQuery={debouncedSearchQuery}
