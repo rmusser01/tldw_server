@@ -967,6 +967,14 @@ def raise_detached_error(error: BaseException) -> NoReturn:
         raise
 
 
+class SchemaReadinessError(RuntimeError):
+    """A schema readiness check failed.
+
+    Messages are fixed operator-facing reasons, never row data, so transaction
+    boundaries that sanitize other failures pass this reason through.
+    """
+
+
 def exception_type_chain(error: BaseException, *, limit: int = 6) -> str:
     """Return ``Outer <- Inner <- ...`` type names for ``error``'s cause/context chain.
 

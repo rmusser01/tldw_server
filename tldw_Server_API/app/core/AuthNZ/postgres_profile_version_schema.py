@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tldw_Server_API.app.core.AuthNZ.exceptions import SchemaReadinessError
+from tldw_Server_API.app.core.exceptions import SchemaReadinessError
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     _mint_profile_user_sql,
     _profile_user_backend,

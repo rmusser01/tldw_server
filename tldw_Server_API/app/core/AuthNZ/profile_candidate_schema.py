@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from tldw_Server_API.app.core.AuthNZ.exceptions import SchemaReadinessError
+from tldw_Server_API.app.core.exceptions import SchemaReadinessError
 
 PROFILE_CANDIDATE_TABLES = (
     "organizations",

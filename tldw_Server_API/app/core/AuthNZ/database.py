@@ -30,7 +30,6 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     DatabaseError,
     DatabaseLockError,
     RollbackSignal,
-    SchemaReadinessError,
     TransactionError,
     UserRegistrationException,
 )
@@ -58,7 +57,11 @@ from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statement
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection_async,
 )
-from tldw_Server_API.app.core.exceptions import TransactionPassthroughError, exception_type_chain
+from tldw_Server_API.app.core.exceptions import (
+    SchemaReadinessError,
+    TransactionPassthroughError,
+    exception_type_chain,
+)
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime, is_test_mode
 
 _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS = (

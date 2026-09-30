@@ -225,14 +225,6 @@ class ConnectionPoolExhaustedError(DatabaseError):
         super().__init__("Database connection pool exhausted. Please try again.")
 
 
-class SchemaReadinessError(RuntimeError):
-    """A schema readiness check failed.
-
-    Messages are fixed operator-facing reasons, never row data, so transaction
-    boundaries that sanitize other failures pass this reason through.
-    """
-
-
 class TransactionError(DatabaseError):
     """Database transaction failed"""
     def __init__(self, operation: str, detail: Optional[str] = None):
