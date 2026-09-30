@@ -22,6 +22,7 @@ from tldw_Server_API.app.core import feature_flags
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core.Workspaces import chat_startup
 from tldw_Server_API.tests.DB_Management.test_conversation_assistant_startup import db_factory as db_factory
 from tldw_Server_API.tests.DB_Management.test_workspace_assistant_creation_atomic import creation_db as creation_db
@@ -137,13 +138,14 @@ def test_legacy_create_keeps_unrelated_extra_ignore_compatibility() -> None:
 
 @pytest.mark.unit
 def test_strict_route_is_static_and_uses_only_its_bounded_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A dynamic chat-id route cannot capture strict startup or inherit its limits."""
+    """Served routing preserves static startup ordering and its dedicated limits."""
     app, _, _ = _app(object(), monkeypatch)
-    paths = [route.path for route in app.routes]
+    routes = list(iter_served_routes(app.routes))
+    paths = [route.path for route in routes]
     assert _PATH in paths
     assert paths.index(_PATH) < paths.index("/api/v1/chats/{chat_id}")
-    strict = next(route for route in app.routes if route.path == _PATH)
-    legacy = next(route for route in app.routes if route.path == "/api/v1/chats/")
+    strict = next(route.route for route in routes if route.path == _PATH)
+    legacy = next(route.route for route in routes if route.path == "/api/v1/chats/")
     assert isinstance(strict, WorkspaceStartupRoute)
     assert not isinstance(legacy, WorkspaceStartupRoute)
     operation = app.openapi()["paths"][_PATH]["post"]
