@@ -205,6 +205,50 @@ def test_cached_identity_is_per_authnz_client_ip(client, monkeypatch):
     assert client.principal_calls == ["7", "7"]
 
 
+# --- Per-IP resolution budget: rotating credentials cannot buy a KDF per request ---
+
+
+@pytest.fixture
+def budget_of_two(monkeypatch):
+    from tldw_Server_API.app.core.Resource_Governance import middleware_simple
+
+    monkeypatch.setattr(middleware_simple, "_IDENTITY_RESOLVE_BUDGET_PER_MIN", 2, raising=False)
+
+
+def test_resolution_budget_spent_charges_ip_without_resolving(client, budget_of_two):
+    caller = _from_ip(client, "10.0.0.1")
+    for key in ("fake-a", "fake-b", "3"):
+        caller.get("/api/v1/thing", headers={"X-API-KEY": key})
+    assert client.principal_calls == ["fake-a", "fake-b"]
+    assert _charged_entities(client) == {"ip:10.0.0.1"}  # "3" is valid but was never resolved
+
+
+def test_resolution_budget_is_per_ip(client, budget_of_two):
+    for key in ("fake-a", "fake-b", "fake-c"):
+        _from_ip(client, "10.0.0.1").get("/api/v1/thing", headers={"X-API-KEY": key})
+    _from_ip(client, "10.0.0.2").get("/api/v1/thing", headers={"X-API-KEY": "4"})
+    assert client.principal_calls == ["fake-a", "fake-b", "4"]
+    assert "user:4" in _charged_entities(client)
+
+
+def test_resolution_budget_resets_each_window(client, budget_of_two, monkeypatch):
+    from tldw_Server_API.app.core.Resource_Governance import middleware_simple
+
+    clock = _Clock()
+    monkeypatch.setattr(middleware_simple, "time", clock, raising=False)
+    for key in ("fake-a", "fake-b", "fake-c"):
+        client.get("/api/v1/thing", headers={"X-API-KEY": key})
+    clock.t += 60
+    client.get("/api/v1/thing", headers={"X-API-KEY": "fake-d"})
+    assert client.principal_calls == ["fake-a", "fake-b", "fake-d"]
+
+
+def test_cache_hits_do_not_spend_resolution_budget(client, budget_of_two):
+    for key in ("7", "7", "7", "7", "8"):
+        client.get("/api/v1/thing", headers={"X-API-KEY": key})
+    assert client.principal_calls == ["7", "8"]
+
+
 class _TenantSnap:
     route_map = {"by_path": {"/api/v1/*": "p"}, "by_tag": {}}
     tenant = {"enabled": True, "header": "X-TLDW-Tenant"}

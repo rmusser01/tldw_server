@@ -45,6 +45,13 @@ _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
 _IDENTITY_TTL_SEC = 60.0
 _IDENTITY_NEGATIVE_TTL_SEC = 30.0
 _IDENTITY_CACHE_MAX = 4096
+# ponytail: per-process, fixed-window budget of identity-cache misses per RG client IP, so
+# rotating fake credentials cannot buy a KDF per request before the rate limit. A NAT with
+# more than 120 distinct credentials a minute degrades to IP charging, never to denial by
+# itself. A shared (Redis) budget would make it cluster-wide if that ever matters.
+_IDENTITY_RESOLVE_BUDGET_PER_MIN = 120
+_IDENTITY_RESOLVE_WINDOW_SEC = 60.0
+_IDENTITY_BUDGET_IPS_MAX = 4096
 
 
 class RGSimpleMiddleware:
@@ -52,6 +59,8 @@ class RGSimpleMiddleware:
         self.app = app
         # sha256(credentials) -> (expires_at, entity or None for "charge the IP"), LRU order.
         self._identity_cache: OrderedDict[str, tuple[float, str | None]] = OrderedDict()
+        # RG client IP -> (window_start, misses resolved in that window), LRU order.
+        self._resolve_budget: OrderedDict[str, tuple[float, int]] = OrderedDict()
 
     async def _ensure_loader_matches_env(self, request: Request) -> None:
         """Ensure app.state.rg_policy_loader reflects current RG_POLICY_PATH.
@@ -125,6 +134,8 @@ class RGSimpleMiddleware:
         - The outcome is cached per credential (60 s; 30 s for a failure) so a 429
           or a repeated bad key does not cost a KDF. A failure is cached as "no
           principal", never as an entity, so fake credentials still share the IP.
+        - Cache misses are budgeted per client IP (_IDENTITY_RESOLVE_BUDGET_PER_MIN);
+          past it the IP is charged unresolved and nothing is cached.
         """
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
@@ -157,12 +168,25 @@ class RGSimpleMiddleware:
         if hit is not None and hit[0] > now:
             self._identity_cache.move_to_end(key)
             return hit[1]
+        if not self._spend_resolve_budget(client_ip, now):
+            return None  # budget spent: charge the IP and cache nothing
         entity = await self._resolve_principal_entity(request, settings, auth_header or "")
         self._identity_cache[key] = (now + (_IDENTITY_TTL_SEC if entity else _IDENTITY_NEGATIVE_TTL_SEC), entity)
         self._identity_cache.move_to_end(key)
         while len(self._identity_cache) > _IDENTITY_CACHE_MAX:
             self._identity_cache.popitem(last=False)
         return entity
+
+    def _spend_resolve_budget(self, ip: str, now: float) -> bool:
+        """Spend one identity resolution from ``ip``'s window; False when it is spent."""
+        start, used = self._resolve_budget.pop(ip, (now, 0))
+        if now - start >= _IDENTITY_RESOLVE_WINDOW_SEC:
+            start, used = now, 0
+        allowed = used < _IDENTITY_RESOLVE_BUDGET_PER_MIN
+        self._resolve_budget[ip] = (start, used + allowed)
+        while len(self._resolve_budget) > _IDENTITY_BUDGET_IPS_MAX:
+            self._resolve_budget.popitem(last=False)
+        return allowed
 
     async def _resolve_principal_entity(self, request: Request, settings, auth_header: str) -> str | None:
         token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
