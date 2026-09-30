@@ -241,6 +241,33 @@ async def test_memory_eviction_batch_scales_with_a_flood(monkeypatch):
     assert (len(gov._buckets), len(gov._leases)) == (90, 90)
 
 
+async def test_memory_expired_op_id_is_not_replayed_before_the_purge_runs(monkeypatch):
+    clock = FakeTime()
+    gov, _ = _gov("memory", {"p": {"requests": {"rpm": 1, "burst": 1.0}, "scopes": ["user"]}}, clock)
+    monkeypatch.setattr(gov, "_purge_expired_ops", lambda _now: None)
+    req = _req("user:1", "p")
+    assert (await gov.reserve(req, op_id="a"))[0].allowed
+    assert not (await gov.reserve(req, op_id="x"))[0].allowed  # denial cached under "x"
+    clock.advance(gov._op_ttl + 1)  # "x" has expired and the bucket has refilled
+    assert (await gov.reserve(req, op_id="x"))[0].allowed
+
+
+async def test_memory_ops_purge_runs_at_most_once_per_interval():
+    from tldw_Server_API.app.core.Resource_Governance.governor import _OPS_PURGE_INTERVAL_SEC
+
+    clock = FakeTime()
+    gov, _ = _gov("memory", {"p": {"requests": {"rpm": 600}, "scopes": ["user"]}}, clock)
+    await gov.reserve(_req("user:1", "p"), op_id="old")
+    clock.advance(gov._op_ttl - 1)
+    await gov.reserve(_req("user:1", "p"), op_id="t1")  # purges; "old" not yet expired
+    clock.advance(2)
+    await gov.reserve(_req("user:1", "p"), op_id="t2")  # "old" expired, but within the interval
+    assert "reserve:old" in gov._ops
+    clock.advance(_OPS_PURGE_INTERVAL_SEC)
+    await gov.reserve(_req("user:1", "p"), op_id="t3")
+    assert "reserve:old" not in gov._ops
+
+
 # --- Redis tokens window: one ZSET member per quantum of max(1, per_min // 1000) tokens ---
 
 _BIG_TOKENS = {"p": {"tokens": {"per_min": 1_000_000, "burst": 1.5}, "scopes": ["user"]}}
