@@ -68,7 +68,7 @@ class TestNemoTranscription:
         )
 
         # Use fixture-provided config through the patched callable
-        mock_config_data.return_value = mock_config['STT-Settings']
+        mock_config_data.return_value = mock_config
 
         cache_dir = _get_cache_dir()
         assert isinstance(cache_dir, Path)
@@ -101,7 +101,7 @@ class TestNemoTranscription:
         # Clear cache first
         _model_cache.clear()
 
-        mock_config_data.return_value = mock_config['STT-Settings']
+        mock_config_data.return_value = mock_config
         mock_model = MagicMock()
         mock_from_pretrained.return_value = mock_model
 
@@ -122,7 +122,7 @@ class TestNemoTranscription:
         # Clear cache first
         _model_cache.clear()
 
-        mock_config_data.return_value = mock_config['STT-Settings']
+        mock_config_data.return_value = mock_config
         mock_model = MagicMock()
         mock_from_pretrained.return_value = mock_model
 
@@ -476,7 +476,7 @@ class TestNemoTranscription:
             _onnx_model_cache,
         )
 
-        mock_config_data.return_value = mock_config['STT-Settings']
+        mock_config_data.return_value = mock_config
         _model_cache.clear()
         _onnx_model_cache.clear()
 

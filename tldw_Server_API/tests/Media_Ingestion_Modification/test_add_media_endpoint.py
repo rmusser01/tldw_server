@@ -255,8 +255,9 @@ def override_get_media_db_for_user_dependency(db_fixture):
     return _override
 
 @pytest.fixture(scope="function")
-def test_api_client(client_user_only, db_session_scope):  # Depends on the FUNCTION-scoped DB fixture now
-    """Provides a shared authenticated TestClient with a per-test Media DB override."""
+def test_api_client(db_session_scope, request: pytest.FixtureRequest):
+    """Keep the temporary Media DB alive until the authenticated client stops."""
+    client_user_only = request.getfixturevalue("client_user_only")
     logger.debug(f"Setting up test_api_client fixture for FUNCTION (DB: {db_session_scope.db_path_str})...")
 
     # --- File Existence Checks (Keep these or adapt as needed) ---
@@ -283,6 +284,8 @@ def test_api_client(client_user_only, db_session_scope):  # Depends on the FUNCT
         else:
             app.dependency_overrides[get_media_db_for_user] = original_db_override
         logger.info("Restored dependency override for get_media_db_for_user (FUNCTION scope teardown)")
+        # Lifespan shutdown runs on the portal thread and cannot close this thread's handle.
+        db_session_scope.backend.get_pool().clear_thread_local_connection()
 
 @pytest.fixture
 def dummy_headers():
@@ -1795,3 +1798,72 @@ def test_process_document_with_analysis_mocked(mock_analyze, test_api_client, db
 # ##################################################################################################################
 # End of remodeled test_add_media_endpoint.py
 # ##################################################################################################################
+
+
+def test_media_add_fixtures_close_request_handles_before_temp_cleanup(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    create_upload_file: Any,
+    dummy_headers: dict[str, str],
+) -> None:
+    """A temporary Media DB must outlive its client and executor-backed writes."""
+    import sqlite3
+    import tempfile
+    import threading
+
+    from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteConnectionPool
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import persistence
+
+    held_handles: list[tuple[str, int, sqlite3.Connection]] = []
+    worker_threads: set[int] = set()
+    closed_before_cleanup: list[bool] = []
+    db_path: Path | None = None
+    create_connection = SQLiteConnectionPool._create_connection
+    cleanup_directory = tempfile.TemporaryDirectory.cleanup
+    persist_in_worker = persistence._with_media_db_session
+
+    def hold_connection(pool: SQLiteConnectionPool) -> sqlite3.Connection:
+        connection = create_connection(pool)
+        held_handles.append((pool.db_path, threading.get_ident(), connection))
+        return connection
+
+    def observe_worker(**kwargs: Any) -> Any:
+        worker_threads.add(threading.get_ident())
+        return persist_in_worker(**kwargs)
+
+    def observe_cleanup(directory: tempfile.TemporaryDirectory) -> None:
+        if db_path is not None and Path(directory.name).resolve() == db_path.parent:
+            for path, _, connection in held_handles:
+                if Path(path).resolve() != db_path:
+                    continue
+                try:
+                    connection.execute("SELECT 1")
+                except sqlite3.ProgrammingError:
+                    closed_before_cleanup.append(True)
+                else:
+                    closed_before_cleanup.append(False)
+        cleanup_directory(directory)
+
+    def verify_released_handles() -> None:
+        assert len(closed_before_cleanup) >= 2
+        assert all(closed_before_cleanup), "Media DB handles remain open at temporary directory cleanup"
+
+    monkeypatch.setattr(SQLiteConnectionPool, "_create_connection", hold_connection)
+    monkeypatch.setattr(persistence, "_with_media_db_session", observe_worker)
+    monkeypatch.setattr(tempfile.TemporaryDirectory, "cleanup", observe_cleanup)
+    # Added before acquiring the fixtures so this check runs after their teardown.
+    request.addfinalizer(verify_released_handles)
+    client = request.getfixturevalue("test_api_client")
+    db = request.getfixturevalue("db_session_scope")
+    db_path = Path(db.db_path_str).resolve()
+    response = client.post(
+        ADD_MEDIA_ENDPOINT,
+        data=create_add_media_form_data(media_type="document", perform_analysis=False),
+        files={"files": create_upload_file(SAMPLE_TXT_PATH)},
+        headers=dummy_headers,
+    )
+    data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
+    assert data["results"][0]["status"] == "Success"
+    assert db.get_media_by_id(data["results"][0]["db_id"])["content"] == data["results"][0]["content"]
+    assert threading.get_ident() not in worker_threads
+    assert any(path == str(db_path) and thread in worker_threads for path, thread, _ in held_handles)

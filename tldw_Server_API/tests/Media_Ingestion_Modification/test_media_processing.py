@@ -115,6 +115,8 @@ VALID_PDF_URL = "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/d
 VALID_EPUB_URL = "https://filesamples.com/samples/ebook/epub/Alices%20Adventures%20in%20Wonderland.epub"
 VALID_TXT_URL = "https://raw.githubusercontent.com/rmusser01/tldw/main/LICENSE.txt"
 VALID_MD_URL = "https://raw.githubusercontent.com/rmusser01/tldw/main/README.md"
+CONTROLLED_TXT_URL = "https://example.com/LICENSE.txt"
+CONTROLLED_MD_URL = "https://example.com/README.md"
 VALID_HTML_URL = "https://example.com/" # Use example.com for basic HTML
 INVALID_URL = "http://this.url.definitely.does.not.exist.invalid/resource.mp4"
 URL_404 = "https://example.com/status/404"
@@ -1356,8 +1358,8 @@ class TestProcessDocuments:
         assert result["chunks"] is not None and len(result["chunks"]) > 0 # Default chunking=True
 
     @pytest.mark.parametrize("url, check_content_part, expected_status, expected_error_part", [
-        (VALID_TXT_URL, "license", 200, None),
-        (VALID_MD_URL, "FastAPI", 200, None),
+        (CONTROLLED_TXT_URL, "license", 200, None),
+        (CONTROLLED_MD_URL, "FastAPI", 200, None),
         pytest.param(
             VALID_HTML_URL,
             "Example Domain",
@@ -1371,8 +1373,8 @@ class TestProcessDocuments:
         from tldw_Server_API.app.core.Ingestion_Media_Processing import download_utils
 
         served = {
-            VALID_TXT_URL: ("text/plain", b"GNU GENERAL PUBLIC LICENSE\nThis license applies to the program."),
-            VALID_MD_URL: ("text/markdown", b"# tldw\n\nA FastAPI server for media analysis.\n"),
+            CONTROLLED_TXT_URL: ("text/plain", b"GNU GENERAL PUBLIC LICENSE\nThis license applies to the program."),
+            CONTROLLED_MD_URL: ("text/markdown", b"# tldw\n\nA FastAPI server for media analysis.\n"),
             VALID_HTML_URL: (
                 "text/html",
                 b"<html><head><title>Example Domain</title></head><body>"
