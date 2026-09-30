@@ -1,6 +1,6 @@
 # Buddy current-dev qualification and workspace picker repair
 
-Server base: `0da68530e80c713ed3a323a741998e1fed37e3e9`. Tasks: TASK-13395
+Server base: `0da68530e80c713ed3a323a741998e1fed37e3e9`. Tasks: TASK-13396
 (route repair), TASK-13227 (ongoing qualification). Existing
 [ADR-005](../../backlog/decisions/005-independent-buddy-bindings-and-work-ownership.md)
 applies; this routine route correction needs no new ADR.
@@ -85,3 +85,29 @@ sources have no base changes. Fresh checks passed 37 workspace contracts and
 [separate rebase receipt](artifacts/buddy-current-dev-20260929/rebase-verification.json)
 records these results without reattributing the earlier WebUI screenshots or
 claiming fresh PostgreSQL, native or physical voice qualification.
+
+
+## FastAPI dev rebase
+
+Dev `607431154cf10129b5d9afa8f9b57d46636466fc` upgrades FastAPI to 0.141.1
+and changes served-route discovery. All four prior PR commits remain patch-identical.
+At rebased source `113653debd30968fafaa2e986ca6fd99b11c3036`, an isolated
+FastAPI overlay passed 25 independent-Buddy cases and all eight served-route
+guards in 72.03 seconds; one PostgreSQL fixture case was skipped. A separate
+real TestClient/SQLite probe verified the workspace collection returns 200 at
+its canonical slash URL, still returns 307 without it, and retains its effective
+auth dependency. Redirect protections are unchanged. The probe's first draft
+misread the collection envelope as a list; correcting its assertion to `items`
+passed without any production change.
+
+The incoming RG task independently allocated TASK-13395. The owned Buddy
+repair record is now TASK-13396, retaining its full history, checked criteria,
+and Done status; the RG task is unchanged. The Python Backlog CLI has no
+renumber command, so only the owned filename and ID needed mechanical repair.
+All subsequent section edits used that CLI, and both owned records passed
+disposable parser/append/summary round-trip checks.
+
+The [FastAPI rebase receipt](artifacts/buddy-current-dev-20260929/fastapi-rebase-verification.json)
+records the versions, source and local-log hashes separately. No full suite,
+paid provider, native, installed-extension, upgraded WebUI or physical-voice
+qualification is claimed. Earlier evidence keeps its original attribution.
