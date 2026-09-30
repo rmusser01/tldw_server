@@ -289,6 +289,13 @@ async def test_redis_tokens_quantized_refund_restores_capacity(how):
     assert (await _reserve_tokens(gov, 1))[0] is False
 
 
+async def test_redis_tokens_partial_commit_removes_unused_quanta():
+    gov, _ = _gov("redis", _BIG_TOKENS, FakeTime())
+    _allowed, handle = await _reserve_tokens(gov, 50_000)  # 50 members at quantum 1000
+    await gov.commit(handle, actuals={"tokens": 20_000})  # refunds 30_000 tokens = 30 members
+    assert await _token_members(gov) == 20
+
+
 async def test_redis_tokens_refund_rounds_down_to_whole_members():
     gov, _ = _gov("redis", _BIG_TOKENS, FakeTime())
     _allowed, handle = await _reserve_tokens(gov, 1_500)  # charges ceil(1.5) = 2 members
