@@ -156,7 +156,7 @@ async def run_workflow(user=Depends(get_current_user)):
 
 Notes:
 - `get_current_user` handles single-user mode first, then API key, then JWT.
-- `check_rate_limit` dependency is diagnostics-only (it does not enforce fallback 429s); see Rate Limiting below for enforcement paths.
+- `check_rate_limit` dependency enforces a local fallback limit (multi-user only) on requests RG ingress did not govern; see Rate Limiting below for enforcement paths.
 
 Legacy compatibility DI (existing endpoints only):
 - `get_optional_current_user` – legacy shim, kept for older optional-auth routes that
@@ -332,8 +332,8 @@ When adding a new FastAPI endpoint that needs AuthNZ and guardrails:
   - `check_lockout(identifier, attempt_type="login", rate_limiter=...)` and `record_auth_failure(identifier, attempt_type, rate_limiter=...)` mediate login lockout and suspicious-activity tracking and are used by the `/auth/login` endpoint.
   - `check_rate_limit(identifier, endpoint, limit=None, window_minutes=None, rate_limiter=...)` remains available for compatibility/testing and direct limiter call sites where explicitly used.
 - Endpoint helpers:
-  - `check_rate_limit` is diagnostics-only (no fallback 429 enforcement).
-  - `check_auth_rate_limit` is diagnostics-only (no fallback 429 enforcement).
+  - `check_rate_limit`: local fallback limit, 120/min (`AUTH_DEPS_FALLBACK_RATE_LIMIT`), applied only when RG ingress did not govern the request (multi-user only). Off when `RG_ENABLED=false`.
+  - `check_auth_rate_limit`: local fallback limit, 30/min (`AUTH_DEPS_AUTH_FALLBACK_RATE_LIMIT`), same condition, but it stays on when `RG_ENABLED=false`: it is the auth brute-force floor (ADR-057).
   - Route abuse protection should come from RG ingress policies and endpoint-local RG checks.
 - LLM budgets: `llm_budget_middleware.py` and `llm_budget_guard.py` enforce endpoint/provider/model quotas when configured, always via `AuthGovernor.check_llm_budget_for_api_key`. Settings are `LLM_BUDGET_ENFORCE` (on/off) and `LLM_BUDGET_ENDPOINTS` (paths). Virtual key features are gated by `VIRTUAL_KEYS_ENABLED` (defaults true).
 
