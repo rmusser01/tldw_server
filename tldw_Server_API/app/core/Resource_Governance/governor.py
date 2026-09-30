@@ -260,11 +260,12 @@ class MemoryResourceGovernor(ResourceGovernor):
         self._last_evict = now
         # Rotate in place: pop the oldest-visited keys and re-insert the survivors at
         # the end, so successive sweeps cover every key even as evictions shrink the dict.
-        for k in list(itertools.islice(self._buckets, _EVICT_BATCH)):
+        # A batch of at least a tenth of the map keeps a flood from outgrowing the sweeps.
+        for k in list(itertools.islice(self._buckets, max(_EVICT_BATCH, len(self._buckets) // 10))):
             b = self._buckets.pop(k)
             if not (now - b.last_used >= _EVICT_IDLE_SEC and b.available(now) >= b.capacity):
                 self._buckets[k] = b
-        for k in list(itertools.islice(self._leases, _EVICT_BATCH)):
+        for k in list(itertools.islice(self._leases, max(_EVICT_BATCH, len(self._leases) // 10))):
             m = self._leases.pop(k)
             if m:
                 self._leases[k] = m

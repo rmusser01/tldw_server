@@ -226,6 +226,21 @@ async def test_memory_eviction_sweeps_rotate_through_every_bucket(monkeypatch):
     assert {k[3] for k in gov._buckets} == {"1", "4"}
 
 
+async def test_memory_eviction_batch_scales_with_a_flood(monkeypatch):
+    # A fixed batch falls behind a flood of one-shot entities; a sweep covers >= 1/10 of the map.
+    from tldw_Server_API.app.core.Resource_Governance import governor as governor_mod
+
+    monkeypatch.setattr(governor_mod, "_EVICT_BATCH", 2)
+    clock = FakeTime()
+    gov, _ = _gov("memory", {"fast": {"requests": {"rpm": 600, "burst": 1.0}, "scopes": ["user"]}}, clock)
+    for user in range(100):
+        await _admits(gov, _req(f"user:{user}", "fast"), 1)
+        gov._leases[("fast", "streams", "user", str(user))] = {}
+    clock.advance(601)
+    gov._maybe_evict_idle(clock())
+    assert (len(gov._buckets), len(gov._leases)) == (90, 90)
+
+
 # --- Redis tokens window: one ZSET member per quantum of max(1, per_min // 1000) tokens ---
 
 _BIG_TOKENS = {"p": {"tokens": {"per_min": 1_000_000, "burst": 1.5}, "scopes": ["user"]}}
