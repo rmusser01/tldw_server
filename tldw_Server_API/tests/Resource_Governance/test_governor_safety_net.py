@@ -39,9 +39,15 @@ def _gov(backend, policies, clock):
     if backend == "memory":
         return MemoryResourceGovernor(policy_loader=loader, time_source=clock), loader
 
+    from tldw_Server_API.app.core.Infrastructure.redis_factory import InMemoryAsyncRedis
     from tldw_Server_API.app.core.Resource_Governance import RedisResourceGovernor
 
-    return RedisResourceGovernor(policy_loader=loader, time_source=clock, ns=f"rg_t_safety_{next(_ns)}"), loader
+    gov = RedisResourceGovernor(policy_loader=loader, time_source=clock, ns=f"rg_t_safety_{next(_ns)}")
+    # Inject the in-process stub directly so this test never touches a real Redis
+    # on 127.0.0.1:6379 if one happens to be running; makes repeated runs
+    # deterministic instead of depending on the ambient environment.
+    gov._client = InMemoryAsyncRedis()
+    return gov, loader
 
 
 def _req(entity, policy_id, **cats):
@@ -78,9 +84,35 @@ async def test_missing_default_uses_builtin(backend):
     assert all(await _admits(gov, _req("user:1", "anything"), 50))
 
 
-async def test_scope_mismatch_charges_per_entity_bucket(backend):
+async def test_scope_mismatch_charges_per_entity_bucket(backend, monkeypatch):
+    if backend == "redis":
+        # Without this, Redis's in-process accept-window tracker admits/denies by
+        # counting successful admits per (policy, entity) independent of scope
+        # buckets, which would pass even if the scope-selection bug were present.
+        # Disabling it forces the assertion through the per-entity ZSET window.
+        monkeypatch.setenv("RG_TEST_DISABLE_ACCEPT_WINDOW", "1")
     gov, _ = _gov(backend, {"p": {"requests": {"rpm": 2, "burst": 1.0}, "scopes": ["user", "api_key"]}}, FakeTime())
     assert await _admits(gov, _req("ip:1.2.3.4", "p"), 3) == [True, True, False]
+
+
+async def test_tokens_scope_mismatch_charges_per_entity_bucket(backend):
+    # No accept-window override needed here: that tracker only ever gates the
+    # "requests" category (see check()'s requests branch), never "tokens".
+    gov, _ = _gov(backend, {"p": {"tokens": {"per_min": 100, "burst": 1.0}, "scopes": ["user"]}}, FakeTime())
+    req = _req("ip:1.2.3.4", "p", tokens={"units": 100})
+    assert await _admits(gov, req, 3) == [True, False, False]
+
+
+async def test_streams_scope_mismatch_lease_released_on_commit(backend):
+    gov, _ = _gov(backend, {"p": {"streams": {"max_concurrent": 1, "ttl_sec": 60}, "scopes": ["user"]}}, FakeTime())
+    req = _req("ip:9.9.9.9", "p", streams={"units": 1})
+    results = []
+    for i in range(3):
+        dec, handle_id = await gov.reserve(req, op_id=f"lease-{backend}-{next(_ns)}-{i}")
+        results.append(dec.allowed)
+        if handle_id:
+            await gov.commit(handle_id)
+    assert results == [True, True, True]
 
 
 async def test_policy_without_requests_inherits_default(backend):

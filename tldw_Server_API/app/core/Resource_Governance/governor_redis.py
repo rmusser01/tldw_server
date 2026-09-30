@@ -409,12 +409,6 @@ class RedisResourceGovernor(ResourceGovernor):
             return s.strip() or "entity", v.strip()
         return "entity", entity
 
-    def _scopes(self, policy: dict[str, Any]) -> list[str]:
-        s = policy.get("scopes")
-        if isinstance(s, list) and s:
-            return [str(x) for x in s]
-        return ["global", "entity"]
-
     @staticmethod
     def _op_key(phase: str, op_id: str) -> str:
         return f"{phase}:{op_id}"
@@ -914,9 +908,7 @@ class RedisResourceGovernor(ResourceGovernor):
                         retry_after = max(retry_after, int(max(0, backoff_until - now)))
                     elif not smoothing_applied:
                         # Sliding-window count checks across scopes
-                        for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                            if sc not in self._scopes(pol) and not (sc == entity_scope and "entity" in self._scopes(pol)):
-                                continue
+                        for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
                             ok, ra, _cnt = await self._allow_requests_sliding_check_only(
                                 key=key, limit=limit, window=window, units=units, now=now, fail_mode=cat_fail
@@ -992,9 +984,7 @@ class RedisResourceGovernor(ResourceGovernor):
                     cat_fail = self._effective_fail_mode(pol, category)
                     counts: list[int] = []
                     if limit > 0:
-                        for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                            if sc not in self._scopes(pol) and not (sc == entity_scope and "entity" in self._scopes(pol)):
-                                continue
+                        for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
                             ok, ra, _cnt = await self._allow_requests_sliding_check_only(
                                 key=key, limit=limit, window=window, units=units, now=now, fail_mode=cat_fail
@@ -1551,9 +1541,7 @@ class RedisResourceGovernor(ResourceGovernor):
                         if category == "tokens" and limit <= 0:
                             continue
                         window = 60
-                        for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                            if sc not in self._scopes(pol) and not (sc == entity_scope and "entity" in self._scopes(pol)):
-                                continue
+                        for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
                             keys.append(key)
                             members = [f"{handle_id}:{sc}:{ev}:{i}:{uuid.uuid4().hex}" for i in range(units)]
@@ -1598,9 +1586,7 @@ class RedisResourceGovernor(ResourceGovernor):
                         # Evaluate across scopes and collect counts
                         counts: list[int] = []
                         ok_all = True
-                        for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                            if sc not in self._scopes(pol) and not (sc == entity_scope and "entity" in self._scopes(pol)):
-                                continue
+                        for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
                             ok, ra, cnt = await self._allow_requests_sliding_check_only(
                                 key=key, limit=limit, window=window, units=units, now=now, fail_mode=self._effective_fail_mode(pol, category)
@@ -1641,9 +1627,7 @@ class RedisResourceGovernor(ResourceGovernor):
                             if limit <= 0:
                                 continue
                         added_members.setdefault(category, {})
-                        for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                            if sc not in self._scopes(pol) and not (sc == entity_scope and "entity" in self._scopes(pol)):
-                                continue
+                        for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
                             members = [f"{handle_id}:{sc}:{ev}:{i}:{uuid.uuid4().hex}" for i in range(units)]
                             await self._add_members(key=key, members=members, now=now)
@@ -1669,9 +1653,7 @@ class RedisResourceGovernor(ResourceGovernor):
                         window = 60
                         cat_fail = self._effective_fail_mode(pol, category)
                         added_members.setdefault(category, {})
-                        for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                            if sc not in self._scopes(pol) and not (sc == entity_scope and "entity" in self._scopes(pol)):
-                                continue
+                        for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
                             _ = await self._purge_and_count(key=key, now=now, window=window)
                             added_for_scope: list[str] = []
@@ -1788,15 +1770,12 @@ class RedisResourceGovernor(ResourceGovernor):
                 if limit <= 0:
                     # Missing max_concurrent is unbounded; mirror memory's semantics (spec §4).
                     continue
-                scope_pairs = self._scope_pairs(pol, entity_scope, entity_value)
-                if not scope_pairs:
-                    concurrency_failed = True
-                    concurrency_failed_category = category
-                    denial_retry_after = max(denial_retry_after, int(ttl_sec or 1))
-                    break
+                # Named "pairs", not "scope_pairs": that name would shadow the
+                # policy_eval.scope_pairs import for the rest of this function.
+                pairs = self._scope_pairs(pol, entity_scope, entity_value)
 
                 planned: dict[tuple[str, str], list[str]] = {}
-                for sc, ev in scope_pairs:
+                for sc, ev in pairs:
                     planned[(sc, ev)] = [f"{handle_id}:{sc}:{ev}:{i}:{uuid.uuid4().hex}" for i in range(units)]
 
                 used_concurrency_lua = False
@@ -1832,7 +1811,7 @@ class RedisResourceGovernor(ResourceGovernor):
 
                 if not used_concurrency_lua:
                     active_by_scope: dict[tuple[str, str], int] = {}
-                    for sc, ev in scope_pairs:
+                    for sc, ev in pairs:
                         key = self._keys.lease(policy_id, category, sc, ev)
                         active_stub = self._stub_lease_purge_and_count(key=key, now=now)
                         active_real = 0
@@ -1845,7 +1824,7 @@ class RedisResourceGovernor(ResourceGovernor):
                     if any((active + units) > limit for active in active_by_scope.values()):
                         concurrency_failed = True
                         concurrency_failed_category = category
-                        for sc, ev in scope_pairs:
+                        for sc, ev in pairs:
                             active = int(active_by_scope.get((sc, ev), 0) or 0)
                             if (active + units) <= limit:
                                 continue
@@ -2091,9 +2070,7 @@ class RedisResourceGovernor(ResourceGovernor):
                 except _RG_NONCRITICAL_EXCEPTIONS:
                     continue
 
-                for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                    if sc not in self._scopes(pol) and not (sc == entity_scope and "entity" in self._scopes(pol)):
-                        continue
+                for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                     key = self._keys.lease(policy_id, category, sc, ev)
                     scope_key = f"{sc}:{ev}"
                     members_list: list[str] = []
@@ -2339,9 +2316,7 @@ class RedisResourceGovernor(ResourceGovernor):
             now = self._time()
             for category in cats:
                 if category in ("streams", "jobs"):
-                    for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                        if sc not in self._scopes(pol) and not (sc == entity_scope and "entity" in self._scopes(pol)):
-                            continue
+                    for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                         key = self._keys.lease(policy_id, category, sc, ev)
                         scope_key = f"{sc}:{ev}"
                         members_list: list[str] = []
@@ -2406,9 +2381,7 @@ class RedisResourceGovernor(ResourceGovernor):
             window = 60
             remainings = []
             resets = []
-            for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                if sc not in self._scopes(pol) and not (sc == entity_scope and "entity" in self._scopes(pol)):
-                    continue
+            for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                 current_cnt = 0
                 key = self._keys.win(policy_id, category, sc, ev)
                 current_cnt = await self._purge_and_count(key=key, now=now, window=window)
