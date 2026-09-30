@@ -25,9 +25,3 @@ by_tag personalization is used by no served route # personalization.py router (r
 # production wiring load_app() builds (nor in a normal server process).
 by_path /api/v1/authnz* matches no served route # authnz_debug.py router only mounts under explicit pytest runtime (default_stable=_is_explicit_pytest_runtime())
 by_tag authnz-debug is used by no served route # authnz_debug.py router only mounts under explicit pytest runtime (default_stable=_is_explicit_pytest_runtime())
-
-# Defensive exact-path entry alongside /api/v1/auth/*: no route currently
-# serves the bare "/api/v1/auth" path, but it costs nothing to keep mapped
-# should one ever be added, and dropping it would leave the bare path to
-# fall through to the tag/default resolution instead of authnz.default.
-by_path /api/v1/auth matches no served route # defensive exact-path entry paired with /api/v1/auth/*; no bare /api/v1/auth route exists yet

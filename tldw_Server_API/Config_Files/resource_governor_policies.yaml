@@ -436,7 +436,6 @@ route_map:
     "/api/v1/auth/magic-link/request": authnz.magic_link.request
     "/api/v1/auth/mfa/verify": authnz.mfa.verify
     "/api/v1/auth/mfa/login": authnz.mfa.login
-    "/api/v1/auth": authnz.default
     "/api/v1/auth/*": authnz.default
     "/api/v1/authnz*": core.default
     "/api/v1/users*": core.default
