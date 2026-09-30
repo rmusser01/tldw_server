@@ -4,7 +4,7 @@ title: Run real PST adapter tests and publish email PR against dev
 status: In Progress
 assignee: []
 created_date: '2026-09-26 21:50'
-updated_date: '2026-09-30 13:29'
+updated_date: '2026-09-30 13:39'
 labels: []
 dependencies: []
 documentation:
@@ -180,12 +180,14 @@ Heartbeat12:24Z: published e692fa0d0af35f3d90817d4ad819b65ee5f41f72/latest devc8
 Heartbeat12:34Z: published e692fa0d0af35f3d90817d4ad819b65ee5f41f72/latest devc867 unchanged; exact-head Qodo zero active findings, all nine threads resolved and no new or edited feedback. Container-build-check36694112552 SUCCESS12:34:51Z joins backend, security, coverage, E2E and trusted license/audit PASS. Frontend36694112079 queued without current-head failures. Six of seven required contexts pass; actual merge/AC7 awaits frontend. Active jobs left alone; no source edit, rerun, cancellation or bypass.
 
 Dev advancedc867 to03043d1c10cbdbfa53945c0641d90e4e37836754 through PR3056. Incoming18 paths comprise one shared frontend workspace collection URL correction, two existing test assertions, twelve qualification documents/artifacts and three unrelated Backlog paths. No email/backend/dependency/CI overlap. Preserve reviewed e692 plus pending own tracking, rebase, compare incoming paths exactlydev and retained163 Python source hashes, run workspace contracts and redirect-security checks, and obtain independent review. Prior-head six required successes remain historical after refresh; actual merge/AC7 pending fresh exact-head review and CI.
+
+Dev0304 rebase complete without conflicts at d6f8cf3d57eed5986e2a0ff9ed4c0334747da220. All18 incoming paths exactlydev; every other non-Backlog tracked entry and all163 certified Python hashes unchanged before evidence update. Fresh workspace37 plus redirect-security13 tests pass across3files,0failures/errors/skips with existing Bun/Node/Vitest dependencies; exact temporary links removed and shared installations preserved. Independent review clear. Existing FastAPI0.141.1 email/auth/nativePST/schema/security validation remains source-bound and was not rerun; no new Python/Bandit scope or benchmark rerun. Evidence appended under buddy_workspace_dev_refresh_20260930; publication and exact-head review/CI pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR3023 published at e692fa0d0af35f3d90817d4ad819b65ee5f41f72 on latest devc867287210d4e85314b00ff22e7d30d0474030a0. Incoming12 paths exactlydev;163 certified Python hashes and all other22360 non-Backlog entries unchanged before evidence update. Fresh affected frontend50passed across5files/0failures/errors/skips; independent review clear. Previous FastAPI746combined/13monitoring/native10 and quality/schema certificates remain source-bound without reruns. Exact-head Qodo zero active findings/allnine threads resolved. Current-head backend, security, coverage, E2E, container and trusted license/audit PASS; frontend queued without failures. Actual merge/AC7 awaits frontend. Human authorization/Change summary preserved; ACTIVE follow-up continues quietly.
+Latest dev03043d1c10cbdbfa53945c0641d90e4e37836754 integrated conflict-free at local d6f8cf3d57eed5986e2a0ff9ed4c0334747da220; all18 incoming paths exactlydev and retained163 certified Python hashes unchanged. Workspace37/redirect13 tests pass with no failures/errors/skips; independent review clear. Evidence updated; refreshed publication, Qodo review and all seven required contexts pending. Prior e692 CI successes remain historical; actual merge/AC7 pending.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

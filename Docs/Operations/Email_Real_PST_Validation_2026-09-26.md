@@ -395,3 +395,27 @@ Python code changed and there is no new Bandit scope. Benchmarks were not rerun.
 The prior reviewed head and tracking remain in
 `codex/email-pr3023-before-devc867-20260930`. Fresh exact-head incremental Qodo
 review and all seven required hosted contexts must pass before the authorized merge.
+
+
+## Buddy workspace dev refresh (2026-09-30)
+
+Dev advanced from `c867287210d4e85314b00ff22e7d30d0474030a0` to
+`03043d1c10cbdbfa53945c0641d90e4e37836754` through PR3056. The incoming shared workspace
+collection URL uses `/api/v1/workspaces/`, matching the server route and avoiding
+a redirect rejected by the unchanged request transport. The rebase is conflict-free.
+All 18 incoming paths (three frontend source/test paths, twelve qualification
+documents/artifacts and three Backlog paths) match dev exactly. Before this evidence
+update, the other 22,367 non-Backlog tracked entries match reviewed
+`e692fa0d0af35f3d90817d4ad819b65ee5f41f72` exactly; all 163 certified Python hashes and
+email/backend/schema/dependency/CI inputs remain unchanged. Independent review is clear.
+
+Fresh workspace contracts (**37 tests**) and redirect security checks (**13 tests**)
+pass across three files, with zero failures, errors or skips, using Bun 1.3.2,
+Node 26.0.0 and existing Vitest 4.0.18. Source and log/XML hashes
+are appended to the existing follow-up JSON. Exact temporary dependency symlinks
+were removed; shared installations are unchanged. The previous FastAPI 0.141.1
+email/auth/native-PST/schema/security validation retains its source/dependency
+binding and was not rerun. No Python code changed, no new Bandit scope is introduced,
+and no benchmark was rerun. The prior reviewed head and tracking remain in
+`codex/email-pr3023-before-dev0304-20260930`. Fresh exact-head incremental Qodo
+review and all seven required hosted contexts must pass before the authorized merge.

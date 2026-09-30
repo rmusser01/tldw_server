@@ -1737,5 +1737,73 @@
     "comparison_receipt_sha256": "7307180d82baca488bbe8c057b394165a625da74168dcbbac56b0c07bd2ecdff",
     "prior_validation_binding": "fastapi_routes_dev_refresh_20260929:746 combined auth/email/route cases,13 monitoring cases,10 guarded native-PST cases;163 unique compiled Python hashes,zero new Ruff/Bandit findings,unchanged OpenAPI/route-auth baseline. Suites overlap; no rerun.",
     "publication_state": "Ready for refreshed-head publication; exact-head incremental Qodo review and all seven required contexts must pass before merge."
+  },
+  "buddy_workspace_dev_refresh_20260930": {
+    "recorded_at": "2026-09-30T13:41:13.663625+00:00",
+    "previous_reviewed_head": "e692fa0d0af35f3d90817d4ad819b65ee5f41f72",
+    "previous_dev": "c867287210d4e85314b00ff22e7d30d0474030a0",
+    "dev_commit": "03043d1c10cbdbfa53945c0641d90e4e37836754",
+    "rebased_parent_commit": "d6f8cf3d57eed5986e2a0ff9ed4c0334747da220",
+    "backup_branch": "codex/email-pr3023-before-dev0304-20260930",
+    "incoming_paths": [
+      "Docs/Reviews/2026-09-29-buddy-current-dev-qualification.md",
+      "Docs/Reviews/artifacts/buddy-current-dev-20260929/browser-receipt.json",
+      "Docs/Reviews/artifacts/buddy-current-dev-20260929/fastapi-rebase-verification.json",
+      "Docs/Reviews/artifacts/buddy-current-dev-20260929/rebase-verification.json",
+      "Docs/Reviews/artifacts/buddy-current-dev-20260929/static-summary.json",
+      "Docs/Reviews/artifacts/buddy-current-dev-20260929/temporary-chat-rebase-verification.md",
+      "Docs/Reviews/artifacts/buddy-current-dev-20260929/verification.json",
+      "Docs/Reviews/artifacts/buddy-current-dev-20260929/watchlists-dynamic-buddy.jpg",
+      "Docs/Reviews/artifacts/buddy-current-dev-20260929/watchlists-static-buddy.jpg",
+      "Docs/Reviews/artifacts/buddy-current-dev-20260929/watchlists-visible-buddy.jpg",
+      "Docs/Reviews/artifacts/buddy-current-dev-20260929/workspace-choice-after.jpg",
+      "Docs/Reviews/artifacts/buddy-current-dev-20260929/workspace-redirect-before.jpg",
+      "apps/packages/ui/src/services/__tests__/tldw-api-client.workspace-api.test.ts",
+      "apps/packages/ui/src/services/tldw/domains/__tests__/workspace-api.status-capabilities.test.ts",
+      "apps/packages/ui/src/services/tldw/domains/workspace-api.ts",
+      "backlog/docs/lessons-backlog-hygiene.md",
+      "backlog/tasks/task-13227 - Qualify-merged-Buddy-v1-setup-and-navigation-in-WebUI-and-extension.md",
+      "backlog/tasks/task-13396 - Use-the-canonical-workspace-collection-URL-in-Buddy-management.md"
+    ],
+    "incoming_paths_exact_dev": true,
+    "all_other_non_backlog_tree_entries_identical_before_evidence_update": true,
+    "other_non_backlog_tree_entry_count": 22367,
+    "certified_python_paths": 163,
+    "certified_python_hashes_unchanged": true,
+    "source_certificate": "/tmp/email_pr3023_dev6074_sources_20260929.json",
+    "source_certificate_sha256": "07074bfcfe9e42935e93d16934bd524fb88a345a74bca2160367acc3dba912c6",
+    "validation": "37 affected workspace contracts and 13 redirect-security tests pass across three files, with zero failures/errors/skips. Existing FastAPI 0.141.1 email/auth/native-PST/schema/security evidence retains its source/dependency binding; no email test/schema/benchmark rerun. No new Python or Bandit scope.",
+    "incoming_frontend_sha256": {
+      "apps/packages/ui/src/services/__tests__/tldw-api-client.workspace-api.test.ts": "fd3200cb9d4513194b46d2459c55a06132d432b7519c3656857788d61ef64b2e",
+      "apps/packages/ui/src/services/tldw/domains/__tests__/workspace-api.status-capabilities.test.ts": "af92d78e0218863353e833ddceab4d8071d7646b58f33a8a40ef7ea359d62dd4",
+      "apps/packages/ui/src/services/tldw/domains/workspace-api.ts": "c7e9be83b24e4676de67dc762d187b37836ecfe6bebb43134d40eec4d93dcfbf"
+    },
+    "retained_redirect_security_test_sha256": {
+      "apps/packages/ui/src/services/tldw/__tests__/request-core.redirect-security.test.ts": "768e73ebea85340fdf9af0ebda547572800f16091cf2a6dd82c8f914144cfae3"
+    },
+    "frontend_validation": {
+      "command": "bun run test src/services/__tests__/tldw-api-client.workspace-api.test.ts src/services/tldw/domains/__tests__/workspace-api.status-capabilities.test.ts src/services/tldw/__tests__/request-core.redirect-security.test.ts --maxWorkers=1 --no-file-parallelism --reporter=default --reporter=junit --outputFile.junit=/tmp/email_pr3023_dev0304_frontend_20260930.xml",
+      "working_directory": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2/apps/packages/ui",
+      "source_commit": "d6f8cf3d57eed5986e2a0ff9ed4c0334747da220",
+      "files_passed": 3,
+      "tests": 50,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "bun": "1.3.2",
+      "node": "v26.0.0",
+      "vitest": "4.0.18",
+      "dependency_source": "Existing installed frontend dependencies reused via exact temporary symlinks; links removed and shared installations unchanged.",
+      "log_sha256": "15149cc61620763e06bf735cffd18d55b173849c6d797f5377442a9a3edcc7f3",
+      "xml_sha256": "80ea18eb7bb106001853ec1a2924f130c78a47d5b452d31f99593ca30dfaf539"
+    },
+    "independent_review": {
+      "result": "clear",
+      "reviewed_source_commit": "d6f8cf3d57eed5986e2a0ff9ed4c0334747da220",
+      "scope": "Incoming Buddy workspace URL delta and preserved email/backend/auth/schema/dependency/CI inputs; canonical server route and unchanged redirect:error transport verified. No concrete integration blocker. Reviewer did not run tests."
+    },
+    "comparison_receipt_sha256": "f621e80764b6a6a3bf7d712f363e7a9e1fdd62feead46c94e624621bd44cde4c",
+    "prior_validation_binding": "fastapi_routes_dev_refresh_20260929:746 combined auth/email/route cases,13 monitoring cases,10 guarded native-PST cases;163 unique compiled Python hashes,zero new Ruff/Bandit findings,unchanged OpenAPI/route-auth baseline. Suites overlap; no rerun.",
+    "publication_state": "Ready for refreshed-head publication; exact-head incremental Qodo review and all seven required contexts must pass before merge."
   }
 }
