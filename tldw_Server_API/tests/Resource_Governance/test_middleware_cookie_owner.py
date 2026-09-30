@@ -137,17 +137,17 @@ def test_ungoverned_cookie_does_not_trigger_authentication(governed_cookie_app):
     assert not validations
 
 
-def test_cookie_preflight_does_not_apply_in_multi_user_mode(governed_cookie_app):
+def test_cookie_preflight_charges_the_owner_in_multi_user_mode_too(governed_cookie_app):
     app, validations, _ = governed_cookie_app
     resolver.get_settings().AUTH_MODE = "multi_user"
     with TestClient(app) as client:
         response = client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=session-a"})
-    # Was 429: the anonymous ip entity used to be permanently denied by the
-    # scope-mismatch bug before ever reaching the endpoint's own auth dependency.
-    # Safety-net fix (spec §4) admits it, so the request reaches the real endpoint,
-    # whose Depends(get_auth_principal) authenticates the cookie normally (the
-    # RG middleware's own early cookie-preflight shortcut still does not run here,
-    # since it is gated to single_user mode).
+    # Ingress identity resolution (ADR-056 / spec §2) is no longer gated to single-user
+    # mode: RGSimpleMiddleware._principal_entity resolves the session cookie via
+    # get_auth_principal in any AUTH_MODE, caching the AuthContext on request.state.
+    # The route's own Depends(get_auth_principal) then reuses that cached context
+    # instead of re-validating, so the cookie is only checked once even though both
+    # ingress and the route reference the same dependency.
     assert response.status_code == 200
     assert response.json() == {"user_id": 1}
     assert validations == ["session-a"]

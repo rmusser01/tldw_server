@@ -234,7 +234,9 @@ class RGSimpleMiddleware:
 
         # Build RG request. Always include 'requests'. Specialized categories
         # (tokens/streams/jobs/minutes/etc.) are enforced at endpoint level.
-        entity = await self._principal_entity(request) or self._derive_entity(request)
+        entity = self._derive_entity(request)
+        if not entity.startswith("tenant:"):
+            entity = await self._principal_entity(request) or entity
         # Never derive the op_id from a client header: a repeated op_id replays the
         # cached decision without charging, so a fixed X-Request-ID would bypass limits.
         op_id = str(uuid.uuid4())

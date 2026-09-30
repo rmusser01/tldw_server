@@ -77,6 +77,10 @@ def test_bearer_jwt_is_keyed_by_verified_subject_without_principal_resolution(cl
     assert client.get("/api/v1/thing", headers=auth).status_code == 200
     assert client.get("/api/v1/thing", headers=auth).status_code == 429  # user:42 bucket
     assert client.principal_calls == []  # scoped-token route checks never run pre-routing
+    # Discriminator: if the JWT branch instead fell back to charging the IP bucket,
+    # the two prior requests would have already exhausted it (rpm=1) and this would
+    # also be 429. The anonymous IP bucket must be untouched by the user:42 charges.
+    assert client.get("/api/v1/thing").status_code == 200
 
 
 def test_invalid_jwt_charges_ip(client):
@@ -98,3 +102,52 @@ def test_non_session_cookie_charges_ip_and_reaches_route(client):
     assert client.get("/api/v1/thing", cookies={"theme": "dark", "csrf_token": "t"}).status_code == 200
     assert client.principal_calls == []  # not a credential: never resolved
     assert client.get("/api/v1/thing").status_code == 429  # same anonymous IP bucket
+
+
+class _TenantSnap:
+    route_map = {"by_path": {"/api/v1/*": "p"}, "by_tag": {}}
+    tenant = {"enabled": True, "header": "X-TLDW-Tenant"}
+    policies = {}
+
+
+class _TenantLoader:
+    def get_snapshot(self):
+        return _TenantSnap()
+
+    def get_policy(self, pid):
+        return {"requests": {"rpm": 1, "burst": 1.0}, "scopes": ["tenant"]}
+
+
+def test_tenant_scope_outranks_principal_resolution(monkeypatch):
+    """Spec Sec2: tenant scoping keeps precedence over principal charging.
+
+    A tenant-wide `scopes: [tenant]` cap must not become a per-user cap just
+    because ingress can now validate the caller's credential.
+    """
+    monkeypatch.delenv("RG_POLICY_PATH", raising=False)
+
+    async def fake_principal(request):
+        user = request.headers.get("X-API-KEY")
+        return AuthPrincipal(kind="user", user_id=int(user))
+
+    monkeypatch.setattr(auth_principal_resolver, "get_auth_principal", fake_principal)
+    monkeypatch.setattr(get_settings(), "AUTH_MODE", "multi_user")
+    app = FastAPI()
+
+    @app.get("/api/v1/thing")
+    def thing() -> dict:
+        return {"ok": True}
+
+    app.add_middleware(RGSimpleMiddleware)
+    app.state.rg_policy_loader = _TenantLoader()
+    app.state.rg_governor = MemoryResourceGovernor(policy_loader=_TenantLoader())
+    tc = TestClient(app)
+
+    # Two different, individually-valid users in the same tenant.
+    headers_a = {"X-API-KEY": "1", "X-TLDW-Tenant": "acme"}
+    headers_b = {"X-API-KEY": "2", "X-TLDW-Tenant": "acme"}
+    assert tc.get("/api/v1/thing", headers=headers_a).status_code == 200
+    # If credential validation outranked tenant scoping, this would charge a
+    # separate user:2 bucket and also return 200. It must instead share the
+    # already-exhausted tenant:acme bucket (rpm=1).
+    assert tc.get("/api/v1/thing", headers=headers_b).status_code == 429
