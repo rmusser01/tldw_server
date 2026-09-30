@@ -406,7 +406,7 @@ Local repair qualifies106artifact/admin/WS/idle/stream controls, zero skips43.04
 **Goal:** Separate the outer test watchdog from durable export lifecycle assertions.
 **Success Criteria:** Controlled cold setup reproduces cancellation in the completed callback.
 **Tests:** Original completion and first-failure retry worker callers.
-**Status:** In Progress
+**Status:** Complete
 
 Native logs record durable completed state before the2second watchdog cancels the completion callback. The design requires bounded worker lifecycle, with no2second latency SLA. Both test callers must use the same finite setup watchdog; no production worker or feature deadline changes.
 
@@ -414,13 +414,15 @@ Native logs record durable completed state before the2second watchdog cancels th
 **Goal:** Retain real worker/DB/callback stop behavior with enough cold setup budget.
 **Success Criteria:** Original download, ownership, completion, retry and late-failure guards stay active.
 **Tests:** Full worker E2E and adjacent Claims controls, compile/Ruff/Bandit.
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 3: Review and qualify
 **Goal:** Require independent source review and final native Claims acceptance.
 **Success Criteria:** No new skip or security finding; final-head hosted checks pass.
 **Tests:** Automatic and native matrix.
-**Status:** Not Started
+**Status:** In Progress
+
+Local repair preserves both real worker callers under one finite30second setup watchdog and adds cancellable warm/cold first-dispatch coverage. Both cold cases fail original2second watchdogs; focused4pass and fullsix-module405pass0skip clean exit. Root source review is clear;27original assertions AST-identical and Ruff/Bandit unchanged. First full thread-method run prints405pass but exits134 with native C++ recursive_mutex teardown; signal and final original-thread repeats each exit0. Initial cause remains unproven and allthree attempts are retained; no suppression, dependency or production workaround. Native Windows final-head acceptance remains open.
 
 ## Windows development fixture publication — UAT535 (TASK-13260.278.18.83.22)
 
