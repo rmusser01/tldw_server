@@ -6494,15 +6494,27 @@ def test_stream_prime_factory_and_metadata_share_one_absolute_deadline(
     clock = ControlledClock()
     captured_factory_timeouts: list[float] = []
 
+    # Keep fake-clock accounting independent of native timer resolution.
+    async def controlled_await(awaitable: Any, _timeout: float) -> Any:
+        return await awaitable
+
+    async def controlled_factory(factory: Any, *, timeout: float) -> Any:
+        before = clock()
+        result = factory()
+        if clock() - before > timeout:
+            raise asyncio.TimeoutError
+        return result
+
     async def capture_execute_streaming_call(**kwargs):
         captured_factory_timeouts.append(kwargs["provider_factory_timeout"])
         return await chat_service.execute_streaming_call(**kwargs)
 
     async def delayed_output():
         clock.advance(0.04)
+        yield 'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'
         yield 'data: {"choices":[{"delta":{"content":"too late"}}]}\n\n'
 
-    def delayed_factory():
+    def delayed_factory(**_kwargs):
         clock.advance(0.04)
         return delayed_output()
 
@@ -6519,6 +6531,9 @@ def test_stream_prime_factory_and_metadata_share_one_absolute_deadline(
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.object(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_ELAPSED_SECONDS", 0.06),
         patch.object(chat_endpoint, "_provider_stream_monotonic", clock),
+        patch.object(chat_endpoint, "_await_provider_stream_operation", controlled_await),
+        patch.object(chat_service, "_provider_factory_monotonic", clock),
+        patch.object(chat_service, "_call_stream_factory_bounded", controlled_factory),
         patch.object(
             chat_endpoint,
             "execute_streaming_call",
@@ -6535,6 +6550,7 @@ def test_stream_prime_factory_and_metadata_share_one_absolute_deadline(
     assert "too late" not in response.text
     assert len(captured_factory_timeouts) == 1
     assert captured_factory_timeouts[0] == pytest.approx(0.06)
+    assert clock.now == pytest.approx(100.08)
 
 
 def test_stream_prime_fallback_attempts_share_one_absolute_deadline(
@@ -6564,6 +6580,17 @@ def test_stream_prime_fallback_attempts_share_one_absolute_deadline(
 
     clock = ControlledClock()
     captured_factory_timeouts: list[float] = []
+
+    # Keep fake-clock accounting independent of native timer resolution.
+    async def controlled_await(awaitable: Any, _timeout: float) -> Any:
+        return await awaitable
+
+    async def controlled_factory(factory: Any, *, timeout: float) -> Any:
+        before = clock()
+        result = factory()
+        if clock() - before > timeout:
+            raise asyncio.TimeoutError
+        return result
 
     async def capture_execute_streaming_call(**kwargs):
         captured_factory_timeouts.append(kwargs["provider_factory_timeout"])
@@ -6604,6 +6631,9 @@ def test_stream_prime_fallback_attempts_share_one_absolute_deadline(
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.object(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_ELAPSED_SECONDS", 0.06),
         patch.object(chat_endpoint, "_provider_stream_monotonic", clock),
+        patch.object(chat_endpoint, "_await_provider_stream_operation", controlled_await),
+        patch.object(chat_service, "_provider_factory_monotonic", clock),
+        patch.object(chat_service, "_call_stream_factory_bounded", controlled_factory),
         patch.object(
             chat_endpoint,
             "execute_streaming_call",
