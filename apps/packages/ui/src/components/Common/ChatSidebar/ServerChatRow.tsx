@@ -37,6 +37,8 @@ type ServerChatRowCommonProps = {
   isTrashView: boolean
   isPinned: boolean
   isActive: boolean
+  /** Temporary mode: the row opens the chat but hides pin and management actions. */
+  readOnly?: boolean
   openMenuFor: string | null
   setOpenMenuFor: (value: string | null) => void
   onSelectChat: (chat: ServerChatHistoryItem) => void
@@ -69,6 +71,7 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
   const {
     chat,
     isTrashView,
+    readOnly = false,
     isPinned,
     isActive,
     openMenuFor,
@@ -273,7 +276,7 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
           {renderSourceInfo()}
         </span>
       </button>
-      {!selectionMode && (
+      {!selectionMode && !readOnly && (
         <div className="flex flex-col items-center gap-1">
           {!isTrashView && (
             <Tooltip title={isPinned ? t("common:unpin") : t("common:pin")}>

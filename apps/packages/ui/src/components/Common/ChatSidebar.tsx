@@ -25,6 +25,7 @@ import {
 } from "@/hooks/useServerChatHistory"
 import { useClearChat } from "@/hooks/chat/useClearChat"
 import { useFolderStore } from "@/store/folder"
+import { useStoreMessageOption } from "@/store/option"
 import { useRouteTransitionStore } from "@/store/route-transition"
 import {
   shouldEnableOptionalResource,
@@ -95,6 +96,7 @@ export function ChatSidebar({
     !collapsed && recentHistoryVisible && currentTab === "server"
 
   const clearChat = useClearChat()
+  const temporaryChat = useStoreMessageOption((state) => state.temporaryChat)
   const startRouteTransition = useRouteTransitionStore((state) => state.start)
 
   // Folder conversation count for tab badge
@@ -241,10 +243,10 @@ export function ChatSidebar({
   }, [collapsed, openResetKey, resetToolsFirst])
 
   React.useEffect(() => {
-    if (currentTab !== "server" && selectionMode) {
+    if ((currentTab !== "server" || temporaryChat) && selectionMode) {
       setSelectionMode(false)
     }
-  }, [currentTab, selectionMode])
+  }, [currentTab, selectionMode, temporaryChat])
 
   React.useEffect(() => {
     setPanelVisible("server-history", serverHistoryPanelVisible)
@@ -426,7 +428,7 @@ export function ChatSidebar({
               <Plus className="size-4" />
             </button>
           </Tooltip>
-          {recentHistoryVisible && currentTab === "server" && (
+          {recentHistoryVisible && currentTab === "server" && !temporaryChat && (
             <Tooltip
               title={
                 selectionMode
@@ -575,12 +577,20 @@ export function ChatSidebar({
               />
             </div>
 
-            {/* Tab Content: stays usable in temporary mode, which opens saved chats read-only (H1). */}
-            <div>
+            {/* Tab Content. Temporary mode opens saved chats read-only (H1): rows stay
+                selectable without management actions, and folder management stays off. */}
+            <div
+              className={
+                temporaryChat && currentTab === "folders"
+                  ? "pointer-events-none opacity-50"
+                  : ""
+              }
+            >
               {currentTab === "server" && (
                 <ServerChatList
                   searchQuery={debouncedSearchQuery}
                   selectionMode={selectionMode}
+                  readOnly={temporaryChat}
                   onConversationSelected={onConversationSelected}
                 />
               )}
