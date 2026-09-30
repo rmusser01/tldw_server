@@ -3,10 +3,10 @@ id: TASK-13389
 title: >-
   Temporary mode cannot open saved server chats: restore read access per the H1
   ruling
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-27 21:18'
-updated_date: '2026-09-28 00:19'
+updated_date: '2026-09-30 01:48'
 labels:
   - bug
   - chat
@@ -30,7 +30,7 @@ Found while fixing Playground coordinator tests on PR #3011; not reproduced in a
 - [x] #1 In temporary mode, opening a saved server chat loads and displays its transcript instead of failing with history_owner_unavailable
 - [x] #2 A test proves the temporary load performs zero writes: no IndexedDB mirror, profile, bookmark, or server-side selection write
 - [x] #3 Replies in a temporary session over a loaded saved chat stay memory-only until Task4.2/H3 define persistence (no silent coercion into local durability)
-- [ ] #4 Reproduced in a browser (e.g. Firefox private window) before and verified after
+- [x] #4 Reproduced in a browser (e.g. Firefox private window) before and verified after
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -43,11 +43,19 @@ Fix (apps/packages/ui/src/hooks/chat/useServerChatLoader.ts, commit 3511438237):
 Tests (apps/packages/ui/src/hooks/__tests__/useServerChatLoader.scope.test.tsx, real useHistorySelection controller): temporary load renders transcript and ends 'loaded' both fresh and after a prior temporary owner; zero calls to ensureLocalProfileId, saveHistoryBookmark, captureHistorySnapshot, ensureServerChatHistoryId, reconcileServerChatMirror, linkServerChatMirror, syncChatSettingsForServerChat; missing chat reports failed/server_chat_not_found. Loader+selection+Playground sibling suites: 13 files, 3 new tests pass; useChatActions.saved-normal has 2 failures that also fail on origin/dev without this change ('deletes a qualified mirror row ... canonical request ID'). tsc --noEmit -p apps/packages/ui: no errors in touched files (pre-existing errors elsewhere). Bandit: N/A (TypeScript only). Docs: none needed; ruling doc already describes the behavior.
 
 Pending: AC #4 browser repro (Firefox private window) left for the orchestrator. Not changed: sidepanel openServerChat opens server chats as a durable tab (temporaryChat:false) by design; toggling temporary off while a temporary owner is published still hits the history_owner_unavailable gate until the next navigation resets the controller (pre-existing, not reproduced).
+
+Browser verification 2026-09-29 (headless Chromium via Playwright; the Chrome extension was not connected). Setup: isolated backend on :8766 (single-user, fresh DBs) plus WebUI next dev on :8080, with a seeded 4-message saved server chat. BEFORE, on dev with 3511438237: in temporary mode, clicking the chat in Recent conversations did nothing. Root cause: ChatSidebar.tsx wrapped the Server/Folders lists in pointer-events-none opacity-50 when temporaryChat was set (a pre-H1 leftover), so the click hit the list container and selectServerChat never ran. The loader fix was unreachable from the UI, and the unit tests drove the loader directly. Control (normal mode) loaded fine. AFTER (38da7aa302): the gate is removed. The same click loads all 4 messages, temporaryChat stays true, historyId stays null, and the H1 notice shows 'You can still read this conversation'. The first after-run also showed one POST /api/v1/rag/feedback/implicit (dwell_time, carrying the message text). Implicit feedback is now disabled in temporary mode at both call sites (useMessageState.ts, Message.tsx), matching the existing canSaveKnowledge gate. Final run: 0 IndexedDB store count changes, 0 non-GET backend requests, and server chat/messages/history-selection byte-identical before and after. Tests: ChatSidebar.lazy-history (temporary mode keeps list clickable) and visual-identity-message-state (implicit feedback off in temporary, on otherwise) were red before the fix and green after. Sidebar suites 34 passed; Playground/__tests__ + useImplicitFeedback + useServerChatLoader.scope 197/198 passed. The 1 failure, Message.dynamic-ui-surface.guard, is pre-existing on dev (it reads the untouched PlaygroundChat.tsx) and is tracked separately.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Temporary mode now opens saved server chats read-only end to end. useServerChatLoader publishes the temporary owner and does a display-only canonical read (3511438237). ChatSidebar no longer disables the history lists in temporary mode, and implicit feedback is off there (38da7aa302). Verified in a real browser: the transcript renders with zero IndexedDB writes, zero backend writes, and unchanged server state. Unit tests cover the loader, the sidebar gate and the feedback gate. Pre-existing guard failure tracked as TASK-13397.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
