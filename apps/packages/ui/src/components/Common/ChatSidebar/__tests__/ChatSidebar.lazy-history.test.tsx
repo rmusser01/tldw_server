@@ -8,6 +8,9 @@ import { ChatSidebar } from "../../ChatSidebar"
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator"
 
 const useSettingMock = vi.hoisted(() => vi.fn())
+const optionState = vi.hoisted(() => ({ temporaryChat: false }))
+const serverListProps = vi.hoisted(() => vi.fn())
+const activeTab = vi.hoisted(() => ({ value: "server" }))
 const useServerChatHistoryMock = vi.hoisted(() =>
   vi.fn((..._args: [string, Record<string, unknown>]) => ({
     data: [],
@@ -41,7 +44,7 @@ vi.mock("@/hooks/chat/useClearChat", () => ({
 
 vi.mock("@/store/option", () => ({
   useStoreMessageOption: (selector?: (state: { temporaryChat: boolean }) => unknown) =>
-    typeof selector === "function" ? selector({ temporaryChat: false }) : { temporaryChat: false }
+    typeof selector === "function" ? selector(optionState) : optionState
 }))
 
 vi.mock("@/store/folder", () => ({
@@ -59,7 +62,10 @@ vi.mock("@/store/route-transition", () => ({
 }))
 
 vi.mock("../ServerChatList", () => ({
-  ServerChatList: () => <div data-testid="server-chat-list" />
+  ServerChatList: (props: Record<string, unknown>) => {
+    serverListProps(props)
+    return <div data-testid="server-chat-list" />
+  }
 }))
 
 vi.mock("../FolderChatList", () => ({
@@ -80,6 +86,9 @@ vi.mock("@/components/Sidepanel/Chat/ModeToggle", () => ({
 
 describe("ChatSidebar lazy history loading", () => {
   beforeEach(() => {
+    optionState.temporaryChat = false
+    activeTab.value = "server"
+    serverListProps.mockClear()
     useSettingMock.mockReset()
     useServerChatHistoryMock.mockClear()
     const setCurrentTab = vi.fn()
@@ -88,7 +97,7 @@ describe("ChatSidebar lazy history loading", () => {
     useSettingMock.mockImplementation((setting: { key?: string } | string) => {
       const key = typeof setting === "string" ? setting : setting?.key
       if (key === "tldw:sidebar:activeTab") {
-        return ["server", setCurrentTab]
+        return [activeTab.value, setCurrentTab]
       }
       if (key === "tldw:sidebar:shortcutsCollapsed") {
         return [false, setShortcutsCollapsed]
@@ -142,6 +151,40 @@ describe("ChatSidebar lazy history loading", () => {
         })
       )
     })
+  })
+
+  it("keeps saved chats clickable in temporary mode so they open read-only (TASK-13389)", () => {
+    optionState.temporaryChat = true
+
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <ChatSidebar collapsed={false} />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+
+    const list = screen.getByTestId("server-chat-list")
+    expect(list.closest(".pointer-events-none")).toBeNull()
+    expect(serverListProps).toHaveBeenLastCalledWith(
+      expect.objectContaining({ readOnly: true, selectionMode: false })
+    )
+    expect(screen.queryByRole("button", { name: "Select chats" })).toBeNull()
+  })
+
+  it("keeps folder management disabled in temporary mode", () => {
+    optionState.temporaryChat = true
+    activeTab.value = "folders"
+
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <ChatSidebar collapsed={false} />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+
+    expect(screen.getByTestId("folder-chat-list").closest(".pointer-events-none")).not.toBeNull()
   })
 
   it("enables server history overview after the user expands recent conversations", async () => {
