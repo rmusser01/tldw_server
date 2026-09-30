@@ -180,6 +180,22 @@ One unchanged-job rerun was requested, but remains queued at publication.
 Diagnostics are retained at `/tmp/pr3018-ux-smoke-36636268090`; this is not
 reported as a successful UX gate. ADR assessment remains unchanged.
 
+## Full-suite Route Lookup Follow-up (2026-09-30)
+
+On head `82fc1a63bf`, the UX smoke gate passed without weakening its no-flaky
+policy. The `gap-verified-4` full-suite shard instead failed one ingestion
+capabilities test with `StopIteration` (1,007 passed, 1 skipped). Its direct
+`app.routes` lookup missed the included router after the FastAPI upgrade.
+The failure reproduced locally before the fix. The test now reuses
+`iter_served_routes`, like sibling ingestion tests, and retains the exact
+response-model identity assertion on the original route.
+
+All 43 ingestion-policy, sibling API, and route-helper tests passed under
+Python 3.12.11/FastAPI 0.141.1: 12 warnings in 8.70 seconds. Ruff, Black on the
+changed test function, scoped Bandit excluding test assertions (`B101`), and
+whitespace checks passed. No production code or CI gates changed. Final-head
+hosted CI and review remain pending; no fresh browser run is claimed.
+
 ## Separate Verifier Finding
 
 Two live runs with the same model failed closed at claims verification: a quiz
