@@ -5442,3 +5442,26 @@ First pytest _ensure_unconfigure takes 33.984301 seconds. SystemExit 0 and both 
 All 95 Prompt Studio Python sources plus two shared source/configuration checks (97 records) remain byte-identical to baseline/published d5c9; Python ASTs match. Explicit CLI adds no warning suppression; inherited pyproject --disable-warnings remains unchanged. The initial launcher bootstrap exited 2 at collection with zero test bodies after resolving another editable checkout; it is retained and excluded. Corrected managed-cwd imports match python -m pytest semantics. Root independently verifies case parity, skip subset, natural exit and all 31 artifact hashes. Independent source review identifies real pytest post-summary collection without proving native causation; no independent pytest rerun is claimed.
 
 Manifest /private/tmp/pr2979-uat556-readonly-verification-manifest.json SHA256 53113294369027946e1161c16b16140f26bbeb4fe8268131f087233bd05e2136; corrected artifacts /private/tmp/pr2979-uat556-whole-prompt-studio-corrected; root-junit-verification.json and independent-source-evidence-20260930.json retained. No source edits or tests remain active. This update is tracking-only; no Bandit/Ruff/compile run applies. Child .45 acceptance criteria and .35 final whole native normal exit remain open. Preserve useful CI and defer replay/publication until diagnostics are terminal; Chatbook disposition remains pending.
+
+
+## Latest-dev 03043 publication batch — 2026-09-30
+
+**Task:** TASK-13260.278.18.83. All d5c9 workflows and useful diagnostic shards are terminal; retained automatic/native failures remain unaccepted. Six reviewed test-only repairs are ready for publication; UAT552/553/555/556 and Chatbook remain open.
+
+### Stage 1: Preserve and replay
+**Goal:** Preserve the verified clean local batch and replay from c867 onto verified latest dev 03043.
+**Success Criteria:** Fresh remote lease verification; new recovery ref; every reviewed commit patch-equivalent; resulting tree adds exactly the 18 upstream files byte-identically. Preserve canonical workspace slash and temporary-chat policy.
+**Tests:** Ancestry/count, range-diff, exact tree/file intersection and repair hash checks.
+**Status:** In Progress
+
+### Stage 2: Qualify the actual replayed head
+**Goal:** Verify upstream client behavior and retained repair source on actual dependencies.
+**Success Criteria:** Both workspace contracts, request-core redirect-security and five temporary-chat scopes pass; changed Python compiles, coverage guard and diff/worktree checks pass; independent source/artifact review clear.
+**Tests:** Installed Vitest scopes, original coverage guard, compilation and actual FastAPI/Pydantic/Node/Vitest version evidence. Existing causal/full repair and Bandit evidence remains valid only with exact source preservation. No dependency/config/warning changes.
+**Status:** Not Started
+
+### Stage 3: Publish for fresh hosted qualification
+**Goal:** Publish the reviewed batch safely and obtain fresh automatic/native qualification.
+**Success Criteria:** Human Change summary byte-identical, fresh remote lease and recovery verification, explicit force-with-lease, exact remote head verified, existing native workflow dispatched and both job APIs retained. Hosted/native acceptance and Chatbook disposition stay open.
+**Tests:** PR/body/head/base verification, current-head workflow and job APIs. No old-head success accepts the new head.
+**Status:** Not Started
