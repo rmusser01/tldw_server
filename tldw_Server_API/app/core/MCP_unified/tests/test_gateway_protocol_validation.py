@@ -87,6 +87,7 @@ class _PostKillProcess:
         self.killed = False
         self.post_kill_join_timeouts: list[float | None] = []
         self.consume_post_kill_wait = False
+        self.post_kill_scheduling_delay = 0.0
 
     @property
     def pid(self) -> int | None:
@@ -114,7 +115,7 @@ class _PostKillProcess:
             self.post_kill_join_timeouts.append(timeout)
             if self.consume_post_kill_wait and timeout is not None:
                 self.consume_post_kill_wait = False
-                time.sleep(timeout)
+                time.sleep(timeout + self.post_kill_scheduling_delay)
                 self._process.join(0)
                 return
         self._process.join(timeout)
@@ -1298,7 +1299,7 @@ async def test_close_attempts_later_children_before_reporting_cleanup_failure() 
 
 @pytest.mark.asyncio
 async def test_close_uses_one_global_graceful_shutdown_deadline() -> None:
-    """Per-child waits must share, rather than multiply, the configured grace period."""
+    """Every child receives wait time within one shared shutdown budget."""
 
     api = _validation_api()
     clock = [100.0]
@@ -1311,6 +1312,10 @@ async def test_close_uses_one_global_graceful_shutdown_deadline() -> None:
     await manager.close()
 
     assert clock[0] <= 100.12
+    assert all(
+        process.calls[-1][0] == "join" and process.calls[-1][1] > 0
+        for process in processes
+    )
     assert all(any(call[0] == "terminate" for call in process.calls) for process in processes)
     assert all(any(call[0] == "kill" for call in process.calls) for process in processes)
     assert manager.live_process_count == 0
@@ -1720,8 +1725,14 @@ def test_embedded_resource_descendant_aliases_honor_exact_subschema_boundary(
 
 
 @pytest.mark.asyncio
-async def test_close_uses_shared_wait_phases_for_all_real_children() -> None:
-    """One force-wait consumer must not starve a later survivor's reap budget."""
+@pytest.mark.parametrize(
+    "post_kill_scheduling_delay",
+    [pytest.param(0.0, id="warm"), pytest.param(0.2, id="scheduler-overrun")],
+)
+async def test_close_uses_shared_wait_phases_for_all_real_children(
+    post_kill_scheduling_delay: float,
+) -> None:
+    """Real children must be reaped even when one timed sleep overshoots."""
 
     if not hasattr(signal, "SIGTERM") or not hasattr(signal, "SIGKILL"):
         pytest.skip("POSIX process signals are required")
@@ -1759,14 +1770,20 @@ async def test_close_uses_shared_wait_phases_for_all_real_children() -> None:
     ready.get(timeout=5)
     ready.get(timeout=5)
     ordered = tuple(manager._live_processes)
-    first, later = ordered
+    first = ordered[0]
+    receivers = tuple(manager._receivers.values())
     first.consume_post_kill_wait = True
+    first.post_kill_scheduling_delay = post_kill_scheduling_delay
 
     try:
         await manager.close()
         outcomes = await asyncio.gather(*tasks, return_exceptions=True)
         assert all(isinstance(outcome, GatewayApplicationError) for outcome in outcomes)
-        assert any(timeout is not None and timeout > 0 for timeout in later.post_kill_join_timeouts)
+        assert all(process.killed for process in context.processes)
+        assert all(process.exitcode == -signal.SIGKILL for process in context.processes)
+        assert all(receiver.closed for receiver in receivers)
+        assert not manager._receivers
+        assert semaphore.acquired == 2
         assert semaphore.released == 2
         assert manager.live_process_count == 0
     finally:

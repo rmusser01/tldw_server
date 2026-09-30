@@ -582,7 +582,7 @@ Production source is unchanged across e49/current/latestdev. Native close/outcom
 **Goal:** Repair only the existing gateway protocol validation test module.
 **Success Criteria:** Warm/overrun cases retain readiness/kill/exitcode/reap/permits/live-count/budget checks; existing fake-clock case retains positive allocation invariant catching serial starvation.
 **Tests:** Causal red/green and full affected validation tests, compile/Ruff/Bandit/AST review.
-**Status:** In Progress
+**Status:** Complete
 
 No production code, timeout increase, signal/capability weakening or skip addition. Root owns independent review.
 
@@ -590,4 +590,6 @@ No production code, timeout increase, signal/capability weakening or skip additi
 **Goal:** Require final-head native process cleanup acceptance.
 **Success Criteria:** Native matrix and all protected gates pass.
 **Tests:** Final automatic/native checks.
-**Status:** Not Started
+**Status:** In Progress
+
+Root independent source review clear. Original real-child positive-wait assertion fails under controlled200ms scheduling overrun after bothchildren are killed/reaped; warm/overrun and deterministic fair-allocation controls now pass3cases. Existing fake-clock test retains positive allocation and rejects serial starvation mutation. Full104case module passes0skip8.84seconds,exit0; unchanged signal/readiness/finally/semaphore ownership guards plus explicit SIGKILL, receiver and permit checks. Production and shutdown budgets unchanged. Ruff0; Bandit116to121 adds onlyfive LOW assertions; compile/diff clean. Actual macOS final-head hosted acceptance remains open.
