@@ -74,7 +74,9 @@ async def test_cookie_sessions_share_owner_quota_and_cached_auth(governed_cookie
             assert response.status_code == 200
         denied = client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=session-b"})
     assert denied.status_code == 429
-    assert len(validations) == 601  # Canonical endpoint resolver reused the request cache.
+    # Each allowed request validates once: ingress on an identity-cache miss (the route
+    # reuses its request-state AuthContext), the route itself on a hit. The 429 costs none.
+    assert len(validations) == 600
     owner_quota = await governor.peek_with_policy("user:1", ["requests"], "character_chat.default")
     other_owner_quota = await governor.peek_with_policy("user:2", ["requests"], "character_chat.default")
     assert owner_quota["requests"]["remaining"] == 0
@@ -91,8 +93,8 @@ async def test_invalid_cookie_returns_canonical_auth_failure(governed_cookie_app
     # The middleware itself never answers 401 (ADR-056 / spec §2): it makes a best-effort
     # attempt to resolve the principal for ingress charging, and on failure falls back to
     # the IP entity and forwards to the route, whose own Depends(get_auth_principal)
-    # re-validates the same cookie (the failed attempt is not cached) and returns the
-    # canonical 401. Hence the cookie is checked twice.
+    # re-validates the same cookie (a failure never reaches request state; ingress's
+    # identity cache is its own) and returns the canonical 401. Hence two checks.
     assert validations == ["invalid", "invalid"]
     owner_quota = await governor.peek_with_policy("user:1", ["requests"], "character_chat.default")
     # capacity is rpm=300 * burst=2.0 = 600 under the safety-net defaults (spec §3).

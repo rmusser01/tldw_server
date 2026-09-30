@@ -43,8 +43,8 @@ def client(monkeypatch):
     calls = []
 
     async def fake_principal(request):
-        calls.append(request.url.path)
         user = request.cookies.get(SESSION) or request.headers.get("X-API-KEY")
+        calls.append(user)
         if not user or not user.isdigit():
             raise HTTPException(status_code=401, detail="bad credentials")
         return AuthPrincipal(kind="user", user_id=int(user))
@@ -102,6 +102,84 @@ def test_non_session_cookie_charges_ip_and_reaches_route(client):
     assert client.get("/api/v1/thing", cookies={"theme": "dark", "csrf_token": "t"}).status_code == 200
     assert client.principal_calls == []  # not a credential: never resolved
     assert client.get("/api/v1/thing").status_code == 429  # same anonymous IP bucket
+
+
+# --- Identity cache: a repeated credential is resolved (KDF, DB) once per TTL ---
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.t = 1000.0
+
+    def monotonic(self) -> float:
+        return self.t
+
+
+def _charged_entities(client) -> set[str]:
+    return {f"{scope}:{value}" for _pid, _cat, scope, value in client.app.state.rg_governor._buckets}
+
+
+def test_repeated_valid_credential_is_resolved_once(client):
+    client.get("/api/v1/thing", headers={"X-API-KEY": "7"})
+    client.get("/api/v1/thing", headers={"X-API-KEY": "7"})
+    assert client.principal_calls == ["7"]
+
+
+def _from_ip(client, ip):
+    return TestClient(client.app, client=(ip, 50000))
+
+
+def test_repeated_invalid_credential_is_resolved_once_and_charges_ip(client):
+    caller = _from_ip(client, "10.0.0.1")
+    assert caller.get("/api/v1/thing", headers={"X-API-KEY": "fake"}).status_code == 200
+    assert caller.get("/api/v1/thing", headers={"X-API-KEY": "fake"}).status_code == 429  # ip bucket spent
+    assert client.principal_calls == ["fake"]
+    assert _charged_entities(client) == {"ip:10.0.0.1"}
+
+
+def test_cached_invalid_credential_is_never_promoted_to_an_entity(client):
+    # The negative entry means "no principal", not "the first caller's ip:" bucket.
+    _from_ip(client, "10.0.0.1").get("/api/v1/thing", headers={"X-API-KEY": "fake"})
+    _from_ip(client, "10.0.0.2").get("/api/v1/thing", headers={"X-API-KEY": "fake"})
+    assert client.principal_calls == ["fake"]
+    assert _charged_entities(client) == {"ip:10.0.0.1", "ip:10.0.0.2"}
+
+
+def test_valid_identity_expires_after_ttl(client, monkeypatch):
+    from tldw_Server_API.app.core.Resource_Governance import middleware_simple
+
+    clock = _Clock()
+    monkeypatch.setattr(middleware_simple, "time", clock, raising=False)
+    client.get("/api/v1/thing", headers={"X-API-KEY": "7"})
+    clock.t += 59
+    client.get("/api/v1/thing", headers={"X-API-KEY": "7"})
+    assert client.principal_calls == ["7"]
+    clock.t += 2
+    client.get("/api/v1/thing", headers={"X-API-KEY": "7"})
+    assert client.principal_calls == ["7", "7"]
+
+
+def test_invalid_identity_expires_after_negative_ttl(client, monkeypatch):
+    from tldw_Server_API.app.core.Resource_Governance import middleware_simple
+
+    clock = _Clock()
+    monkeypatch.setattr(middleware_simple, "time", clock, raising=False)
+    client.get("/api/v1/thing", headers={"X-API-KEY": "fake"})
+    clock.t += 29
+    client.get("/api/v1/thing", headers={"X-API-KEY": "fake"})
+    assert client.principal_calls == ["fake"]
+    clock.t += 2
+    client.get("/api/v1/thing", headers={"X-API-KEY": "fake"})
+    assert client.principal_calls == ["fake", "fake"]
+
+
+def test_identity_cache_cap_evicts_oldest(client, monkeypatch):
+    from tldw_Server_API.app.core.Resource_Governance import middleware_simple
+
+    monkeypatch.setattr(middleware_simple, "_IDENTITY_CACHE_MAX", 2, raising=False)
+    for key in ("1", "2", "3", "3", "1"):
+        client.get("/api/v1/thing", headers={"X-API-KEY": key})
+    assert client.principal_calls == ["1", "2", "3", "1"]  # "1" was evicted by "3"
 
 
 class _TenantSnap:

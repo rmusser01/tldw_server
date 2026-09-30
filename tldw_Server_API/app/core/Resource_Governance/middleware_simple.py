@@ -9,9 +9,12 @@ full-featured middleware later.
 """
 
 import contextlib
+import hashlib
 import os
 import re
+import time
 import uuid
+from collections import OrderedDict
 
 from loguru import logger
 from starlette.requests import Request
@@ -36,10 +39,19 @@ _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     re.error,
 )
 
+# ponytail: per-process identity cache. A revoked credential keeps charging its old
+# principal's bucket for up to _IDENTITY_TTL_SEC (route auth still rejects it); a shared
+# cache (Redis) or a revocation hook would close that if it ever matters.
+_IDENTITY_TTL_SEC = 60.0
+_IDENTITY_NEGATIVE_TTL_SEC = 30.0
+_IDENTITY_CACHE_MAX = 4096
+
 
 class RGSimpleMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
+        # sha256(credentials) -> (expires_at, entity or None for "charge the IP"), LRU order.
+        self._identity_cache: OrderedDict[str, tuple[float, str | None]] = OrderedDict()
 
     async def _ensure_loader_matches_env(self, request: Request) -> None:
         """Ensure app.state.rg_policy_loader reflects current RG_POLICY_PATH.
@@ -105,19 +117,39 @@ class RGSimpleMiddleware:
           Revocation is still enforced by the route's own auth; a revoked token only
           spends its own user's bucket.
         - API keys, non-JWT bearers and the single-user session cookie go through
-          ``get_auth_principal``. It caches its AuthContext on request state, so
-          endpoint auth reuses this validation. A failure is not cached; the route
-          re-checks and returns its own 401.
+          ``get_auth_principal``. On a cache miss it stores its AuthContext on
+          request state, so endpoint auth reuses this validation. The route
+          re-checks a failure and returns its own 401.
         - Other cookies (CSRF, theme, analytics) are not credentials, so they are
           never resolved.
+        - The outcome is cached per credential (60 s; 30 s for a failure) so a 429
+          or a repeated bad key does not cost a KDF. A failure is cached as "no
+          principal", never as an entity, so fake credentials still share the IP.
         """
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
         settings = get_settings()
-        auth_header = request.headers.get("Authorization") or ""
-        has_session_cookie = bool(request.cookies.get(settings.SINGLE_USER_SESSION_COOKIE_NAME))
-        if not (auth_header or request.headers.get("X-API-KEY") is not None or has_session_cookie):
+        auth_header = request.headers.get("Authorization")
+        api_key = request.headers.get("X-API-KEY")
+        session = request.cookies.get(settings.SINGLE_USER_SESSION_COOKIE_NAME)
+        if not (auth_header or api_key is not None or session):
             return None
+        # Every credential the resolver may read is in the key; raw values are never stored.
+        creds = (("bearer", auth_header), ("x-api-key", api_key), ("session-cookie", session))
+        key = hashlib.sha256("\0".join(f"{kind}\0{value}" for kind, value in creds if value is not None).encode()).hexdigest()
+        now = time.monotonic()
+        hit = self._identity_cache.get(key)
+        if hit is not None and hit[0] > now:
+            self._identity_cache.move_to_end(key)
+            return hit[1]
+        entity = await self._resolve_principal_entity(request, settings, auth_header or "")
+        self._identity_cache[key] = (now + (_IDENTITY_TTL_SEC if entity else _IDENTITY_NEGATIVE_TTL_SEC), entity)
+        self._identity_cache.move_to_end(key)
+        while len(self._identity_cache) > _IDENTITY_CACHE_MAX:
+            self._identity_cache.popitem(last=False)
+        return entity
+
+    async def _resolve_principal_entity(self, request: Request, settings, auth_header: str) -> str | None:
         token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
         if token and token.count(".") == 2 and settings.AUTH_MODE != "single_user":
             from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
