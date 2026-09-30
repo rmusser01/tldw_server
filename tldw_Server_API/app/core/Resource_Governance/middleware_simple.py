@@ -137,8 +137,9 @@ class RGSimpleMiddleware:
         - The outcome is cached per credential (60 s; 30 s for a failure) so a 429
           or a repeated bad key does not cost a KDF. A failure is cached as "no
           principal", never as an entity, so fake credentials still share the IP.
-        - Cache misses are budgeted per client IP (_IDENTITY_RESOLVE_BUDGET_PER_MIN);
-          past it the IP is charged unresolved and nothing is cached.
+        - API-key and cookie cache misses (the DB-lookup and key-derivation path) are
+          budgeted per client IP (_IDENTITY_RESOLVE_BUDGET_PER_MIN); past it the IP is
+          charged unresolved and nothing is cached. JWTs never spend the budget.
         """
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 

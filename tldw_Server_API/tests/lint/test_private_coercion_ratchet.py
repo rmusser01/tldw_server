@@ -101,7 +101,6 @@ PRIVATE_COERCER_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/Embeddings/services/jobs_worker.py": 2,
     "tldw_Server_API/app/core/Embeddings/services/redis_worker.py": 1,
     "tldw_Server_API/app/core/Embeddings/simplified_config.py": 1,
-    "tldw_Server_API/app/core/Evaluations/config_validator.py": 1,
     "tldw_Server_API/app/core/Evaluations/embeddings_abtest_jobs_worker.py": 1,
     "tldw_Server_API/app/core/External_Sources/connectors_service.py": 1,
     "tldw_Server_API/app/core/Flashcards/apkg_importer.py": 1,
