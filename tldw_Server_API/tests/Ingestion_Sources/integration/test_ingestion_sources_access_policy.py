@@ -7,6 +7,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+
 
 class _FakeTx:
     async def __aenter__(self):
@@ -436,12 +438,13 @@ def test_capabilities_reports_false_without_applicable_flag(
 
 
 @pytest.mark.integration
-def test_capabilities_endpoint_uses_explicit_response_model(ingestion_sources_policy_client):
+def test_capabilities_endpoint_uses_explicit_response_model(
+    ingestion_sources_policy_client: dict[str, Any],
+) -> None:
+    """Require the capabilities response model on the included, prefixed route."""
     from tldw_Server_API.app.api.v1.schemas.ingestion_sources import (
         IngestionSourceCapabilitiesResponse,
     )
-
-    from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
     # FastAPI >= 0.137 keeps included routers nested; walk the served routes instead.
     served = next(
