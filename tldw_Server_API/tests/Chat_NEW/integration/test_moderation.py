@@ -80,7 +80,9 @@ def _make_test_db():
 
 
 @pytest.mark.unit
-def test_cleanup_db_artifacts_closes_owned_handles_before_unlink(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cleanup_db_artifacts_closes_owned_handles_before_unlink(
+    monkeypatch: pytest.MonkeyPatch, tmp_path,
+) -> None:
     """Close actual retired handles before unlink while another database remains usable."""
     db, db_path = _make_test_db()
     unrelated_db, unrelated_path = _make_test_db()
@@ -108,8 +110,18 @@ def test_cleanup_db_artifacts_closes_owned_handles_before_unlink(monkeypatch: py
         for connection, _ in handles:
             assert connection.execute("SELECT 1").fetchone()[0] == 1
 
+        process_os = os
         real_unlink = os.unlink
         deleted_paths = []
+        background_errors = []
+        background_path = tmp_path / "unrelated-log-lock"
+        background_path.write_text("background log lock")
+
+        def delete_background_artifact() -> None:
+            try:
+                process_os.unlink(background_path)
+            except BaseException as exc:
+                background_errors.append(exc)
 
         def unlink_after_owned_handles_close(path: str) -> None:
             for connection, _ in handles:
@@ -120,7 +132,17 @@ def test_cleanup_db_artifacts_closes_owned_handles_before_unlink(monkeypatch: py
             real_unlink(path)
 
         with monkeypatch.context() as cleanup_patch:
-            cleanup_patch.setattr(os, "unlink", unlink_after_owned_handles_close)
+            cleanup_patch.setattr(
+                __name__ + ".os",
+                SimpleNamespace(unlink=unlink_after_owned_handles_close, path=process_os.path),
+            )
+            background = threading.Thread(target=delete_background_artifact)
+            background.start()
+            background.join(timeout=5)
+            assert not background.is_alive()
+            assert background_errors == []
+            assert not background_path.exists()
+            assert deleted_paths == []
             _cleanup_db_artifacts(db, db_path)
         assert deleted_paths[0] == db_path
         assert all(not os.path.exists(db_path + suffix) for suffix in ("", "-wal", "-shm"))

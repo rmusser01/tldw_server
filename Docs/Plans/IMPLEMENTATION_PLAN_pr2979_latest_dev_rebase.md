@@ -669,3 +669,15 @@ Production route/schema are unchanged. Only the test route enumeration uses the 
 **Status:** In Progress
 
 Retain job109745901883 metadata/annotations and unavailable-log result, preserve useful remaining diagnostic jobs, and dispatch the existing native matrix on the reviewed final publication. If setup failure repeats, investigate actual runner resource/setup evidence before editing.
+
+
+### UAT544 — moderation cleanup spy scope (TASK-13260.278.18.83.33)
+
+**Goal:** Keep background log deletion outside the real SQLite owner-handle cleanup spy.
+**Success Criteria:** A controlled real unrelated delete fails the old global patch and passes module-local binding; all owned-handle closure, unrelated DB usability and strict unlink assertions remain. Native Windows final-head acceptance required.
+**Tests:** Existing owner-handle test with joined background deletion, full moderation module, AST assertion preservation, Ruff/Bandit and independent review.
+**Status:** In Progress
+
+Native stack pins logger thread reading handles in the global unlink spy while main closes SQLite connections. Reuse existing SimpleNamespace only for this test module os unlink/path binding; no production or pool change.
+
+Local qualification: 17 moderation cases pass with zero skips and normal exit. Independent source/evidence review is clear and verifies preserved assertion/definition ASTs; hosted Windows acceptance remains open. Evidence: /private/tmp/pr2979-uat544-{red,green}.log/.xml and Bandit JSON.
