@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-09-27 21:18'
-updated_date: '2026-09-30 01:48'
+updated_date: '2026-09-30 04:27'
 labels:
   - bug
   - chat
@@ -45,6 +45,8 @@ Tests (apps/packages/ui/src/hooks/__tests__/useServerChatLoader.scope.test.tsx, 
 Pending: AC #4 browser repro (Firefox private window) left for the orchestrator. Not changed: sidepanel openServerChat opens server chats as a durable tab (temporaryChat:false) by design; toggling temporary off while a temporary owner is published still hits the history_owner_unavailable gate until the next navigation resets the controller (pre-existing, not reproduced).
 
 Browser verification 2026-09-29 (headless Chromium via Playwright; the Chrome extension was not connected). Setup: isolated backend on :8766 (single-user, fresh DBs) plus WebUI next dev on :8080, with a seeded 4-message saved server chat. BEFORE, on dev with 3511438237: in temporary mode, clicking the chat in Recent conversations did nothing. Root cause: ChatSidebar.tsx wrapped the Server/Folders lists in pointer-events-none opacity-50 when temporaryChat was set (a pre-H1 leftover), so the click hit the list container and selectServerChat never ran. The loader fix was unreachable from the UI, and the unit tests drove the loader directly. Control (normal mode) loaded fine. AFTER (38da7aa302): the gate is removed. The same click loads all 4 messages, temporaryChat stays true, historyId stays null, and the H1 notice shows 'You can still read this conversation'. The first after-run also showed one POST /api/v1/rag/feedback/implicit (dwell_time, carrying the message text). Implicit feedback is now disabled in temporary mode at both call sites (useMessageState.ts, Message.tsx), matching the existing canSaveKnowledge gate. Final run: 0 IndexedDB store count changes, 0 non-GET backend requests, and server chat/messages/history-selection byte-identical before and after. Tests: ChatSidebar.lazy-history (temporary mode keeps list clickable) and visual-identity-message-state (implicit feedback off in temporary, on otherwise) were red before the fix and green after. Sidebar suites 34 passed; Playground/__tests__ + useImplicitFeedback + useServerChatLoader.scope 197/198 passed. The 1 failure, Message.dynamic-ui-surface.guard, is pre-existing on dev (it reads the untouched PlaygroundChat.tsx) and is tracked separately.
+
+Qodo on #3064: removing the sidebar gate also re-enabled mutation controls. Temporary mode now keeps saved chats read-only. Rows open the chat, but pin and the actions menu are hidden (ServerChatRow readOnly), bulk selection is off, and the Folders tab stays disabled (folder management). New tests: a real ServerChatList read-only click selects without management buttons; ChatSidebar passes readOnly/selectionMode=false and gates Folders; PlaygroundMessage disables implicit feedback in temporary mode; useImplicitFeedback sends nothing when disabled. Affected suites: 202/203 passed (the 1 failure is pre-existing TASK-13397).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
