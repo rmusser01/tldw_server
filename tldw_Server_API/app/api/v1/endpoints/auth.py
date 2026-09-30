@@ -1122,6 +1122,13 @@ async def _reserve_auth_rg_requests(
 ) -> tuple[bool, Optional[int]]:
     _ = fail_open  # Compatibility parameter; legacy fallback limiter is retired.
 
+    # Ingress already charged this request to this policy's per-IP bucket. The two
+    # IP derivations (AuthNZ trusted proxies vs RG_TRUSTED_PROXIES) can disagree,
+    # so compare the policy, not the IP. Reservations keyed on something else
+    # (email hash, user) still apply. See TASK-13144 for unifying the derivations.
+    if entity is None and getattr(getattr(request, "state", None), "rg_policy_id", None) == policy_id:
+        return True, None
+
     rg_entity = entity or f"ip:{_auth_request_client_ip(request)}"
 
     governor = await _get_auth_endpoint_rg_governor(request)

@@ -229,6 +229,11 @@ async def _maybe_enforce_with_rg_mcp(*, key: str, category: str) -> dict[str, ob
     if gov is None:
         return None
     policy_id = f"mcp.{category}"
+    try:
+        if _rg_mcp_loader is not None and not _rg_mcp_loader.get_policy(policy_id):
+            policy_id = "mcp.default"  # categories without their own policy share mcp.default
+    except Exception:  # noqa: BLE001 - a lookup failure must not deny the tool call
+        policy_id = "mcp.default"
     op_id = f"mcp-{category}-{key}-{time.time_ns()}"
     try:
         decision, handle = await gov.reserve(
