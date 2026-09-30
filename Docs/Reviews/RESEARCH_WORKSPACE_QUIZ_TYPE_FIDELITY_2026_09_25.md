@@ -196,6 +196,34 @@ changed test function, scoped Bandit excluding test assertions (`B101`), and
 whitespace checks passed. No production code or CI gates changed. Final-head
 hosted CI and review remain pending; no fresh browser run is claimed.
 
+## Devf3f1 Resource Governor Refresh (2026-09-30)
+
+Rebased onto `f3f1b4fdbe3fe461b371ece30887c5fff8476d9d` after PR3066
+changed shared Resource Governor policies, memory/Redis accounting, ingress,
+and auth charging. Fourteen preceding patches replayed identically by
+`git range-diff`. The ingestion-test patch required one overlap resolution:
+the base already uses `iter_served_routes`; its served-route lookup and exact
+response-model identity assertion remain intact, alongside our docstring,
+type annotations, and module-level helper import.
+
+Fresh validation in the isolated Python 3.12.11/FastAPI 0.141.1 environment:
+- 230 quiz, plan, profile, prompt, provenance, authority, artifact, and API
+  tests passed: 2,617 warnings in 194.20 seconds
+  (`/tmp/pr3018-devf3f1-backend.log`).
+- 43 ingestion-policy, sibling API, and route-helper tests passed: 12 warnings
+  in 9.57 seconds (`/tmp/pr3018-devf3f1-ingestion.log`).
+- 102 Resource Governor safety-net, policy, ingress/cookie-owner, MCP fallback,
+  and auth single-charge tests passed: 6 warnings in 3.31 seconds
+  (`/tmp/pr3018-devf3f1-rg.log`).
+
+Ruff, four test-file Black checks, Black on the changed ingestion function,
+whitespace, and shard coverage (`new_uncovered=0`) passed. Scoped Bandit found
+zero findings/errors in both production modules (3,614 LOC) and the ingestion
+test (364 LOC, excluding assertion rule `B101`). Shared environments, stashes,
+the worktree, and untracked `:memory:.ses` were preserved. No fresh browser UAT
+is claimed. Hosted CI and review must refresh on the published head before
+protected merge. ADR assessment remains unchanged.
+
 ## Separate Verifier Finding
 
 Two live runs with the same model failed closed at claims verification: a quiz
