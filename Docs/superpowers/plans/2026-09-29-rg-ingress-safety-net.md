@@ -127,13 +127,18 @@ def test_getter_errors_are_treated_as_unknown():
 
 
 def test_unknown_policy_is_logged_once(monkeypatch):
-    seen = []
+    from loguru import logger
+
     monkeypatch.setattr(policy_eval, "_warned_unknown", set())
-    monkeypatch.setattr(policy_eval.logger, "error", lambda msg, *a: seen.append(a))
-    getter = _getter({"default": {"requests": {"rpm": 1}}})
-    effective_policy(getter, "typo")
-    effective_policy(getter, "typo")
-    assert len(seen) == 1
+    seen = []
+    sink = logger.add(lambda m: seen.append(str(m)), level="ERROR")
+    try:
+        getter = _getter({"default": {"requests": {"rpm": 1}}})
+        effective_policy(getter, "typo")
+        effective_policy(getter, "typo")
+    finally:
+        logger.remove(sink)
+    assert len([m for m in seen if "'typo'" in m]) == 1
 
 
 def test_scope_pairs_always_include_the_entity_bucket():
@@ -586,6 +591,7 @@ _EVICT_BATCH = 5000
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Resource_Governance/test_governor_safety_net.py tldw_Server_API/tests/Resource_Governance/test_governor_memory.py tldw_Server_API/tests/Resource_Governance/test_governor_memory_combined.py tldw_Server_API/tests/Resource_Governance/test_rg_fail_modes_across_categories.py`
 Expected: all pass.
 - If an existing test asserted that an unknown policy, a scope mismatch or a missing concurrency config is denied, it encoded the old bug. Change its expectation to the safety-net behaviour, and add a one-line comment citing the spec section (§4).
+- **Check the one direction `scope_pairs` can tighten.** For concurrency (`streams`, `jobs`), an entity kind a policy did not list used to get no lease, which meant no limit. It now gets a per-entity lease. Confirm each policy with `streams` or `jobs` (`audio.default`, `media.default`) lists every entity kind its callers reserve with (`user`, `api_key`, and `ip` for audio). Run `grep -n "max_concurrent" tldw_Server_API/Config_Files/resource_governor_policies.yaml`, read each such policy's `scopes`, and record the check in the commit message. Requests and tokens only ever get looser.
 
 - [ ] **Step 5: Commit**
 
@@ -761,7 +767,7 @@ ROOT = Path(__file__).resolve().parents[3]
 YAML = ROOT / "tldw_Server_API" / "Config_Files" / "resource_governor_policies.yaml"
 APP = ROOT / "tldw_Server_API" / "app"
 _LITERAL = re.compile(r"""policy_id\s*=\s*["']([a-z_]+(?:\.[a-z_]+)+)["']""")
-_ENV_DEFAULT = re.compile(r"""getenv\(\s*["']RG_[A-Z_]+_POLICY_ID["']\s*,\s*["']([a-z_.]+)["']""")
+_ENV_DEFAULT = re.compile(r"""(?:getenv|environ\.get)\(\s*["']RG_[A-Z_]+_POLICY_ID["']\s*,\s*["']([a-z_.]+)["']""")
 # Referenced on purpose without a shipped policy; each entry says why.
 OPTIONAL = {
     # "authnz.federation.login": "federation is opt-in; endpoints skip RG when undefined",
@@ -961,6 +967,7 @@ def spy(monkeypatch):
 
     monkeypatch.setattr(auth_ep, "_get_auth_endpoint_rg_governor", _get)
     monkeypatch.setattr(auth_ep, "_auth_rg_policy_defined", lambda *_a: True)
+    monkeypatch.setattr(auth_ep, "_auth_request_client_ip", lambda _request: "203.0.113.9")
     return gov
 
 
@@ -1312,13 +1319,14 @@ class PolicyResolver:
 
 
 def _routes_version(app: Any) -> Any:
+    # ponytail: O(1) top-level counter (bumped by app.include_router / add_api_route), read per
+    # request. _get_routes_version() would be exact for nested routers but walks every route
+    # (~2k) on each call. Upgrade path: poll it on a timer if nested routers ever mutate
+    # after startup.
     router = getattr(app, "router", None)
-    get_version = getattr(router, "_get_routes_version", None)  # FastAPI private API, pinned
-    if callable(get_version):
-        try:
-            return get_version()
-        except (RuntimeError, TypeError, ValueError):
-            pass
+    version = getattr(router, "_routes_version", None)  # FastAPI private attribute, pinned
+    if isinstance(version, int):
+        return (version, len(getattr(app, "routes", None) or []))
     return len(getattr(app, "routes", None) or [])
 
 
@@ -1345,9 +1353,9 @@ Also add to `tests/Utils/test_fastapi_routes.py` a guard for the private version
 
 ```python
 def test_router_routes_version_changes_on_include() -> None:
-    """policy_resolver rebuilds its index on this private FastAPI counter."""
+    """policy_resolver rebuilds its index on this private FastAPI counter (read per request)."""
     app = FastAPI()
-    before = app.router._get_routes_version()
+    before = app.router._routes_version
     extra = APIRouter()
 
     @extra.get("/x")
@@ -1355,7 +1363,7 @@ def test_router_routes_version_changes_on_include() -> None:
         return None
 
     app.include_router(extra)
-    assert app.router._get_routes_version() != before
+    assert isinstance(app.router._routes_version, int) and app.router._routes_version != before
 ```
 
 - [ ] **Step 4: Run the tests to verify they pass**
@@ -1514,8 +1522,9 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.core.AuthNZ import auth_principal_resolver
+from tldw_Server_API.app.core.AuthNZ import auth_principal_resolver, jwt_service
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor
 from tldw_Server_API.app.core.Resource_Governance.middleware_simple import RGSimpleMiddleware
 
@@ -1536,17 +1545,31 @@ class _Loader:
         return {"requests": {"rpm": 1, "burst": 1.0}, "scopes": ["user", "api_key", "ip"]}
 
 
+SESSION = get_settings().SINGLE_USER_SESSION_COOKIE_NAME
+
+
+class _FakeJwt:
+    def decode_access_token(self, token):
+        if token != "a.valid.jwt":
+            raise ValueError("bad signature")
+        return {"sub": "42", "scope": "notes.read"}  # a scoped (virtual-key style) token
+
+
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.delenv("RG_POLICY_PATH", raising=False)
+    calls = []
 
     async def fake_principal(request):
-        user = request.cookies.get("session") or request.headers.get("X-API-KEY")
+        calls.append(request.url.path)
+        user = request.cookies.get(SESSION) or request.headers.get("X-API-KEY")
         if not user or not user.isdigit():
             raise HTTPException(status_code=401, detail="bad credentials")
         return AuthPrincipal(kind="user", user_id=int(user))
 
     monkeypatch.setattr(auth_principal_resolver, "get_auth_principal", fake_principal)
+    monkeypatch.setattr(jwt_service, "get_jwt_service", lambda: _FakeJwt())
+    monkeypatch.setattr(get_settings(), "AUTH_MODE", "multi_user")
     app = FastAPI()
 
     @app.get("/api/v1/thing")
@@ -1556,13 +1579,27 @@ def client(monkeypatch):
     app.add_middleware(RGSimpleMiddleware)
     app.state.rg_policy_loader = _Loader()
     app.state.rg_governor = MemoryResourceGovernor(policy_loader=_Loader())
-    return TestClient(app)
+    tc = TestClient(app)
+    tc.principal_calls = calls
+    return tc
 
 
 def test_two_cookie_users_behind_one_ip_get_separate_buckets(client):
-    assert client.get("/api/v1/thing", cookies={"session": "1"}).status_code == 200
-    assert client.get("/api/v1/thing", cookies={"session": "1"}).status_code == 429
-    assert client.get("/api/v1/thing", cookies={"session": "2"}).status_code == 200
+    assert client.get("/api/v1/thing", cookies={SESSION: "1"}).status_code == 200
+    assert client.get("/api/v1/thing", cookies={SESSION: "1"}).status_code == 429
+    assert client.get("/api/v1/thing", cookies={SESSION: "2"}).status_code == 200
+
+
+def test_bearer_jwt_is_keyed_by_verified_subject_without_principal_resolution(client):
+    auth = {"Authorization": "Bearer a.valid.jwt"}
+    assert client.get("/api/v1/thing", headers=auth).status_code == 200
+    assert client.get("/api/v1/thing", headers=auth).status_code == 429  # user:42 bucket
+    assert client.principal_calls == []  # scoped-token route checks never run pre-routing
+
+
+def test_invalid_jwt_charges_ip(client):
+    assert client.get("/api/v1/thing", headers={"Authorization": "Bearer forged.jwt.x"}).status_code == 200
+    assert client.get("/api/v1/thing").status_code == 429  # same anonymous IP bucket
 
 
 def test_rotating_fake_tokens_share_the_ip_bucket(client):
@@ -1576,7 +1613,8 @@ def test_invalid_credentials_reach_the_route(client):
 
 
 def test_non_session_cookie_charges_ip_and_reaches_route(client):
-    assert client.get("/api/v1/thing", cookies={"theme": "dark"}).status_code == 200
+    assert client.get("/api/v1/thing", cookies={"theme": "dark", "csrf_token": "t"}).status_code == 200
+    assert client.principal_calls == []  # not a credential: never resolved
     assert client.get("/api/v1/thing").status_code == 429  # same anonymous IP bucket
 ```
 
@@ -1596,16 +1634,37 @@ In `middleware_simple.py`, delete the ADR-044 block (the `if (request.cookies an
     async def _principal_entity(self, request: Request) -> str | None:
         """Charge the validated principal. Invalid or absent credentials charge the IP.
 
-        get_auth_principal caches its AuthContext on request state, so endpoint auth
-        reuses this validation. A failure is not cached; the route re-checks and
-        returns its own 401.
+        - A multi-user bearer JWT is keyed by its signature-verified ``sub``
+          (``decode_access_token``: no database access, no revocation check). Full
+          principal resolution before routing would run the scoped-token check,
+          which needs the matched route. For virtual keys that check always fails
+          pre-routing, and it would log a security warning on every request.
+          Revocation is still enforced by the route's own auth; a revoked token only
+          spends its own user's bucket.
+        - API keys, non-JWT bearers and the single-user session cookie go through
+          ``get_auth_principal``. It caches its AuthContext on request state, so
+          endpoint auth reuses this validation. A failure is not cached; the route
+          re-checks and returns its own 401.
+        - Other cookies (CSRF, theme, analytics) are not credentials, so they are
+          never resolved.
         """
-        if not (
-            request.cookies
-            or request.headers.get("Authorization") is not None
-            or request.headers.get("X-API-KEY") is not None
-        ):
+        from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+        settings = get_settings()
+        auth_header = request.headers.get("Authorization") or ""
+        has_session_cookie = bool(request.cookies.get(settings.SINGLE_USER_SESSION_COOKIE_NAME))
+        if not (auth_header or request.headers.get("X-API-KEY") is not None or has_session_cookie):
             return None
+        token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+        if token and token.count(".") == 2 and settings.AUTH_MODE != "single_user":
+            from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
+
+            try:
+                sub = get_jwt_service().decode_access_token(token).get("sub")
+            except Exception as exc:  # noqa: BLE001 - identity is best-effort; route auth still decides
+                logger.debug("RG ingress JWT identity fell back to IP: {}", type(exc).__name__)
+                return None
+            return f"user:{sub}" if sub else None
         from tldw_Server_API.app.core.AuthNZ import auth_principal_resolver
 
         try:
@@ -2201,8 +2260,11 @@ async def test_disabled_governance_attaches_no_governor(monkeypatch):
 
     app = SimpleNamespace(state=SimpleNamespace())
     await init_resource_governor(app)
-    assert getattr(app.state, "rg_governor", None) is None
-    assert getattr(app.state, "rg_policy_loader", None) is not None  # diag still works
+    try:
+        assert getattr(app.state, "rg_governor", None) is None
+        assert getattr(app.state, "rg_policy_loader", None) is not None  # diag still works
+    finally:
+        await app.state.rg_policy_loader.shutdown()  # stop the auto-reload task
 
 
 @pytest.mark.asyncio
@@ -2212,12 +2274,22 @@ async def test_disabled_governance_skips_auth_reservations(monkeypatch):
 
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()), state=SimpleNamespace())
     assert await auth_ep._get_auth_endpoint_rg_governor(request) is None
+
+
+def test_diag_lazy_governor_is_not_attached_when_disabled(monkeypatch):
+    monkeypatch.setenv("RG_ENABLED", "false")
+    from tldw_Server_API.app.api.v1.endpoints import resource_governor as rg_ep
+
+    app = SimpleNamespace(state=SimpleNamespace(rg_policy_loader=SimpleNamespace(get_policy=lambda _pid: None)))
+    monkeypatch.setattr(rg_ep, "_get_app", lambda: app)
+    assert rg_ep._get_or_init_governor() is not None  # diagnostics still work
+    assert getattr(app.state, "rg_governor", None) is None  # but enforcement stays off
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `/Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Resource_Governance/test_rg_single_switch.py`
-Expected: all three FAIL.
+Expected: all four FAIL.
 
 - [ ] **Step 3: Implement**
 
@@ -2235,6 +2307,15 @@ Expected: all three FAIL.
 
   Skip `_warn_if_enabled_without_governor(app)` when disabled.
 - `_get_auth_endpoint_rg_governor`: first statement `if not rg_enabled(True): return None`, importing `rg_enabled` from `tldw_Server_API.app.core.config`.
+- `resource_governor._get_or_init_governor` (the diag endpoints): keep the lazily built governor local when governance is off. Today it attaches it to `app.state`, so one diag call would switch enforcement back on for every call site that reads `app.state.rg_governor` (media ingest, workflows). Guard only the attach:
+
+```python
+            if loader is not None:
+                gov = MemoryResourceGovernor(policy_loader=loader)
+                if rg_enabled(True):
+                    app.state.rg_governor = gov  # diagnostics only when disabled
+```
+
 - `auth_deps._rg_enabled_flag`: `return bool(rg_enabled(True))`.
 - `config_validator`: replace `if not _is_truthy(os.getenv("RG_ENABLED")):` with `if not rg_enabled(True):`, importing from `tldw_Server_API.app.core.config`.
 - The three `rg_enabled(False)` sites become `rg_enabled(True)`.
@@ -2323,6 +2404,8 @@ Then delete the four ignored sections from the shipped YAML, so the shipped file
   - the DB policy store upgrade step: re-seed with `python -m tldw_Server_API.app.core.Resource_Governance.seed_db_from_yaml`, or edit policies, to pick up the new limits.
 
   It amends ADR-018 (resolution order, default policy) and ADR-044 (preflight generalised; invalid credentials fall through).
+
+- [ ] **Step 1b: Update the "new endpoint" checklist in `Resource_Governance/README.md`.** A new router is governed by `default` automatically. To give it a dedicated policy, add a router tag mapped in `by_tag` (preferred) or a `by_path` entry. A `by_path` entry for a sensitive route always wins over a tag. The route-map lint (`Helper_Scripts/ci/rg_route_map_lint.py`) fails CI on dead, shadowed or unused entries.
 
 - [ ] **Step 2: Correct `Env_Vars.md`'s RG section to match `config.py`:**
   - `RG_ENABLED`: defaults on, via `config.txt [ResourceGovernor] enabled = true`.
