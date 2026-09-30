@@ -4,7 +4,7 @@ title: RG ingress safety net (spec 1 of 2)
 status: To Do
 assignee: []
 created_date: '2026-09-30 01:39'
-updated_date: '2026-09-30 03:37'
+updated_date: '2026-09-30 04:34'
 labels:
   - resource-governance
   - backend
@@ -37,6 +37,13 @@ PR A (relief) implemented on fix/rg-safety-net-relief:
 - MCP categories fall back to mcp.default;
 - auth endpoints are charged once (guard keyed on an IP-scoped reservation under the same policy).
 Each task was reviewed (spec + quality). Broad suites (Resource_Governance, AuthNZ_Unit, Embeddings, lint): 2207 passed; 4 failures are xdist ordering interactions that pass in isolation.
+
+PR #3066 Qodo wave (2026-09-30). Fixed 9 of 11 findings; declined 2 with a posted rationale. Changes:
+- auth skip needs a policy match, an IP entity charged at ingress, and an IP auth entity;
+- policy-store failures log at ERROR from both governors;
+- Redis token windows quantized to about 1000 members (G = max(1, per_min // 1000));
+- eviction rotates in place (also fixes a cursor that skipped keys).
+Also fixed a pre-existing bypass: ingress used the client X-Request-ID as the governor op_id, and the memory governor replays the cached decision for a repeated op_id without charging, so a fixed header was never rate limited on any route. The op_id is now always server-generated. Commits 67b07ae36a..d2ecf10cca.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
