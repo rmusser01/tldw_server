@@ -10,9 +10,12 @@ Centralized rate limiting and concurrency control with policy-based configuratio
 ## New endpoints checklist (RG-aware design)
 
 - When adding new API endpoints, first wire authentication/authorization via `get_auth_principal` together with `RequirePermission(...)` / `RequireRole(...)` (and `require_service_principal()` for service-only routes). Authorization should be claim-first; do not gate new behavior on `AUTH_MODE` or `is_single_user_mode()` / `is_multi_user_mode()` checks.
-- For endpoints that are latency/cost-sensitive or user-facing (chat, audio, embeddings, evaluations, MCP, workflows, tools, media ingestion, etc.), decide whether they should be governed by Resource Governor:
-  - If yes, add or reuse a policy in the RG policy store (`resource_governor_policies.yaml` or DB-backed `rg_policies`) and ensure there is a corresponding `route_map` entry keyed by path/tag (for example `/api/v1/chat/* → chat.default`).
+- A new router is governed automatically: any unmapped `/api/` route resolves to the catch-all `default` policy (see `policy_resolver.py` and [ADR-057](../../../../Docs/ADR/057-resource-governor-safety-net.md)). You don't have to do anything for baseline coverage.
+- To give an endpoint a **dedicated** policy instead of the safety-net default:
+  - Add or reuse a policy in the RG policy store (`resource_governor_policies.yaml` or DB-backed `rg_policies`).
+  - Map it via `route_map.by_tag` (preferred — tag the router, and the mapping follows every route under it) or `route_map.by_path` (for one specific, sensitive route; a `by_path` entry always wins over a tag).
   - Where feasible, add or extend tests so RG-enforced behavior is covered at the HTTP level (200/429 behavior, `Retry-After` and `X-RateLimit-*` headers, and token/stream caps).
+- The route-map lint (`Helper_Scripts/ci/rg_route_map_lint.py`, allowlist `Helper_Scripts/ci/rg_route_map_lint_allowlist.txt`) fails CI on a `by_path` pattern that matches nothing or is fully shadowed by an earlier one, and on a `by_tag` key that no served route uses. Fix the mapping (or add a justified allowlist entry) rather than ignoring the failure.
 
 ## Policy Store Selection (env)
 - `RG_POLICY_STORE`: `file` (default) or `db`
@@ -121,7 +124,6 @@ Notes
   - `X-Forwarded-For` is parsed as a complete chain from the trusted edge inward (right-to-left); a malformed chain falls back to the physical peer. Any other header must be one plain IP literal.
   - Invalid physical peers resolve to the safe `unknown` sentinel. If AuthNZ forwarding is also enabled, use equivalent trusted-proxy sets and compatible headers so login lockouts and RG derive the same client identity.
 - Metrics cardinality (env): `RG_METRICS_ENTITY_LABEL`: `true|false` (default `false`)
-- Test mode precedence: `RG_TEST_BYPASS` overrides Resource Governor behavior when set; otherwise falls back to `TLDW_TEST_MODE`
 
 ## Simple Middleware (default‑on)
 

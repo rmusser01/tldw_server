@@ -318,14 +318,14 @@ Pytest markers
 The Resource Governor (RG) is the **primary enforcement path** for all rate limiting. Some deprecated module-local compatibility knobs remain during cutover and will be removed once shadow-mode exit criteria are met (see `Docs/Product/Completed/AuthNZ-Refactor/Resource_Governor_PRD.md`). AuthNZ dependency shims (`check_rate_limit`, `check_auth_rate_limit`) are diagnostics-only and do not enforce fallback 429 behavior.
 
 ### Core Settings
-- `RG_ENABLED`: Master toggle for Resource Governor enforcement (`true|1|false|0`). Resolution: env var > `config.txt` `[ResourceGovernor] enabled` > default `false`.
+- `RG_ENABLED`: Master toggle for Resource Governor enforcement (`true|1|false|0`). Resolution: env var > `config.txt` `[ResourceGovernor] enabled` > default `true` (test/pytest runtime defaults `false` unless `RG_ENABLED` is set explicitly). The stock `config.txt` ships `[ResourceGovernor] enabled = true`, so RG is on by default outside tests. Disabling it (env or config.txt) turns off every enforcement path at once — ingress, auth reservations, chat/embeddings token reservations, MCP admission, evaluations/audio concurrency, the workflows daily cap, and media job concurrency — and the ingress middleware no longer lazily builds a governor; policy files still load so diagnostics endpoints keep reporting state. See [ADR-057](../ADR/057-resource-governor-safety-net.md).
 - `RG_BACKEND`: Backend type (`memory` | `redis`). Default `memory`. Redis requires `REDIS_URL`.
 - `RG_POLICY_PATH`: Path to YAML policy file. Default `tldw_Server_API/Config_Files/resource_governor_policies.yaml`.
-- `RG_POLICY_STORE`: Policy persistence backend (`yaml` | `db`). Default `yaml`.
+- `RG_POLICY_STORE`: Policy persistence backend (`file` | `db`). Default `file`.
 - `RG_POLICY_RELOAD_ENABLED`: Enable hot-reload of policy changes (`true|false`). Default `true`.
-- `RG_POLICY_RELOAD_INTERVAL_SEC`: Policy reload check interval in seconds. Default `30`.
-- `RG_ROUTE_MAP_AUDIT`: When `true`, log warnings for HTTP routes not covered by the RG route map.
-- `RG_REDIS_FAIL_MODE`: Behavior when Redis is unavailable (`fail_open` | `fail_closed` | `fallback_memory`). Default `fail_open`.
+- `RG_POLICY_RELOAD_INTERVAL_SEC`: Policy reload check interval in seconds. Default `10`.
+- `RG_ROUTE_MAP_AUDIT`: When `true` (the default), the startup audit logs routes not covered by the RG route map.
+- `RG_REDIS_FAIL_MODE`: Behavior when Redis is unavailable (`fail_open` | `fail_closed` | `fallback_memory`). Default `fallback_memory`.
 
 ### Client Identity
 - `RG_TRUSTED_PROXIES`: Comma-separated trusted-proxy host/CIDR list. This is opt-in: forwarding is used only when the physical peer is a valid IP in this list.

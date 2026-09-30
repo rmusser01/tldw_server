@@ -1,7 +1,8 @@
 # Resource Governor ingress: enforce tag policies and make the defaults a safety net
 
 - **Date:** 2026-09-29
-- **Status:** Draft for owner review
+- **Status:** Implemented
+- **Delivered in:** PR #3066 (PR A, relief); PR B (open); PR C (open)
 - **Backlog:** TASK-13395 (tag policies never enforced). Implementation tasks are filed after this spec is approved.
 - **Scope:** Spec 1 of 2. This spec covers the ingress governor. Spec 2 (usage-quota posture) is described under [Out of scope](#out-of-scope).
 
@@ -242,7 +243,7 @@ Every item below is a pytest test, and each defect fix gets a test that fails be
 Three PRs against `dev`. They ship relief first, then wider coverage, so no intermediate state throttles more than today. If tag enforcement shipped first, about 57 more routes would be governed by today's server-wide `core.default` until the defaults changed.
 1. **Relief: safety-net defaults, the permanent-429 fixes in both backends, bucket eviction, the MCP and auth fixes.** Test 6 (except the switch test).
 2. **Coverage: resolver, route index, identity, audits, route-map lints and their fixes, and the WebUI replay.** This closes TASK-13395. Tests 1–5, 7, 8 and the audit part of 9.
-3. **The single switch, config hygiene, the DB-store upgrade note, ADR-056 and docs.** The switch test in 6.
+3. **The single switch, config hygiene, the DB-store upgrade note, ADR-057 and docs.** The switch test in 6.
 
 ## Out of scope
 

@@ -1,6 +1,6 @@
 """Resolve which Resource Governor policy governs a request.
 
-Order (ADR-056):
+Order (ADR-057):
 1. ``route_map.by_path`` globs, first match.
 2. The innermost mapped tag of the served route.
 3. ``default`` for any other ``/api/`` path.
