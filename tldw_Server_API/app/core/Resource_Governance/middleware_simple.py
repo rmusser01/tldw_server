@@ -303,7 +303,9 @@ class RGSimpleMiddleware:
         # Build RG request. Always include 'requests'. Specialized categories
         # (tokens/streams/jobs/minutes/etc.) are enforced at endpoint level.
         entity = self._derive_entity(request)
-        op_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        # Never derive the op_id from a client header: a repeated op_id replays the
+        # cached decision without charging, so a fixed X-Request-ID would bypass limits.
+        op_id = str(uuid.uuid4())
         cats: dict[str, dict[str, int]] = {"requests": {"units": 1}}
         # Note: tokens/streams/jobs require correct per-request units and are enforced
         # at the endpoint level (reserve/commit) rather than in this minimal middleware.

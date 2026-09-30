@@ -275,3 +275,19 @@ def test_ingress_entity_is_recorded_only_when_ingress_charged():
     with TestClient(_ingress_entity_app(_ExplodingGov())) as c:
         r = c.get("/api/v1/echo")
     assert r.status_code == 200 and r.json()["entity"] is None
+
+
+def test_repeated_client_request_id_is_still_charged():
+    # A client-chosen X-Request-ID must not become the reserve op_id: the governor
+    # replays a repeated op_id's cached decision without charging.
+    from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor
+
+    app = _ingress_entity_app(None)
+    app.state.rg_policy_loader = _Loader(
+        {"by_path": {"/api/v1/echo": "tight"}},
+        policies={"tight": {"requests": {"rpm": 1, "burst": 1.0}, "scopes": ["ip"]}},
+    )
+    app.state.rg_governor = MemoryResourceGovernor(policy_loader=app.state.rg_policy_loader)
+    with TestClient(app) as c:
+        codes = [c.get("/api/v1/echo", headers={"X-Request-ID": "fixed"}).status_code for _ in range(2)]
+    assert codes == [200, 429]
