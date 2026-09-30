@@ -5303,7 +5303,9 @@ async def get_chat_context(
         _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
 
         settings_row = db.get_conversation_settings(chat_id)
-        history_messages, attachment_urls = read_messages_with_images(db, chat_id, limit=1000, for_completions=True)
+        history_messages, attachment_urls = await run_in_threadpool(
+            read_messages_with_images, db, chat_id, limit=1000, for_completions=True,
+        )
         history_messages = [m for m in history_messages if not m.get('deleted')]
         turn_context = _resolve_chat_turn_context(
             db=db,
@@ -5470,7 +5472,9 @@ async def prepare_chat_completion(
             owner_user_id=str(current_user.id),
         )
 
-        messages, attachment_urls = read_messages_with_images(db, chat_id, limit=limit, offset=offset, for_completions=True)
+        messages, attachment_urls = await run_in_threadpool(
+            read_messages_with_images, db, chat_id, limit=limit, offset=offset, for_completions=True,
+        )
         # Filter deleted
         messages = [m for m in messages if not m.get('deleted')]
         paginated = messages
@@ -6302,7 +6306,9 @@ async def character_chat_completion(
             if _active_chat_sync_service(current_user, conversation_scope) is not None:
                 raise _chat_completion_persist_sync_unsupported_error()
 
-        messages, attachment_urls = read_messages_with_images(db, chat_id, limit=limit, offset=offset, for_completions=True)
+        messages, attachment_urls = await run_in_threadpool(
+            read_messages_with_images, db, chat_id, limit=limit, offset=offset, for_completions=True,
+        )
         messages = [m for m in messages if not m.get('deleted')]
         paginated = messages
         summary_content = ""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import io
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -304,3 +305,74 @@ def test_character_image_only_text_preserves_retry_content(
     parts = next(row["content"] for row in messages if row["role"] == "user")
     assert "".join(part["text"] for part in parts if part["type"] == "text") == ("" if text_kind == "generated" else placeholder)
     assert [part["image_url"]["detail"] for part in parts if part["type"] == "image_url"] == ["high"]
+
+
+@pytest.mark.parametrize("endpoint", ["context", "completions", "complete-v2"])
+@pytest.mark.parametrize("corrupt", [False, True], ids=["complete", "invalid-image"])
+def test_character_image_reads_leave_event_loop_and_release_operation(
+    monkeypatch: pytest.MonkeyPatch,
+    test_client: TestClient,
+    auth_headers: dict[str, str],
+    character_db: CharactersRAGDB,
+    endpoint: str,
+    corrupt: bool,
+) -> None:
+    """Image work moves to a worker and retains request-owned cleanup, including errors."""
+    from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import current_connection_state
+
+    png = (Path(__file__).resolve().parents[4] / "apps/packages/ui/src/public/icon/128.png").read_bytes()
+    chat_id = create_character_chat(test_client, auth_headers)
+    character_db.add_message({
+        "conversation_id": chat_id, "sender": "user", "content": "Describe",
+        "images": [{"data": b"corrupt" if corrupt else png, "mime": "image/png"}],
+    })
+    owners = []
+    reads = []
+    returned = []
+    original_verify = character_chat_sessions._verify_chat_ownership
+    original_read = character_chat_sessions.read_messages_with_images
+
+    def verify(*args: Any, **kwargs: Any) -> None:
+        original_verify(*args, **kwargs)
+        owners.append((threading.get_ident(), current_connection_state(character_db)))
+
+    def read(*args: Any, **kwargs: Any) -> Any:
+        state = current_connection_state(character_db)
+        try:
+            return original_read(*args, **kwargs)
+        finally:
+            reads.append((threading.get_ident(), state, state.conn if state is not None else None))
+
+    if character_db.backend_type == BackendType.POSTGRESQL:
+        pool = character_db.backend.get_pool()
+        original_return = pool.return_connection
+
+        def return_connection(raw: Any) -> None:
+            returned.append(raw)
+            original_return(raw)
+
+        monkeypatch.setattr(pool, "return_connection", return_connection)
+    monkeypatch.setattr(character_chat_sessions, "_verify_chat_ownership", verify)
+    monkeypatch.setattr(character_chat_sessions, "read_messages_with_images", read)
+    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", lambda **kwargs: {
+        "choices": [{"message": {"content": "Seen"}}],
+    })
+    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    path = f"/api/v1/chats/{chat_id}/{endpoint}"
+    body = {"include_character_context": False}
+    if endpoint == "complete-v2":
+        body.update(provider="llama", model="vision-fixture", save_to_db=False)
+    response = (test_client.get(path, headers=auth_headers) if endpoint == "context"
+                else test_client.post(path, headers=auth_headers, json=body))
+    assert response.status_code == (409 if corrupt else 200), response.text
+    assert len(owners) == len(reads) == 1
+    loop_thread, owner = owners[0]
+    worker_thread, state, raw = reads[0]
+    assert worker_thread != loop_thread, "Saved image reads must not decode or encode on the event loop"
+    assert state is owner and state is not None, "Worker image reads must retain the HTTP operation owner"
+    assert state.retiring and state.conn is None, "The complete HTTP response must finish its operation"
+    if character_db.backend_type == BackendType.POSTGRESQL:
+        assert raw is not None
+        assert sum(connection is raw for connection in returned) == 1
+        assert raw.info.transaction_status.name == "IDLE"
