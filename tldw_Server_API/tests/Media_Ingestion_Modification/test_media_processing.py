@@ -200,6 +200,21 @@ def client(client_user_only):
     return client_user_only
 
 
+@pytest.fixture
+def controlled_transcription():
+    """Provide segments at the STT seam and reject real provider/model dispatch."""
+    with patch(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib.speech_to_text",
+        side_effect=AssertionError("External audio model dispatch is forbidden in audio batch contracts"),
+    ) as model_dispatch:
+        with patch(
+            "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files.speech_to_text",
+            return_value=[{"Text": "Controlled audio transcript.", "start_seconds": 0, "end_seconds": 1}],
+        ) as transcribe:
+            yield transcribe
+        model_dispatch.assert_not_called()
+
+
 # --- Define the factory directly in the test file for isolation ---
 @pytest.fixture(scope="function")  # Function scope for the factory itself, so each test gets a fresh one if needed
 def memory_db_factory_local():  # Using a different name to avoid conflicts if one exists elsewhere
@@ -686,7 +701,7 @@ class TestProcessVideos:
 class TestProcessAudios:
     ENDPOINT = "/api/v1/media/process-audios"
 
-    def test_process_audio_url_success_no_analysis_no_chunking(self, client, dummy_headers):
+    def test_process_audio_url_success_no_analysis_no_chunking(self, client, dummy_headers, controlled_transcription):
 
         form_data = {
             "urls": [VALID_AUDIO_URL],
@@ -724,6 +739,8 @@ class TestProcessAudios:
                     "or unavailable local STT runtime"
                 )
 
+        controlled_transcription.assert_called_once()
+
         data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
         result = data["results"][0]
         check_media_item_result(result, "Success", check_db_fields=True)
@@ -732,6 +749,7 @@ class TestProcessAudios:
         # Expect content because transcription should still happen
         assert result["content"] is not None # Might be empty if transcription fails silently, but shouldn't be None
         assert isinstance(result["content"], str)
+        assert controlled_transcription.return_value[0]["Text"] in result["content"]
         assert result["segments"] is not None and isinstance(result["segments"], list)
         # Analysis and Chunks should be None as they were disabled
         assert result["analysis"] == "[Analysis Not Requested]" or result["analysis"] is None, f"Analysis should be None/Not Requested, got: {result['analysis']}"
@@ -768,7 +786,7 @@ class TestProcessAudios:
         assert result["chunks"] is not None and len(result["chunks"]) > 0 # Expect chunks due to default
         assert result["analysis"] is not None and len(result["analysis"]) > 0 # Expect analysis due to default
 
-    def test_process_audio_multi_status_mixed(self, client, dummy_headers):
+    def test_process_audio_multi_status_mixed(self, client, dummy_headers, controlled_transcription):
 
         """Test one valid upload and one invalid URL -> 207."""
         form_data = {
@@ -777,9 +795,12 @@ class TestProcessAudios:
             "perform_chunking": "true"   # Keep chunking enabled (default)
         }
         with open(SAMPLE_AUDIO_PATH, "rb") as f:
-            # Ensure the dummy audio file has some content for transcription to work
+            # Keep real upload validation and WAV conversion before the STT seam.
             files = {"files": (SAMPLE_AUDIO_PATH.name, f, "audio/mpeg")}
             response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
+
+        controlled_transcription.assert_called_once()
+        assert Path(controlled_transcription.call_args.kwargs["audio_input"]).name == SAMPLE_AUDIO_PATH.with_suffix(".wav").name
 
         if response.status_code == 400 and "error parsing the body" in response.text.lower():
             pytest.fail("Still getting 400 'error parsing body' after auth fix (audio mixed).")
@@ -836,15 +857,19 @@ class TestProcessAudios:
 
         # Check successful item results (assuming defaults enabled chunking)
         assert success_result["content"] is not None
+        assert controlled_transcription.return_value[0]["Text"] in success_result["content"]
         assert success_result["chunks"] is not None # Chunking was true
 
-    def test_process_audio_upload_success(self, client, dummy_headers):
+    def test_process_audio_upload_success(self, client, dummy_headers, controlled_transcription):
 
         """Test processing a single valid audio file upload."""
         form_data = {"perform_analysis": "false"}
         with open(SAMPLE_AUDIO_PATH, "rb") as f:
             files = {"files": (SAMPLE_AUDIO_PATH.name, f, "audio/mpeg")}
             response = client.post(self.ENDPOINT, data=form_data, files=files, headers=dummy_headers)
+
+        controlled_transcription.assert_called_once()
+        assert Path(controlled_transcription.call_args.kwargs["audio_input"]).name == SAMPLE_AUDIO_PATH.with_suffix(".wav").name
 
         if response.status_code == 400 and "error parsing the body" in response.text.lower():
             pytest.fail("Still getting 400 'error parsing body' after auth fix (audio upload success).")
@@ -872,6 +897,7 @@ class TestProcessAudios:
         assert data["results"][0]["media_type"] == "audio"
         assert data["results"][0]["input_ref"] == SAMPLE_AUDIO_PATH.name
         assert data["results"][0]["content"] is not None and len(data["results"][0]["content"]) > 0
+        assert controlled_transcription.return_value[0]["Text"] in data["results"][0]["content"]
 
     def test_process_audio_no_input(self, client, dummy_headers):
 

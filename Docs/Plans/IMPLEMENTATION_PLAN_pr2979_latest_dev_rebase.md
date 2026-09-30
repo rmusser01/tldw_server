@@ -356,18 +356,20 @@ UAT531 final local review is clear. Exact1744nodes/all358PGcases preserved in al
 **Goal:** Prove the original aggregation contract calls a real model provider.
 **Success Criteria:** An opt-in tripwire fails before model dispatch without downloads.
 **Tests:** Exact original mixed audio case and native successful-case evidence.
-**Status:** In Progress
+**Status:** Complete
 
 ### Stage 2: Reuse the existing transcription mock seam
 **Goal:** Keep real conversion, batching, chunking and URL error behavior with controlled segments.
 **Success Criteria:** Original mixed-result assertions pass and transcript content/one-call checks are causal.
 **Tests:** Exact case, adjacent audio preflight/summary controls, broader141 Media scope where feasible.
-**Status:** Not Started
+**Status:** Complete
 
 ### Stage 3: Verify, review and qualify
 **Goal:** Record complete evidence and require final hosted acceptance.
 **Success Criteria:** No added skips, compile/Ruff/Bandit clear, independent review and final native checks accepted.
 **Tests:** Changed-scope quality and final-head automatic/native matrix.
-**Status:** Not Started
+**Status:** In Progress
 
 UAT532 caller tracing expands the same one-file repair to three existing audio API contracts (upload success, URL success, mixed status), using one explicit opt-in controlled-transcription fixture and lower-provider tripwire. Do not deselect these known callers from final broader141 verification. First clean causal red intercepts before model loading; mixed+adjacent seams35pass. First BaseException-based tripwire disrupted TestClient and is retained as failed harness evidence; ordinary guarded Mock plus immediate assert_not_called yields clean red.
+
+UAT532 final all141scope is green with110pass/29existing skips/2existing xpasses140.41seconds. No added skip/deselection or model artifacts; URL availability remains an explicit limitation. Allthree callers use one opt-in seam, root independent review is clear, Ruff adds zero findings and Bandit adds five LOW assertions only. Final native hosted acceptance remains open.
