@@ -1,3 +1,5 @@
+"""Verify Sync v2 HTTP contracts, including durable personal-context recovery."""
+
 from __future__ import annotations
 
 import base64
@@ -3700,9 +3702,11 @@ def test_personal_context_endpoints_use_real_factory_bootstrap_and_complete_flow
     )
     assert push.status_code == 200, push.text
     assert push.json()["personal_context_exchange"] == exchange
-    assert [item["client_envelope_id"] for item in push.json()["accepted"]] == [
+    accepted_envelopes = push.json()["accepted"]
+    assert [item["client_envelope_id"] for item in accepted_envelopes] == [
         "pc-device:record:1"
     ], push.json()
+    assert accepted_envelopes[0]["apply_status"] == "applied", accepted_envelopes[0]
     recovery_cursor = None
     recovered_body = None
     for _attempt in range(10):
