@@ -36,7 +36,7 @@ def spy(monkeypatch):
 
 
 async def test_ingress_charged_same_policy_skips_ip_reservation(spy):
-    allowed, _ = await auth_ep._reserve_auth_rg_requests(_request("authnz.forgot_password"), policy_id="authnz.forgot_password")
+    allowed, _ = await auth_ep._reserve_auth_rg_requests(_request("authnz.forgot_password"), policy_id="authnz.forgot_password", entity="ip:203.0.113.9")
     assert allowed and spy.entities == []
 
 
@@ -45,6 +45,11 @@ async def test_per_email_throttle_still_applies(spy):
     assert spy.entities == ["email:abc"]
 
 
+async def test_per_user_throttle_still_applies(spy):
+    await auth_ep._reserve_auth_rg_requests(_request("authnz.forgot_password"), policy_id="authnz.forgot_password", entity="user:7")
+    assert spy.entities == ["user:7"]
+
+
 async def test_no_ingress_charge_reserves_by_ip(spy):
-    await auth_ep._reserve_auth_rg_requests(_request(), policy_id="authnz.forgot_password")
+    await auth_ep._reserve_auth_rg_requests(_request(), policy_id="authnz.forgot_password", entity="ip:203.0.113.9")
     assert len(spy.entities) == 1 and spy.entities[0].startswith("ip:")
