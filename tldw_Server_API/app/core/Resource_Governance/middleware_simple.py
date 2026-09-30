@@ -14,7 +14,6 @@ import re
 import uuid
 
 from loguru import logger
-from starlette.exceptions import HTTPException
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -95,6 +94,53 @@ class RGSimpleMiddleware:
             return None
         return None
 
+    async def _principal_entity(self, request: Request) -> str | None:
+        """Charge the validated principal. Invalid or absent credentials charge the IP.
+
+        - A multi-user bearer JWT is keyed by its signature-verified ``sub``
+          (``decode_access_token``: no database access, no revocation check). Full
+          principal resolution before routing would run the scoped-token check,
+          which needs the matched route. For virtual keys that check always fails
+          pre-routing, and it would log a security warning on every request.
+          Revocation is still enforced by the route's own auth; a revoked token only
+          spends its own user's bucket.
+        - API keys, non-JWT bearers and the single-user session cookie go through
+          ``get_auth_principal``. It caches its AuthContext on request state, so
+          endpoint auth reuses this validation. A failure is not cached; the route
+          re-checks and returns its own 401.
+        - Other cookies (CSRF, theme, analytics) are not credentials, so they are
+          never resolved.
+        """
+        from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+
+        settings = get_settings()
+        auth_header = request.headers.get("Authorization") or ""
+        has_session_cookie = bool(request.cookies.get(settings.SINGLE_USER_SESSION_COOKIE_NAME))
+        if not (auth_header or request.headers.get("X-API-KEY") is not None or has_session_cookie):
+            return None
+        token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+        if token and token.count(".") == 2 and settings.AUTH_MODE != "single_user":
+            from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
+
+            try:
+                sub = get_jwt_service().decode_access_token(token).get("sub")
+            except Exception as exc:  # noqa: BLE001 - identity is best-effort; route auth still decides
+                logger.debug("RG ingress JWT identity fell back to IP: {}", type(exc).__name__)
+                return None
+            return f"user:{sub}" if sub else None
+        from tldw_Server_API.app.core.AuthNZ import auth_principal_resolver
+
+        try:
+            principal = await auth_principal_resolver.get_auth_principal(request)
+        except Exception as exc:  # noqa: BLE001 - identity is best-effort; route auth still decides
+            logger.debug("RG ingress identity fell back to IP: {}", type(exc).__name__)
+            return None
+        if getattr(principal, "user_id", None) is not None:
+            return f"user:{principal.user_id}"
+        if getattr(principal, "api_key_id", None) is not None:
+            return f"api_key:{principal.api_key_id}"
+        return None
+
     def _derive_entity(self, request: Request) -> str:
         """Derive the RG entity key for this request.
 
@@ -158,43 +204,6 @@ class RGSimpleMiddleware:
             await self.app(scope, receive, send)
             return
 
-        # Cookie sessions must spend their validated owner's user quota when
-        # the policy cannot admit an anonymous request. The
-        # canonical resolver caches AuthContext on shared ASGI request state,
-        # so endpoint auth reuses this validation. Explicit headers (even empty
-        # ones) keep precedence over cookies, matching the resolver contract.
-        if (
-            request.cookies
-            and request.headers.get("Authorization") is None
-            and request.headers.get("X-API-KEY") is None
-        ):
-            from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-
-            settings = get_settings()
-            loader = getattr(request.app.state, "rg_policy_loader", None)
-            policy = (loader.get_policy(policy_id) or {}) if loader else {}
-            policy_scopes = set(policy.get("scopes") or ["global", "entity"])
-            requires_owner = bool(policy_scopes & {"user", "api_key"}) and not (
-                policy_scopes & {"global", "ip", "entity"}
-            )
-            if (
-                requires_owner
-                and settings.AUTH_MODE == "single_user"
-                and request.cookies.get(settings.SINGLE_USER_SESSION_COOKIE_NAME)
-            ):
-                from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import (
-                    get_auth_principal,
-                )
-
-                try:
-                    await get_auth_principal(request)
-                except HTTPException as exc:
-                    # This middleware runs outside ExceptionMiddleware.
-                    response = JSONResponse(
-                        {"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers
-                    )
-                    await response(scope, receive, send)
-                    return
         # If governor not initialized, lazily create one using loader + backend env
         gov = getattr(request.app.state, "rg_governor", None)
         if gov is None:
@@ -225,7 +234,7 @@ class RGSimpleMiddleware:
 
         # Build RG request. Always include 'requests'. Specialized categories
         # (tokens/streams/jobs/minutes/etc.) are enforced at endpoint level.
-        entity = self._derive_entity(request)
+        entity = await self._principal_entity(request) or self._derive_entity(request)
         # Never derive the op_id from a client header: a repeated op_id replays the
         # cached decision without charging, so a fixed X-Request-ID would bypass limits.
         op_id = str(uuid.uuid4())
