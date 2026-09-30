@@ -639,3 +639,29 @@ Actual dev advanced to `955b1d9626a055ca44336a00d3d4c144949cb00f` through #3062,
 Fresh documentation and affected child verification are pending before publication. Prior source qualification remains explicitly pinned evidence, not fresh rewritten-head hosted CI. Qodo's zero findings on `f393150ca4` and the successful replacement license audit are historical for this new head. Require fresh reviews, all required checks, the unchanged approved summaries, and a normal exact-head/up-to-date parent merge. Then retarget/requalify the child against actual dev before its normal merge; Stage 2D delivery and broader parity remain open.
 
 Complete parent Docs passes **212 tests, eight warnings, no failures/skips**, 24.16s (`/private/tmp/persona-pr3041-tracking-rebase-docs-20260929.log/xml`). This tracking-only refresh has no new Python security target; the prior production 17-file Bandit result belongs to byte-identical qualified source, not a fresh scan claim. Only the plan/task evidence is added after the identical rebase. Parent exact-head hosted gates/review and ordered child delivery remain open.
+
+## 2026-09-30 Hosted Gate Recovery (TASK-13245.14)
+
+### Stage 1: Diagnose Exact-Head Failures
+**Goal**: Separate inherited test contracts, test-order interference and process limits from Persona defects.
+**Success Criteria**: Each correction has reproduced evidence and preserves its original assertions and coverage.
+**Tests**: Failed hosted nodes, pristine exact-dev controls and related complete files.
+**Status**: In Progress
+
+Published parent `0d6f5c5a72` has three failed shards and their failed aggregate. The Sync shard has one recovery-envelope assertion failure among 2,410 passes; the node passes alone locally, so its cause remains unproven. The DB shard reports 1,643 passes/seven skips, then the unchanged 55-minute process guard aborts interpreter garbage collection; no assertion failed and no timeout or test has been disabled. Actual dev advanced to `03043d1c10cbdbfa53945c0641d90e4e37836754` through frontend/docs/tracking-only #3064 and #3056. Neither PR is merged. Qodo is clean on both published heads, and child `008e2a3613` has passing stacked checks, not final dev-merge evidence.
+
+### Stage 2: Minimal Verified Corrections
+**Goal**: Restore legitimate gates without runtime, workflow-policy or dependency scope expansion.
+**Success Criteria**: Complete touched files pass, with lint, compilation, security and contract evidence.
+**Tests**: Ingestion access/API/notes contracts and `test_fastapi_routes.py`; additional scopes only after diagnosis.
+**Status**: In Progress
+
+The Ingestion capability route test fails with `StopIteration` on both the parent and a physical pristine exact-dev archive using the pinned FastAPI overlay. FastAPI includes routers lazily, so reading `app.routes` directly misses the served capability path. Reusing the existing `iter_served_routes` helper preserves the explicit response-model identity assertion; endpoint behavior is unchanged. Four complete related files pass **44 tests, seven warnings, no failures/skips**, 9.78s. Ruff, compilation and whitespace pass. Raw Bandit reports only 43 B101 test assertions/no errors; the non-assert scan has zero findings/errors. Evidence: `/private/tmp/persona-pr3041-ingestion-{base-red,green,bandit,bandit-nonassert}-20260930.*`. Sync and DB investigations are still open; this is not a green whole-stack claim.
+
+### Stage 3: Refresh And Deliver The Stack
+**Goal**: Rebase onto actual latest dev and merge only freshly qualified exact heads.
+**Success Criteria**: Patch preservation, current-head checks/reviews and approved unchanged summaries satisfy normal strict merges.
+**Tests**: Relevant integration and Docs guards, exact-head hosted CI and fresh Qodo/formal/inline inspections.
+**Status**: Not Started
+
+Preserve recovery branches/stashes and the shared dirty checkout. Parent merges normally into dev first; only then retarget and qualify the tests-only child against actual dev. No administrator bypass, stale green checks, repeated healthy-run resets, or completion claim for Stage 2D/broader parity.
