@@ -659,3 +659,13 @@ Final publication rebase: newestdev955b1d9626a055ca44336a00d3d4c144949cb00f adva
 **Status:** In Progress
 
 Production route/schema are unchanged. Only the test route enumeration uses the existing shared walker and unwraps its original route for the unchanged model assertion. Local43-case full scope, missing-model assertion mutation, Ruff/compile/diff and unchanged Bandit43LOW assertions pass; all original43 assertions/22other definitions are retained. Independent source/evidence review is clear. Local repair is complete; status stays In Progress for final hosted acceptance. Batch locally while final-head diagnostics remain useful.
+
+
+### UAT543 — hosted setup interruption (TASK-13260.278.18.83.32)
+
+**Goal:** Qualify the final-head Ubuntu3.12 embeddings shard after a hosted runner disconnect.
+**Success Criteria:** Replacement exact-head job completes its real tests; interruptions and other-platform passes do not count as acceptance.
+**Tests:** Job/check annotations show dependency setup never completed and tests never began; underlying disconnect cause is unproven. Same-head Ubuntu3.13/Windows/macOS embeddings jobs pass. No speculative source patch, timer change or suppression.
+**Status:** In Progress
+
+Retain job109745901883 metadata/annotations and unavailable-log result, preserve useful remaining diagnostic jobs, and dispatch the existing native matrix on the reviewed final publication. If setup failure repeats, investigate actual runner resource/setup evidence before editing.

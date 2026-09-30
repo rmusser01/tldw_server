@@ -4,6 +4,12 @@
 
 The requester identifies this PR as a blocker for the next release and hosted private beta. GitHub confirms no merge queue is configured on dev; its rulesets still require protected status checks and merge-only integration. PR2979 is labelled `release-blocker`. Merge immediately once final-head checks/native matrix and applicable review findings are accepted, without bypassing those gates. Full UAT remains paused.
 
+## UAT543 — hosted embeddings runner disconnect (TASK-13260.278.18.83.32)
+
+Published-head308acf native Ubuntu Python3.12 embeddings job109745901883 starts05:53:11 and ends06:39:11 with GitHub annotation “The hosted runner lost communication with the server.” Step5 dependency setup remains in progress; every later step, including smoke, PostgreSQL verification and pytest, is pending. The direct log endpoint returns404; official gh fallback cannot read incomplete-run logs. Preserve /private/tmp/pr2979-native-109745901883-{meta,check,annotations}.json. The cause of the disconnect is unproven; no CPU, memory, network or application defect is inferred. Same-head embeddings shards pass on Ubuntu3.13, Windows3.12 and macOS3.12, which do not substitute for Ubuntu3.12 acceptance.
+
+No source, dependency, timeout or CI patch is justified. Keep remaining useful diagnostic jobs and qualify the replacement Ubuntu3.12 shard when the reviewed local batch is published and the native matrix runs on that final head. Latest snapshot has586 passes, two known UAT542 failures plus this setup failure,206 queued/running and three configured skips across both runs. Full UAT remains paused; final-head hosted acceptance is open. Tracking-only change: Bandit is inapplicable to Markdown, and no test run is claimed for these records.
+
 ## UAT542 — included capabilities route audit (TASK-13260.278.18.83.31)
 
 Published-head `308acf31a8` native Ubuntu Python 3.12 job109745899318 and 3.13 job109745898622 each fail only `test_capabilities_endpoint_uses_explicit_response_model` with StopIteration. FastAPI 0.141.1 nests included routers; the unchanged test scans top-level `app.routes`, so it cannot find the served capabilities path. The endpoint and its four HTTP capability cases pass. Reuse the existing `iter_served_routes` helper used by neighboring ingestion audits, then inspect the original route for the unchanged response-model identity assertion. No endpoint, schema, entitlement or database behavior changes.
