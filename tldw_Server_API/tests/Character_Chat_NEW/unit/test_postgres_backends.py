@@ -260,9 +260,6 @@ def test_world_book_entry_insert_uses_returning_clause():
 
     service = WorldBookService(db)
     world_book_id = service.create_world_book(name="Lore Book")
-    # PostgreSQL entry writes first confirm the owner's book exists
-    # (a9f0c1a1b5); that read is not what this test pins.
-    service.get_world_book = lambda book_id: {"id": book_id}
     entry_id = service.add_world_book_entry(
         world_book_id,
         keywords=["hero"],

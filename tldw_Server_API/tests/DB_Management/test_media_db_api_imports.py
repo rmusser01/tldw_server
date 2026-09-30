@@ -2232,7 +2232,8 @@ def test_claims_service_does_not_bind_media_database_from_shim(monkeypatch):
     monkeypatch.setattr(legacy_media_db, "MediaDatabase", object(), raising=False)
     module = importlib.reload(claims_service)
     assert module.managed_media_database is media_db_api.managed_media_database
-    assert module.MediaDatabase is media_db_native_class.MediaDatabase
+    assert "MediaDatabase" not in module.__dict__
+    assert "from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase" in inspect.getsource(module)
     assert "Media_DB_v2" not in inspect.getsource(module)
 
 

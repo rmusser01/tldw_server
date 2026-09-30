@@ -95,7 +95,7 @@ async def test_magic_link_verify_creates_user_and_org(
         client.portal.call(seed_unverified_user)
 
     original_ensure_membership = auth._ensure_user_org_membership
-    original_mark_verified = auth._mark_user_verified
+    original_mark_verified = auth._svc_mark_user_verified
     verified_versions: dict[int, Any] = {}
 
     async def mark_verified_and_record_version(db: Any, user_id: int, now_utc: Any) -> None:
@@ -105,7 +105,7 @@ async def test_magic_link_verify_creates_user_and_org(
             "SELECT profile_version FROM users WHERE id = $1", user_id,
         )
 
-    monkeypatch.setattr(auth, "_mark_user_verified", mark_verified_and_record_version)
+    monkeypatch.setattr(auth, "_svc_mark_user_verified", mark_verified_and_record_version)
 
     async def ensure_membership_after_verification(user_id: int, username: str | None = None) -> None:
         """Independent auth services must see committed verification before FK writes."""
