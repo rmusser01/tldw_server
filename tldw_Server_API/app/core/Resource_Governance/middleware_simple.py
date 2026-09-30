@@ -387,6 +387,9 @@ class RGSimpleMiddleware:
             return
 
         # Allowed; run handler with header injection wrapper and then commit in finally
+        # Record the entity ingress actually charged; auth's single-charge check keys on it.
+        with contextlib.suppress(_RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS):
+            request.state.rg_ingress_entity = entity
         # Prepare success-path rate-limit headers (using precise peek when available)
         try:
             _cats = dict((decision.details or {}).get("categories") or {})
