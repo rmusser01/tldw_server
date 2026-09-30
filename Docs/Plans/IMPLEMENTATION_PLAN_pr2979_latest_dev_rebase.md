@@ -388,7 +388,7 @@ The autouse fixture and two heartbeat tests mutate sb.asyncio.sleep on the share
 **Goal:** Keep native asyncio globally and accelerate only the endpoint10second heartbeat.
 **Success Criteria:** Allthree fake callers use one local fixture boundary; other durations/functions/identities remain native.
 **Tests:** Durable fixture regression, artifact/admin and heartbeat/idle/stream controls, compile/Ruff/Bandit.
-**Status:** In Progress
+**Status:** Complete
 
 Only sandbox test conftest, heartbeat tests and existing test regression scope are authorized. Keep the exact5second artifact threshold and all sizes/paths/no-walk assertions. No production/core-pool or process-wide asyncio changes.
 
@@ -396,7 +396,9 @@ Only sandbox test conftest, heartbeat tests and existing test regression scope a
 **Goal:** Require independent source review and native final-head acceptance.
 **Success Criteria:** No new skip, assertion weakening or production security finding; hosted gates pass.
 **Tests:** Full affected sandbox controls and final automatic/native matrix.
-**Status:** Not Started
+**Status:** In Progress
+
+Local repair qualifies106artifact/admin/WS/idle/stream controls, zero skips43.04seconds, after seven actual-fixture causal reds. Root corrected the duration recorder to replace only conftest._asyncio, and independent source review is clear. All12original assertions remain including exact5second/300item/no-walk guards. Ruff retains six inherited findings; Bandit adds ten LOW assertions only with three inherited B110 unchanged. Native Windows final-head acceptance remains open.
 
 ## Claims worker setup watchdog — UAT533 (TASK-13260.278.18.83.21)
 

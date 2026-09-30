@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType
 from tldw_Server_API.app.main import app
+
+_NATIVE_ASYNCIO_SLEEP = asyncio.sleep
 
 
 def _force_docker_preflight_available(monkeypatch) -> None:
@@ -121,3 +126,51 @@ def test_artifacts_list_uses_cached_sizes_before_filesystem_walk(tmp_path: Path,
             ("nested/out.txt", 5),
             ("summary.txt", 2),
         ]
+
+
+def test_artifact_context_preserves_native_asyncio_sleep() -> None:
+    """Artifact tests must retain Jobs backoff and other process-wide clocks."""
+    assert asyncio.sleep is _NATIVE_ASYNCIO_SLEEP
+
+
+def test_heartbeat_fixture_preserves_native_asyncio_sleep(
+    patch_sandbox_heartbeat_sleep,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+
+    assert asyncio.sleep is _NATIVE_ASYNCIO_SLEEP
+    assert sb.asyncio is not asyncio
+    assert sb.asyncio.create_task is asyncio.create_task
+    assert sb.asyncio.wait_for is asyncio.wait_for
+    assert sb.asyncio.to_thread is asyncio.to_thread
+    assert sb.asyncio.Task is asyncio.Task
+    assert sb.asyncio.TimeoutError is asyncio.TimeoutError
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("delay", "expected_delay"),
+    [(0.05, 0.05), (0.5, 0.5), (2, 2), (300, 300), (10, 0.01)],
+)
+async def test_heartbeat_fixture_only_shortens_heartbeat_wait(
+    monkeypatch: pytest.MonkeyPatch,
+    delay: float,
+    expected_delay: float,
+) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.tests.sandbox import conftest as sandbox_fixtures
+
+    requested_delays = []
+
+    async def record_sleep(requested_delay: float, result: object = None) -> object:
+        requested_delays.append(requested_delay)
+        return result
+
+    # Substitute only the fixture's clock reference, keeping process-wide
+    # asyncio native even while checking a 300-second requested delay.
+    test_clock = SimpleNamespace(**{**vars(asyncio), "sleep": record_sleep})
+    monkeypatch.setattr(sandbox_fixtures, "_asyncio", test_clock)
+    sandbox_fixtures.patch_sandbox_heartbeat_sleep.__wrapped__(monkeypatch)
+    assert asyncio.sleep is _NATIVE_ASYNCIO_SLEEP
+    await sb.asyncio.sleep(delay)
+    assert requested_delays == [expected_delay]
