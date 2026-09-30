@@ -18,14 +18,17 @@ against either a raw uvicorn access log or this app's stdout/Loguru log.
 import json
 import re
 import sys
+from collections.abc import Iterable
 from datetime import datetime
 
 _TS = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)[.,](\d{3})")
 _REQ = re.compile(r'"(\w+) (\S+) HTTP/[\d.]+"\s+(\d{3})')
 
 
-def convert(lines):
-    rows, t0 = [], None
+def convert(lines: Iterable[str]) -> list[list[float | str]]:
+    """Return ``[seconds_since_first, method, path]`` rows for each /api/ request line."""
+    rows: list[list[float | str]] = []
+    t0: float | None = None
     for line in lines:
         ts_m = _TS.match(line)
         req_m = _REQ.search(line)
