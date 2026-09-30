@@ -194,6 +194,17 @@ def test_invalid_jwt_falls_back_to_api_key_like_route_auth(client):
     assert _charged_entities(client) == {"user:7"}
 
 
+def test_cached_identity_is_per_authnz_client_ip(client, monkeypatch):
+    # API-key allowed_ips checks AuthNZ's own client IP, which can differ from RG's.
+    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
+
+    authnz_ips = iter(["10.0.0.1", "10.0.0.2"])
+    monkeypatch.setattr(ip_allowlist, "resolve_client_ip", lambda _request, _settings=None: next(authnz_ips))
+    client.get("/api/v1/thing", headers={"X-API-KEY": "7"})
+    client.get("/api/v1/thing", headers={"X-API-KEY": "7"})
+    assert client.principal_calls == ["7", "7"]
+
+
 class _TenantSnap:
     route_map = {"by_path": {"/api/v1/*": "p"}, "by_tag": {}}
     tenant = {"enabled": True, "header": "X-TLDW-Tenant"}

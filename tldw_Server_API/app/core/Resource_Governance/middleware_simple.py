@@ -135,9 +135,22 @@ class RGSimpleMiddleware:
         if not (auth_header or api_key is not None or session):
             return None
         # Every credential the resolver may read is in the key, plus the client IP because
-        # validation is IP-gated (per-key allowed_ips); raw values are never stored.
+        # validation is IP-gated (per-key allowed_ips); raw values are never stored. AuthNZ
+        # derives its own client IP for that gate, which can differ from RG's (TASK-13144).
+        from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
+
         client_ip = str(getattr(request.state, "rg_client_ip", "") or "")
-        creds = (("ip", client_ip), ("bearer", auth_header), ("x-api-key", api_key), ("session-cookie", session))
+        try:
+            authnz_ip = resolve_client_ip(request, settings) or ""
+        except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
+            authnz_ip = ""
+        creds = (
+            ("ip", client_ip),
+            ("authnz-ip", authnz_ip),
+            ("bearer", auth_header),
+            ("x-api-key", api_key),
+            ("session-cookie", session),
+        )
         key = hashlib.sha256("\0".join(f"{kind}\0{value}" for kind, value in creds if value is not None).encode()).hexdigest()
         now = time.monotonic()
         hit = self._identity_cache.get(key)
