@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -707,8 +707,9 @@ def test_persona_backed_chat_appends_persona_exemplar_guidance_in_runtime_path(
 
 
 def test_explicit_prompt_preserves_persona_boundary_guidance(
-    persona_chat_client, persona_chat_db,
-):
+    persona_chat_client: tuple[TestClient, dict[str, str], MagicMock],
+    persona_chat_db: CharactersRAGDB,
+) -> None:
     """Explicit system text must retain provider-visible Persona boundary guidance."""
     client, headers, provider = persona_chat_client
     conversation_id, _ = _create_persona_conversation(
@@ -738,8 +739,12 @@ def test_explicit_prompt_preserves_persona_boundary_guidance(
 @pytest.mark.parametrize("system_text", [None, "Answer briefly.", "   "], ids=["omitted", "explicit", "blank"])
 @pytest.mark.parametrize("template_name", [None, "persona_contract"], ids=["raw", "named"])
 def test_persona_prompt_template_precedence_preserves_guidance_and_saved_binding(
-    persona_chat_client, persona_chat_db, template_name, system_text, persona_memory_mode,
-):
+    persona_chat_client: tuple[TestClient, dict[str, str], MagicMock],
+    persona_chat_db: CharactersRAGDB,
+    template_name: str | None,
+    system_text: str | None,
+    persona_memory_mode: str,
+) -> None:
     """Real rendering preserves required sections without rewriting saved identity."""
     client, headers, provider = persona_chat_client
     conversation_id, _ = _create_persona_conversation(
@@ -1256,12 +1261,14 @@ def test_persona_memory_mode_read_write_allows_memory_write(
     assert len(usage_entries) == 1
 
 
-@pytest.mark.parametrize("persona_memory_mode", ["read_only", "read_write"])
-@pytest.mark.parametrize("access_loss", ["revoked", "inactive", "deleted"])
-def test_inherited_workspace_chat_keeps_startup_binding_and_memory_policy_on_resume(
-    persona_chat_client, persona_chat_db, monkeypatch, persona_memory_mode, access_loss,
-):
-    """Accepted startup survives a default edit, but never a loss of current access."""
+@pytest.fixture
+def inherited_workspace_chat(
+    persona_chat_client: tuple[TestClient, dict[str, str], MagicMock],
+    persona_chat_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+    persona_memory_mode: str,
+) -> tuple[str, dict[str, object], dict[str, object], dict[str, object]]:
+    """Accept an inherited chat, then change the Workspace identity and memory default."""
     from tldw_Server_API.app.core.Chat.assistant_startup import decode_assistant_startup
     from tldw_Server_API.app.core.Persona import memory_integration as mem
     from tldw_Server_API.app.core.Workspaces.chat_startup import start_workspace_chat
@@ -1334,120 +1341,163 @@ def test_inherited_workspace_chat_keeps_startup_binding_and_memory_policy_on_res
     assert edited.status_code == 200, edited.text
     assert edited.json()["version"] == workspace["version"] + 1
     assert persona_chat_db.get_workspace("ws-resume")["assistant_defaults_json"]["assistant_id"] == "workspace-replacement"
+    return conversation_id, binding, origin, initial
 
-    with patch.object(chat_endpoint_module, "persist_persona_turn", wraps=mem.persist_persona_turn) as capture:
-        for turn, scope in enumerate(({}, {"scope_type": "workspace", "workspace_id": workspace["id"]}), start=1):
-            user_text = f"Remember Workspace turn {turn} and reply."
-            body = {**_chat_completion_body(conversation_id), **scope}
-            body["messages"] = [{"role": "user", "content": user_text}]
-            response = client.post("/api/v1/chat/completions", json=body, headers=headers)
-            assert response.status_code == 200, response.text
-            assert response.json()["tldw_conversation_id"] == conversation_id
-            rows = persona_chat_db.get_messages_for_conversation(conversation_id)
-            assert [row["content"] for row in rows if row["sender"] == "user"] == [
-                f"Remember Workspace turn {number} and reply." for number in range(1, turn + 1)
-            ]
-            assert len([row for row in rows if row["sender"] == "assistant"]) == turn
-            assert response.json()["tldw_user_message_id"] in {row["id"] for row in rows if row["sender"] == "user"}
-            assert provider.call_count == turn
-            assert provider.call_args.kwargs["system_message"] == "You are workspace-original."
-            resumed = client.get(f"/api/v1/chats/{conversation_id}", params={
-                "scope_type": "workspace", "workspace_id": workspace["id"],
-            }, headers=headers)
-            assert resumed.status_code == 200, resumed.text
-            assert {field: resumed.json()[field] for field in binding} == binding
-            assert resumed.json()["assistant_startup"] == origin
-            persisted = persona_chat_db.get_conversation_by_id(conversation_id)
-            assert {field: persisted[field] for field in binding} == binding
-            assert persisted["assistant_startup_json"] == initial["assistant_startup_json"]
-            memories = persona_chat_db.list_persona_memory_entries(
-                user_id="1", persona_id="workspace-original", include_archived=True,
-                include_deleted=True, limit=50, offset=0,
-            )
-            if persona_memory_mode == "read_only":
-                capture.assert_not_called()
-                assert memories == []
-            else:
-                assert capture.call_count == turn
-                assert capture.call_args.kwargs == {
-                    "user_id": "1", "session_id": conversation_id, "persona_id": "workspace-original",
-                    "role": "assistant", "content": "Persona reply from test", "turn_type": "assistant_delta",
-                    "metadata": {"source": "chat_completions", "conversation_id": conversation_id},
-                    "store_as_memory": True,
-                }
-                summaries = [entry for entry in memories if entry["memory_type"] == "summary"]
-                usage = [json.loads(entry["content"]) for entry in memories if entry["memory_type"] == "usage_event"]
-                assert [entry["content"] for entry in summaries] == ["Persona reply from test"] * turn
-                assert len(usage) == turn
-                assert all(entry["session_id"] == conversation_id and entry["persona_id"] == "workspace-original" for entry in usage)
-            assert persona_chat_db.list_persona_memory_entries(
-                user_id="1", persona_id="workspace-replacement", include_archived=True,
-                include_deleted=True, limit=50, offset=0,
-            ) == []
 
-        personalization_path = DatabasePaths.get_personalization_db_path(1)
-        personalization_db = PersonalizationDB(str(personalization_path))
-        assert personalization_db.update_profile("1", enabled=0)["enabled"] == 0
-        provider.reset_mock()
-        capture.reset_mock()
+@pytest.mark.parametrize("persona_memory_mode", ["read_only", "read_write"])
+def test_inherited_workspace_chat_keeps_startup_binding_and_memory_policy_on_resume(
+    persona_chat_client: tuple[TestClient, dict[str, str], MagicMock],
+    persona_chat_db: CharactersRAGDB,
+    inherited_workspace_chat: tuple[str, dict[str, object], dict[str, object], dict[str, object]],
+    persona_memory_mode: str,
+) -> None:
+    """Both stored and explicit Workspace scope retain accepted binding and memory policy."""
+    client, headers, provider = persona_chat_client
+    conversation_id, binding, origin, initial = inherited_workspace_chat
+    for turn, scope in enumerate(({}, {"scope_type": "workspace", "workspace_id": binding["workspace_id"]}), start=1):
         body = _chat_completion_body(conversation_id)
-        body["messages"] = [{"role": "user", "content": "Reply after I turn personalization off."}]
-        opted_out = client.post("/api/v1/chat/completions", json=body, headers=headers)
-        assert opted_out.status_code == 200, opted_out.text
-        assert opted_out.json()["tldw_conversation_id"] == conversation_id
-        assert provider.call_count == 1
-        assert provider.call_args.kwargs["system_message"] == "You are workspace-original."
-        opted_out_rows = persona_chat_db.get_messages_for_conversation(conversation_id)
-        assert [row["content"] for row in opted_out_rows if row["sender"] == "user"] == [
-            "Remember Workspace turn 1 and reply.", "Remember Workspace turn 2 and reply.",
-            "Reply after I turn personalization off.",
+        body["messages"] = [{"role": "user", "content": f"Remember Workspace turn {turn} and reply."}]
+        response = client.post("/api/v1/chat/completions", params=scope, json=body, headers=headers)
+        assert dict(response.request.url.params) == scope
+        assert response.status_code == 200, response.text
+        assert response.json()["tldw_conversation_id"] == conversation_id
+        rows = persona_chat_db.get_messages_for_conversation(conversation_id)
+        assert [row["content"] for row in rows if row["sender"] == "user"] == [
+            f"Remember Workspace turn {number} and reply." for number in range(1, turn + 1)
         ]
-        assert len([row for row in opted_out_rows if row["sender"] == "assistant"]) == 3
-        assert opted_out.json()["tldw_user_message_id"] == opted_out_rows[-2]["id"]
-        assert capture.call_count == (1 if persona_memory_mode == "read_write" else 0)
-        assert persona_chat_db.list_persona_memory_entries(
+        assert len([row for row in rows if row["sender"] == "assistant"]) == turn
+        assert response.json()["tldw_user_message_id"] in {row["id"] for row in rows if row["sender"] == "user"}
+        assert provider.call_count == turn
+        assert provider.call_args.kwargs["system_message"] == "You are workspace-original."
+        resumed = client.get(f"/api/v1/chats/{conversation_id}", params={
+            "scope_type": "workspace", "workspace_id": binding["workspace_id"],
+        }, headers=headers)
+        assert resumed.status_code == 200, resumed.text
+        assert {field: resumed.json()[field] for field in binding} == binding
+        assert resumed.json()["assistant_startup"] == origin
+        persisted = persona_chat_db.get_conversation_by_id(conversation_id)
+        assert {field: persisted[field] for field in binding} == binding
+        assert persisted["assistant_startup_json"] == initial["assistant_startup_json"]
+        memories = persona_chat_db.list_persona_memory_entries(
             user_id="1", persona_id="workspace-original", include_archived=True,
             include_deleted=True, limit=50, offset=0,
-        ) == memories
+        )
+        if persona_memory_mode == "read_only":
+            assert memories == []
+        else:
+            summaries = [entry for entry in memories if entry["memory_type"] == "summary"]
+            usage = [json.loads(entry["content"]) for entry in memories if entry["memory_type"] == "usage_event"]
+            assert [entry["content"] for entry in summaries] == ["Persona reply from test"] * turn
+            assert len(usage) == turn
+            assert all(entry["session_id"] == conversation_id and entry["persona_id"] == "workspace-original" for entry in usage)
         assert persona_chat_db.list_persona_memory_entries(
             user_id="1", persona_id="workspace-replacement", include_archived=True,
             include_deleted=True, limit=50, offset=0,
         ) == []
-        assert personalization_db.get_or_create_profile("1")["enabled"] == 0
-        persisted = persona_chat_db.get_conversation_by_id(conversation_id)
-        assert {field: persisted[field] for field in binding} == binding
-        assert persisted["assistant_startup_json"] == initial["assistant_startup_json"]
-        assert decode_assistant_startup(persisted["assistant_startup_json"]).model_dump() == origin
 
-        profile = persona_chat_db.get_persona_profile("workspace-original", user_id="1")
-        if access_loss == "revoked":
-            # Use the existing admission tests' ownership-revocation fixture;
-            # current access is genuinely lost, not replaced by an admission stub.
-            with persona_chat_db.transaction() as conn:
-                conn.execute("UPDATE persona_profiles SET user_id = ? WHERE id = ?", ("other-owner", profile["id"]))
-            expected = (404, {"code": "persona_not_found"})
-        elif access_loss == "inactive":
-            assert persona_chat_db.update_persona_profile(
-                persona_id=profile["id"], user_id="1", update_data={"is_active": False},
-                expected_version=profile["version"],
-            )
-            expected = (409, {"code": "persona_unavailable", "reason": "persona_unavailable"})
-        else:
-            assert persona_chat_db.soft_delete_persona_profile(
-                persona_id=profile["id"], user_id="1", expected_version=profile["version"],
-            )
-            expected = (404, {"code": "persona_not_found"})
-        rows_before = persona_chat_db.get_messages_for_conversation(conversation_id)
-        memories_before = persona_chat_db.list_persona_memory_entries(
-            user_id="1", persona_id="workspace-original", include_archived=True,
-            include_deleted=True, limit=50, offset=0,
+
+@pytest.mark.parametrize("persona_memory_mode", ["read_only", "read_write"])
+def test_inherited_workspace_chat_personalization_optout_preserves_binding_without_memory_writes(
+    persona_chat_client: tuple[TestClient, dict[str, str], MagicMock],
+    persona_chat_db: CharactersRAGDB,
+    inherited_workspace_chat: tuple[str, dict[str, object], dict[str, object], dict[str, object]],
+    persona_memory_mode: str,
+) -> None:
+    """Disabling personalization keeps the accepted assistant without adding memory."""
+    from tldw_Server_API.app.core.Chat.assistant_startup import decode_assistant_startup
+
+    client, headers, provider = persona_chat_client
+    conversation_id, binding, origin, initial = inherited_workspace_chat
+    prior = client.post("/api/v1/chat/completions", json=_chat_completion_body(conversation_id), headers=headers)
+    assert prior.status_code == 200, prior.text
+    memories_before = persona_chat_db.list_persona_memory_entries(
+        user_id="1", persona_id="workspace-original", include_archived=True,
+        include_deleted=True, limit=50, offset=0,
+    )
+    assert len(memories_before) == (2 if persona_memory_mode == "read_write" else 0)
+    personalization_db = PersonalizationDB(str(DatabasePaths.get_personalization_db_path(1)))
+    assert personalization_db.update_profile("1", enabled=0)["enabled"] == 0
+    provider.reset_mock()
+    body = _chat_completion_body(conversation_id)
+    body["messages"] = [{"role": "user", "content": "Reply after I turn personalization off."}]
+    opted_out = client.post("/api/v1/chat/completions", json=body, headers=headers)
+    assert opted_out.status_code == 200, opted_out.text
+    assert opted_out.json()["tldw_conversation_id"] == conversation_id
+    provider.assert_called_once()
+    assert provider.call_args.kwargs["system_message"] == "You are workspace-original."
+    rows = persona_chat_db.get_messages_for_conversation(conversation_id)
+    assert [row["content"] for row in rows if row["sender"] == "user"] == [
+        "Remember this and reply.", "Reply after I turn personalization off.",
+    ]
+    assert len([row for row in rows if row["sender"] == "assistant"]) == 2
+    assert opted_out.json()["tldw_user_message_id"] == rows[-2]["id"]
+    assert persona_chat_db.list_persona_memory_entries(
+        user_id="1", persona_id="workspace-original", include_archived=True,
+        include_deleted=True, limit=50, offset=0,
+    ) == memories_before
+    assert persona_chat_db.list_persona_memory_entries(
+        user_id="1", persona_id="workspace-replacement", include_archived=True,
+        include_deleted=True, limit=50, offset=0,
+    ) == []
+    assert personalization_db.get_or_create_profile("1")["enabled"] == 0
+    persisted = persona_chat_db.get_conversation_by_id(conversation_id)
+    assert {field: persisted[field] for field in binding} == binding
+    assert persisted["assistant_startup_json"] == initial["assistant_startup_json"]
+    assert decode_assistant_startup(persisted["assistant_startup_json"]).model_dump() == origin
+
+
+@pytest.mark.parametrize("persona_memory_mode", ["read_only", "read_write"])
+@pytest.mark.parametrize("access_loss", ["revoked", "inactive", "deleted"])
+def test_inherited_workspace_chat_rejects_lost_access_without_generation_or_writes(
+    persona_chat_client: tuple[TestClient, dict[str, str], MagicMock],
+    persona_chat_db: CharactersRAGDB,
+    inherited_workspace_chat: tuple[str, dict[str, object], dict[str, object], dict[str, object]],
+    persona_memory_mode: str,
+    access_loss: str,
+) -> None:
+    """Current access loss rejects stored and explicit scope before any turn effects."""
+    from tldw_Server_API.app.core.Persona import memory_integration as mem
+
+    client, headers, provider = persona_chat_client
+    conversation_id, binding, _, _ = inherited_workspace_chat
+    prior = client.post("/api/v1/chat/completions", json=_chat_completion_body(conversation_id), headers=headers)
+    assert prior.status_code == 200, prior.text
+    persisted = persona_chat_db.get_conversation_by_id(conversation_id)
+    assert {field: persisted[field] for field in binding} == binding
+    memories_before = persona_chat_db.list_persona_memory_entries(
+        user_id="1", persona_id="workspace-original", include_archived=True,
+        include_deleted=True, limit=50, offset=0,
+    )
+    assert len(memories_before) == (2 if persona_memory_mode == "read_write" else 0)
+    profile = persona_chat_db.get_persona_profile("workspace-original", user_id="1")
+    if access_loss == "revoked":
+        # Reuse the admission tests' ownership revocation, not an admission stub.
+        with persona_chat_db.transaction() as conn:
+            conn.execute("UPDATE persona_profiles SET user_id = ? WHERE id = ?", ("other-owner", profile["id"]))
+        expected = (404, {"code": "persona_not_found"})
+    elif access_loss == "inactive":
+        assert persona_chat_db.update_persona_profile(
+            persona_id=profile["id"], user_id="1", update_data={"is_active": False},
+            expected_version=profile["version"],
         )
-        provider.reset_mock()
-        capture.reset_mock()
-        for scope in ({}, {"scope_type": "workspace", "workspace_id": workspace["id"]}):
-            body = {**_chat_completion_body(conversation_id), **scope}
+        expected = (409, {"code": "persona_unavailable", "reason": "persona_unavailable"})
+    else:
+        assert persona_chat_db.soft_delete_persona_profile(
+            persona_id=profile["id"], user_id="1", expected_version=profile["version"],
+        )
+        expected = (404, {"code": "persona_not_found"})
+    rows_before = persona_chat_db.get_messages_for_conversation(conversation_id)
+    memories_before = persona_chat_db.list_persona_memory_entries(
+        user_id="1", persona_id="workspace-original", include_archived=True,
+        include_deleted=True, limit=50, offset=0,
+    )
+    provider.reset_mock()
+    with patch.object(chat_endpoint_module, "persist_persona_turn", wraps=mem.persist_persona_turn) as capture:
+        for scope in ({}, {"scope_type": "workspace", "workspace_id": binding["workspace_id"]}):
+            body = _chat_completion_body(conversation_id)
             body["messages"] = [{"role": "user", "content": "This rejected turn must have no effects."}]
-            rejected = client.post("/api/v1/chat/completions", json=body, headers=headers)
+            rejected = client.post("/api/v1/chat/completions", params=scope, json=body, headers=headers)
+            assert dict(rejected.request.url.params) == scope
             assert (rejected.status_code, rejected.json()["detail"]) == expected
             provider.assert_not_called()
             capture.assert_not_called()
