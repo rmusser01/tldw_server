@@ -289,6 +289,14 @@ class RGSimpleMiddleware:
         # If governor not initialized, lazily create one using loader + backend env
         gov = getattr(request.app.state, "rg_governor", None)
         if gov is None:
+            from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
+
+            if not bool(_rg_enabled_flag(True)):
+                # Governance is globally disabled: never lazily attach a governor
+                # (that would silently re-enable enforcement for every other call
+                # site reading app.state.rg_governor) and never fail closed.
+                await self.app(scope, receive, send)
+                return
             try:
                 loader = getattr(request.app.state, "rg_policy_loader", None)
                 if loader is not None:

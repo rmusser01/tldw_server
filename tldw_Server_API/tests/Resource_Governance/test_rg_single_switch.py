@@ -5,6 +5,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from tldw_Server_API.app.core.Resource_Governance.middleware_simple import RGSimpleMiddleware
+from tldw_Server_API.app.core.Resource_Governance.policy_loader import PolicyLoader, PolicyReloadConfig
 
 pytestmark = [pytest.mark.unit, pytest.mark.rate_limit]
 
@@ -55,3 +61,80 @@ def test_diag_lazy_governor_is_not_attached_when_disabled(monkeypatch):
     monkeypatch.setattr(rg_ep, "_get_app", lambda: app)
     assert rg_ep._get_or_init_governor() is not None  # diagnostics still work
     assert getattr(app.state, "rg_governor", None) is None  # but enforcement stays off
+
+
+_RG_SWITCH_PATH = "/api/v1/rg-switch-check"
+
+
+async def _rg_switch_app(tmp_path, monkeypatch, *, fail_closed: bool = False) -> FastAPI:
+    """A FastAPI app with RGSimpleMiddleware, a loader/route_map, and no attached governor.
+
+    Mirrors the tmp_path + PolicyLoader pattern used by test_middleware_tag_enforcement.py.
+    """
+    monkeypatch.delenv("RG_POLICY_PATH", raising=False)
+    policy: dict = {"requests": {"rpm": 1, "burst": 1.0}, "scopes": ["ip"]}
+    if fail_closed:
+        policy["fail_mode"] = "fail_closed"
+    policy_path = tmp_path / "rg.yaml"
+    policy_path.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "policies": {"test.rg": policy},
+                "route_map": {"by_path": {_RG_SWITCH_PATH: "test.rg"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    loader = PolicyLoader(policy_path, PolicyReloadConfig(enabled=False))
+    await loader.load_once()
+
+    app = FastAPI()
+
+    @app.get(_RG_SWITCH_PATH)
+    def _check() -> dict:
+        return {"ok": True}
+
+    app.add_middleware(RGSimpleMiddleware)
+    app.state.rg_policy_loader = loader
+    app.state.rg_governor = None  # nothing initialized this run; middleware may lazily build one
+    return app
+
+
+@pytest.mark.asyncio
+async def test_disabled_middleware_never_lazily_attaches_governor(tmp_path, monkeypatch):
+    """A governed route under a disabled switch must never see a governor, ever, at ingress."""
+    monkeypatch.setenv("RG_ENABLED", "false")
+    app = await _rg_switch_app(tmp_path, monkeypatch)
+    client = TestClient(app)
+
+    codes = [client.get(_RG_SWITCH_PATH).status_code for _ in range(3)]
+
+    assert codes == [200, 200, 200]
+    assert getattr(app.state, "rg_governor", None) is None
+
+
+@pytest.mark.asyncio
+async def test_disabled_middleware_ignores_fail_closed_policy(tmp_path, monkeypatch):
+    """Disabled overrides fail_mode: a fail_closed policy must not 503 when RG is off."""
+    monkeypatch.setenv("RG_ENABLED", "false")
+    app = await _rg_switch_app(tmp_path, monkeypatch, fail_closed=True)
+    client = TestClient(app)
+
+    codes = [client.get(_RG_SWITCH_PATH).status_code for _ in range(3)]
+
+    assert codes == [200, 200, 200]
+    assert getattr(app.state, "rg_governor", None) is None
+
+
+@pytest.mark.asyncio
+async def test_enabled_middleware_still_lazily_governs(tmp_path, monkeypatch):
+    """Sanity: the disabled guard must not disable the enabled lazy-attach path."""
+    monkeypatch.setenv("RG_ENABLED", "true")
+    app = await _rg_switch_app(tmp_path, monkeypatch)
+    client = TestClient(app)
+
+    codes = [client.get(_RG_SWITCH_PATH).status_code for _ in range(2)]
+
+    assert codes == [200, 429]
+    assert getattr(app.state, "rg_governor", None) is not None
