@@ -78,12 +78,13 @@ The index only has to choose between a tag policy and `default`, and it runs onl
 
 The index is built lazily on the first request and cached on `app.state`. It is rebuilt when:
 - the policy loader publishes a new route map, or
-- the app's route table changes. FastAPI 0.141 tracks changes in the private `APIRouter._get_routes_version()`. The index uses it behind a `getattr` guard, next to the other private-state reads in `Utils/fastapi_routes.py`, and falls back to `len(app.routes)` if it is missing. `tests/Utils/test_fastapi_routes.py` fails loudly if a FastAPI upgrade moves it.
+- the app's route table changes. The check runs on every request, so it reads FastAPI 0.141's private top-level counter `app.router._routes_version`. That counter is O(1) and is bumped by `include_router` and `add_api_route`. `_get_routes_version()` would also catch nested-router changes, but it walks every route on each call. Routes do not change after startup in production. `tests/Utils/test_fastapi_routes.py` fails loudly if a FastAPI upgrade moves the counter.
 
 ### 2. Identity: charge the principal, not the proxy
 
-This generalises the ADR-044 preflight to every auth mode and every policy.
-- When a request carries credentials (a session cookie, `Authorization: Bearer`, or `X-API-KEY`), the middleware calls `get_auth_principal(request)` before deriving the entity.
+This generalises the ADR-044 preflight to every auth mode and every policy. Only real credentials trigger it: `Authorization`, `X-API-KEY`, or the single-user session cookie (`SINGLE_USER_SESSION_COOKIE_NAME`). CSRF, theme and analytics cookies are not credentials and never trigger a lookup.
+- **Multi-user bearer JWTs** are keyed by their signature-verified `sub` (`jwt_service.decode_access_token`: no database access and no revocation check). Full principal resolution before routing would run the scoped-token check (`_route_declares_scope_enforcement`), which needs the matched route. For virtual keys that check always fails before routing, and it logs a security warning each time. The route's own auth still enforces revocation; a revoked but correctly signed token only spends its own user's bucket.
+- **API keys, non-JWT bearers and the session cookie** go through `get_auth_principal(request)` before the entity is derived.
   - The resolver caches its `AuthContext` on request state, and endpoint auth reuses it. This adds no database work compared with the current flow.
   - `derive_entity_key` then returns `user:<id>`, or `api_key:<id>` for key-only principals.
 - **Invalid or expired credentials are not rejected here.** The middleware falls back to the `ip:` entity and lets the route's own auth return 401. This replaces ADR-044's early error response.
