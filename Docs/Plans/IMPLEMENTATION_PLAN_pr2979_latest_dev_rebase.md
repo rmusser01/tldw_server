@@ -593,3 +593,55 @@ No production code, timeout increase, signal/capability weakening or skip additi
 **Status:** In Progress
 
 Root independent source review clear. Original real-child positive-wait assertion fails under controlled200ms scheduling overrun after bothchildren are killed/reaped; warm/overrun and deterministic fair-allocation controls now pass3cases. Existing fake-clock test retains positive allocation and rejects serial starvation mutation. Full104case module passes0skip8.84seconds,exit0; unchanged signal/readiness/finally/semaphore ownership guards plus explicit SIGKILL, receiver and permit checks. Production and shutdown budgets unchanged. Ruff0; Bandit116to121 adds onlyfive LOW assertions; compile/diff clean. Actual macOS final-head hosted acceptance remains open.
+
+## Completed browser cleanup race — UAT540 (TASK-13260.278.18.83.29)
+
+### Stage 1: Prove native operation versus supervisor continuation
+**Goal:** Distinguish successful completed close from a resource still requiring forced teardown.
+**Success Criteria:** Controlled32case actual-source probe reproduces redundant force acrosspage/context/browser/Playwright stop; failed/cancelled/pending/no-force ownership controls hold.
+**Tests:** Original native signature, deterministic task ordering and unchanged upstream source hashes.
+**Status:** Complete
+
+Existing context entry marks graceful_complete only after the shielded waiter resumes. Native close can succeed first; early deadline cancels the waiter and explicit force_close currently runs redundantly. Repair belongs in existing BrowserCleanupHandle force state boundary, not context budget or timer. Original30ms cleanup and50ms analyzer budgets stay unchanged.
+
+### Stage 2: Reuse existing terminal and operation state
+**Goal:** Return terminally only for a successful completed native operation.
+**Success Criteria:** Absent/failed/cancelled/pending operations still force exactly once; no-force path still shares original native task; parent teardown, cancellation and deadlines remain.
+**Tests:** Durable causal red/green and full browser/context controls, compile/Ruff/Bandit.
+**Status:** Complete
+
+Authorize only preflight/adapters/browser.py and existing test_phase3_preflight_browser.py. Add the smallest successful-completion state guard under the existing operation lock. No wider grace, helper abstraction, global fake, skip or shared context rewrite. Root owns independent review.
+
+### Stage 3: Review and qualify native behavior
+**Goal:** Require final native Windows browser acceptance and all protected gates.
+**Success Criteria:** Reviewed minimal production fix and full final-head hosted checks.
+**Tests:** Final automatic/native matrix.
+**Status:** In Progress
+
+Eight-line shared callable-force guard returns only for successful completed native close under existing operation lock. All failed/cancelled/pending/absent/no-force behavior remains. Durable4causal failures become40green; fullsevenmodules569passed0skip5.20s; private15.625ms loop41passed including unchanged30ms/50ms original test. Original58bodies/171assertions AST-identical; exactly sanitized no-force error/cancellation outcomes pinned. Root and independent frozen-source review clear; independentbrowser/external178passed0skip. Ruff0/productionBandit0/test17newLOWassertions only, inheritedB105same; compile/diff clean. Native Windows final-head acceptance remains open.
+
+## External timeout clock assumptions — UAT541 (TASK-13260.278.18.83.30)
+
+### Stage 1: Trace actual deadline semantics
+**Goal:** Distinguish native timer firing from the actual monotonic overall deadline.
+**Success Criteria:** Coarse15.625ms resolution plus harmless5ms wakeup reproduces20ms timeout with14ms globaltime remaining; spec and plan504 explicitly require local ProbeTimeout in this case.
+**Tests:** Both creation/communicate and fine/coarse logical elapsed/positive-remaining private controls, uncapped mutation.
+**Status:** Complete
+
+Allfive critical production/test files are identical across e49/current/latestdev. Eight controls retain real cancellation/cleanup and exact20ms cap; cap-removal mutant fails. No external production defect is supported; don't reclassify an unelapsed global deadline from timer provenance.
+
+### Stage 2: Reuse existing FakeClock in the two elapsed tests
+**Goal:** Preserve real timeout cancellation and explicit monotonic expiry independently.
+**Success Criteria:** Original elapsed assertions retained, positive-remaining outcomes pinned, exact20ms cap distinguished from40ms local test limit; no skipped native coverage or global asyncio mutation.
+**Tests:** Durable clock/cap/cancellation assertions, full external-tool controls, compile/Ruff/Bandit.
+**Status:** Complete
+
+Authorize only existing test_phase3_preflight_external_tools.py. Thin opt-in delegating process/factory fakes may advance logical clock after actual cancellation; record and delegate original timeout helpers. Preserve production WAF60second constant, original20ms overall deadline, process ownership and cancellation cleanup. Root and independent review before commit.
+
+### Stage 3: Require native acceptance
+**Goal:** Qualify final-head Windows integrations and all protected gates.
+**Success Criteria:** Native installed event-loop semantics pass the explicit logical-clock contract.
+**Tests:** Final automatic/native matrix.
+**Status:** In Progress
+
+Two elapsed-deadline tests now use existingFakeClock advanced only after real delegated cancellation. Original20ms overall deadline/cap and raises/asserts remain;40ms local fixture proves cap selection. Both positive-remaining boundary controls pin contract-correct ProbeTimeout. Original coarse2red becomes4green; uncappedmutation4expectedfailures. Fullextool48plusadjacent301=349passed0skip5.82s; root and independent frozen-source review clear, independentcombined178passed0skip. Ruff0/Bandit15newLOWassertions only; compile/diff/AST preservation pass. No production, global asyncio, timer tolerance, skip or budget change. Native Windows final-head acceptance remains open.
