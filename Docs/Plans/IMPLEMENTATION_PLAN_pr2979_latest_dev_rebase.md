@@ -649,3 +649,13 @@ Two elapsed-deadline tests now use existingFakeClock advanced only after real de
 ## Final publication qualification — 2026-09-30
 
 Final publication rebase: newestdev955b1d9626a055ca44336a00d3d4c144949cb00f advances only unrelated TASK13392 record viaPR3062. All194reviewed branch commits replay cleanly from607431 onto955b: range-diff194equal/0changed/0added/0removed; resultingtree differs only thatupstreamtask. Qualified source head58ae540d67a9ebf8c954cbeedf9d686cc05a012f, all292changedPythonfiles compile; no source or dependency change invalidates focused checks. Clean tree/diff; freshls-remote confirms955bdev and expectede49publishedhead. Recoveryqualified-before-push-20260930 preserves b2bf3dcdec. FullUAT remainspaused; finalpublishedhead hosted and Qodogates remainpending.
+
+
+### UAT542 — included capabilities response-model audit (TASK-13260.278.18.83.31)
+
+**Goal:** Restore the existing explicit model audit under FastAPI 0.141.1 by reusing `iter_served_routes`.
+**Success Criteria:** Original response-model identity and HTTP entitlement assertions remain; focused and adjacent route controls, mutation, Ruff/Bandit and independent review pass. Final hosted native acceptance remains required.
+**Tests:** Native Ubuntu 3.12/3.13 each fail the same original audit; actual pinned FastAPI local red is one StopIteration with four HTTP capability passes. Run full policy module, adjacent ingestion route audits and shared route helper controls; missing-model mutation must still fail.
+**Status:** In Progress
+
+Production route/schema are unchanged. Only the test route enumeration uses the existing shared walker and unwraps its original route for the unchanged model assertion. Local43-case full scope, missing-model assertion mutation, Ruff/compile/diff and unchanged Bandit43LOW assertions pass; all original43 assertions/22other definitions are retained. Independent source/evidence review is clear. Local repair is complete; status stays In Progress for final hosted acceptance. Batch locally while final-head diagnostics remain useful.
