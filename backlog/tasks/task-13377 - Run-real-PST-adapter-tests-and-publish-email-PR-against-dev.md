@@ -4,7 +4,7 @@ title: Run real PST adapter tests and publish email PR against dev
 status: In Progress
 assignee: []
 created_date: '2026-09-26 21:50'
-updated_date: '2026-09-30 08:59'
+updated_date: '2026-09-30 09:06'
 labels: []
 dependencies: []
 documentation:
@@ -162,6 +162,8 @@ Heartbeat08:26Z: published d4ed59d64e59dd9df8b4853079e7570d836dd9a6/latest dev95
 Heartbeat08:46Z: published d4ed59d64e59dd9df8b4853079e7570d836dd9a6/latest dev955b unchanged; exact-head Qodo zero active findings, all nine threads resolved and no new or edited feedback. Backend-required36669651086 SUCCESS08:39:56Z joins coverage, security and trusted license/audit PASS. Frontend36669651031/e2e36669651026/container36669651053 remain queued without current-head failures. Four of seven required contexts pass; actual merge/AC7 awaits three formal gates. Active jobs left alone; no rerun, cancellation, bypass or source edit.
 
 Dev advanced955b to c867287210d4e85314b00ff22e7d30d0474030a0 through PR3064. Incoming12 paths comprise10 frontend chat source/tests and2 unrelated Backlog records; no overlap with this email PR or source/dependency/CI inputs certified by163 Python hashes. Preserve current reviewed d4ed plus own pending tracking, conflict-free rebase, verify incoming paths exactlydev and all remaining tracked inputs unchanged, run affected frontend tests and independent review. Prior-head CI successes remain historical after refresh; actual merge/AC7 pending fresh exact-head review and required gates.
+
+Devc867 refresh verified: conflict-free rebase afaa7d88bf8645f9ef1985641ec8ca4f500a6b54; all12 incoming paths exactlydev, other22360 non-Backlog tracked entries and all163 certified Python hashes unchanged. Five affected frontend suites50passed/0failures/errors/skips with Bun1.3.2/Node26.0.0/Vitest4.0.18; source and log/XML hashes retained. Temporary dependency symlinks removed; shared installations preserved. Independent read-only review clear. Previous FastAPI0.141.1 746combined/13monitoring/native10, security/schema/route-auth certificates retain original source/dependency bindings without reruns. TypeScript-only incoming source and documentation/tracking changes introduce no Python/Bandit scope. Report/JSON append frontend_chat_dev_refresh_20260930; historical values unchanged. Ready to publish verified refresh; fresh exact-head Qodo/allseven CI and actualmerge pending.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

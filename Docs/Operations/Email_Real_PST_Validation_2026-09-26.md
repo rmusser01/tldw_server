@@ -371,3 +371,27 @@ not rerun. The comparison receipt is appended to the existing follow-up JSON.
 The reviewed head and tracking remain in
 `codex/email-pr3023-before-dev955b-20260930`. Fresh exact-head incremental review
 and all seven required hosted contexts must pass before the authorized merge.
+
+
+## Frontend chat dev refresh (2026-09-30)
+
+Dev advanced from `955b1d9626a055ca44336a00d3d4c144949cb00f` to
+`c867287210d4e85314b00ff22e7d30d0474030a0` through PR3064, adding saved-chat
+read-only selection and disabling passive feedback writes in temporary mode.
+The rebase is conflict-free. All ten incoming frontend source/test paths and two
+Backlog records match dev exactly. Before this evidence update, the other 22,360
+non-Backlog tracked entries match reviewed `d4ed59d64e59dd9df8b4853079e7570d836dd9a6`
+exactly; all 163 certified Python hashes, backend/schema/dependency/CI inputs and
+the email patch remain unchanged. Independent review found no integration blocker.
+
+The five affected frontend suites pass **50 tests**, with zero failures, errors
+or skips, using Bun 1.3.2, Node 26.0.0 and the existing Vitest 4.0.18 installation.
+Source and log/XML hashes are retained in the existing follow-up JSON. Temporary
+dependency symlinks were removed after the tests; shared installations are unchanged.
+The 746 combined auth/email/route, 13 monitoring and ten guarded native-PST cases
+retain their original FastAPI 0.141.1 source/dependency bindings and were not rerun.
+Existing Ruff, Bandit, OpenAPI and route-auth certificates remain unchanged; no
+Python code changed and there is no new Bandit scope. Benchmarks were not rerun.
+The prior reviewed head and tracking remain in
+`codex/email-pr3023-before-devc867-20260930`. Fresh exact-head incremental Qodo
+review and all seven required hosted contexts must pass before the authorized merge.

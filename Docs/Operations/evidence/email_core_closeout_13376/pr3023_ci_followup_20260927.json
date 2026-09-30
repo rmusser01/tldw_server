@@ -1671,5 +1671,71 @@
     "comparison_receipt_sha256": "63f1ac62019d99cb17c374834692ac5af9202029e30d8470d8a73857d96db177",
     "prior_validation_binding": "fastapi_routes_dev_refresh_20260929:746 combined auth/email/route cases,13 monitoring cases,10 guarded native-PST cases;163 unique compiled Python hashes,zero new Ruff/Bandit findings,unchanged OpenAPI/route-auth baseline. Suites overlap; no rerun.",
     "publication_state": "Ready for refreshed-head publication; exact-head incremental Qodo review and all seven required contexts must pass before merge."
+  },
+  "frontend_chat_dev_refresh_20260930": {
+    "recorded_at": "2026-09-30T09:02:03.496452+00:00",
+    "previous_reviewed_head": "d4ed59d64e59dd9df8b4853079e7570d836dd9a6",
+    "previous_dev": "955b1d9626a055ca44336a00d3d4c144949cb00f",
+    "dev_commit": "c867287210d4e85314b00ff22e7d30d0474030a0",
+    "rebased_parent_commit": "afaa7d88bf8645f9ef1985641ec8ca4f500a6b54",
+    "backup_branch": "codex/email-pr3023-before-devc867-20260930",
+    "incoming_paths": [
+      "apps/packages/ui/src/components/Common/ChatSidebar.tsx",
+      "apps/packages/ui/src/components/Common/ChatSidebar/ServerChatList.tsx",
+      "apps/packages/ui/src/components/Common/ChatSidebar/ServerChatRow.tsx",
+      "apps/packages/ui/src/components/Common/ChatSidebar/__tests__/ChatSidebar.lazy-history.test.tsx",
+      "apps/packages/ui/src/components/Common/ChatSidebar/__tests__/ServerChatList.reliability.test.tsx",
+      "apps/packages/ui/src/components/Common/Playground/Message.tsx",
+      "apps/packages/ui/src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx",
+      "apps/packages/ui/src/components/Common/Playground/__tests__/visual-identity-message-state.test.tsx",
+      "apps/packages/ui/src/components/Common/Playground/useMessageState.ts",
+      "apps/packages/ui/src/hooks/__tests__/useImplicitFeedback.test.tsx",
+      "backlog/tasks/task-13389 - Temporary-mode-cannot-open-saved-server-chats-restore-read-access-per-the-H1-ruling.md",
+      "backlog/tasks/task-13397 - Message.dynamic-ui-surface.guard-fails-on-dev-PlaygroundChat-no-longer-passes-onDynamicUIAction.md"
+    ],
+    "incoming_paths_exact_dev": true,
+    "all_other_non_backlog_tree_entries_identical_before_evidence_update": true,
+    "other_non_backlog_tree_entry_count": 22360,
+    "certified_python_paths": 163,
+    "certified_python_hashes_unchanged": true,
+    "source_certificate": "/tmp/email_pr3023_dev6074_sources_20260929.json",
+    "source_certificate_sha256": "07074bfcfe9e42935e93d16934bd524fb88a345a74bca2160367acc3dba912c6",
+    "validation": "50 affected frontend chat regressions pass across five files with zero failures/errors/skips. Existing FastAPI0.141.1 email/auth/native-PST/schema/security evidence retains its source/dependency binding; no email test/schema/benchmark rerun. No new Python or Bandit scope.",
+    "incoming_frontend_sha256": {
+      "apps/packages/ui/src/components/Common/ChatSidebar.tsx": "be4cda2213758feceba5c4743f4e2c45dc9f11c9b885610064a77e2f87008978",
+      "apps/packages/ui/src/components/Common/ChatSidebar/ServerChatList.tsx": "cb5dae1b900d61d4dfcd65c9b4f3c1df02467db903ecf24b5e06a550db56d429",
+      "apps/packages/ui/src/components/Common/ChatSidebar/ServerChatRow.tsx": "5bdee71fd345eeb2760d225e71470dda90159653bdc0c40f8d1e9af5801e0755",
+      "apps/packages/ui/src/components/Common/ChatSidebar/__tests__/ChatSidebar.lazy-history.test.tsx": "010dc08929ab988cff62270c7976a82a8452e133978578e838e0359650aa3899",
+      "apps/packages/ui/src/components/Common/ChatSidebar/__tests__/ServerChatList.reliability.test.tsx": "e261c6f3659ba9da420f7bceffaae8e3e452cef31166f967c9016878011422d6",
+      "apps/packages/ui/src/components/Common/Playground/Message.tsx": "685448435873274abd78be66dc0ed196345f1452c22cc992707ab44bfdd58d66",
+      "apps/packages/ui/src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx": "de99cddd07a6d3ac9e74769967f13067b9f0307ee95324d441301b9c058aaeb3",
+      "apps/packages/ui/src/components/Common/Playground/__tests__/visual-identity-message-state.test.tsx": "4239a09fb8a7fcd2d42c148d6a91f82b34e77f28e7fb7baedc5750f20d9b1242",
+      "apps/packages/ui/src/components/Common/Playground/useMessageState.ts": "f5bee0a1c0dad19c93b92c12b24e7b69e243a5822fd1efad177f9d624d391d4f",
+      "apps/packages/ui/src/hooks/__tests__/useImplicitFeedback.test.tsx": "2b6390577852375f0323135d7078af527abdf88dad9036af827cd9b658cb53fb"
+    },
+    "frontend_validation": {
+      "command": "bun run test src/components/Common/ChatSidebar/__tests__/ChatSidebar.lazy-history.test.tsx src/components/Common/ChatSidebar/__tests__/ServerChatList.reliability.test.tsx src/components/Common/Playground/__tests__/Message.error-recovery.integration.test.tsx src/components/Common/Playground/__tests__/visual-identity-message-state.test.tsx src/hooks/__tests__/useImplicitFeedback.test.tsx --maxWorkers=1 --no-file-parallelism --reporter=default --reporter=junit --outputFile.junit=/tmp/email_pr3023_devc867_frontend_20260930.xml",
+      "working_directory": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2/apps/packages/ui",
+      "source_commit": "afaa7d88bf8645f9ef1985641ec8ca4f500a6b54",
+      "files_passed": 5,
+      "tests": 50,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "bun": "1.3.2",
+      "node": "v26.0.0",
+      "vitest": "4.0.18",
+      "dependency_source": "Existing installed frontend dependencies reused via temporary symlinks; installations unchanged.",
+      "log_sha256": "004c7e15d011bf032fb6098dbc33c4a643182d6fb2cd797185dd86b6112b86a9",
+      "xml_sha256": "73873b10250b9b8214848115df299d05b4533663935308e925f83d6d1983cb87"
+    },
+    "independent_review": {
+      "result": "clear",
+      "reviewed_source_commit": "afaa7d88bf8645f9ef1985641ec8ca4f500a6b54",
+      "scope": "Incoming dev chat delta and preservation of prior email/backend/auth/schema/dependency/CI inputs; no concrete integration regression or blocker."
+    },
+    "comparison_receipt_sha256": "7307180d82baca488bbe8c057b394165a625da74168dcbbac56b0c07bd2ecdff",
+    "prior_validation_binding": "fastapi_routes_dev_refresh_20260929:746 combined auth/email/route cases,13 monitoring cases,10 guarded native-PST cases;163 unique compiled Python hashes,zero new Ruff/Bandit findings,unchanged OpenAPI/route-auth baseline. Suites overlap; no rerun.",
+    "publication_state": "Ready for refreshed-head publication; exact-head incremental Qodo review and all seven required contexts must pass before merge."
   }
 }
