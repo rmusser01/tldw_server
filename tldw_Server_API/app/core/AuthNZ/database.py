@@ -30,6 +30,7 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     DatabaseError,
     DatabaseLockError,
     RollbackSignal,
+    SchemaReadinessError,
     TransactionError,
     UserRegistrationException,
 )
@@ -1116,7 +1117,10 @@ class DatabasePool:
                 backend="postgres",
                 operation="authnz_schema_readiness",
                 exception_type=type(exc).__name__,
-            ).error("PostgreSQL AuthNZ schema readiness failed")
+            ).error(
+                "PostgreSQL AuthNZ schema readiness failed{}",
+                f": {exc}" if isinstance(exc, SchemaReadinessError) else "",
+            )
             raise DatabaseError(
                 "PostgreSQL AuthNZ schema readiness failed"
             ) from None
@@ -1317,7 +1321,13 @@ class DatabasePool:
                     "PostgreSQL transaction failed: cause={}",
                     exception_type_chain(primary_failure),
                 )
-                raise TransactionError("PostgreSQL transaction") from None
+                # Readiness reasons are fixed text; any other message may carry row data.
+                reason = (
+                    str(primary_failure)
+                    if isinstance(primary_failure, SchemaReadinessError)
+                    else None
+                )
+                raise TransactionError("PostgreSQL transaction", reason) from None
             raise primary_failure from None
 
         conn = None

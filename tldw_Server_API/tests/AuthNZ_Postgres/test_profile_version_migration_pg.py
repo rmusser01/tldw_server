@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+from loguru import logger
 
 from tldw_Server_API.tests.helpers.authnz_seed import (
     unmanaged_authnz_pg_connection as _legacy_conn,
@@ -185,10 +186,19 @@ async def test_postgres_current_schema_corruption_fails_closed_at_startup(
         user_id,
     )
 
-    # Fails closed: False makes startup refuse to boot (initialize.py raises).
-    # The transaction boundary sanitizes the profile_version reason away, so
-    # it cannot be asserted here; TASK-13393 tracks restoring it for operators.
-    assert await ensure_authnz_core_tables_pg(test_db_pool) is False
+    # Fails closed: False makes startup refuse to boot (initialize.py raises),
+    # and the operator log names the profile_version reason.
+    warnings: list[str] = []
+    sink_id = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        assert await ensure_authnz_core_tables_pg(test_db_pool) is False
+    finally:
+        logger.remove(sink_id)
+    assert any(
+        "Failed to ensure PostgreSQL AuthNZ core tables" in line
+        and "AuthNZ profile_version readiness validation failed" in line
+        for line in warnings
+    ), warnings
 
     await _legacy_execute(
         "UPDATE users SET profile_version = updated_at WHERE id = $1",
