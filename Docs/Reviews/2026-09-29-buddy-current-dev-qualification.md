@@ -111,3 +111,25 @@ The [FastAPI rebase receipt](artifacts/buddy-current-dev-20260929/fastapi-rebase
 records the versions, source and local-log hashes separately. No full suite,
 paid provider, native, installed-extension, upgraded WebUI or physical-voice
 qualification is claimed. Earlier evidence keeps its original attribution.
+
+
+## Temporary-chat dev rebase — 2026-09-30
+
+Dev `c867287210d4e85314b00ff22e7d30d0474030a0` merged PR #3064's
+saved-chat read-only sidebar and implicit-feedback controls. All five preceding
+Buddy PR commits remain patch-identical in range-diff. At tested source
+`3a671a4cb05b8845fd7190826a91bd295b360790`, 152 targeted cases passed:
+50 incoming sidebar/message/feedback cases, 37 workspace contracts, 14 shared
+workspace cases, 13 redirect-security cases, 37 Buddy components and one route
+lifecycle fixture. The 141-case combined run took 27.61 seconds; the additional
+11-case workspace-status contract file took 0.962 seconds. No timeout changed.
+
+Local verification used existing Node 26.0.0 and Vitest 4.0.18. Required CI uses
+Node 20 and must pass on the exact published head; these local checks do not
+substitute for that gate. Backend, dependencies and the one-line Buddy collection
+repair are unchanged. Diff checks passed; Bandit is inapplicable to this
+TypeScript-only incoming change. The
+[separate receipt](artifacts/buddy-current-dev-20260929/temporary-chat-rebase-verification.md)
+records the exact tested source and local-log hashes. All older evidence retains
+its original attribution. No full suite, paid provider or additional native,
+installed-extension, upgraded-WebUI or physical-voice acceptance is claimed.
