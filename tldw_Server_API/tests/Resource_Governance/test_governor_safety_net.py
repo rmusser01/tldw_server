@@ -149,6 +149,30 @@ async def test_raised_limit_applies_without_restart(backend):
     assert all(await _admits(gov, _req("user:1", "p"), 5))
 
 
+async def test_policy_store_failure_is_logged_once_and_default_applies(backend, monkeypatch):
+    from loguru import logger
+
+    from tldw_Server_API.app.core.Resource_Governance import policy_eval
+
+    monkeypatch.setattr(policy_eval, "_warned_lookup_errors", set())
+    monkeypatch.setattr(policy_eval, "_warned_unknown", set())
+
+    class _BrokenLoader:
+        def get_policy(self, pid):
+            raise RuntimeError("PolicyLoader not initialized")
+
+    gov, _ = _gov(backend, {}, FakeTime())
+    gov._policy_loader = _BrokenLoader()
+    seen = []
+    sink = logger.add(lambda m: seen.append(str(m)), level="ERROR")
+    try:
+        admitted = await _admits(gov, _req("user:1", "p"), 2)
+    finally:
+        logger.remove(sink)
+    assert admitted == [True, True]
+    assert len([m for m in seen if "'p'" in m and "PolicyLoader not initialized" in m]) == 1, seen
+
+
 async def test_memory_evicts_full_idle_buckets_only():
     clock = FakeTime()
     policies = {

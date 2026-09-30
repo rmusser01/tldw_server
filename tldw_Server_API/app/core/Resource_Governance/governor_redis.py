@@ -19,7 +19,7 @@ from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 from .daily_caps import check_daily_cap, consume_daily_cap
 from .governor import MemoryResourceGovernor, ResourceGovernor, RGDecision, RGRequest
 from .metrics_rg import _labels, ensure_rg_metrics_registered, rg_metrics_entity_label_enabled
-from .policy_eval import clamp_token_units, effective_policy, scope_pairs
+from .policy_eval import clamp_token_units, effective_policy, log_lookup_failure, scope_pairs
 from .tenant import hash_entity
 
 TimeSource = Callable[[], float]
@@ -386,7 +386,8 @@ class RedisResourceGovernor(ResourceGovernor):
     def _lookup_policy(self, policy_id: str) -> dict[str, Any] | None:
         try:
             return self._policy_loader.get_policy(policy_id)
-        except _RG_NONCRITICAL_EXCEPTIONS:
+        except _RG_NONCRITICAL_EXCEPTIONS as exc:
+            log_lookup_failure(policy_id, exc)
             return None
 
     def _get_policy(self, policy_id: str) -> dict[str, Any]:

@@ -29,7 +29,7 @@ from loguru import logger
 
 from .daily_caps import check_daily_cap, consume_daily_cap
 from .metrics_rg import _labels, ensure_rg_metrics_registered, rg_metrics_entity_label_enabled
-from .policy_eval import clamp_token_units, effective_policy, scope_pairs
+from .policy_eval import clamp_token_units, effective_policy, log_lookup_failure, scope_pairs
 from .tenant import hash_entity
 
 try:
@@ -218,7 +218,7 @@ class MemoryResourceGovernor(ResourceGovernor):
                 if pol:
                     return pol
             except (AttributeError, RuntimeError, TypeError, ValueError) as e:
-                logger.debug(f"Policy loader failed; falling back to static policies: {e}")
+                log_lookup_failure(policy_id, e)
         return self._policies.get(policy_id)
 
     def _get_policy(self, policy_id: str) -> dict[str, Any]:
