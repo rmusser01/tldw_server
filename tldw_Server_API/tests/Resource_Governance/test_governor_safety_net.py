@@ -184,3 +184,101 @@ async def test_memory_eviction_sweeps_rotate_through_every_bucket(monkeypatch):
     clock.advance(61)
     gov._maybe_evict_idle(clock())
     assert {k[3] for k in gov._buckets} == {"1", "4"}
+
+
+# --- Redis tokens window: one ZSET member per quantum of max(1, per_min // 1000) tokens ---
+
+_BIG_TOKENS = {"p": {"tokens": {"per_min": 1_000_000, "burst": 1.5}, "scopes": ["user"]}}
+_SMALL_TOKENS = {"p": {"tokens": {"per_min": 500, "burst": 1.0}, "scopes": ["user"]}}
+
+
+async def _token_members(gov):
+    return await gov._client.zcard(gov._keys.win("p", "tokens", "user", "1"))
+
+
+async def _reserve_tokens(gov, units):
+    dec, handle = await gov.reserve(_req("user:1", "p", tokens={"units": units}), op_id=f"tok-{next(_ns)}")
+    return dec.allowed, handle
+
+
+@pytest.mark.parametrize("add_path", ["stub", "python", "lua"])
+async def test_redis_tokens_window_holds_one_member_per_quantum(add_path, monkeypatch):
+    gov, _ = _gov("redis", _BIG_TOKENS, FakeTime())
+    lua_argv = []
+    if add_path != "stub":
+        # Drive reserve() down the real-Redis branches while still on the in-process stub.
+        async def _real():
+            return True
+
+        monkeypatch.setattr(gov, "_is_real_redis", _real)
+    if add_path == "python":
+
+        async def _no_lua():
+            return None
+
+        monkeypatch.setattr(gov, "_ensure_multi_reserve_lua", _no_lua)
+    if add_path == "lua":
+
+        async def _lua():
+            return "sha"
+
+        async def _evalsha(_sha, _nkeys, *args):
+            lua_argv.append(args)
+            return [1, 0]
+
+        monkeypatch.setattr(gov, "_ensure_multi_reserve_lua", _lua)
+        monkeypatch.setattr(gov._client, "evalsha", _evalsha)
+
+    allowed, handle = await _reserve_tokens(gov, 50_000)
+
+    assert allowed and handle
+    if add_path == "lua":
+        limit, _window, units, csv = lua_argv[0][-4:]
+        assert (limit, units, len(csv.split(","))) == (1000, 50, 50)
+    else:
+        assert await _token_members(gov) == 50
+
+
+async def test_redis_tokens_quantized_window_admits_per_min_then_denies():
+    gov, _ = _gov("redis", _BIG_TOKENS, FakeTime())
+    assert [(await _reserve_tokens(gov, 50_000))[0] for _ in range(20)] == [True] * 20
+    assert not (await gov.check(_req("user:1", "p", tokens={"units": 1}))).allowed
+    assert (await _reserve_tokens(gov, 1))[0] is False
+
+
+async def test_redis_tokens_peek_reports_remaining_in_tokens():
+    gov, _ = _gov("redis", _BIG_TOKENS, FakeTime())
+    await _reserve_tokens(gov, 50_000)
+    peek = await gov.peek_with_policy("user:1", ["tokens"], "p")
+    assert peek["tokens"]["remaining"] == 950_000
+
+
+@pytest.mark.parametrize("how", ["refund", "commit"])
+async def test_redis_tokens_quantized_refund_restores_capacity(how):
+    gov, _ = _gov("redis", _BIG_TOKENS, FakeTime())
+    handles = [(await _reserve_tokens(gov, 50_000))[1] for _ in range(20)]
+    if how == "refund":
+        await gov.refund(handles[0], deltas={"tokens": 50_000})
+    else:
+        await gov.commit(handles[0], actuals={"tokens": 0})
+    assert (await _reserve_tokens(gov, 50_000))[0] is True
+    assert (await _reserve_tokens(gov, 1))[0] is False
+
+
+async def test_redis_tokens_refund_rounds_down_to_whole_members():
+    gov, _ = _gov("redis", _BIG_TOKENS, FakeTime())
+    _allowed, handle = await _reserve_tokens(gov, 1_500)  # charges ceil(1.5) = 2 members
+    await gov.refund(handle, deltas={"tokens": 1_500})  # refunds floor(1.5) = 1 member
+    assert await _token_members(gov) == 1
+
+
+async def test_redis_tokens_small_per_min_keeps_one_member_per_token():
+    gov, _ = _gov("redis", _SMALL_TOKENS, FakeTime())
+    _allowed, handle = await _reserve_tokens(gov, 200)
+    assert await _token_members(gov) == 200
+    assert (await _reserve_tokens(gov, 300))[0] is True
+    assert (await _reserve_tokens(gov, 1))[0] is False
+    await gov.refund(handle, deltas={"tokens": 100})
+    assert await _token_members(gov) == 400
+    assert (await _reserve_tokens(gov, 100))[0] is True
+    assert (await _reserve_tokens(gov, 1))[0] is False

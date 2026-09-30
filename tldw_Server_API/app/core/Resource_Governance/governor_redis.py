@@ -48,6 +48,20 @@ class _FallbackToMemory(Exception):
     """Signal that Redis operations failed and fallback_memory should be used."""
 
 
+def _window_members(category: str, limit: int, units: int = 0) -> tuple[int, int, int]:
+    """Map a requests/tokens sliding window onto ZSET members.
+
+    Returns ``(quantum, limit_members, unit_members)``. Requests use one member per
+    unit. Tokens pack ``quantum = max(1, per_min // 1000)`` tokens into each member,
+    so an entity's window holds about 1000 members instead of one per token. Charges
+    and the limit round up. Refunds of ``r`` tokens remove ``r // quantum`` members,
+    so rounding never refunds more than was charged. Report remaining capacity in
+    tokens as ``min(limit, max(0, limit_members - count) * quantum)``.
+    """
+    quantum = max(1, int(limit) // 1000) if category == "tokens" else 1
+    return quantum, (int(limit) + quantum - 1) // quantum, (int(units) + quantum - 1) // quantum
+
+
 @dataclass
 class _RedisKeys:
     ns: str
@@ -984,10 +998,12 @@ class RedisResourceGovernor(ResourceGovernor):
                     cat_fail = self._effective_fail_mode(pol, category)
                     counts: list[int] = []
                     if limit > 0:
+                        # Window is counted in members; `units` stays in tokens for daily caps below.
+                        _q, limit_m, units_m = _window_members(category, limit, units)
                         for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
                             ok, ra, _cnt = await self._allow_requests_sliding_check_only(
-                                key=key, limit=limit, window=window, units=units, now=now, fail_mode=cat_fail
+                                key=key, limit=limit_m, window=window, units=units_m, now=now, fail_mode=cat_fail
                             )
                             counts.append(int(_cnt))
                             allowed = allowed and ok
@@ -1541,12 +1557,13 @@ class RedisResourceGovernor(ResourceGovernor):
                         if category == "tokens" and limit <= 0:
                             continue
                         window = 60
+                        _q, limit_m, units_m = _window_members(category, limit, units)
                         for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
                             keys.append(key)
-                            members = [f"{handle_id}:{sc}:{ev}:{i}:{uuid.uuid4().hex}" for i in range(units)]
+                            members = [f"{handle_id}:{sc}:{ev}:{i}:{uuid.uuid4().hex}" for i in range(units_m)]
                             tmp_members.append((category, sc, ev, key, members))
-                            argv.extend([int(limit), int(window), int(units), ",".join(members)])
+                            argv.extend([int(limit_m), int(window), int(units_m), ",".join(members)])
                 if keys:
                     sha = await self._ensure_multi_reserve_lua()
                     if sha:
@@ -1583,13 +1600,14 @@ class RedisResourceGovernor(ResourceGovernor):
                         if category == "tokens" and limit <= 0:
                             continue
                         window = 60
+                        _q, limit_m, units_m = _window_members(category, limit, units)
                         # Evaluate across scopes and collect counts
                         counts: list[int] = []
                         ok_all = True
                         for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
                             ok, ra, cnt = await self._allow_requests_sliding_check_only(
-                                key=key, limit=limit, window=window, units=units, now=now, fail_mode=self._effective_fail_mode(pol, category)
+                                key=key, limit=limit_m, window=window, units=units_m, now=now, fail_mode=self._effective_fail_mode(pol, category)
                             )
                             counts.append(int(cnt))
                             if not ok:
@@ -1622,14 +1640,14 @@ class RedisResourceGovernor(ResourceGovernor):
                     if units <= 0:
                         continue
                     if category in ("requests", "tokens"):
-                        if category == "tokens":
-                            limit = int((pol.get("tokens") or {}).get("per_min") or 0)
-                            if limit <= 0:
-                                continue
+                        limit = int((pol.get(category) or {}).get("rpm") or 0) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
+                        if category == "tokens" and limit <= 0:
+                            continue
+                        _q, _limit_m, units_m = _window_members(category, limit, units)
                         added_members.setdefault(category, {})
                         for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
-                            members = [f"{handle_id}:{sc}:{ev}:{i}:{uuid.uuid4().hex}" for i in range(units)]
+                            members = [f"{handle_id}:{sc}:{ev}:{i}:{uuid.uuid4().hex}" for i in range(units_m)]
                             await self._add_members(key=key, members=members, now=now)
                             with contextlib.suppress(_RG_NONCRITICAL_EXCEPTIONS):
                                 logger.debug(
@@ -1652,15 +1670,16 @@ class RedisResourceGovernor(ResourceGovernor):
                             continue
                         window = 60
                         cat_fail = self._effective_fail_mode(pol, category)
+                        _q, limit_m, units_m = _window_members(category, limit, units)
                         added_members.setdefault(category, {})
                         for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
                             _ = await self._purge_and_count(key=key, now=now, window=window)
                             added_for_scope: list[str] = []
-                            for i in range(units):
+                            for i in range(units_m):
                                 try:
                                     cnt = await self._purge_and_count(key=key, now=now, window=window)
-                                    if cnt >= limit:
+                                    if cnt >= limit_m:
                                         # Capacity reached for this scope; stop adding more here
                                         break
                                     member = f"{handle_id}:{sc}:{ev}:{i}:{uuid.uuid4().hex}"
@@ -1930,11 +1949,14 @@ class RedisResourceGovernor(ResourceGovernor):
 
         # Persist handle
         try:
-            # Persist actual reserved counts per category based on members added
+            # Persist actual reserved amounts per category (in request units, e.g. tokens)
+            # based on members added; commit() computes refunds against these.
             reserved_by_cat: dict[str, int] = {}
             for cat, scopes in added_members.items():
                 counts = [len(mems) for mems in scopes.values()]
-                reserved_by_cat[cat] = min(counts) if counts else int((req.categories.get(cat) or {}).get("units") or 0)
+                req_units = int((req.categories.get(cat) or {}).get("units") or 0)
+                quantum = _window_members(cat, int((pol.get(cat) or {}).get("per_min") or 0))[0]
+                reserved_by_cat[cat] = min(req_units, min(counts) * quantum) if counts else req_units
             await client.hset(
                 self._keys.handle(handle_id),
                 mapping={
@@ -2137,7 +2159,10 @@ class RedisResourceGovernor(ResourceGovernor):
                                     pass
                         except _RG_NONCRITICAL_EXCEPTIONS:
                             pass
-                    # Remove up to refund_units members per scope (LIFO of what we added)
+                    # Remove up to refund_members members per scope (LIFO of what we added);
+                    # tokens round down so a partial quantum is never refunded.
+                    quantum = _window_members(category, int((pol.get(category) or {}).get("per_min") or 0))[0]
+                    refund_members = refund_units // quantum
                     scope_map = members.get(category) or {}
                     for key_scope, mem_list in scope_map.items():
                         try:
@@ -2147,14 +2172,14 @@ class RedisResourceGovernor(ResourceGovernor):
                         key = self._keys.win(policy_id, category, sc, ev)
                         # Pop last N members to reduce usage
                         to_remove = []
-                        take = min(refund_units, len(mem_list))
+                        take = min(refund_members, len(mem_list))
                         for _ in range(take):
                             to_remove.append(str(mem_list.pop()))
                         if to_remove:
                             await self._zrem_members(key=key, members=to_remove)
                         # Fallback: if we still need to refund more but local list is shorter,
                         # remove additional members matching this handle_id prefix.
-                        remaining = refund_units - take
+                        remaining = refund_members - take
                         if remaining > 0:
                             try:
                                 client = await self._client_get()
@@ -2214,6 +2239,7 @@ class RedisResourceGovernor(ResourceGovernor):
                 if not data:
                     return
             policy_id = data.get("policy_id") or "default"
+            pol = self._get_policy(policy_id)
             members_raw = data.get("members")
             try:
                 members = json.loads(members_raw or "{}") if isinstance(members_raw, str) else (members_raw or {})
@@ -2223,7 +2249,8 @@ class RedisResourceGovernor(ResourceGovernor):
             for category, delta in deltas.items():
                 if category not in ("requests", "tokens"):
                     continue
-                units = max(0, int(delta))
+                # Members to remove; tokens round down so a partial quantum is never refunded.
+                units = max(0, int(delta)) // _window_members(category, int((pol.get(category) or {}).get("per_min") or 0))[0]
                 if units <= 0:
                     continue
                 # Remove reserved members for this handle to reflect refund request
@@ -2378,6 +2405,7 @@ class RedisResourceGovernor(ResourceGovernor):
                 out[category] = {"remaining": None, "reset": None}
                 continue
             limit = int((pol.get(category) or {}).get("rpm") or 0) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
+            quantum, limit_m, _units_m = _window_members(category, limit)
             window = 60
             remainings = []
             resets = []
@@ -2385,11 +2413,11 @@ class RedisResourceGovernor(ResourceGovernor):
                 current_cnt = 0
                 key = self._keys.win(policy_id, category, sc, ev)
                 current_cnt = await self._purge_and_count(key=key, now=now, window=window)
-                if current_cnt >= limit:
+                if current_cnt >= limit_m:
                     try:
                         res = await self._ensure_tokens_lua()
                         if res:
-                            pair = await (await self._client_get()).evalsha(res, 1, key, int(limit), int(window), float(now))
+                            pair = await (await self._client_get()).evalsha(res, 1, key, int(limit_m), int(window), float(now))
                             if isinstance(pair, (list, tuple)) and int(pair[0]) == 0:
                                 resets.append(int(pair[1]))
                             else:
@@ -2400,7 +2428,7 @@ class RedisResourceGovernor(ResourceGovernor):
                         resets.append(window)
                 else:
                     resets.append(0)
-                remainings.append(max(0, limit - current_cnt))
+                remainings.append(min(limit, max(0, limit_m - current_cnt) * quantum))
             remaining = min(remainings) if remainings else None
             reset = max(resets) if resets else None
             out[category] = {"remaining": remaining, "reset": reset}
