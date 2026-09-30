@@ -482,13 +482,15 @@ Seven causal failures become15focused and457full generator/allfive consuming-mod
 **Goal:** Replace only safe_regex module references during simulations.
 **Success Criteria:** Every original CPU/address-space assertion remains, native globals unchanged and full module passes.
 **Tests:** Posture red/green, full safe-regex module, Ruff/Bandit baseline.
-**Status:** In Progress
+**Status:** Complete
 
 ### Stage 3: Review and qualify
 **Goal:** Review the one test file and require native Windows final-head acceptance.
 **Success Criteria:** No production change, new skip or guard weakening.
 **Tests:** Final automatic/native integrations checks.
-**Status:** Not Started
+**Status:** In Progress
+
+Safe-regex subtask.83.24: original fakes fail two durable native-platform identity controls on macOS, matching Windows global-os mutation failure. Module-local stdlib facades retain each original resource posture assertion and native os/sys globals. Full204cases pass0skip3.00seconds; Ruff0, compile/diff pass, Bandit adds two LOW assertions with inherited B404/B105 unchanged. Root source self-review clear; native Windows final-head acceptance remains open.
 
 ## Chat post-output cleanup test phase — UAT536 (TASK-13260.278.18.83.25)
 
