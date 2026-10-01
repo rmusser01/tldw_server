@@ -1092,8 +1092,9 @@ it.each(['/chat-workspace', '/research-workspace'])('shares one fresh H1 control
   routerState.location.pathname = path;
   let controller: unknown;
   function Probe() {
-    controller = useHistorySelectionContext()?.getReference ?? null;
-    return <output data-testid="workspace-controller">{controller ? 'present' : 'absent'}</output>;
+    const current = useHistorySelectionContext()?.getReference ?? null;
+    React.useEffect(() => { controller = current; }, [current]);
+    return <output data-testid="workspace-controller">{current ? 'present' : 'absent'}</output>;
   }
   const view = render(<OptionLayout><Probe /></OptionLayout>);
   expect(view.getByTestId('header')).toHaveAttribute('data-history-controller', 'present');
