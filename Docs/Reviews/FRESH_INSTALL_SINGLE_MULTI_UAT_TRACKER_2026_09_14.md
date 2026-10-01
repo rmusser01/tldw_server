@@ -5554,3 +5554,40 @@ TASK-13260.278.18.83.45 and .35 remain open for final whole native exit. Native 
 Before replay: Stage2 of owned latest-dev Resource Governance plan is In Progress. Preserve a new recovery ref for the complete clean recorded batch; freshly verify remote64/devf3, fetch dev and replay b709..local onto f3f1. Retain upstream auth actual-IP/policy/charged-entity guard and PR verify_magic_link get_login_db_connection binding; reconcile duplicate capabilities traversal while preserving original response_model identity assertion and all43 module assertions. Record raw range-diff and every duplicate/conflict replacement, preserve upstream TASK13396/design/plan and all previous UAT/workspace/temporary-chat/locale/JSX contracts. Final actual-source RG memory/Redis, AuthNZ_Unit single-charge, magic-link/HTTP/officialPG, MCP and capabilities qualification, dependency versions, compile/Ruff/Bandit/coverage/diff and independent review remain required. No old-head/local/upstream result accepts a future changed head.
 
 Unproven native UAT552/556/558 still need separately tracked content-free actual native route/SQL/scheduling, shutdown phase/stacks and activation lease/deadline/stage evidence before any repair. Reconcile and qualify source before preparing that diagnostic publication; preserve budgets, cleanup and tests. No native bypass, speculative fix, final publication or merge acceptance is claimed. Chatbook scope question remains pending and is not repeated/inferred; full UAT paused/UAT261 open.
+
+
+## Latest-dev85ede strict startup and Resource Governance replay — 2026-10-01
+
+**Task:** TASK-13260.278.18.83. Supersedes the f3f1 replay target; preserve the earlier plan as history.
+
+### Stage 1: Review and record material upstream changes
+**Goal:** Inventory new Persona startup/DB/CI behavior and all direct overlaps.
+**Success Criteria:** Verified immutable refs, complete diff/intersection and independent review requirements recorded before replay.
+**Tests:** Read-only source/diff/assertion inventory.
+**Status:** Complete
+
+### Stage 2: Preserve and reconcile the recorded batch
+**Goal:** Replay onto freshly verified dev85ede after creating a new recovery ref.
+**Success Criteria:** Every patch replacement/conflict explained; all prior and upstream contracts preserved; clean final source.
+**Tests:** Range-diff, exact files/source/assertion/control comparisons and CI partition inventory.
+**Status:** In Progress
+
+### Stage 3: Qualify actual reconciled behavior and dependencies
+**Goal:** Exercise RG and strict startup/SQLite/official PostgreSQL/HTTP/CI scopes on actual reconciled source.
+**Success Criteria:** Causal/full affected scopes, static/coverage/diff and independent review clear; unproven native issues remain explicitly open.
+**Tests:** Scopes listed below; real fixtures and original budgets retained.
+**Status:** Not Started
+
+### Stage 4: Native diagnosis, final publication and protected merge
+**Goal:** Collect actual native causal evidence, make only proven repairs, qualify final published automatic/native head.
+**Success Criteria:** Safe recovery/lease publication; all required native/strict successes, natural Prompt Studio exit and review dispositions including Chatbook settled.
+**Tests:** Content-free native observations, fresh exact-head direct job APIs and protection gates.
+**Status:** Not Started
+
+2026-10-01 01:34 UTC new upstream PR3041 material delta: freshly verified/fetched dev85ede1f1df10c03505c603e4183920edcb7cbfef supersedes f3f1. It adds33commits/83files/18direct PR overlaps: strict Workspace Persona startup receipts, admission/retry/lifecycle/privacy/schema/RLS/erasure/rebinding; SQLite and PostgreSQL bootstrap/cascade/HTTP cleanup ownership; endpoint/request schemas and chat integration; ADR057 and task/design/plan history; OpenAPI fingerprint; CI repartition and strict-startup Workspace suites. No dependency manifest change. Combined b709..85ede has62upstream commits/104files/19direct overlaps. Evidence /private/tmp/pr2979-dev-delta-20261001-0134.json and .txt.
+
+A stale f3f1 replay started after the fresh-dev assertion failed because the shell did not stop after Python failure. It paused at known UAT542 conflict196/223 and was aborted with git rebase --abort; original branch and ORIG_HEAD verifiedfd6194, clean batch restored with seven held normal-hook commits, UAT557 source hash unchanged. No recovery-ref creation or qualification occurred during that excluded attempt and nothing was published. Preserve /private/tmp/pr2979-rebase-20261001-f3f1-excluded-attempt.json/status/conflict.diff. Future mutation must be gated in checked Python subprocesses or separate successful tools; no shell continuation after a failed verification.
+
+Replay plan expands before new replay: fresh remote64/dev85 verification, new recovery of the fully recorded clean batch, patch equivalence/reconciliation including every changed/duplicate original control, preservation of all prior UAT/canonical workspace/temporary-chat/locale/JSX contracts and upstream TASK13245/TASK13396/ADR057 histories. Preserve upstream CI movement of DB_Management/test_chacha_*.py into chacha-core-stores in all five matrices and the three Workspace startup HTTP suites; preserve original55-minute outer/300-second per-case budgets and complete nonoverlapping coverage. Retain upstream strict startup admission, private durable receipts and erasure/rebinding/PG transaction ownership alongside PR current owner bindings, moderation cleanup isolation and native controls. Retain Resource Governance fallback/scopes/Redis accounting/auth single charge and magic-link binding; reconcile actual served-route audit and original response_model assertion.
+
+Actual final source qualification expands to strict startup acceptance/concurrency/lifecycle/privacy/receipts/repair/RLS, owner-bound chat and HTTP routes, SQLite migration/index/cascade and official required PostgreSQL migration/schema-lock/bootstrap/operation-cleanup tests, API fingerprints/contracts and actual CI partition/coverage controls, alongside Resource Governance memory/Redis/AuthNZ_Unit single-charge/PG/MCP/route scopes. Compile/Ruff/Bandit/diff/dependency evidence and independent review required. A new independent read-only strict-startup delta review is active; no own tests claimed. UAT552/556/558 actual native causal instrumentation remains necessary before repairs, all final native/strict checks and pending Chatbook disposition remain open, full UAT paused/UAT261 open. No latest-dev source qualification/publication or merge acceptance.
