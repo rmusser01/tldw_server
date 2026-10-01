@@ -1,10 +1,10 @@
 ---
 id: TASK-13398
 title: Repair latest-dev Chat Workspace UAT failures
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-30 15:47'
-updated_date: '2026-10-01 18:05'
+updated_date: '2026-10-01 18:59'
 labels: []
 dependencies: []
 documentation:
@@ -21,8 +21,8 @@ Requester authorized addressing confirmed Chat Workspace issues using latest dev
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Existing patch and latest dev are reconciled without weakening history ownership or reusing occupied schema migration numbers.
-- [ ] #2 All confirmed issues have scoped regression coverage and actual no-mock UAT evidence or explicitly documented unresolved blockers.
-- [ ] #3 Bandit on touched Python production scope and relevant lint/type/regression checks pass without new findings.
+- [x] #2 All confirmed issues have scoped regression coverage and actual no-mock UAT evidence or explicitly documented unresolved blockers.
+- [x] #3 Bandit on touched Python production scope and relevant lint/type/regression checks pass without new findings.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -117,14 +117,22 @@ Reviewed241pathcommit99182ae9f3b0216d79ee18e4c4ad17a940019541 pushed and request
 2026-10-01 additionalCI follow-up associatedbeforeedits: shardcoverage guard genuineRED newownedlorebookdiagnostics testunregistered; registerit alongsideexistinglorebook/character-scope testinall5CI shardmatrices,notignore/baseline. FrontendowningESLint7hookspurity findsnewWebLayout.chat-scroll-contractProbe assignsoutercontrollerduringrender; movesonlytestobservercapture intoReacteffect matchingexistingadjacentProbe. Preserve assertions/testcoverage, no productionchange orrule suppression. Parentrepairs theseCIboundaries whileBohrtracesbundle andSingerrunsactualownerUAT; fullUAT remainsopen.
 
 CI boundary repairsGREEN2026-10-01: missingEOFhooks/chat-helper/index.ts restoredexact1newline; WebLayouttestobserverReacteffect retainsall39assertions(0fail/skip), ownESLint0errors/6existingwarnings; lorebookscopeapi testregisteredinall5existingCI shardmatrices, coverageguardRED1newuncovered -> GREEN0(shards830,4943tests,baseline44unchanged). gitdiffcheck0. No testdisabled/newignore/budgetraised. Nativeownertraceactual200workspace/H1 andvisibleChrome, matrixstillpending; bundleinvestigationcontinues.
+
+FinalChatWorkspacescopecompletewithactualno-mockChromeCDP matrix andfinalFastAPI0.142.1/latestdevec86 groundedgeneration/citations/draftreloadPASS; final9pathindependentreviewPASS48checks, full85ownedfiles2278assertions0skip, productionTurbopack/token/unchanged539.9/842.3budgetsPASS, scopedsecurity0newfindings; originaldata/browser/all68stashesretained. Sourcefixesfcd22bee90+upstreammerge9ebc3bdfb14; finalreportDocs/superpowers/reviews/chat-workspace/2026-10-01-latest-dev-no-mock-uat.md. PR3071draftunmergedremoteCI/humanChangeSummarygateexplicit. UpstreamFastAPI task reusedID13398; finaluniqueTask13408ownsremainingpublication. HistoricalChatWorkspaceroot/familywillbearchivedthroughofficialCLIafterallchildDone to preservecontentandavoidactiveIDcollision; do notarchiveupstreamPinFastAPIrecord.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Reconciled latest dev, addressed confirmed Chat Workspace production/UAT/CI issues and completed the approved full no-mock native matrix with actual API/auth/databases/browser storage/Gemma/embeddings. Scoped tests, security, independent review and unchanged production build budgets pass. All original data/tabs/stashes preserved. Unique final trackerTASK13408 and PR3071 retain remote CI and requester-written merge gates; this is not epic closure or permission to merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
