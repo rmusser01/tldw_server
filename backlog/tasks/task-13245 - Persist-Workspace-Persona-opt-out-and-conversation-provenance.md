@@ -4,7 +4,7 @@ title: Persist Workspace Persona opt-out and conversation provenance
 status: In Progress
 assignee: []
 created_date: 2026-09-13 18:15
-updated_date: 2026-10-01 02:25
+updated_date: 2026-10-01 05:05
 labels:
 - persona
 - workspaces
@@ -65,6 +65,19 @@ The parent full-suite summary and Character Chat rate-limit checks were pending 
 PR #3055 already targets actual dev after nine patches replayed identically. Fresh affected qualification passed 252 unique cases, including 99 official PostgreSQL-labelled cases, with no failures/errors/skips. Separate prompt/Docs/workflow checks passed 266 unique cases; overlapping final Docs validation passed 212. The child requester summary is already approved and verbatim. Local qualification and retargeting are complete, while exact-head hosted CI/review, Cubic documentation corrections and normal child merge remain open under TASK-13245.10/.14.
 
 TASK-13245 remains In Progress and issue #2950 remains open. Stage 2D delivery and broader tool-profile, provisioning/backfill and Research adoption work are not claimed complete. Shared checkout, dependencies, other agents containers, recovery refs and stash backups are preserved.
+## Current Review And Integration Checkpoint (2026-10-01)
+
+This checkpoint supersedes the delivery-status paragraph above without replacing or deleting its history. Nine of the eleven original Cubic documentation corrections are completed and published in f3a977cc1eae09a730a9c5a1d6124ca48d6ee633. Only the two original historical-note formatting requests (threads PRRT_kwDOL1aGf86nxo4I and PRRT_kwDOL1aGf86nxo4b) still await the already-requested explicit formatting-only approval. Those original records remain unchanged. The additional current-status clarification in thread PRRT_kwDOL1aGf86nyJIW is addressed by this explicit distinction; publication and verified thread disposition remain pending.
+
+Actual dev advanced to b365af1827b607fc221f9bf31ca76dde881edb4f through RG/AuthNZ PR #3068. All twelve child commits replayed identically without conflicts onto that base at local checkpoint 9a70325818bc2e7b73bbc15fb36c9fdeafb56705, with recovery codex/persona-stage2d-pre-rg-policy-rebase-20261001 preserving f3a977. Fresh Persona and affected shared RG/AuthNZ qualification is in progress; this new base is not yet qualified or published. Exact-head hosted CI/review and normal child merge remain pending, and the two original formatting approvals still block merge. Prior f3a977 required-check successes are historical evidence only, not validation of the rebased head. The three separately triaged ancillary UX/MCP/Sandbox failures are not claimed repaired. TASK-13245 and issue #2950 remain open for broader Persona parity.
+RG-base qualification closeout at local checkpoint `9a70325818bc2e7b73bbc15fb36c9fdeafb56705` on dev `b365af1827b607fc221f9bf31ca76dde881edb4f`: the fresh 26-file matrix completed 634 passed, two existing Redis expected failures and nine warnings, with no failures/errors in 918.48s. All 252 child cases passed, including 99 official required isolated PostgreSQL-labelled cases plus SQLite. Separate prompt/Docs/workflow checks passed 266 cases. This supersedes the preceding checkpoint's in-progress qualification status, not its history. Final post-record Docs verification, publication, fresh new-head CI/review and normal child merge remain pending. Nine original Cubic corrections are complete; two original historical-note formatting approvals remain outstanding. The third current-status clarification is appended but not yet published/dispositioned. Original notes and TASK-13245.11 remain unchanged. Broader profile/provisioning/Research parity and issue #2950 remain open.
+## Readable RG-Base Closeout (2026-10-01)
+
+Local source checkpoint `9a70325818bc2e7b73bbc15fb36c9fdeafb56705` is rebased onto dev `b365af1827b607fc221f9bf31ca76dde881edb4f`. Fresh qualification completed 634 passed, two existing Redis expected failures and nine warnings, with no failures/errors in 918.48s. All 252 child cases passed, including 99 official required isolated PostgreSQL-labelled cases plus SQLite. Separate prompt/Docs/workflow checks passed 266 cases (nine warnings, 52.66s); final complete Docs verification passed 212 cases (eight warnings, 37.54s, seed 3105512003). These overlapping Docs runs are not summed. Logs/XML use /private/tmp/persona-pr3055-rg-rebase-{qualification,guards,docs-final}-20261001.
+
+Nine original Cubic corrections are complete. Only the two original historical-note formatting requests still await the already-requested approval. The additional current-status clarification is explicitly appended here but not yet published/dispositioned. Original historical notes and TASK-13245.11 remain unchanged. Whole-note update attempts did not succeed; no replacement or alternate write route was used to overwrite historical records. This append-only closeout supersedes prior in-progress qualification text without deleting it.
+
+Publication, fresh exact-head hosted dev CI/Qodo/trusted license, strict up-to-date and normal child merge remain open. The UX/MCP/Sandbox ancillary baseline findings are not repaired. Broader profile/provisioning/backfill/Research parity and issue #2950 remain open; shared checkout, dependencies, containers, recovery refs and stash backups are preserved.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
