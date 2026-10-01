@@ -156,8 +156,13 @@ export const NavLink = React.forwardRef<HTMLAnchorElement, NavLinkProps>(
 NavLink.displayName = "NavLink"
 
 export const useNavigate = () => {
-  const router = useRouter()
-  return (to: NavigateTo, options?: NavigateOptions) => {
+  const currentRouter = useRouter()
+  const routerRef = React.useRef(currentRouter)
+  routerRef.current = currentRouter
+  // Next republishes its public router during hydration/Fast Refresh. Keep
+  // effect dependencies stable without retaining an obsolete router snapshot.
+  return React.useCallback((to: NavigateTo, options?: NavigateOptions) => {
+    const router = routerRef.current
     if (typeof to === "number") {
       if (to < 0) {
         runNavigationTransition(
@@ -199,7 +204,7 @@ export const useNavigate = () => {
       console.error("[useNavigate shim] Navigation failed:", err)
       doFallback()
     }
-  }
+  }, [])
 }
 
 const useUnstablePrompt = ({ when, message }: PromptOptions): void => {
@@ -243,20 +248,17 @@ export { useUnstablePrompt as unstable_usePrompt }
 
 export const useLocation = () => {
   const router = useRouter()
-  const search =
-    typeof window === "undefined" ? "" : window.location.search || ""
-  const hash = typeof window === "undefined" ? "" : window.location.hash || ""
-  const pathname = router.asPath.split("?")[0].split("#")[0] || router.pathname
-  return React.useMemo(
-    () => ({
-      pathname,
-      search,
-      hash,
+  return React.useMemo(() => {
+    // Router and browser URLs can advance separately during a transition.
+    const url = new URL(router.asPath || router.pathname, "http://localhost")
+    return {
+      pathname: url.pathname,
+      search: url.search,
+      hash: url.hash,
       state: null,
       key: router.asPath
-    }),
-    [pathname, router.asPath, search, hash]
-  )
+    }
+  }, [router.asPath, router.pathname])
 }
 
 export const useParams = <

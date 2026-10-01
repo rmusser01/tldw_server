@@ -166,11 +166,10 @@ def _reset_chat_rate_limiter_between_tests(monkeypatch):
         monkeypatch.setenv("TEST_CHAT_GLOBAL_RPM", "10")
         monkeypatch.setenv("TEST_CHAT_TOKENS_PER_MINUTE", "1000")
         monkeypatch.delenv("TEST_CHAT_BURST_MULTIPLIER", raising=False)
-        from tldw_Server_API.app.core.Chat.rate_limiter import (
-            initialize_rate_limiter,
-        )
-        # Reinitialize each test to ensure TEST_CHAT_* env overrides apply.
-        rl = initialize_rate_limiter()
+        from tldw_Server_API.app.core.Chat import rate_limiter
+        # Restore the incoming cached owner along with the scoped env overrides.
+        monkeypatch.setattr(rate_limiter, "_rate_limiter", None)
+        rl = rate_limiter.initialize_rate_limiter()
         # Reset per-user and global buckets (both common test ids)
         rl.reset_user_limits("test_user")
         rl.reset_user_limits("1")  # single_user mode default user id

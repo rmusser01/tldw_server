@@ -7,29 +7,60 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 pytestmark = pytest.mark.unit
 
 
-def test_sqlite_migration_adds_task_tables(tmp_path, monkeypatch) -> None:
+def test_sqlite_migration_adds_task_tables(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     db_path = tmp_path / "tasks.db"
-    # Seed a genuine v47 DB. Dropping the task tables from a current-schema DB is
-    # not a real predecessor: later steps depend on the catalog they left behind
-    # (v55->v56's note_graph_suggestion_evidence FK needs uq_notes_owner_id).
+    note_id = "11111111-1111-4111-8111-111111111111"
+
+    def initialize_historical(db: CharactersRAGDB) -> None:
+        with db.transaction() as conn:
+            db._apply_schema_v4(conn)
+            steps = db._sqlite_linear_migration_steps()
+            for version in range(4, 47):
+                steps[version](conn)
+                assert db._get_db_version(conn) == version + 1
+
     with monkeypatch.context() as patch:
         patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 47)
-        db = CharactersRAGDB(db_path=str(db_path), client_id="bootstrap")
-        db.close_connection()
-
-    with sqlite3.connect(db_path) as conn:
-        assert conn.execute(  # nosec B101
-            "SELECT version FROM db_schema_version WHERE schema_name = ?",
-            (CharactersRAGDB._SCHEMA_NAME,),
-        ).fetchone()[0] == 47
-        assert conn.execute(  # nosec B101
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'note_tasks'"
-        ).fetchone() is None
+        patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical)
+        seed = CharactersRAGDB(db_path, client_id="bootstrap")
+    try:
+        with seed.transaction() as conn:
+            assert seed._get_db_version(conn) == 47
+            tables = seed._sqlite_table_names(conn)
+            assert {
+                "note_tasks", "task_events", "task_event_read_state", "task_note_projections",
+                "note_task_reconciliation_state", "note_task_scope_authority", "note_attachments",
+                "note_graph_suggestion_evidence",
+            }.isdisjoint(tables)
+            conn.execute(
+                "INSERT INTO notes (id, title, content, client_id) VALUES (?, ?, ?, ?)",
+                (note_id, "Retained task note", "Original content", "bootstrap"),
+            )
+            note_before = dict(conn.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone())
+            seed._migrate_from_v47_to_v48(conn)
+            assert seed._get_db_version(conn) == 48
+            assert {
+                "note_tasks", "task_events", "task_event_read_state", "task_note_projections",
+                "note_task_reconciliation_state",
+            } <= seed._sqlite_table_names(conn)
+            assert dict(conn.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone()) == note_before
+            with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed.*projection_status"):
+                conn.execute(
+                    "INSERT INTO note_tasks "
+                    "(id, note_id, text, status, projection_status, created_at, updated_at, client_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("invalid-task", note_id, "Task", "open", "invalid", "2026-01-01", "2026-01-01", "bootstrap"),
+                )
+    finally:
+        seed.close_all_connections()
 
     migrated = CharactersRAGDB(db_path=str(db_path), client_id="migrate")
-    migrated.close_connection()
+    migrated.close_all_connections()
 
     with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        note_after = dict(conn.execute("SELECT * FROM notes WHERE id = ?", (note_id,)).fetchone())
+        assert all(note_after[key] == value for key, value in note_before.items())
         tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         final_version = conn.execute(
             "SELECT version FROM db_schema_version WHERE schema_name = ?",

@@ -241,6 +241,7 @@ export function UnifiedSetupWizard({
   const activeStep = isMultiUserServer
     ? "multi_user_exit"
     : step === "first_chat" && !providerSelection ? "provider_setup" : step;
+  const handleOpenConnectionSettings = () => navigate("/settings/tldw");
 
   const handleSignIn = async () => {
     setLoginPending(true);
@@ -581,7 +582,7 @@ export function UnifiedSetupWizard({
   );
 
   const handleSkip = React.useCallback(() => {
-    if (skipPendingRef.current) return;
+    if (!state || skipPendingRef.current) return;
     skipPendingRef.current = true;
     setSkipPending(true);
     setStepError(null);
@@ -598,7 +599,7 @@ export function UnifiedSetupWizard({
         setSkipPending(false);
         void refreshSetupReadiness();
       });
-  }, [onStateChange, refreshSetupReadiness, skip]);
+  }, [onStateChange, refreshSetupReadiness, skip, state]);
 
   if (loading && !state && !metadata) {
     return (
@@ -630,16 +631,27 @@ export function UnifiedSetupWizard({
                 : "Configure the minimum needed to reach a successful first chat."}
             </p>
           </div>
-          {!isMultiUserServer ? (
-            <button
-              type="button"
-              onClick={handleSkip}
-              disabled={skipPending}
-              className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"
-            >
-              {skipPending ? "Skipping..." : "Skip for now"}
-            </button>
-          ) : null}
+          <div className="flex flex-wrap gap-2">
+            {(!metadata || error) && activeStep !== "multi_user_exit" ? (
+              <button
+                type="button"
+                onClick={handleOpenConnectionSettings}
+                className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2"
+              >
+                Open connection settings
+              </button>
+            ) : null}
+            {!isMultiUserServer && state ? (
+              <button
+                type="button"
+                onClick={handleSkip}
+                disabled={skipPending}
+                className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"
+              >
+                {skipPending ? "Skipping..." : "Skip for now"}
+              </button>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -689,6 +701,7 @@ export function UnifiedSetupWizard({
             metadata={metadata}
             onBack={isMultiUserServer ? undefined : () => setStep("setup_path")}
             onSignIn={isMultiUserServer ? handleSignIn : undefined}
+            onOpenConnectionSettings={handleOpenConnectionSettings}
             loginPending={loginPending}
           />
         ) : null}

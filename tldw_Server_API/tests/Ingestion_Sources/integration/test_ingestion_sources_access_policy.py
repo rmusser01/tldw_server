@@ -449,10 +449,10 @@ def test_capabilities_endpoint_uses_explicit_response_model(
     )
 
     # FastAPI >= 0.137 keeps included routers nested; walk the served routes instead.
-    served = next(
-        served
+    route = next(
+        served.route
         for served in iter_served_routes(ingestion_sources_policy_client["app"].routes)
         if served.path == "/api/v1/ingestion-sources/capabilities"
     )
 
-    assert served.route.response_model is IngestionSourceCapabilitiesResponse
+    assert route.response_model is IngestionSourceCapabilitiesResponse

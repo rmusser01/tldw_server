@@ -31,15 +31,24 @@ class TestNemoTranscription:
         return audio_data, sample_rate
 
     @pytest.fixture
-    def mock_config(self, tmp_path):
-        """Mock configuration for testing."""
+    def mock_config(self, monkeypatch, tmp_path):
+        """Provide flat STT settings with private cache state and paths."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Nemo as nemo_mod,
+        )
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Parakeet_ONNX as onnx_mod,
+        )
+
+        monkeypatch.setattr(nemo_mod, "_model_cache", {})
+        monkeypatch.setattr(onnx_mod, "_onnx_model_cache", {})
+        cache_dir = tmp_path / "nemo"
+        monkeypatch.setenv("NEMO_CACHE_DIR", str(cache_dir))
         return {
-            'STT-Settings': {
-                'default_transcriber': 'parakeet',
-                'nemo_model_variant': 'standard',
-                'nemo_device': 'cpu',
-                'nemo_cache_dir': str(tmp_path / 'nemo')
-            }
+            'default_transcriber': 'parakeet',
+            'nemo_model_variant': 'standard',
+            'nemo_device': 'cpu',
+            'nemo_cache_dir': str(cache_dir),
         }
 
     def test_import_nemo_module(self):
@@ -59,7 +68,7 @@ class TestNemoTranscription:
         )
 
         # Use fixture-provided config through the patched callable
-        mock_config_data.return_value = mock_config['STT-Settings']
+        mock_config_data.return_value = mock_config
 
         cache_dir = _get_cache_dir()
         assert isinstance(cache_dir, Path)
@@ -92,7 +101,7 @@ class TestNemoTranscription:
         # Clear cache first
         _model_cache.clear()
 
-        mock_config_data.return_value = mock_config['STT-Settings']
+        mock_config_data.return_value = mock_config
         mock_model = MagicMock()
         mock_from_pretrained.return_value = mock_model
 
@@ -113,7 +122,7 @@ class TestNemoTranscription:
         # Clear cache first
         _model_cache.clear()
 
-        mock_config_data.return_value = mock_config['STT-Settings']
+        mock_config_data.return_value = mock_config
         mock_model = MagicMock()
         mock_from_pretrained.return_value = mock_model
 
@@ -467,7 +476,7 @@ class TestNemoTranscription:
             _onnx_model_cache,
         )
 
-        mock_config_data.return_value = mock_config['STT-Settings']
+        mock_config_data.return_value = mock_config
         _model_cache.clear()
         _onnx_model_cache.clear()
 

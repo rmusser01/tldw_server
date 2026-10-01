@@ -102,33 +102,52 @@ def test_persona_conversation_round_trips_assistant_identity(db_instance: Charac
 def test_migration_v31_to_v32_backfills_assistant_identity_for_legacy_rows(
     db_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Registered upgrades retain a real pre-identity row and leave new origin unknown."""
-    with monkeypatch.context() as historical:
-        historical.setattr(CharactersRAGDB, "_initialize_schema_sqlite", _initialize_genuine_v31)
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_initialize_schema_sqlite", _initialize_genuine_v31)
         seed = CharactersRAGDB(db_path, "assistant-identity-test-client")
-    character_id = seed.execute_query("SELECT id FROM character_cards ORDER BY id LIMIT 1").fetchone()[0]
     conv_id = "conv-migration-1"
-    with seed.transaction() as conn:
-        conn.execute(
-            "INSERT INTO conversations (id, root_id, character_id, title, client_id) VALUES (?, ?, ?, ?, ?)",
-            (conv_id, conv_id, character_id, "Legacy migration chat", seed.client_id),
-        )
-    assert "assistant_kind" not in seed.get_conversation_by_id(conv_id)
-    seed.close_connection()
+    try:
+        with seed.transaction() as conn:
+            assert seed._get_db_version(conn) == 31
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(conversations)")}
+            assert {"assistant_kind", "assistant_id", "persona_memory_mode"}.isdisjoint(columns)
+            assert conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE name = 'note_attachments'"
+            ).fetchone() is None
+            character_id = conn.execute(
+                "INSERT INTO character_cards (name, description, client_id) VALUES (?, ?, ?)",
+                ("Migration Source", "Retained character content", seed.client_id),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO conversations (id, root_id, character_id, title, client_id) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (conv_id, conv_id, character_id, "Legacy migration chat", seed.client_id),
+            )
+            before = dict(conn.execute("SELECT * FROM conversations WHERE id = ?", (conv_id,)).fetchone())
+
+            seed._migrate_from_v31_to_v32(conn)
+            assert seed._get_db_version(conn) == 32
+            after = dict(conn.execute("SELECT * FROM conversations WHERE id = ?", (conv_id,)).fetchone())
+            assert after == {
+                **before,
+                "assistant_kind": "character",
+                "assistant_id": str(character_id),
+                "persona_memory_mode": None,
+            }
+    finally:
+        seed.close_all_connections()
 
     migrated = CharactersRAGDB(db_path, "assistant-identity-test-client")
-    conn = migrated.get_connection()
-    version_row = conn.execute(
-        "SELECT version FROM db_schema_version WHERE schema_name = ?",
-        (CharactersRAGDB._SCHEMA_NAME,),
-    ).fetchone()
-    assert version_row is not None
-    assert version_row["version"] == CharactersRAGDB._CURRENT_SCHEMA_VERSION
-
-    migrated_row = migrated.get_conversation_by_id(conv_id)
-    assert migrated_row is not None
-    assert migrated_row["assistant_kind"] == "character"
-    assert migrated_row["assistant_id"] == str(character_id)
-    assert migrated_row["persona_memory_mode"] is None
-    assert migrated_row["assistant_startup_json"] is None
-    migrated.close_connection()
+    try:
+        conn = migrated.get_connection()
+        assert migrated._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        current_row = dict(conn.execute("SELECT * FROM conversations WHERE id = ?", (conv_id,)).fetchone())
+        assert all(current_row[key] == value for key, value in after.items())
+        migrated_row = migrated.get_conversation_by_id(conv_id)
+        assert migrated_row is not None
+        assert migrated_row["assistant_kind"] == "character"
+        assert migrated_row["assistant_id"] == str(character_id)
+        assert migrated_row["persona_memory_mode"] is None
+        assert migrated_row["assistant_startup_json"] is None
+    finally:
+        migrated.close_all_connections()

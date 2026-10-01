@@ -353,10 +353,10 @@ describe("TldwChatService message sanitization", () => {
     await expect(settled).resolves.toMatchObject({
       status: "rejected",
       error: {
-        message: "Stream completion failed",
-        cause: expect.objectContaining({
-          message: expect.stringContaining("visible output")
-        })
+        name: "ChatStreamTimeoutError",
+        phase: "startup",
+        timeoutMs: 50,
+        message: expect.stringContaining("visible output")
       }
     })
   })
@@ -415,10 +415,10 @@ describe("TldwChatService message sanitization", () => {
     await expect(settled).resolves.toMatchObject({
       status: "rejected",
       error: {
-        message: "Stream completion failed",
-        cause: expect.objectContaining({
-          message: expect.stringContaining("visible output")
-        })
+        name: "ChatStreamTimeoutError",
+        phase: "startup",
+        timeoutMs: 50,
+        message: expect.stringContaining("visible output")
       }
     })
   })

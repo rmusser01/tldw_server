@@ -1468,5 +1468,20 @@
   },
   "actor_templateMode_ignore": {
     "message": "ടെംപ്ലേറ്റുകൾ സജീവമാകുമ്പോൾ ഇഗ്നോർ ചെയ്യുക"
+  },
+  "mediaHandoff_conflictLabel": {
+    "message": "മീഡിയ കൈമാറ്റത്തിലെ വൈരുദ്ധ്യം"
+  },
+  "mediaHandoff_conflict": {
+    "message": "സന്ദേശം എഴുതുന്നിടത്ത് ഇതിനകം ഒരു കരടുണ്ട്. മീഡിയ ഉറവിടം ചേർക്കുക, നിങ്ങളുടെ കരട് മാറ്റിസ്ഥാപിക്കുക, അല്ലെങ്കിൽ ഇറക്കുമതി റദ്ദാക്കുക."
+  },
+  "mediaHandoff_insert": {
+    "message": "മീഡിയ ഉറവിടം ചേർക്കുക"
+  },
+  "mediaHandoff_replace": {
+    "message": "നിലവിലെ കരട് മാറ്റിസ്ഥാപിക്കുക"
+  },
+  "mediaHandoff_cancel": {
+    "message": "ഇറക്കുമതി റദ്ദാക്കുക"
   }
 }

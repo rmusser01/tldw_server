@@ -159,12 +159,20 @@ def client_user_only(request):  # noqa: D401 - compatibility alias with fallback
     try:
         request.getfixturevalue("authnz_schema_ready_sync")
         client, _logger = request.getfixturevalue("client_with_single_user")
-        return client
     except Exception:
         # Last resort: construct a minimal TestClient against the app
         from fastapi.testclient import TestClient
         fastapi_app = _resolve_app_for_fallback_client()
-        return TestClient(fastapi_app)
+        client = TestClient(fastapi_app)
+
+    # Lifespan startup replaces the snapshot seeded by the autouse fixture.
+    # Adapter tests need their deterministic policy after startup completes.
+    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        set_llm_provider_overrides_cache_for_tests,
+    )
+
+    set_llm_provider_overrides_cache_for_tests({})
+    return client
 
 
 @pytest.fixture
@@ -180,7 +188,7 @@ def client(client_user_only):
     try:
         resp = test_client.get("/api/v1/health")
         csrf_token = getattr(test_client, "csrf_token", None) or resp.cookies.get("csrf_token", "")
-        setattr(test_client, "csrf_token", csrf_token)
+        test_client.csrf_token = csrf_token
     except Exception:
         csrf_token = ""
 
@@ -201,7 +209,7 @@ def client(client_user_only):
             _ = None
         return test_client.post(url, headers=headers, **kwargs)
 
-    setattr(test_client, "post_with_auth", post_with_auth)
+    test_client.post_with_auth = post_with_auth
     return test_client
 
 
@@ -219,7 +227,7 @@ def authenticated_client(client_user_only, auth_token):
     try:
         resp = test_client.get("/api/v1/health")
         csrf_token = getattr(test_client, "csrf_token", None) or resp.cookies.get("csrf_token", "")
-        setattr(test_client, "csrf_token", csrf_token)
+        test_client.csrf_token = csrf_token
     except Exception:
         csrf_token = getattr(test_client, "csrf_token", "")
 

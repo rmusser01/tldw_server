@@ -5,17 +5,10 @@ import { load } from "cheerio"
 import { describe, expect, it } from "vitest"
 
 const extensionRoot = path.resolve(__dirname, "..", "..")
-const optionsHtmlPath = path.join(
-  extensionRoot,
-  "entrypoints",
-  "options",
-  "index.html",
-)
 const themeBootstrapPath = path.resolve(
   extensionRoot,
   "../packages/ui/src/public/theme-bootstrap.js",
 )
-const optionsHtml = readFileSync(optionsHtmlPath, "utf8")
 const themeBootstrap = readFileSync(themeBootstrapPath, "utf8")
 
 function inlineScriptBodies(html: string): string[] {
@@ -26,7 +19,11 @@ function inlineScriptBodies(html: string): string[] {
     .filter(Boolean)
 }
 
-describe("options theme bootstrap", () => {
+describe.each(["options", "sidepanel"])("%s theme bootstrap", (entrypoint) => {
+  const optionsHtml = readFileSync(
+    path.join(extensionRoot, "entrypoints", entrypoint, "index.html"),
+    "utf8"
+  )
   it("loads a same-origin external classic script synchronously from the head", () => {
     const document = load(optionsHtml)
     const bootstrap = document('head > script[src="/theme-bootstrap.js"]')

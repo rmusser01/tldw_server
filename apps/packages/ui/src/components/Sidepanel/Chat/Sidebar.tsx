@@ -26,9 +26,11 @@ import type { SidepanelChatTab, ConversationStatus } from "@/store/sidepanel-cha
 import { useSidepanelChatTabsStore } from "@/store/sidepanel-chat-tabs"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useDebounce } from "@/hooks/useDebounce"
+import { useConnectionState } from "@/hooks/useConnectionState"
 import { useServerChatHistory, type ServerChatHistoryItem } from "@/hooks/useServerChatHistory"
 import { PageAssistDatabase } from "@/db/dexie/chat"
 import type { HistoryInfo } from "@/db/dexie/types"
+import type { SidepanelChatOwner } from "@/hooks/useSidepanelChatOwner"
 import { useFolderStore } from "@/store/folder"
 import { useBulkChatOperations } from "@/hooks/useBulkChatOperations"
 import { useStorage } from "@plasmohq/storage/hook"
@@ -55,6 +57,9 @@ type SidebarGroup = {
 }
 
 type SidepanelChatSidebarProps = {
+  owner?: Pick<SidepanelChatOwner, "ownerKey" | "isCurrent"> & {
+    snapshot: Pick<SidepanelChatOwner["snapshot"], "requestScope">
+  }
   open: boolean
   variant: "docked" | "overlay"
   tabs: SidepanelChatTab[]
@@ -199,6 +204,7 @@ const buildGroups = (tabs: SidepanelChatTab[], t: TFunction): SidebarGroup[] => 
 }
 
 export const SidepanelChatSidebar = ({
+  owner,
   open,
   variant,
   tabs,
@@ -336,16 +342,48 @@ export const SidepanelChatSidebar = ({
   const [folderPickerTabId, setFolderPickerTabId] = React.useState<string | null>(null)
 
   const debouncedSearchQuery = useDebounce(searchQuery, 250)
-  const hasDebouncedSearchQuery = debouncedSearchQuery.trim().length > 0
+  const normalizedQuery = searchQuery.trim().toLowerCase()
+  const hasSearch = normalizedQuery.length > 0
+  const debouncedNormalizedQuery = debouncedSearchQuery.trim().toLowerCase()
+  const hasDebouncedSearchQuery = debouncedNormalizedQuery.length > 0
+  const isSearchDebouncing = normalizedQuery !== debouncedNormalizedQuery
+  const ownerCurrent = Boolean(owner?.isCurrent())
+  const { isConnected } = useConnectionState()
   const dbRef = React.useRef<PageAssistDatabase | null>(null)
-  const [localSearchResults, setLocalSearchResults] = React.useState<HistoryInfo[]>([])
-  const { data: serverSearchResults = [] } = useServerChatHistory(
+  const [localSearchRetry, setLocalSearchRetry] = React.useState(0)
+  const [localSearch, setLocalSearch] = React.useState<{
+    owner: typeof owner
+    query: string
+    status: "idle" | "pending" | "success" | "error"
+    results: HistoryInfo[]
+  }>({ owner: undefined, query: "", status: "idle", results: [] })
+  const serverSearch = useServerChatHistory(
     debouncedSearchQuery,
     {
-      enabled: hasDebouncedSearchQuery,
+      enabled: hasDebouncedSearchQuery && Boolean(owner?.isCurrent()),
+      owner: owner ? { key: owner.ownerKey, requestScope: owner.snapshot.requestScope, isCurrent: owner.isCurrent } : undefined,
       mode: "search"
     }
   )
+  const localSearchCurrent = localSearch.owner === owner && localSearch.query === normalizedQuery
+  const localSearchPending = ownerCurrent && hasSearch && (
+    isSearchDebouncing || !localSearchCurrent || localSearch.status === "pending"
+  )
+  const serverSearchUnavailable = !isConnected || serverSearch.fetchStatus === "paused"
+  const searchPending = localSearchPending || (
+    ownerCurrent && hasSearch && !serverSearchUnavailable && (
+      isSearchDebouncing || serverSearch.isPending || serverSearch.isFetching
+    )
+  )
+  const retryServerSearch = () => {
+    if (!owner?.isCurrent() || serverSearchUnavailable || isSearchDebouncing ||
+      !hasDebouncedSearchQuery || serverSearch.isFetching) return
+    void serverSearch.refetch()
+  }
+  const retryLocalSearch = () => {
+    if (!owner?.isCurrent() || isSearchDebouncing || !hasSearch || localSearchPending) return
+    setLocalSearchRetry(value => value + 1)
+  }
 
   React.useEffect(() => {
     setRouteContext({ routeId: "chat", surface: "extension" })
@@ -375,11 +413,13 @@ export const SidepanelChatSidebar = ({
 
   React.useEffect(() => {
     const normalized = debouncedSearchQuery.trim()
-    if (!normalized) {
-      setLocalSearchResults([])
+    const query = normalized.toLowerCase()
+    if (!normalized || !owner?.isCurrent()) {
+      setLocalSearch({ owner, query, status: "idle", results: [] })
       return
     }
     let isActive = true
+    setLocalSearch({ owner, query, status: "pending", results: [] })
     if (!dbRef.current) {
       dbRef.current = new PageAssistDatabase()
     }
@@ -388,12 +428,12 @@ export const SidepanelChatSidebar = ({
         const results = await dbRef.current!.fullTextSearchChatHistories(
           normalized
         )
-        if (isActive) {
-          setLocalSearchResults(results)
+        if (isActive && owner.isCurrent()) {
+          setLocalSearch({ owner, query, status: "success", results: results.filter(history => history.server_scope_key === owner.ownerKey) })
         }
       } catch {
-        if (isActive) {
-          setLocalSearchResults([])
+        if (isActive && owner.isCurrent()) {
+          setLocalSearch({ owner, query, status: "error", results: [] })
         }
       }
     }
@@ -401,7 +441,7 @@ export const SidepanelChatSidebar = ({
     return () => {
       isActive = false
     }
-  }, [debouncedSearchQuery])
+  }, [debouncedSearchQuery, owner, localSearchRetry])
 
   // Bulk selection state
   const [selectionMode, setSelectionMode] = React.useState(false)
@@ -646,8 +686,6 @@ export const SidepanelChatSidebar = ({
     [itemClass]
   )
 
-  const normalizedQuery = searchQuery.trim().toLowerCase()
-  const hasSearch = normalizedQuery.length > 0
   const sortedTabs = React.useMemo(
     () =>
       [...tabs].sort((a, b) => b.updatedAt - a.updatedAt),
@@ -678,9 +716,9 @@ export const SidepanelChatSidebar = ({
   }, [tabs])
 
   const filteredLocalResults = React.useMemo(() => {
-    if (!hasSearch) return []
-    return localSearchResults.filter((history) => !openHistoryIds.has(history.id))
-  }, [hasSearch, localSearchResults, openHistoryIds])
+    if (!hasSearch || !owner?.isCurrent() || !localSearchCurrent || localSearch.status !== "success") return []
+    return localSearch.results.filter((history) => !openHistoryIds.has(history.id))
+  }, [hasSearch, localSearch, localSearchCurrent, openHistoryIds, owner])
 
   const localServerIds = React.useMemo(() => {
     const ids = new Set<string>()
@@ -691,14 +729,14 @@ export const SidepanelChatSidebar = ({
   }, [filteredLocalResults])
 
   const filteredServerResults = React.useMemo(() => {
-    if (!hasSearch) return []
-    return serverSearchResults.filter((chat) => {
+    if (!hasSearch || !owner?.isCurrent() || isSearchDebouncing || serverSearchUnavailable || serverSearch.isError) return []
+    return serverSearch.data.filter((chat) => {
       const chatId = String(chat.id)
       if (openServerChatIds.has(chatId)) return false
       if (localServerIds.has(chatId)) return false
       return true
     })
-  }, [hasSearch, localServerIds, openServerChatIds, serverSearchResults])
+  }, [hasSearch, isSearchDebouncing, localServerIds, openServerChatIds, serverSearch.data, serverSearch.isError, serverSearchUnavailable, owner])
 
   const pinnedTabs = filteredTabs.filter((tab) => tab.pinned)
   const unpinnedTabs = filteredTabs.filter((tab) => !tab.pinned)
@@ -1002,6 +1040,47 @@ export const SidepanelChatSidebar = ({
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
         {hasSearch ? (
           <>
+            {!ownerCurrent && (
+              <div role="status" className="px-2 py-3 text-xs text-text-subtle">
+                {t("common:chatSidebar.searchUnverified", "History search is unavailable until your account is verified.")}
+              </div>
+            )}
+            {searchPending && (
+              <div role="status" className="px-2 py-3 text-xs text-text-subtle">
+                {t("common:chatSidebar.searching", "Searching chat history…")}
+              </div>
+            )}
+            {ownerCurrent && !isSearchDebouncing && serverSearchUnavailable && (
+              <div role="status" className="px-2 py-3 text-xs text-text-subtle">
+                {t("common:chatSidebar.searchOffline", "Server history search is unavailable while disconnected.")}
+              </div>
+            )}
+            {ownerCurrent && !isSearchDebouncing && !serverSearchUnavailable && serverSearch.isError && !serverSearch.isFetching && (
+              <div role="alert" className="px-2 py-3 text-xs text-text-subtle">
+                {t("common:chatSidebar.serverSearchFailed", "Server history search failed. Try again.")}
+                <button
+                  type="button"
+                  className="ml-2 underline hover:text-text"
+                  aria-label={t("common:chatSidebar.retryServerSearch", "Retry server history search")}
+                  onClick={retryServerSearch}
+                >
+                  {t("common:retry", "Retry")}
+                </button>
+              </div>
+            )}
+            {ownerCurrent && !isSearchDebouncing && localSearchCurrent && localSearch.status === "error" && (
+              <div role="alert" className="px-2 py-3 text-xs text-text-subtle">
+                {t("common:chatSidebar.localSearchFailed", "Local history search failed. Try again.")}
+                <button
+                  type="button"
+                  className="ml-2 underline hover:text-text"
+                  aria-label={t("common:chatSidebar.retryLocalSearch", "Retry local history search")}
+                  onClick={retryLocalSearch}
+                >
+                  {t("common:retry", "Retry")}
+                </button>
+              </div>
+            )}
             {pinnedTabs.length > 0 && (
               <div className={groupSpacing}>
                 <div className="panel-section-label">
@@ -1065,7 +1144,9 @@ export const SidepanelChatSidebar = ({
               </div>
             )}
 
-            {pinnedTabs.length === 0 &&
+            {ownerCurrent && !searchPending && !serverSearchUnavailable && serverSearch.isSuccess &&
+              localSearchCurrent && localSearch.status === "success" &&
+              pinnedTabs.length === 0 &&
               groups.length === 0 &&
               filteredLocalResults.length === 0 &&
               filteredServerResults.length === 0 && (

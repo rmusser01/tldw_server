@@ -1533,9 +1533,9 @@ def _log_outbound_request(
         endpoint_id = _opaque_stt_endpoint_id()
         if endpoint_id is not None:
             lvl = (
-                "warning"
+                "WARNING"
                 if status_code >= 400 or exception_class
-                else "info"
+                else "INFO"
             )
             logger.bind(
                 endpoint_id=endpoint_id,
@@ -1545,7 +1545,7 @@ def _log_outbound_request(
             return
         retry_delay_ms = int(max(0.0, last_retry_delay_s) * 1000)
         scheme, host, path = _url_parts(url)
-        lvl = "warning" if (status_code >= 400 or exception_class) else "info"
+        lvl = "WARNING" if (status_code >= 400 or exception_class) else "INFO"
         logger.bind(
             method=method.upper(),
             scheme=scheme,
@@ -4340,6 +4340,7 @@ def _fetch_httpx_response(
                         cur_url = next_url
                         continue
                     if resp.status_code < 400:
+                        response_observability_url = observability_url
                         try:
                             response_url = _get_response_url(resp, cur_url)
                             response_observability_url = (

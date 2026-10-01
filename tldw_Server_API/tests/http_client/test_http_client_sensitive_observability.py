@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager, contextmanager, nullcontext
 from threading import Barrier
 from typing import Any
 
@@ -86,6 +86,157 @@ class _TraceRecorder:
 
     def get_baggage(self, _key: str) -> None:
         return None
+
+
+@pytest.mark.parametrize("observability_context", ["public", "sensitive", "opaque-stt"])
+@pytest.mark.parametrize(
+    ("status_code", "exception_class", "expected_level"),
+    [(200, "", "INFO"), (503, "", "WARNING"), (0, "RuntimeError", "WARNING")],
+    ids=["success", "http-error", "exception"],
+)
+def test_outbound_request_emits_native_loguru_level_and_preserves_private_context(
+    observability_context: str,
+    status_code: int,
+    exception_class: str,
+    expected_level: str,
+) -> None:
+    endpoint = "https://8.8.8.8/public-health?token=private-query-sentinel"
+    endpoint_id = "sha256:" + "a" * 64
+    log_records: list[dict[str, Any]] = []
+    context = (
+        http_client.opaque_stt_http_observability(endpoint_id)
+        if observability_context == "opaque-stt"
+        else http_client.sensitive_http_observability_context()
+        if observability_context == "sensitive"
+        else nullcontext()
+    )
+    sink_id = logger.add(lambda message: log_records.append(dict(message.record)), level="DEBUG")
+    try:
+        with context:
+            http_client._log_outbound_request(
+                method="POST",
+                url=endpoint,
+                status_code=status_code,
+                start_time=0,
+                attempt=2,
+                last_retry_delay_s=0.25,
+                exception_class=exception_class,
+            )
+    finally:
+        logger.remove(sink_id)
+
+    assert len(log_records) == 1
+    record = log_records[0]
+    assert record["level"].name == expected_level
+    assert record["extra"]["status_code"] == status_code
+    assert record["extra"]["duration_ms"] >= 0
+    rendered = repr(record)
+    assert "private-query-sentinel" not in rendered
+    if observability_context == "opaque-stt":
+        assert record["message"] == "planned STT HTTP outbound"
+        assert record["extra"]["endpoint_id"] == endpoint_id
+        assert not {"method", "scheme", "host", "path", "attempt", "retry_delay_ms", "exception_class"} & record["extra"].keys()
+        assert "8.8.8.8" not in rendered
+        assert "public-health" not in rendered
+    else:
+        assert record["message"] == "http.client outbound"
+        assert record["extra"]["method"] == "POST"
+        assert record["extra"]["attempt"] == 2
+        assert record["extra"]["retry_delay_ms"] == 250
+        assert record["extra"]["exception_class"] == exception_class
+        if observability_context == "sensitive":
+            assert record["extra"]["host"] == "sensitive-endpoint.invalid"
+            assert "8.8.8.8" not in rendered
+            assert "public-health" not in rendered
+        else:
+            assert record["extra"]["scheme"] == "https"
+            assert record["extra"]["host"] == "8.8.8.8"
+            assert record["extra"]["path"] == "/public-health"
+
+
+@pytest.mark.parametrize("response_kind", ["double", "unattached-httpx"])
+@pytest.mark.parametrize("sensitive_observability", [False, True], ids=["public", "sensitive"])
+def test_sync_success_without_request_metadata_retains_response_and_safe_observability(
+    monkeypatch: pytest.MonkeyPatch,
+    response_kind: str,
+    sensitive_observability: bool,
+) -> None:
+    endpoint = "http://8.8.8.8:8443/fallback-success-secret?tenant=private"
+    request_body = {"message": "private-request-body-sentinel"}
+    response_body = {"answer": "private-response-body-sentinel"}
+    observed_requests: list[tuple[str, Any]] = []
+    metrics = _MetricRecorder()
+    traces = _TraceRecorder()
+    log_records: list[dict[str, Any]] = []
+    outbound_records: list[dict[str, Any]] = []
+    log_outbound_request = http_client._log_outbound_request
+
+    class ResponseWithoutRequest:
+        status_code = 200
+
+        def json(self) -> dict[str, str]:
+            return response_body
+
+        def close(self) -> None:
+            return None
+
+    upstream = (
+        ResponseWithoutRequest()
+        if response_kind == "double"
+        else httpx.Response(200, json=response_body)
+    )
+
+    def transport_io(**kwargs: Any) -> Any:
+        observed_requests.append((kwargs["url"], kwargs["json"]))
+        return upstream
+
+    def record_outbound(**kwargs: Any) -> None:
+        outbound_records.append(kwargs)
+        log_outbound_request(**kwargs)
+
+    monkeypatch.setattr(http_client, "_log_outbound_request", record_outbound)
+    monkeypatch.setattr(http_client, "_httpx_request_io", transport_io)
+    monkeypatch.setattr(http_client, "get_metrics_registry", lambda: metrics)
+    monkeypatch.setattr(http_client, "get_tracing_manager", lambda: traces)
+    sink_id = logger.add(lambda message: log_records.append(dict(message.record)), level="DEBUG")
+    try:
+        response = http_client.fetch(
+            method="POST",
+            url=endpoint,
+            client=object(),
+            json=request_body,
+            sensitive_observability=sensitive_observability,
+        )
+    finally:
+        upstream.close()
+        logger.remove(sink_id)
+
+    assert response is upstream
+    assert response.status_code == 200
+    assert response.json() == response_body
+    assert observed_requests == [(endpoint, request_body)]
+    assert traces.recorded_exceptions == []
+    assert traces.updated_attributes == [{"http.status_code": 200}]
+    assert otel_context.get_value(otel_context._SUPPRESS_HTTP_INSTRUMENTATION_KEY) is None
+    assert len(outbound_records) == 1
+    assert outbound_records[0]["status_code"] == 200
+    expected_url = http_client._SENSITIVE_OBSERVABILITY_URL if sensitive_observability else endpoint
+    assert outbound_records[0]["url"] == expected_url
+    observability = repr(
+        {
+            "logs": log_records,
+            "outbound": outbound_records,
+            "metrics": metrics.calls,
+            "spans": traces.span_attributes,
+            "updated": traces.updated_attributes,
+            "events": traces.events,
+        }
+    )
+    assert "private-request-body-sentinel" not in observability
+    assert "private-response-body-sentinel" not in observability
+    if sensitive_observability:
+        for fragment in ("8.8.8.8", "fallback-success-secret", "tenant=private", endpoint):
+            assert fragment not in observability
 
 
 def test_sensitive_sync_request_uses_real_url_without_observability_disclosure(
@@ -450,6 +601,14 @@ def test_sensitive_log_filter_does_not_hide_concurrent_public_request(
     request_barrier = Barrier(2)
     log_records: list[dict[str, Any]] = []
     auto_instrumented_urls: list[str] = []
+    transport_logger = logging.getLogger("httpx")
+    previous_level = transport_logger.level
+
+    class CaptureHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            log_records.append({"name": record.name, "message": record.getMessage()})
+
+    capture_handler = CaptureHandler()
 
     def handler(request: httpx.Request) -> httpx.Response:
         if not otel_context.get_value(otel_context._SUPPRESS_HTTP_INSTRUMENTATION_KEY):
@@ -461,6 +620,8 @@ def test_sensitive_log_filter_does_not_hide_concurrent_public_request(
     monkeypatch.setattr(http_client, "get_tracing_manager", _TraceRecorder)
     sink_id = logger.add(lambda message: log_records.append(dict(message.record)), level="DEBUG")
     client = http_client.create_client(transport=httpx.MockTransport(handler))
+    transport_logger.addHandler(capture_handler)
+    transport_logger.setLevel(logging.INFO)
 
     def send(url: str, *, sensitive: bool) -> int:
         return http_client.fetch(
@@ -478,6 +639,8 @@ def test_sensitive_log_filter_does_not_hide_concurrent_public_request(
             assert public_future.result(timeout=3) == 200
     finally:
         client.close()
+        transport_logger.removeHandler(capture_handler)
+        transport_logger.setLevel(previous_level)
         logger.remove(sink_id)
 
     rendered_logs = "\n".join(str(record["message"]) for record in log_records)

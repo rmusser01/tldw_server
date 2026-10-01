@@ -71,10 +71,13 @@ async def test_postgres_tenant_provisioning_uses_real_defaults_and_rolls_back(
         )
 
     assert raised.value.status_code == 500
-    assert await test_db_pool.fetchval(
-        "SELECT COUNT(*) FROM public.users WHERE username = $1",
-        rolled_back_username,
-    ) == 0
+    assert (
+        await test_db_pool.fetchval(
+            "SELECT COUNT(*) FROM public.users WHERE username = $1",
+            rolled_back_username,
+        )
+        == 0
+    )
 
 
 @pytest.mark.asyncio
@@ -108,12 +111,8 @@ async def test_postgres_candidate_validation_rejects_shadow_fk_and_missing_id_de
             )
             assert constraint_name
             await conn.execute("CREATE SCHEMA profile_shadow")
-            await conn.execute(
-                "CREATE TABLE profile_shadow.users (id INTEGER PRIMARY KEY)"
-            )
-            await conn.execute(
-                f'ALTER TABLE public.org_members DROP CONSTRAINT "{constraint_name}"'
-            )
+            await conn.execute("CREATE TABLE profile_shadow.users (id INTEGER PRIMARY KEY)")
+            await conn.execute(f'ALTER TABLE public.org_members DROP CONSTRAINT "{constraint_name}"')
             await conn.execute(
                 "ALTER TABLE public.org_members ADD CONSTRAINT "
                 "org_members_shadow_user_fk FOREIGN KEY (user_id) "
@@ -132,9 +131,7 @@ async def test_postgres_candidate_validation_rejects_shadow_fk_and_missing_id_de
         transaction = conn.transaction()
         await transaction.start()
         try:
-            await conn.execute(
-                "ALTER TABLE public.organizations ALTER COLUMN id DROP DEFAULT"
-            )
+            await conn.execute("ALTER TABLE public.organizations ALTER COLUMN id DROP DEFAULT")
             with pytest.raises(Exception, match="candidate schema validation failed"):
                 await UsersDB._validate_profile_candidate_tables(  # noqa: SLF001
                     conn,

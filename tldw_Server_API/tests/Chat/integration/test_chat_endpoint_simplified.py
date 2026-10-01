@@ -7,6 +7,7 @@ import json
 import os
 import sqlite3
 import threading
+import time
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
@@ -1403,7 +1404,7 @@ def test_health_fallback_keeps_model_policy_atomic_during_config_rotation(
                 self._fallback_calls += 1
                 if self._fallback_calls == 1:
                     fallback_resolution_started.set()
-                    await asyncio.to_thread(release_fallback_resolution.wait, 2.0)
+                    await asyncio.to_thread(release_fallback_resolution.wait, 20.0)
             return await issue_provider_call_credentials_async(
                 normalized,
                 api_key=f"{normalized}-runtime-key",
@@ -1461,16 +1462,20 @@ def test_health_fallback_keeps_model_policy_atomic_during_config_rotation(
         patch.object(chat_endpoint, "get_override_default_model", return_value=None),
         patch.object(chat_endpoint, "get_llm_provider_override", return_value=None),
     ):
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(
-                authenticated_client.post,
+        def post_after_slow_start():
+            # Exercise a request startup longer than the old two-second deadline.
+            time.sleep(2.1)
+            return authenticated_client.post(
                 "/api/v1/chat/completions",
                 json=request_data.model_dump(),
             )
-            assert fallback_resolution_started.wait(timeout=2.0)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(post_after_slow_start)
+            assert fallback_resolution_started.wait(timeout=20.0)
             monkeypatch.setenv("DEFAULT_MODEL_ANTHROPIC", "claude-rotated-model")
             release_fallback_resolution.set()
-            response = future.result(timeout=5.0)
+            response = future.result(timeout=25.0)
 
     assert response.status_code == status.HTTP_200_OK, response.text
     assert captured["model"] == "claude-snapshot-model"
@@ -3590,6 +3595,54 @@ def test_real_openai_adapter_nonstream_failure_is_bounded_across_endpoint_logs_a
     assert runtime_key not in "".join(logs)
     assert sentinel not in serialized_audit_calls
     assert runtime_key not in serialized_audit_calls
+
+
+@pytest.mark.parametrize("finish_reason", ["length", "stop"])
+def test_nonstream_output_limit_guidance_reaches_http_boundary(
+    authenticated_client,
+    mock_chacha_db,
+    setup_dependencies,
+    finish_reason,
+):
+    """The final HTTP sanitizer preserves bounded output-limit guidance only."""
+    sentinel = "hidden-provider-reasoning-must-not-leak"
+    provider_result = {
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": "", "reasoning_content": sentinel},
+                "finish_reason": finish_reason,
+            }
+        ],
+        "usage": {"prompt_tokens": 5, "completion_tokens": 128, "total_tokens": 133},
+    }
+    runtime_type = _credential_runtime_double()
+    provider_manager = MagicMock()
+    provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
+    with (
+        patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
+        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", False),
+        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch.object(chat_service, "get_request_queue", return_value=None),
+        patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
+        patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+        patch.object(chat_endpoint, "perform_chat_api_call", return_value=provider_result) as provider_call,
+    ):
+        response = authenticated_client.post(
+            "/api/v1/chat/completions",
+            json={
+                "model": "gpt-4o-mini",
+                "api_provider": "openai",
+                "stream": False,
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
+        )
+
+    assert response.status_code == status.HTTP_502_BAD_GATEWAY
+    expected_code = "provider_output_limit" if finish_reason == "length" else "provider_unavailable"
+    assert response.json()["detail"] == chat_endpoint.PROVIDER_STREAM_ERROR_MESSAGES[expected_code]
+    assert sentinel not in response.text
+    assert provider_call.call_count == 1
 
 
 class UnknownAdapterFailure(Exception):
@@ -5729,6 +5782,12 @@ async def test_stream_prime_allows_finite_metadata_then_output(monkeypatch):
 @pytest.mark.asyncio
 async def test_stream_prime_budget_stops_after_first_output(monkeypatch):
     monkeypatch.setattr(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_ELAPSED_SECONDS", 0.01, raising=False)
+    monkeypatch.setattr(chat_endpoint, "_provider_stream_monotonic", lambda: 0.0)
+    # Elapsed-time bounds have separate tests; isolate the one-frame budget here.
+    async def await_frame(operation, _timeout):
+        return await operation
+
+    monkeypatch.setattr(chat_endpoint, "_await_provider_stream_operation", await_frame)
     monkeypatch.setattr(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_BUFFERED_BYTES", 10_000, raising=False)
     monkeypatch.setattr(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_BUFFERED_CHUNKS", 1, raising=False)
     closed = asyncio.Event()
@@ -6435,15 +6494,27 @@ def test_stream_prime_factory_and_metadata_share_one_absolute_deadline(
     clock = ControlledClock()
     captured_factory_timeouts: list[float] = []
 
+    # Keep fake-clock accounting independent of native timer resolution.
+    async def controlled_await(awaitable: Any, _timeout: float) -> Any:
+        return await awaitable
+
+    async def controlled_factory(factory: Any, *, timeout: float) -> Any:
+        before = clock()
+        result = factory()
+        if clock() - before > timeout:
+            raise asyncio.TimeoutError
+        return result
+
     async def capture_execute_streaming_call(**kwargs):
         captured_factory_timeouts.append(kwargs["provider_factory_timeout"])
         return await chat_service.execute_streaming_call(**kwargs)
 
     async def delayed_output():
         clock.advance(0.04)
+        yield 'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'
         yield 'data: {"choices":[{"delta":{"content":"too late"}}]}\n\n'
 
-    def delayed_factory():
+    def delayed_factory(**_kwargs):
         clock.advance(0.04)
         return delayed_output()
 
@@ -6460,6 +6531,9 @@ def test_stream_prime_factory_and_metadata_share_one_absolute_deadline(
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.object(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_ELAPSED_SECONDS", 0.06),
         patch.object(chat_endpoint, "_provider_stream_monotonic", clock),
+        patch.object(chat_endpoint, "_await_provider_stream_operation", controlled_await),
+        patch.object(chat_service, "_provider_factory_monotonic", clock),
+        patch.object(chat_service, "_call_stream_factory_bounded", controlled_factory),
         patch.object(
             chat_endpoint,
             "execute_streaming_call",
@@ -6476,6 +6550,7 @@ def test_stream_prime_factory_and_metadata_share_one_absolute_deadline(
     assert "too late" not in response.text
     assert len(captured_factory_timeouts) == 1
     assert captured_factory_timeouts[0] == pytest.approx(0.06)
+    assert clock.now == pytest.approx(100.08)
 
 
 def test_stream_prime_fallback_attempts_share_one_absolute_deadline(
@@ -6505,6 +6580,17 @@ def test_stream_prime_fallback_attempts_share_one_absolute_deadline(
 
     clock = ControlledClock()
     captured_factory_timeouts: list[float] = []
+
+    # Keep fake-clock accounting independent of native timer resolution.
+    async def controlled_await(awaitable: Any, _timeout: float) -> Any:
+        return await awaitable
+
+    async def controlled_factory(factory: Any, *, timeout: float) -> Any:
+        before = clock()
+        result = factory()
+        if clock() - before > timeout:
+            raise asyncio.TimeoutError
+        return result
 
     async def capture_execute_streaming_call(**kwargs):
         captured_factory_timeouts.append(kwargs["provider_factory_timeout"])
@@ -6545,6 +6631,9 @@ def test_stream_prime_fallback_attempts_share_one_absolute_deadline(
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.object(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_ELAPSED_SECONDS", 0.06),
         patch.object(chat_endpoint, "_provider_stream_monotonic", clock),
+        patch.object(chat_endpoint, "_await_provider_stream_operation", controlled_await),
+        patch.object(chat_service, "_provider_factory_monotonic", clock),
+        patch.object(chat_service, "_call_stream_factory_bounded", controlled_factory),
         patch.object(
             chat_endpoint,
             "execute_streaming_call",

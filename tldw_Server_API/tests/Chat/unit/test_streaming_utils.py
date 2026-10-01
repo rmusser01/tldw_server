@@ -866,10 +866,29 @@ class TestSafeStreamGenerator:
         assert "healthy output" in healthy_wire
         assert healthy_handler.error_occurred is False
 
+    @pytest.mark.parametrize(
+        "first_frame_setup_delay",
+        [pytest.param(0.0, id="warm"), pytest.param(0.05, id="cold-first-frame")],
+    )
     async def test_post_output_noncooperative_adapter_cleanup_is_bounded_and_isolated(
         self,
         monkeypatch: pytest.MonkeyPatch,
+        first_frame_setup_delay: float,
     ) -> None:
+        """Bound post-output cleanup after warm or cold first-frame setup."""
+        original_has_output = chat_endpoint._provider_stream_chunk_has_output
+        first_frame_pending = True
+
+        def inspect_after_cold_setup(chunk: object) -> bool:
+            """Delay only the bad first frame, then use the real inspector."""
+            nonlocal first_frame_pending
+            if first_frame_pending and '"content":"ok"' in str(chunk):
+                first_frame_pending = False
+                if first_frame_setup_delay:
+                    time.sleep(first_frame_setup_delay)
+            return original_has_output(chunk)
+
+        monkeypatch.setattr(chat_endpoint, "_provider_stream_chunk_has_output", inspect_after_cold_setup)
         monkeypatch.setattr(
             streaming_utils,
             "STREAM_TASK_CANCEL_DRAIN_SECONDS",
@@ -886,6 +905,24 @@ class TestSafeStreamGenerator:
         blocked = asyncio.Event()
         healthy_done = asyncio.Event()
         ticked = asyncio.Event()
+        post_output_armed = asyncio.Event()
+        bad_handlers: dict[str, StreamingResponseHandler] = {}
+        original_handler_init = StreamingResponseHandler.__init__
+
+        def capture_handler_init(handler: StreamingResponseHandler, *args: object, **kwargs: object) -> None:
+            """Capture the real bad handler while preserving class identity."""
+            original_handler_init(handler, *args, **kwargs)
+            if handler.conversation_id == "bad":
+                bad_handlers["bad"] = handler
+
+        monkeypatch.setattr(StreamingResponseHandler, "__init__", capture_handler_init)
+
+        def arm_post_output_timeout() -> None:
+            """Start the unchanged idle deadline after valid provider output."""
+            handler = bad_handlers["bad"]
+            handler.idle_timeout = 0.01
+            handler.update_activity()
+            post_output_armed.set()
 
         class ResistantAfterOutput:
             def __init__(self) -> None:
@@ -931,8 +968,10 @@ class TestSafeStreamGenerator:
             bad,
             "bad",
             "model",
-            idle_timeout=0.01,
+            # Bound setup separately; the callback arms the post-output deadline.
+            idle_timeout=1,
             heartbeat_interval=0.01,
+            on_first_output=arm_post_output_timeout,
         )
         good_gen = create_streaming_response_with_timeout(
             healthy_adapter(),
@@ -948,8 +987,9 @@ class TestSafeStreamGenerator:
         bad_task = asyncio.create_task(collect(bad_gen))
         good_task = asyncio.create_task(collect(good_gen))
         tick_task = asyncio.create_task(ticker())
-        await asyncio.wait_for(blocked.wait(), 1.0)
         try:
+            await asyncio.wait_for(blocked.wait(), 1.0)
+            assert post_output_armed.is_set()
             good_wire = await asyncio.wait_for(good_task, timeout=1.0)
             await asyncio.wait_for(tick_task, timeout=1.0)
             bad_wire = await asyncio.wait_for(

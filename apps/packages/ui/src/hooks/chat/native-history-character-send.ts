@@ -1,4 +1,6 @@
 import type { Dispatch, SetStateAction } from "react"
+import type { TFunction } from "i18next"
+import { buildCharacterChatAssistantErrorContent } from "./useCharacterChatMode"
 import type { Message, ToolChoice } from "@/store/option"
 import type { ChatModelSettings } from "@/store/model"
 import { useStoreChatModelSettings } from "@/store/model"
@@ -50,6 +52,7 @@ export type NativeHistoryCharacterSendParams = {
   settings: ChatModelSettings
   message: string
   image: string
+  t: TFunction
   unsupportedContext?: boolean
   setServerChatId: (id: string) => void
   onCreated?: (characterId: string | number) => void
@@ -338,8 +341,10 @@ export const sendNativeHistoryCharacter = async (
       })) {
         if (!authValid() || signal.aborted)
           throw new Error("native_history_consumption_interrupted")
-        if (extractStreamTransportInterruption(chunk) || chunk?.error)
+        if (extractStreamTransportInterruption(chunk))
           throw new Error("native_history_stream_interrupted")
+        if (chunk?.error)
+          throw new Error("native_history_stream_interrupted", { cause: chunk.error })
         if (chunk?.tldw_history_admission_v1 !== undefined) {
           const accepted = parseNativeHistoryAdmission(
             owner,
@@ -417,7 +422,11 @@ export const sendNativeHistoryCharacter = async (
           )
         )
         if (sameView()) {
-          params.setMessages(base.messages)
+          // This error is display-only; the retained receipt owns any uncertain outcome.
+          params.setMessages([...base.messages, {
+            id: displayId, isBot: true, name: "Assistant", sources: [], createdAt,
+            message: buildCharacterChatAssistantErrorContent(undefined, error, params.t)
+          }])
           await controller.refreshRecovery()
         }
       } else await dismissHistoryTurnRecovery(scope, view, operationId)

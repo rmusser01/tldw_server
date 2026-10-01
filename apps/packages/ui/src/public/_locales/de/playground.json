@@ -1471,5 +1471,20 @@
   },
   "actor_templateMode_ignore": {
     "message": "Ignorieren, wenn Vorlagen aktiv sind"
+  },
+  "mediaHandoff_conflictLabel": {
+    "message": "Konflikt bei der Medienübernahme"
+  },
+  "mediaHandoff_conflict": {
+    "message": "Im Nachrichtenfeld ist bereits ein Entwurf vorhanden. Füge die Medienquelle ein, ersetze deinen Entwurf oder brich den Import ab."
+  },
+  "mediaHandoff_insert": {
+    "message": "Medienquelle einfügen"
+  },
+  "mediaHandoff_replace": {
+    "message": "Aktuellen Entwurf ersetzen"
+  },
+  "mediaHandoff_cancel": {
+    "message": "Import abbrechen"
   }
 }

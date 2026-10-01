@@ -2647,11 +2647,14 @@ class FilesystemModule(BaseModule):
             existing_mode = stat_module.S_IMODE(target.stat(follow_symlinks=False).st_mode)
         fd, tmp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
         tmp_path = Path(tmp_name)
+        fchmod = getattr(os, "fchmod", None)
         try:
             with os.fdopen(fd, "wb") as handle:
-                if existing_mode is not None:
-                    os.fchmod(handle.fileno(), existing_mode)
+                if existing_mode is not None and fchmod is not None:
+                    fchmod(handle.fileno(), existing_mode)
                 handle.write(text.encode("utf-8"))
+            if existing_mode is not None and fchmod is None:
+                os.chmod(tmp_path, existing_mode)
             os.replace(tmp_path, target)
         finally:
             with suppress(OSError):

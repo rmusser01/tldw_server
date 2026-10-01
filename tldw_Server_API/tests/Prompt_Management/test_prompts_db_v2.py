@@ -10,6 +10,7 @@ import sqlite3
 import subprocess
 import sys
 import uuid
+from contextlib import closing
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -1018,7 +1019,7 @@ def test_service_prompt_override_rollback_failure_retires_connection_and_discard
 
     later_connection = file_db.get_connection()
     later_connection.commit()
-    with sqlite3.connect(file_db.db_path) as observer:
+    with closing(sqlite3.connect(file_db.db_path)) as observer:
         stored = observer.execute(
             """
             SELECT parts_json, revision
