@@ -137,17 +137,15 @@ def pytest_unconfigure(config) -> None:
     snapshot("pytest_unconfigure")
 
 
-def sample_child(child: subprocess.Popen, checkpoint: int) -> bool:
+def sample_child(child: subprocess.Popen, checkpoint: int | str) -> bool:
     """Only sample this parent's still-live, unreaped child; never terminate it."""
     if child.poll() is not None:
         return False
-    try:
-        os.kill(child.pid, signal.SIGUSR1)
-    except OSError:
-        record("owned_child_stack_unavailable", child_pid=child.pid, checkpoint=checkpoint)
-        return False
-    record("owned_child_stack_requested", child_pid=child.pid, checkpoint=checkpoint)
+    # Native sampling cannot deliver a Python signal after its handler has
+    # been removed during interpreter shutdown, including marker-read races.
+    record("native_sample_requested", child_pid=child.pid, checkpoint=checkpoint)
     if sys.platform != "darwin":
+        record("native_sample_unavailable", child_pid=child.pid, checkpoint=checkpoint)
         return True
     # Raw headers stay outside the always-uploaded results tree, even if the
     # original Actions maximum interrupts this parent during native sampling.
@@ -194,7 +192,9 @@ def supervise(arguments: list[str]) -> int:
     """Inherit original output and return the child's actual natural status."""
     started = time.monotonic()
     session_finished = None
+    post_atexit = None
     sent = []
+    late_sent = []
     command = [sys.executable, str(Path(__file__).resolve()), "--child", *arguments]
     # This parent is the sole reaper: a child exiting during sample stays an
     # owned zombie until the next poll, so its PID cannot identify another task.
@@ -216,13 +216,25 @@ def supervise(arguments: list[str]) -> int:
                         and session_finished is None
                     ):
                         session_finished = time.monotonic()
+                    if (
+                        event["event"] == "atexit_early_registration"
+                        and event["pid"] == child.pid
+                        and post_atexit is None
+                    ):
+                        post_atexit = time.monotonic()
                     line = events.readline()
-                if session_finished is not None:
+                if session_finished is not None and post_atexit is None:
                     for checkpoint in (15, 30, 60, 90):
                         if time.monotonic() - session_finished >= checkpoint and checkpoint not in sent:
                             if child.poll() is None:
                                 if sample_child(child, checkpoint):
                                     sent.append(checkpoint)
+                if post_atexit is not None:
+                    for checkpoint in (15, 30, 60, 90, 300, 600, 900):
+                        if time.monotonic() - post_atexit >= checkpoint and checkpoint not in late_sent:
+                            if child.poll() is None:
+                                if sample_child(child, f"atexit-{checkpoint}"):
+                                    late_sent.append(checkpoint)
                 time.sleep(0.5)
     except (OSError, ValueError):
         record("parent_observations_unavailable", child_pid=child.pid)
@@ -236,7 +248,11 @@ def supervise(arguments: list[str]) -> int:
         "sessionfinish_to_parent_observed_exit_seconds": None
         if session_finished is None
         else time.monotonic() - session_finished,
-        "signal_stack_checkpoints": sent,
+        "sessionfinish_native_checkpoints": sent,
+        "post_atexit_native_checkpoints": late_sent,
+        "post_atexit_to_parent_observed_exit_seconds": None
+        if post_atexit is None
+        else time.monotonic() - post_atexit,
         "acceptance": False,
     }
     try:
