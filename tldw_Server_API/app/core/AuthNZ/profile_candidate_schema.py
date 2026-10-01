@@ -6,6 +6,8 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from tldw_Server_API.app.core.exceptions import SchemaReadinessError
+
 PROFILE_CANDIDATE_TABLES = (
     "organizations",
     "teams",
@@ -468,7 +470,7 @@ def validate_sqlite_profile_candidate_schema(conn: Any) -> None:
         PROFILE_CANDIDATE_TABLES,
     ).fetchone()
     if shadow is not None:
-        raise RuntimeError("Required profile candidate schema validation failed")
+        raise SchemaReadinessError("Required profile candidate schema validation failed")
 
     columns: dict[str, dict[str, dict[str, Any]]] = {}
     primary_keys: dict[str, tuple[str, ...]] = {}
@@ -526,7 +528,7 @@ def validate_sqlite_profile_candidate_schema(conn: Any) -> None:
         unique_keys=unique_keys,
         foreign_keys=foreign_keys,
     ):
-        raise RuntimeError("Required profile candidate schema validation failed")
+        raise SchemaReadinessError("Required profile candidate schema validation failed")
 
 
 async def validate_postgres_profile_candidate_schema(conn: Any) -> None:
@@ -647,7 +649,7 @@ async def validate_postgres_profile_candidate_schema(conn: Any) -> None:
         unique_keys=unique_keys,
         foreign_keys=foreign_keys,
     ):
-        raise RuntimeError("Required profile candidate schema validation failed")
+        raise SchemaReadinessError("Required profile candidate schema validation failed")
 
 
 async def repair_postgres_profile_candidate_timestamps(conn: Any) -> None:
@@ -667,7 +669,7 @@ async def repair_postgres_profile_candidate_timestamps(conn: Any) -> None:
                     f"TYPE TIMESTAMPTZ USING {column_name} AT TIME ZONE 'UTC'"
                 )
             elif data_type != "timestamp with time zone":
-                raise RuntimeError(
+                raise SchemaReadinessError(
                     "Required profile candidate timestamp normalization failed"
                 )
 
