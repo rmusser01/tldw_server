@@ -3368,15 +3368,6 @@
   "actor_templateMode_ignore": {
     "message": "Ignore when templates active"
   },
-  "composer_rolePlaySaveError": {
-    "message": "Scene settings could not be saved. Your draft is still here; retry Apply."
-  },
-  "composer_rolePlayApplyError": {
-    "message": "Settings could not be applied. Your draft is still here; retry Apply."
-  },
-  "composer_rolePlayRestoreError": {
-    "message": "Settings could not be applied, and the previous scene could not be restored. Keep this drawer open and retry Apply."
-  },
   "historySelection_region": {
     "message": "Conversation history selection"
   },
@@ -3565,5 +3556,167 @@
   },
   "historySelection_copyRecordFailedDetail": {
     "message": "Saved copy: {{childId}}. Its recovery record could not be updated. Reason: {{code}}"
+  },
+  "standaloneHtml_recoveryUnavailable": {
+    "message": "Recovery unavailable. Keep this tab open or download your draft."
+  },
+  "standaloneHtml_leavePrompt": {
+    "message": "Leave without saving? Your local draft is preserved only in this tab."
+  },
+  "standaloneHtml_presentationTitle": {
+    "message": "Standalone HTML presentation"
+  },
+  "standaloneHtml_offline": {
+    "message": "Server is offline. Your in-memory draft has not been sent."
+  },
+  "standaloneHtml_confirmingPrincipal": {
+    "message": "Confirming current server and account…"
+  },
+  "standaloneHtml_checkingAccess": {
+    "message": "Checking standalone HTML access…"
+  },
+  "standaloneHtml_authenticationRequired": {
+    "message": "Current standalone HTML access requires authentication."
+  },
+  "standaloneHtml_forbidden": {
+    "message": "This account cannot read standalone HTML presentations."
+  },
+  "standaloneHtml_readingUnsupported": {
+    "message": "This server does not support reading standalone HTML presentations."
+  },
+  "standaloneHtml_accessUnconfirmed": {
+    "message": "Standalone HTML access could not be confirmed."
+  },
+  "standaloneHtml_retry": {
+    "message": "Retry"
+  },
+  "standaloneHtml_principalUnconfirmed": {
+    "message": "Current server and account could not be confirmed."
+  },
+  "standaloneHtml_unavailable": {
+    "message": "Presentation unavailable."
+  },
+  "standaloneHtml_formatLabel": {
+    "message": "Standalone HTML"
+  },
+  "standaloneHtml_securityBoundary": {
+    "message": "Studio never runs this code. Downloading and opening the file leaves tldw's security boundary."
+  },
+  "standaloneHtml_back": {
+    "message": "Back to presentations"
+  },
+  "standaloneHtml_downloadCurrent": {
+    "message": "Download current draft"
+  },
+  "standaloneHtml_save": {
+    "message": "Save"
+  },
+  "standaloneHtml_savingUnavailable": {
+    "message": "Saving is unavailable"
+  },
+  "standaloneHtml_recoveredDraft": {
+    "message": "Recovered draft"
+  },
+  "standaloneHtml_recoveryDescription": {
+    "message": "A different draft was saved in this tab. It has not been applied."
+  },
+  "standaloneHtml_restoreRecovery": {
+    "message": "Restore recovered draft"
+  },
+  "standaloneHtml_downloadRecovery": {
+    "message": "Download recovered draft"
+  },
+  "standaloneHtml_discardRecovery": {
+    "message": "Discard recovered draft"
+  },
+  "standaloneHtml_discardRecoveryPrompt": {
+    "message": "Confirm discarding the recovered draft. This cannot be undone."
+  },
+  "standaloneHtml_confirmDiscardRecovery": {
+    "message": "Confirm discard recovered draft"
+  },
+  "standaloneHtml_saveConflict": {
+    "message": "Save conflict"
+  },
+  "standaloneHtml_statusConflict": {
+    "message": "Conflict"
+  },
+  "standaloneHtml_conflictDescription": {
+    "message": "Your draft is unchanged. Choose an explicit next step."
+  },
+  "standaloneHtml_discardAndLoad": {
+    "message": "Discard my changes and load server version"
+  },
+  "standaloneHtml_overwrite": {
+    "message": "Overwrite server with my draft"
+  },
+  "standaloneHtml_downloadDraft": {
+    "message": "Download my draft"
+  },
+  "standaloneHtml_overwritePrompt": {
+    "message": "Confirm replacing the current server version with your local draft."
+  },
+  "standaloneHtml_confirmOverwrite": {
+    "message": "Confirm overwrite"
+  },
+  "standaloneHtml_discardLocalPrompt": {
+    "message": "Confirm discarding your local changes and loading the server version."
+  },
+  "standaloneHtml_confirmDiscardAndLoad": {
+    "message": "Confirm discard and load server version"
+  },
+  "standaloneHtml_leaveTitle": {
+    "message": "Leave without saving?"
+  },
+  "standaloneHtml_leaveDescription": {
+    "message": "Your in-memory draft will close. Scoped recovery may still be available in this tab."
+  },
+  "standaloneHtml_leave": {
+    "message": "Leave presentation"
+  },
+  "standaloneHtml_keepEditing": {
+    "message": "Keep editing"
+  },
+  "standaloneHtml_viewsLabel": {
+    "message": "Standalone HTML workspace views"
+  },
+  "standaloneHtml_codeTab": {
+    "message": "Code"
+  },
+  "standaloneHtml_outlineTab": {
+    "message": "Outline"
+  },
+  "standaloneHtml_statusSaved": {
+    "message": "Saved"
+  },
+  "standaloneHtml_statusSaving": {
+    "message": "Saving"
+  },
+  "standaloneHtml_statusNotSaved": {
+    "message": "Not saved"
+  },
+  "standaloneHtml_loadFailed": {
+    "message": "This standalone HTML presentation could not be loaded safely."
+  },
+  "standaloneHtml_serverChanged": {
+    "message": "The server version changed. Choose how to continue."
+  },
+  "standaloneHtml_saveUnconfirmed": {
+    "message": "Save could not be confirmed. Your local draft is preserved."
+  },
+  "standaloneHtml_overwriteVerified": {
+    "message": "The current server version was verified. Confirm before overwriting it."
+  },
+  "standaloneHtml_overwriteUnverified": {
+    "message": "The current server version could not be verified. Your draft is preserved."
+  },
+  "standaloneHtml_draftChanged": {
+    "message": "Your draft changed while the server version was loading. Your newer draft is preserved."
+  },
+  "standaloneHtml_serverLoadFailed": {
+    "message": "The server version could not be loaded. Your draft is preserved."
+  },
+  "standaloneHtml_downloadFailed": {
+    "message": "Download could not be prepared. Your draft is preserved."
   }
 }

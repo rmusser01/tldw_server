@@ -1,0 +1,11 @@
+{
+  "legacy_indexed_body_rows": 1000000,
+  "backend": "sqlite",
+  "native_rows": 1000000,
+  "owner_media_rows": 1000000,
+  "linked_legacy_rows": 1000000,
+  "matching_body_version_rows": 1000000,
+  "synthetic_identity_rows": 1000000,
+  "distinct_senders": 200,
+  "distinct_recipients": 500
+}

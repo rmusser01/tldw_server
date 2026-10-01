@@ -61,7 +61,7 @@ def _make_test_db():
 
     with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
         db_path = tmp.name
-    db = CharactersRAGDB(db_path, "test_client")
+    db = CharactersRAGDB(db_path, "1", owner_user_id="1")
     # Minimal default character required by endpoint
     db.add_character_card({
         "name": DEFAULT_CHARACTER_NAME,
@@ -842,7 +842,7 @@ def test_streaming_cross_chunk_redaction_persisted(
                         if "[DONE]" in line:
                             break
 
-        convs = db.get_conversations_for_user("test_client", limit=1)
+        convs = db.get_conversations_for_user(db.client_id, limit=1)
         assert convs, "Expected a persisted conversation"
         conv_id = convs[0]["id"]
         msgs = db.get_messages_for_conversation(conv_id, order_by_timestamp="ASC")
@@ -943,7 +943,7 @@ def test_continued_character_conversation_input_guardian_overlay_uses_saved_conv
             {
                 "character_id": character["id"],
                 "title": "Guardian Continued Character Chat",
-                "client_id": "test_client",
+                "client_id": db.client_id,
             }
         )
         assert conversation_id
@@ -1023,7 +1023,7 @@ def test_continued_ordinary_conversation_input_guardian_overlay_stays_regular_fo
             {
                 "character_id": default_character["id"],
                 "title": "Guardian Continued Ordinary Chat",
-                "client_id": "test_client",
+                "client_id": db.client_id,
             }
         )
         assert conversation_id

@@ -849,6 +849,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
+              tldw_Server_API/tests/DB_Management/test_chacha_*.py
           - name: chacha-character-conversation
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_character_*.py
@@ -883,6 +884,9 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_startup.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_transport.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
@@ -890,11 +894,15 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
-          # DB_Management alone is ~3700 tests; test_[a-l] carries the slow
-          # per-test ChaCha Postgres bootstraps, so it gets its own shard.
+          # Cold ChaCha bootstraps run in chacha-core-stores to fit the 55m guard.
           - name: db-management-a-l
             paths: >-
-              tldw_Server_API/tests/DB_Management/test_[a-l]*.py
+              tldw_Server_API/tests/DB_Management/test_[a-bd-l]*.py
+              tldw_Server_API/tests/DB_Management/test_character_*.py
+              tldw_Server_API/tests/DB_Management/test_chat_*.py
+              tldw_Server_API/tests/DB_Management/test_claims_*.py
+              tldw_Server_API/tests/DB_Management/test_con*.py
+              tldw_Server_API/tests/DB_Management/test_core_*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
@@ -1217,7 +1225,9 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_archive_worker.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_logging_safety_13376_2.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py
@@ -2467,6 +2477,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
+              tldw_Server_API/tests/DB_Management/test_chacha_*.py
           - name: chacha-character-conversation
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_character_*.py
@@ -2501,6 +2512,9 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_startup.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_transport.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
@@ -2508,11 +2522,15 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
-          # DB_Management alone is ~3700 tests; test_[a-l] carries the slow
-          # per-test ChaCha Postgres bootstraps, so it gets its own shard.
+          # Cold ChaCha bootstraps run in chacha-core-stores to fit the 55m guard.
           - name: db-management-a-l
             paths: >-
-              tldw_Server_API/tests/DB_Management/test_[a-l]*.py
+              tldw_Server_API/tests/DB_Management/test_[a-bd-l]*.py
+              tldw_Server_API/tests/DB_Management/test_character_*.py
+              tldw_Server_API/tests/DB_Management/test_chat_*.py
+              tldw_Server_API/tests/DB_Management/test_claims_*.py
+              tldw_Server_API/tests/DB_Management/test_con*.py
+              tldw_Server_API/tests/DB_Management/test_core_*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
@@ -2836,7 +2854,9 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_archive_worker.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_logging_safety_13376_2.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py
@@ -3925,6 +3945,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
+              tldw_Server_API/tests/DB_Management/test_chacha_*.py
           - name: chacha-character-conversation
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_character_*.py
@@ -3959,6 +3980,9 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_startup.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_transport.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
@@ -3966,11 +3990,15 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
-          # DB_Management alone is ~3700 tests; test_[a-l] carries the slow
-          # per-test ChaCha Postgres bootstraps, so it gets its own shard.
+          # Cold ChaCha bootstraps run in chacha-core-stores to fit the 55m guard.
           - name: db-management-a-l
             paths: >-
-              tldw_Server_API/tests/DB_Management/test_[a-l]*.py
+              tldw_Server_API/tests/DB_Management/test_[a-bd-l]*.py
+              tldw_Server_API/tests/DB_Management/test_character_*.py
+              tldw_Server_API/tests/DB_Management/test_chat_*.py
+              tldw_Server_API/tests/DB_Management/test_claims_*.py
+              tldw_Server_API/tests/DB_Management/test_con*.py
+              tldw_Server_API/tests/DB_Management/test_core_*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
@@ -4294,7 +4322,9 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_archive_worker.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_logging_safety_13376_2.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py
@@ -5287,6 +5317,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
+              tldw_Server_API/tests/DB_Management/test_chacha_*.py
           - name: chacha-character-conversation
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_character_*.py
@@ -5321,6 +5352,9 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_startup.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_transport.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
@@ -5328,11 +5362,15 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
-          # DB_Management alone is ~3700 tests; test_[a-l] carries the slow
-          # per-test ChaCha Postgres bootstraps, so it gets its own shard.
+          # Cold ChaCha bootstraps run in chacha-core-stores to fit the 55m guard.
           - name: db-management-a-l
             paths: >-
-              tldw_Server_API/tests/DB_Management/test_[a-l]*.py
+              tldw_Server_API/tests/DB_Management/test_[a-bd-l]*.py
+              tldw_Server_API/tests/DB_Management/test_character_*.py
+              tldw_Server_API/tests/DB_Management/test_chat_*.py
+              tldw_Server_API/tests/DB_Management/test_claims_*.py
+              tldw_Server_API/tests/DB_Management/test_con*.py
+              tldw_Server_API/tests/DB_Management/test_core_*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
@@ -5656,7 +5694,9 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_archive_worker.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_logging_safety_13376_2.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py
@@ -6649,6 +6689,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_chacha_*.py
               tldw_Server_API/tests/ChaChaNotesDB/test_chachanotes_db.py
+              tldw_Server_API/tests/DB_Management/test_chacha_*.py
           - name: chacha-character-conversation
             paths: >-
               tldw_Server_API/tests/ChaChaNotesDB/test_character_*.py
@@ -6683,6 +6724,9 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_defaults_api.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py
               tldw_Server_API/tests/Workspaces/test_workspace_assistant_provenance.py
+              tldw_Server_API/tests/Workspaces/test_workspace_assistant_startup.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_api.py
+              tldw_Server_API/tests/Workspaces/test_workspace_chat_startup_transport.py
               tldw_Server_API/tests/Workspaces/test_workspace_artifact_validation.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle.py
               tldw_Server_API/tests/Workspaces/test_workspace_clone_target_lifecycle_postgres.py
@@ -6690,11 +6734,15 @@ jobs:
               tldw_Server_API/tests/Workspaces/test_workspace_source_preview.py
               tldw_Server_API/tests/Workspaces/test_workspace_source_saved_views_api.py
               tldw_Server_API/tests/ChaChaNotesDB/test_writing_playground_db.py
-          # DB_Management alone is ~3700 tests; test_[a-l] carries the slow
-          # per-test ChaCha Postgres bootstraps, so it gets its own shard.
+          # Cold ChaCha bootstraps run in chacha-core-stores to fit the 55m guard.
           - name: db-management-a-l
             paths: >-
-              tldw_Server_API/tests/DB_Management/test_[a-l]*.py
+              tldw_Server_API/tests/DB_Management/test_[a-bd-l]*.py
+              tldw_Server_API/tests/DB_Management/test_character_*.py
+              tldw_Server_API/tests/DB_Management/test_chat_*.py
+              tldw_Server_API/tests/DB_Management/test_claims_*.py
+              tldw_Server_API/tests/DB_Management/test_con*.py
+              tldw_Server_API/tests/DB_Management/test_core_*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
@@ -7018,7 +7066,9 @@ jobs:
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_zip_safe_extract.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_book_processing_*.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ebook_safe_paths.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_archive_worker.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py
+              tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_logging_safety_13376_2.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_file_validation.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_filename_and_mime_and_archive.py
               tldw_Server_API/tests/MediaIngestion_NEW/unit/test_ingest_jobs_batch_lookup.py

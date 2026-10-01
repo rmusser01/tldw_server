@@ -1466,7 +1466,7 @@ export const workspaceApiMethods = {
 
   async listWorkspaces(): Promise<WorkspaceListApiResponse> {
     const response = await bgRequest<WorkspaceListApiResponse>({
-      path: "/api/v1/workspaces",
+      path: "/api/v1/workspaces/",
       method: "GET"
     })
     return {

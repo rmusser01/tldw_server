@@ -1,13 +1,81 @@
 """Real PostgreSQL lock lifetime across resumable schema transactions."""
 
 
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
+from pathlib import Path
+
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    DatabaseConfig,
+    DatabaseError,
+    TransientContentionError,
+)
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap import postgres_schema_migration
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.mark.parametrize("deadline", ["bootstrap", "operator-statement"])
+def test_initializer_acquisition_deadline_discards_checkout_and_allows_later_retry(
+    pg_database_config: DatabaseConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    deadline: str,
+) -> None:
+    """Both native acquisition deadlines discard failed initializer sessions."""
+    from psycopg.conninfo import make_conninfo
+
+    owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    waiter_config = pg_database_config
+    if deadline == "operator-statement":
+        waiter_config = replace(pg_database_config, connection_string=make_conninfo(
+            host=pg_database_config.pg_host, port=str(pg_database_config.pg_port),
+            dbname=pg_database_config.pg_database, user=pg_database_config.pg_user,
+            password=pg_database_config.pg_password, options="-c statement_timeout=100ms",
+        ))
+    waiter_backend = DatabaseBackendFactory.create_backend(waiter_config)
+    pool = waiter_backend.get_pool()
+    original_get_connection = pool.get_connection
+    checkouts = []
+
+    def observe_checkout(*args: object, **kwargs: object):
+        """Observe the real connection without replacing PostgreSQL behavior."""
+        connection = original_get_connection(*args, **kwargs)
+        checkouts.append((connection, connection.info.backend_pid))
+        return connection
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as workers:
+            with postgres_schema_migration(owner_backend, "100ms"):
+                with monkeypatch.context() as patch:
+                    patch.setattr(pool, "get_connection", observe_checkout)
+                    waiter = workers.submit(
+                        CharactersRAGDB, tmp_path / "blocked.db", client_id="2", backend=waiter_backend,
+                    )
+                    with pytest.raises(CharactersRAGDBError) as failure:
+                        waiter.result(timeout=35 if deadline == "bootstrap" else 5)
+                cause = failure.value.__cause__
+                if deadline == "bootstrap":
+                    assert isinstance(cause, TransientContentionError)
+                else:
+                    assert type(cause) is DatabaseError
+                connection, process_id = checkouts[-1]
+                assert connection.closed
+                assert owner_backend.execute(
+                    "SELECT count(*) FROM pg_locks WHERE pid=%s AND locktype='advisory'",
+                    (process_id,),
+                ).scalar == 0
+        replacement = CharactersRAGDB(tmp_path / "retry.db", client_id="2", backend=waiter_backend)
+        try:
+            note = replacement.add_note(title="Recovered", content="Acquisition can retry")
+            assert replacement.get_note_by_id(note)["content"] == "Acquisition can retry"
+        finally:
+            replacement.close_connection()
+    finally:
+        for backend in (owner_backend, waiter_backend):
+            backend.get_pool().close_all()
 
 
 @pytest.mark.parametrize("failure", [None, "body", "unlock"])

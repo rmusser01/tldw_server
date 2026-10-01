@@ -420,6 +420,21 @@ vi.mock("@/hooks/useMessageOption", () => ({
   useMessageOption: () => messageOptionState.value
 }))
 
+// Server-chat settings are read and written only through a history-selection
+// owner (settingsMode is "pending" until one is bound). These tests inject the
+// server chat through useMessageOption instead of loading it, so report an
+// ordinary owner the way Playground.search.integration.test.tsx does.
+vi.mock("@/hooks/chat/useHistorySelection", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
+  return {
+    ...actual,
+    useHistorySelectionContext: () => ({
+      ...actual.useHistorySelectionContext()!,
+      settingsMode: () => "ordinary" as const
+    })
+  }
+})
+
 vi.mock("@/hooks/usePlaygroundSessionPersistence", () => ({
   usePlaygroundSessionPersistence: () => ({
     restoreSession: vi.fn(async () => false),

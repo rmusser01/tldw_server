@@ -19,11 +19,7 @@ os.environ.setdefault("MINIMAL_TEST_APP", "1")
 # Reduce background services during tests
 os.environ.setdefault("DISABLE_AUTHNZ_SCHEDULER", "1")
 os.environ.setdefault("WORKFLOWS_SCHEDULER_ENABLED", "false")
-# Deterministic chat rate limits for integration tests
-os.environ.setdefault("TEST_CHAT_PER_USER_RPM", "2")
-os.environ.setdefault("TEST_CHAT_PER_CONVERSATION_RPM", "2")
-os.environ.setdefault("TEST_CHAT_GLOBAL_RPM", "10")
-os.environ.setdefault("TEST_CHAT_TOKENS_PER_MINUTE", "1000")
+# Chat rate limits belong to the scoped reset fixture below.
 
 # Load config to get API keys
 from tldw_Server_API.app.core.config import load_and_log_configs
@@ -217,7 +213,8 @@ def chacha_db(temp_db_path) -> Generator[CharactersRAGDB, None, None]:
     """Create a real CharactersRAGDB instance for testing."""
     db = CharactersRAGDB(
         db_path=str(temp_db_path),
-        client_id="test_user"
+        client_id="1",
+        owner_user_id="1",
     )
     # Database is initialized in __init__, no need to call initialize_db
     try:
@@ -235,7 +232,7 @@ def populated_chacha_db(chacha_db) -> CharactersRAGDB:
         'description': 'A helpful assistant',
         'personality': 'Helpful and friendly',
         'system_prompt': 'You are a helpful AI assistant.',
-        'client_id': 'test_user'
+        'client_id': chacha_db.client_id
     }
     character_id = chacha_db.add_character_card(character_data)
 

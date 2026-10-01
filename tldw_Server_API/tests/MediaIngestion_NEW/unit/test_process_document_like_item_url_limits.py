@@ -408,5 +408,7 @@ async def test_process_document_like_item_email_archive_url_uses_archive_content
 
     assert called["validator_dispatch"] is True
     assert result.get("status") == "Error"
-    assert "downloaded file failed validation" in str(result.get("error", "")).lower()
-    assert "archive content rejected" in str(result.get("error", "")).lower()
+    error = str(result.get("error", ""))
+    assert error.startswith("File preparation/download failed. [error_id=")
+    assert "archive content rejected" not in error
+    assert str(downloaded_file) not in error

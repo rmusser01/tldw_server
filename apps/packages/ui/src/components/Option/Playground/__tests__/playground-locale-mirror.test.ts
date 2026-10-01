@@ -34,10 +34,12 @@ const flattenNested = (
     return {};
   }
 
+  // Chrome message names allow only [A-Za-z0-9_], so apps/extension/scripts/
+  // sync-public-locales.js writes "preset.sliceOfLife" as "preset_sliceOfLife".
   return Object.entries(value as Record<string, unknown>).reduce(
     (acc, [key, nested]) => ({
       ...acc,
-      ...flattenNested(nested, [...prefix, key]),
+      ...flattenNested(nested, [...prefix, key.replace(/[^A-Za-z0-9_]/g, "_")]),
     }),
     {} as Record<string, string>,
   );

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -22,6 +23,10 @@ from tldw_Server_API.app.core.exceptions import ConversationSettingsTargetMissin
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+
+class _ReceiptAdmissionChanged(ConflictError):
+    """A stale preflight may retry only after its independently owned rollback."""
 
 
 class ConversationStore:
@@ -541,6 +546,57 @@ class ConversationStore:
             logger.error(f"Database error fetching conversation ID {conversation_id}: {exc}")
             raise
 
+    def _lock_receipt_admission(
+        self, conversation_id: str, destination: tuple[str, str | None], *, conn: Any,
+    ) -> bool:
+        """Fence receipt-bound admission before any explicit or implicit chat lock."""
+        store = self._db.workspace_chat_startups
+        associated = store.has_receipt(conversation_id, conn=conn)
+        if associated and destination[0] == "workspace":
+            workspace = store.lock_receipt_workspace(destination[1], conn=conn)
+            if (
+                workspace is None or workspace["deleted"]
+                or workspace["native_chat_admission_closed"] or workspace["system_operation_state"] is not None
+            ):
+                raise ConflictError("workspace_chat_admission_unavailable", entity="workspaces", entity_id=destination[1])
+        return associated
+
+    def _run_receipt_admission(self, mutation: Callable[[Any], Any]) -> Any:
+        """Retry at most once, never rolling back or retrying a caller-owned unit."""
+        from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_store import WorkspaceStartupError
+
+        owned = True
+        try:
+            self._db.workspace_chat_startups.require_outermost()
+        except WorkspaceStartupError:
+            owned = False
+        for attempt in range(2):
+            try:
+                with self._db.transaction(preserve_existing=True) as conn:
+                    result = mutation(conn)
+            except _ReceiptAdmissionChanged as error:
+                if not owned or attempt == 1:
+                    raise
+                # Managers can log a failed rollback without closing the unit.
+                try:
+                    self._db.workspace_chat_startups.require_outermost()
+                except WorkspaceStartupError:
+                    raise error from None
+            else:
+                return result
+        raise AssertionError("Receipt admission retry exhausted")
+
+    def _recheck_receipt_admission(
+        self, conversation_id: str, preflight: Any, current: Any, associated: bool, *, conn: Any,
+    ) -> None:
+        """Never discover and acquire a new Workspace lock after locking the chat."""
+        final_associated = self._db.workspace_chat_startups.has_receipt(conversation_id, conn=conn)
+        if final_associated != associated or ((associated or final_associated) and (
+            preflight is None or current is None
+            or (preflight["scope_type"], preflight["workspace_id"]) != (current["scope_type"], current["workspace_id"])
+        )):
+            raise _ReceiptAdmissionChanged("workspace_chat_admission_changed", entity="conversations", entity_id=conversation_id)
+
     def upsert_conversation_from_sync(
         self,
         *,
@@ -563,7 +619,7 @@ class ConversationStore:
         scope_type: str | None = None,
         workspace_id: str | None = None,
     ) -> bool:
-        """Replace Sync fields atomically, preserving local origin only for equivalent bindings."""
+        """Replace Sync fields and invalidate receipts atomically on binding changes."""
 
         del object_hash
         normalized_id = str(conversation_id).strip()
@@ -620,14 +676,17 @@ class ConversationStore:
             normalized_workspace_id,
         )
         try:
-            with self._db.transaction() as conn:
+            def replace(conn: Any) -> None:
+                """Replace one Sync object only after destination and binding revalidation."""
+                preflight = conn.execute(
+                    "SELECT scope_type, workspace_id FROM conversations WHERE id = ?", (normalized_id,),
+                ).fetchone()
+                associated = self._lock_receipt_admission(
+                    normalized_id, (normalized_scope_type, normalized_workspace_id), conn=conn,
+                )
                 inserted = conn.execute(query, params)
                 if inserted.rowcount == 0:
-                    current_query = (
-                        "SELECT character_id, assistant_kind, assistant_id, persona_memory_mode, "
-                        "assistant_startup_json, required_projection_version, native_bundle_json, "
-                        "native_creation_operation_kind, native_creation_operation_id FROM conversations WHERE id = ?"
-                    )
+                    current_query = "SELECT * FROM conversations WHERE id = ?"
                     if self._db.backend_type == BackendType.POSTGRESQL:
                         current_query += " FOR UPDATE"
                     current = conn.execute(current_query, (normalized_id,)).fetchone()
@@ -643,6 +702,7 @@ class ConversationStore:
                         raise ConflictError(
                             "native_conversation_sync_unsupported", entity="conversations", entity_id=normalized_id,
                         )
+                    self._recheck_receipt_admission(normalized_id, preflight, current, associated, conn=conn)
                     binding = (assistant_kind, assistant_id, normalized_character_id, persona_memory_mode)
                     startup_json = (
                         current["assistant_startup_json"]
@@ -661,6 +721,11 @@ class ConversationStore:
                         # Preserve created_at; replace every other existing Sync field.
                         (*params[1:13], *params[14:], startup_json, normalized_id),
                     )
+                    after = conn.execute("SELECT * FROM conversations WHERE id = ?", (normalized_id,)).fetchone()
+                    self._db.workspace_chat_startups.invalidate_changed_binding(
+                        normalized_id, dict(current), dict(after), conn=conn,
+                    )
+            self._run_receipt_admission(replace)
             logger.info("Upserted conversation projection from Sync v2 for ID: {}.", normalized_id)
             return True
         except sqlite3.IntegrityError as exc:
@@ -1124,12 +1189,7 @@ class ConversationStore:
 
         try:
             with self._db.transaction() as conn:
-                current_query = (
-                    "SELECT title, version, deleted, character_id, assistant_kind, assistant_id, persona_memory_mode, "
-                    "required_projection_version, native_bundle_json, "
-                    "native_creation_operation_kind, native_creation_operation_id "
-                    "FROM conversations WHERE id = ?"
-                )
+                current_query = "SELECT * FROM conversations WHERE id = ?"
                 if self._db.backend_type == BackendType.POSTGRESQL:
                     current_query += " FOR UPDATE"
                 current_state = conn.execute(
@@ -1310,6 +1370,12 @@ class ConversationStore:
                         )
                     raise ConflictError(msg, entity="conversations", entity_id=conversation_id)
 
+                if assistant_update_requested:
+                    after = conn.execute("SELECT * FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+                    self._db.workspace_chat_startups.invalidate_changed_binding(
+                        conversation_id, dict(current_state), dict(after), conn=conn,
+                    )
+
                 logger.info(
                     "Updated conversation ID {} from version {} to version {} (FTS handled by DB triggers). "
                     "Title changed: {}",
@@ -1415,6 +1481,7 @@ class ConversationStore:
     def restore_conversation(
         self, conversation_id: str, expected_version: int, *, require_already_active: bool = False
     ) -> bool | None:
+        """Restore under current native and permanent receipt-association admission."""
         now = self._db._get_current_utc_timestamp_iso()
         next_version_val = expected_version + 1
         query = (
@@ -1425,7 +1492,8 @@ class ConversationStore:
         params = (now, next_version_val, self._db.client_id, conversation_id, expected_version)
 
         try:
-            with self._db.transaction() as conn:
+            def restore(conn: Any) -> bool:
+                """Restore or acknowledge the current row under its admitted destination."""
                 restore_columns = (
                     "deleted, version, client_id, scope_type, workspace_id, "
                     "required_projection_version, native_bundle_json, "
@@ -1441,6 +1509,9 @@ class ConversationStore:
                         entity="conversations",
                         entity_id=conversation_id,
                     )
+                associated = self._lock_receipt_admission(
+                    conversation_id, (preflight["scope_type"], preflight["workspace_id"]), conn=conn,
+                )
                 protected_columns = (
                     "required_projection_version", "native_bundle_json",
                     "native_creation_operation_kind", "native_creation_operation_id",
@@ -1471,6 +1542,7 @@ class ConversationStore:
                         entity="conversations",
                         entity_id=conversation_id,
                     )
+                self._recheck_receipt_admission(conversation_id, preflight, record_status, associated, conn=conn)
                 if protected:
                     if (
                         record_status["client_id"] != preflight["client_id"]
@@ -1527,15 +1599,19 @@ class ConversationStore:
                     f"new version {next_version_val}."
                 )
                 return True
+            return self._run_receipt_admission(restore)
         except ConflictError:
             raise
         except CharactersRAGDBError:
             raise
 
     def hard_delete_conversation(self, conversation_id: str) -> bool:
+        """Burn native and Workspace receipts in their shared lock order before deletion."""
         try:
             with self._db.transaction() as conn:
                 self._db.native_forks.mark_child_gone(self._db.client_id, conversation_id, conn=conn)
+                self._db.workspace_chat_startups.lock_conversation(conversation_id, conn=conn)
+                self._db.workspace_chat_startups.mark_hard_deleted(conversation_id, conn=conn)
                 rowcount = conn.execute(
                     "DELETE FROM conversations WHERE id = ?",
                     (conversation_id,),

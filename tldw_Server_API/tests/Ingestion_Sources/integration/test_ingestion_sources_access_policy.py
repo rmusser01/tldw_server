@@ -1,3 +1,5 @@
+"""Verify ingestion source access decisions and the served capability contract."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -6,6 +8,8 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 
 class _FakeTx:
@@ -436,12 +440,15 @@ def test_capabilities_reports_false_without_applicable_flag(
 
 
 @pytest.mark.integration
-def test_capabilities_endpoint_uses_explicit_response_model(ingestion_sources_policy_client):
+def test_capabilities_endpoint_uses_explicit_response_model(
+    ingestion_sources_policy_client: dict[str, Any],
+) -> None:
+    """The included capability route retains its explicit response model."""
     from tldw_Server_API.app.api.v1.schemas.ingestion_sources import (
         IngestionSourceCapabilitiesResponse,
     )
-    from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
+    # FastAPI >= 0.137 keeps included routers nested; walk the served routes instead.
     served = next(
         served
         for served in iter_served_routes(ingestion_sources_policy_client["app"].routes)

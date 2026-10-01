@@ -1,0 +1,23 @@
+# Intentional route_map lint exceptions, one problem string per line.
+#
+# Format: the exact problem string the lint printed, then a `#` reason.
+
+# Websocket-only routes: iter_served_routes yields them, but the lint's dead/
+# shadow check only considers routes with HTTP methods (websocket routes have
+# none), so a websocket-only by_path entry always reads as dead here even
+# though it is real and served.
+by_path /v1/realtime matches no served route # websocket route; lint sees HTTP routes only
+by_path /api/v1/mcp/ws* matches no served route # websocket route (mcp_unified_endpoint.py @router.websocket("/ws")); lint sees HTTP routes only
+
+# Routers gated by a route_key whose default_stable=False and that is not in
+# config.txt's [API-Routes] enable list, so they are not mounted by the app
+# load_app() builds (or by the shipped default config). Once an operator
+# enables the route_key, the router mounts under exactly this prefix.
+by_path /api/v1/benchmarks* matches no served route # benchmark_api.py router (route_key=benchmarks, default_stable=False); not enabled by default config
+by_path /api/v1/connectors* matches no served route # connectors.py router (route_key=connectors, default_stable=False); not enabled by default config
+by_path /api/v1/personalization* matches no served route # personalization.py router (route_key=personalization, default_stable=False); not enabled by default config
+
+# authnz_debug.py mounts with default_stable=_is_explicit_pytest_runtime(),
+# so it is only ever included under an explicit pytest run, never in the
+# production wiring load_app() builds (nor in a normal server process).
+by_path /api/v1/authnz* matches no served route # authnz_debug.py router only mounts under explicit pytest runtime (default_stable=_is_explicit_pytest_runtime())

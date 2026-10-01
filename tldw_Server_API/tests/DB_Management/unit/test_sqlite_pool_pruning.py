@@ -109,8 +109,8 @@ def test_sqlite_pool_detaches_rejected_handle_after_close_failure(
             assert len(records) == 1
             assert records[0]["extra"]["connection_id"] == id(failed)
             assert records[0]["extra"]["thread_id"] == threading.get_ident()
-            assert records[0]["exception"].type is close_error
-            assert records[0]["exception"].traceback is not None
+            assert records[0]["extra"]["error_type"] == close_error.__name__
+            assert records[0]["exception"] is None
         else:
             assert records == []
     finally:
