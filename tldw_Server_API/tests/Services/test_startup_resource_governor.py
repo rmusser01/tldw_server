@@ -136,7 +136,10 @@ async def test_init_resource_governor_falls_back_to_file_loader_when_db_store_se
         monkeypatch,
         "tldw_Server_API.app.core.config",
         rg_backend=lambda: "memory",
-        rg_enabled=lambda default=False: False,
+        # This test targets the DB-store-setup-failure fallback path, not the
+        # RG on/off switch, so RG must be explicitly enabled for a governor to
+        # be attached (RG disabled now means app.state.rg_governor is None).
+        rg_enabled=lambda default=False: True,
         rg_policy_path=lambda: "/tmp/rg-policies.yaml",
         rg_policy_reload_enabled=lambda: False,
         rg_policy_reload_interval_sec=lambda: 60,

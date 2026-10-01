@@ -5288,7 +5288,10 @@ def test_chat_completion_rg_primary_deny(
 
     gov = getattr(app.state, "rg_governor", None)
     if gov is None:
-        app.state.rg_governor = SimpleNamespace()
+        # RG is disabled by default under pytest, so no governor is attached to the
+        # shared app on startup. Attach a throwaway double via monkeypatch (not a
+        # direct assignment) so it is restored on teardown of this shared app.state.
+        monkeypatch.setattr(app.state, "rg_governor", SimpleNamespace(reserve=None, commit=None), raising=False)
         gov = app.state.rg_governor
 
     if getattr(app.state, "rg_policy_loader", None) is None:
@@ -5297,7 +5300,7 @@ def test_chat_completion_rg_primary_deny(
             def get_policy(self, _policy_id):
                 return {}
 
-        app.state.rg_policy_loader = _Loader()
+        monkeypatch.setattr(app.state, "rg_policy_loader", _Loader(), raising=False)
 
     async def fake_reserve(req, op_id=None):
         categories = getattr(req, "categories", {}) or {}
@@ -5360,7 +5363,10 @@ def test_chat_completion_rg_shadow_vs_primary_behaviour(
 
     gov = getattr(app.state, "rg_governor", None)
     if gov is None:
-        app.state.rg_governor = SimpleNamespace()
+        # RG is disabled by default under pytest, so no governor is attached to the
+        # shared app on startup. Attach a throwaway double via monkeypatch (not a
+        # direct assignment) so it is restored on teardown of this shared app.state.
+        monkeypatch.setattr(app.state, "rg_governor", SimpleNamespace(reserve=None, commit=None), raising=False)
         gov = app.state.rg_governor
 
     if getattr(app.state, "rg_policy_loader", None) is None:
@@ -5369,7 +5375,7 @@ def test_chat_completion_rg_shadow_vs_primary_behaviour(
             def get_policy(self, _policy_id):
                 return {}
 
-        app.state.rg_policy_loader = _Loader()
+        monkeypatch.setattr(app.state, "rg_policy_loader", _Loader(), raising=False)
 
     token_calls = {"count": 0}
 
