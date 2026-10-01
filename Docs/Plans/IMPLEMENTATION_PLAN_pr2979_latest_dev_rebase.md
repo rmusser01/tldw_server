@@ -1138,3 +1138,83 @@ A stale f3f1 replay started after the fresh-dev assertion failed because the she
 Replay plan expands before new replay: fresh remote64/dev85 verification, new recovery of the fully recorded clean batch, patch equivalence/reconciliation including every changed/duplicate original control, preservation of all prior UAT/canonical workspace/temporary-chat/locale/JSX contracts and upstream TASK13245/TASK13396/ADR057 histories. Preserve upstream CI movement of DB_Management/test_chacha_*.py into chacha-core-stores in all five matrices and the three Workspace startup HTTP suites; preserve original55-minute outer/300-second per-case budgets and complete nonoverlapping coverage. Retain upstream strict startup admission, private durable receipts and erasure/rebinding/PG transaction ownership alongside PR current owner bindings, moderation cleanup isolation and native controls. Retain Resource Governance fallback/scopes/Redis accounting/auth single charge and magic-link binding; reconcile actual served-route audit and original response_model assertion.
 
 Actual final source qualification expands to strict startup acceptance/concurrency/lifecycle/privacy/receipts/repair/RLS, owner-bound chat and HTTP routes, SQLite migration/index/cascade and official required PostgreSQL migration/schema-lock/bootstrap/operation-cleanup tests, API fingerprints/contracts and actual CI partition/coverage controls, alongside Resource Governance memory/Redis/AuthNZ_Unit single-charge/PG/MCP/route scopes. Compile/Ruff/Bandit/diff/dependency evidence and independent review required. A new independent read-only strict-startup delta review is active; no own tests claimed. UAT552/556/558 actual native causal instrumentation remains necessary before repairs, all final native/strict checks and pending Chatbook disposition remain open, full UAT paused/UAT261 open. No latest-dev source qualification/publication or merge acceptance.
+
+
+## Reconciled-source qualification plan — 2026-10-01
+
+Latest-dev85ede replay completed locally at9c71a8b9595608240a6db2f8c67311b1e22b4aef with224commits above85ede. Raw range-diff215equal/nine changed/no added or removed; eight explicit conflicts plus one context-only Character test import shift. Recovery33632b8bcccec72dbcc2f502a02fe4a1cdc53b70 preserved in codex/recovery/pr2979-pre-85ede-rebase-20261001, fresh start remote64/dev85 verified. Conflict evidence /private/tmp/pr2979-rebase-20261001-85ede-conflict-dispositions.json and replay-proof.json. Keep both strict-startup and image imports; both historical-v35 and v73/current index/receipt tests; exact guarded workspace-startup route inventory; outer coordination30s vs internalDDL5s/statement30s with PR checkout ownership; upstream completed TASK13245.5/parity/merge-history via official CLI; PRa-c/d-l shards plus upstream ChaCha-to-core in five matrices; all43 capabilities assertion ASTs. Provisional upstream fingerprint must be regenerated on actual final source.
+
+Actual dependency/managed-import/official cluster preflight verifies Python3.12.11/FastAPI0.141.1/Pydantic2.13.5/core2.46.5/Starlette1.7.0/asyncpg0.31.0/PostgreSQL18.6. Existing full-suite partition test gives one causal expected failure at exact glob-map assertion after CI reconciliation, /private/tmp/pr2979-85ede-ci-red.log/xml, normalexit1, no skipped cases. Plan before source edit: update only its expected a-c pattern list to a-b plus explicit character/chat/claims/con/core globs, include test_chacha*.py from chacha-core-stores in its same exact no-duplicate/no-omission inventory, retain all original assertions/finite guards. Run focused green then full CI/coverage controls; regression mutants must detect missing/duplicate mapped file. Independent upstream review /private/tmp/pr2979-strict-startup-upstream-review-20261001.json reports only stale active-runbook ADR056 reference; correct to existing ADR057 without changing histories. Official actual-source fingerprint export/review required before replacing provisional tracked artifact. All broader RG/strict-startup/SQLite/officialPG/HTTP/UI/static/source-preservation/independent/final-native gates remain open. No publication or merge acceptance. Correction: three strict Workspace HTTP suites belong in chacha-content-persona, not the previously recorded chacha-workspace-writing group.
+
+
+UAT559 / TASK-13260.278.18.83.48 records the newly proven stale E2E budget contract. FullCI module49passes/onefail/no skips/naturalexit1. Upstream Character Chat policy changed60rpm/burst1 to300rpm/burst2; unchangedE2Ecopy rpm600 retainsburst2. Before source edits official child records minimal three-line probe reconciliation to601requests/600accepted,1201/1200accepted and source-restorationrpm300; no governor/policy/workflow budget change, actual uniqueop/frozenclock/YAMLtransformation/fullpolicy equality/order retained. Local requiredPG storage/lock/strict-startup qualification has started on reconciled source. All final native/strict/Chatbook gates open.
+
+
+## UAT560 shared Chat_NEW rate-limit fixture isolation — 2026-10-01
+
+**Task:** TASK-13260.278.18.83.49. **Status:** In Progress; final published/native criteria open.
+
+### Stage 1: Prove shared ordering failure
+**Goal:** Attribute the two HTTP qualification failures before editing fixtures.
+**Success Criteria:** Unchanged isolated Buddy green and actual paired Chat_NEW/Buddy causal red, with content-free HTTP error/config evidence.
+**Tests:** Seven Buddy cases alone; one original Chat_NEW validation plus the same seven cases.
+**Status:** Complete
+
+### Stage 2: Scope the existing fixture
+**Goal:** Keep the same finite Chat_NEW limits and restore the incoming shared limiter owner.
+**Success Criteria:** Delete redundant collection-level TEST_CHAT overrides; use the existing monkeypatch fixture for cached ownership; all original HTTP and limiter assertions unchanged.
+**Tests:** New ownership/enforcement check red first; paired green and retained real third-request denial.
+**Status:** Complete
+
+### Stage 3: Qualify and review
+**Goal:** Verify the full actual reconciled HTTP scope and final touched source.
+**Success Criteria:** Normal exits, identical original skips, compile/Ruff/Bandit and independent review clear; official task/plan/tracker committed normally.
+**Tests:** Full 1,001-case HTTP scope plus focused limiter controls; source/assertion preservation. Actual final hosted strict/native and pending Chatbook remain separate open gates.
+**Status:** Complete
+
+The unchanged full HTTP run has 986 passes, two Buddy handoff failures and 13 original skips, natural exit 1. The seven Buddy cases alone pass. Actual paired eight-case reproduction gives six passes and two identical third-request `chat_http_429` failures. Observer records the leaked 10/2/2/1000 limits, burst 1.0 and provider count two. Chat_NEW writes these four values during collection and initializes a shared cached limiter without restoring its owner; its existing autouse fixture already sets the same four values per test. No production or policy/budget change is justified. Evidence /private/tmp/pr2979-85ede-buddy-paired-red.{log,xml,result.json} and -observations.json; baseline buddy-baseline.log/xml.
+
+
+## Latest-dev b365 Resource Governance delta — 2026-10-01 03:06 UTC
+
+Fresh remote confirms published64 unchanged and devb365 through PR3068. Read-only compare85..b365 has31commits/46files/two direct PR overlaps (auth.py, test_usage_tracker_sqlite.py), backend-required CI change and no dependency manifest changes. New served-route policy resolver, validated-principal/tenant charging, cached/budgeted identity resolution, same-policy+same-entity auth single-charge guard, fractional RPM/memory eviction/idempotency/scopeless bucket semantics and route-map/coverage lint require actual reconciled qualification. Preserve upstream TASK13395/13399/13400..13405 histories and open follow-ups. Evidence /private/tmp/pr2979-dev-b365-20261001-{compare,delta,read}.json and official parent task notes. Current replay9c qualification remains unpublished; defer reconciliation while current HTTP/PG tests run, then fresh refs/recovery/equivalence/final-source qualification. No upstream result accepts this PR; pending Chatbook and native causal/normal-exit gates remain open.
+
+
+## UAT560 local qualification complete — 2026-10-01 03:18 UTC
+
+Final actual17-module HTTP qualification COMPLETE1003cases:990pass/13original exact skip identities+reasons/zero failure/error/naturalexit0, 979.655547s total. Original1001caseidentitymultiset retained; added existing unitconcurrency+newfixtureownership tests. Original two Buddy failures now pass with all original assertions. Independent immutable source/artifact review clear /private/tmp/pr2979-uat560-independent-review.json SHA717b75a46891ffefe0d673896f3b89108eaa52788e6114ef89b9bca85858676b, no ownpytest/PG/static rerun. Root final evidence verifies hashes/XMLparity/static/source-preservation at /private/tmp/pr2979-uat560-final-evidence.json. LocalAC1/2checked only; finalAC3OPEN. This does not accept native unknowns, current newPGscope failure, future b365reconciled source or pending Chatbook. No publication.
+
+
+## UAT561 forced PostgreSQL acquisition guard scope — 2026-10-01
+
+**Task:** TASK-13260.278.18.83.50. **Status:** In Progress; final published/native criteria open.
+
+### Stage 1: Preserve and diagnose the final-source failure
+**Goal:** Separate blocked acquisition disposal from later cold retry DDL.
+**Success Criteria:** Actual 78-pass/one-failure evidence; content-free native SQLSTATE and controlled sufficient cause retained.
+**Tests:** Unchanged operator case observer (one pass, blocked SQLSTATE57014 at101ms); controlled150ms native PostgreSQL retry DDL delay (one exact retry failure, SQLSTATE57014 at105ms).
+**Status:** Complete
+
+### Stage 2: Scope the synthetic negative guard
+**Goal:** Apply the same100ms forced native operator deadline only to the test-owned blocked checkout, which the original assertions require discarded.
+**Success Criteria:** Existing checkout observer/real backend/pool reused; original100ms guard,35s/5s outer waits, production5s/30s limits and all original assertions retained.
+**Tests:** Identical controlled delay becomes green; required PostgreSQL whole79-case scope and guard/invalidation sensitivity.
+**Status:** Complete
+
+### Stage 3: Qualify, review and commit
+**Goal:** Qualify actual source with the private delay disabled, plus static/source preservation and independent review.
+**Success Criteria:** Normal exit/zero new skips; no new production or nonassert findings; official task/owned docs normally committed. Native/future latest-dev/Chatbook remain open.
+**Tests:** Actual whole affected officialPG scopes, compile/Ruff/Bandit, original assertion/body comparisons and independent source/artifact review.
+**Status:** Complete
+
+The final import-sorted scope reports78passes/one failure, zero skips and six inherited warnings, naturalexit1. The negative blocked-acquisition assertions pass; failure is retry manuscript trigger creation. Focused unchanged native observer passes and shows blocked QueryCanceled57014 at101ms. Controlled150ms actual PostgreSQL work in the exact retry DDL call reproduces the retry SchemaError and QueryCanceled57014 at105ms. The forced100ms synthetic acquisition option was set on the whole pool, including unrelated positive retry DDL. Exact original unobserved driver cause/delay remains unproven; no import-order or production attribution is claimed. Apply the same native100ms guard through the existing checkout observer, commit its SET before blocked acquisition, then require the original closed-checkout/advisory-lock/retry CRUD assertions. No production/fixture database policy/default budget change. Private observer/delay remains outside the repository and disabled in actual qualification. Evidence /private/tmp/pr2979-85ede-import-sorted-pg.* and /private/tmp/pr2979-schema-deadline-{observation,controlled-red}.*.
+
+
+## UAT561 local qualification complete — 2026-10-01
+
+Local UAT561 qualification complete: actual unchanged79case multiset gives79passes/zero skips/errors/failures/six inherited warnings, naturalexit0 in235.976839s. Same controlled150ms real retry DDL delay becomes one pass while original blocked100ms QueryCanceled remains. Missing-deadline and returned-failed-checkout mutants each fail retained original finite-wait/disposal checks with naturalexit1. All17 assertion ASTs/all other definitions unchanged; Ruff0; Bandit17 identical inherited LOW B101/zero errors/new nonassert findings; compile pass. Independent read-only review clear /private/tmp/pr2979-uat561-independent-review.json SHA256a0654719ace61ff3aefd9969aa6d06777b4a2c44435f3c61f2d7cfbb366a1a29, no ownpytest/PG/static execution. Exact original unobserved driver cause remains unproven; synthetic guard leak sufficient cause only. Evidence /private/tmp/pr2979-uat561-final-evidence.json and pr2979-85ede-schema-final.*. Final hosted/native/latest-dev/Chatbook AC3 remains OPEN; normal local commit pending.
+
+
+## Reviewed local85ede qualification batch — 2026-10-01
+
+Current local9c plus UAT559/560/561 qualification is complete locally and independently source/artifact reviewed. Actual storage802passes/13explicit backend applicability skips, RG331passes/two inheritedxfails (including9realRedis and4officialPG), authPG16passes, sync/RLS142passes, finalHTTP990passes/13exact original skips, finalPG79passes/zero skips, CI50passes and installedUI129passes/zero skips all exited normally. The first broadHTTP and laterPG failure evidence remains retained; repairs do not attribute unknown native causes. Actual final API fingerprint e261f2bc281c155149c02f529d92d4c440cac9e6fb84355095ce7c6599a79f1a from FastAPI0.141.1 source; ADR057 runbook reference and two import sorts reviewed. Final changedPython compile299files versus85ede has zero errors; source hashes match CI/fixture/PG reviewed evidence. Coverage835patterns/4900files/four ignored/44baseline/zero omissions; Actionlint/compile/diff checks pass. Static inherited findings and new LOW test assertions are recorded separately, no new production/nonassert finding. Normal-hook local commit next; no publication, final hosted/native/Chatbook or future b365 acceptance.

@@ -16,12 +16,12 @@ from tldw_Server_API.app.api.v1.endpoints import notes
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError, FTSQuery
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap import postgres_schema_migration
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
     ClosedChaChaOperationError,
     chacha_operation,
     current_connection_state,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap import postgres_schema_migration
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendConnectionWrapper,
     CharactersRAGDB,

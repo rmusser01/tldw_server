@@ -1,10 +1,9 @@
 """Real PostgreSQL lock lifetime across resumable schema transactions."""
 
 
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
-from pathlib import Path
 import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -27,17 +26,8 @@ def test_initializer_acquisition_deadline_discards_checkout_and_allows_later_ret
     deadline: str,
 ) -> None:
     """Both native acquisition deadlines discard failed initializer sessions."""
-    from psycopg.conninfo import make_conninfo
-
     owner_backend = DatabaseBackendFactory.create_backend(pg_database_config)
-    waiter_config = pg_database_config
-    if deadline == "operator-statement":
-        waiter_config = replace(pg_database_config, connection_string=make_conninfo(
-            host=pg_database_config.pg_host, port=str(pg_database_config.pg_port),
-            dbname=pg_database_config.pg_database, user=pg_database_config.pg_user,
-            password=pg_database_config.pg_password, options="-c statement_timeout=100ms",
-        ))
-    waiter_backend = DatabaseBackendFactory.create_backend(waiter_config)
+    waiter_backend = DatabaseBackendFactory.create_backend(pg_database_config)
     pool = waiter_backend.get_pool()
     original_get_connection = pool.get_connection
     checkouts = []
@@ -45,6 +35,10 @@ def test_initializer_acquisition_deadline_discards_checkout_and_allows_later_ret
     def observe_checkout(*args: object, **kwargs: object):
         """Observe the real connection without replacing PostgreSQL behavior."""
         connection = original_get_connection(*args, **kwargs)
+        if deadline == "operator-statement":
+            # Force the acquisition deadline only on the blocked test checkout.
+            waiter_backend.execute("SET statement_timeout = '100ms'", connection=connection)
+            connection.commit()
         checkouts.append((connection, connection.info.backend_pid))
         return connection
 

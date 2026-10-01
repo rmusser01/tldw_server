@@ -1841,7 +1841,10 @@ def test_db_management_partitions_cover_each_file_once() -> None:
     root = Path("tldw_Server_API/tests/DB_Management")
     files = {path.as_posix() for path in root.glob("test_[a-l]*.py")}
     patterns = {
-        "db-management-a-c": ("test_[a-c]*.py",),
+        "db-management-a-c": (
+            "test_[a-b]*.py", "test_character_*.py", "test_chat_*.py",
+            "test_claims_*.py", "test_con*.py", "test_core_*.py",
+        ),
         "db-management-d-l": ("test_[d-l]*.py",),
     }
     jobs = (
@@ -1857,7 +1860,11 @@ def test_db_management_partitions_cover_each_file_once() -> None:
             for shard in workflow["jobs"][job]["strategy"]["matrix"]["shard"]
         }
         assert "db-management-a-l" not in shards
-        covered: list[str] = []
+        assert (root / "test_chacha_*.py").as_posix() in shards["chacha-core-stores"]
+        covered: list[str] = [
+            filename for filename in files
+            if any(fnmatch.fnmatch(filename, pattern) for pattern in shards["chacha-core-stores"])
+        ]
         for name, globs in patterns.items():
             expected = {(root / pattern).as_posix() for pattern in globs}
             assert shards[name] == expected
@@ -2027,9 +2034,9 @@ def test_critical_e2e_budget_preserves_other_policies_and_still_enforces_limits(
             allowed += int(decision.allowed)
         return allowed
 
-    assert asyncio.run(allowed_count(source["policies"], 61)) == 60
-    assert asyncio.run(allowed_count(configured["policies"], 601)) == 600
-    configured["policies"]["character_chat.default"]["requests"]["rpm"] = 60
+    assert asyncio.run(allowed_count(source["policies"], 601)) == 600
+    assert asyncio.run(allowed_count(configured["policies"], 1201)) == 1200
+    configured["policies"]["character_chat.default"]["requests"]["rpm"] = 300
     assert configured == source
     assert workflow["steps"].index(step) < workflow["steps"].index(_get_step(workflow["steps"], "Start backend server"))
 

@@ -19,11 +19,6 @@ os.environ.setdefault("MINIMAL_TEST_APP", "1")
 # Reduce background services during tests
 os.environ.setdefault("DISABLE_AUTHNZ_SCHEDULER", "1")
 os.environ.setdefault("WORKFLOWS_SCHEDULER_ENABLED", "false")
-# Deterministic chat rate limits for integration tests
-os.environ.setdefault("TEST_CHAT_PER_USER_RPM", "2")
-os.environ.setdefault("TEST_CHAT_PER_CONVERSATION_RPM", "2")
-os.environ.setdefault("TEST_CHAT_GLOBAL_RPM", "10")
-os.environ.setdefault("TEST_CHAT_TOKENS_PER_MINUTE", "1000")
 
 # Load config to get API keys
 from tldw_Server_API.app.core.config import load_and_log_configs
@@ -170,11 +165,10 @@ def _reset_chat_rate_limiter_between_tests(monkeypatch):
         monkeypatch.setenv("TEST_CHAT_GLOBAL_RPM", "10")
         monkeypatch.setenv("TEST_CHAT_TOKENS_PER_MINUTE", "1000")
         monkeypatch.delenv("TEST_CHAT_BURST_MULTIPLIER", raising=False)
-        from tldw_Server_API.app.core.Chat.rate_limiter import (
-            initialize_rate_limiter,
-        )
-        # Reinitialize each test to ensure TEST_CHAT_* env overrides apply.
-        rl = initialize_rate_limiter()
+        from tldw_Server_API.app.core.Chat import rate_limiter
+        # Restore the incoming cached owner along with the scoped env overrides.
+        monkeypatch.setattr(rate_limiter, "_rate_limiter", None)
+        rl = rate_limiter.initialize_rate_limiter()
         # Reset per-user and global buckets (both common test ids)
         rl.reset_user_limits("test_user")
         rl.reset_user_limits("1")  # single_user mode default user id
