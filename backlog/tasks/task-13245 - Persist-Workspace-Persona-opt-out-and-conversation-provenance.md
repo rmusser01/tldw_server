@@ -4,7 +4,7 @@ title: Persist Workspace Persona opt-out and conversation provenance
 status: In Progress
 assignee: []
 created_date: 2026-09-13 18:15
-updated_date: 2026-10-01 05:05
+updated_date: 2026-10-01 10:18
 labels:
 - persona
 - workspaces
@@ -78,6 +78,14 @@ Local source checkpoint `9a70325818bc2e7b73bbc15fb36c9fdeafb56705` is rebased on
 Nine original Cubic corrections are complete. Only the two original historical-note formatting requests still await the already-requested approval. The additional current-status clarification is explicitly appended here but not yet published/dispositioned. Original historical notes and TASK-13245.11 remain unchanged. Whole-note update attempts did not succeed; no replacement or alternate write route was used to overwrite historical records. This append-only closeout supersedes prior in-progress qualification text without deleting it.
 
 Publication, fresh exact-head hosted dev CI/Qodo/trusted license, strict up-to-date and normal child merge remain open. The UX/MCP/Sandbox ancillary baseline findings are not repaired. Broader profile/provisioning/backfill/Research parity and issue #2950 remain open; shared checkout, dependencies, containers, recovery refs and stash backups are preserved.
+## Published Qualification And Review Checkpoint (2026-10-01 10:04Z)
+
+This dated checkpoint supersedes the earlier in-progress/publication-pending statements without replacing their history. Publication at e91f70622d166033c355b988c69191cd45105e02 and local qualification on dev b365af1827b607fc221f9bf31ca76dde881edb4f are complete. The 636-node source matrix contains 634 passed and two explicit, unchanged Redis xfails: no unexpected failures, zero ordinary JUnit failures/errors and no unavailable-backend skips. All 252 child cases passed, including 99 official required isolated PostgreSQL-labelled cases plus SQLite; mocked HTTP memory/provider evidence remains SQLite-only.
+
+Both earlier final Docs runs completed before publication: 212 passed/eight warnings/37.54s, seed3105512003, and identical-scope 212 passed/eight warnings/59.45s, seed3105512004. Their counts overlap and are not summed. Artifacts: /private/tmp/persona-pr3055-rg-rebase-docs-{final,publish}-20261001.log/xml. No remaining local Docs gate is inferred from historical pending clauses.
+
+All seven required contexts, trusted dev license and replacement license audit passed on exact e91f, but ancillary CI is not green. Seven documentation threads remain open: two original approval-dependent formatting requests plus five new Cubic requests. Append-only clarification does not insert the two requested separators into preserved notes or claim their resolution. The already-requested history-formatting approval remains unanswered; TASK-13245.11 and all original notes remain unchanged. After any record publication, fresh exact-head required/trusted checks, fresh review and every disposition, strict up-to-date and normal dev merge remain mandatory. Stage 2D delivery, parent TASK-13245 and issue #2950 stay open; broader profile/provisioning/backfill/Research parity is not complete.
+2026-10-01 documentation-checkpoint verification: complete prompt assembly/Docs/required-workflow scope passed 266 cases, seven warnings, no failures/errors/skips, 35.38s, seed3105514001; /private/tmp/persona-pr3055-doc-checkpoint-guards-20261001.log/xml. Both unchanged child tests pass no-cache Ruff and bytecode-free compilation. Fresh raw Bandit reports 246 B101 test assertions only and zero errors; /private/tmp/persona-pr3055-doc-checkpoint-bandit-20261001.json. This four-file documentation-only checkpoint has no new production Python target. A runnable read-only verifier confirms every original note byte-prefix, description/criteria/final-summary/DoD suffix and TASK-13245.11 unchanged, source bytes identical to e91f and qualified9a703, and exact Backlog configuration restoration; /private/tmp/persona-pr3055-doc-checkpoint-verify-20261001.py. Independent bounded diff/record review found no new actionable issue; it did not inspect hosted logs or run tests. The aggregate raw log now confirms only the failed shard-result gate, /private/tmp/persona-pr3055-e91f-full-suite-summary-20261001.log. The additional old current-status thread PRRT_kwDOL1aGf86nyJIW was automatically resolved at05:11:24Z as addressed in e91f; this is distinct from the seven still-open threads. Final publication-tree Docs validation is separate evidence, never added to overlapping counts. Publication of this new record checkpoint does not carry e91f hosted green checks onto a future head; fresh exact-head CI/review, every open disposition and normal merge remain required.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
