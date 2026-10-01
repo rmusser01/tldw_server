@@ -1050,7 +1050,7 @@ All 63 original assertion ASTs and 36 definitions remain preserved through exact
 
 ## Latest-dev f3f1 Resource Governance reconciliation — 2026-09-30
 
-**Task:** TASK-13260.278.18.83. **Status:** Deferred until useful published-head diagnostics are terminal; no replay or publication performed.
+**Task:** TASK-13260.278.18.83. **Status:** Replay preparation in progress after all useful published-head diagnostics became terminal on 2026-10-01 01:26 UTC; publication and final acceptance remain open.
 
 ### Stage 1: Record the upstream delta
 **Goal:** Identify affected behavior and overlap before replay.
@@ -1062,7 +1062,7 @@ All 63 original assertion ASTs and 36 definitions remain preserved through exact
 **Goal:** Replay the held repair/documentation batch onto freshly verified latest dev.
 **Success Criteria:** New recovery ref, patch equivalence with every duplicate/conflict disposition recorded, original assertion preservation, upstream task/design/plan history retained.
 **Tests:** Range-diff, exact tree/source/AST/assertion comparisons and auth binding/served-route contract review.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Stage 3: Qualify actual reconciled dependencies and behavior
 **Goal:** Qualify new shared rate-governance/auth behavior and retained UAT repairs on the actual head.
@@ -1092,3 +1092,12 @@ Native job 110059189097 on published 64bab60 prints 1,095 passes, 95 original sk
 Read-only byte/hash/AST checks preserve 95 scoped Python files plus two shared source/configuration files (97 records) against frozen evidence, publication and historical d5; ci.yml is separately unchanged. Native Python 3.12.10, pytest 9.1.1, FastAPI 0.141.1, Pydantic 2.13.5/core 2.46.5 and Starlette 1.7.0 are recorded. Original plugins, 300-second signal guard and existing warning configuration remain intact. The artifact/log supplies no post-summary native stack, thread-ownership/phase profile or retained-graph attribution. Prior local slow GC cannot attribute the hosted interval. Actual native shutdown cause remains unproven.
 
 No source/test, GC, cleanup, process-exit, warning, timeout, dependency or CI change is justified. No further whole local run was made, and no new PostgreSQL/static/independent pytest claim applies. Synthetic retry-unit local criteria remain separate from the required whole native normal exit. Preserve useful automatic diagnostics; defer latest-dev reconciliation/publication. Once diagnostics are terminal, collect actual content-free native shutdown phase/stack evidence before repair. Manifest /private/tmp/pr2979-uat556-native-recurrence-2249.json SHA256 d4f1f3168f9296d357dee8208b735f747b65f9466163592a742dc4b29c683a30 verifies 11 artifacts, native parity/timestamps and source preservation; raw native110059189097 log/meta/annotations/zip/XML retained.
+
+
+## Resource Governance replay preparation — 2026-10-01 01:26 UTC
+
+2026-10-01 01:26 UTC: all useful published64 automatic/native diagnostics are terminal. Automatic36762555589 COMPLETED/SUCCESS with224jobs (216success/eight configured skips); native36762723116 COMPLETED/FAILURE with792jobs (784success/three known shard failures/two known aggregate propagation failures/one automatic Prompt Studio timeout/two configured skips). This is diagnostic completion, not merge acceptance. No new source/review finding, human summary unchanged672bytes/originalSHA. Fresh remote published64bab60/devf3f1 and cleanlocal71bb/six held commits verified in /private/tmp/pr2979-monitor-20261001-0126-final-proof.json.
+
+Before replay: Stage2 of owned latest-dev Resource Governance plan is In Progress. Preserve a new recovery ref for the complete clean recorded batch; freshly verify remote64/devf3, fetch dev and replay b709..local onto f3f1. Retain upstream auth actual-IP/policy/charged-entity guard and PR verify_magic_link get_login_db_connection binding; reconcile duplicate capabilities traversal while preserving original response_model identity assertion and all43 module assertions. Record raw range-diff and every duplicate/conflict replacement, preserve upstream TASK13396/design/plan and all previous UAT/workspace/temporary-chat/locale/JSX contracts. Final actual-source RG memory/Redis, AuthNZ_Unit single-charge, magic-link/HTTP/officialPG, MCP and capabilities qualification, dependency versions, compile/Ruff/Bandit/coverage/diff and independent review remain required. No old-head/local/upstream result accepts a future changed head.
+
+Unproven native UAT552/556/558 still need separately tracked content-free actual native route/SQL/scheduling, shutdown phase/stacks and activation lease/deadline/stage evidence before any repair. Reconcile and qualify source before preparing that diagnostic publication; preserve budgets, cleanup and tests. No native bypass, speculative fix, final publication or merge acceptance is claimed. Chatbook scope question remains pending and is not repeated/inferred; full UAT paused/UAT261 open.
