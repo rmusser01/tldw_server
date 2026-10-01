@@ -65,6 +65,13 @@ beforeEach(() => {
 })
 const props = { workspaceId: "workspace-A", workspaceReady: true, stagedSources: [], backendAvailable: true, onClearStagedSources: () => {} }
 
+it("keeps retained recovery controls in the transcript scroller outside the composer", () => {
+  render(<WorkspaceChatPanel {...props} />)
+  const scroller = screen.getByRole("button", { name: "Explicit reprepare" }).closest(".overflow-y-auto")
+  expect(scroller).toHaveClass("min-h-0", "flex-1")
+  expect(scroller).not.toContainElement(screen.getByRole("textbox", { name: "Chat workspace message" }))
+})
+
 it("explicit reprepare fills only the draft and reuses logical UUID on the next explicit Send", async () => {
   render(<WorkspaceChatPanel {...props} />)
   fireEvent.click(screen.getByRole("button", { name: "Explicit reprepare" }))
