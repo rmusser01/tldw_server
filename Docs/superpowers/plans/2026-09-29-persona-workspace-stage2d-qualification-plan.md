@@ -4,7 +4,7 @@
 
 **Goal:** Qualify the existing Workspace Persona startup contract across prompt, memory, persistence and operational boundaries without expanding its supported surfaces.
 
-**Architecture:** Reuse the resolver, admission, prompt assembly, receipt lifecycle and official database fixtures from Stage 2A/2B and pending Stage 2C. Run existing behavioral gates first, add only missing regression cases, and record cross-client differences rather than copying Chatbook behavior.
+**Architecture:** Reuse the resolver, admission, prompt assembly, receipt lifecycle and official database fixtures from Stage 2A/2B and delivered Stage 2C. Run existing behavioral gates first, add only missing regression cases, and record cross-client differences rather than copying Chatbook behavior.
 
 **Tech Stack:** FastAPI, pytest, SQLite/PostgreSQL, existing Persona/Chat services and Backlog.md; no new dependencies.
 
@@ -12,7 +12,7 @@
 
 **Tracking:** TASK-13245.9 is documentation-only planning. The requester approved the review corrections and execution under TASK-13245.10; parent TASK-13245 and #2950 remain open. Qualification is not delivery or broader parity completion.
 
-**Stack:** Depends on [PR #3041](https://github.com/rmusser01/tldw_server/pull/3041), branch `codex/persona-workspace-strict-startup`. Planning and full pinned-stack evidence began at parent `837d28fdd25c23d8166c96f396bf1f0118d82af0` on dev `0da68530e80c713ed3a323a741998e1fed37e3e9`. The child is now integrated onto parent `36d760251e76911916442f3457ae82fc58137a8a` on actual dev `5910412fba589dc0547fac295bb35948496435ce`; exact-head hosted gates and parent delivery remain open. Stage 2C is implemented and locally qualified, not delivered by this plan.
+**Stack:** Parent [PR #3041](https://github.com/rmusser01/tldw_server/pull/3041) merged normally into dev at `2026-10-01T01:28:52Z`, merge `85ede1f1df10c03505c603e4183920edcb7cbfef`. Child #3055 already targets `dev`; rebase and fresh actual-dev local qualification are complete. Exact-head hosted checks/review and normal child merge remain open. Planning began at parent `837d28fdd25c23d8166c96f396bf1f0118d82af0` on dev `0da68530e80c713ed3a323a741998e1fed37e3e9`; later pinned-stack results below are historical, not current delivery status.
 
 ## Global Constraints
 
@@ -90,7 +90,7 @@ def test_explicit_prompt_preserves_persona_boundary_guidance(
 **Goal:** Prove startup choice survives first-send, resume and default edits while current admission and memory rules hold.
 **Success Criteria:** Every Stage 2 regression row has fresh behavior evidence or an explicit open gap; no silent fallback or read-only memory write.
 **Tests:** Inventory suites and narrowly added cases in the existing Persona conversation integration file.
-**Status:** Pinned-stack local qualification complete under TASK-13245.10; latest-base integration and delivery remain open.
+**Status:** Local actual-dev qualification complete under TASK-13245.10; exact-head hosted checks/review and normal child merge remain open.
 
 - [x] Reuse real Workspace/default DB operations and `start_workspace_chat` to create inherited chats, then call `/api/v1/chat/completions` with the existing mocked-provider fixture. Assert persisted conversation id, assistant id, mode and startup source before/after the turn; do not stub admission or manufacture provenance.
 - [x] For read-only and owner-confirmed read-write defaults, edit the Workspace default after accepted startup and send/resume the original chat. Binding/origin stays original; memory writes obey saved mode and current policy. Reuse actual `memory_integration` capture assertions from the existing memory tests, not mode labels alone. The real personalization opt-out preserves the saved chat and disables new memory writes, including for saved read-write mode.
@@ -98,10 +98,10 @@ def test_explicit_prompt_preserves_persona_boundary_guidance(
 - [x] Fill rows for unset/new, explicit Persona, explicit Character, explicit None, inherited read-only, confirmed read-write, legacy caller, resume after default edit, revoked Persona, stale version, concurrent clear, accepted retry, fork and wrong owner/scope. Link adequate cases and add only missing cross-boundary assertions. The listing defect was reproduced and repaired as recorded below; the identical upstream repair must be absorbed when integrating the child.
 - [x] Run the Stage 5 baseline command in the [Stage 2C plan](2026-09-27-persona-workspace-strict-startup-implementation-plan.md#stage-5-acceptance-contracts-and-delivery) AND every mandatory supplementary suite below, requiring official isolated live PostgreSQL and SQLite. The linked 15-file command is not complete Stage 2D evidence. Preserve the original failed run; the complete post-repair 28-file pinned-stack gate passes with the 13 intentional backend exclusions below, not unavailable-PostgreSQL skips.
 
-Baseline command from the isolated stack checkout:
+Baseline command from the isolated checkout. Activation defaults to its `.venv`; set `TLDW_PROJECT_VENV` to the existing project environment when an isolated worktree has no local virtual environment. No installation or shared dependency change is required.
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source "${TLDW_PROJECT_VENV:-.venv}/bin/activate"
 python -m pytest -q \
   tldw_Server_API/tests/Chat/test_persona_prompt_assembly.py \
   tldw_Server_API/tests/Chat/integration/test_persona_backed_chat_conversations.py \
@@ -134,11 +134,11 @@ DB suites reuse their parameterized `db_factory`/equivalent fixtures backed by t
 **Goal:** Close Stage 2D with precise release evidence, not deployment or full parity certification.
 **Success Criteria:** Matrix, runbook and tracking agree with tested behavior and actual merged commits; broader stages stay open.
 **Tests:** Registered migration/RLS/process, lifecycle/repair/privacy and docs gates; touched-code Bandit if execution edits Python.
-**Status:** Local operational evidence recorded; latest-base integration and delivery gates open.
+**Status:** Local operational and actual-dev integration complete; exact-head hosted checks/review and normal child merge remain open.
 
-- [x] Reuse [the offline runbook](../../Operations/Workspace_Persona_Strict_Startup_Runbook_2026_09_27.md), ADR056 and process/migration tests. Final registered versions, response-loss/restart, tombstones, owner RLS and SQLite backup retention pass the executed cases. The runbook requires every writer drained; no production drain or PostgreSQL physical/PITR rehearsal is claimed. Parent PostgreSQL logical-dump evidence remains historical, not rerun here.
+- [x] Reuse [the offline runbook](../../Operations/Workspace_Persona_Strict_Startup_Runbook_2026_09_27.md), [ADR057](../../ADR/057-workspace-chat-strict-startup-receipts.md) and process/migration tests. Final registered versions, response-loss/restart, tombstones, owner RLS and SQLite backup retention pass the executed cases. The runbook requires every writer drained; no production drain or PostgreSQL physical/PITR rehearsal is claimed. Parent PostgreSQL logical-dump evidence remains historical, not rerun here.
 - [x] Record SHAs, commands, durations, counts and exclusions. Changed tests pass lint/compilation and touched-scope Bandit; complete docs checks precede the final result-only prose. Retain earlier failed runs and their dispositions, and require fresh checks after child integration.
-- [ ] After #3041 merges, rebase this stack onto actual dev and retarget its PR. Re-run affected gates, preserve recovery refs/shared dirty checkout, and require this child's requester-owned Change summary; the parent's summary cannot satisfy it.
+- [x] After #3041 merged, rebased this stack onto actual dev `85ede1f1df10c03505c603e4183920edcb7cbfef`, retargeted #3055 to dev and reran affected gates. Recovery refs/shared dirty checkout are preserved. This child's own requester-written Change summary is approved and remains verbatim; fresh hosted checks/review and normal merge are separate open gates.
 - [ ] Only after qualification delivery update TASK-13245, canonical plan, assessment and #2950 with fresh Stage 2D evidence. Keep Stage 3 tool profiles, Stage 4 provisioning, Stage 5 Research normal/RAG adoption and other parity differences open. Closing the planning task proves only this plan deliverable.
 
 ## Planning Verification
@@ -149,6 +149,8 @@ These historical checks validate the planning deliverable, not the proposed qual
 
 ## Execution Checkpoint
 
+The dated checkpoints below retain historical results and blockers. The final actual-dev delivery section records the current qualification and delivery state.
+
 Execution started at child `d8cbbf86726e55d6702c15066ac799f924087d7b` on the pinned parent above. The initial two-file prompt/conversation gate passed **74 tests, six warnings, no failures/skips**, 274.60s (`/private/tmp/persona-stage2d-prompts-qualified.log/xml`); this includes 19 new cases, not 19 additional passes to sum again. An independent task review approved spec/quality with no Important/Critical patch findings. Four process-local negative controls proved the new assertions reject stripped guidance, unrendered template text, suppressed memory persistence and ignoring current personalization opt-out; these are synthetic regressions, not production REDs. The fourth control initially had an assertion-message checker error in its scratch harness, corrected without tracked-source edits; both logs are retained in the worker report.
 
 The final amended two-file gate passed **74 tests, six warnings, no failures/errors/skips**, 245.12s (`/private/tmp/persona-stage2d-prompts-final.log/xml`): 64 conversation integration cases plus ten prompt-assembly cases. It covers every pre-existing case and all 19 new parameter cases. Final test-file SHA-256 is `229d2e3fd855c6ebb77d218d3279a3f65054cbccce799a7558c0a4724c8ee8c7`, verified unchanged before/after this run. Both saved modes have real current-policy opt-out and access-loss side-effect assertions. These ordinary-chat integration cases use SQLite; they are not separate PostgreSQL or Chatbook runtime evidence.
@@ -156,7 +158,7 @@ The final amended two-file gate passed **74 tests, six warnings, no failures/err
 Exact final prompt command, from the isolated child checkout:
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source "${TLDW_PROJECT_VENV:-.venv}/bin/activate"
 TMPDIR=/private/tmp TLDW_TEST_NO_DOCKER=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q \
   tldw_Server_API/tests/Chat/test_persona_prompt_assembly.py \
   tldw_Server_API/tests/Chat/integration/test_persona_backed_chat_conversations.py \
@@ -185,7 +187,7 @@ Warning attribution was exposed without changing the repository's `--disable-war
 The following is the exact deduplicated mandatory invocation. It includes the linked Stage 2C baseline, all supplementary paths and creation coverage; the disjoint prompt files ran separately above. The existing Persona PostgreSQL cluster on port 15432 was reused only through registered per-test `pg_database_config` and `pg_restricted_backend` fixtures. No container or shared dependency changed. Random seed: `3768836319`.
 
 ```bash
-source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate
+source "${TLDW_PROJECT_VENV:-.venv}/bin/activate"
 TMPDIR=/private/tmp POSTGRES_TEST_PORT=15432 TLDW_TEST_POSTGRES_REQUIRED=1 TLDW_TEST_NO_DOCKER=1 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q \
   tldw_Server_API/tests/Workspaces/test_workspace_assistant_creation.py \
   tldw_Server_API/tests/Workspaces/test_workspace_assistant_startup.py \
@@ -306,10 +308,16 @@ The parent's strict post-commit MkDocs build passes in 7.54s with existing INFO 
 
 Parent #3041 merged normally into dev at `01:28:52Z`, merge **`85ede1f1df10c03505c603e4183920edcb7cbfef`**, after all seven exact-head required gates, fresh reviews and the approved requester summary. Its merge tree matches qualified parent `1a29adc0203fb674f4f7be204d23cb3144219c97`. Ancillary parent full-summary/rate-limit checks were pending at merge and are not called green; current-head Sync is verified passing, not an intermittent-root repair.
 
-Recovery `codex/persona-stage2d-pre-dev-delivery-20261001` preserves published child `b741e2a84fc5e08600b4c68e4650ebbc282f3838`. All **nine child patches replay identically** without conflicts onto actual dev to checkpoint **`65921132b49cf3296343df0a2d9cfd55fd9fcb17`**. Production, workflow, helper, dependency and fingerprint diff against actual dev is empty. Fresh complete three-file qualification is running with seed `3105511001` and official required isolated live PostgreSQL/SQLite. HTTP memory/provider scenarios remain SQLite-only mocked-provider evidence, not PostgreSQL HTTP certification.
+Recovery `codex/persona-stage2d-pre-dev-delivery-20261001` preserves published child `b741e2a84fc5e08600b4c68e4650ebbc282f3838`. All **nine child patches replay identically** without conflicts onto actual dev to checkpoint **`65921132b49cf3296343df0a2d9cfd55fd9fcb17`**. Production, workflow, helper, dependency and fingerprint diff against actual dev is empty. Fresh complete three-file qualification passed with seed `3105511001` and official required isolated live PostgreSQL/SQLite, as detailed below. HTTP memory/provider scenarios remain SQLite-only mocked-provider evidence, not PostgreSQL HTTP certification.
 
-Publish only after fresh local qualification/static/Docs evidence, then retarget #3055 to dev without changing its approved summary. Fresh exact-head Qodo, trusted license and required dev checks plus strict up-to-date normal merge remain mandatory. Stage 2D delivery and broader parity are still open.
+After local qualification/static/Docs evidence, #3055 was published and retargeted to dev without changing its approved summary. Source-identical synchronization head `f1f83d3b74d15ed4949b27ce29d5efdd349a1b1d` admitted full dev CI. Fresh exact-head Qodo, trusted license and required dev checks plus strict up-to-date normal merge remain mandatory after any review correction. Stage 2D delivery and broader parity are still open.
 
 Fresh actual-dev qualification completes **252 unique passed, six warnings, no failures/errors/skips**, 659.34s: Chat integration 68, opt-out/listing 24 and shared-note caller ownership 160. All 99 PostgreSQL-labelled nodes execute with official required isolated fixtures; mocked HTTP memory/provider scenarios remain SQLite-only. Separate complete prompt/Docs/required-workflow guards pass **266 unique tests, nine warnings, no failures/errors/skips**, 46.42s (10/212/44). Logs/XML: `/private/tmp/persona-pr3055-dev-{qualification,guards}-20261001`. These are separate executed scopes, not an invented full-gate total.
 
-Both changed tests compile and pass no-cache Ruff. Fresh raw touched-test Bandit reports **246 B101 assertion findings only, zero errors** (`/private/tmp/persona-pr3055-dev-bandit-20261001.json`); the tests-only child has no production scan target. Actual dev remains `85ede1f1df10c03505c603e4183920edcb7cbfef`. Backlog active-branch configuration is restored, with no included config change. Final documentation validation follows these record updates before publication. Bounded parent delivery is recorded in [issue update 5923003545](https://github.com/rmusser01/tldw_server/issues/2950#issuecomment-5923003545); the issue and broader parity remain open.
+Both changed tests compile and pass no-cache Ruff. Fresh raw touched-test Bandit reports **246 B101 assertion findings only, zero errors** (`/private/tmp/persona-pr3055-dev-bandit-20261001.json`); the tests-only child has no production scan target. Final post-record Docs validation passed **212 tests, eight warnings, no failures/errors/skips**, 61.26s (`/private/tmp/persona-pr3055-dev-docs-final-20261001.log/xml`), overlapping the prior Docs scope. Actual dev remains `85ede1f1df10c03505c603e4183920edcb7cbfef`. No Backlog configuration change was published. Bounded parent delivery is recorded in [issue update 5923003545](https://github.com/rmusser01/tldw_server/issues/2950#issuecomment-5923003545); the issue and broader parity remain open.
+
+Parent ancillary full-suite summary and Character Chat rate-limit checks subsequently passed on exact parent head `1a29adc0203fb674f4f7be204d23cb3144219c97`; CI run `36787709858` completed successfully at `01:49:21Z`. These later outcomes supplement, not replace, the merge-time evidence ([comment 5923186810](https://github.com/rmusser01/tldw_server/pull/3041#issuecomment-5923186810)).
+
+### Current-State Review Corrections (2026-10-01)
+
+Cubic's documentation/tracker review on `f1f83d3b74d15ed4949b27ce29d5efdd349a1b1d` prompted the status/checklist, ADR057 and portable activation corrections above. Full Docs verification passes **212 unique tests, eight warnings, no failures/errors/skips**, 57.85s, seed `3105511004` (`/private/tmp/persona-pr3055-cubic-docs-20261001.log/xml`). A focused state/checklist check went from nine failing documentation markers to all 11 checks passing; this is not an all-findings-resolved claim. Two formatting comments on the original parent task notes remain pending requester approval; readable current summaries were appended while preserving the originals verbatim. Runtime, test, workflow, helper and dependency source is unchanged. Fresh exact-head hosted review/CI and normal child merge remain required after publication.
