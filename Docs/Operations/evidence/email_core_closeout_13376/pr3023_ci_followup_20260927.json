@@ -6499,5 +6499,501 @@
       }
     },
     "publication_and_merge": "Pending at this receipt; only newly published exact-head review and all seven required contexts can authorize merge."
+  },
+  "sandbox_ws_heartbeat_ci_repair_20261001": {
+    "task": "TASK-13377.10",
+    "recorded_at": "2026-10-01T10:22:26.136522+00:00",
+    "head_before_repair": "6b7cee876e09f256816a72877fa82f4b5381b82d",
+    "base_dev": "b365af1827b607fc221f9bf31ca76dde881edb4f",
+    "failure": {
+      "workflow": 36836299812,
+      "job": 110297946051,
+      "url": "https://github.com/rmusser01/tldw_server/actions/runs/36836299812/job/110297946051",
+      "shard": "platform-sandbox-ws-streams Ubuntu/Python3.12",
+      "test": "test_ws_multi_subs_live_stream",
+      "failed": 1,
+      "passed": 91,
+      "warnings": 34504,
+      "observed_sequence_lists": [
+        [
+          1,
+          2,
+          3,
+          4
+        ],
+        [
+          2,
+          3,
+          4,
+          5
+        ]
+      ],
+      "limitation": "Hosted frame types were not captured. Native counterexample verifies the test contract defect; it does not prove the hosted mismatch was heartbeat-only."
+    },
+    "source_binding": {
+      "tldw_Server_API/tests/sandbox/test_ws_multi_subscribers.py": {
+        "prior_head_sha256": "8caddee80b6f12cc2636d52c0ae1ec6f9252edf35ec14248c24235bdbd599ff0",
+        "dev_sha256": "8caddee80b6f12cc2636d52c0ae1ec6f9252edf35ec14248c24235bdbd599ff0",
+        "current_sha256": "fc8bcb2148cc857febacb61083351d14b12a2b7e0802b0b22d410b83957b3a35",
+        "prior_head_exact_dev": true,
+        "current_equals_prior_head": false
+      },
+      "tldw_Server_API/tests/sandbox/conftest.py": {
+        "prior_head_sha256": "ebb24a2880bf8602ab7613de8581ec16b07bee97a4f229d943e131fbab38b7fa",
+        "dev_sha256": "ebb24a2880bf8602ab7613de8581ec16b07bee97a4f229d943e131fbab38b7fa",
+        "current_sha256": "ebb24a2880bf8602ab7613de8581ec16b07bee97a4f229d943e131fbab38b7fa",
+        "prior_head_exact_dev": true,
+        "current_equals_prior_head": true
+      },
+      "tldw_Server_API/app/core/Sandbox/streams.py": {
+        "prior_head_sha256": "53d3cb752db9be0194ab51ae6a92bbddba95562d8688fec9dc23abf7898d34a6",
+        "dev_sha256": "53d3cb752db9be0194ab51ae6a92bbddba95562d8688fec9dc23abf7898d34a6",
+        "current_sha256": "53d3cb752db9be0194ab51ae6a92bbddba95562d8688fec9dc23abf7898d34a6",
+        "prior_head_exact_dev": true,
+        "current_equals_prior_head": true
+      },
+      "tldw_Server_API/app/api/v1/endpoints/sandbox.py": {
+        "prior_head_sha256": "d86d7c746f42672404a6dd38ad1863610d99003842c1a38a9ec5179613eb429f",
+        "dev_sha256": "d86d7c746f42672404a6dd38ad1863610d99003842c1a38a9ec5179613eb429f",
+        "current_sha256": "d86d7c746f42672404a6dd38ad1863610d99003842c1a38a9ec5179613eb429f",
+        "prior_head_exact_dev": true,
+        "current_equals_prior_head": true
+      },
+      ".github/workflows/ci.yml": {
+        "prior_head_sha256": "d4009bee3fb9d03ac715322c6dbd73f943e3332212d370875e8d663645ad6bcc",
+        "dev_sha256": "44547bac4541102fac609cfa7d5eb26844ed3597a82d6b5d56b6b2fecaa1b0ca",
+        "current_sha256": "d4009bee3fb9d03ac715322c6dbd73f943e3332212d370875e8d663645ad6bcc",
+        "prior_head_exact_dev": false,
+        "current_equals_prior_head": true
+      }
+    },
+    "verified_contract_defect": {
+      "fixture": "Existing autouse sandbox fixture accelerates heartbeat sleep to0.01s. Heartbeats receive global sequence numbers but are not buffered for later subscribers. Fixed-count data assertions incorrectly counted any raw heartbeat frames.",
+      "native_red": "With synthetic=false established before imports, one native heartbeat is published after the first WebSocket connects and before the second. Original live test fails order equality; trace records only type/event/seq.",
+      "native_green": "Same separately retained probe now passes. Both subscribers retain exact data sequences[6,9,12,15], without renumbering; heartbeat prefixes differ legally.",
+      "deterministic_reader_regression": "Leading and interleaved heartbeat frames around event/stdout/stderr/end are ignored; every other dictionary is retained exactly. The undefined-reader regression fails before implementation and passes as part of the complete module."
+    },
+    "changes": {
+      "scope": [
+        "tldw_Server_API/tests/sandbox/test_ws_multi_subscribers.py"
+      ],
+      "reader": "One local test reader ignores only type=heartbeat, reused by all fixed-count data reads in this module.",
+      "delivery_checks": "Live test additionally requires complete start/stdout/stdout/end, equality of full data frames, and unique increasing sequence values for both subscribers.",
+      "production_fixture_workflow_changes": false,
+      "new_dependencies": false,
+      "adr": "Test observation correction only; no durable architecture decision and no new ADR."
+    },
+    "validation": {
+      "reader_red": {
+        "tests": 1,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0,
+        "log": "/tmp/email_pr3023_sandbox_ws_reader_red_20261001.log",
+        "xml": "/tmp/email_pr3023_sandbox_ws_reader_red_20261001.xml"
+      },
+      "heartbeat_red_confirmed": {
+        "tests": 1,
+        "failures": 1,
+        "errors": 0,
+        "skipped": 0,
+        "log": "/tmp/email_pr3023_sandbox_ws_heartbeat_red_confirmed_20261001.log",
+        "xml": "/tmp/email_pr3023_sandbox_ws_heartbeat_red_confirmed_20261001.xml"
+      },
+      "module_green": {
+        "tests": 4,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "log": "/tmp/email_pr3023_sandbox_ws_module_green_20261001.log",
+        "xml": "/tmp/email_pr3023_sandbox_ws_module_green_20261001.xml"
+      },
+      "heartbeat_green": {
+        "tests": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "log": "/tmp/email_pr3023_sandbox_ws_heartbeat_green_20261001.log",
+        "xml": "/tmp/email_pr3023_sandbox_ws_heartbeat_green_20261001.xml"
+      },
+      "shard_green": {
+        "tests": 93,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "log": "/tmp/email_pr3023_sandbox_ws_shard_green_20261001.log",
+        "xml": "/tmp/email_pr3023_sandbox_ws_shard_green_20261001.xml"
+      },
+      "shard_py312": {
+        "tests": 93,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "log": "/tmp/email_pr3023_sandbox_ws_shard_py312_20261001.log",
+        "xml": "/tmp/email_pr3023_sandbox_ws_shard_py312_20261001.xml",
+        "environment_receipt": "/tmp/email_pr3023_sandbox_ws_dependencies_20261001.json"
+      }
+    },
+    "quality": {
+      "recorded_at": "2026-10-01T10:18:29.195192+00:00",
+      "source_binding": {
+        "tldw_Server_API/tests/sandbox/test_ws_multi_subscribers.py": {
+          "prior_head_sha256": "8caddee80b6f12cc2636d52c0ae1ec6f9252edf35ec14248c24235bdbd599ff0",
+          "dev_sha256": "8caddee80b6f12cc2636d52c0ae1ec6f9252edf35ec14248c24235bdbd599ff0",
+          "current_sha256": "fc8bcb2148cc857febacb61083351d14b12a2b7e0802b0b22d410b83957b3a35",
+          "prior_head_exact_dev": true,
+          "current_equals_prior_head": false
+        },
+        "tldw_Server_API/tests/sandbox/conftest.py": {
+          "prior_head_sha256": "ebb24a2880bf8602ab7613de8581ec16b07bee97a4f229d943e131fbab38b7fa",
+          "dev_sha256": "ebb24a2880bf8602ab7613de8581ec16b07bee97a4f229d943e131fbab38b7fa",
+          "current_sha256": "ebb24a2880bf8602ab7613de8581ec16b07bee97a4f229d943e131fbab38b7fa",
+          "prior_head_exact_dev": true,
+          "current_equals_prior_head": true
+        },
+        "tldw_Server_API/app/core/Sandbox/streams.py": {
+          "prior_head_sha256": "53d3cb752db9be0194ab51ae6a92bbddba95562d8688fec9dc23abf7898d34a6",
+          "dev_sha256": "53d3cb752db9be0194ab51ae6a92bbddba95562d8688fec9dc23abf7898d34a6",
+          "current_sha256": "53d3cb752db9be0194ab51ae6a92bbddba95562d8688fec9dc23abf7898d34a6",
+          "prior_head_exact_dev": true,
+          "current_equals_prior_head": true
+        },
+        "tldw_Server_API/app/api/v1/endpoints/sandbox.py": {
+          "prior_head_sha256": "d86d7c746f42672404a6dd38ad1863610d99003842c1a38a9ec5179613eb429f",
+          "dev_sha256": "d86d7c746f42672404a6dd38ad1863610d99003842c1a38a9ec5179613eb429f",
+          "current_sha256": "d86d7c746f42672404a6dd38ad1863610d99003842c1a38a9ec5179613eb429f",
+          "prior_head_exact_dev": true,
+          "current_equals_prior_head": true
+        },
+        ".github/workflows/ci.yml": {
+          "prior_head_sha256": "d4009bee3fb9d03ac715322c6dbd73f943e3332212d370875e8d663645ad6bcc",
+          "dev_sha256": "44547bac4541102fac609cfa7d5eb26844ed3597a82d6b5d56b6b2fecaa1b0ca",
+          "current_sha256": "d4009bee3fb9d03ac715322c6dbd73f943e3332212d370875e8d663645ad6bcc",
+          "prior_head_exact_dev": false,
+          "current_equals_prior_head": true
+        }
+      },
+      "source_patch_sha256": "bb6be00508a0440a47e02d937aa01ebdc68fc09a358068b5b626f43528c47df3",
+      "compile": {
+        "scope": [
+          "tldw_Server_API/tests/sandbox/test_ws_multi_subscribers.py"
+        ],
+        "method": "compile source with supported project Python; no bytecode required",
+        "passed": true
+      },
+      "ruff": {
+        "baseline": 10,
+        "current": 4,
+        "new": 0,
+        "comparison": "multiset of code/message, baseline used repository configuration; current --no-cache avoids sandbox cache write",
+        "remaining": [
+          [
+            "UP035",
+            "`typing.Dict` is deprecated, use `dict` instead"
+          ],
+          [
+            "UP006",
+            "Use `dict` instead of `Dict` for type annotation"
+          ],
+          [
+            "E401",
+            "Multiple imports on one line"
+          ],
+          [
+            "I001",
+            "Import block is un-sorted or un-formatted"
+          ]
+        ]
+      },
+      "bandit": {
+        "baseline": 0,
+        "current": 0,
+        "errors": 0,
+        "excluded": [
+          "B101"
+        ],
+        "exclusion_scope": "test assertions only; production unchanged"
+      },
+      "format": {
+        "scope": "new helper and regression only, extracted preserving source blank-line separation",
+        "exit": 0,
+        "log": "/tmp/email_pr3023_sandbox_ws_format_confirmed_20261001.log"
+      },
+      "diff_check": {
+        "exit": 0
+      },
+      "preserved_setup_diagnostics": [
+        "/tmp/email_pr3023_sandbox_ws_ruff_current_20261001.stderr",
+        "/tmp/email_pr3023_sandbox_ws_format_20261001.log"
+      ]
+    },
+    "independent_source_review": {
+      "receipt": "/tmp/email_pr3023_sandbox_ws_source_review_20261001.json",
+      "patch_sha256": "bb6be00508a0440a47e02d937aa01ebdc68fc09a358068b5b626f43528c47df3",
+      "recommendation": "merge",
+      "findings": [],
+      "limitation": "Advisory source review only; existing human Change summary and current PR gates still apply."
+    },
+    "environment": {
+      "supported_wrapper": {
+        "interpreter": "/tmp/email_pr3023_dev6074_python_20260929",
+        "python": "3.11.13",
+        "platform": "macOS-26.5.2-arm64-arm-64bit",
+        "packages": {
+          "fastapi": "0.141.1",
+          "pydantic": "2.13.5",
+          "pydantic_core": "2.46.5",
+          "starlette": "1.7.0",
+          "pytest": "8.4.1",
+          "pytest-asyncio": "1.1.0",
+          "pytest-timeout": "2.4.0",
+          "cryptography": "45.0.6",
+          "httpx": "0.28.1"
+        }
+      },
+      "existing_read_only_py312": {
+        "interpreter": "/tmp/pr3018-dev6074-py312/bin/python",
+        "python": "3.12.11",
+        "platform": "macOS-26.5.2-arm64-arm-64bit",
+        "packages": {
+          "fastapi": "0.141.1",
+          "pydantic": "2.13.5",
+          "pydantic_core": "2.46.5",
+          "starlette": "1.7.0",
+          "pytest": "9.1.1",
+          "pytest-asyncio": "1.4.0",
+          "pytest-timeout": "2.4.0",
+          "cryptography": "50.0.1",
+          "httpx": "0.28.1"
+        }
+      },
+      "limitations": "Local macOS Python3.11.13/3.12.11 results do not certify hosted Linux Python3.12.14/cryptography50.0.2; existing py312 environment was read only, never installed into or altered."
+    },
+    "validation_limits": [
+      "Native scopes overlap and are not a full repository suite. Python3.11 shard93pass/6warnings and Python3.12 shard93pass/29757warnings have0failures/errors/skips; warnings are retained, not claimed zero.",
+      "Synthetic=false is set before native app imports to match this test intent and avoid unrelated frozen endpoint-synthetic setup; production/workflow settings unchanged.",
+      "Local macOS Python3.12.11/cryptography50.0.1 differs from hosted Linux Python3.12.14/cryptography50.0.2; no hosted certification claimed.",
+      "All prior source/transitive/dependency certificates retain their historical bindings, including the previously listed12 changed paths in the original163-file certificate. No claim that all163 are unchanged.",
+      "No native-PST, throughput, million-message benchmark or live VM drill rerun.",
+      "Separate Sync/Personal Context restart-recovery failure remains unconfirmed and blocks merge; this test repair does not resolve it."
+    ],
+    "preserved_diagnostics": [
+      "Actual hosted failure log",
+      "Original native early-heartbeat order-assertion RED",
+      "Initial native cached-synthetic probe, rejected as heartbeat evidence",
+      "Undefined-reader RED",
+      "Initial Ruff sandbox-cache write error, superseded by no-cache configured comparison",
+      "Initial extracted-format blank-line error, superseded by exact source separation",
+      "Native warnings and all previous diagnostics"
+    ],
+    "publication_and_merge": {
+      "state": "Normal fix/evidence commit and push pending; fresh exact-head reviews and hosted CI required. No CI rerun/cancellation or merge credited.",
+      "prior_head_required_checks": "At fresh10:16 snapshot all7 required6b7 contexts pass, but actual sandbox and Sync/PC broad-CI failures block merge. These checks cannot certify the future repair commit."
+    },
+    "documentation_validation": {
+      "tests": 212,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "warnings": 8,
+      "seed": 4293640905,
+      "log": "/tmp/email_pr3023_sandbox_ws_docs_20261001.log",
+      "xml": "/tmp/email_pr3023_sandbox_ws_docs_20261001.xml",
+      "binding": "Post-append report and test source; final evidence adds only this result and artifact hashes."
+    },
+    "artifacts": {
+      "/tmp/email_pr3023_sandbox_ws_automation_before_20261001.json": {
+        "sha256": "1583c2cb8bf4a2af69c784471be114d336812243d8d6ab614230a188f64665cb",
+        "bytes": 36883
+      },
+      "/tmp/email_pr3023_sandbox_ws_bandit_baseline_20261001.json": {
+        "sha256": "7f15ce38788828459712e8c917fa6e1038314a6f2c0d1addd66d93264e2cdda2",
+        "bytes": 775
+      },
+      "/tmp/email_pr3023_sandbox_ws_bandit_baseline_20261001.stderr": {
+        "sha256": "597bcfd656aad687cbf53c32483d1d02c706d690f9bf945d1fd7b50969e57cb1",
+        "bytes": 152
+      },
+      "/tmp/email_pr3023_sandbox_ws_bandit_confirmed_20261001.json": {
+        "sha256": "835b71c0b43704c9e59f29697ee0f260e9167bf8704f94616dc1876019d4c515",
+        "bytes": 775
+      },
+      "/tmp/email_pr3023_sandbox_ws_bandit_confirmed_20261001.stderr": {
+        "sha256": "597bcfd656aad687cbf53c32483d1d02c706d690f9bf945d1fd7b50969e57cb1",
+        "bytes": 152
+      },
+      "/tmp/email_pr3023_sandbox_ws_baseline_20261001.py": {
+        "sha256": "8caddee80b6f12cc2636d52c0ae1ec6f9252edf35ec14248c24235bdbd599ff0",
+        "bytes": 6764
+      },
+      "/tmp/email_pr3023_sandbox_ws_dependencies_20261001.json": {
+        "sha256": "6072f908e0bbca55096cc256b374c6e0cf22aa4eab6638464a33207b2f747c02",
+        "bytes": 1114
+      },
+      "/tmp/email_pr3023_sandbox_ws_diff_check_20261001.log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "/tmp/email_pr3023_sandbox_ws_docs_20261001.log": {
+        "sha256": "a0a4f8104802bf2ef71aff8c1637590991cd6223b880a4a26398b7c6b48e870e",
+        "bytes": 12063
+      },
+      "/tmp/email_pr3023_sandbox_ws_docs_20261001.xml": {
+        "sha256": "89fc5d289325d8822f10cbd02a080083379d84f3fc8522cc9083a483b5879fff",
+        "bytes": 35412
+      },
+      "/tmp/email_pr3023_sandbox_ws_duplicate_search_20261001.log": {
+        "sha256": "a358b1c07d44108e6ba676a4dc2b4ab9f9a9b6bf5d063751c70e5b33f1cfa1a2",
+        "bytes": 18
+      },
+      "/tmp/email_pr3023_sandbox_ws_failure_20261001.log": {
+        "sha256": "3f1ab1287de3579606dd6a358f71e7aef9c86825f857876773019c1b2738973a",
+        "bytes": 492064
+      },
+      "/tmp/email_pr3023_sandbox_ws_format_20261001.log": {
+        "sha256": "b128a053aa7844ebd939cf96b271f52b5b4eeb72b58516d99b140036e8db8249",
+        "bytes": 124
+      },
+      "/tmp/email_pr3023_sandbox_ws_format_confirmed_20261001.log": {
+        "sha256": "1a56c7cd8457fd05d978cfbd139d7bfd86e86acaa9b57668e718ef8bccc0cf48",
+        "bytes": 55
+      },
+      "/tmp/email_pr3023_sandbox_ws_heartbeat_green_20261001.log": {
+        "sha256": "aa72a19970ad98cedfa1ebfcbf46c153c053de50fc5b6a1073345a1dd89718fd",
+        "bytes": 6106
+      },
+      "/tmp/email_pr3023_sandbox_ws_heartbeat_green_20261001.xml": {
+        "sha256": "d9268119d59b75ba7b547a28845d0c6d45312073c111a53d1fd7e04051c0ef73",
+        "bytes": 394
+      },
+      "/tmp/email_pr3023_sandbox_ws_heartbeat_probe_20261001.py": {
+        "sha256": "f7eeae6aae4d2d69d5d2cfa9ee26ef63bbce04e595bcab7ceb44244d2ffcfdaf",
+        "bytes": 1554
+      },
+      "/tmp/email_pr3023_sandbox_ws_heartbeat_probe_confirmed_20261001.py": {
+        "sha256": "a252203e38b8e94bec435c0b6d33ba4fd33bec7871a203ae17c96cc365dd8365",
+        "bytes": 1564
+      },
+      "/tmp/email_pr3023_sandbox_ws_heartbeat_probe_green_20261001.py": {
+        "sha256": "eb31792de173aa536b9dbfc710720ecdeb009b216e83b89af5909655f3832daa",
+        "bytes": 1560
+      },
+      "/tmp/email_pr3023_sandbox_ws_heartbeat_red_20261001.log": {
+        "sha256": "495c50df8b5e8b4c907d98b9ece18f03c74c71aed749fe2d9c220c6875c09c11",
+        "bytes": 360921
+      },
+      "/tmp/email_pr3023_sandbox_ws_heartbeat_red_20261001.xml": {
+        "sha256": "69ef99b5928b9d22137b2a804cbab73f535e888a4ccb1613921b9812d2ccb98d",
+        "bytes": 775
+      },
+      "/tmp/email_pr3023_sandbox_ws_heartbeat_red_confirmed_20261001.log": {
+        "sha256": "30922c536b879a0292a38bfaf8d04430b97355b58bb15468f098db3f72542249",
+        "bytes": 247447
+      },
+      "/tmp/email_pr3023_sandbox_ws_heartbeat_red_confirmed_20261001.xml": {
+        "sha256": "e5e5153f9dea37c6bbec4ad2548027e54d4d780cac8195db2351d69c55745fdf",
+        "bytes": 765
+      },
+      "/tmp/email_pr3023_sandbox_ws_heartbeat_trace_20261001.json": {
+        "sha256": "f0b2687b574b8ce3c660c47417987e77a2ef7ae6c701c35f3d8ff6cb02d42e76",
+        "bytes": 768
+      },
+      "/tmp/email_pr3023_sandbox_ws_heartbeat_trace_confirmed_20261001.json": {
+        "sha256": "75bb3515445687ac887998da8743f5e30bec7cdb2341b52d1844194bc9725b66",
+        "bytes": 782
+      },
+      "/tmp/email_pr3023_sandbox_ws_heartbeat_trace_green_20261001.json": {
+        "sha256": "57e23e143587fe668702ab9df004187ead7800b32d88212513b37cd8fb99baae",
+        "bytes": 2495
+      },
+      "/tmp/email_pr3023_sandbox_ws_historical_evidence_before_20261001.json": {
+        "sha256": "d99300f38f1990332a82b7f3cb46916231c12297a7b1c57331469d330a2280f9",
+        "bytes": 433525
+      },
+      "/tmp/email_pr3023_sandbox_ws_module_green_20261001.log": {
+        "sha256": "6edb1ab1f249f2023cf53785ecfbd31e8edfbb333c72b2bd66744deaca008555",
+        "bytes": 6106
+      },
+      "/tmp/email_pr3023_sandbox_ws_module_green_20261001.xml": {
+        "sha256": "fc930aef092bbe6d2220c6a6a62651853863e9e69eaeb7bf33fc40d9d14a9476",
+        "bytes": 829
+      },
+      "/tmp/email_pr3023_sandbox_ws_native_results_20261001.json": {
+        "sha256": "7e704fa29b05b327c130ee3ca2ac9c85c9aa71c1070d1a2eff5ec09359e2b29b",
+        "bytes": 1513
+      },
+      "/tmp/email_pr3023_sandbox_ws_new_code_format_20261001.py": {
+        "sha256": "eb5b15e9bcbbf0040b4a0bf67fa3c4eb30e4af03ce3a65253a9a504eb76b551b",
+        "bytes": 1072
+      },
+      "/tmp/email_pr3023_sandbox_ws_new_code_format_confirmed_20261001.py": {
+        "sha256": "8fa252f26a470d44b3636b346a9504e3f55a4945a890a8e778882dfc2d9c7b00",
+        "bytes": 1073
+      },
+      "/tmp/email_pr3023_sandbox_ws_parent_update_20261001.log": {
+        "sha256": "0de652254ce0e4275cdf0230c663404b2b87d401ae62243919ebe7edf2762c71",
+        "bytes": 65537
+      },
+      "/tmp/email_pr3023_sandbox_ws_quality_20261001.json": {
+        "sha256": "af7980f3042dd1e58130274c288f9dec71b6be23dafe45c081b5507c976924aa",
+        "bytes": 3590
+      },
+      "/tmp/email_pr3023_sandbox_ws_reader_red_20261001.log": {
+        "sha256": "a952fdb42cfed0b30c5b399ba98387b03374af1c7c696e621c38715928a3bf0b",
+        "bytes": 15465
+      },
+      "/tmp/email_pr3023_sandbox_ws_reader_red_20261001.xml": {
+        "sha256": "2d48b184a6667e130b3c39a662b849dba28d5f0301d8e16281336c2667248d13",
+        "bytes": 787
+      },
+      "/tmp/email_pr3023_sandbox_ws_ruff_baseline_20261001.json": {
+        "sha256": "e809c6ea822b00342ba5938142392dc1ece02e497b2c019aea67044c78430a05",
+        "bytes": 8134
+      },
+      "/tmp/email_pr3023_sandbox_ws_ruff_baseline_20261001.stderr": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "/tmp/email_pr3023_sandbox_ws_ruff_confirmed_20261001.json": {
+        "sha256": "3afcd389f193f0f360ab4c3b2e1ac1bd28bdc44939e2b11281c1e503b8f49d6d",
+        "bytes": 3161
+      },
+      "/tmp/email_pr3023_sandbox_ws_ruff_confirmed_20261001.stderr": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "/tmp/email_pr3023_sandbox_ws_ruff_current_20261001.json": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "/tmp/email_pr3023_sandbox_ws_ruff_current_20261001.stderr": {
+        "sha256": "07d47475e2d85cedb3bedc9a83a428da541a84c623ec322dc6028d18a45b0385",
+        "bytes": 223
+      },
+      "/tmp/email_pr3023_sandbox_ws_shard_green_20261001.log": {
+        "sha256": "bb7ef015ce588fa764d4839e1cfc88c984e12ce3df179f47daf7b06971531adb",
+        "bytes": 8107
+      },
+      "/tmp/email_pr3023_sandbox_ws_shard_green_20261001.xml": {
+        "sha256": "5b9549dcee89750f8c545d3166f4393de584834548341a675dec3bf257120140",
+        "bytes": 14263
+      },
+      "/tmp/email_pr3023_sandbox_ws_shard_py312_20261001.log": {
+        "sha256": "ec8bafdf2eaa6a97b6d17577937d581e8fa87fc4f94b6a676b1f3ee851b768ae",
+        "bytes": 8120
+      },
+      "/tmp/email_pr3023_sandbox_ws_shard_py312_20261001.xml": {
+        "sha256": "4e420d97041517859511e9161e57370f07bf84a93c2a1645cbc85fe6985317f6",
+        "bytes": 14263
+      },
+      "/tmp/email_pr3023_sandbox_ws_source_review_20261001.json": {
+        "sha256": "6d11db76424082c604e8d3c286e47171309d7c4f28aae67dec3385e3ecac7137",
+        "bytes": 9537
+      },
+      "/tmp/email_pr3023_sandbox_ws_source_review_20261001.patch": {
+        "sha256": "bb6be00508a0440a47e02d937aa01ebdc68fc09a358068b5b626f43528c47df3",
+        "bytes": 5041
+      }
+    }
   }
 }
