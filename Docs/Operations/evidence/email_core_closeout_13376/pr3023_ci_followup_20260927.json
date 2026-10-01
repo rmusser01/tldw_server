@@ -4292,5 +4292,1779 @@
         "receipt": "/tmp/email_pr3023_dev85ed_incoming_final_result_20261001.json"
       }
     }
+  },
+  "policy_resolver_dev_refresh_20261001": {
+    "published_head_before_refresh": "831dc3596b90631656a8ee7e6651753dd1d098fd",
+    "latest_dev": "b365af1827b607fc221f9bf31ca76dde881edb4f",
+    "rebase_head_before_evidence": "271eeb4d23a05bb69f68feb894636fa9150ba08b",
+    "rebase": {
+      "old_head": "306bc79f498e48b70abcf3936364f4796fde5547",
+      "dev": "b365af1827b607fc221f9bf31ca76dde881edb4f",
+      "rebased_head": "271eeb4d23a05bb69f68feb894636fa9150ba08b",
+      "incoming_count": 46,
+      "incoming_exact_dev": 42,
+      "incoming_exceptions": [
+        "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+        "tldw_Server_API/app/core/Resource_Governance/governor.py",
+        "tldw_Server_API/app/core/Resource_Governance/governor_redis.py",
+        "tldw_Server_API/tests/Resource_Governance/test_tokens_daily_cap.py"
+      ],
+      "other_nonbacklog_count": 22389,
+      "other_nonbacklog_changed": [],
+      "conflicts": 0,
+      "tracking_stash": {
+        "sha": "ff2c607d9319916eb0d6cf8c1e83c6f55f1c0e98",
+        "applied_exactly_once": true,
+        "paths": [
+          "backlog/tasks/task-13377 - Run-real-PST-adapter-tests-and-publish-email-PR-against-dev.md",
+          "Docs/Plans/IMPLEMENTATION_PLAN_email_pr3023_qodo_merge_20260929.md"
+        ],
+        "retained_as_recovery": true,
+        "applied_to_head": "271eeb4d23a05bb69f68feb894636fa9150ba08b"
+      },
+      "incoming_current_source_sha256": {
+        ".github/workflows/backend-required.yml": "7b96f1eddffc2a1b3751effc1b754b7a08409db132f3544c0107504b105a745f",
+        "Helper_Scripts/ci/rg_route_map_lint.py": "4b120cc1a9abda23772b529a378c027467bfc721f5ecc66242c867f7c9041c48",
+        "Helper_Scripts/ci/rg_route_map_lint_allowlist.txt": "ed27359a1d465709798fee587dc859143c7fe3bb635bd763090a82b489b3d097",
+        "Helper_Scripts/ci/route_auth_ratchet.py": "fe5531b7f56cad8acd33b42e17fcfd7816c7f508536feeca9f8b8461ae1550cd",
+        "Helper_Scripts/rg_webui_fixture_from_access_log.py": "a73f8ecb31078e0ae3d7fe338dc71dd9fadaeea4d67158ce9c7eb908ecdd8eca",
+        "backlog/tasks/task-13395 - RG-tag-policies-are-never-enforced-RGSimpleMiddleware-picks-a-policy-before-routing-so-route_map.by_tag-is-dead.md": "b65d20a5c8b2262fd8b33a8ac12461db573600010519a8c936a08cc018d21c5d",
+        "backlog/tasks/task-13399 - route_auth_ratchet-never-sees-flag-gated-routers.md": "3b865f530bdc400d1db4e6a8dc35c2e726d39257c8c58048ab5bd3a3aa28e532",
+        "backlog/tasks/task-13400 - Four-tests-fail-under-pytest-n-8-from-cross-test-pollution.md": "682b3b209e26237dff54a0cb092f9d18ea27258462ca4b372d4c9095799b3558",
+        "backlog/tasks/task-13401 - RG-Redis-backend-parity-unbounded-in-process-maps-burst-ignored-fractional-rpm-semantics.md": "bd48aeeafd8d527413c9eed76eeadcc16fa4ad3009dbe51e3928954b2051c6d7",
+        "backlog/tasks/task-13402 - RG-tenant-scoping-keys-ingress-on-an-unvalidated-tenant-header.md": "5aea24e22d1c5c9479188fbd77a2e41d4c2e2b32dd8a3ed496b8b1695c6e0015",
+        "backlog/tasks/task-13403 - API-key-usage-audit-rows-lose-endpoint-details-when-the-key-is-validated-at-ingress.md": "e2f8a358050278dd16ac2654f0cb7a75bb254dc658a462e605cbe06f78020ed1",
+        "backlog/tasks/task-13404 - RG-safety-net-tests-broaden-the-WebUI-replay-fixture-the-invalid-credential-test-hits-a-stub-route.md": "c3a40d6727d185bb51285f87a0fe647b7e8e09713e2fb812e5ea50c6175e2645",
+        "backlog/tasks/task-13405 - RG-ingress-safety-net-spec-1-of-2.md": "019b577d039e48583413bab7e9258955c5a624c9e3d719734e015530edd5705a",
+        "tldw_Server_API/Config_Files/resource_governor_policies.yaml": "68ccc5e8d4c4970a45a125b61ff5a9a99abffaf336033f6fd6a0d2af2edce73f",
+        "tldw_Server_API/app/api/v1/endpoints/audio/audio_transcriptions.py": "dfc9e1709c6c89a273a933354fb7393f0f10d407e0c5c7b0172275b2b606a0a5",
+        "tldw_Server_API/app/api/v1/endpoints/auth.py": "a83b7c3badf420030d0da077b289477a057eda97d5b02839cd71bdbbdc7c186c",
+        "tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py": "cea7ef5288a5362725b912ca26dce8b2b596ed544610eeaf9ea00680b5c0041c",
+        "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": "0fec196292969c25bb07dcdea99bc8d3d806b3576d1446acd115f246d81aa061",
+        "tldw_Server_API/app/core/Resource_Governance/coverage_audit.py": "f780bb8ef00d6191c26c316d5ade6a9068df9fe939731b76537348d1d3dda80d",
+        "tldw_Server_API/app/core/Resource_Governance/deps.py": "2cbf91054a2468220649e1d49e8c7eef90a6758612441b5c6b9b42cc837750b5",
+        "tldw_Server_API/app/core/Resource_Governance/governor.py": "b494f42c592da4387ca5cc09ef241d07dd22221c2d4ffd1f8aa335d2bde620d0",
+        "tldw_Server_API/app/core/Resource_Governance/governor_redis.py": "487dd1f1fd3539f9fd3f6b0ff77f226126c5f7f325a5c1dcbfc41b0ca8c12e42",
+        "tldw_Server_API/app/core/Resource_Governance/middleware_simple.py": "23aeb6b5dd4cc695743edf778fb34d8e896bc515e2b7c237ff68d34432f4b39e",
+        "tldw_Server_API/app/core/Resource_Governance/policy_eval.py": "3e9fce0b4a6f53fb49e76d6e0c0c35299e47bbf702eef1852e09a4d7914a661d",
+        "tldw_Server_API/app/core/Resource_Governance/policy_resolver.py": "2c4e0c78adcd4f39943f7958168427225105a2548d623ef1abb9e023ae9c707f",
+        "tldw_Server_API/app/core/Usage/usage_tracker.py": "6b43dd097e697a994d8e18693885604ace9cde8f06eeb4cb9bf1332047e93eb5",
+        "tldw_Server_API/app/services/startup_resource_governor.py": "577524b6e870908b40116d92632b11b917f593888857da64c3a71a71212c658e",
+        "tldw_Server_API/tests/Audio/test_audio_transcriptions_adapter_path.py": "a90a4166fbd956a177bce6169bf6c85758819bcf05c77f7781c5675b9e823a21",
+        "tldw_Server_API/tests/AuthNZ_Unit/test_auth_rg_single_charge.py": "ec2bfd6d395873c128479c815cc817d989d4195a07228dc3d698970ca05e4708",
+        "tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py": "d0f6cbf145bc8f829a0841d8e37f428d633f866c7c2496d0503092d250a1e7db",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py": "ef1c9d044be84ac8637af2f3ea9b3f40e83c42d7ac7d4d02bf724da500f32d6d",
+        "tldw_Server_API/tests/Resource_Governance/fixtures/webui_session_requests.json": "ca7d566fb721fb9115458009aa6232c4b7fab5a409875f0774737d582a51598e",
+        "tldw_Server_API/tests/Resource_Governance/integration/test_policy_loader_route_map_postgres.py": "1db95a48bea00e96841b5647ed3c40c9013f0ab1478826baffc915aa3d679b2e",
+        "tldw_Server_API/tests/Resource_Governance/test_coverage_audit.py": "bb001d8e3a7bbe39ca72fe49fd0da5968f4ec8ca68a34b4d4e5a6bf95986039d",
+        "tldw_Server_API/tests/Resource_Governance/test_governor_safety_net.py": "46cd72415c93756428990d1191a180820fd278c0ba6ce944caa5042329afe72f",
+        "tldw_Server_API/tests/Resource_Governance/test_middleware_cookie_owner.py": "32d88886b89c0021e517da6a327d498f5e909ccf90cb421dca775727f5077d84",
+        "tldw_Server_API/tests/Resource_Governance/test_middleware_identity.py": "3eb0c7b14da6008c3c70f15a6854fc84122c6bec0bccc057edfafcb4e5b73e35",
+        "tldw_Server_API/tests/Resource_Governance/test_middleware_tag_enforcement.py": "7a1255c35806b8cb65c007ded55d3f97d5568d7058bf5fea17dc64a83ec168b3",
+        "tldw_Server_API/tests/Resource_Governance/test_policy_eval.py": "a40842a6dff7f2eca3fbd876084907042a66b8925081c4a9a12f39bf6c63b9c4",
+        "tldw_Server_API/tests/Resource_Governance/test_policy_loader_route_map_db_store.py": "97e22656f631c18b4ffee3da67d53fb55f4afa148a7798f530c3134976b0b555",
+        "tldw_Server_API/tests/Resource_Governance/test_policy_resolver.py": "bcd5d837bad9a2c21668b4e032e94291d9ad7759f491871a7788df8798d3e1ab",
+        "tldw_Server_API/tests/Resource_Governance/test_tokens_daily_cap.py": "f566948f3d563e2d8db1b9ce16aad9465574f7466ef6ecc4397ad2ebc96a70b0",
+        "tldw_Server_API/tests/Resource_Governance/test_webui_replay_no_429.py": "d8c81728376d30377a560e11abff4b4e11e2be775ba2a6c01cc5e1c77e06c071",
+        "tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py": "e96a688729b4d972a852bc430fb74a956adee2835802d8e05347f0d9d23fc381",
+        "tldw_Server_API/tests/Utils/test_fastapi_routes.py": "16eb2d5bf4894fcc8040a1189b60883b58661c02ed68d251966dca48a6ffa33e",
+        "tldw_Server_API/tests/lint/test_rg_route_map_lint.py": "5e6a1cfda24c73e4ccb22474b97a404ad1d36aa411749d1683c6b62b8567abbb"
+      },
+      "verified_head_after_tests": "271eeb4d23a05bb69f68feb894636fa9150ba08b",
+      "integration_patch_sha256": "34cbbecf0113ca7024c9fcbc69eb41b27b0da7c39a127c5b7ee7c3fcf5453585",
+      "integration_patch_path": "/tmp/email_pr3023_devb365_integration_final_20261001.patch"
+    },
+    "source_preservation": {
+      "original_certificate_python": 163,
+      "original_certificate_changed_paths": [
+        "Helper_Scripts/ci/route_auth_ratchet.py",
+        "tldw_Server_API/app/core/DB_Management/Collections_DB.py",
+        "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+        "tldw_Server_API/app/core/Resource_Governance/coverage_audit.py",
+        "tldw_Server_API/app/services/startup_resource_governor.py",
+        "tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py",
+        "tldw_Server_API/tests/DB_Management/test_media_db_runtime_factory.py",
+        "tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py",
+        "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_attachment_upload_13376.py",
+        "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_research_discovery_media_add.py",
+        "tldw_Server_API/tests/Resource_Governance/test_coverage_audit.py",
+        "tldw_Server_API/tests/Utils/test_fastapi_routes.py"
+      ],
+      "prior_repair_scopes": {
+        "email_pr3023_rg_quality_20260930.json": {
+          "total": 20,
+          "unchanged": 8,
+          "changed": [
+            "tldw_Server_API/app/api/v1/endpoints/auth.py",
+            "tldw_Server_API/app/core/Resource_Governance/governor.py",
+            "tldw_Server_API/app/core/Resource_Governance/governor_redis.py",
+            "tldw_Server_API/app/core/Resource_Governance/middleware_simple.py",
+            "tldw_Server_API/app/core/Resource_Governance/policy_eval.py",
+            "tldw_Server_API/app/services/startup_resource_governor.py",
+            "tldw_Server_API/tests/AuthNZ_Unit/test_auth_rg_single_charge.py",
+            "tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_access_policy.py",
+            "tldw_Server_API/tests/Resource_Governance/test_governor_safety_net.py",
+            "tldw_Server_API/tests/Resource_Governance/test_middleware_cookie_owner.py",
+            "tldw_Server_API/tests/Resource_Governance/test_policy_eval.py",
+            "tldw_Server_API/tests/Resource_Governance/test_tokens_daily_cap.py"
+          ]
+        },
+        "email_pr3023_ci_fix_sources_final_20260930.json": {
+          "total": 16,
+          "unchanged": 13,
+          "changed": [
+            "tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py",
+            "tldw_Server_API/tests/CI/test_required_workflow_contracts.py",
+            "tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_access_policy.py"
+          ]
+        },
+        "email_pr3023_dev85ed_final_quality_20261001.json": {
+          "total": 58,
+          "unchanged": 58,
+          "changed": []
+        }
+      },
+      "current_source_sha256": {
+        "Docs/Operations/probes/email_archive_probe_databases_2026_09_25.py": "1e5235360fe5bb17b7db94c09d91aad154fd923ac17c98143e26c3717878bd88",
+        "Docs/Operations/probes/email_archive_throughput_postgres_2026_09_25.py": "97e700887e777ac9f9c24d7ee7b271d2b6d87b376422acfe3e1c20166e52b24d",
+        "Docs/Operations/probes/email_archive_throughput_sqlite_2026_09_25.py": "1f0735567d31913bb225bd129fc8ee98760a44d9332edc0b516203f09f113675",
+        "Docs/Operations/probes/email_local_release_checks_13376.py": "7b6898f1abf8df3bc2916e5fd29e3979f271c1820b7c677c6dcbc81516cbbd82",
+        "Docs/Operations/probes/email_million_search_13376.py": "142c6b67c0a9cf4cd7369ef4d5fd8ac17b62c560740df4bb9f5fee00ea1615f4",
+        "Helper_Scripts/benchmarks/email_search_bench.py": "827c26a396b26dcadcc4ded2c9e9b1309b85ab03bdf33b17b2af232ea66fb991",
+        "Helper_Scripts/ci/rg_route_map_lint.py": "4b120cc1a9abda23772b529a378c027467bfc721f5ecc66242c867f7c9041c48",
+        "Helper_Scripts/ci/route_auth_ratchet.py": "fe5531b7f56cad8acd33b42e17fcfd7816c7f508536feeca9f8b8461ae1550cd",
+        "Helper_Scripts/rg_webui_fixture_from_access_log.py": "a73f8ecb31078e0ae3d7fe338dc71dd9fadaeea4d67158ce9c7eb908ecdd8eca",
+        "tldw_Server_API/app/api/v1/API_Deps/billing_deps.py": "03a76a1288bebd024ad7a89b3339dee61c1ce4d13ad594393bcdc52532e3e6ee",
+        "tldw_Server_API/app/api/v1/API_Deps/content_org_deps.py": "9a80dc48e0bcd9784c466a2d3251aa33dbf4aa02f415ee9863b4f50c81565231",
+        "tldw_Server_API/app/api/v1/API_Deps/media_add_deps.py": "ec11bfea6a0aefc1a269beb7a15ed281919085bcc4fe4b6d82715a7fcde8e360",
+        "tldw_Server_API/app/api/v1/API_Deps/media_processing_deps.py": "0038ccfb76e15f9818978ffe95e3ae310442db94202d856bd9f431597d8eaa5f",
+        "tldw_Server_API/app/api/v1/API_Deps/storage_quota_guard.py": "83b8837db81e6e5ade071c404655c248d45b46554d783874ab6f13ba8228defc",
+        "tldw_Server_API/app/api/v1/endpoints/audio/audio_transcriptions.py": "dfc9e1709c6c89a273a933354fb7393f0f10d407e0c5c7b0172275b2b606a0a5",
+        "tldw_Server_API/app/api/v1/endpoints/auth.py": "a83b7c3badf420030d0da077b289477a057eda97d5b02839cd71bdbbdc7c186c",
+        "tldw_Server_API/app/api/v1/endpoints/email.py": "bb76617d7e5e54812225ee7c53199a5e2897d46bb8403e3e2b40e4eab8b80f34",
+        "tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py": "cea7ef5288a5362725b912ca26dce8b2b596ed544610eeaf9ea00680b5c0041c",
+        "tldw_Server_API/app/api/v1/endpoints/media/add.py": "142354aa819919d2191eb258ab2b3f971cb6ff53df93ff5d1f5f9d854b1138eb",
+        "tldw_Server_API/app/api/v1/endpoints/media/process_emails.py": "35727c25ff44c8626bff3838642b34501e849db9a16fde64bc0dd2b4cf17c46b",
+        "tldw_Server_API/app/api/v1/schemas/media_request_models.py": "959e4865749594715ac582704c8dc0291f80d29d3309e010a7b63c746e2f71cf",
+        "tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py": "c0bfbd8462fd1e2ab9424e0134cc90039ddb39020a5acc0096d0f32e3f4c0dd6",
+        "tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py": "2a8535761631fa18ffd75fc5af9309e83b982d5318e13cb31fbd5fb02e36c4f0",
+        "tldw_Server_API/app/core/DB_Management/Collections_DB.py": "77ae981aa72702598564598933b29ac095b82400053ad2b3db7495f69f333c29",
+        "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py": "16090522fe64c99a28bf056129b1a86c44f913910117dceb58c374b2d149adda",
+        "tldw_Server_API/app/core/DB_Management/backends/query_utils.py": "effbb887843a3ace3be2eac4fca314fe2897ce808ed673a764d3e7738e19d858",
+        "tldw_Server_API/app/core/DB_Management/backends/sqlite_backend.py": "831a64fd3714df5339256223b207a2ab4a24e89ed03b3df84c7c8c2812c40c8b",
+        "tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py": "07e311516af634c23cd2170332c91bde72da71e371cc3775a1528e83fb1587fa",
+        "tldw_Server_API/app/core/DB_Management/media_db/repositories/document_versions_repository.py": "328faf405b385848c9357eabdc549f9d7ecca7acd43476a896f82b0b6f413cd0",
+        "tldw_Server_API/app/core/DB_Management/media_db/repositories/keywords_repository.py": "1dfe4832785a66f36096d050adb1e97e719fb75b297e572c9fe5b8eca5392d91",
+        "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py": "ccf3232e460caec49235ce15645fd2c3c97f0d75d774c16ed404c3bac9f4b7ee",
+        "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_search_repository.py": "5d55aa5d97802142185befc289eb35ea9e52d1b48aa7aa209f75b1f3e37cf1e4",
+        "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_benchmark_fixture.py": "cb4f615bffc512779685ec1afdf3651be42a40a5427b0c4ecc87a72a59d77b6e",
+        "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_graph_persistence_ops.py": "fecc3eb7cc60164a3ed82f756bd9b6424d5f8bc5db3d3c0a7c0a395cf3c17664",
+        "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_query_ops.py": "9b3e4385a1f39d76d763361a2b4adb1f4a405adcbfbf4bf44661fdc9207332b3",
+        "tldw_Server_API/app/core/DB_Management/media_db/runtime/execution_ops.py": "aed8b8b2ea4f7e02bf38da71395fec889685734035a995972120a88c41f1e3ea",
+        "tldw_Server_API/app/core/DB_Management/media_db/runtime/fts_ops.py": "2a5742849a0b1c613c1715290f725d2558b69a01457879cbeeeadffbad63bece",
+        "tldw_Server_API/app/core/DB_Management/media_db/runtime/sync_utility_ops.py": "4be2d97c934e49a9b2a27ec65a5d426d8b08c5cbf8595ff0f27567a30d07cfdc",
+        "tldw_Server_API/app/core/DB_Management/media_db/schema/backends/postgres_helpers.py": "c9febe54f6d2b269937fb3b5580aa468f64bf439c19dd2c86d6ca4b94e72c81b",
+        "tldw_Server_API/app/core/DB_Management/media_db/schema/email_schema_structures.py": "b9ee5e90eacca190af638e7ae82a7bdac8ac5bd8247cf35ca284b0c1b939768f",
+        "tldw_Server_API/app/core/DB_Management/media_db/schema/features/postgres_rls.py": "7236e2c6dd3957ea48d2c9bf2cb46a21fe155b797ee85324304d299df5516f52",
+        "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/Email_Processing_Lib.py": "d811d62c157c1437f81dd7127372e408a1b1907d50325a9da5822dbb3d31908f",
+        "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/attachment_policy.py": "2b64e6f130692a41854bcb62867a9a4f8997e473aa7c7d2e779b5ea90736775d",
+        "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/email_ingestion_metrics.py": "2b8d1ec859b5429aa7b1e1c2e5f69e922eedcb50fa2224d7e61da70ce9bab4d6",
+        "tldw_Server_API/app/core/Ingestion_Media_Processing/Upload_Sink.py": "af14515d225c8ac3b7ea7d8815f8f899dae69443bcc4c9d9ba325772f1d5ce66",
+        "tldw_Server_API/app/core/Ingestion_Media_Processing/chunking_options.py": "f707de892ca281e42c77db26d807f4f8c8d7c73d32a3a62d3659a8e8aa88461d",
+        "tldw_Server_API/app/core/Ingestion_Media_Processing/input_sourcing.py": "3267e1ba5fd729b6dd8e9a9af3ec8bb86aa5090aedb25f571abacf2c1df8a53f",
+        "tldw_Server_API/app/core/Ingestion_Media_Processing/logging_safety.py": "67602eb927878146c2ecd720c78fb331cfe2a1523cddfabb59faf7b2d4c97b4b",
+        "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": "0fec196292969c25bb07dcdea99bc8d3d806b3576d1446acd115f246d81aa061",
+        "tldw_Server_API/app/core/Logging/access_log_middleware.py": "bc6aa0ea5072d7dfabe55468b757791c8a6e5c30a8149008f4a47f750be9f0d0",
+        "tldw_Server_API/app/core/Metrics/http_middleware.py": "82334806b38d2f693c99f07b8fdccfe41bbd9d107d75b68c8c5ad8e714e42f41",
+        "tldw_Server_API/app/core/Metrics/metrics_manager.py": "f3a152d6b3548357b2a1a3675a3912752992f76153d32a7a64419097a3dedba4",
+        "tldw_Server_API/app/core/PrivilegeMaps/introspection.py": "169ff35493ec8c8102284d142f55471663ad02666837fbdfc37d92ca9671155d",
+        "tldw_Server_API/app/core/Resource_Governance/coverage_audit.py": "f780bb8ef00d6191c26c316d5ade6a9068df9fe939731b76537348d1d3dda80d",
+        "tldw_Server_API/app/core/Resource_Governance/deps.py": "2cbf91054a2468220649e1d49e8c7eef90a6758612441b5c6b9b42cc837750b5",
+        "tldw_Server_API/app/core/Resource_Governance/governor.py": "b494f42c592da4387ca5cc09ef241d07dd22221c2d4ffd1f8aa335d2bde620d0",
+        "tldw_Server_API/app/core/Resource_Governance/governor_redis.py": "487dd1f1fd3539f9fd3f6b0ff77f226126c5f7f325a5c1dcbfc41b0ca8c12e42",
+        "tldw_Server_API/app/core/Resource_Governance/middleware_simple.py": "23aeb6b5dd4cc695743edf778fb34d8e896bc515e2b7c237ff68d34432f4b39e",
+        "tldw_Server_API/app/core/Resource_Governance/policy_eval.py": "3e9fce0b4a6f53fb49e76d6e0c0c35299e47bbf702eef1852e09a4d7914a661d",
+        "tldw_Server_API/app/core/Resource_Governance/policy_resolver.py": "2c4e0c78adcd4f39943f7958168427225105a2548d623ef1abb9e023ae9c707f",
+        "tldw_Server_API/app/core/Storage/quota_enforcement.py": "9d78dd8a7a0a2ae67babbfd33b5e564e83f7f1d52eb760514b444e41e46151ca",
+        "tldw_Server_API/app/core/Usage/usage_tracker.py": "6b43dd097e697a994d8e18693885604ace9cde8f06eeb4cb9bf1332047e93eb5",
+        "tldw_Server_API/app/core/Utils/fastapi_routes.py": "ede7483e5e430dba8d01e116c56c3935ef4df320235b01c7e6a254307a4c94e6",
+        "tldw_Server_API/app/core/VN_Platform/capabilities.py": "03ac11adfd35ac3abfeb96ebfbd3ef558961bda68fc2b109429cba2d7f3f1895",
+        "tldw_Server_API/app/main.py": "18d291e25982a6d2bf6c78917f8b94e3915eacb88bc64aa1ef8d9275de589741",
+        "tldw_Server_API/app/services/startup_resource_governor.py": "577524b6e870908b40116d92632b11b917f593888857da64c3a71a71212c658e",
+        "tldw_Server_API/tests/Admin/test_admin_integration_smoke.py": "84e1aa2422adb83d744549d3267d3184fec2387ca7fd5a81ed3bd150237239ef",
+        "tldw_Server_API/tests/Admin_Webhooks/test_route_selection.py": "2ca1031b6ab386fe8f9ff096ea2814a29ab22a1fab4dab8f0657736ff582353f",
+        "tldw_Server_API/tests/Audio/test_audio_router_import_resilience.py": "90e0b34992399deeac0eca81e5f57e23dc280ab5fa2cf8e17835640b9c7e38a4",
+        "tldw_Server_API/tests/Audio/test_audio_transcriptions_adapter_path.py": "a90a4166fbd956a177bce6169bf6c85758819bcf05c77f7781c5675b9e823a21",
+        "tldw_Server_API/tests/Audio/test_realtime_websocket.py": "4c23109c8414f17ebc74da0024e5cc3b4de83cd13dd2df266032dc2eea53953a",
+        "tldw_Server_API/tests/AuthNZ/integration/test_auth_principal_api_key_happy_path.py": "04f11bae5b064e332e9be555682785cd0748dcf59d1f5bc0950f23b55d16f864",
+        "tldw_Server_API/tests/AuthNZ/integration/test_auth_principal_jwt_happy_path.py": "7ddfaac8c4326d6aac07ea26758726670091ca20b6e778652c8dcfd8bfd97a0c",
+        "tldw_Server_API/tests/AuthNZ/integration/test_auth_principal_mcp_monitoring_invariants.py": "bc06f290669b9260418241aa92223d394c8a198d56e9597012d617218188df91",
+        "tldw_Server_API/tests/AuthNZ/integration/test_single_user_cookie_session.py": "41275051c73bba0a4a1ad37e0c21137bb78c63fc48be729f457ba75af955edc5",
+        "tldw_Server_API/tests/AuthNZ/integration/test_storage_quotas_postgres_bootstrap.py": "19e58d3f1b23a647d9df8f49dda35c0552e20427227514cfa2ce218f1331413f",
+        "tldw_Server_API/tests/AuthNZ/test_consent_endpoints.py": "319fb212c9474f364e8182d4d1c9bd0799c7289f68da14ca0eded22f9f98470f",
+        "tldw_Server_API/tests/AuthNZ/unit/test_scoped_token_route_auth_chain.py": "a9fec778f51440d8dc9e61282187b28f65d40ab1933b50435536a58859dfef52",
+        "tldw_Server_API/tests/AuthNZ/unit/test_user_capabilities.py": "2aaf7acdcf273b7b69453b5754e1b5f773af8a418e8ffff5fce0130dc5030dac",
+        "tldw_Server_API/tests/AuthNZ_Unit/test_auth_rg_single_charge.py": "ec2bfd6d395873c128479c815cc817d989d4195a07228dc3d698970ca05e4708",
+        "tldw_Server_API/tests/AuthNZ_Unit/test_notes_graph_permissions_claims.py": "a097388da707cc95d855b4e26179c717a8eab1ebe141b815d4ea6c89677ea710",
+        "tldw_Server_API/tests/AuthNZ_Unit/test_scheduler_workflows_permissions_claims.py": "080254034e3ab3a277beeb221545d27173518cfdbe8a86a1d2573514480588f5",
+        "tldw_Server_API/tests/Billing/test_billing_deps_org_header.py": "14f209659cf114d864eca2caad62a713f85fe578b66ae87c32d468a9474cf29b",
+        "tldw_Server_API/tests/Billing/test_billing_public_api_removed.py": "4afe163788cc12b20fafbe9d955716b37fc4e41c2d6e53b4a11e7f7e218e8911",
+        "tldw_Server_API/tests/Billing/test_content_org_deps.py": "6e5ddc897a0e483549eec8656f224e89488c62309262a16444eb264897dbb9a8",
+        "tldw_Server_API/tests/Billing/test_storage_quota_guard.py": "28c495dffbc74722a24da03fcdea5a3bbf12a6a15398674b179c15c4edbfbaea",
+        "tldw_Server_API/tests/Collections/test_collections_schema_bootstrap.py": "da5a8c6a0b4543f1203ab162687ca6a0663c592a9f53059676bbbfcc749a3e88",
+        "tldw_Server_API/tests/Config/test_route_and_cors_guards.py": "73421f51ad82e3c21e8b903da01cec0df03be00c4b6e6b9b196d9beb9ac93ffa",
+        "tldw_Server_API/tests/DB_Management/test_backend_utils.py": "ddad4702ab6d2ca1baf24ca8bbbdd58bc618032ae39b75537504f26a030e6f91",
+        "tldw_Server_API/tests/DB_Management/test_chacha_operation_scope.py": "ca15d3d04ba59db1f7526bd113fbfa29174c44386369b440cd2d7e9212020481",
+        "tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py": "cc2e60dcd0da33f599e8220dd083c7b6f27c0338e4cf96f8784ec35ebb62ccb9",
+        "tldw_Server_API/tests/DB_Management/test_email_benchmark_fixture_13376.py": "a74caa8c3cf6cb5134e4303ab996dc0e26ce0efad2caec816c2c871d9efc46a1",
+        "tldw_Server_API/tests/DB_Management/test_email_benchmark_settings_13376.py": "88ac81b8436708ca3edf25f50eedbea01a4b828aa625fb61ab8e2e152bfcf2cf",
+        "tldw_Server_API/tests/DB_Management/test_email_graph_roundtrips_13376.py": "dc1aa2d36bfe7dee17c03cfed861be3a9c0059b88358172395e797beaef7ee29",
+        "tldw_Server_API/tests/DB_Management/test_email_search_scale_plan_13376.py": "bacb30d876d1c905e65be2738ca0542f5082d280d39e2a2f11452a624eadf546",
+        "tldw_Server_API/tests/DB_Management/test_legacy_media_search_scale_13376.py": "dc8897788a26718c66cebb6154aaed94b38b066568749ef9e2776787f7a9bd48",
+        "tldw_Server_API/tests/DB_Management/test_media_db_runtime_factory.py": "5a865b9de273cabe3b991713414cd16f736d38c556fe223f76ec2696109283d7",
+        "tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py": "c35bfd08954b20bd4e70a28b1e25e131e521748a77fd1d1510dd84444c8abdee",
+        "tldw_Server_API/tests/DB_Management/test_media_search_fts_fallback.py": "20e4c9b95c765d91a57983bb17456360c1ef41542460bc0225e85bf1c486bb8b",
+        "tldw_Server_API/tests/DB_Management/test_postgres_email_archive_transaction.py": "14bdd3a186122054da12a66064613fc7cb3c3e5b74c7197705a0ab14f073dd42",
+        "tldw_Server_API/tests/DB_Management/test_postgres_email_identity_lookup_13376.py": "c2d78ba836158d23f84b08f917765cb94a9e7e4552b8adea481a67e350d408b3",
+        "tldw_Server_API/tests/DB_Management/test_postgres_email_scope_roundtrips_13376.py": "8fd70536a491b2829db3df887deee485a95cb4976bcd26695672ff938166242e",
+        "tldw_Server_API/tests/DB_Management/test_postgres_email_search_acceleration_13376.py": "f445add51073f82dda1c9da601a1b9f3089eb3476ced324488a4d926b43702b3",
+        "tldw_Server_API/tests/DB_Management/test_postgres_fts_refresh.py": "ca47eec9bc5086bb57ef024d7f07de79ec79451816747f0b9cd4122d3e6ca1c9",
+        "tldw_Server_API/tests/DB_Management/test_postgres_legacy_search_parameters_13376.py": "8a257e6654bc3ff104cb2b4b1aa07b32a569976a29544ef9d04aaff2132214fd",
+        "tldw_Server_API/tests/DB_Management/test_postgres_media_sequence_bootstrap.py": "b2b6be3f71d065c96794d1211c49d6c94da0e46689bfcf7b7fdd12d1e44c9e49",
+        "tldw_Server_API/tests/DB_Management/test_postgres_scope_installation_live_13376.py": "c01e0d1d4b8a31a7aecc2bb9ff99381ae14af312a62baca5ad825b319ec83029",
+        "tldw_Server_API/tests/DB_Management/unit/test_sqlite_pool_pruning.py": "d16438eaaf1c648d2d40ccd6f184c7afa575dc0a274f95b840dbb5da40d9a4ca",
+        "tldw_Server_API/tests/Embeddings/conftest.py": "abbaefc9969884fb87b8e79f6cd7e6f9e5bf66c72e8b154b46c5b45644f01dfd",
+        "tldw_Server_API/tests/Embeddings/test_backpressure_and_quotas.py": "1a34f1e6a073e791ce454d7f1d26715179850818e9088e68d50d4ff1c68cc582",
+        "tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py": "d0f6cbf145bc8f829a0841d8e37f428d633f866c7c2496d0503092d250a1e7db",
+        "tldw_Server_API/tests/Embeddings/test_reembed_schedule_endpoint.py": "ec429e592c685896f6abf1a3337d96531c4a826e46e988a4b180d8454d1e538b",
+        "tldw_Server_API/tests/Evaluations/integration/test_recipe_runs_api.py": "527b1967f35cbd33b79ac4af0b2e4b8c8dd4a9537117fb9b0d9ee0598244e854",
+        "tldw_Server_API/tests/Evaluations/test_evaluations_stage1_route_and_error_regressions.py": "17a0431ae549373692372c6a5e41790a62a7a9411b29699b9c00153484ce806a",
+        "tldw_Server_API/tests/External_Sources/test_connectors_endpoints_api.py": "5d34d756b14dd0ff5989104351fa4603659c7c63104dc5ee793352f69a94ddc1",
+        "tldw_Server_API/tests/External_Sources/test_connectors_webhooks.py": "0fff190002a6b1a073bbb4640093b63c413c344f40dd7d41d3ded45cca93d83e",
+        "tldw_Server_API/tests/Helper_Scripts/test_email_archive_probe_cleanup.py": "4e1c3ef9cecf2a2e545196209d163394b67b30d8e00d517a02aa2413968cf917",
+        "tldw_Server_API/tests/Helper_Scripts/test_email_million_search_probe_13376.py": "dffbc844c528418e72ad56e89c9aa12d0da9d9d4b930a76327731a34227d1974",
+        "tldw_Server_API/tests/Helper_Scripts/test_email_postgres_reuse_probe_13376.py": "5409b67365b9f6243335f8d8696d3843afd8fc1d50c313f1c82fb011c4f1859b",
+        "tldw_Server_API/tests/Helper_Scripts/test_email_probe_assertion_guards_13376.py": "b4986fcf122b58a23657fdbb5d6fed3b1e1d2e04f687b490835d932ed99b99c3",
+        "tldw_Server_API/tests/Helper_Scripts/test_email_release_probe_boundaries_13376.py": "77608bb0b340407d65bd2114aa840ecd5d3ba1cc766b39812de233bb3dcead21",
+        "tldw_Server_API/tests/Helper_Scripts/test_email_search_bench_backends.py": "fa1a5c381147e42ead4dc230c8005d2e8a218d33ff06919397b56f476cffaa1b",
+        "tldw_Server_API/tests/Ingestion_Sources/integration/test_notes_detached_integration.py": "820d2d20dba8e9d6baa4dccaa1f991fee2944508408efbda6bbe7cfc2b7ca0d2",
+        "tldw_Server_API/tests/Ingestion_Sources/test_ingestion_sources_api.py": "42725add1fb9ece03936a13bbcdcc868862d51ba36738f0c684ccaa4a6c8736c",
+        "tldw_Server_API/tests/Jobs/conftest.py": "e34d3112add719aa2bde5930df3da5c6469605fe7657a52263ab76df735ade7a",
+        "tldw_Server_API/tests/Jobs/test_jobs_admin_endpoints_postgres.py": "2ab56fe3d86cc90953a46d1063d51894746eb60dfad6270d5cba07ab86ea8d1a",
+        "tldw_Server_API/tests/Jobs/test_jobs_events_outbox_postgres.py": "0a0e5d0c23fd2051628b4e52bbace83550036e7ef5190fd8a6830894cd0fc9fb",
+        "tldw_Server_API/tests/Logging/test_trace_context.py": "bd8f6232355a7dee45eaecb76d00f412db8ad8dea3d90245cc2d7974914461e5",
+        "tldw_Server_API/tests/MCP_unified/test_media_health_portable_sql.py": "7a31fe1ce7e6a01d75100858b0b706a37ba601dd3ba2a551875c4f0664d47bf6",
+        "tldw_Server_API/tests/Media/test_document_insights.py": "72ec8ede97d1934a6f49381aa693cda58273d2a9e58759d945ead9d4309e03a2",
+        "tldw_Server_API/tests/Media/test_document_insights_service_prompt.py": "733bb2def051698e86d157303b87b55933efb5ce2a40a6c455d4aab3a40f2a04",
+        "tldw_Server_API/tests/Media/test_document_references.py": "20f6f5a315da4665912380902f07865a43392724182ab382775d2c9f5ed91201",
+        "tldw_Server_API/tests/Media/test_upload_sink_security.py": "bb4809c0d5ad664da75ae0fdd9375c8d3f2d52908b2520c938230ef5df03fee0",
+        "tldw_Server_API/tests/MediaDB2/test_metadata_endpoints_more.py": "05ef3b9c250a4923599daab1629f88c74e66e6b249614b8e9b5f8fe623acbaa5",
+        "tldw_Server_API/tests/MediaDB2/test_safe_metadata_endpoints.py": "c592c444a9b557d9282a40d732d4fc71002cbfa7bba700b9e3314ed2df9bdb6d",
+        "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_attachment_upload_13376.py": "d2af156797c0823765d5c6b5ee565464626844d48ba393b7ae3c94a3c4a7bd85",
+        "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_authenticated_access.py": "edd418aa52afa2f8b5ed3eda400336436ac01c50377127a395d7406a6391408b",
+        "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_authenticated_upload.py": "bd5c4964e308766a0978790df9237321bfd061ded1de5143ee15243d6a2cea3f",
+        "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_sensitive_logging_13376_2.py": "0f542aa3c81fd52ac30507ab33aaf2fe6b67903643e045671d1b741249ca4e5e",
+        "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_research_discovery_media_add.py": "37ef2e29780a5812bceaeaebe2cd4b04187dbefd50bf0aff7e51e5fe77f1fc35",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_archive_worker.py": "3827c79c51358657d081a1c86dfcf6e0110fdc8ef6827ee4263c3bd1f25610ef",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_logging_safety_13376_2.py": "f58413323f36bc6ec82e7afe7321af0b24a8b17d0835a099aadf57ee4e11411b",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_chunk_consistency.py": "aee212a188e40011ce5b141c5a512a613a0bc2fb003711d82ed62d39b521d7f8",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_ingestion_metrics.py": "298e0aadec0fda357363b7f93bdff6cafa43866e94f27452a71842b63bee8a4f",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py": "ef1c9d044be84ac8637af2f3ea9b3f40e83c42d7ac7d4d02bf724da500f32d6d",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_prep_error_logging.py": "6a658487f90db692d080069a440e785678d2a7a14bdab23adcbfdb4d52617205",
+        "tldw_Server_API/tests/Media_Ingestion_Modification/test_email_attachment_policy_13376.py": "4d546edfe9c118c7a4e3a593157aedaecfa94c14afdd4c9c40556658430784be",
+        "tldw_Server_API/tests/Media_Ingestion_Modification/test_media_contextual_integration.py": "a8fbfec78f00f03cde2dfe23a6b44756ea9e0385be1d48eac85851ff8d608006",
+        "tldw_Server_API/tests/Media_Ingestion_Modification/test_process_emails_endpoint.py": "3d162d59ed4194006dc04c061a4668bfe5031a0dc5ade8de280cf7f2c9544bd0",
+        "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py": "1d95a8ebc889ed3d5cae6a63566cb5194f5111fddd6514d560d8b04a14c41a6d",
+        "tldw_Server_API/tests/Metrics/test_email_ingestion_metrics_13376.py": "8999a2a7645a26f7e7e06e241576cb69b9d63c0df0280e0f42399629d2806683",
+        "tldw_Server_API/tests/Metrics/test_email_search_metrics_13376.py": "d8f876cab24422c6b3c2bab15b9cc2bc7ba94cc5678497ac88d06a9f54aa6ab2",
+        "tldw_Server_API/tests/Monitoring/test_monitoring_api_key_scopes.py": "f61d13b9c84b08c545196e253b6bc8a902787b54b7ec36ee3fb3b1dd8039920e",
+        "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_endpoints.py": "d15cde9be6fc24b5484ad41807708f84c36776053dfdc09d01f44148ec09abe3",
+        "tldw_Server_API/tests/Notes_Graph/integration/test_suggestion_fresh_reads.py": "cb594731c0d9173ba2d5253d3aa275cd702009827960cc0d24408c62219816b4",
+        "tldw_Server_API/tests/Persona/test_persona_connections_api.py": "455cd6aa4d9516205a45bde08b5b33d5dbb71e73ee123745ae731eda55d3fb50",
+        "tldw_Server_API/tests/Persona/test_persona_exemplars_api.py": "db4494ae61c9e99f63b048852d57e7aa11048a8b8892f17aa8123f6d27dd0e13",
+        "tldw_Server_API/tests/Persona/test_persona_voice_analytics_api.py": "520d88fa884acd813781a122ca2af87631a53bbfc679d452bad6cd66641644f8",
+        "tldw_Server_API/tests/Persona/test_persona_voice_commands_api.py": "49eca4f545c7edc1f3cfb2be7d90db3e82f033a1a10f9ae147a8f644ddbca7c7",
+        "tldw_Server_API/tests/Prompt_Management_NEW/integration/test_prompt_improvement_api.py": "f5c67a7423fc8cd953419f4ac25d26982cfb56f1c220f19d155d72e7947a8126",
+        "tldw_Server_API/tests/Quizzes/test_osce_endpoint_privacy.py": "1ab4578dd3768d244f115ed3619b1ba7e1bf2c2824d1685cdff983aaa0bcc41a",
+        "tldw_Server_API/tests/RPG/test_rpg_api.py": "b433efb1d37d4b2e13ae8fe0cc33bb8913eca334c6135adb1ad957d8b2611181",
+        "tldw_Server_API/tests/Resource_Governance/integration/test_policy_loader_route_map_postgres.py": "1db95a48bea00e96841b5647ed3c40c9013f0ab1478826baffc915aa3d679b2e",
+        "tldw_Server_API/tests/Resource_Governance/test_coverage_audit.py": "bb001d8e3a7bbe39ca72fe49fd0da5968f4ec8ca68a34b4d4e5a6bf95986039d",
+        "tldw_Server_API/tests/Resource_Governance/test_e2e_chat_audio_headers.py": "058ca5986c27300ec57d01521499d3a96735a794c7e2bf4c8ed8a8e914d56915",
+        "tldw_Server_API/tests/Resource_Governance/test_governor_safety_net.py": "46cd72415c93756428990d1191a180820fd278c0ba6ce944caa5042329afe72f",
+        "tldw_Server_API/tests/Resource_Governance/test_middleware_cookie_owner.py": "32d88886b89c0021e517da6a327d498f5e909ccf90cb421dca775727f5077d84",
+        "tldw_Server_API/tests/Resource_Governance/test_middleware_identity.py": "3eb0c7b14da6008c3c70f15a6854fc84122c6bec0bccc057edfafcb4e5b73e35",
+        "tldw_Server_API/tests/Resource_Governance/test_middleware_tag_enforcement.py": "7a1255c35806b8cb65c007ded55d3f97d5568d7058bf5fea17dc64a83ec168b3",
+        "tldw_Server_API/tests/Resource_Governance/test_policy_eval.py": "a40842a6dff7f2eca3fbd876084907042a66b8925081c4a9a12f39bf6c63b9c4",
+        "tldw_Server_API/tests/Resource_Governance/test_policy_loader_route_map_db_store.py": "97e22656f631c18b4ffee3da67d53fb55f4afa148a7798f530c3134976b0b555",
+        "tldw_Server_API/tests/Resource_Governance/test_policy_resolver.py": "bcd5d837bad9a2c21668b4e032e94291d9ad7759f491871a7788df8798d3e1ab",
+        "tldw_Server_API/tests/Resource_Governance/test_tokens_daily_cap.py": "f566948f3d563e2d8db1b9ce16aad9465574f7466ef6ecc4397ad2ebc96a70b0",
+        "tldw_Server_API/tests/Resource_Governance/test_webui_replay_no_429.py": "d8c81728376d30377a560e11abff4b4e11e2be775ba2a6c01cc5e1c77e06c071",
+        "tldw_Server_API/tests/Security/test_dependency_security_floor.py": "135048f11223422f867c0e630e18f564925d0cba955d9a245472daf5ba1e081e",
+        "tldw_Server_API/tests/Services/test_main_router_contract.py": "3c362a34fb7788a599bf3ecbe79d10bcefdf0c08fd0631e476ee5d02f92b1546",
+        "tldw_Server_API/tests/Services/test_placeholder_services_not_routed.py": "df4ad74a3d7804925de4020e66d3b6a61d35c4645ee76d61995c56f0be9fa634",
+        "tldw_Server_API/tests/Services/test_router_groups_contract.py": "eb47592ee03c22ed3ddfe6f64d697a8192d68ce48993b515e76670b8701eabf5",
+        "tldw_Server_API/tests/Sharing/test_shared_workspace_clone_endpoints.py": "3dfbd71c1861202acef7454f0647f16aff073012897e434748d3086aa0dd3eeb",
+        "tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_endpoints.py": "106d6c96f33e5e58d14b94680a66811dfa7fed52585199ebde406bbbaf10c032",
+        "tldw_Server_API/tests/TTS_NEW/integration/test_fish_s2_reference_endpoints.py": "6a9a439b8c7fd655ce644b0c4432634b5fde62f3ec7f19e85e2b5edfe8ded232",
+        "tldw_Server_API/tests/TTS_NEW/integration/test_voice_routes_rate_limit.py": "ba613f8cfa22159cf4451ab311d0b7a56cbd0f3c1e104fea1618ca35d1b32325",
+        "tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py": "e96a688729b4d972a852bc430fb74a956adee2835802d8e05347f0d9d23fc381",
+        "tldw_Server_API/tests/Utils/test_fastapi_routes.py": "16eb2d5bf4894fcc8040a1189b60883b58661c02ed68d251966dca48a6ffa33e",
+        "tldw_Server_API/tests/Utils/test_pagination_openapi_contract.py": "5be70535e58322b3941792086113a02ce5b48ffd3b38a179f7ce632da93f07ff",
+        "tldw_Server_API/tests/VN_Platform/test_vn_route_namespace.py": "fd092f6f487b3c3f22db045ff6585d6024d59fce3e78b1cc5da448d27d2e9532",
+        "tldw_Server_API/tests/Writing/test_writing_manuscripts_import.py": "e57630327a83ad478879c6f2f29d80b473d9fa2a5ad4b9964057c8e3897e1cf2",
+        "tldw_Server_API/tests/lint/test_rg_route_map_lint.py": "5e6a1cfda24c73e4ccb22474b97a404ad1d36aa411749d1683c6b62b8567abbb",
+        "tldw_Server_API/tests/lint/test_route_auth_ratchet.py": "175df578f9b6e8b266a0a4eaaca5cb92f025fd20cbeb96e5746ebfca14b8de0a",
+        "tldw_Server_API/tests/sandbox/test_workspace_diagnostics.py": "f685a129ff8f8b7082e1263cc2402657b9561d3ea490d7abd488c01c5a9459ee",
+        "tldw_Server_API/tests/sanity_tests/test_app_import_sanity.py": "656d1457b4b57736b5e4760699bf82560628a51a0fa6bf50a4107a203f3ec6e0"
+      },
+      "source_binding_note": "Current-source hashes verified after the fresh tests. Older certificates remain bound to their own tested source and dependency set; unchanged direct files do not imply unchanged transitive inputs.",
+      "setup_diagnostic": "An initial receipt assembly read CI-repair metadata as paths; corrected to its explicit sha256 map. No source or test changes."
+    },
+    "dependencies": {
+      "python": "3.11.13 (main, Aug 14 2025, 16:05:31) [Clang 20.1.4 ]",
+      "packages": {
+        "fastapi": "0.141.1",
+        "pydantic": "2.13.5",
+        "pydantic-core": "2.46.5",
+        "starlette": "1.7.0",
+        "pytest": "8.4.1",
+        "pytest-randomly": "4.1.0",
+        "psycopg": "3.3.3",
+        "ruff": "0.15.10",
+        "bandit": "1.9.3"
+      },
+      "overlay": "/tmp/email_pr3023_dev6074_deps_20260929",
+      "wrapper": "/tmp/email_pr3023_dev6074_python_20260929",
+      "wrapper_sha256": "8124c9eac5121b300798ed6b1a8226b2ce7594f29b2acebd12766a477503fc1a",
+      "shared_installations": "unchanged",
+      "receipt_probe": "Executed through the exact supported wrapper used for all tests, scans and schema generation.",
+      "corrected_receipt_diagnostic": {
+        "earlier_receipt": "/tmp/email_pr3023_devb365_dependencies_before_wrapper_correction_20261001.json",
+        "issue": "Earlier receipt assembled through bare shared-venv Python instead of the recorded supported wrapper. Actual tests/scans/schema commands used the wrapper. No dependency reinstall or source change."
+      }
+    },
+    "quality": {
+      "base": "b365af1827b607fc221f9bf31ca76dde881edb4f",
+      "head": "271eeb4d23a05bb69f68feb894636fa9150ba08b",
+      "paths": [
+        "Helper_Scripts/ci/rg_route_map_lint.py",
+        "Helper_Scripts/ci/route_auth_ratchet.py",
+        "Helper_Scripts/rg_webui_fixture_from_access_log.py",
+        "tldw_Server_API/app/api/v1/endpoints/audio/audio_transcriptions.py",
+        "tldw_Server_API/app/api/v1/endpoints/auth.py",
+        "tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py",
+        "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+        "tldw_Server_API/app/core/Resource_Governance/coverage_audit.py",
+        "tldw_Server_API/app/core/Resource_Governance/deps.py",
+        "tldw_Server_API/app/core/Resource_Governance/governor.py",
+        "tldw_Server_API/app/core/Resource_Governance/governor_redis.py",
+        "tldw_Server_API/app/core/Resource_Governance/middleware_simple.py",
+        "tldw_Server_API/app/core/Resource_Governance/policy_eval.py",
+        "tldw_Server_API/app/core/Resource_Governance/policy_resolver.py",
+        "tldw_Server_API/app/core/Usage/usage_tracker.py",
+        "tldw_Server_API/app/services/startup_resource_governor.py",
+        "tldw_Server_API/tests/Audio/test_audio_transcriptions_adapter_path.py",
+        "tldw_Server_API/tests/AuthNZ_Unit/test_auth_rg_single_charge.py",
+        "tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py",
+        "tldw_Server_API/tests/Resource_Governance/integration/test_policy_loader_route_map_postgres.py",
+        "tldw_Server_API/tests/Resource_Governance/test_coverage_audit.py",
+        "tldw_Server_API/tests/Resource_Governance/test_governor_safety_net.py",
+        "tldw_Server_API/tests/Resource_Governance/test_middleware_cookie_owner.py",
+        "tldw_Server_API/tests/Resource_Governance/test_middleware_identity.py",
+        "tldw_Server_API/tests/Resource_Governance/test_middleware_tag_enforcement.py",
+        "tldw_Server_API/tests/Resource_Governance/test_policy_eval.py",
+        "tldw_Server_API/tests/Resource_Governance/test_policy_loader_route_map_db_store.py",
+        "tldw_Server_API/tests/Resource_Governance/test_policy_resolver.py",
+        "tldw_Server_API/tests/Resource_Governance/test_tokens_daily_cap.py",
+        "tldw_Server_API/tests/Resource_Governance/test_webui_replay_no_429.py",
+        "tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py",
+        "tldw_Server_API/tests/Utils/test_fastapi_routes.py",
+        "tldw_Server_API/tests/lint/test_rg_route_map_lint.py"
+      ],
+      "production": [
+        "Helper_Scripts/ci/rg_route_map_lint.py",
+        "Helper_Scripts/ci/route_auth_ratchet.py",
+        "Helper_Scripts/rg_webui_fixture_from_access_log.py",
+        "tldw_Server_API/app/api/v1/endpoints/audio/audio_transcriptions.py",
+        "tldw_Server_API/app/api/v1/endpoints/auth.py",
+        "tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py",
+        "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+        "tldw_Server_API/app/core/Resource_Governance/coverage_audit.py",
+        "tldw_Server_API/app/core/Resource_Governance/deps.py",
+        "tldw_Server_API/app/core/Resource_Governance/governor.py",
+        "tldw_Server_API/app/core/Resource_Governance/governor_redis.py",
+        "tldw_Server_API/app/core/Resource_Governance/middleware_simple.py",
+        "tldw_Server_API/app/core/Resource_Governance/policy_eval.py",
+        "tldw_Server_API/app/core/Resource_Governance/policy_resolver.py",
+        "tldw_Server_API/app/core/Usage/usage_tracker.py",
+        "tldw_Server_API/app/services/startup_resource_governor.py"
+      ],
+      "tests": [
+        "tldw_Server_API/tests/Audio/test_audio_transcriptions_adapter_path.py",
+        "tldw_Server_API/tests/AuthNZ_Unit/test_auth_rg_single_charge.py",
+        "tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py",
+        "tldw_Server_API/tests/Resource_Governance/integration/test_policy_loader_route_map_postgres.py",
+        "tldw_Server_API/tests/Resource_Governance/test_coverage_audit.py",
+        "tldw_Server_API/tests/Resource_Governance/test_governor_safety_net.py",
+        "tldw_Server_API/tests/Resource_Governance/test_middleware_cookie_owner.py",
+        "tldw_Server_API/tests/Resource_Governance/test_middleware_identity.py",
+        "tldw_Server_API/tests/Resource_Governance/test_middleware_tag_enforcement.py",
+        "tldw_Server_API/tests/Resource_Governance/test_policy_eval.py",
+        "tldw_Server_API/tests/Resource_Governance/test_policy_loader_route_map_db_store.py",
+        "tldw_Server_API/tests/Resource_Governance/test_policy_resolver.py",
+        "tldw_Server_API/tests/Resource_Governance/test_tokens_daily_cap.py",
+        "tldw_Server_API/tests/Resource_Governance/test_webui_replay_no_429.py",
+        "tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py",
+        "tldw_Server_API/tests/Utils/test_fastapi_routes.py",
+        "tldw_Server_API/tests/lint/test_rg_route_map_lint.py"
+      ],
+      "baseline_root": "/tmp/email_pr3023_devb365_quality_baseline_20261001",
+      "cwd": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2",
+      "compiled_python": 34,
+      "source_sha256": {
+        "Helper_Scripts/ci/rg_route_map_lint.py": "4b120cc1a9abda23772b529a378c027467bfc721f5ecc66242c867f7c9041c48",
+        "Helper_Scripts/ci/route_auth_ratchet.py": "fe5531b7f56cad8acd33b42e17fcfd7816c7f508536feeca9f8b8461ae1550cd",
+        "Helper_Scripts/rg_webui_fixture_from_access_log.py": "a73f8ecb31078e0ae3d7fe338dc71dd9fadaeea4d67158ce9c7eb908ecdd8eca",
+        "tldw_Server_API/app/api/v1/endpoints/audio/audio_transcriptions.py": "dfc9e1709c6c89a273a933354fb7393f0f10d407e0c5c7b0172275b2b606a0a5",
+        "tldw_Server_API/app/api/v1/endpoints/auth.py": "a83b7c3badf420030d0da077b289477a057eda97d5b02839cd71bdbbdc7c186c",
+        "tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py": "cea7ef5288a5362725b912ca26dce8b2b596ed544610eeaf9ea00680b5c0041c",
+        "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": "0fec196292969c25bb07dcdea99bc8d3d806b3576d1446acd115f246d81aa061",
+        "tldw_Server_API/app/core/Resource_Governance/coverage_audit.py": "f780bb8ef00d6191c26c316d5ade6a9068df9fe939731b76537348d1d3dda80d",
+        "tldw_Server_API/app/core/Resource_Governance/deps.py": "2cbf91054a2468220649e1d49e8c7eef90a6758612441b5c6b9b42cc837750b5",
+        "tldw_Server_API/app/core/Resource_Governance/governor.py": "b494f42c592da4387ca5cc09ef241d07dd22221c2d4ffd1f8aa335d2bde620d0",
+        "tldw_Server_API/app/core/Resource_Governance/governor_redis.py": "487dd1f1fd3539f9fd3f6b0ff77f226126c5f7f325a5c1dcbfc41b0ca8c12e42",
+        "tldw_Server_API/app/core/Resource_Governance/middleware_simple.py": "23aeb6b5dd4cc695743edf778fb34d8e896bc515e2b7c237ff68d34432f4b39e",
+        "tldw_Server_API/app/core/Resource_Governance/policy_eval.py": "3e9fce0b4a6f53fb49e76d6e0c0c35299e47bbf702eef1852e09a4d7914a661d",
+        "tldw_Server_API/app/core/Resource_Governance/policy_resolver.py": "2c4e0c78adcd4f39943f7958168427225105a2548d623ef1abb9e023ae9c707f",
+        "tldw_Server_API/app/core/Usage/usage_tracker.py": "6b43dd097e697a994d8e18693885604ace9cde8f06eeb4cb9bf1332047e93eb5",
+        "tldw_Server_API/app/services/startup_resource_governor.py": "577524b6e870908b40116d92632b11b917f593888857da64c3a71a71212c658e",
+        "tldw_Server_API/tests/Audio/test_audio_transcriptions_adapter_path.py": "a90a4166fbd956a177bce6169bf6c85758819bcf05c77f7781c5675b9e823a21",
+        "tldw_Server_API/tests/AuthNZ_Unit/test_auth_rg_single_charge.py": "ec2bfd6d395873c128479c815cc817d989d4195a07228dc3d698970ca05e4708",
+        "tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py": "d0f6cbf145bc8f829a0841d8e37f428d633f866c7c2496d0503092d250a1e7db",
+        "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py": "ef1c9d044be84ac8637af2f3ea9b3f40e83c42d7ac7d4d02bf724da500f32d6d",
+        "tldw_Server_API/tests/Resource_Governance/integration/test_policy_loader_route_map_postgres.py": "1db95a48bea00e96841b5647ed3c40c9013f0ab1478826baffc915aa3d679b2e",
+        "tldw_Server_API/tests/Resource_Governance/test_coverage_audit.py": "bb001d8e3a7bbe39ca72fe49fd0da5968f4ec8ca68a34b4d4e5a6bf95986039d",
+        "tldw_Server_API/tests/Resource_Governance/test_governor_safety_net.py": "46cd72415c93756428990d1191a180820fd278c0ba6ce944caa5042329afe72f",
+        "tldw_Server_API/tests/Resource_Governance/test_middleware_cookie_owner.py": "32d88886b89c0021e517da6a327d498f5e909ccf90cb421dca775727f5077d84",
+        "tldw_Server_API/tests/Resource_Governance/test_middleware_identity.py": "3eb0c7b14da6008c3c70f15a6854fc84122c6bec0bccc057edfafcb4e5b73e35",
+        "tldw_Server_API/tests/Resource_Governance/test_middleware_tag_enforcement.py": "7a1255c35806b8cb65c007ded55d3f97d5568d7058bf5fea17dc64a83ec168b3",
+        "tldw_Server_API/tests/Resource_Governance/test_policy_eval.py": "a40842a6dff7f2eca3fbd876084907042a66b8925081c4a9a12f39bf6c63b9c4",
+        "tldw_Server_API/tests/Resource_Governance/test_policy_loader_route_map_db_store.py": "97e22656f631c18b4ffee3da67d53fb55f4afa148a7798f530c3134976b0b555",
+        "tldw_Server_API/tests/Resource_Governance/test_policy_resolver.py": "bcd5d837bad9a2c21668b4e032e94291d9ad7759f491871a7788df8798d3e1ab",
+        "tldw_Server_API/tests/Resource_Governance/test_tokens_daily_cap.py": "f566948f3d563e2d8db1b9ce16aad9465574f7466ef6ecc4397ad2ebc96a70b0",
+        "tldw_Server_API/tests/Resource_Governance/test_webui_replay_no_429.py": "d8c81728376d30377a560e11abff4b4e11e2be775ba2a6c01cc5e1c77e06c071",
+        "tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py": "e96a688729b4d972a852bc430fb74a956adee2835802d8e05347f0d9d23fc381",
+        "tldw_Server_API/tests/Utils/test_fastapi_routes.py": "16eb2d5bf4894fcc8040a1189b60883b58661c02ed68d251966dca48a6ffa33e",
+        "tldw_Server_API/tests/lint/test_rg_route_map_lint.py": "5e6a1cfda24c73e4ccb22474b97a404ad1d36aa411749d1683c6b62b8567abbb"
+      },
+      "scans": {
+        "ruff_current": {
+          "command": [
+            "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python",
+            "-m",
+            "ruff",
+            "check",
+            "--no-cache",
+            "--output-format=json",
+            "Helper_Scripts/ci/rg_route_map_lint.py",
+            "Helper_Scripts/ci/route_auth_ratchet.py",
+            "Helper_Scripts/rg_webui_fixture_from_access_log.py",
+            "tldw_Server_API/app/api/v1/endpoints/audio/audio_transcriptions.py",
+            "tldw_Server_API/app/api/v1/endpoints/auth.py",
+            "tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py",
+            "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+            "tldw_Server_API/app/core/Resource_Governance/coverage_audit.py",
+            "tldw_Server_API/app/core/Resource_Governance/deps.py",
+            "tldw_Server_API/app/core/Resource_Governance/governor.py",
+            "tldw_Server_API/app/core/Resource_Governance/governor_redis.py",
+            "tldw_Server_API/app/core/Resource_Governance/middleware_simple.py",
+            "tldw_Server_API/app/core/Resource_Governance/policy_eval.py",
+            "tldw_Server_API/app/core/Resource_Governance/policy_resolver.py",
+            "tldw_Server_API/app/core/Usage/usage_tracker.py",
+            "tldw_Server_API/app/services/startup_resource_governor.py",
+            "tldw_Server_API/tests/Audio/test_audio_transcriptions_adapter_path.py",
+            "tldw_Server_API/tests/AuthNZ_Unit/test_auth_rg_single_charge.py",
+            "tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py",
+            "tldw_Server_API/tests/Resource_Governance/integration/test_policy_loader_route_map_postgres.py",
+            "tldw_Server_API/tests/Resource_Governance/test_coverage_audit.py",
+            "tldw_Server_API/tests/Resource_Governance/test_governor_safety_net.py",
+            "tldw_Server_API/tests/Resource_Governance/test_middleware_cookie_owner.py",
+            "tldw_Server_API/tests/Resource_Governance/test_middleware_identity.py",
+            "tldw_Server_API/tests/Resource_Governance/test_middleware_tag_enforcement.py",
+            "tldw_Server_API/tests/Resource_Governance/test_policy_eval.py",
+            "tldw_Server_API/tests/Resource_Governance/test_policy_loader_route_map_db_store.py",
+            "tldw_Server_API/tests/Resource_Governance/test_policy_resolver.py",
+            "tldw_Server_API/tests/Resource_Governance/test_tokens_daily_cap.py",
+            "tldw_Server_API/tests/Resource_Governance/test_webui_replay_no_429.py",
+            "tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py",
+            "tldw_Server_API/tests/Utils/test_fastapi_routes.py",
+            "tldw_Server_API/tests/lint/test_rg_route_map_lint.py"
+          ],
+          "cwd": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2",
+          "report": "/tmp/email_pr3023_devb365_ruff_current_20261001.json",
+          "log": "/tmp/email_pr3023_devb365_ruff_current_20261001.log",
+          "exit_code": 1,
+          "findings": 45,
+          "errors": []
+        },
+        "bandit_production_current": {
+          "command": [
+            "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python",
+            "-m",
+            "bandit",
+            "-r",
+            "Helper_Scripts/ci/rg_route_map_lint.py",
+            "Helper_Scripts/ci/route_auth_ratchet.py",
+            "Helper_Scripts/rg_webui_fixture_from_access_log.py",
+            "tldw_Server_API/app/api/v1/endpoints/audio/audio_transcriptions.py",
+            "tldw_Server_API/app/api/v1/endpoints/auth.py",
+            "tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py",
+            "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+            "tldw_Server_API/app/core/Resource_Governance/coverage_audit.py",
+            "tldw_Server_API/app/core/Resource_Governance/deps.py",
+            "tldw_Server_API/app/core/Resource_Governance/governor.py",
+            "tldw_Server_API/app/core/Resource_Governance/governor_redis.py",
+            "tldw_Server_API/app/core/Resource_Governance/middleware_simple.py",
+            "tldw_Server_API/app/core/Resource_Governance/policy_eval.py",
+            "tldw_Server_API/app/core/Resource_Governance/policy_resolver.py",
+            "tldw_Server_API/app/core/Usage/usage_tracker.py",
+            "tldw_Server_API/app/services/startup_resource_governor.py",
+            "-f",
+            "json",
+            "-o",
+            "/tmp/email_pr3023_devb365_bandit_production_current_20261001.json"
+          ],
+          "cwd": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2",
+          "report": "/tmp/email_pr3023_devb365_bandit_production_current_20261001.json",
+          "log": "/tmp/email_pr3023_devb365_bandit_production_current_20261001.log",
+          "exit_code": 1,
+          "findings": 12,
+          "errors": []
+        },
+        "bandit_tests_current": {
+          "command": [
+            "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python",
+            "-m",
+            "bandit",
+            "-r",
+            "tldw_Server_API/tests/Audio/test_audio_transcriptions_adapter_path.py",
+            "tldw_Server_API/tests/AuthNZ_Unit/test_auth_rg_single_charge.py",
+            "tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py",
+            "tldw_Server_API/tests/Resource_Governance/integration/test_policy_loader_route_map_postgres.py",
+            "tldw_Server_API/tests/Resource_Governance/test_coverage_audit.py",
+            "tldw_Server_API/tests/Resource_Governance/test_governor_safety_net.py",
+            "tldw_Server_API/tests/Resource_Governance/test_middleware_cookie_owner.py",
+            "tldw_Server_API/tests/Resource_Governance/test_middleware_identity.py",
+            "tldw_Server_API/tests/Resource_Governance/test_middleware_tag_enforcement.py",
+            "tldw_Server_API/tests/Resource_Governance/test_policy_eval.py",
+            "tldw_Server_API/tests/Resource_Governance/test_policy_loader_route_map_db_store.py",
+            "tldw_Server_API/tests/Resource_Governance/test_policy_resolver.py",
+            "tldw_Server_API/tests/Resource_Governance/test_tokens_daily_cap.py",
+            "tldw_Server_API/tests/Resource_Governance/test_webui_replay_no_429.py",
+            "tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py",
+            "tldw_Server_API/tests/Utils/test_fastapi_routes.py",
+            "tldw_Server_API/tests/lint/test_rg_route_map_lint.py",
+            "-s",
+            "B101",
+            "-f",
+            "json",
+            "-o",
+            "/tmp/email_pr3023_devb365_bandit_tests_current_20261001.json"
+          ],
+          "cwd": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2",
+          "report": "/tmp/email_pr3023_devb365_bandit_tests_current_20261001.json",
+          "log": "/tmp/email_pr3023_devb365_bandit_tests_current_20261001.log",
+          "exit_code": 1,
+          "findings": 4,
+          "errors": []
+        },
+        "ruff_baseline": {
+          "command": [
+            "/tmp/email_pr3023_dev6074_python_20260929",
+            "-m",
+            "ruff",
+            "check",
+            "--no-cache",
+            "--output-format=json",
+            "Helper_Scripts/ci/rg_route_map_lint.py",
+            "Helper_Scripts/ci/route_auth_ratchet.py",
+            "Helper_Scripts/rg_webui_fixture_from_access_log.py",
+            "tldw_Server_API/app/api/v1/endpoints/audio/audio_transcriptions.py",
+            "tldw_Server_API/app/api/v1/endpoints/auth.py",
+            "tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py",
+            "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+            "tldw_Server_API/app/core/Resource_Governance/coverage_audit.py",
+            "tldw_Server_API/app/core/Resource_Governance/deps.py",
+            "tldw_Server_API/app/core/Resource_Governance/governor.py",
+            "tldw_Server_API/app/core/Resource_Governance/governor_redis.py",
+            "tldw_Server_API/app/core/Resource_Governance/middleware_simple.py",
+            "tldw_Server_API/app/core/Resource_Governance/policy_eval.py",
+            "tldw_Server_API/app/core/Resource_Governance/policy_resolver.py",
+            "tldw_Server_API/app/core/Usage/usage_tracker.py",
+            "tldw_Server_API/app/services/startup_resource_governor.py",
+            "tldw_Server_API/tests/Audio/test_audio_transcriptions_adapter_path.py",
+            "tldw_Server_API/tests/AuthNZ_Unit/test_auth_rg_single_charge.py",
+            "tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py",
+            "tldw_Server_API/tests/Resource_Governance/integration/test_policy_loader_route_map_postgres.py",
+            "tldw_Server_API/tests/Resource_Governance/test_coverage_audit.py",
+            "tldw_Server_API/tests/Resource_Governance/test_governor_safety_net.py",
+            "tldw_Server_API/tests/Resource_Governance/test_middleware_cookie_owner.py",
+            "tldw_Server_API/tests/Resource_Governance/test_middleware_identity.py",
+            "tldw_Server_API/tests/Resource_Governance/test_middleware_tag_enforcement.py",
+            "tldw_Server_API/tests/Resource_Governance/test_policy_eval.py",
+            "tldw_Server_API/tests/Resource_Governance/test_policy_loader_route_map_db_store.py",
+            "tldw_Server_API/tests/Resource_Governance/test_policy_resolver.py",
+            "tldw_Server_API/tests/Resource_Governance/test_tokens_daily_cap.py",
+            "tldw_Server_API/tests/Resource_Governance/test_webui_replay_no_429.py",
+            "tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py",
+            "tldw_Server_API/tests/Utils/test_fastapi_routes.py",
+            "tldw_Server_API/tests/lint/test_rg_route_map_lint.py"
+          ],
+          "cwd": "/tmp/email_pr3023_devb365_quality_baseline_20261001",
+          "report": "/tmp/email_pr3023_devb365_ruff_baseline_20261001.json",
+          "log": "/tmp/email_pr3023_devb365_ruff_baseline_20261001.log",
+          "exit_code": 1,
+          "findings": 70,
+          "errors": []
+        },
+        "bandit_production_baseline": {
+          "command": [
+            "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python",
+            "-m",
+            "bandit",
+            "-r",
+            "Helper_Scripts/ci/rg_route_map_lint.py",
+            "Helper_Scripts/ci/route_auth_ratchet.py",
+            "Helper_Scripts/rg_webui_fixture_from_access_log.py",
+            "tldw_Server_API/app/api/v1/endpoints/audio/audio_transcriptions.py",
+            "tldw_Server_API/app/api/v1/endpoints/auth.py",
+            "tldw_Server_API/app/api/v1/endpoints/embeddings_v5_production_enhanced.py",
+            "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+            "tldw_Server_API/app/core/Resource_Governance/coverage_audit.py",
+            "tldw_Server_API/app/core/Resource_Governance/deps.py",
+            "tldw_Server_API/app/core/Resource_Governance/governor.py",
+            "tldw_Server_API/app/core/Resource_Governance/governor_redis.py",
+            "tldw_Server_API/app/core/Resource_Governance/middleware_simple.py",
+            "tldw_Server_API/app/core/Resource_Governance/policy_eval.py",
+            "tldw_Server_API/app/core/Resource_Governance/policy_resolver.py",
+            "tldw_Server_API/app/core/Usage/usage_tracker.py",
+            "tldw_Server_API/app/services/startup_resource_governor.py",
+            "-f",
+            "json",
+            "-o",
+            "/tmp/email_pr3023_devb365_bandit_production_baseline_20261001.json"
+          ],
+          "cwd": "/tmp/email_pr3023_devb365_quality_baseline_20261001",
+          "report": "/tmp/email_pr3023_devb365_bandit_production_baseline_20261001.json",
+          "log": "/tmp/email_pr3023_devb365_bandit_production_baseline_20261001.log",
+          "exit_code": 1,
+          "findings": 12,
+          "errors": []
+        },
+        "bandit_tests_baseline": {
+          "command": [
+            "/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python",
+            "-m",
+            "bandit",
+            "-r",
+            "tldw_Server_API/tests/Audio/test_audio_transcriptions_adapter_path.py",
+            "tldw_Server_API/tests/AuthNZ_Unit/test_auth_rg_single_charge.py",
+            "tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py",
+            "tldw_Server_API/tests/Resource_Governance/integration/test_policy_loader_route_map_postgres.py",
+            "tldw_Server_API/tests/Resource_Governance/test_coverage_audit.py",
+            "tldw_Server_API/tests/Resource_Governance/test_governor_safety_net.py",
+            "tldw_Server_API/tests/Resource_Governance/test_middleware_cookie_owner.py",
+            "tldw_Server_API/tests/Resource_Governance/test_middleware_identity.py",
+            "tldw_Server_API/tests/Resource_Governance/test_middleware_tag_enforcement.py",
+            "tldw_Server_API/tests/Resource_Governance/test_policy_eval.py",
+            "tldw_Server_API/tests/Resource_Governance/test_policy_loader_route_map_db_store.py",
+            "tldw_Server_API/tests/Resource_Governance/test_policy_resolver.py",
+            "tldw_Server_API/tests/Resource_Governance/test_tokens_daily_cap.py",
+            "tldw_Server_API/tests/Resource_Governance/test_webui_replay_no_429.py",
+            "tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py",
+            "tldw_Server_API/tests/Utils/test_fastapi_routes.py",
+            "tldw_Server_API/tests/lint/test_rg_route_map_lint.py",
+            "-s",
+            "B101",
+            "-f",
+            "json",
+            "-o",
+            "/tmp/email_pr3023_devb365_bandit_tests_baseline_20261001.json"
+          ],
+          "cwd": "/tmp/email_pr3023_devb365_quality_baseline_20261001",
+          "report": "/tmp/email_pr3023_devb365_bandit_tests_baseline_20261001.json",
+          "log": "/tmp/email_pr3023_devb365_bandit_tests_baseline_20261001.log",
+          "exit_code": 1,
+          "findings": 4,
+          "errors": []
+        }
+      },
+      "baseline_package_context": [
+        "Helper_Scripts/ci/__init__.py",
+        "Helper_Scripts/__init__.py",
+        "tldw_Server_API/app/api/v1/endpoints/audio/__init__.py",
+        "tldw_Server_API/app/api/v1/endpoints/__init__.py",
+        "tldw_Server_API/app/api/v1/__init__.py",
+        "tldw_Server_API/app/api/__init__.py",
+        "tldw_Server_API/app/__init__.py",
+        "tldw_Server_API/__init__.py",
+        "tldw_Server_API/app/core/Ingestion_Media_Processing/__init__.py",
+        "tldw_Server_API/app/core/__init__.py",
+        "tldw_Server_API/app/core/Resource_Governance/__init__.py",
+        "tldw_Server_API/app/core/Usage/__init__.py",
+        "tldw_Server_API/app/services/__init__.py",
+        "tldw_Server_API/tests/Audio/__init__.py",
+        "tldw_Server_API/tests/__init__.py",
+        "tldw_Server_API/tests/AuthNZ_Unit/__init__.py",
+        "tldw_Server_API/tests/Utils/__init__.py"
+      ],
+      "comparison": {
+        "ruff": {
+          "current": 45,
+          "baseline": 70,
+          "new": [],
+          "removed": [
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "I001",
+              "Import block is un-sorted or un-formatted",
+              1,
+              1
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "UP035",
+              "Import from `collections.abc` instead: `Mapping`",
+              16,
+              1
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "F821",
+              "Undefined name `MediaDatabase`",
+              137,
+              26
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "B009",
+              "Do not call `getattr` with a constant attribute value. It is not any safer than normal property access.",
+              190,
+              44
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "F821",
+              "Undefined name `MediaDatabase`",
+              1177,
+              39
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "F821",
+              "Undefined name `MediaDatabase`",
+              2373,
+              9
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "F821",
+              "Undefined name `MediaDatabase`",
+              2657,
+              9
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "F821",
+              "Undefined name `MediaDatabase`",
+              3536,
+              9
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "F841",
+              "Local variable `model_for_check` is assigned to but never used",
+              4182,
+              17
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "F821",
+              "Undefined name `MediaDatabase`",
+              4193,
+              51
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "B023",
+              "Function definition does not bind loop variable `url_clause`",
+              4207,
+              90
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "B023",
+              "Function definition does not bind loop variable `url_params`",
+              4210,
+              35
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "B023",
+              "Function definition does not bind loop variable `source_hash`",
+              4210,
+              47
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "B023",
+              "Function definition does not bind loop variable `url_clause_alias`",
+              4226,
+              54
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "B023",
+              "Function definition does not bind loop variable `source_hash`",
+              4228,
+              68
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "B023",
+              "Function definition does not bind loop variable `url_params_alias`",
+              4231,
+              39
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "B023",
+              "Function definition does not bind loop variable `url_clause_alias`",
+              4247,
+              50
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "B023",
+              "Function definition does not bind loop variable `source_hash`",
+              4249,
+              64
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "B023",
+              "Function definition does not bind loop variable `url_params_alias`",
+              4252,
+              35
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "F821",
+              "Undefined name `MediaDatabase`",
+              4279,
+              43
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "B023",
+              "Function definition does not bind loop variable `url_clause`",
+              4288,
+              86
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "B023",
+              "Function definition does not bind loop variable `url_params`",
+              4291,
+              29
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "F821",
+              "Undefined name `MediaDatabase`",
+              5727,
+              50
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "F821",
+              "Undefined name `MediaDatabase`",
+              5928,
+              71
+            ],
+            [
+              "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+              "F821",
+              "Undefined name `MediaDatabase`",
+              6178,
+              75
+            ]
+          ],
+          "current_codes": {
+            "I001": 21,
+            "SIM114": 1,
+            "UP035": 3,
+            "UP006": 18,
+            "F401": 2
+          },
+          "normalization": "Canonical paths and exact unchanged line mapping, code, message and column; no findings suppressed."
+        },
+        "bandit_production": {
+          "current": 12,
+          "baseline": 12,
+          "new": [],
+          "removed": [],
+          "current_codes": {
+            "B106": 11,
+            "B113": 1
+          },
+          "normalization": "Canonical paths and exact unchanged line mapping, code, message and column; no findings suppressed."
+        },
+        "bandit_tests": {
+          "current": 4,
+          "baseline": 4,
+          "new": [],
+          "removed": [],
+          "current_codes": {
+            "B105": 2,
+            "B404": 1,
+            "B603": 1
+          },
+          "normalization": "Canonical paths and exact unchanged line mapping, code, message and column; no findings suppressed."
+        }
+      },
+      "baseline_package_context_note": "Initial partial baseline missed native package markers, causing one import-sort diagnostic on byte-identical rg_route_map_lint.py. Exact dev package markers copied; prior report retained as setup diagnostic, not a source improvement.",
+      "normalizer_setup_diagnostic": "First comparator rejected /private/tmp report paths relative to /tmp baseline. Corrected canonical path resolution; scanner reports unchanged."
+    },
+    "contracts": {
+      "schema": {
+        "command": [
+          "/tmp/email_pr3023_dev6074_python_20260929",
+          "Helper_Scripts/export_openapi_schema.py",
+          "--out",
+          "/tmp/email_pr3023_devb365_openapi_20261001.json",
+          "--check",
+          "apps/tldw-frontend/lib/api/openapi.fingerprint.json"
+        ],
+        "exit_code": 0,
+        "fingerprint": {
+          "sha256": "bb17b220db46ddb10fd4dc22a4e87d3c63f8a4fd5e38287386c2cf8ca4426cd3",
+          "openapi_version": "3.1.0",
+          "path_count": 2105,
+          "schema_count": 3245,
+          "note": "Regenerate with `make openapi-fingerprint`. A change here means the backend API contract drifted; regenerate the frontend types (`bun run generate:api-types` in apps/tldw-frontend) and review."
+        },
+        "schema_file_sha256": "d8b0c8bef9878e1c8c8b410e25684ef12af18bb08d44b5a7106362c2c2134d6f",
+        "identical_to_prior_generated_schema": true,
+        "log": "/tmp/email_pr3023_devb365_schema_check_20261001.log"
+      },
+      "route_auth": {
+        "command": [
+          "/tmp/email_pr3023_dev6074_python_20260929",
+          "Helper_Scripts/ci/route_auth_ratchet.py"
+        ],
+        "exit_code": 0,
+        "unauthenticated_routes": 178,
+        "baseline_exact": true,
+        "log": "/tmp/email_pr3023_devb365_route_auth_20261001.log"
+      },
+      "route_map": {
+        "command": [
+          "/tmp/email_pr3023_dev6074_python_20260929",
+          "Helper_Scripts/ci/rg_route_map_lint.py"
+        ],
+        "exit_code": 0,
+        "log": "/tmp/email_pr3023_devb365_route_map_20261001.log"
+      },
+      "frontend_types": "No new type-generation run in this refresh; fresh combined schema is byte-identical to the schema used for the successful dev85ed standard type generation."
+    },
+    "independent_review": {
+      "task": "TASK13377",
+      "reviewed_at_utc": "2026-10-01T03:58:19.985098+00:00",
+      "review_mode": "Read-only repository review; no tests rerun by this reviewer; only this credential-free /tmp receipt written.",
+      "old_checkpoint": "306bc79f498e48b70abcf3936364f4796fde5547",
+      "dev": "b365af1827b607fc221f9bf31ca76dde881edb4f",
+      "head": "271eeb4d23a05bb69f68feb894636fa9150ba08b",
+      "patch": {
+        "path": "/tmp/email_pr3023_devb365_integration_final_20261001.patch",
+        "sha256": "34cbbecf0113ca7024c9fcbc69eb41b27b0da7c39a127c5b7ee7c3fcf5453585",
+        "matches_complete_checkpoint_to_head_git_diff": true
+      },
+      "source_assessment": "No actionable source integration finding. The four intersections preserve incoming changes and prior email corrections.",
+      "preserved_intersections": [
+        "Memory governor checks and consumes original daily units while clamping minute reservations; incoming live-op expiry, purge throttling and scope-pair refunds remain.",
+        "Redis governor uses original daily units for check/reserve and memory fallback; incoming fractional request limits remain.",
+        "Persistence accepts the incoming server-generated upload-ledger operation ID and retains all prior email persistence changes.",
+        "Daily-token tests retain incoming per-call usage accounting and all four original-unit quota parameter cases."
+      ],
+      "independent_equality": {
+        "incoming_paths": 46,
+        "exact_dev_paths": 42,
+        "exceptions": [
+          "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py",
+          "tldw_Server_API/app/core/Resource_Governance/governor.py",
+          "tldw_Server_API/app/core/Resource_Governance/governor_redis.py",
+          "tldw_Server_API/tests/Resource_Governance/test_tokens_daily_cap.py"
+        ],
+        "other_nonbacklog_entries": 22389,
+        "other_changed_entries": [],
+        "current_quality_source_hashes_verified": 34,
+        "preservation_source_hashes_verified": 191,
+        "prior_workspace_python_hashes_identical": 58
+      },
+      "independent_quality_comparison": {
+        "method": "Normalize resolved scan roots and compare full diagnostic identity and columns with exact unchanged-line mapping against immutable dev source. Baseline package markers and pyproject.toml match dev exactly.",
+        "ruff": {
+          "current": 45,
+          "baseline": 70,
+          "new": 0,
+          "removed": 25
+        },
+        "bandit_production": {
+          "current": 12,
+          "baseline": 12,
+          "new": 0,
+          "removed": 0,
+          "errors": 0
+        },
+        "bandit_tests_excluding_B101": {
+          "current": 4,
+          "baseline": 4,
+          "new": 0,
+          "removed": 0,
+          "errors": 0
+        },
+        "compiled_python_receipt": 34
+      },
+      "fresh_test_xml_verification": {
+        "affected": {
+          "collected": 598,
+          "passed": 596,
+          "failures": 0,
+          "errors": 0,
+          "ordinary_skips": 0,
+          "existing_xfails": 2,
+          "xml_sha256": "ee42175c9d44e128670f4c517872b9b0b92ec1d0e522be325f8e118aca0d93ca",
+          "log_sha256": "a76948525b45b508e583261238413306a18c9faa6a2572a962550c652248b693",
+          "xml_and_log_hashes_independently_verified": true,
+          "command_exit_code": 0
+        },
+        "retained": {
+          "collected": 650,
+          "passed": 650,
+          "failures": 0,
+          "errors": 0,
+          "ordinary_skips": 0,
+          "existing_xfails": 0,
+          "xml_sha256": "45e291206e188651aa6b1e32bfe5fafa142cffe8e9a2a22b696db57b10fae735",
+          "log_sha256": "45cbf4e0839894dc1a7bc4aed362ca3c903c0a9114706123e3d78de99ad7da9a",
+          "xml_and_log_hashes_independently_verified": true,
+          "command_exit_code": 0
+        },
+        "email": {
+          "collected": 47,
+          "passed": 47,
+          "failures": 0,
+          "errors": 0,
+          "ordinary_skips": 0,
+          "existing_xfails": 0,
+          "xml_sha256": "a39efd49805d3384fd90df35bd6f17aa7984de338daa1c5124e2a2ce94cbd7ec",
+          "log_sha256": "17520f3a4dfb37aba1c182aa654a84c036a905a9c9654b13bac1856f3131a839",
+          "xml_and_log_hashes_independently_verified": true,
+          "command_exit_code": 0
+        }
+      },
+      "real_email_rg_probe": {
+        "path": "/tmp/email_pr3023_devb365_test_email_ingress_20261001.py",
+        "sha256": "bde7682ac406e440f6e003e7f41d2f38ddd86a7c56a2b4f1de95b0f6834427f9",
+        "xml_case": "test_real_email_write_scope_and_org_selection_through_rg_ingress",
+        "passed": true,
+        "scope": "Existing real AuthNZ/SQLite email fixture and actual selected production routers, initialized production RG middleware; no authentication or billing dependency overrides. Not a full production server deployment.",
+        "assertions_verified_from_source_and_passed_xml": [
+          "Read API key upload returns 403",
+          "Rejected read-key response includes X-RateLimit-Limit",
+          "Existing two-org scenario returns 413 for exhausted selected-org quota, persists distinct same-message records after quota restoration, drops prior-org team scope and enforces cross-org detail 404",
+          "Governor buckets include the authenticated owner user scope"
+        ]
+      },
+      "contracts": {
+        "canonical_fingerprint": "bb17b220db46ddb10fd4dc22a4e87d3c63f8a4fd5e38287386c2cf8ca4426cd3",
+        "paths": 2105,
+        "schemas": 3245,
+        "independently_recomputed": true,
+        "schema_byte_identical_to_prior_and_generated": true,
+        "route_auth_baseline_count": 178,
+        "route_auth_exact": true,
+        "route_map_lint_exit_code_receipt": 0,
+        "fresh_frontend_type_generation": false
+      },
+      "dependency_observation": {
+        "wrapper": "/tmp/email_pr3023_dev6074_python_20260929",
+        "metadata_files_predate_fresh_tests": true,
+        "observed_packages": {
+          "fastapi": "0.141.1",
+          "pydantic": "2.13.5",
+          "pydantic-core": "2.46.5",
+          "starlette": "1.7.0",
+          "pytest": "8.4.1",
+          "pytest-randomly": "4.1.0",
+          "psycopg": "3.3.3",
+          "ruff": "0.15.10",
+          "bandit": "1.9.3"
+        }
+      },
+      "findings": [
+        {
+          "severity": "P2",
+          "kind": "Evidence artifact accuracy",
+          "file": "/tmp/email_pr3023_devb365_dependencies_20261001.json",
+          "title": "Bind the dependency receipt to the test wrapper environment",
+          "evidence": "The receipt lists pydantic 2.11.7, pydantic-core 2.33.2 and starlette 1.2.1. Running importlib.metadata through the exact recorded test wrapper reports 2.13.5, 2.46.5 and 1.7.0 respectively. The wrapper prepends /tmp/email_pr3023_dev6074_deps_20260929, and all three distribution METADATA files predate the fresh test XML timestamps. FastAPI matches 0.141.1.",
+          "requested_correction": "Regenerate the dependency receipt through the exact wrapper and preserve source-versus-runtime evidence binding. No source fix or package reinstall is indicated by this finding."
+        }
+      ],
+      "limitations": [
+        "The three fresh suite counts overlap and must not be added as a unique total.",
+        "The 1968-pass Workspace result remains historical on dev85ed despite all 58 directly reviewed Python files remaining byte-identical.",
+        "The original 163-file certificate has changed direct source paths and must remain bound to its original source and transitive inputs; this review verifies the current preservation receipt hashes, not a new full certificate.",
+        "No full repository suite or hosted merge success was verified."
+      ],
+      "publication_assessment": "Source integration is clear; correct the dependency evidence artifact before publication.",
+      "focused_dependency_correction_resolution": {
+        "resolved_at_utc": "2026-10-01T04:00:45.767396+00:00",
+        "finding_index": 0,
+        "status": "resolved",
+        "scope": "Only the corrected dependency receipt and wrapper binding were rechecked. No source review or test suite was repeated.",
+        "corrected_receipt": "/tmp/email_pr3023_devb365_dependencies_20261001.json",
+        "corrected_receipt_sha256": "c353ad2f3000846bc40b22d6e5c8e2d5d1a289b82171883f1e83948739474b53",
+        "wrapper": "/tmp/email_pr3023_dev6074_python_20260929",
+        "wrapper_sha256": "8124c9eac5121b300798ed6b1a8226b2ce7594f29b2acebd12766a477503fc1a",
+        "actual_python_and_all_nine_package_versions_match": true,
+        "verified_package_versions": {
+          "fastapi": "0.141.1",
+          "pydantic": "2.13.5",
+          "pydantic-core": "2.46.5",
+          "starlette": "1.7.0",
+          "pytest": "8.4.1",
+          "pytest-randomly": "4.1.0",
+          "psycopg": "3.3.3",
+          "ruff": "0.15.10",
+          "bandit": "1.9.3"
+        },
+        "original_diagnostic_receipt": "/tmp/email_pr3023_devb365_dependencies_before_wrapper_correction_20261001.json",
+        "original_diagnostic_sha256": "9a7d089528631f7b6e8d317809847f567743fbb0ebddd89985f57e918be6e25e",
+        "original_finding_preserved": true,
+        "resolution": "The corrected receipt now binds package metadata to the exact supported test wrapper. The incorrect bare-venv receipt is preserved and explicitly identified as diagnostic. No source change or dependency reinstall was performed for this review."
+      },
+      "current_publication_assessment": "Source integration is clear and the dependency artifact finding is resolved. This focused closure supersedes only the dependency correction required by the original publication_assessment; prior verification scope and limitations remain unchanged."
+    },
+    "verification": {
+      "affected": {
+        "collected": 598,
+        "passed": 596,
+        "skipped_or_xfailed": [
+          {
+            "class": "tldw_Server_API.tests.Resource_Governance.test_governor_redis_property",
+            "name": "test_requests_retry_after_monotonic_and_burst_vs_steady",
+            "message": "FIXME: stabilize Redis requests RA monotonicity across burst/steady patterns",
+            "type": "pytest.xfail"
+          },
+          {
+            "class": "tldw_Server_API.tests.Resource_Governance.test_governor_redis",
+            "name": "test_requests_burst_and_retry_after_behavior",
+            "message": "FIXME: stabilize Redis burst retry_after/deny floor determinism",
+            "type": "pytest.xfail"
+          }
+        ],
+        "failures": [],
+        "errors": [],
+        "command": {
+          "command": [
+            "/tmp/email_pr3023_dev6074_python_20260929",
+            "-m",
+            "pytest",
+            "-q",
+            "tldw_Server_API/tests/Resource_Governance",
+            "tldw_Server_API/tests/AuthNZ_Unit/test_auth_rg_single_charge.py",
+            "tldw_Server_API/tests/Audio/test_audio_transcriptions_adapter_path.py",
+            "tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py",
+            "tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py",
+            "tldw_Server_API/tests/Utils/test_fastapi_routes.py",
+            "tldw_Server_API/tests/lint/test_rg_route_map_lint.py",
+            "tldw_Server_API/tests/Chat_NEW/integration/test_moderation.py",
+            "tldw_Server_API/tests/Persona/test_buddy_workspace_model_handoff.py",
+            "tldw_Server_API/tests/Chat_NEW/integration/test_chat_completions_api.py::TestErrorHandling::test_rate_limit_error_handling",
+            "--randomly-seed=4293640905",
+            "--basetemp=/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/email_pr3023_devb365_affected_tmp_20261001",
+            "--junitxml=/tmp/email_pr3023_devb365_affected_20261001.xml"
+          ],
+          "cwd": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2",
+          "env": {
+            "TLDW_TEST_POSTGRES_REQUIRED": "1",
+            "TMPDIR": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T"
+          },
+          "phase": "New devb365 governor/auth/persistence intersections plus retained fixture regressions",
+          "exit_code": 0,
+          "elapsed_seconds": 317.80458521842957
+        },
+        "xml_sha256": "ee42175c9d44e128670f4c517872b9b0b92ec1d0e522be325f8e118aca0d93ca",
+        "log_sha256": "a76948525b45b508e583261238413306a18c9faa6a2572a962550c652248b693"
+      },
+      "retained": {
+        "collected": 650,
+        "passed": 650,
+        "skipped_or_xfailed": [],
+        "failures": [],
+        "errors": [],
+        "command": {
+          "command": [
+            "/tmp/email_pr3023_dev6074_python_20260929",
+            "-m",
+            "pytest",
+            "-q",
+            "tldw_Server_API/tests/AuthNZ/unit/test_scoped_token_route_auth_chain.py",
+            "tldw_Server_API/tests/AuthNZ_Unit/test_authenticated_content_scope.py",
+            "tldw_Server_API/tests/CI/test_required_workflow_contracts.py",
+            "tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v61.py",
+            "tldw_Server_API/tests/DB_Management/test_email_search_cursor.py",
+            "tldw_Server_API/tests/DB_Management/test_media_db_runtime_factory.py",
+            "tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py",
+            "tldw_Server_API/tests/DB_Management/test_media_postgres_support.py",
+            "tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_access_policy.py",
+            "tldw_Server_API/tests/Media/unit/test_media_upload_cleanup.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_attachment_upload_13376.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_search_cursor_endpoint.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_research_discovery_media_add.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_url_limits.py",
+            "tldw_Server_API/tests/Metrics/test_email_ingestion_metrics_13376.py",
+            "tldw_Server_API/tests/Metrics/test_email_search_metrics_13376.py",
+            "tldw_Server_API/tests/Resource_Governance/test_resource_governor_import_order.py",
+            "tldw_Server_API/tests/Resource_Governance/test_tokens_daily_cap.py",
+            "tldw_Server_API/tests/Resource_Governance/test_governor_safety_net.py",
+            "tldw_Server_API/tests/Collections",
+            "--randomly-seed=4293640905",
+            "--basetemp=/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/email_pr3023_devb365_retained_tmp_20261001",
+            "--junitxml=/tmp/email_pr3023_devb365_retained_20261001.xml"
+          ],
+          "cwd": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2",
+          "env": {
+            "TLDW_TEST_POSTGRES_REQUIRED": "1",
+            "TMPDIR": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T"
+          },
+          "phase": "Retained email/auth/Collections/ChaCha/governor cases after new ingress policy integration",
+          "exit_code": 0,
+          "elapsed_seconds": 316.3270950317383
+        },
+        "xml_sha256": "45e291206e188651aa6b1e32bfe5fafa142cffe8e9a2a22b696db57b10fae735",
+        "log_sha256": "45cbf4e0839894dc1a7bc4aed362ca3c903c0a9114706123e3d78de99ad7da9a"
+      },
+      "email": {
+        "collected": 47,
+        "passed": 47,
+        "skipped_or_xfailed": [],
+        "failures": [],
+        "errors": [],
+        "command": {
+          "command": [
+            "/tmp/email_pr3023_dev6074_python_20260929",
+            "-m",
+            "pytest",
+            "-q",
+            "tldw_Server_API/tests/Billing/test_billing_deps_org_header.py",
+            "tldw_Server_API/tests/Billing/test_content_org_deps.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_authenticated_upload.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_authenticated_access.py",
+            "/tmp/email_pr3023_devb365_test_email_ingress_20261001.py",
+            "--randomly-seed=4293640905",
+            "--basetemp=/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/email_pr3023_devb365_email_tmp_20261001",
+            "--junitxml=/tmp/email_pr3023_devb365_email_20261001.xml"
+          ],
+          "cwd": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2",
+          "env": {
+            "TMPDIR": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T",
+            "PYTHONPATH": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2"
+          },
+          "phase": "Real authenticated organization and quota guards with production RG ingress",
+          "exit_code": 0,
+          "elapsed_seconds": 87.1987841129303
+        },
+        "xml_sha256": "a39efd49805d3384fd90df35bd6f17aa7984de338daa1c5124e2a2ce94cbd7ec",
+        "log_sha256": "17520f3a4dfb37aba1c182aa654a84c036a905a9c9654b13bac1856f3131a839"
+      }
+    },
+    "verification_source_binding": "These b365 integration results were produced on HEAD271e before the later TASK13377.8 app-main test-helper repair; final post-helper tests and immutable review are appended separately.",
+    "authenticated_email_ingress_probe": {
+      "path": "/tmp/email_pr3023_devb365_test_email_ingress_20261001.py",
+      "sha256": "bde7682ac406e440f6e003e7f41d2f38ddd86a7c56a2b4f1de95b0f6834427f9",
+      "behavior": "Real production RG initialization and middleware; existing real AuthNZ/SQLite email fixtures and two-organization scenario. Read-only key403 with rate-limit header, selected-org quota413, allowed uploads and cross-org search/detail isolation, authenticated user bucket evidence. No auth, billing, storage or parser overrides. Model/outbound work guarded. Local synthetic validation, not a deployed VM drill."
+    },
+    "historical_validation": "All35 earlier evidence values retain their original source/dependency bindings. Dev85ed Workspace1968pass/26existing skips is historical; all 58 direct Python files remain identical, but transitive b365 inputs changed and fresh affected suites are separate. Original 746 auth/email/routes, 13 monitoring,10native-PST were not rerun in full; no native-PST, throughput/million-message benchmark or live VM drill rerun. Suites overlap, not a full repository test suite.",
+    "publication_state": "Verified b365 integration before the subsequent TASK13377.8 test-helper repair. Final helper-repair verification/evidence and publication remain pending; historical hosted831dc successes cannot certify this integration."
+  },
+  "test_reload_identity_ci_repair_20261001": {
+    "task": "TASK13377.8",
+    "integration_head_before_commit": "271eeb4d23a05bb69f68feb894636fa9150ba08b",
+    "dev": "b365af1827b607fc221f9bf31ca76dde881edb4f",
+    "published_head_before_repair": "831dc3596b90631656a8ee7e6651753dd1d098fd",
+    "root_cause": {
+      "trace": {
+        "head": "271eeb4d23a05bb69f68feb894636fa9150ba08b",
+        "source": "tldw_Server_API/tests/helpers/app_main_state.py",
+        "records": [
+          {
+            "attempt": 0,
+            "old_reloaded_object_gone": true,
+            "new_object_reuses_old_id": true,
+            "new_plain_import_kept": false
+          }
+        ],
+        "natural_id_reuse_failure_reproduced": true
+      },
+      "explanation": "A collected reload module left its numeric ID in a permanent set; a distinct ordinary first import naturally reused that ID and was removed. Native weak module identity fixes the shared helper without retaining dead apps.",
+      "hosted_failure": "Broad CI36790042527 platform-infrastructure-metrics job110166347466:1failed/478passed; all219jobs/3pages inspected, only this shard and aggregate fail.",
+      "hosted_failure_log_sha256": "d297390b43b5e2813834070ca5a3b2d0eaf6f7874ff481c0858dc51b0c2f037c"
+    },
+    "repair": "weakref.WeakSet of actual reload modules replaces stale numeric IDs, existing restoration behavior retained; one deterministic collected-reload ID-collision regression",
+    "source_sha256": {
+      "tldw_Server_API/tests/helpers/app_main_state.py": "4df75cafd264f801dd1044f7d1d4dd740209e97ac4a19f2dcbe673a35b2e1999",
+      "tldw_Server_API/tests/Infrastructure/test_singleton_isolation.py": "8c109c985dc5b73fceedee5273f6b8158b68cf35335ebdcd4901f54a5fe4f491"
+    },
+    "quality": {
+      "cwd": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2",
+      "baseline_root": "/private/tmp/email_pr3023_reload_identity_baseline_20261001",
+      "baseline_head": "271eeb4d23a05bb69f68feb894636fa9150ba08b",
+      "source_sha256": {
+        "tldw_Server_API/tests/helpers/app_main_state.py": "4df75cafd264f801dd1044f7d1d4dd740209e97ac4a19f2dcbe673a35b2e1999",
+        "tldw_Server_API/tests/Infrastructure/test_singleton_isolation.py": "8c109c985dc5b73fceedee5273f6b8158b68cf35335ebdcd4901f54a5fe4f491"
+      },
+      "compiled": [
+        "tldw_Server_API/tests/helpers/app_main_state.py",
+        "tldw_Server_API/tests/Infrastructure/test_singleton_isolation.py"
+      ],
+      "commands": [
+        {
+          "scope": "ruff",
+          "binding": "current",
+          "command": [
+            "/tmp/email_pr3023_dev6074_python_20260929",
+            "-m",
+            "ruff",
+            "check",
+            "tldw_Server_API/tests/helpers/app_main_state.py",
+            "tldw_Server_API/tests/Infrastructure/test_singleton_isolation.py",
+            "--output-format=json"
+          ],
+          "cwd": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2",
+          "exit_code": 1
+        },
+        {
+          "scope": "bandit_production",
+          "binding": "current",
+          "command": [
+            "/tmp/email_pr3023_dev6074_python_20260929",
+            "-m",
+            "bandit",
+            "-r",
+            "tldw_Server_API/tests/helpers/app_main_state.py",
+            "-f",
+            "json",
+            "-o",
+            "/tmp/email_pr3023_reload_identity_bandit_production_current_20261001.json"
+          ],
+          "cwd": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2",
+          "exit_code": 0
+        },
+        {
+          "scope": "bandit_tests",
+          "binding": "current",
+          "command": [
+            "/tmp/email_pr3023_dev6074_python_20260929",
+            "-m",
+            "bandit",
+            "-r",
+            "tldw_Server_API/tests/Infrastructure/test_singleton_isolation.py",
+            "-s",
+            "B101",
+            "-f",
+            "json",
+            "-o",
+            "/tmp/email_pr3023_reload_identity_bandit_tests_current_20261001.json"
+          ],
+          "cwd": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2",
+          "exit_code": 1
+        },
+        {
+          "scope": "ruff",
+          "binding": "baseline",
+          "command": [
+            "/tmp/email_pr3023_dev6074_python_20260929",
+            "-m",
+            "ruff",
+            "check",
+            "tldw_Server_API/tests/helpers/app_main_state.py",
+            "tldw_Server_API/tests/Infrastructure/test_singleton_isolation.py",
+            "--output-format=json"
+          ],
+          "cwd": "/private/tmp/email_pr3023_reload_identity_baseline_20261001",
+          "exit_code": 1
+        },
+        {
+          "scope": "bandit_production",
+          "binding": "baseline",
+          "command": [
+            "/tmp/email_pr3023_dev6074_python_20260929",
+            "-m",
+            "bandit",
+            "-r",
+            "tldw_Server_API/tests/helpers/app_main_state.py",
+            "-f",
+            "json",
+            "-o",
+            "/tmp/email_pr3023_reload_identity_bandit_production_baseline_20261001.json"
+          ],
+          "cwd": "/private/tmp/email_pr3023_reload_identity_baseline_20261001",
+          "exit_code": 0
+        },
+        {
+          "scope": "bandit_tests",
+          "binding": "baseline",
+          "command": [
+            "/tmp/email_pr3023_dev6074_python_20260929",
+            "-m",
+            "bandit",
+            "-r",
+            "tldw_Server_API/tests/Infrastructure/test_singleton_isolation.py",
+            "-s",
+            "B101",
+            "-f",
+            "json",
+            "-o",
+            "/tmp/email_pr3023_reload_identity_bandit_tests_baseline_20261001.json"
+          ],
+          "cwd": "/private/tmp/email_pr3023_reload_identity_baseline_20261001",
+          "exit_code": 1
+        }
+      ],
+      "comparison": {
+        "ruff": {
+          "current": 2,
+          "baseline": 2,
+          "new": [],
+          "current_codes": {
+            "B010": 2
+          }
+        },
+        "bandit_production": {
+          "current": 0,
+          "baseline": 0,
+          "new": [],
+          "current_codes": {}
+        },
+        "bandit_tests": {
+          "current": 2,
+          "baseline": 2,
+          "new": [],
+          "current_codes": {
+            "B404": 1,
+            "B603": 1
+          }
+        }
+      },
+      "normalization": "Canonical paths, exact unchanged line mapping, code, message, column; only B101 excluded for test assertions; no helper exclusions."
+    },
+    "patch_sha256": "0fbb373d3f0bd04e351adf4655d4264f3b276cf7c4d014775456535abd776c50",
+    "independent_review": {
+      "task": "TASK13377.8",
+      "reviewed_at_utc": "2026-10-01T04:20:18.041741+00:00",
+      "review_mode": "Read-only source and artifact review; no tests or source edits performed by reviewer. Only this credential-free /tmp review receipt written.",
+      "head": "271eeb4d23a05bb69f68feb894636fa9150ba08b",
+      "patch": {
+        "path": "/tmp/email_pr3023_reload_identity_review_20261001.patch",
+        "sha256": "0fbb373d3f0bd04e351adf4655d4264f3b276cf7c4d014775456535abd776c50",
+        "matches_exact_current_two_file_delta": true
+      },
+      "source_sha256": {
+        "tldw_Server_API/tests/helpers/app_main_state.py": "4df75cafd264f801dd1044f7d1d4dd740209e97ac4a19f2dcbe673a35b2e1999",
+        "tldw_Server_API/tests/Infrastructure/test_singleton_isolation.py": "8c109c985dc5b73fceedee5273f6b8158b68cf35335ebdcd4901f54a5fe4f491"
+      },
+      "baseline": {
+        "root": "/private/tmp/email_pr3023_reload_identity_baseline_20261001",
+        "both_files_match_immutable_head": true
+      },
+      "root_cause": {
+        "trace": "/tmp/email_pr3023_reload_id_root_trace_20261001.json",
+        "sha256": "ea8b58cbda7a04e65ed0f7a8ee97ed16af056e6830315a56c8c3413fccf7c7e0",
+        "reviewed": "The native trace records a collected prior reload module, natural ID reuse by a plain import, and unintended removal of that import. The old helper stores numeric IDs forever, so this trace matches the failing lifecycle path."
+      },
+      "lifecycle_assessment": "WeakSet tracks live module objects, does not retain retired reloads, and cannot classify an unrelated first import by a reused numeric ID. Existing snapshot restoration and genuine reload cleanup remain. The shared autouse caller still wraps each test in app_main_isolated().",
+      "regression_assessment": "The deterministic test forces the old numeric-ID lookup to collide, verifies the old reload is collected, asserts the new plain first import remains published, and restores the original module in finally. Its scoped import stub is restored before the lifecycle assertion; normal monkeypatch teardown removes the local ID override.",
+      "tests_verified": {
+        "red": {
+          "testcases": 1,
+          "passed": 0,
+          "failure_count": 1,
+          "error_count": 0,
+          "skip_count": 0,
+          "xml_sha256": "b4e55b176be322ee0cd8287524a619b08ae97947a0964cb66b5f2ddf6de73f85",
+          "log_sha256": "69b994ee7a82d6c6cef612ce4f85ec1fd326890e26c9dd30ff8fa81ef04eb619",
+          "xml_and_log_hashes_independently_verified": true,
+          "expected_regression_failure": "test_a_first_import_survives_a_collected_reload_identity_collision: reused ID unloaded a plain first import"
+        },
+        "green": {
+          "testcases": 6,
+          "passed": 6,
+          "failure_count": 0,
+          "error_count": 0,
+          "skip_count": 0,
+          "xml_sha256": "8e227bc99b3a8e0adb532a1d040a1748fba383d7a0f5201240ad4565657eb004",
+          "log_sha256": "feed27b86f7885f27312d24816678fe0505610b0b9622647bdeed3556a8e0dfc",
+          "xml_and_log_hashes_independently_verified": true
+        },
+        "shard": {
+          "testcases": 480,
+          "passed": 480,
+          "failure_count": 0,
+          "error_count": 0,
+          "skip_count": 0,
+          "xml_sha256": "9d3b227c80b5328914f9a7cb7131cf39a81c859ae76710b49685c65ffea9eb42",
+          "log_sha256": "1faf0ebd7a4586934ce5184d0d7a689a792c205a0fe694ca254ed35b49da217f",
+          "xml_and_log_hashes_independently_verified": true
+        }
+      },
+      "independent_quality_comparison": {
+        "method": "Both baseline sources verified against the immutable HEAD. Scanner roots normalized and all diagnostic identity, columns and full source ranges compared using exact unchanged-line mapping.",
+        "ruff": {
+          "current": 2,
+          "baseline": 2,
+          "new": 0,
+          "removed": 0,
+          "codes": {
+            "B010": 2
+          }
+        },
+        "helper_bandit": {
+          "current": 0,
+          "baseline": 0,
+          "new": 0,
+          "errors": 0
+        },
+        "test_bandit_excluding_B101_assertions": {
+          "current": 2,
+          "baseline": 2,
+          "new": 0,
+          "removed": 0,
+          "errors": 0,
+          "codes": {
+            "B404": 1,
+            "B603": 1
+          }
+        },
+        "compile_receipt_paths": [
+          "tldw_Server_API/tests/helpers/app_main_state.py",
+          "tldw_Server_API/tests/Infrastructure/test_singleton_isolation.py"
+        ]
+      },
+      "findings": [],
+      "assessment": "No actionable finding in the minimal helper repair. Reviewed source and bounded verification evidence support the correction.",
+      "limitations": [
+        "The failed hosted shard was rerun locally under the supported Python 3.11 overlay; this is not a fresh hosted Python 3.12 result.",
+        "The singleton-module and full-shard counts overlap and are not additive.",
+        "Fresh affected, retained and authenticated-email suites are being handled separately by the coordinator and are not credited in this focused review.",
+        "The existing b365 integration review was not repeated; no full repository suite or publication/merge result was verified."
+      ]
+    },
+    "verification": {
+      "red": {
+        "testcases": 1,
+        "passed": 0,
+        "failures": [
+          {
+            "name": "test_a_first_import_survives_a_collected_reload_identity_collision",
+            "message": "AssertionError: a reused ID unloaded a plain first import\nassert None is <module 'tldw_Server_API.app.main'>\n +  where None = <function snapshot_app_main at 0x10be29260>()\n +    where <function snapshot_app_main at 0x10be29260> = <module 'tldw_Server_API.tests.helpers.app_main_state' from '/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2/tldw_Server_API/tests/helpers/app_main_state.py'>.snapshot_app_main"
+          }
+        ],
+        "errors": [],
+        "skips": [],
+        "xml_sha256": "b4e55b176be322ee0cd8287524a619b08ae97947a0964cb66b5f2ddf6de73f85",
+        "log_sha256": "69b994ee7a82d6c6cef612ce4f85ec1fd326890e26c9dd30ff8fa81ef04eb619"
+      },
+      "green": {
+        "testcases": 6,
+        "passed": 6,
+        "failures": [],
+        "errors": [],
+        "skips": [],
+        "xml_sha256": "8e227bc99b3a8e0adb532a1d040a1748fba383d7a0f5201240ad4565657eb004",
+        "log_sha256": "feed27b86f7885f27312d24816678fe0505610b0b9622647bdeed3556a8e0dfc"
+      },
+      "shard": {
+        "testcases": 480,
+        "passed": 480,
+        "failures": [],
+        "errors": [],
+        "skips": [],
+        "xml_sha256": "9d3b227c80b5328914f9a7cb7131cf39a81c859ae76710b49685c65ffea9eb42",
+        "log_sha256": "1faf0ebd7a4586934ce5184d0d7a689a792c205a0fe694ca254ed35b49da217f"
+      },
+      "affected": {
+        "collected": 598,
+        "passed": 596,
+        "skipped_or_xfailed": [
+          {
+            "class": "tldw_Server_API.tests.Resource_Governance.test_governor_redis_property",
+            "name": "test_requests_retry_after_monotonic_and_burst_vs_steady",
+            "message": "FIXME: stabilize Redis requests RA monotonicity across burst/steady patterns",
+            "type": "pytest.xfail"
+          },
+          {
+            "class": "tldw_Server_API.tests.Resource_Governance.test_governor_redis",
+            "name": "test_requests_burst_and_retry_after_behavior",
+            "message": "FIXME: stabilize Redis burst retry_after/deny floor determinism",
+            "type": "pytest.xfail"
+          }
+        ],
+        "failures": [],
+        "errors": [],
+        "command": {
+          "command": [
+            "/tmp/email_pr3023_dev6074_python_20260929",
+            "-m",
+            "pytest",
+            "-q",
+            "tldw_Server_API/tests/Resource_Governance",
+            "tldw_Server_API/tests/AuthNZ_Unit/test_auth_rg_single_charge.py",
+            "tldw_Server_API/tests/Audio/test_audio_transcriptions_adapter_path.py",
+            "tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_persistence_original_storage.py",
+            "tldw_Server_API/tests/Usage/test_usage_tracker_sqlite.py",
+            "tldw_Server_API/tests/Utils/test_fastapi_routes.py",
+            "tldw_Server_API/tests/lint/test_rg_route_map_lint.py",
+            "tldw_Server_API/tests/Chat_NEW/integration/test_moderation.py",
+            "tldw_Server_API/tests/Persona/test_buddy_workspace_model_handoff.py",
+            "tldw_Server_API/tests/Chat_NEW/integration/test_chat_completions_api.py::TestErrorHandling::test_rate_limit_error_handling",
+            "--randomly-seed=4293640905",
+            "--basetemp=/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/email_pr3023_reload_identity_affected_tmp_20261001",
+            "--junitxml=/tmp/email_pr3023_reload_identity_affected_20261001.xml"
+          ],
+          "cwd": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2",
+          "env": {
+            "TLDW_TEST_POSTGRES_REQUIRED": "1",
+            "TMPDIR": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T"
+          },
+          "phase": "Final post-WeakSet New devb365 governor/auth/persistence intersections plus retained fixture regressions",
+          "source_sha256": {
+            "tldw_Server_API/tests/helpers/app_main_state.py": "4df75cafd264f801dd1044f7d1d4dd740209e97ac4a19f2dcbe673a35b2e1999",
+            "tldw_Server_API/tests/Infrastructure/test_singleton_isolation.py": "8c109c985dc5b73fceedee5273f6b8158b68cf35335ebdcd4901f54a5fe4f491"
+          },
+          "exit_code": 0,
+          "elapsed_seconds": 351.50657629966736
+        },
+        "xml_sha256": "bd090068547d5e940ccf3cd6199e344176798db1185fa9f0b820f3386964174c",
+        "log_sha256": "edf08f9bbe223673268ae2deb0f3e3656bc0383e86674b82ea41bc47892afcec"
+      },
+      "retained": {
+        "collected": 650,
+        "passed": 650,
+        "skipped_or_xfailed": [],
+        "failures": [],
+        "errors": [],
+        "command": {
+          "command": [
+            "/tmp/email_pr3023_dev6074_python_20260929",
+            "-m",
+            "pytest",
+            "-q",
+            "tldw_Server_API/tests/AuthNZ/unit/test_scoped_token_route_auth_chain.py",
+            "tldw_Server_API/tests/AuthNZ_Unit/test_authenticated_content_scope.py",
+            "tldw_Server_API/tests/CI/test_required_workflow_contracts.py",
+            "tldw_Server_API/tests/DB_Management/test_chacha_postgres_migration_v61.py",
+            "tldw_Server_API/tests/DB_Management/test_email_search_cursor.py",
+            "tldw_Server_API/tests/DB_Management/test_media_db_runtime_factory.py",
+            "tldw_Server_API/tests/DB_Management/test_media_db_schema_bootstrap.py",
+            "tldw_Server_API/tests/DB_Management/test_media_postgres_support.py",
+            "tldw_Server_API/tests/Ingestion_Sources/integration/test_ingestion_sources_access_policy.py",
+            "tldw_Server_API/tests/Media/unit/test_media_upload_cleanup.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_attachment_upload_13376.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_search_cursor_endpoint.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_research_discovery_media_add.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_email_endpoint_error_mapping.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/unit/test_process_document_like_item_url_limits.py",
+            "tldw_Server_API/tests/Metrics/test_email_ingestion_metrics_13376.py",
+            "tldw_Server_API/tests/Metrics/test_email_search_metrics_13376.py",
+            "tldw_Server_API/tests/Resource_Governance/test_resource_governor_import_order.py",
+            "tldw_Server_API/tests/Resource_Governance/test_tokens_daily_cap.py",
+            "tldw_Server_API/tests/Resource_Governance/test_governor_safety_net.py",
+            "tldw_Server_API/tests/Collections",
+            "--randomly-seed=4293640905",
+            "--basetemp=/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/email_pr3023_reload_identity_retained_tmp_20261001",
+            "--junitxml=/tmp/email_pr3023_reload_identity_retained_20261001.xml"
+          ],
+          "cwd": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2",
+          "env": {
+            "TLDW_TEST_POSTGRES_REQUIRED": "1",
+            "TMPDIR": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T"
+          },
+          "phase": "Final post-WeakSet Retained email/auth/Collections/ChaCha/governor cases after new ingress policy integration",
+          "source_sha256": {
+            "tldw_Server_API/tests/helpers/app_main_state.py": "4df75cafd264f801dd1044f7d1d4dd740209e97ac4a19f2dcbe673a35b2e1999",
+            "tldw_Server_API/tests/Infrastructure/test_singleton_isolation.py": "8c109c985dc5b73fceedee5273f6b8158b68cf35335ebdcd4901f54a5fe4f491"
+          },
+          "exit_code": 0,
+          "elapsed_seconds": 370.1432077884674
+        },
+        "xml_sha256": "c550934d70d7253527500578919971bfab1adf88cb0eabb1db37a14496b187d8",
+        "log_sha256": "443e3f471d77e94fbdbf75937d9bc663a689d7c5e2a499b6f645f95a15174e8c"
+      },
+      "email": {
+        "collected": 47,
+        "passed": 47,
+        "skipped_or_xfailed": [],
+        "failures": [],
+        "errors": [],
+        "command": {
+          "command": [
+            "/tmp/email_pr3023_dev6074_python_20260929",
+            "-m",
+            "pytest",
+            "-q",
+            "tldw_Server_API/tests/Billing/test_billing_deps_org_header.py",
+            "tldw_Server_API/tests/Billing/test_content_org_deps.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_authenticated_upload.py",
+            "tldw_Server_API/tests/MediaIngestion_NEW/integration/test_email_authenticated_access.py",
+            "/tmp/email_pr3023_devb365_test_email_ingress_20261001.py",
+            "--randomly-seed=4293640905",
+            "--basetemp=/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/email_pr3023_reload_identity_email_tmp_20261001",
+            "--junitxml=/tmp/email_pr3023_reload_identity_email_20261001.xml"
+          ],
+          "cwd": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2",
+          "env": {
+            "TMPDIR": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T",
+            "PYTHONPATH": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2"
+          },
+          "phase": "Final post-WeakSet Real authenticated organization and quota guards with production RG ingress",
+          "source_sha256": {
+            "tldw_Server_API/tests/helpers/app_main_state.py": "4df75cafd264f801dd1044f7d1d4dd740209e97ac4a19f2dcbe673a35b2e1999",
+            "tldw_Server_API/tests/Infrastructure/test_singleton_isolation.py": "8c109c985dc5b73fceedee5273f6b8158b68cf35335ebdcd4901f54a5fe4f491"
+          },
+          "exit_code": 0,
+          "elapsed_seconds": 57.573838233947754
+        },
+        "xml_sha256": "ead308ef0aaa232a9216ab365cb7dbc2365d03edd8b523a67b355793c9b1e385",
+        "log_sha256": "fd95fdbfe9e8eb138d5b02963e4de822d806c06e018c4aa3c700c4644c7c042f"
+      }
+    },
+    "dependencies_receipt": "/tmp/email_pr3023_devb365_dependencies_20261001.json",
+    "environment_limit": "Local supported overlay Python3.11.13/pytest8.4.1/randomly4.1.0 differs from hosted Python3.12.14/pytest9.1.1/randomly5.0.0; native identity mechanism and actual local checks are verified, hosted exact-head checks remain pending.",
+    "scope_limit": "Suites overlap; not a full repository test suite. No native-PST/throughput/million-message/live VM drill rerun; earlier results retain original source/dependency bindings.",
+    "tracking_diagnostic": "CLI creation stack overflow; MCP reported300s timeout but later produced exact child13377.8, verified through official CLI. Parent13377 recorded the repair before source edits; no manual task edits or duplicate tasks.",
+    "publication_state": "Final local source verified and reviewed; publication and fresh exact-head hosted review/required contexts remain pending."
   }
 }
