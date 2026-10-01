@@ -4,7 +4,7 @@ title: Persist Workspace Persona opt-out and conversation provenance
 status: In Progress
 assignee: []
 created_date: 2026-09-13 18:15
-updated_date: 2026-10-01 01:36
+updated_date: 2026-10-01 02:25
 labels:
 - persona
 - workspaces
@@ -54,6 +54,17 @@ Requester-approved TASK-13245.6 follow-up planning amendments cover strict trans
 
 TASK-13245.7 local prerequisite repair Done in e1d05ddca0 (codex/persona-workspace-cascade-retry, dev35d6dd90d4 base). Hard/soft cascade enumeration and message-page reads now settle their own PostgreSQL transactions; outermost guard, caller work and admission closure unchanged. Final affected verification 714 passes/four SQLite-only driver skips/no failures across 15 files, official isolated SQLite/livePG. Multi-page image failure confirms earlier deletes durable and immediate retry; independent review gap closed, Ruff/compile/scoped Bandit pass. Repair is local, not a hosted CI or merged delivery. Completed task plan retained in implementation commit and retired from active tree. Parent remains In Progress; Stage2C strict receipts/admission, Stage2D and broader profile/provisioning/Research work remain open; create separate execution task before strict runtime edits.
 2026-10-01 bounded Stage2C delivered: strict Workspace Persona startup PR#3041 merged normally into dev at01:28:52Z, merge85ede1f1df10c03505c603e4183920edcb7cbfef from exact qualified head1a29adc0203fb674f4f7be204d23cb3144219c97. TASK13245.8 Done; seven current-head required gates including trusted dev license, fresh reviews and approved requester summary satisfied without bypass. Final focused source integration795passed/two existing Redis xfails; official SQLite/livePG available, production17-file Bandit clean. Exact-head Sync rerun2411passed/one skip and original bootstrap/apply/pull node passed, historical intermittent root not claimed repaired. Ancillary full-summary/rate-limit jobs pending at merge remain separately inspected. SQLite74/PostgreSQL78 durable receipts, ADR057 and offline runbook delivered without UI controls or legacy creation change. Tests/documentation child#3055 is rebased locally onto actual merged dev85ede; fresh qualification, dev retarget/exact-head hosted gates and normal merge remain pending underTASK13245.10/.14. Parent remains In Progress with broad AC unchecked; tool-profile, provisioning/backfill and Research Workspace adoption remain open, issue2950 stays open. Shared checkout/dependencies/other agents containers preserved.
+## Current Delivery Status (2026-10-01)
+
+This readable status supplements the compact historical entries above; those original records are preserved unchanged.
+
+PR #3041 merged normally into dev at 2026-10-01T01:28:52Z, merge 85ede1f1df10c03505c603e4183920edcb7cbfef, from qualified head 1a29adc0203fb674f4f7be204d23cb3144219c97. All seven required gates, fresh review and the approved requester summary were satisfied without administrator bypass. TASK-13245.8 is Done for bounded Stage 2C.
+
+The parent full-suite summary and Character Chat rate-limit checks were pending at merge, then passed on that exact parent head. CI run 36787709858 completed successfully at 01:49:21Z; post-merge outcome comment 5923186810 records these later results separately. Current-head Sync passed 2411 cases with one skip, including the original accepted-apply/recovery node; the historical intermittent root remains unreproduced, not repaired.
+
+PR #3055 already targets actual dev after nine patches replayed identically. Fresh affected qualification passed 252 unique cases, including 99 official PostgreSQL-labelled cases, with no failures/errors/skips. Separate prompt/Docs/workflow checks passed 266 unique cases; overlapping final Docs validation passed 212. The child requester summary is already approved and verbatim. Local qualification and retargeting are complete, while exact-head hosted CI/review, Cubic documentation corrections and normal child merge remain open under TASK-13245.10/.14.
+
+TASK-13245 remains In Progress and issue #2950 remains open. Stage 2D delivery and broader tool-profile, provisioning/backfill and Research adoption work are not claimed complete. Shared checkout, dependencies, other agents containers, recovery refs and stash backups are preserved.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
