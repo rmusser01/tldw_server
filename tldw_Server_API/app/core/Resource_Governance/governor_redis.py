@@ -823,7 +823,8 @@ class RedisResourceGovernor(ResourceGovernor):
         # Use native logic for both real Redis and in-memory stub.
         policy_id = req.tags.get("policy_id") or "default"
         pol = self._get_policy(policy_id)
-        req = dataclasses.replace(req, categories=clamp_token_units(self._get_policy(req.tags.get("policy_id") or "default"), req.categories, capacity_includes_burst=False))
+        daily_req = req  # Daily quotas charge original units; relief applies only to minute windows.
+        req = dataclasses.replace(req, categories=clamp_token_units(pol, req.categories, capacity_includes_burst=False))
         entity_scope, entity_value = self._parse_entity(req.entity)
         backend = "redis"
         now = self._time()
@@ -1027,7 +1028,7 @@ class RedisResourceGovernor(ResourceGovernor):
                             entity_value=entity_value,
                             category="tokens",
                             daily_cap=daily_cap,
-                            units=units,
+                            units=int(daily_req.categories[category].get("units") or 0),
                         )
                         if not daily_allowed:
                             allowed = False
@@ -1188,7 +1189,7 @@ class RedisResourceGovernor(ResourceGovernor):
 
         except _FallbackToMemory:
             if fallback_allowed and self._stub_delegate is not None:
-                dec = await self._stub_delegate.check(req)
+                dec = await self._stub_delegate.check(daily_req)
                 try:
                     if isinstance(dec.details, dict):
                         dec.details["fallback_memory"] = True
@@ -1534,7 +1535,8 @@ class RedisResourceGovernor(ResourceGovernor):
         # to avoid off-by-one denials under steady-rate scenarios.
         policy_id = dec.details.get("policy_id") or req.tags.get("policy_id") or "default"
         pol = self._get_policy(policy_id)
-        req = dataclasses.replace(req, categories=clamp_token_units(self._get_policy(req.tags.get("policy_id") or "default"), req.categories, capacity_includes_burst=False))
+        daily_req = req
+        req = dataclasses.replace(req, categories=clamp_token_units(pol, req.categories, capacity_includes_burst=False))
         entity_scope, entity_value = self._parse_entity(req.entity)
         handle_id = str(uuid.uuid4())
 
@@ -1927,7 +1929,7 @@ class RedisResourceGovernor(ResourceGovernor):
             added_members.setdefault(cat, {}).update(scopes)
 
         daily_denial = await self._consume_daily_caps_for_reserve(
-            req=req,
+            req=daily_req,
             policy_id=policy_id,
             policy=pol,
             entity_scope=entity_scope,

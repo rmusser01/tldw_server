@@ -189,7 +189,14 @@ def test_validate_postgres_content_backend_uses_factory_validator(monkeypatch):
 
     assert any("schema_version" in query for query in stub_backend.queries)
     assert StubMediaDatabase.instances
-    assert StubMediaDatabase.instances[-1].checked_policies
+    assert StubMediaDatabase.instances[-1].checked_policies == [
+        ("media", "media_visibility_access"),
+        ("sync_log", "sync_scope_admin"),
+        ("sync_log", "sync_scope_personal"),
+        ("sync_log", "sync_scope_org"),
+        ("sync_log", "sync_scope_team"),
+        ("operationownedclonekeywords", "owned_clone_pending_keyword_access"),
+    ]
     assert StubMediaDatabase.instances[-1].closed is True
 
 
@@ -262,7 +269,7 @@ def test_validate_postgres_content_backend_reports_unreadable_policy_as_validati
     )
     monkeypatch.setattr(runtime_factory, "_load_media_database_cls", lambda: StubMediaDatabase)
 
-    with pytest.raises(RuntimeError, match="is missing or could not be inspected"):
+    with pytest.raises(RuntimeError, match="media_visibility_access.*is missing or could not be inspected"):
         runtime_factory.validate_postgres_content_backend(
             runtime=runtime,
             get_content_backend_instance=lambda: StubBackend(),

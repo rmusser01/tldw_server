@@ -129,3 +129,18 @@ def test_fallback_retains_team_org_visibility_and_date_exclusion(search_db):
         assert repo.search("AURORA-CYCLE5-MULTI-23", date_range={"start_date": datetime(2026, 9, 17)}) == ([], 0)
     finally:
         reset_scope(scope)
+
+
+def test_fts_boolean_query_and_ranking_do_not_use_literal_like_fallback(search_db):
+    repo, connection, _, db = search_db
+    statements = []
+
+    def execute(sql, params):
+        statements.append(sql)
+        return connection.execute(sql, params)
+
+    db.execute_query = execute
+    rows, total = repo.search("blue AND harbor", sort_by="relevance")
+    assert ([row["id"] for row in rows], total) == ([1], 1)
+    assert "relevance_score" in rows[0]
+    assert not any(" LIKE " in sql for sql in statements)

@@ -20,6 +20,10 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.email_ingestion_metrics import (
+    iter_email_metric_definitions,
+)
+
 from .stt_metrics import iter_stt_metric_definitions
 from .telemetry import OTEL_AVAILABLE, get_telemetry_manager
 
@@ -1412,6 +1416,57 @@ class MetricsRegistry:
                 type=MetricType.COUNTER,
                 description="Embeddings enqueue attempts/outcomes for ingestion flows",
                 labels=["path_kind", "outcome"],
+            )
+        )
+        for definition in iter_email_metric_definitions():
+            self.register_metric(
+                MetricDefinition(**{**definition, "type": MetricType(definition["type"])})
+            )
+
+        self.register_metric(
+            MetricDefinition(
+                name="email_native_persist_total",
+                type=MetricType.COUNTER,
+                description="Native email persistence outcomes by path",
+                labels=["path_kind", "outcome"],
+            )
+        )
+
+        # Email query helpers emit only fixed phase and boolean-presence labels.
+        self.register_metric(
+            MetricDefinition(
+                name="email_native_search_requests_total",
+                type=MetricType.COUNTER,
+                description="Native email search attempts and outcomes",
+                labels=["phase", "query_present", "include_deleted"],
+            )
+        )
+        self.register_metric(
+            MetricDefinition(
+                name="email_native_search_parse_failures_total",
+                type=MetricType.COUNTER,
+                description="Native email search query and cursor validation failures",
+                labels=["query_present", "include_deleted"],
+            )
+        )
+        self.register_metric(
+            MetricDefinition(
+                name="email_native_search_duration_seconds",
+                type=MetricType.HISTOGRAM,
+                description="Native email search duration including failed attempts",
+                unit="s",
+                labels=["query_present", "include_deleted"],
+                buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
+            )
+        )
+        self.register_metric(
+            MetricDefinition(
+                name="email_native_search_results_total",
+                type=MetricType.HISTOGRAM,
+                description="Matching message count per successful native email search",
+                unit="messages",
+                labels=["query_present", "include_deleted"],
+                buckets=[0, 1, 5, 10, 25, 50, 100, 250, 500, 1000, 10000],
             )
         )
 
