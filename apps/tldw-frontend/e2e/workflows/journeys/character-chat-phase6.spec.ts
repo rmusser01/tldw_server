@@ -44,9 +44,12 @@ async function openRolePlaySetup(page: Page): Promise<void> {
   }
 
   if (!openedDirectly) {
-    await page.getByRole("button", { name: "More options" }).first().click()
+    // Mobile cockpit deliberately hides the full toolbar. Its visible Buddy
+    // entry keeps conversation Persona and behavior settings reachable.
+    await page.getByRole("button", { name: "Buddy & Persona", exact: true }).click()
     await page
-      .getByRole("button", { name: "Role-play setup", exact: true })
+      .getByRole("dialog", { name: "Buddy & Persona Management" })
+      .getByRole("button", { name: "Edit conversation Persona & behavior", exact: true })
       .click()
   }
 
@@ -80,14 +83,16 @@ async function expectCharacterSessionsReachable(page: Page): Promise<void> {
     return
   }
 
-  const showPanels = page.getByTestId("playground-chat-layout-mode-trigger")
-  if (await showPanels.isVisible().catch(() => false)) {
-    await showPanels.click()
-  }
-
-  const contextTab = page.getByRole("tab", { name: "Context" })
-  if (await contextTab.isVisible().catch(() => false)) {
-    await contextTab.click()
+  // Rail visibility is independent of focus mode and defaults to collapsed.
+  const restoreContext = page.getByRole("button", {
+    name: "Restore context sidechannel", exact: true,
+  })
+  if (await restoreContext.isVisible()) {
+    await restoreContext.click()
+  } else {
+    await page.getByRole("tab", {
+      name: /^(Context|Restore context sidechannel)$/,
+    }).click()
   }
 
   await expect(sessions).toBeVisible({ timeout: 30_000 })
@@ -110,6 +115,15 @@ test.describe("Character Chat Phase 6 signoff", () => {
         waitUntil: "domcontentloaded",
       })
       await waitForConnection(page)
+
+      // Mobile starts in focus mode. The same toggle enters focus on desktop,
+      // so only activate it when its current pressed state means exit focus.
+      const layoutToggle = page.getByTestId("playground-chat-layout-mode-trigger")
+      await expect(layoutToggle).toBeVisible()
+      if ((await layoutToggle.getAttribute("aria-pressed")) === "true") {
+        await layoutToggle.click()
+      }
+      await expect(layoutToggle).toHaveAttribute("aria-pressed", "false")
 
       await expect(
         page.getByTestId("playground-active-chat-mode"),

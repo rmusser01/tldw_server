@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -135,18 +135,19 @@ def _create_v64_legacy_database(
     with monkeypatch.context() as patch:
         patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 64)
         db = CharactersRAGDB(db_path=str(db_path), client_id="legacy-owner")
-        # add_conversation writes post-v65 columns (76c5167b35), so seed the v64 row directly.
-        with db.transaction() as conn:
-            conn.execute(
-                "INSERT INTO conversations (id, root_id, character_id, title, client_id) "
-                "VALUES (?, ?, 1, ?, ?)",
-                (conversation_id, conversation_id, "Legacy character conversation", "legacy-owner"),
-            )
-        assert db.upsert_conversation_settings(
-            conversation_id,
-            {"temperature": 0.25},
-        )
-        db.close_connection()
+        try:
+            with db.transaction() as conn:
+                conn.execute(
+                    "INSERT INTO conversations (id, root_id, character_id, title, client_id) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (conversation_id, conversation_id, 1, "Legacy character conversation", "legacy-owner"),
+                )
+                conn.execute(
+                    "INSERT INTO conversation_settings (conversation_id, settings_json) VALUES (?, ?)",
+                    (conversation_id, json.dumps({"temperature": 0.25})),
+                )
+        finally:
+            db.close_all_connections()
 
     with sqlite3.connect(db_path) as conn:
         version = conn.execute(
@@ -155,6 +156,9 @@ def _create_v64_legacy_database(
         ).fetchone()[0]
         assert version == 64
         assert "history_version" not in {
+            row[1] for row in conn.execute("PRAGMA table_info('conversations')")
+        }
+        assert "assistant_startup_json" not in {
             row[1] for row in conn.execute("PRAGMA table_info('conversations')")
         }
         assert "settings_version" not in {
@@ -174,7 +178,7 @@ def _table_columns(conn: sqlite3.Connection, table_name: str) -> dict[str, sqlit
     }
 
 
-@_v65_head
+@pytest.mark.usefixtures("_pin_v65_schema")
 def test_schema_head_allocates_exactly_v65_and_both_ladders_advance_once() -> None:
     assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 65
     assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION == 65
@@ -195,7 +199,8 @@ def test_sqlite_v64_to_v65_migrates_catalog_and_legacy_reads_missing(
 
     with monkeypatch.context() as patch:
         patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 65)
-        CharactersRAGDB(db_path=str(db_path), client_id="legacy-owner").close_connection()
+        migrated = CharactersRAGDB(db_path=str(db_path), client_id="legacy-owner")
+        migrated.close_all_connections()
 
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
@@ -266,6 +271,26 @@ def test_sqlite_v64_to_v65_migrates_catalog_and_legacy_reads_missing(
             "SELECT history_version FROM conversations WHERE id = ?",
             (conversation_id,),
         ).fetchone()["history_version"] == 1
+    conn.close()
+
+    migrated = CharactersRAGDB(db_path=str(db_path), client_id="legacy-owner")
+    try:
+        snapshot = migrated.get_conversation_behavior_snapshot(conversation_id)
+        assert snapshot == {
+            "status": "missing",
+            "schema_version": None,
+            "canonical_json": None,
+            "digest": None,
+            "size_bytes": None,
+            "created_at": None,
+            "payload": None,
+        }
+        state = migrated.get_roleplay_resume_state(conversation_id)
+        assert state["behavior_snapshot"] == snapshot
+        assert state["settings_version"] == 1
+        assert state["history_version"] == 1
+    finally:
+        migrated.close_all_connections()
 
     # Current readers select post-v65 columns (e.g. required_projection_version),
     # so read the legacy row back after the upgrade to the current schema.
@@ -1141,6 +1166,23 @@ class _PostgresRecordingBackend:
         return SimpleNamespace(rowcount=0)
 
 
+def _record_postgres_coordinator(
+    monkeypatch: pytest.MonkeyPatch, backend: _PostgresRecordingBackend,
+) -> tuple[object, list[tuple[object, str]]]:
+    """Record the current session coordinator while retaining transaction rollback."""
+    migration_connection = SimpleNamespace(execute=backend.execute)
+    calls: list[tuple[object, str]] = []
+
+    @contextmanager
+    def coordinator(selected_backend: object, lock_timeout: str):
+        calls.append((selected_backend, lock_timeout))
+        with backend.transaction():
+            yield migration_connection
+
+    monkeypatch.setattr(schema_bootstrap, "postgres_schema_migration", coordinator)
+    return migration_connection, calls
+
+
 def _postgres_db(backend: _PostgresRecordingBackend) -> CharactersRAGDB:
     db = CharactersRAGDB.__new__(CharactersRAGDB)
     db._backend = backend
@@ -1582,7 +1624,7 @@ def test_resume_state_returns_authoritative_owned_conversation_identity(
         "character_id": 1,
         "assistant_kind": "character",
         "assistant_id": "1",
-        "assistant_binding_mode": None,  # only native forks bind a snapshot (1f261a0319)
+        "assistant_binding_mode": None,
         "persona_memory_mode": None,
         "scope_type": "global",
         "workspace_id": None,
@@ -1802,13 +1844,14 @@ def test_postgres_v65_contract_has_matching_constraints_indexes_and_initializer_
 
     backend = _PostgresRecordingBackend()
     db = _postgres_db(backend)
-    # f5f5b63005 bootstraps on a pooled session this fake does not model.
-    monkeypatch.setattr(
-        schema_bootstrap,
-        "postgres_schema_migration",
-        lambda backend, _lock_timeout: backend.transaction(),
-    )
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn, **kwargs: 64)
+    migration_connection, coordinator_calls = _record_postgres_coordinator(monkeypatch, backend)
+    version_reads: list[tuple[object, bool]] = []
+
+    def schema_version(connection: object, *, lock: bool = False) -> int:
+        version_reads.append((connection, lock))
+        return 64
+
+    monkeypatch.setattr(db, "_get_schema_version_postgres", schema_version)
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: None)
@@ -1821,8 +1864,6 @@ def test_postgres_v65_contract_has_matching_constraints_indexes_and_initializer_
 
     def _record_migration(conn: object) -> None:
         applied.append("64-to-65")
-        # Pin the route only; the post-migration reconciliation needs the
-        # persona/study-pack stores this fake does not model.
         raise _ReachedV65
 
     monkeypatch.setattr(db, "_migrate_from_v64_to_v65_postgres", _record_migration)
@@ -1830,6 +1871,8 @@ def test_postgres_v65_contract_has_matching_constraints_indexes_and_initializer_
         db._initialize_schema_postgres()
 
     assert applied == ["64-to-65"]
+    assert coordinator_calls == [(backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_STATEMENT_TIMEOUT)]
+    assert version_reads[:3] == [(backend, False), (migration_connection, False), (migration_connection, True)]
 
 
 @pytest.mark.integration
@@ -1846,22 +1889,21 @@ def test_postgres_v64_to_v65_preserves_legacy_conversation_and_notes_schema(
         patch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 64)
         db = CharactersRAGDB(":memory:", client_id="legacy-owner", backend=backend)
     try:
-        # add_conversation writes post-v65 columns (76c5167b35), so seed the v64 row directly.
-        conversation_id = "pg-v64-conversation"
-        backend.execute(
-            "INSERT INTO conversations (id, root_id, title, client_id) VALUES (%s, %s, %s, %s)",
-            (conversation_id, conversation_id, "Legacy before resume", "legacy-owner"),
-        )
+        conversation_id = "legacy-before-resume"
+        with backend.transaction() as conn:
+            backend.execute(
+                "INSERT INTO conversations (id, root_id, title, client_id) VALUES (%s, %s, %s, %s)",
+                (conversation_id, conversation_id, "Legacy before resume", "legacy-owner"),
+                connection=conn,
+            )
         with monkeypatch.context() as patch:
             patch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 65)
             db._initialize_schema_postgres()
-        assert backend.execute(
-            "SELECT version FROM db_schema_version WHERE schema_name = %s",
-            (CharactersRAGDB._SCHEMA_NAME,),
-        ).scalar == 65
+            assert backend.execute(
+                "SELECT version FROM db_schema_version WHERE schema_name = %s",
+                (CharactersRAGDB._SCHEMA_NAME,),
+            ).scalar == 65
         assert backend.table_exists("note_graph_suggestion_operation_receipts")
-        # Current readers select post-v65 columns (e.g. required_projection_version),
-        # so finish the upgrade to the current schema before reading the legacy row.
         db._initialize_schema_postgres()
         state = db.get_roleplay_resume_state(
             conversation_id,
@@ -1912,13 +1954,14 @@ def test_postgres_v65_checkpoint_failure_uses_outer_transaction_rollback(
 ) -> None:
     backend = _PostgresRecordingBackend()
     db = _postgres_db(backend)
-    # f5f5b63005 bootstraps on a pooled session this fake does not model.
-    monkeypatch.setattr(
-        schema_bootstrap,
-        "postgres_schema_migration",
-        lambda backend, _lock_timeout: backend.transaction(),
-    )
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda conn, **kwargs: 64)
+    migration_connection, coordinator_calls = _record_postgres_coordinator(monkeypatch, backend)
+    version_reads: list[tuple[object, bool]] = []
+
+    def schema_version(connection: object, *, lock: bool = False) -> int:
+        version_reads.append((connection, lock))
+        return 64
+
+    monkeypatch.setattr(db, "_get_schema_version_postgres", schema_version)
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda conn: None)
     monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda conn: None)
@@ -1933,10 +1976,13 @@ def test_postgres_v65_checkpoint_failure_uses_outer_transaction_rollback(
 
     assert backend.rolled_back is True
     assert backend.schema_version == 64
-    # Only the read-only readiness probe (f5f5b63005) commits; no migration write does.
-    assert backend.committed_statements
-    assert all(sql.lstrip().upper().startswith("SELECT") for sql in backend.committed_statements)
+    assert backend.committed_statements == [
+        "SELECT set_config('lock_timeout',%s,true)",
+        "SELECT set_config('statement_timeout',%s,true)",
+    ]
     assert any("conversation_behavior_snapshots" in sql for sql in backend._pending) is False
+    assert coordinator_calls == [(backend, db._NOTES_MOODBOARD_STUDIO_V61_POSTGRES_STATEMENT_TIMEOUT)]
+    assert version_reads[:3] == [(backend, False), (migration_connection, False), (migration_connection, True)]
 
 
 class _PostgresAuthorityConnection:

@@ -289,8 +289,6 @@ def _relevant_catalog(db: CharactersRAGDB) -> dict[str, object]:
 
 
 def test_sqlite_schema_authority_is_v63_and_version_update_is_last() -> None:
-    # The authority has moved past v63 (73 at the time of writing); the v63
-    # step must still exist and write its version last.
     assert CharactersRAGDB._CURRENT_SCHEMA_VERSION >= 63
     source = inspect.getsource(CharactersRAGDB._migrate_from_v62_to_v63_sqlite)
     for operation in (

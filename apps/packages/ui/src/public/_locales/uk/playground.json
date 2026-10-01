@@ -1468,5 +1468,20 @@
   },
   "actor_templateMode_ignore": {
     "message": "Ігнорувати, коли шаблони активні"
+  },
+  "mediaHandoff_conflictLabel": {
+    "message": "Конфлікт під час перенесення медіа"
+  },
+  "mediaHandoff_conflict": {
+    "message": "У полі повідомлення вже є чернетка. Вставте медіаджерело, замініть чернетку або скасуйте імпорт."
+  },
+  "mediaHandoff_insert": {
+    "message": "Вставити медіаджерело"
+  },
+  "mediaHandoff_replace": {
+    "message": "Замінити поточну чернетку"
+  },
+  "mediaHandoff_cancel": {
+    "message": "Скасувати імпорт"
   }
 }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -21,6 +22,50 @@ def _profile_candidate(user_id: int) -> list[dict[str, Any]]:
             "candidate_value": datetime(2026, 2, 9, 11, 0, tzinfo=timezone.utc),
         }
     ]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_auth_service_profile_writes_use_sqlite_pool_transaction(tmp_path: Path) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+    from tldw_Server_API.app.core.AuthNZ.settings import Settings
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+
+    pool = DatabasePool(
+        Settings(AUTH_MODE="single_user", DATABASE_URL=f"sqlite:///{tmp_path / 'auth.db'}")
+    )
+    await pool.initialize()
+    try:
+        users = UsersDB(pool)
+        await users.initialize(ensure_schema=False)
+        seed_hash = "hash"
+        user = await users.create_user(
+            username="sqlite-profile-service",
+            email="sqlite-profile-service@example.com",
+            password_hash=seed_hash,
+        )
+        user_id = int(user["id"])
+        now = datetime(2026, 7, 5, 6, 25, 52, tzinfo=timezone.utc)
+
+        changed = await auth_service.verify_user_email_once(
+            pool,
+            user_id=user_id,
+            email="sqlite-profile-service@example.com",
+            now_utc=now,
+        )
+        assert changed == 1
+        await auth_service.mark_user_verified(pool, user_id=user_id, now_utc=now)
+        await auth_service.update_user_last_login(pool, user_id=user_id, now=now)
+
+        row = await pool.fetchone(
+            "SELECT is_verified, last_login, profile_version FROM users WHERE id = ?",
+            user_id,
+        )
+        assert bool(row["is_verified"]) is True
+        assert row["last_login"] is not None
+        assert row["profile_version"] is not None
+    finally:
+        await pool.close()
 
 
 class _Cursor:

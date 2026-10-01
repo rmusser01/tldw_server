@@ -22,6 +22,11 @@ def production_egress(monkeypatch):
     monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
     monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
     monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    # Let private-address and DNS checks decide, independently of CI host policy.
+    monkeypatch.setenv(
+        "WORKFLOWS_EGRESS_ALLOWLIST",
+        "public.example,93.184.216.34,127.0.0.1,169.254.169.254",
+    )
     monkeypatch.delenv("WORKFLOWS_EGRESS_ALLOWED_DOMAINS", raising=False)
     monkeypatch.delenv("WORKFLOWS_EGRESS_DENIED_DOMAINS", raising=False)
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda _host: ["93.184.216.34"])
@@ -123,8 +128,9 @@ async def test_private_destination_never_reaches_transport(
     production_egress, backend, max_response_bytes, url
 ):
     seen = []
-    with pytest.raises(EgressPolicyError):
+    with pytest.raises(EgressPolicyError) as exc_info:
         await _request(backend, url, seen, max_response_bytes=max_response_bytes)
+    assert exc_info.value.reason_code == "address_forbidden"
     assert seen == []
 
 
@@ -134,7 +140,7 @@ async def test_public_redirect_to_private_host_never_dispatches_second_request(
     production_egress, backend, max_response_bytes
 ):
     seen = []
-    with pytest.raises(EgressPolicyError):
+    with pytest.raises(EgressPolicyError) as exc_info:
         await _request(
             backend,
             "https://public.example/resource",
@@ -142,6 +148,7 @@ async def test_public_redirect_to_private_host_never_dispatches_second_request(
             max_response_bytes=max_response_bytes,
             redirect="http://127.0.0.1/private",
         )
+    assert exc_info.value.reason_code == "address_forbidden"
     assert [item["url"] for item in seen] == ["https://93.184.216.34/resource"]
 
 
@@ -153,11 +160,12 @@ async def test_rebound_dns_is_denied_before_first_transport_request(
     answers = iter([["93.184.216.34"], ["127.0.0.1"]])
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda _host: next(answers))
     seen = []
-    with pytest.raises(EgressPolicyError):
+    with pytest.raises(EgressPolicyError) as exc_info:
         await _request(
             backend,
             "https://public.example/resource",
             seen,
             max_response_bytes=max_response_bytes,
         )
+    assert exc_info.value.reason_code == "address_forbidden"
     assert seen == []

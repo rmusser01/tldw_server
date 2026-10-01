@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react"
+import { useEffect, useRef, useCallback, useState } from "react"
 import { useStoreMessageOption } from "@/store/option"
 import type { Knowledge, State, Message as StoreMessage } from "@/store/option"
 import { useConnectionStore } from "@/store/connection"
@@ -8,6 +8,12 @@ import {
   getHistoryByDocId,
   getFullChatData
 } from "@/db/dexie/helpers"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { runChatPersistenceTransaction } from "@/db/dexie/chat-persistence-transaction"
+import { PageAssistDatabase } from "@/db/dexie/chat"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 
 type DocumentChatSession = Pick<
   State,
@@ -64,52 +70,66 @@ async function persistDocumentSession(
   }
 
   const docId = `document:${mediaId}`
+  const revision = usePlaygroundSessionStore.getState().restoreRevision
+  let owner: ServicePromptSnapshot | undefined
 
   try {
-    // Check if we already have a history ID for this session
-    let historyId = session.historyId
-
-    if (!historyId) {
-      // Check if there's an existing history for this document
-      const existingHistory = await getHistoryByDocId(docId)
-      if (existingHistory) {
-        historyId = existingHistory.id
-      } else {
-        // Create new history entry
-        const title = session.messages[0]?.message?.slice(0, 50) || "Document Chat"
-        const newHistory = await saveHistory(
-          title,
-          true, // is_rag
-          "web-ui",
-          docId,
-          session.serverChatId ?? undefined
-        )
-        historyId = newHistory.id
-      }
-    }
-
-    // Save each message that doesn't have a persisted flag
-    for (const msg of session.messages) {
-      // Skip if message is already persisted (check by looking for a generated ID pattern)
-      if (msg.id && !msg.id.startsWith("temp_")) {
-        continue
+    owner = await loadServicePromptSnapshot([])
+    if (revision !== usePlaygroundSessionStore.getState().restoreRevision || owner.scopeSignal.aborted || owner.scopeInvalidatedSignal.aborted) return null
+    const capturedOwner = owner
+    return await runChatPersistenceTransaction(owner.scopeSignal, async () => {
+      // Check if we already have a history ID for this session
+      let historyId = session.historyId
+      if (historyId) {
+        const existing = await new PageAssistDatabase().getHistoryInfo(historyId)
+        if (existing?.server_scope_key !== serverChatMirrorOwnerKey(capturedOwner)) return null
       }
 
-      await saveMessage({
-        history_id: historyId,
-        name: msg.name || "user",
-        role: msg.role,
-        content: msg.message,
-        images: msg.images || [],
-        source: msg.sources,
-        documents: msg.documents
-      })
-    }
+      if (!historyId) {
+        // Check if there's an existing history for this document
+        const existingHistory = await getHistoryByDocId(docId, capturedOwner.requestScope)
+        if (existingHistory) {
+          historyId = existingHistory.id
+        } else {
+          // Create new history entry
+          const title = session.messages[0]?.message?.slice(0, 50) || "Document Chat"
+          const newHistory = await saveHistory(
+            title,
+            true, // is_rag
+            "web-ui",
+            docId,
+            session.serverChatId ?? undefined,
+            capturedOwner.requestScope
+          )
+          historyId = newHistory.id
+        }
+      }
 
-    return historyId
+      // Save each message that doesn't have a persisted flag
+      for (const msg of session.messages) {
+        // Skip if message is already persisted (check by looking for a generated ID pattern)
+        if (msg.id && !msg.id.startsWith("temp_")) {
+          continue
+        }
+
+        await saveMessage({
+          history_id: historyId,
+          name: msg.name || "user",
+          role: msg.role,
+          content: msg.message,
+          images: msg.images || [],
+          source: msg.sources,
+          documents: msg.documents
+        })
+      }
+
+      return historyId
+    })
   } catch (error) {
     console.error("Failed to persist document chat session:", error)
-    return session.historyId
+    return null
+  } finally {
+    owner?.release()
   }
 }
 
@@ -120,16 +140,18 @@ async function loadDocumentSession(
   mediaId: number
 ): Promise<DocumentChatSession | null> {
   const docId = `document:${mediaId}`
+  let owner: ServicePromptSnapshot | undefined
 
   try {
-    const history = await getHistoryByDocId(docId)
+    owner = await loadServicePromptSnapshot([])
+    const history = await getHistoryByDocId(docId, owner.requestScope)
     if (!history) {
       return null
     }
 
     // Load full chat data including messages
     const chatData = await getFullChatData(history.id)
-    if (!chatData) {
+    if (!chatData || owner.scopeSignal.aborted || owner.scopeInvalidatedSignal.aborted) {
       return null
     }
 
@@ -177,6 +199,8 @@ async function loadDocumentSession(
   } catch (error) {
     console.error("Failed to load document chat session:", error)
     return null
+  } finally {
+    owner?.release()
   }
 }
 
@@ -210,8 +234,10 @@ const isMediaDbOnlySources = (sources: string[] | null | undefined) =>
  * @param mediaId - The active document's media ID (null when no document is open)
  */
 export function useDocumentChat(mediaId: number | null) {
+  const [accountRevision, setAccountRevision] = useState(0)
   const previousMediaIdRef = useRef<number | null>(null)
   const activeMediaIdRef = useRef<number | null>(mediaId)
+  const loadGenerationRef = useRef(0)
   const sessionsRef = useRef<Map<number, DocumentChatSession>>(new Map())
   const baselineSessionRef = useRef<DocumentChatSession | null>(null)
   const baselineRagSettingsRef = useRef<{
@@ -288,6 +314,15 @@ export function useDocumentChat(mediaId: number | null) {
     })
   }, [])
 
+  useEffect(() => watchChatAccountChanges(invalidated => {
+    if (!invalidated) return
+    sessionsRef.current.clear()
+    baselineSessionRef.current = null
+    previousMediaIdRef.current = null
+    applySession(createEmptySession())
+    setAccountRevision(revision => revision + 1)
+  }), [applySession])
+
   const ensureDocumentSources = useCallback(() => {
     if (isMediaDbOnlySources(ragSources)) {
       return
@@ -346,16 +381,18 @@ export function useDocumentChat(mediaId: number | null) {
     }
 
     const previousMediaId = previousMediaIdRef.current
+    const loadGeneration = ++loadGenerationRef.current
 
     // Save previous session to memory and persist to IndexedDB
     if (previousMediaId !== null) {
       const session = snapshotSession()
+      const revision = usePlaygroundSessionStore.getState().restoreRevision
       sessionsRef.current.set(previousMediaId, session)
       // Persist to IndexedDB in background (don't await)
       persistDocumentSession(previousMediaId, session).then((historyId) => {
-        if (historyId) {
+        if (historyId && revision === usePlaygroundSessionStore.getState().restoreRevision) {
           const savedSession = sessionsRef.current.get(previousMediaId)
-          if (savedSession) {
+          if (savedSession === session) {
             sessionsRef.current.set(previousMediaId, {
               ...savedSession,
               historyId
@@ -382,9 +419,10 @@ export function useDocumentChat(mediaId: number | null) {
         }
       } else {
         // Try to load from IndexedDB
+        const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision
         loadDocumentSession(mediaId).then((loadedSession) => {
           // Only apply if we're still on the same document
-          if (activeMediaIdRef.current === mediaId) {
+          if (loadGeneration === loadGenerationRef.current && activeMediaIdRef.current === mediaId && restoreRevision === usePlaygroundSessionStore.getState().restoreRevision) {
             const sessionToUse = loadedSession ?? createEmptySession()
             sessionsRef.current.set(mediaId, sessionToUse)
             applySession(sessionToUse)
@@ -410,6 +448,7 @@ export function useDocumentChat(mediaId: number | null) {
       restoreRagSources()
     }
   }, [
+    accountRevision,
     applySession,
     ensureDocumentSources,
     mediaId,
@@ -421,13 +460,16 @@ export function useDocumentChat(mediaId: number | null) {
   // Clean up on unmount
   useEffect(() => {
     return () => {
+      loadGenerationRef.current += 1
       const currentMediaId = activeMediaIdRef.current
       if (currentMediaId !== null) {
         const session = snapshotSession()
-        sessionsRef.current.set(currentMediaId, session)
         // Persist to IndexedDB (fire-and-forget since we're unmounting)
         persistDocumentSession(currentMediaId, session)
       }
+      // StrictMode replays effects after cleanup; the replacement mount must
+      // start a fresh read instead of retaining the cancelled load's marker.
+      previousMediaIdRef.current = null
       if (baselineSessionRef.current) {
         applySession(baselineSessionRef.current)
       }

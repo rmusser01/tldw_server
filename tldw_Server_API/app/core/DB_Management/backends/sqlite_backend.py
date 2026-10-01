@@ -35,6 +35,7 @@ from .base import (
     FTSQuery,
     QueryResult,
     TransientContentionError,
+    UniqueConstraintError,
 )
 from .fts_translator import FTSQueryTranslator
 
@@ -443,6 +444,7 @@ class SQLiteBackend(DatabaseBackend):
         start_time = time.time()
         redacted_failure = False
         constraint_failure = False
+        unique_failure = False
         contention_failure = False
 
         conn = connection or self.get_pool().get_connection()
@@ -481,9 +483,15 @@ class SQLiteBackend(DatabaseBackend):
             # FOREIGN KEY and UNIQUE. The raise stays outside this except block so the
             # driver exception is never chained; the message is unchanged.
             constraint_failure = isinstance(e, sqlite3.IntegrityError)
+            unique_failure = (
+                constraint_failure
+                and getattr(e, "sqlite_errorcode", None) == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+            )
             contention_failure = is_sqlite_locked_error(e)
 
         if redacted_failure:
+            if unique_failure:
+                raise UniqueConstraintError("SQLite query execution failed")
             if constraint_failure:
                 raise ConstraintViolationError("SQLite query execution failed")
             if contention_failure:

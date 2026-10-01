@@ -6,7 +6,7 @@
 
 ## Release Gates
 
-Before cutover, require reviewed exact-head tests, current hosted checks, a requester-owned Change summary, and an up-to-date normal merge into `dev`. Check the final migration registry and ADR links after integration; planning numbers are not reservations. Receipts use SQLite 74/PostgreSQL 78 after Companion's 73/77, with the durable contract in ADR056.
+Before cutover, require reviewed exact-head tests, current hosted checks, a requester-owned Change summary, and an up-to-date normal merge into `dev`. Check the final migration registry and ADR links after integration; planning numbers are not reservations. Receipts use SQLite 74/PostgreSQL 78 after Companion's 73/77, with the durable contract in ADR057.
 
 Required capabilities in every running binary:
 

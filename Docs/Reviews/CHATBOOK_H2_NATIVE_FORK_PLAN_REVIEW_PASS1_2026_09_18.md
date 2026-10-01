@@ -25,7 +25,7 @@ No repository files, index, HEAD, branch state, applications, databases or runni
 
 ## P2-1 — Carry the admitted history fence into child-summary persistence
 
-**Plan:** `IMPLEMENTATION_PLAN_chatbook_h2_native_fork.md:79–83` and `:294`; related `:307`.
+**Plan:** `Docs/Plans/IMPLEMENTATION_PLAN_chatbook_h2_native_fork.md:79–83` and `:294`; related `:307`.
 
 The proposed `NativeChildSummaryUpdate` contains `child_id`, `expected_settings_revision` and `summary_json`, and Task 3.2 explicitly describes persistence as a settings-revision CAS. The `FrozenHistoryBehaviorPlan` also has no admitted history revision. This loses a fence that the source implementation already requires.
 
@@ -42,7 +42,7 @@ The proposed `NativeChildSummaryUpdate` contains `child_id`, `expected_settings_
 
 ## P2-2 — Define the server mutation that resolves an unavailable attachment
 
-**Plan:** `IMPLEMENTATION_PLAN_chatbook_h2_native_fork.md:243–260` and `:360`. **Design:** `Docs/Design/2026-09-18-chatbook-h2-native-fork-design.md:46–48` and `:156`.
+**Plan:** `Docs/Plans/IMPLEMENTATION_PLAN_chatbook_h2_native_fork.md:243–260` and `:360`. **Design:** `Docs/Design/2026-09-18-chatbook-h2-native-fork-design.md:46–48` and `:156`.
 
 A6 promises that restore/replacement or explicit removal from context advances the canonical asset/context revision and unblocks dependent sends. The wire/interface map supplies upload retention, retention lookup and asset read, but no request/route/store operation for changing an existing context reference or removing an unavailable marker. Retention is defined as verified uploaded bytes being attached under the original source fence; a pure removal has no upload, and an additive retention alone does not specify which old required reference is superseded.
 
@@ -58,7 +58,7 @@ A6 promises that restore/replacement or explicit removal from context advances t
 
 ## P2-3 — Specify the native reference-image consumer wire contract
 
-**Plan:** `IMPLEMENTATION_PLAN_chatbook_h2_native_fork.md:308`, `:342` and `:360`. **Design:** `Docs/Design/2026-09-18-chatbook-h2-native-fork-design.md:142`, `:156`.
+**Plan:** `Docs/Plans/IMPLEMENTATION_PLAN_chatbook_h2_native_fork.md:308`, `:342` and `:360`. **Design:** `Docs/Design/2026-09-18-chatbook-h2-native-fork-design.md:142`, `:156`.
 
 The plan promises to remap executable refine/reference-image links to native claims and wire them into existing image consumers, but its interfaces/file map only cover retention/read plus chat completion admission. The existing image-generation consumer has a different request and namespace. A typed native claim cannot pass through it merely by changing the attachment renderer or replacing an ID.
 

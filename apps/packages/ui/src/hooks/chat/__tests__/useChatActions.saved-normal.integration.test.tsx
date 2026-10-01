@@ -99,7 +99,10 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 vi.mock("@/services/tldw", async () => {
   const actual = await vi.importActual<typeof import("@/services/tldw")>("@/services/tldw")
-  return { ...actual, tldwModels: { ...actual.tldwModels, getModel: mocks.getModel, getModels: mocks.getModels }, tldwChat: { ...actual.tldwChat, streamMessage: mocks.streamMessage } }
+  return { ...actual, tldwModels: { ...actual.tldwModels, getModel: async (model: string) => {
+    const info = await mocks.getModel(model)
+    return info ? { id: model, provider: "openai", ...info } : info
+  }, getModels: mocks.getModels }, tldwChat: { ...actual.tldwChat, streamMessage: mocks.streamMessage } }
 })
 vi.mock("@/models", () => ({ pageAssistModel: mocks.pageAssistModel }))
 vi.mock("@/services/title", () => ({
@@ -160,7 +163,10 @@ vi.mock("@/db/dexie/schema", () => ({ db: {
       else mocks.rows[index] = row
       return row.id
     },
-    delete: async (id: string) => { mocks.rows = mocks.rows.filter(row => row.id !== id) }
+    delete: async (id: string) => {
+      const index = mocks.rows.findIndex(row => row.id === id)
+      if (index >= 0) mocks.rows.splice(index, 1)
+    }
   }
 } }))
 vi.mock("@/hooks/useSelectedAssistant", () => ({
@@ -366,9 +372,12 @@ const renderWorkspace = (realNotifications = false, withLoader = false, options:
     ({ ready }) => {
       const notificationApi = React.useContext(NotificationContext)
       const state = useStoreMessageOption()
+      const [abortController, setAbortController] = React.useState<AbortController | null>(null)
       const actions = useChatActions({
         ...createHookOptions(),
         ...state,
+        abortController,
+        setAbortController,
         ...options,
         ensureServerChatHistoryId: mocks.ensureHistory,
         selectedCharacter: null,
@@ -464,7 +473,7 @@ describe("saved normal Chat pipeline with autosave", () => {
     mocks.capability = capability as boolean | "error"
     mocks.realFormatter = true
     mocks.realPersistence = true
-    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
+    vi.spyOn(i18n, "t").mockImplementation((...args) => { const [key, fallback] = args; return typeof fallback === "string" ? fallback : String(key) })
     const image = ack === "none" ? "" : "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="
     const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
     mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
@@ -504,20 +513,27 @@ describe("saved normal Chat pipeline with autosave", () => {
   it.each(["local", "server"])("deletes a qualified mirror row and clears its %s reply target using the canonical request ID", async replyKind => {
     const localId = "history-A:server:answer"
     const serverId = "canonical-answer"
+    mocks.mirrorHistories.set("mirror", {
+      id: "mirror", server_chat_id: "cedar",
+      server_scope_key: serverChatMirrorOwnerKey({ requestScope: {
+        config: { serverUrl: mocks.config.serverUrl, authMode: "single-user" }, userId: null
+      } })
+    })
+    const stored = { id: localId, history_id: "mirror", serverMessageId: serverId,
+      serverMessageVersion: 2, role: "assistant", content: "Cedar reply", createdAt: 1 }
+    const draft = { ...stored, id: "same-text-draft", serverMessageId: undefined }
+    const otherHistory = { ...stored, id: "other-history:server:answer", history_id: "other-history" }
+    mocks.rows.push(stored, draft, otherHistory)
     useStoreMessageOption.setState({ historyId: "mirror", serverChatId: "cedar", temporaryChat: false,
       messages: [{ id: localId, serverMessageId: serverId, serverMessageVersion: 2, role: "assistant", isBot: true, name: "Cedar", message: "Cedar reply" }],
       history: [{ role: "assistant", content: "Cedar reply" }],
       replyTarget: { id: replyKind === "local" ? localId : serverId, role: "assistant", text: "Cedar reply" }
     })
-    // Since 977e118e57 a server-mirrored row is removed through
-    // removeAcknowledgedServerMirrorMessage, which refuses unless the local mirror is
-    // provably bound to this server chat. Seed that binding and the unique mirror row.
-    mocks.mirrorHistories.set("mirror", { id: "mirror", server_chat_id: "cedar", server_scope_key: "scope-A" })
-    mocks.rows.push({ id: localId, history_id: "mirror", serverMessageId: serverId, role: "assistant", content: "Cedar reply" })
     const { result } = renderWorkspace()
     await act(async () => { await result.current.actions.deleteMessage(0) })
     expect(mocks.deleteMessage).toHaveBeenCalledWith(serverId, 2, "cedar")
     expect(mocks.rows.find(row => row.id === localId)).toBeUndefined()
+    expect(mocks.rows).toEqual([draft, otherHistory])
     expect(useStoreMessageOption.getState().messages).toEqual([])
     expect(useStoreMessageOption.getState().replyTarget).toBeNull()
   })
@@ -1209,7 +1225,7 @@ describe("saved normal Chat pipeline with autosave", () => {
   it.each([false, true].flatMap(prior => ["", "  Keep this image  "].map(text => ({ prior, text }))))("keeps unsupported image work through blocked Retry, actual vision-model selection and canonical remount: $text / prior $prior", async ({ text, prior }) => {
     mocks.withLoader = true
     mocks.realFormatter = true
-    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
+    vi.spyOn(i18n, "t").mockImplementation((...args) => { const [key, fallback] = args; return typeof fallback === "string" ? fallback : String(key) })
     const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="
     const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
     mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
@@ -1270,9 +1286,105 @@ describe("saved normal Chat pipeline with autosave", () => {
     view.unmount()
   })
 
+  it.each([false, true])("refreshes same-model image capability on Retry while preserving the failed user: dispatched %s", async dispatched => {
+    mocks.realFormatter = true
+    vi.spyOn(i18n, "t").mockImplementation((...args) => { const [key, fallback] = args; return typeof fallback === "string" ? fallback : String(key) })
+    const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
+    mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
+    mocks.getModel.mockResolvedValue({ id: "vision-test", capabilities: dispatched ? ["vision"] : [] })
+    mocks.getModels.mockResolvedValue([{ id: "vision-test", provider: "openai", capabilities: ["vision"] }])
+    const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="
+    let shouldFail = dispatched
+    mocks.streamMessage.mockImplementation(async function* (_messages, options, onChunk) {
+      if (shouldFail) { shouldFail = false; throw new Error("Provider unavailable") }
+      expect(options.retryFailedTurn).toBe(dispatched)
+      onChunk({ tldw_user_message_id: "same-image-user", tldw_message_id: "same-image-answer" })
+      yield "Recovered same model"
+    })
+    act(() => useStoreMessageOption.setState({ selectedModel: "vision-test" }))
+    const view = renderWorkspace()
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Keep image", image }) })
+    const user = view.result.current.state.messages.find(row => !row.isBot)!
+    mocks.getModel.mockResolvedValue({ id: "vision-test", capabilities: [] })
+    await act(async () => { await view.result.current.actions.regenerateLastMessage() })
+    expect(view.result.current.state.messages.at(-1)?.message).toBe("Recovered same model")
+    expect(view.result.current.state.messages.filter(row => !row.isBot)).toMatchObject([{ id: user.id, message: "Keep image", images: [image], serverMessageId: "same-image-user" }])
+    expect(mocks.streamMessage.mock.calls.at(-1)![1]).toMatchObject({ clientMessageId: user.id, retryFailedTurn: dispatched })
+    expect(mocks.streamMessage.mock.calls.at(-1)![0].at(-1)?.content).toContainEqual({ type: "image_url", image_url: { url: image } })
+    view.unmount()
+  })
+
+  it.each([false, true])("keeps text-only Retry cached after explicit OCR %s", async useOCR => {
+    mocks.realFormatter = true
+    const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
+    mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
+    mocks.getModel.mockResolvedValue({ id: "vision-test", capabilities: [] })
+    mocks.getModels.mockResolvedValue([{ id: "vision-test", provider: "openai", capabilities: ["vision"] }])
+    let failed = false
+    mocks.streamMessage.mockImplementation(async function* () {
+      if (!failed) { failed = true; throw new Error("Provider unavailable") }
+      yield "Recovered text"
+    })
+    const view = renderWorkspace(false, false, { useOCR })
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Read this", image: useOCR ? "data:image/png;base64,aW1hZ2U=" : "" }) })
+    await act(async () => { await view.result.current.actions.regenerateLastMessage() })
+    expect(view.result.current.state.messages.at(-1)?.message).toBe("Recovered text")
+    expect(mocks.getModels).not.toHaveBeenCalledWith(true, { requireFresh: true })
+    view.unmount()
+  })
+
+  it("refreshes on Retry when only restored history contains an image", async () => {
+    mocks.realFormatter = true
+    const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
+    mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
+    mocks.getModel.mockResolvedValue({ id: "vision-test", provider: "openai", capabilities: ["vision"] })
+    mocks.streamMessage.mockImplementation(async function* () { yield "Answer" })
+    act(() => useStoreMessageOption.setState({ selectedModel: "vision-test" }))
+    const view = renderWorkspace()
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "An image", image: "data:image/png;base64,aW1hZ2U=" }) })
+    mocks.getModel.mockResolvedValue({ id: "vision-test", capabilities: [] })
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Follow-up", image: "" }) })
+    mocks.getModels.mockResolvedValue([{ id: "vision-test", provider: "openai", capabilities: ["vision"] }])
+    await act(async () => { await view.result.current.actions.regenerateLastMessage() })
+    expect(view.result.current.state.messages.at(-1)?.message).toBe("Answer")
+    expect(mocks.getModels).toHaveBeenCalledWith(true, { requireFresh: true })
+    expect(mocks.streamMessage).toHaveBeenCalledTimes(2)
+    view.unmount()
+  })
+
+  it.each(["stop", "B", "A"])("does not dispatch an image Retry after a held capability refresh is cancelled by %s", async destination => {
+    mocks.realFormatter = true
+    vi.spyOn(i18n, "t").mockImplementation((...args) => { const [key, fallback] = args; return typeof fallback === "string" ? fallback : String(key) })
+    const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
+    mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
+    mocks.getModel.mockResolvedValue({ id: "vision-test", capabilities: [] })
+    act(() => useStoreMessageOption.setState({ selectedModel: "vision-test" }))
+    const view = renderWorkspace()
+    await act(async () => { await view.result.current.actions.onSubmit({ message: "Keep image", image: "data:image/png;base64,aW1hZ2U=" }) })
+    const fresh = deferred<Array<{ id: string; provider: string; capabilities: string[] }>>()
+    mocks.getModels.mockReturnValue(fresh.promise)
+    let pending!: Promise<unknown>
+    act(() => { pending = view.result.current.actions.regenerateLastMessage() })
+    await waitFor(() => expect(mocks.getModels).toHaveBeenCalledWith(true, { requireFresh: true }))
+    const replacement = { id: "new-draft", isBot: false, name: "You", message: "Replacement work", sources: [] }
+    await act(async () => {
+      if (destination === "stop") view.result.current.actions.stopStreamingRequest()
+      else {
+        replaceAuthority("synthetic-b")
+        if (destination === "A") replaceAuthority("synthetic-a")
+        useStoreMessageOption.setState({ messages: [replacement], history: [], historyId: null, serverChatId: null })
+      }
+      fresh.resolve([{ id: "vision-test", provider: "openai", capabilities: ["vision"] }])
+      await pending
+    })
+    expect(mocks.streamMessage).not.toHaveBeenCalled()
+    if (destination !== "stop") expect(view.result.current.state.messages).toEqual([replacement])
+    view.unmount()
+  })
+
   it.each([false, true])("retains server Retry after an ambiguous transport failure and a later capability refusal: initial refusal %s", async initialRefusal => {
     mocks.realFormatter = true
-    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
+    vi.spyOn(i18n, "t").mockImplementation((...args) => { const [key, fallback] = args; return typeof fallback === "string" ? fallback : String(key) })
     const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
     mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
     mocks.getModel.mockImplementation(async model => ({ id: model, capabilities: model === "vision-test" ? ["vision"] : [] }))
@@ -1316,7 +1428,7 @@ describe("saved normal Chat pipeline with autosave", () => {
 
   it("allows explicit current-image OCR but refuses unconverted prior images on the next text-only turn", async () => {
     mocks.realFormatter = true
-    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
+    vi.spyOn(i18n, "t").mockImplementation((...args) => { const [key, fallback] = args; return typeof fallback === "string" ? fallback : String(key) })
     const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
     mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
     const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="
@@ -1366,7 +1478,7 @@ describe("saved normal Chat pipeline with autosave", () => {
 
   it("hydrates a failed saved turn before Retry without duplicating the canonical user", async () => {
     mocks.withLoader = true
-    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
+    vi.spyOn(i18n, "t").mockImplementation((...args) => { const [key, fallback] = args; return typeof fallback === "string" ? fallback : String(key) })
     const projected: unknown[][] = []
     mocks.pageAssistModel.mockImplementation(async ({ conversationId, clientMessageId, retryFailedTurn }) =>
       new ChatTldw({ model: "test", saveToDb: true, conversationId, clientMessageId, retryFailedTurn }))
@@ -1421,7 +1533,7 @@ describe("saved normal Chat pipeline with autosave", () => {
   it.each([false, true].flatMap(prior => ["Image question", ""].map(text => ({ prior, text }))))("recovers actual image transport through the domain adapter, mounted mirror, Retry and remount: $text / prior $prior", async ({ text, prior }) => {
     mocks.withLoader = true
     const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="
-    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
+    vi.spyOn(i18n, "t").mockImplementation((...args) => { const [key, fallback] = args; return typeof fallback === "string" ? fallback : String(key) })
     const projected: Array<Array<{ role: string; content: unknown }>> = []
     mocks.listChatMessages.mockImplementation((id, params, options) => chatRagMethods.listChatMessages.call(
       { getChatMessagesCacheKey: (key: string, query: string) => key + query } as never, id, params, options))
@@ -1493,7 +1605,7 @@ describe("saved normal Chat pipeline with autosave", () => {
 
   it.each(["B", "A"])("does not apply delayed failed-user correlation after A to B to %s", async destination => {
     mocks.withLoader = true
-    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
+    vi.spyOn(i18n, "t").mockImplementation((...args) => { const [key, fallback] = args; return typeof fallback === "string" ? fallback : String(key) })
     const response = deferred<Array<{ id: string; role: string; content: string; metadata_extra: Record<string, unknown> }>>()
     mocks.listChatMessages.mockReturnValueOnce(response.promise)
     mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => ({
@@ -1541,7 +1653,7 @@ describe("saved normal Chat pipeline with autosave", () => {
   })
 
   it("real failed-turn regeneration sends the intended user once without its display error", async () => {
-    vi.spyOn(i18n, "t").mockImplementation((key, fallback) => typeof fallback === "string" ? fallback : String(key))
+    vi.spyOn(i18n, "t").mockImplementation((...args) => { const [key, fallback] = args; return typeof fallback === "string" ? fallback : String(key) })
     const projected: unknown[][] = []
     mocks.pageAssistModel.mockImplementation(async ({ conversationId }) => ({
       saveToDb: true, conversationId,

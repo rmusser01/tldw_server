@@ -21,7 +21,6 @@ import {
   useConnectionUxState
 } from '@/hooks/useConnectionState'
 import { useDemoMode } from '@/context/demo-mode'
-import { useMessageOption } from '@/hooks/useMessageOption'
 import { useAntdMessage } from '@/hooks/useAntdMessage'
 import FeatureEmptyState from '@/components/Common/FeatureEmptyState'
 import { SearchBar } from '@/components/Media/SearchBar'
@@ -38,9 +37,9 @@ import { bgRequest } from '@/services/background-proxy'
 import { requestQuickIngestOpen } from '@/utils/quick-ingest-open'
 import { setSetting } from '@/services/settings/registry'
 import {
-  DISCUSS_MEDIA_PROMPT_SETTING,
   LAST_MEDIA_ID_SETTING,
 } from '@/services/settings/ui-settings'
+import { createMediaChatHandoff, buildMediaChatHandoffRoute, removeMediaChatHandoff } from '@/services/tldw/media-chat-handoff'
 import {
   hasDefaultMediaSearchFields,
 } from '@/components/Review/mediaSearchRequest'
@@ -326,11 +325,6 @@ const MediaPageContent: React.FC = () => {
     ? 'Checking delete permission…'
     : 'Your account does not have permission to delete media.'
   const message = useAntdMessage()
-  const {
-    setChatMode,
-    setSelectedKnowledge,
-    setRagMediaIds
-  } = useMessageOption()
 
   // --- Hooks ---
   const search = useMediaSearch({ t, message })
@@ -892,6 +886,16 @@ const MediaPageContent: React.FC = () => {
     }
   }
 
+  const handoffBoundaryRevision = React.useRef(0)
+  React.useLayoutEffect(() => watchChatAccountChanges(invalidated => {
+    if (invalidated) handoffBoundaryRevision.current += 1
+  }), [])
+  const handoffLifetime = useRef<AbortController | null>(null)
+  React.useLayoutEffect(() => {
+    const lifetime = new AbortController()
+    handoffLifetime.current = lifetime
+    return () => lifetime.abort()
+  }, [ownerScope, nav.selected])
   const handoffSelectionRef = useRef(nav.selected)
   handoffSelectionRef.current = nav.selected
   const fullContentReady = Boolean(ownerScope && nav.selected && !nav.detailLoading && !nav.detailFetchError &&
@@ -903,6 +907,9 @@ const MediaPageContent: React.FC = () => {
 
   // Chat/action handlers
   const handleChatWithMedia = useCallback(async () => {
+    const boundaryRevision = handoffBoundaryRevision.current
+    const lifetime = handoffLifetime.current
+    if (!lifetime || lifetime.signal.aborted) return
     if (!nav.selected || !ownerScope || !fullContentReady || !isMediaCurrent()) return
 
     const title = nav.selected.title || String(nav.selected.id)
@@ -916,25 +923,17 @@ const MediaPageContent: React.FC = () => {
         mode: 'normal' as const,
         ownerScope
       }
-      await setSetting(DISCUSS_MEDIA_PROMPT_SETTING, payload)
-      if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== nav.selected) return
-      try {
-        window.dispatchEvent(
-          new CustomEvent('tldw:discuss-media', {
-            detail: payload
-          })
-        )
-      } catch {
-        // ignore event errors
+      const token = await createMediaChatHandoff(payload)
+      if (boundaryRevision !== handoffBoundaryRevision.current || lifetime.signal.aborted || !isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== nav.selected) {
+        await removeMediaChatHandoff(token)
+        return
       }
+      navigate(buildMediaChatHandoffRoute(token))
     } catch {
-      // ignore storage errors
+      message.error(t('review:reviewPage.chatPrepareFailed', 'Could not prepare this source for Chat. Please try again.'))
+      return
     }
     if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== nav.selected) return
-    setChatMode('normal')
-    setSelectedKnowledge(null as any)
-    setRagMediaIds(null)
-    navigate('/chat')
     message.success(
       t(
         'review:reviewPage.chatPrepared',
@@ -949,13 +948,13 @@ const MediaPageContent: React.FC = () => {
     message,
     navigate,
     nav.selected,
-    setChatMode,
-    setRagMediaIds,
-    setSelectedKnowledge,
     t
   ])
 
   const handleChatAboutMedia = useCallback(async () => {
+    const boundaryRevision = handoffBoundaryRevision.current
+    const lifetime = handoffLifetime.current
+    if (!lifetime || lifetime.signal.aborted) return
     if (!nav.selected || !ownerScope || !isMediaCurrent()) return
 
     const idNum = Number(nav.selected.id)
@@ -974,19 +973,17 @@ const MediaPageContent: React.FC = () => {
         mode: 'rag_media' as const,
         ownerScope
       }
-      await setSetting(DISCUSS_MEDIA_PROMPT_SETTING, payload)
-      if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== nav.selected) return
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('tldw:discuss-media', { detail: payload }))
+      const token = await createMediaChatHandoff(payload)
+      if (boundaryRevision !== handoffBoundaryRevision.current || lifetime.signal.aborted || !isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== nav.selected) {
+        await removeMediaChatHandoff(token)
+        return
       }
+      navigate(buildMediaChatHandoffRoute(token))
     } catch {
-      // ignore storage/event errors
+      message.error(t('review:reviewPage.chatPrepareFailed', 'Could not prepare this source for Chat. Please try again.'))
+      return
     }
     if (!isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== nav.selected) return
-    setSelectedKnowledge(null as any)
-    setRagMediaIds([idNum])
-    setChatMode('rag')
-    navigate('/chat')
     try {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('tldw:focus-composer'))
@@ -1000,7 +997,7 @@ const MediaPageContent: React.FC = () => {
         'Opened media-scoped RAG chat.'
       )
     )
-  }, [nav.selected, ownerScope, isMediaCurrent, setSelectedKnowledge, setRagMediaIds, setChatMode, navigate, message, t])
+  }, [nav.selected, ownerScope, isMediaCurrent, navigate, message, t])
 
   const handleGenerateFlashcardsFromMedia = useCallback(
     async (payload: {
@@ -1092,7 +1089,11 @@ const MediaPageContent: React.FC = () => {
     navigate('/media-multi')
   }, [nav.selected, navigate])
 
-  const handleSendAnalysisToChat = useCallback((text: string) => {
+  const handleSendAnalysisToChat = useCallback(async (text: string) => {
+    const boundaryRevision = handoffBoundaryRevision.current
+    const lifetime = handoffLifetime.current
+    if (!lifetime || lifetime.signal.aborted) return
+    if (!ownerScope || !isMediaCurrent()) return
     if (!text.trim()) {
       message.warning(t('review:reviewPage.nothingToSend', 'Nothing to send'))
       return
@@ -1102,19 +1103,21 @@ const MediaPageContent: React.FC = () => {
         mediaId: nav.selected ? String(nav.selected.id) : undefined,
         title: nav.selected?.title || 'Analysis',
         content: `Please review this analysis and continue the discussion:\n\n${text}`,
+        ownerScope,
         mode: 'normal' as const
       }
-      void setSetting(DISCUSS_MEDIA_PROMPT_SETTING, payload)
-      window.dispatchEvent(new CustomEvent('tldw:discuss-media', { detail: payload }))
+      const token = await createMediaChatHandoff(payload)
+      if (boundaryRevision !== handoffBoundaryRevision.current || lifetime.signal.aborted || !isMediaCurrent() || handoffOwnerRef.current !== ownerScope || handoffSelectionRef.current !== nav.selected) {
+        await removeMediaChatHandoff(token)
+        return
+      }
+      navigate(buildMediaChatHandoffRoute(token))
     } catch {
-      // ignore storage errors
+      message.error(t('review:reviewPage.chatPrepareFailed', 'Could not prepare this source for Chat. Please try again.'))
+      return
     }
-    setChatMode('normal')
-    setSelectedKnowledge(null as any)
-    setRagMediaIds(null)
-    navigate('/chat')
     message.success(t('review:reviewPage.sentToChat', 'Sent to chat'))
-  }, [nav.selected, setChatMode, setSelectedKnowledge, setRagMediaIds, navigate, message, t])
+  }, [nav.selected, ownerScope, isMediaCurrent, navigate, message, t])
 
   const handleRefreshMedia = useCallback(async () => {
     await nav.handleRefreshMedia(showNavigationPanel, () => {

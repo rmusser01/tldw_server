@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import os
 import threading
 from configparser import ConfigParser
 from pathlib import Path
@@ -28,6 +29,9 @@ from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import ModelNot
 from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 
 pytestmark = pytest.mark.integration
+requires_posix_snapshots = pytest.mark.skipif(
+    not hasattr(os, "O_NOFOLLOW"), reason="secure snapshots require POSIX confinement"
+)
 
 
 def make_config(tmp_path: Path) -> LlamaCppConfig:
@@ -174,6 +178,7 @@ class FakeRunnerFactory:
         return runner
 
 
+@requires_posix_snapshots
 async def test_snapshot_profile_toggle_propagates_without_restart_and_busy_fences(tmp_path):
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_operations import SnapshotOperationError
 
@@ -207,6 +212,7 @@ async def test_snapshot_profile_toggle_propagates_without_restart_and_busy_fence
     await supervisor.shutdown()
 
 
+@requires_posix_snapshots
 async def test_snapshot_failed_start_keeps_child_ownership_until_confirmed_death(tmp_path):
     from types import SimpleNamespace
 
@@ -247,6 +253,7 @@ async def test_snapshot_failed_start_keeps_child_ownership_until_confirmed_death
         assert not (tmp_path / "llamacpp-snapshots" / "one" / "working" / "failedlaunch").exists()
 
 
+@requires_posix_snapshots
 async def test_overlapping_cleanup_preserves_new_live_child_and_owner_on_failed_stop(tmp_path, monkeypatch):
     from types import SimpleNamespace
 
@@ -339,6 +346,7 @@ async def test_overlapping_cleanup_preserves_new_live_child_and_owner_on_failed_
 
 
 @pytest.mark.parametrize("retained", ["corrupt_manifest", "binary_only", "manifest_only"])
+@requires_posix_snapshots
 async def test_profile_deletion_rejects_uncertain_retained_snapshot_state(tmp_path: Path, retained: str):
     from datetime import UTC, datetime
 
@@ -388,6 +396,7 @@ async def test_profile_deletion_rejects_uncertain_retained_snapshot_state(tmp_pa
         await supervisor.shutdown()
 
 
+@requires_posix_snapshots
 async def test_default_profile_compatibility_path_cannot_change_reserved_snapshot_profile(tmp_path):
     from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import DEFAULT_PROFILE_ID
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_operations import SnapshotOperationError
@@ -406,6 +415,7 @@ async def test_default_profile_compatibility_path_cannot_change_reserved_snapsho
     await supervisor.shutdown()
 
 
+@requires_posix_snapshots
 async def test_cancelled_snapshot_factory_keeps_created_owner_for_shutdown(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as module
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
@@ -433,6 +443,7 @@ async def test_cancelled_snapshot_factory_keeps_created_owner_for_shutdown(tmp_p
         pass
 
 
+@requires_posix_snapshots
 async def test_shutdown_waits_for_inflight_snapshot_factory_then_releases_owner(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.Local_LLM import llamacpp_supervisor_service as module
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_store import SnapshotStore
@@ -463,6 +474,7 @@ async def test_shutdown_waits_for_inflight_snapshot_factory_then_releases_owner(
         pass
 
 
+@requires_posix_snapshots
 async def test_shutdown_drains_admission_that_registers_after_shutdown_begins(tmp_path, monkeypatch):
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_models import SnapshotRequest
     from tldw_Server_API.tests.LLM_Local.test_llamacpp_snapshot_operations import Runner, Transport
@@ -1054,6 +1066,7 @@ async def test_supervisor_delete_running_profile_awaits_stop_before_removing(tmp
 
 
 @pytest.mark.asyncio
+@requires_posix_snapshots
 async def test_supervisor_deletes_snapshot_disabled_profile_without_fcntl(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1082,6 +1095,7 @@ async def test_supervisor_deletes_snapshot_disabled_profile_without_fcntl(
 
 
 @pytest.mark.asyncio
+@requires_posix_snapshots
 async def test_supervisor_fails_closed_without_fcntl_when_disabled_profile_has_snapshot(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

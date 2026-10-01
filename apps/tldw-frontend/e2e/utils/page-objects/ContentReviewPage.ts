@@ -9,7 +9,7 @@
  * - Committing drafts to the server (via /api/v1/media/add)
  * - Marking drafts as reviewed, discarding, or resetting
  */
-import { type Page, type Locator, expect } from "@playwright/test"
+import { type Page, type Locator } from "@playwright/test"
 import { BasePage, type InteractiveElement } from "./BasePage"
 import { waitForAppShell, waitForConnection } from "../helpers"
 
@@ -27,13 +27,9 @@ export class ContentReviewPage extends BasePage {
 
   async assertPageReady(): Promise<void> {
     await waitForAppShell(this.page, 30_000)
-    // Wait for heading or the empty state
-    const heading = this.page.getByText("Content Review")
-    const emptyState = this.page.getByText("No drafts yet")
-    await Promise.race([
-      heading.first().waitFor({ state: "visible", timeout: 20_000 }),
-      emptyState.first().waitFor({ state: "visible", timeout: 20_000 }),
-    ]).catch(() => {})
+    // The heading is always rendered, including the empty state. Missing UI
+    // must reject readiness instead of silently completing acceptance.
+    await this.heading.waitFor({ state: "visible", timeout: 20_000 })
   }
 
   // -- Locators --------------------------------------------------------------
@@ -95,7 +91,7 @@ export class ContentReviewPage extends BasePage {
 
   /** Content textarea editor */
   get contentTextarea(): Locator {
-    return this.page.locator("textarea").first()
+    return this.page.locator("textarea:visible").first()
   }
 
   /** "AI fix" button for AI corrections */
@@ -165,7 +161,7 @@ export class ContentReviewPage extends BasePage {
 
   /** Review notes textarea */
   get reviewNotesTextarea(): Locator {
-    return this.page.locator("textarea").nth(1)
+    return this.page.locator("textarea:visible").nth(1)
   }
 
   /** Select a draft prompt when no draft is selected */

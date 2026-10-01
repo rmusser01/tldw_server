@@ -1468,5 +1468,20 @@
   },
   "actor_templateMode_ignore": {
     "message": "Ignorar quando templates estiverem ativos"
+  },
+  "mediaHandoff_conflictLabel": {
+    "message": "Conflito na transferência de mídia"
+  },
+  "mediaHandoff_conflict": {
+    "message": "O campo de mensagem já contém um rascunho. Insira a fonte de mídia, substitua seu rascunho ou cancele a importação."
+  },
+  "mediaHandoff_insert": {
+    "message": "Inserir fonte de mídia"
+  },
+  "mediaHandoff_replace": {
+    "message": "Substituir rascunho atual"
+  },
+  "mediaHandoff_cancel": {
+    "message": "Cancelar importação"
   }
 }

@@ -75,7 +75,7 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
   const { t } = useTranslation(["evaluations", "common"])
   const [currentStep, setCurrentStep] = useState(0)
 
-  const evalType = Form.useWatch("evalType", form) || "response_quality"
+  const evalType = Form.useWatch("evalType", { form, preserve: true }) || "response_quality"
   const evalMetadataValue = Form.useWatch("evalMetadataJson", form) || ""
   const evalTypeTooltips = useMemo(
     () => ({

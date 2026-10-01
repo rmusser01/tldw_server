@@ -249,7 +249,10 @@ async def test_resend_verification_throttled(isolated_test_environment, test_use
     from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
     pool = await get_db_pool()
-    await UsersDB(pool).update_user(int(test_user["id"]), is_verified=False)
+    users = UsersDB(pool)
+    await users.update_user(int(test_user["id"]), is_verified=False)
+    updated_user = await users.get_user_by_id(int(test_user["id"]))
+    assert updated_user["is_verified"] is False
 
     class _StubEmail:
         def __init__(self) -> None:

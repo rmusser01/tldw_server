@@ -224,10 +224,12 @@ export const saveMessageOnError = async ({
     const persistedHistoryId = await runChatPersistenceTransaction(
       scopeInvalidatedSignal,
       async () => {
-        const targetHistoryId =
-          historyId ?? (await saveHistory(title!, false, message_source)).id
-        const shouldSaveUser =
-          !isRegenerating && (!historyId || !isAbort || !isContinue)
+        const targetHistoryId = historyId ?? (
+          await saveHistory(title!, false, message_source, undefined, undefined, requestScope)
+        ).id
+        const shouldSaveUser = !isRegenerating && (
+          !historyId || !isAbort || !isContinue
+        )
 
         if (isRegenerating && retryFailedTurn && userMessageId && userServerMessageId) {
           await acknowledgeSavedUserMessage(targetHistoryId, userMessageId, userServerMessageId, userMessage)
@@ -346,7 +348,7 @@ export const saveMessageOnError = async ({
       return historyId
     } else {
       const title = await generateTitleWithFallback(selectedModel, userMessage)
-      const newHistoryId = await saveHistory(title, false, message_source)
+      const newHistoryId = await saveHistory(title, false, message_source, undefined, undefined, requestScope)
       updatePageTitle(title)
       if (!isRegenerating) {
         await saveMessage({
@@ -445,7 +447,7 @@ export const saveMessageOnError = async ({
   } else {
     // Create new history on error
     const title = await generateTitleWithFallback(selectedModel, userMessage)
-    const newHistoryId = await saveHistory(title, false, message_source)
+    const newHistoryId = await saveHistory(title, false, message_source, undefined, undefined, requestScope)
     updatePageTitle(title)
     try {
       if (!isRegenerating) {
@@ -628,7 +630,7 @@ export const saveMessageOnSuccess = async ({
     throw error
   }
 
-  const title = historyId
+  let title = historyId
     ? null
     : scopeSignal || requestScope
       ? await generateTitle(selectedModel, message, message, {
@@ -637,11 +639,16 @@ export const saveMessageOnSuccess = async ({
         })
       : await generateTitle(selectedModel, message, message)
 
+  if (!historyId && !title?.trim()) {
+    title = buildFallbackHistoryTitle(message)
+  }
+
   const persistedHistoryId = await runChatPersistenceTransaction(
     scopeInvalidatedSignal,
     async () => {
-      const targetHistoryId =
-        historyId ?? (await saveHistory(title!, false, message_source)).id
+      const targetHistoryId = historyId ?? (
+        await saveHistory(title!, false, message_source, undefined, undefined, requestScope)
+      ).id
 
       if (isRegenerate && retryFailedTurn && userMessageId && userServerMessageId) {
         await acknowledgeSavedUserMessage(targetHistoryId, userMessageId, userServerMessageId, message)

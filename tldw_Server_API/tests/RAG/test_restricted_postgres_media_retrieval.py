@@ -420,3 +420,80 @@ async def test_cached_ordinary_identity_cannot_reuse_another_owners_scope(restri
             await get_request_user(request, api_key=None, token=None)
         assert db.get_media_by_id(media_id, include_trash=True) is None
     assert get_scope() is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fts_level", ["media", "chunk"])
+@pytest.mark.parametrize("include_metadata", [True, False])
+async def test_media_evidence_keeps_canonical_identity_in_stream_context(
+    restricted_media_store, fts_level, include_metadata,
+):
+    """Source navigation must retain the Media owner, never substitute a chunk ID."""
+    from tldw_Server_API.app.core.RAG.rag_service.streaming_executor import _context_events
+
+    db = restricted_media_store
+    with scoped_context(user_id=1, is_admin=False):
+        media_id, _, _ = db.add_media_with_keywords(
+            title="Rowan Observatory identity",
+            media_type="document",
+            content="Rowan Observatory is directed by Mira Vale.",
+            owner_user_id=1,
+            chunks=[{"text": "Rowan Observatory is directed by Mira Vale.", "start_char": 0, "end_char": 43}],
+        )
+        retriever = MediaDBRetriever(
+            db_path=db.db_path_str, media_db=db,
+            config=RetrievalConfig(
+                max_results=8, min_score=0.0, use_fts=True, use_vector=False,
+                fts_level=fts_level, include_metadata=include_metadata,
+            ),
+        )
+        documents = await retriever.retrieve("Rowan", allowed_media_ids=[media_id])
+        events = _context_events(docs=documents, payload={}, request_defaults={})
+    contexts = events[0]["contexts"]
+    assert len(contexts) == 1
+    assert contexts[0].get("source_id") == str(media_id)
+    assert contexts[0].get("source_type") == "media_db"
+    assert contexts[0].get("evidence_origin") == "local_library"
+    if fts_level == "chunk":
+        assert contexts[0]["id"] != str(media_id)
+    with scoped_context(user_id=2, is_admin=False):
+        assert await retriever.retrieve("Rowan", allowed_media_ids=[media_id]) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fts_level", ["media", "chunk"])
+@pytest.mark.parametrize(
+    "visibility,reader,teams,orgs,is_admin,visible",
+    [
+        ("personal", 1, [], [], False, True),
+        ("personal", 2, [], [], False, False),
+        ("personal", None, [], [], False, False),
+        ("personal", 2, [], [], True, True),
+        ("team", 2, [7], [], False, True),
+        ("team", 2, [8], [], False, False),
+        ("org", 2, [], [9], False, True),
+        ("org", 2, [], [10], False, False),
+    ],
+)
+async def test_media_evidence_respects_shared_visibility(
+    restricted_media_store, fts_level, visibility, reader, teams, orgs, is_admin, visible,
+):
+    """Chunk and whole-source search share the same database visibility contract."""
+    db = restricted_media_store
+    with scoped_context(user_id=1, is_admin=True):
+        media_id, _, _ = db.add_media_with_keywords(
+            title="Rowan shared source", media_type="document",
+            content="Rowan shared evidence.", owner_user_id=1,
+            chunks=[{"text": "Rowan shared evidence.", "start_char": 0, "end_char": 22}],
+        )
+        if visibility != "personal":
+            assert db.share_media(media_id, visibility, team_id=7 if visibility == "team" else None,
+                                  org_id=9 if visibility == "org" else None)
+    retriever = MediaDBRetriever(
+        db_path=db.db_path_str, media_db=db,
+        config=RetrievalConfig(max_results=1, min_score=0.0, use_fts=True,
+                               use_vector=False, fts_level=fts_level),
+    )
+    with scoped_context(user_id=reader, team_ids=teams, org_ids=orgs, is_admin=is_admin):
+        documents = await retriever.retrieve("Rowan", allowed_media_ids=[media_id])
+    assert [doc.metadata["source_id"] for doc in documents] == ([str(media_id)] if visible else [])

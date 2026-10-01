@@ -49,7 +49,7 @@ describe("provider-qualified Chat model construction", () => {
 
   it("retains the existing unqualified model and default-provider behavior", async () => {
     const chat = await pageAssistModel({ model: "tldw:shared", saveToDb: false })
-    for await (const _ of await chat.stream([image])) { /* consume */ }
+    for await (const _ of await chat.stream([new HumanMessage("Hello")])) { /* consume */ }
     expect(mocks.stream.mock.calls[0][1]).toMatchObject({ model: "shared", apiProvider: "openai" })
   })
 

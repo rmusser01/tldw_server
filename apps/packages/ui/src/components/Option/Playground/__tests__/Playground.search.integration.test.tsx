@@ -15,7 +15,7 @@ import {
   SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE
 } from "@/services/tldw/sidepanel-chat-webui-handoff"
 
-const h1 = vi.hoisted(() => ({ enabled: false, legacyNative: false, controller: null as HistorySelectionController | null, bookmarks: new Map<string, any>(), confirm: vi.fn() }))
+const h1 = vi.hoisted(() => ({ enabled: false, legacyNative: false, controller: null as HistorySelectionController | null, bookmarks: new Map<string, any>(), confirm: vi.fn(), historyInfo: vi.fn() }))
 const timelineReveal = vi.hoisted(() => ({ current: null as null | (() => Promise<boolean>) }))
 const h1Key = (scope: any, owner: any) => JSON.stringify([scope.profile_id, scope.client_session_id, owner.owner_key, owner.conversation_id])
 
@@ -71,6 +71,16 @@ const messageOptionState = vi.hoisted(() => ({
     setContextFiles: vi.fn(),
     createChatBranch: vi.fn(),
     streaming: false,
+    effectiveAssistantState: {
+      mode: "plain",
+      kind: null,
+      id: null,
+      displayName: null,
+      avatarUrl: null,
+      systemPromptSnapshot: null,
+      source: "none"
+    },
+    selectedAssistant: null,
     selectedCharacter: null,
     setSelectedCharacter: vi.fn(),
     compareMode: false,
@@ -824,7 +834,7 @@ vi.mock("@/db/dexie/history-selection", () => ({
 vi.mock("@/db/dexie/fork-operations", () => ({findForkCandidate: async () => null, loadForkOperations: async () => []}))
 vi.mock("@/db/dexie/chat", () => ({
   PageAssistDatabase: class {
-    getHistoryInfo = async () => null
+    getHistoryInfo = h1.historyInfo
   }
 }))
 vi.mock("@/services/chat-history-selection", () => ({
@@ -879,6 +889,11 @@ describe("Playground H1 URL initialization with the mounted session/controller",
     h1.controller = null
     h1.bookmarks.clear()
     h1.confirm.mockClear()
+    h1.historyInfo.mockReset().mockImplementation(async (id: string) =>
+      ["chat-one", "chat-two"].includes(id)
+        ? { id, title: id, createdAt: 1, is_rag: false, message_source: "branch", local_owner_key: "local-owner" }
+        : null
+    )
     localStorage.clear()
     sessionStorage.clear()
     storageState.value.clear()
@@ -974,6 +989,23 @@ describe("Playground H1 URL initialization with the mounted session/controller",
     }
   })
 
+  it.each([
+    { name: "missing history", details: null, code: "owner_conversation_mismatch" },
+    { name: "unowned history", details: { id: "chat-one", message_source: "branch" }, code: "owner_conversation_mismatch" },
+    { name: "unbound server mirror", details: { id: "chat-one", message_source: "server", server_chat_id: "foreign-chat" }, code: "unbound_server_mirror" }
+  ])("rejects a bookmarked $name without publishing selected rows", async ({ details, code }) => {
+    const reference = seed()
+    h1.historyInfo.mockResolvedValue(details)
+    window.history.replaceState(null, "", "/chat?historySelection=" + encodeURIComponent(JSON.stringify(reference)))
+    const page = render(<Playground />)
+    await waitFor(() => expect(h1.controller?.error).toBe(code))
+    expect(h1.controller?.capture).toBeNull()
+    expect(h1.controller?.view).toBeNull()
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+    expect(h1.bookmarks.size).toBe(1)
+    expect(window.location.search).toContain("historySelection")
+    page.unmount()
+  })
   it.each(["query", "hash", "hash-router"])(
     "consumes a %s handoff once and restores destination choice, conversation switch and empty reset",
     async (route) => {

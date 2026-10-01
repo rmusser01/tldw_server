@@ -1,3 +1,5 @@
+"""POSIX artifact integrity and unmarked cross-platform rejection/snapshot controls."""
+
 from __future__ import annotations
 
 import asyncio
@@ -10,10 +12,12 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
 
+from tldw_Server_API.app.core.Admin_Webhooks import legacy_import as legacy_import_module
 from tldw_Server_API.app.core.Admin_Webhooks.audit import OperationalAudit
 from tldw_Server_API.app.core.Admin_Webhooks.catalog import EVENT_CATALOG
 from tldw_Server_API.app.core.Admin_Webhooks.config import (
@@ -39,6 +43,13 @@ from tldw_Server_API.app.core.DB_Management.admin_webhooks_repository import (
 
 NOW = datetime(2026, 8, 22, 20, 0, tzinfo=timezone.utc)
 CATALOG_EVENTS = tuple(item.event_type for item in EVENT_CATALOG)
+
+# Artifact operations require native POSIX permissions. Repository snapshots,
+# pure parser/source-rejection tests, and all host-negative tests stay unmarked.
+_requires_posix_artifacts = pytest.mark.skipif(
+    not legacy_import_module.posix_private_artifacts_supported(),
+    reason="Legacy private artifacts require POSIX ownership and mode-0600 enforcement",
+)
 
 
 @dataclass
@@ -145,6 +156,7 @@ async def legacy_import(
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_dry_run_is_deterministic_redacted_and_mutates_no_source_or_database(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -172,6 +184,8 @@ async def test_dry_run_is_deterministic_redacted_and_mutates_no_source_or_databa
 
 
 @pytest.mark.unit
+# This full build_plan check publishes a private report; the repository snapshot stays native.
+@_requires_posix_artifacts
 async def test_source_snapshot_does_not_reopen_store_after_strict_read(
     legacy_import: LegacyImportFixture,
     monkeypatch: pytest.MonkeyPatch,
@@ -203,6 +217,8 @@ async def test_source_snapshot_does_not_reopen_store_after_strict_read(
     ],
 )
 @pytest.mark.unit
+# These are build_plan operation cases; unmarked strict-source parser cases appear below.
+@_requires_posix_artifacts
 async def test_strict_system_ops_source_handling(
     legacy_import: LegacyImportFixture,
     payload: bytes,
@@ -228,6 +244,7 @@ async def test_strict_system_ops_source_handling(
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_dry_run_rejects_id_that_leaves_no_next_sequence_value(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -280,6 +297,7 @@ async def test_repository_snapshot_reads_legacy_rows_and_canonical_allocator_sta
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_apply_imports_inactive_preserves_secret_and_sanitizes_exact_fields(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -330,6 +348,7 @@ async def test_apply_imports_inactive_preserves_secret_and_sanitizes_exact_field
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_apply_audit_failure_has_zero_database_source_or_artifact_side_effects(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -364,6 +383,7 @@ async def test_apply_audit_failure_has_zero_database_source_or_artifact_side_eff
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_literal_report_approval_detects_payload_tampering_before_audit(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -386,6 +406,7 @@ async def test_literal_report_approval_detects_payload_tampering_before_audit(
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_fresh_install_apply_completes_without_rollback_artifacts(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -423,6 +444,7 @@ class _StaticLegacyDecryptor(LegacySecretDecryptor):
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_database_only_import_preserves_collision_mapping_and_advances_sequence(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -532,6 +554,7 @@ async def test_database_only_import_preserves_collision_mapping_and_advances_seq
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_encrypted_database_source_requires_explicit_decryption_flag(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -572,6 +595,8 @@ async def test_encrypted_database_source_requires_explicit_decryption_flag(
 
 
 @pytest.mark.unit
+# This flow publishes three plans; the unmarked source-rejection control below publishes none.
+@_requires_posix_artifacts
 async def test_reject_source_is_audited_and_bound_to_exact_record_fingerprint(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -605,6 +630,7 @@ async def test_reject_source_is_audited_and_bound_to_exact_record_fingerprint(
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_extract_rollback_backup_writes_distinct_private_plaintext_file(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -641,6 +667,7 @@ async def test_extract_rollback_backup_writes_distinct_private_plaintext_file(
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_extract_cleans_created_plaintext_when_transaction_exit_is_cancelled(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -683,6 +710,7 @@ async def test_extract_cleans_created_plaintext_when_transaction_exit_is_cancell
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_extract_failure_cleanup_preserves_replaced_output_inode(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -729,16 +757,23 @@ async def test_extract_failure_cleanup_preserves_replaced_output_inode(
 
 
 @pytest.mark.unit
-def test_output_cleanup_preserves_replacement_that_reused_the_inode(tmp_path: Path) -> None:
+@_requires_posix_artifacts
+def test_output_cleanup_preserves_replacement_that_reused_the_inode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Linux reuses a freed inode at once; identity alone must not authorize unlink."""
     from tldw_Server_API.app.core.Admin_Webhooks import legacy_import as legacy_import_module
 
     output = tmp_path / "extraction.json"
     evidence = legacy_import_module._publish_exclusive_output(output, b"extracted-by-us")
+    original_stat = output.lstat()
     # Stand-in for an unlink + recreate that got the same dev:inode back.
     os.chmod(output, 0o600)
     output.write_bytes(b"replacement-owned-by-another-process")
     assert f"{output.stat().st_dev}:{output.stat().st_ino}" == evidence.identity
+
+    local_os = SimpleNamespace(**{**vars(os), "lstat": lambda path: original_stat})
+    monkeypatch.setattr(legacy_import_module, "os", local_os)
 
     legacy_import_module._remove_published_output_if_same(
         output,
@@ -747,17 +782,49 @@ def test_output_cleanup_preserves_replacement_that_reused_the_inode(tmp_path: Pa
     )
     assert output.read_bytes() == b"replacement-owned-by-another-process"
 
-    output.write_bytes(b"extracted-by-us")
-    legacy_import_module._remove_published_output_if_same(
-        output,
-        evidence,
-        expected_payload=b"extracted-by-us",
+
+@pytest.mark.unit
+@pytest.mark.parametrize("change", ["unchanged", "replaced", "modified"])
+@_requires_posix_artifacts
+def test_output_cleanup_requires_unchanged_file_even_when_inode_is_reused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str,
+) -> None:
+    output = tmp_path / "owned-output.json"
+    output.write_bytes(b"owned plaintext")
+    output.chmod(0o600)
+    evidence = legacy_import_module._file_evidence(output)
+    original_stat = output.lstat()
+    if change == "replaced":
+        output.unlink()
+    if change != "unchanged":
+        output.write_bytes(b"owned plaintext")
+        output.chmod(0o600)
+
+    # Model a filesystem reusing the original inode with changed creation/status time.
+    reused_inode_stat = SimpleNamespace(
+        st_mode=original_stat.st_mode,
+        st_uid=original_stat.st_uid,
+        st_gid=original_stat.st_gid,
+        st_dev=original_stat.st_dev,
+        st_ino=original_stat.st_ino,
+        st_ctime_ns=original_stat.st_ctime_ns + (change != "unchanged"),
     )
-    assert not output.exists()
+    local_os = SimpleNamespace(**{**vars(os), "lstat": lambda path: reused_inode_stat})
+    monkeypatch.setattr(legacy_import_module, "os", local_os)
+
+    legacy_import_module._remove_published_output_if_same(
+        output, evidence, expected_payload=b"owned plaintext",
+    )
+
+    if change == "unchanged":
+        assert not output.exists()
+    else:
+        assert output.read_bytes() == b"owned plaintext"
 
 
 @pytest.mark.parametrize("closing_action", ["activity", "retirement"])
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_extract_holds_migration_lock_through_plaintext_publication(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -850,6 +917,7 @@ async def test_extract_holds_migration_lock_through_plaintext_publication(
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_extract_checks_closed_window_before_artifact_access_or_audit(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -886,6 +954,7 @@ async def test_extract_checks_closed_window_before_artifact_access_or_audit(
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_extract_rechecks_activity_after_accepted_audit_before_artifact_access(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -932,6 +1001,7 @@ async def test_extract_rechecks_activity_after_accepted_audit_before_artifact_ac
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_extract_rechecks_retirement_after_accepted_audit_before_artifact_access(
     legacy_import: LegacyImportFixture,
     tmp_path: Path,
@@ -981,6 +1051,7 @@ async def test_extract_rechecks_retirement_after_accepted_audit_before_artifact_
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_destroy_rollback_key_requires_expiry_then_retires_idempotently(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -1044,6 +1115,7 @@ async def test_destroy_rollback_key_requires_expiry_then_retires_idempotently(
     ],
 )
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_apply_resumes_from_every_durable_stage_without_duplicate_import(
     legacy_import: LegacyImportFixture,
     crash_stage: str,
@@ -1086,7 +1158,205 @@ async def test_apply_resumes_from_every_durable_stage_without_duplicate_import(
     assert "webhook_deliveries" not in sanitized
 
 
+def _unsupported_artifact_os(reason: str = "non_posix") -> SimpleNamespace:
+    """Model missing capabilities without changing the process-wide os module."""
+    values = {
+        **vars(os),
+        "name": "posix",
+        "geteuid": getattr(os, "geteuid", lambda: 0),
+        "fchmod": getattr(os, "fchmod", lambda _descriptor, _mode: None),
+    }
+    if reason == "non_posix":
+        values["name"] = "nt"
+    else:
+        values.pop(reason)
+    return SimpleNamespace(**values)
+
+
 @pytest.mark.unit
+def test_private_artifact_capability_matches_native_host(tmp_path: Path) -> None:
+    """Native Windows must reject artifacts rather than claim chmod secures them."""
+    expected = (
+        os.name == "posix"
+        and callable(getattr(os, "geteuid", None))
+        and callable(getattr(os, "fchmod", None))
+    )
+    assert legacy_import_module.posix_private_artifacts_supported() is expected
+    if expected:
+        legacy_import_module.require_posix_private_artifacts()
+    else:
+        with pytest.raises(LegacyImportError, match="admin_webhook_legacy_host_unsupported"):
+            legacy_import_module._publish_exclusive_output(tmp_path / "native-output", b"private")
+        assert not tuple(tmp_path.iterdir())
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("reason", ["non_posix", "geteuid", "fchmod"])
+@pytest.mark.parametrize(
+    "helper",
+    ["normalize", "read", "report", "artifact", "resume", "output", "fsync"],
+)
+def test_unsupported_host_rejects_artifact_helpers_before_filesystem_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str, helper: str,
+) -> None:
+    """Removing any required host capability must stop every direct artifact entry."""
+    local_os = _unsupported_artifact_os(reason)
+    accesses: list[str] = []
+
+    def deny_access(*_args, **_kwargs):
+        accesses.append("artifact access")
+        raise AssertionError("unsupported host must not access an artifact")
+
+    local_os.open = deny_access
+    monkeypatch.setattr(legacy_import_module, "os", local_os)
+    monkeypatch.setattr(legacy_import_module, "tempfile", SimpleNamespace(mkstemp=deny_access))
+    output = tmp_path / "output"
+    staging = tmp_path / "staging"
+    operations = {
+        "normalize": lambda: legacy_import_module._normalize_output_path(output),
+        "read": lambda: legacy_import_module._read_private_file(output),
+        "report": lambda: legacy_import_module._publish_private_report(output, b"private"),
+        "artifact": lambda: legacy_import_module._publish_exclusive_artifact(output, staging, b"private"),
+        "resume": lambda: legacy_import_module._publish_or_resume_artifact(output, staging, b"private"),
+        "output": lambda: legacy_import_module._publish_exclusive_output(output, b"private"),
+        "fsync": lambda: legacy_import_module._fsync_directory(tmp_path),
+    }
+
+    with pytest.raises(LegacyImportError, match="admin_webhook_legacy_host_unsupported"):
+        operations[helper]()
+
+    assert accesses == []
+    assert not tuple(tmp_path.iterdir())
+
+
+@pytest.mark.unit
+def test_unsupported_output_publication_does_not_leave_an_empty_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The historical fchmod AttributeError left an already-created output behind."""
+    monkeypatch.setattr(legacy_import_module, "os", _unsupported_artifact_os("fchmod"))
+    output = tmp_path / "plaintext.json"
+    error: LegacyImportError | AttributeError | None = None
+    try:
+        legacy_import_module._publish_exclusive_output(output, b"private plaintext")
+    except (LegacyImportError, AttributeError) as exc:
+        error = exc
+
+    assert not output.exists()
+    assert isinstance(error, LegacyImportError)
+    assert error.code.value == "admin_webhook_legacy_host_unsupported"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "operation", ["build_plan", "apply_plan", "verify_and_sanitize", "extract_rollback_backup", "destroy_rollback_key"],
+)
+async def test_unsupported_host_artifact_operations_have_no_side_effects(
+    legacy_import: LegacyImportFixture, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, operation: str,
+) -> None:
+    """Unsupported operations must stop before source locks, DB reads, or audit."""
+    state_before = await legacy_import.repository.get_migration_state()
+    read_state = legacy_import.repository.get_migration_state
+    accesses: list[str] = []
+
+    async def deny_access(*_args, **_kwargs):
+        accesses.append("source or database access")
+        raise AssertionError("unsupported operation must stop before runtime work")
+
+    monkeypatch.setattr(legacy_import_module, "os", _unsupported_artifact_os())
+    monkeypatch.setattr(legacy_import.service, "_snapshot", deny_access)
+    monkeypatch.setattr(legacy_import.repository, "get_migration_state", deny_access)
+    digest = "sha256:" + "a" * 64
+    if operation == "build_plan":
+        invocation = getattr(legacy_import.service, operation)(legacy_import.request)
+    elif operation in {"apply_plan", "verify_and_sanitize"}:
+        invocation = getattr(legacy_import.service, operation)(
+            legacy_import.request, approved_report_digest=digest,
+        )
+    else:
+        kwargs = {
+            "backup_path": legacy_import.request.backup_path,
+            "rollback_key_path": legacy_import.request.rollback_key_path,
+            "operator_id": 9,
+            "now": NOW,
+            "confirmed": True,
+            "request_id": "unsupported-private-artifact-operation",
+        }
+        if operation == "extract_rollback_backup":
+            kwargs["output_path"] = tmp_path / "plaintext.json"
+        invocation = getattr(legacy_import.service, operation)(**kwargs)
+
+    with pytest.raises(LegacyImportError, match="admin_webhook_legacy_host_unsupported"):
+        await invocation
+
+    assert accesses == []
+    assert await read_state() == state_before
+    assert await legacy_import.repository.count_registrations() == 0
+    assert legacy_import.store_path.read_bytes() == legacy_import.original_store_bytes
+    assert legacy_import.audits == []
+    assert not any(
+        path.exists() for path in (
+            legacy_import.request.report_path, legacy_import.request.backup_path,
+            legacy_import.request.rollback_key_path, tmp_path / "plaintext.json",
+        )
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("payload", "invalid"),
+    [(b" \n", False), (b"[]", True), (b"{not-json", True), (b'{"webhooks":[],"webhooks":[]}', True)],
+)
+def test_strict_source_parser_remains_platform_neutral(
+    legacy_import: LegacyImportFixture, payload: bytes, invalid: bool,
+) -> None:
+    """Source parsing remains available independently of private report publication."""
+    legacy_import.store_path.write_bytes(payload)
+    if invalid:
+        with pytest.raises(LegacyImportError, match="admin_webhook_legacy_source_invalid"):
+            legacy_import.service._read_store()
+    else:
+        store, raw = legacy_import.service._read_store()
+        assert store == {}
+        assert raw == payload
+    assert legacy_import.audits == []
+    assert not legacy_import.request.report_path.exists()
+
+
+@pytest.mark.unit
+async def test_source_rejection_and_constructor_remain_available_on_unsupported_host(
+    legacy_import: LegacyImportFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A private-artifact limitation must not block audited source rejection."""
+    monkeypatch.setattr(legacy_import_module, "os", _unsupported_artifact_os())
+    service = LegacyImportService(
+        repository=legacy_import.repository,
+        key_ring=_ring(),
+        settings=_settings(),
+        system_ops_path=legacy_import.store_path,
+        audit_sink=legacy_import.service._audit_sink,
+    )
+    snapshot = await service._snapshot()
+    record = service._raw_records(snapshot)[0]
+    state = await service.reject_source(
+        source_kind=record.source_kind,
+        source_identity=record.source_identity,
+        source_record_fingerprint=record.source_record_fingerprint,
+        reason_code=LegacyRejectionReason.OPERATOR_EXCLUDED,
+        operator_id=9,
+        now=NOW,
+        request_id="platform-neutral-source-rejection",
+    )
+
+    assert state.source_rejections[0]["source_record_fingerprint"] == record.source_record_fingerprint
+    assert [audit.outcome for audit in legacy_import.audits] == ["accepted", "completed"]
+    assert legacy_import.store_path.read_bytes() == legacy_import.original_store_bytes
+    assert not legacy_import.request.report_path.exists()
+
+
+@pytest.mark.unit
+@_requires_posix_artifacts
 async def test_resume_after_backup_publish_preserves_unrelated_store_changes(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -1134,6 +1404,7 @@ async def test_resume_after_backup_publish_preserves_unrelated_store_changes(
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_resume_rejects_authenticated_backup_with_wrong_webhook_subtree(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -1206,6 +1477,7 @@ async def test_resume_rejects_authenticated_backup_with_wrong_webhook_subtree(
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_reserved_operation_resumes_when_reviewed_report_is_missing(
     legacy_import: LegacyImportFixture,
 ) -> None:
@@ -1246,6 +1518,7 @@ async def test_reserved_operation_resumes_when_reviewed_report_is_missing(
 
 
 @pytest.mark.unit
+@_requires_posix_artifacts
 async def test_public_verify_and_sanitize_resumes_database_committed_import(
     legacy_import: LegacyImportFixture,
 ) -> None:

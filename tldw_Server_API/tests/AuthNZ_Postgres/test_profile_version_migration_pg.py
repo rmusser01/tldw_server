@@ -15,11 +15,7 @@ from tldw_Server_API.tests.helpers.authnz_seed import (
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
 _POSTGRES_SCHEMA_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "Databases"
-    / "Postgres"
-    / "Schema"
-    / "postgresql_users.sql"
+    Path(__file__).resolve().parents[2] / "Databases" / "Postgres" / "Schema" / "postgresql_users.sql"
 )
 
 
@@ -56,6 +52,7 @@ async def _reset_to_legacy_users_schema() -> None:
         """
     )
 
+    await _legacy_execute("ALTER TABLE users ALTER COLUMN updated_at DROP NOT NULL")
 
 def test_fresh_postgres_schema_declares_durable_profile_version() -> None:
     schema_sql = _POSTGRES_SCHEMA_PATH.read_text(encoding="utf-8").upper()
@@ -125,10 +122,13 @@ async def test_postgres_upgrade_preserves_aware_updated_at_and_is_idempotent(
     assert await ensure_user_profile_version_pg(test_db_pool) is True
 
     assert first_value == aware_value
-    assert await test_db_pool.fetchval(
-        "SELECT profile_version FROM users WHERE id = $1",
-        user_id,
-    ) == aware_value
+    assert (
+        await test_db_pool.fetchval(
+            "SELECT profile_version FROM users WHERE id = $1",
+            user_id,
+        )
+        == aware_value
+    )
 
 
 @pytest.mark.asyncio
@@ -199,6 +199,8 @@ async def test_postgres_current_schema_corruption_fails_closed_at_startup(
         and "AuthNZ profile_version readiness validation failed" in line
         for line in warnings
     ), warnings
+    with pytest.raises(RuntimeError, match="profile_version"):
+        await ensure_user_profile_version_pg(test_db_pool)
 
     await _legacy_execute(
         "UPDATE users SET profile_version = updated_at WHERE id = $1",
@@ -273,8 +275,11 @@ async def test_postgres_readiness_serializes_concurrent_legacy_upgrades(
 
     await asyncio.gather(_upgrade(), _upgrade())
 
-    assert await test_db_pool.fetchval(
-        "SELECT COUNT(*) FROM information_schema.columns "
-        "WHERE table_schema = 'public' AND table_name = 'users' "
-        "AND column_name = 'profile_version'"
-    ) == 1
+    assert (
+        await test_db_pool.fetchval(
+            "SELECT COUNT(*) FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = 'users' "
+            "AND column_name = 'profile_version'"
+        )
+        == 1
+    )

@@ -563,6 +563,7 @@ class _ScopeBypassPromptsModule(BaseModule):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("allow_knowledge_source_tools")
 async def test_knowledge_scope_propagates_filters_and_blocks_bypass():
     await reset_module_registry()
     try:

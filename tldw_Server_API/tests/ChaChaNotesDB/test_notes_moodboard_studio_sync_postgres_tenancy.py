@@ -225,7 +225,6 @@ def test_postgres_v63_migration_contract_is_bounded_and_version_last() -> None:
     )
     initializer_source = inspect.getsource(CharactersRAGDB._initialize_schema_postgres)
 
-    # The PostgreSQL authority has moved past v63 (77 at the time of writing).
     assert CharactersRAGDB._POSTGRES_SCHEMA_VERSION >= 63
     assert "lock_timeout" in configure_source
     assert "statement_timeout" in configure_source

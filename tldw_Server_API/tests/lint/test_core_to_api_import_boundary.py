@@ -100,7 +100,6 @@ CORE_TO_API_BASELINE = frozenset({
     "tldw_Server_API/app/core/MCP_unified/modules/implementations/rag_module.py",
     "tldw_Server_API/app/core/MCP_unified/tests/support.py",
     "tldw_Server_API/app/core/MCP_unified/tests/test_http_mapping.py",
-    "tldw_Server_API/app/core/MCP_unified/tests/test_http_validation_bounds.py",
     "tldw_Server_API/app/core/MCP_unified/tests/test_mounted_jsonrpc_transport_contract.py",
     "tldw_Server_API/app/core/MCP_unified/tests/test_persona_visuals_module.py",
     "tldw_Server_API/app/core/MCP_unified/tests/test_rag_module.py",
