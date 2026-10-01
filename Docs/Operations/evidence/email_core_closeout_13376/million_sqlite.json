@@ -1,0 +1,476 @@
+{
+  "report_version": 1,
+  "generated_at": "2026-09-26T18:06:28.372627+00:00",
+  "duration_seconds": 73.9046,
+  "environment": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "python_version": "3.11.13",
+    "cpu_count": 18,
+    "cpu_model": "Apple M5 Max",
+    "memory_bytes": 137438953472
+  },
+  "benchmark": {
+    "backend": "sqlite",
+    "db_path": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-sqlite-pyj4mla9/million.sqlite",
+    "scope_user_id": null,
+    "client_id": "42",
+    "tenant_id": "email-benchmark:42",
+    "limit": 50,
+    "offset": 0,
+    "query_mix_source": "default",
+    "query_mix_file": null,
+    "workload_trace_file": null,
+    "workload_top_n": 20,
+    "workload_min_count": 1
+  },
+  "dataset_profile": {
+    "total_messages": 1000000,
+    "total_attachments": 200000,
+    "distinct_labels": 23,
+    "min_internal_date": "2025-09-26T17:53:30+00:00",
+    "max_internal_date": "2026-09-26T17:53:30+00:00",
+    "top_sender": "sender0@bench.example",
+    "top_recipient": "recipient0@bench.example",
+    "top_label": "Inbox",
+    "sample_subject": "Invoice Notice #999999",
+    "sample_sender": "sender199@bench.example",
+    "fixture_setup": {
+      "loader": "bulk_synthetic",
+      "messages": 1000000,
+      "attachments": 200000,
+      "attachment_ratio": 0.2,
+      "batches": 500,
+      "batch_size": 2000,
+      "sender_pool": 200,
+      "recipient_pool": 500,
+      "seed": 42,
+      "duration_seconds": 274.52747954207007,
+      "planner_statistics": "analyze_after_load",
+      "statistics_seconds": 3.7663710840279236,
+      "statistics_added_after_failed_diagnostic": true,
+      "original_load_duration_seconds": 270.76110845804214
+    }
+  },
+  "query_mix": [
+    {
+      "name": "from_filter",
+      "query": "from:sender0@bench.example",
+      "notes": "Participant sender filter"
+    },
+    {
+      "name": "to_filter",
+      "query": "to:recipient0@bench.example",
+      "notes": "Participant recipient filter"
+    },
+    {
+      "name": "subject_filter",
+      "query": "subject:Invoice",
+      "notes": "Subject field filter"
+    },
+    {
+      "name": "label_filter",
+      "query": "label:Inbox",
+      "notes": "Label filter"
+    },
+    {
+      "name": "has_attachment",
+      "query": "has:attachment",
+      "notes": "Attachment existence filter"
+    },
+    {
+      "name": "after_date",
+      "query": "after:2026-03-28",
+      "notes": "Date lower bound"
+    },
+    {
+      "name": "before_date",
+      "query": "before:2026-03-28",
+      "notes": "Date upper bound"
+    },
+    {
+      "name": "mixed_text_and_negation",
+      "query": "Invoice -from:sender199@bench.example",
+      "notes": "Free text + unary negation"
+    },
+    {
+      "name": "explicit_or",
+      "query": "from:sender0@bench.example OR subject:Invoice",
+      "notes": "Explicit OR semantics"
+    },
+    {
+      "name": "relative_window",
+      "query": "newer_than:90d",
+      "notes": "Relative time operator"
+    }
+  ],
+  "cold_pass": {
+    "queries": [
+      {
+        "name": "from_filter",
+        "query": "from:sender0@bench.example",
+        "latency_ms": 58.047708007507026,
+        "total_matches": 5000
+      },
+      {
+        "name": "to_filter",
+        "query": "to:recipient0@bench.example",
+        "latency_ms": 26.87299996614456,
+        "total_matches": 2000
+      },
+      {
+        "name": "subject_filter",
+        "query": "subject:Invoice",
+        "latency_ms": 192.78291705995798,
+        "total_matches": 166667
+      },
+      {
+        "name": "label_filter",
+        "query": "label:Inbox",
+        "latency_ms": 694.7722920449451,
+        "total_matches": 1000000
+      },
+      {
+        "name": "has_attachment",
+        "query": "has:attachment",
+        "latency_ms": 349.59216602146626,
+        "total_matches": 200000
+      },
+      {
+        "name": "after_date",
+        "query": "after:2026-03-28",
+        "latency_ms": 197.3331660265103,
+        "total_matches": 500673
+      },
+      {
+        "name": "before_date",
+        "query": "before:2026-03-28",
+        "latency_ms": 250.06291700992733,
+        "total_matches": 499327
+      },
+      {
+        "name": "mixed_text_and_negation",
+        "query": "Invoice -from:sender199@bench.example",
+        "latency_ms": 693.6555419815704,
+        "total_matches": 165000
+      },
+      {
+        "name": "explicit_or",
+        "query": "from:sender0@bench.example OR subject:Invoice",
+        "latency_ms": 232.978458981961,
+        "total_matches": 171667
+      },
+      {
+        "name": "relative_window",
+        "query": "newer_than:90d",
+        "latency_ms": 97.24420809652656,
+        "total_matches": 246553
+      }
+    ],
+    "summary": {
+      "count": 10,
+      "min_ms": 26.87299996614456,
+      "max_ms": 694.7722920449451,
+      "avg_ms": 279.33423751965165,
+      "p50_ms": 197.3331660265103,
+      "p95_ms": 694.7722920449451
+    }
+  },
+  "warm_pass": {
+    "warmup_runs_per_query": 3,
+    "measured_runs_per_query": 20,
+    "queries": [
+      {
+        "name": "from_filter",
+        "query": "from:sender0@bench.example",
+        "notes": "Participant sender filter",
+        "total_matches": 5000,
+        "latency": {
+          "count": 20,
+          "min_ms": 54.26329199690372,
+          "max_ms": 69.52424999326468,
+          "avg_ms": 56.70747690019198,
+          "p50_ms": 55.72225002106279,
+          "p95_ms": 61.42937496770173
+        },
+        "sqlite_query_plan": null
+      },
+      {
+        "name": "to_filter",
+        "query": "to:recipient0@bench.example",
+        "notes": "Participant recipient filter",
+        "total_matches": 2000,
+        "latency": {
+          "count": 20,
+          "min_ms": 24.65954201761633,
+          "max_ms": 39.34387501794845,
+          "avg_ms": 27.03654369688593,
+          "p50_ms": 26.345916907303035,
+          "p95_ms": 31.31570795085281
+        },
+        "sqlite_query_plan": null
+      },
+      {
+        "name": "subject_filter",
+        "query": "subject:Invoice",
+        "notes": "Subject field filter",
+        "total_matches": 166667,
+        "latency": {
+          "count": 20,
+          "min_ms": 195.86791598703712,
+          "max_ms": 227.91833302471787,
+          "avg_ms": 204.9736853921786,
+          "p50_ms": 201.22254209127277,
+          "p95_ms": 222.76795899961144
+        },
+        "sqlite_query_plan": null
+      },
+      {
+        "name": "label_filter",
+        "query": "label:Inbox",
+        "notes": "Label filter",
+        "total_matches": 1000000,
+        "latency": {
+          "count": 20,
+          "min_ms": 697.0774999354035,
+          "max_ms": 742.7656250074506,
+          "avg_ms": 713.2204811670817,
+          "p50_ms": 709.9229999585077,
+          "p95_ms": 738.2804590743035
+        },
+        "sqlite_query_plan": null
+      },
+      {
+        "name": "has_attachment",
+        "query": "has:attachment",
+        "notes": "Attachment existence filter",
+        "total_matches": 200000,
+        "latency": {
+          "count": 20,
+          "min_ms": 357.2955409763381,
+          "max_ms": 387.6009159721434,
+          "avg_ms": 368.9780353975948,
+          "p50_ms": 367.32162500265986,
+          "p95_ms": 384.2960000038147
+        },
+        "sqlite_query_plan": null
+      },
+      {
+        "name": "after_date",
+        "query": "after:2026-03-28",
+        "notes": "Date lower bound",
+        "total_matches": 500673,
+        "latency": {
+          "count": 20,
+          "min_ms": 195.51279104780406,
+          "max_ms": 203.62875005230308,
+          "avg_ms": 199.04922716668807,
+          "p50_ms": 199.38891706988215,
+          "p95_ms": 203.48016696516424
+        },
+        "sqlite_query_plan": null
+      },
+      {
+        "name": "before_date",
+        "query": "before:2026-03-28",
+        "notes": "Date upper bound",
+        "total_matches": 499327,
+        "latency": {
+          "count": 20,
+          "min_ms": 195.93562500085682,
+          "max_ms": 204.90141701884568,
+          "avg_ms": 200.73397305677645,
+          "p50_ms": 200.7931669941172,
+          "p95_ms": 204.8858340131119
+        },
+        "sqlite_query_plan": null
+      },
+      {
+        "name": "mixed_text_and_negation",
+        "query": "Invoice -from:sender199@bench.example",
+        "notes": "Free text + unary negation",
+        "total_matches": 165000,
+        "latency": {
+          "count": 20,
+          "min_ms": 695.5500830663368,
+          "max_ms": 771.2895839940757,
+          "avg_ms": 721.3940271642059,
+          "p50_ms": 723.2627500779927,
+          "p95_ms": 747.4717909935862
+        },
+        "sqlite_query_plan": null
+      },
+      {
+        "name": "explicit_or",
+        "query": "from:sender0@bench.example OR subject:Invoice",
+        "notes": "Explicit OR semantics",
+        "total_matches": 171667,
+        "latency": {
+          "count": 20,
+          "min_ms": 231.8656670395285,
+          "max_ms": 237.82487493008375,
+          "avg_ms": 234.03562708990648,
+          "p50_ms": 233.7604999775067,
+          "p95_ms": 236.9032499846071
+        },
+        "sqlite_query_plan": null
+      },
+      {
+        "name": "relative_window",
+        "query": "newer_than:90d",
+        "notes": "Relative time operator",
+        "total_matches": 246551,
+        "latency": {
+          "count": 20,
+          "min_ms": 96.72354208305478,
+          "max_ms": 116.42962496262044,
+          "avg_ms": 98.62507286015898,
+          "p50_ms": 97.53395803272724,
+          "p95_ms": 99.22124992590398
+        },
+        "sqlite_query_plan": null
+      }
+    ],
+    "summary": {
+      "count": 200,
+      "min_ms": 24.65954201761633,
+      "max_ms": 771.2895839940757,
+      "avg_ms": 282.4754149891669,
+      "p50_ms": 202.2276249481365,
+      "p95_ms": 725.7366670528427
+    },
+    "query_plan_summary": {
+      "enabled": false,
+      "captured_queries": 0,
+      "queries_with_index_hits": 0,
+      "total_explained_statements": 0,
+      "total_index_hit_rows": 0
+    }
+  },
+  "negation_validation": {
+    "name": "mixed_text_and_negation",
+    "query": "Invoice -from:sender199@bench.example",
+    "positive_query": "Invoice",
+    "positive_total_matches": 166667,
+    "negated_total_matches": 165000,
+    "meaningful": true,
+    "reason": null
+  },
+  "targets": {
+    "nfr_p50_ms": 250.0,
+    "nfr_p95_ms": 900.0,
+    "warm_pass_met_p50": true,
+    "warm_pass_met_p95": true,
+    "required_mailbox_messages": 1000000,
+    "mailbox_size_met": true,
+    "operator_coverage_met": true,
+    "operator_latency_met": false,
+    "meaningful_negation_met": true,
+    "nfr_performance_gate_met": true,
+    "latency_gate_method": "aggregate_warm_pass_per_documented_protocol",
+    "per_operator_latency_is_diagnostic": true
+  },
+  "validation_guards": {
+    "synthetic_only": true,
+    "gmail_connector_enabled": false,
+    "outbound_attempts": 0,
+    "model_attempts": 0,
+    "background_tasks_blocked": true,
+    "non_loopback_socket_and_dns_blocked": true
+  },
+  "fixture_validation": {
+    "native_samples": 3,
+    "cross_tenant_matches": 0,
+    "messages": 1000000,
+    "attachments": 200000,
+    "negation": {
+      "positive_matches": 166667,
+      "negated_matches": 165000,
+      "removed_matches": 1667
+    }
+  },
+  "fixture_security": {
+    "legacy_indexed_body_rows": 1000000,
+    "backend": "sqlite",
+    "native_rows": 1000000,
+    "owner_media_rows": 1000000,
+    "linked_legacy_rows": 1000000,
+    "matching_body_version_rows": 1000000,
+    "synthetic_identity_rows": 1000000,
+    "distinct_senders": 200,
+    "distinct_recipients": 500
+  },
+  "source_identity": {
+    "revision": "b880be1b53db929583fec07c31f967af7f80a922",
+    "sha256": {
+      "Docs/Operations/probes/email_million_search_13376.py": "bab94827d4e836bd82a39e5692e3c4a2b75f87bed42a9a22d6b78ca0c55a350a",
+      "Docs/Operations/probes/email_archive_throughput_sqlite_2026_09_25.py": "1f0735567d31913bb225bd129fc8ee98760a44d9332edc0b516203f09f113675",
+      "Docs/Operations/probes/email_archive_throughput_postgres_2026_09_25.py": "97e700887e777ac9f9c24d7ee7b271d2b6d87b376422acfe3e1c20166e52b24d",
+      "Docs/Operations/probes/email_local_release_checks_13376.py": "7b6898f1abf8df3bc2916e5fd29e3979f271c1820b7c677c6dcbc81516cbbd82",
+      "Helper_Scripts/benchmarks/email_search_bench.py": "827c26a396b26dcadcc4ded2c9e9b1309b85ab03bdf33b17b2af232ea66fb991",
+      "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py": "55f7a37c91f17f811a91e682730ee63a1dc234f1f574dd639836557085f1d4cf",
+      "tldw_Server_API/app/core/DB_Management/backends/sqlite_backend.py": "8a08c4f6b499406fa6d3057fe64cdf4ee95c9431f237e10b7886cec728a15235",
+      "tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py": "07e311516af634c23cd2170332c91bde72da71e371cc3775a1528e83fb1587fa",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/execution_ops.py": "aed8b8b2ea4f7e02bf38da71395fec889685734035a995972120a88c41f1e3ea",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_query_ops.py": "c6c34e282cc33502d7166e05c8c6947f149ec5f582e5ffe9e1ac94a1bd53777c",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_benchmark_fixture.py": "968249f3f7d26ab52c9a6e62543fb57091de0130701484e5ec133580da48e387",
+      "tldw_Server_API/app/core/DB_Management/media_db/schema/email_schema_structures.py": "f208e9367d666b305a48418266db354be7b0fc783a8f27ec32cc65fedcb123ba",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py": "44e0215e569b862b5e46a267768f8cd447db803503784aa8a3bac8d0eb2c4fcd",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_search_repository.py": "8977be09d2652e2017a06ce84199bac08435f081ff30d702811f93038d6fe46d",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": "9419d6c081704af513cd367b9fb61c0e2d40ac29d5a63c99f3958a328d1b4f09",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/Email_Processing_Lib.py": "768eb28505313f4d386efe68a622c8007a4fedf51f5045177b7dde8999bef499",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/email_ingestion_metrics.py": "2b8d1ec859b5429aa7b1e1c2e5f69e922eedcb50fa2224d7e61da70ce9bab4d6",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/attachment_policy.py": "e9b023d3ae924fb1385fcf8fd2f5589fe1078bc127f6824e879616c1578c8b56",
+      "tldw_Server_API/app/core/Metrics/metrics_manager.py": "f3a152d6b3548357b2a1a3675a3912752992f76153d32a7a64419097a3dedba4"
+    }
+  },
+  "source_identity_after_probe": {
+    "revision": "b880be1b53db929583fec07c31f967af7f80a922",
+    "sha256": {
+      "Docs/Operations/probes/email_million_search_13376.py": "bab94827d4e836bd82a39e5692e3c4a2b75f87bed42a9a22d6b78ca0c55a350a",
+      "Docs/Operations/probes/email_archive_throughput_sqlite_2026_09_25.py": "1f0735567d31913bb225bd129fc8ee98760a44d9332edc0b516203f09f113675",
+      "Docs/Operations/probes/email_archive_throughput_postgres_2026_09_25.py": "97e700887e777ac9f9c24d7ee7b271d2b6d87b376422acfe3e1c20166e52b24d",
+      "Docs/Operations/probes/email_local_release_checks_13376.py": "7b6898f1abf8df3bc2916e5fd29e3979f271c1820b7c677c6dcbc81516cbbd82",
+      "Helper_Scripts/benchmarks/email_search_bench.py": "827c26a396b26dcadcc4ded2c9e9b1309b85ab03bdf33b17b2af232ea66fb991",
+      "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py": "55f7a37c91f17f811a91e682730ee63a1dc234f1f574dd639836557085f1d4cf",
+      "tldw_Server_API/app/core/DB_Management/backends/sqlite_backend.py": "8a08c4f6b499406fa6d3057fe64cdf4ee95c9431f237e10b7886cec728a15235",
+      "tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py": "07e311516af634c23cd2170332c91bde72da71e371cc3775a1528e83fb1587fa",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/execution_ops.py": "aed8b8b2ea4f7e02bf38da71395fec889685734035a995972120a88c41f1e3ea",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_query_ops.py": "c6c34e282cc33502d7166e05c8c6947f149ec5f582e5ffe9e1ac94a1bd53777c",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_benchmark_fixture.py": "968249f3f7d26ab52c9a6e62543fb57091de0130701484e5ec133580da48e387",
+      "tldw_Server_API/app/core/DB_Management/media_db/schema/email_schema_structures.py": "f208e9367d666b305a48418266db354be7b0fc783a8f27ec32cc65fedcb123ba",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py": "44e0215e569b862b5e46a267768f8cd447db803503784aa8a3bac8d0eb2c4fcd",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_search_repository.py": "8977be09d2652e2017a06ce84199bac08435f081ff30d702811f93038d6fe46d",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": "9419d6c081704af513cd367b9fb61c0e2d40ac29d5a63c99f3958a328d1b4f09",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/Email_Processing_Lib.py": "768eb28505313f4d386efe68a622c8007a4fedf51f5045177b7dde8999bef499",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/email_ingestion_metrics.py": "2b8d1ec859b5429aa7b1e1c2e5f69e922eedcb50fa2224d7e61da70ce9bab4d6",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/attachment_policy.py": "e9b023d3ae924fb1385fcf8fd2f5589fe1078bc127f6824e879616c1578c8b56",
+      "tldw_Server_API/app/core/Metrics/metrics_manager.py": "f3a152d6b3548357b2a1a3675a3912752992f76153d32a7a64419097a3dedba4"
+    }
+  },
+  "source_unchanged_during_probe": true,
+  "cold_connection_cache_scope": "Fresh MediaDatabase handle per query; backend pools may reuse physical connections. OS filesystem and database server caches are unchanged.",
+  "reproduction": {
+    "runner": "Docs/Operations/probes/email_million_search_13376.py",
+    "messages": 1000000,
+    "runs": 20,
+    "warmup_runs": 3,
+    "fixture_reused": true,
+    "configured_shape": {
+      "attachment_ratio": 0.2,
+      "label_cardinality": 20,
+      "sender_pool": 200,
+      "recipient_pool": 500,
+      "seed": 42
+    },
+    "setup_is_ingestion_throughput": false
+  },
+  "cleanup": {
+    "retained_temporary_roots": [
+      "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-sqlite-pyj4mla9",
+      "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-sqlite-ykwzo2tf"
+    ],
+    "instructions": "After handles/processes close, remove only these generated temporary roots."
+  }
+}

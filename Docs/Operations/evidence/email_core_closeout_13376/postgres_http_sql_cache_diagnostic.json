@@ -1,0 +1,147 @@
+{
+  "diagnostic": true,
+  "requests": [
+    {
+      "elapsed_seconds": 2.089331666007638,
+      "status": 200,
+      "counts": {
+        "_apply_scope_settings": 265,
+        "sql_select": 1600,
+        "sql_alter": 50,
+        "sql_create": 263,
+        "sql_update": 111,
+        "sql_insert": 1225,
+        "sql_savepoint": 6,
+        "sql_release": 6,
+        "sql_drop": 4,
+        "__init__": 2,
+        "add_media_with_keywords": 100,
+        "read_persisted_email_content": 100,
+        "upsert_email_message_graph": 100
+      },
+      "seconds": {
+        "_apply_scope_settings": 0.24878699844703078,
+        "sql_select": 0.6761203424539417,
+        "sql_alter": 0.03030212444718927,
+        "sql_create": 0.06492741825059056,
+        "sql_update": 0.052184251486323774,
+        "sql_insert": 0.43865372717846185,
+        "sql_savepoint": 0.0011330830166116357,
+        "sql_release": 0.0010783340549096465,
+        "sql_drop": 0.0012788331368938088,
+        "__init__": 0.14159595791716129,
+        "add_media_with_keywords": 0.9917925001354888,
+        "read_persisted_email_content": 0.08713954221457243,
+        "upsert_email_message_graph": 0.2582944998284802
+      }
+    },
+    {
+      "elapsed_seconds": 2.5620358750456944,
+      "status": 200,
+      "counts": {
+        "_apply_scope_settings": 205,
+        "sql_select": 1564,
+        "sql_create": 256,
+        "sql_update": 109,
+        "sql_alter": 40,
+        "sql_savepoint": 6,
+        "sql_release": 6,
+        "sql_drop": 4,
+        "__init__": 2,
+        "sql_insert": 1202,
+        "add_media_with_keywords": 100,
+        "read_persisted_email_content": 100,
+        "upsert_email_message_graph": 100
+      },
+      "seconds": {
+        "_apply_scope_settings": 0.24147336813621223,
+        "sql_select": 1.1078906102338806,
+        "sql_create": 0.07236455380916595,
+        "sql_update": 0.061226630001328886,
+        "sql_alter": 0.013267624424770474,
+        "sql_savepoint": 0.0014243328478187323,
+        "sql_release": 0.0015440820716321468,
+        "sql_drop": 0.0014901250833645463,
+        "__init__": 0.17897133412770927,
+        "sql_insert": 0.5158416263293475,
+        "add_media_with_keywords": 1.5646473336964846,
+        "read_persisted_email_content": 0.11539469950366765,
+        "upsert_email_message_graph": 0.3299059590790421
+      }
+    },
+    {
+      "elapsed_seconds": 1.9102449170313776,
+      "status": 200,
+      "counts": {
+        "_apply_scope_settings": 205,
+        "sql_select": 1564,
+        "sql_create": 256,
+        "sql_update": 109,
+        "sql_alter": 40,
+        "sql_savepoint": 6,
+        "sql_release": 6,
+        "sql_drop": 4,
+        "__init__": 2,
+        "sql_insert": 1202,
+        "add_media_with_keywords": 100,
+        "read_persisted_email_content": 100,
+        "upsert_email_message_graph": 100
+      },
+      "seconds": {
+        "_apply_scope_settings": 0.20261875458527356,
+        "sql_select": 0.5628906202036887,
+        "sql_create": 0.1610887125134468,
+        "sql_update": 0.04979362466838211,
+        "sql_alter": 0.01069878926500678,
+        "sql_savepoint": 0.0012022490845993161,
+        "sql_release": 0.0013747909106314182,
+        "sql_drop": 0.0013049159897491336,
+        "__init__": 0.25045933306682855,
+        "sql_insert": 0.42540300567634404,
+        "add_media_with_keywords": 0.9612359189195558,
+        "read_persisted_email_content": 0.09348912874702364,
+        "upsert_email_message_graph": 0.2692487044259906
+      }
+    },
+    {
+      "elapsed_seconds": 0.9841787499608472,
+      "status": 200,
+      "counts": {
+        "_apply_scope_settings": 205,
+        "sql_select": 463,
+        "sql_create": 256,
+        "sql_update": 208,
+        "sql_alter": 40,
+        "sql_savepoint": 6,
+        "sql_release": 6,
+        "sql_drop": 4,
+        "__init__": 2,
+        "sql_insert": 600,
+        "add_media_with_keywords": 100,
+        "read_persisted_email_content": 100,
+        "sql_delete": 300,
+        "upsert_email_message_graph": 100
+      },
+      "seconds": {
+        "_apply_scope_settings": 0.15271824947558343,
+        "sql_select": 0.1509665350895375,
+        "sql_create": 0.06173070252407342,
+        "sql_update": 0.06990616756957024,
+        "sql_alter": 0.009602497797459364,
+        "sql_savepoint": 0.0012384578585624695,
+        "sql_release": 0.0012029159115627408,
+        "sql_drop": 0.000899916049093008,
+        "__init__": 0.14209049998316914,
+        "sql_insert": 0.13982162531465292,
+        "add_media_with_keywords": 0.25081666733603925,
+        "read_persisted_email_content": 0.07415541436057538,
+        "sql_delete": 0.05825446080416441,
+        "upsert_email_message_graph": 0.2305320375598967
+      }
+    }
+  ],
+  "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-fiub63fh",
+  "outbound_attempts": 0,
+  "model_attempts": 0,
+  "source_identity_did_not_yet_include_query_utils": true
+}

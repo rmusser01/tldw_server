@@ -161,3 +161,18 @@ def test_visibility_helper_filters_real_rows_without_changing_existing_filters(
         assert params[0] == "document"
     finally:
         reset_scope(token)
+
+
+def test_fts_boolean_query_and_ranking_do_not_use_literal_like_fallback(search_db):
+    repo, connection, _, db = search_db
+    statements = []
+
+    def execute(sql, params):
+        statements.append(sql)
+        return connection.execute(sql, params)
+
+    db.execute_query = execute
+    rows, total = repo.search("blue AND harbor", sort_by="relevance")
+    assert ([row["id"] for row in rows], total) == ([1], 1)
+    assert "relevance_score" in rows[0]
+    assert not any(" LIKE " in sql for sql in statements)

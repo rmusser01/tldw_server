@@ -19,6 +19,7 @@ os.environ.setdefault("MINIMAL_TEST_APP", "1")
 # Reduce background services during tests
 os.environ.setdefault("DISABLE_AUTHNZ_SCHEDULER", "1")
 os.environ.setdefault("WORKFLOWS_SCHEDULER_ENABLED", "false")
+# Chat rate limits belong to the scoped reset fixture below.
 
 # Load config to get API keys
 from tldw_Server_API.app.core.config import load_and_log_configs

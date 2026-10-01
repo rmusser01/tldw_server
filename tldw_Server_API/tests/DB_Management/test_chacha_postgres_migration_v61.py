@@ -993,3 +993,37 @@ def test_postgres_v60_to_v61_constraints_forced_rls_and_head_rerun(
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("damage", ["missing_policy", "missing_check", "unforced_rls"])
+def test_postgres_v61_verifier_rejects_incomplete_security_catalog(
+    pg_database_config: DatabaseConfig, damage: str,
+) -> None:
+    """Stored-tree verification still fails closed on each original catalog invariant."""
+    driver = pytest.importorskip("psycopg")
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id="recipient-a", backend=backend)
+    expected = (
+        "Shared workspace chat v61 relations require forced RLS"
+        if damage == "unforced_rls"
+        else "Shared workspace chat v61 policy catalog is incomplete"
+    )
+    try:
+        with pytest.raises(driver.errors.RaiseException, match=expected):
+            with backend.transaction() as conn:
+                if damage == "unforced_rls":
+                    backend.execute("ALTER TABLE shared_workspace_chat_requests NO FORCE ROW LEVEL SECURITY",
+                                    connection=conn)
+                else:
+                    backend.execute("DROP POLICY shared_workspace_chat_requests_tenant_isolation "
+                                    "ON shared_workspace_chat_requests", connection=conn)
+                    if damage == "missing_check":
+                        backend.execute("CREATE POLICY shared_workspace_chat_requests_tenant_isolation "
+                                        "ON shared_workspace_chat_requests FOR SELECT USING (true)",
+                                        connection=conn)
+                # The backend intentionally redacts driver messages; inspect this fixed verifier directly.
+                conn.execute(CharactersRAGDB._SHARED_WORKSPACE_CHAT_V61_POSTGRES_VERIFY_SQL)
+    finally:
+        db.close_all_connections()
+        backend.get_pool().close_all()

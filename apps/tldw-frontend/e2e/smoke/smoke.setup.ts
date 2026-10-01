@@ -22,7 +22,7 @@ export interface SmokeHardGateAllowlistRule {
   expiresOn: string
 }
 
-type ConsoleIssue = { type: string; text: string }
+type ConsoleIssue = DiagnosticsData["console"][number]
 type RequestIssue = { url: string; errorText: string }
 
 export interface ClassifiedSmokeIssues {
@@ -524,11 +524,20 @@ export const BENIGN_PATTERNS = [
  */
 export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
   {
+    id: "m5-optional-resource-404-noise",
+    scope: "console",
+    pattern: /\/api\/v1\/moderation\/review\/items(?:\?[^ ]*)?\s+Failed to load resource: the server responded with a status of 404\b/i,
+    rationale: "The minimal smoke backend omits moderation review items; the route remains recoverable. TASK-13377.9 records the exact endpoint evidence.",
+    owner: "WebUI",
+    expiresOn: "2026-10-08",
+    routes: ["/moderation"]
+  },
+  {
     id: "m5-drawer-width-deprecation-noise",
     scope: "console",
     pattern: /Warning:\s+\[antd:\s*Drawer\]\s+`width` is deprecated\. Please use `size` instead\./i,
     rationale:
-      "TASK-13260.278.18.83.51: current Kanban development fixture emits this Drawer width warning; removal fails its unchanged recovery gate.",
+      "TASK-13260.278.18.83.51: current Kanban development fixture emits this Drawer width warning; removal fails its unchanged recovery gate. TASK-13377.9 also records fresh fixture evidence.",
     owner: "WebUI",
     expiresOn: "2026-10-31",
     routes: ["/kanban"]
@@ -537,7 +546,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     id: "m5-route-boundary-forced-react-overlay-warning",
     scope: "console",
     pattern: /The above error occurred in the <ForcedRouteErrorProbe> component/i,
-    rationale: "Expected React error-overlay emission when route boundary fixture intentionally throws.",
+    rationale: "Expected React error-overlay emission from deliberate route-boundary fixtures; TASK-13377.9 records fresh recovery evidence.",
     owner: "WebUI",
     expiresOn: "2026-10-31",
     routes: [
@@ -563,7 +572,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     id: "m5-route-boundary-forced-error-log",
     scope: "console",
     pattern: /\[RouteErrorBoundary:[^\]]+\]\s+Error:\s+Forced route boundary error/i,
-    rationale: "Route boundary fixture emits deterministic forced-error log to confirm recovery branch.",
+    rationale: "Deliberate route-boundary fixture logs confirm the recovery branch; TASK-13377.9 records fresh evidence.",
     owner: "WebUI",
     expiresOn: "2026-10-31",
     routes: [
@@ -689,7 +698,7 @@ export function isBenign(text: string): boolean {
  */
 export function getCriticalIssues(diagnostics: DiagnosticsData): {
   pageErrors: Array<{ message: string; stack: string }>
-  consoleErrors: Array<{ type: string; text: string }>
+  consoleErrors: DiagnosticsData["console"]
   requestFailures: Array<{ url: string; errorText: string }>
 } {
   return {
@@ -756,7 +765,7 @@ export function classifySmokeIssues(
   }
 
   for (const entry of issues.consoleErrors) {
-    const match = findAllowlistRule("console", entry.text, routePath)
+    const match = findAllowlistRule("console", `${entry.location?.url || ""} ${entry.text}`, routePath)
     if (match) {
       classified.allowlistedConsoleErrors.push({ entry, rule: match })
     } else {

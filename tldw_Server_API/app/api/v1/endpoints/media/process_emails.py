@@ -234,6 +234,9 @@ async def process_emails_endpoint(
                             system_prompt=system_prompt,
                             summarize_recursively=form_data.summarize_recursively,
                             ingest_attachments=form_data.ingest_attachments,
+                            extract_attachments=form_data.extract_attachments,
+                            attachment_mime_allowlist=form_data.attachment_mime_allowlist,
+                            attachment_mime_denylist=form_data.attachment_mime_denylist,
                             max_depth=form_data.max_depth,
                         )
                         res_list = await loop.run_in_executor(None, processor)
@@ -269,6 +272,9 @@ async def process_emails_endpoint(
                             system_prompt=system_prompt,
                             summarize_recursively=form_data.summarize_recursively,
                             ingest_attachments=form_data.ingest_attachments,
+                            extract_attachments=form_data.extract_attachments,
+                            attachment_mime_allowlist=form_data.attachment_mime_allowlist,
+                            attachment_mime_denylist=form_data.attachment_mime_denylist,
                             max_depth=form_data.max_depth,
                         )
                         res_list = await loop.run_in_executor(None, processor)
@@ -306,6 +312,9 @@ async def process_emails_endpoint(
                             system_prompt=system_prompt,
                             summarize_recursively=form_data.summarize_recursively,
                             ingest_attachments=form_data.ingest_attachments,
+                            extract_attachments=form_data.extract_attachments,
+                            attachment_mime_allowlist=form_data.attachment_mime_allowlist,
+                            attachment_mime_denylist=form_data.attachment_mime_denylist,
                             max_depth=form_data.max_depth,
                         )
                         res_list = await loop.run_in_executor(None, processor)
@@ -340,6 +349,9 @@ async def process_emails_endpoint(
                             system_prompt=system_prompt,
                             summarize_recursively=form_data.summarize_recursively,
                             ingest_attachments=form_data.ingest_attachments,
+                            extract_attachments=form_data.extract_attachments,
+                            attachment_mime_allowlist=form_data.attachment_mime_allowlist,
+                            attachment_mime_denylist=form_data.attachment_mime_denylist,
                             max_depth=form_data.max_depth,
                         )
                         res = await loop.run_in_executor(None, processor)

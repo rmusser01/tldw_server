@@ -46,6 +46,10 @@ def pg_http(request, pg_database_config, tmp_path, monkeypatch):
 
     monkeypatch.setattr(CharactersRAGDB, "_NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT", "100ms")
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    # A real cache rebuild must resolve the same official PostgreSQL database.
+    from tldw_Server_API.app.core.DB_Management import ChaChaNotes_DB as chacha_module
+
+    monkeypatch.setattr(chacha_module, "get_content_backend", lambda _config: backend)
     db = CharactersRAGDB(tmp_path / "http.db", client_id="1", backend=backend)
     note = db.add_note(title="Committed title", content="HTTP lifetime fixture")
     db.sync_note_folders(note, ["Research"])
@@ -146,6 +150,15 @@ def pg_http(request, pg_database_config, tmp_path, monkeypatch):
 
         monkeypatch.setattr(pool, "_free", ObservedFreeList(pool._free))
     observe_database(db)
+    real_create_and_prepare = deps._create_and_prepare_db
+
+    def create_and_observe(user_id, client_id):
+        """Retain real initialization and observe every rebuilt HTTP handle."""
+        database = real_create_and_prepare(user_id, client_id)
+        observe_database(database)
+        return database
+
+    monkeypatch.setattr(deps, "_create_and_prepare_db", create_and_observe)
     app = FastAPI()
     app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(flashcards.router, prefix="/api/v1")
@@ -200,6 +213,8 @@ def pg_http(request, pg_database_config, tmp_path, monkeypatch):
     finally:
         executor.shutdown(wait=True)
         db.close_all_connections()
+        for cached_database in cache.values():
+            cached_database.close_all_connections()
         backend.get_pool().close_all()
         observer.close()
 
@@ -328,6 +343,39 @@ def _replacement(f):
         if replacement is not None:
             replacement.close_all_connections()
         backend.get_pool().close_all()
+
+
+def test_real_dependency_cache_rebuild_retains_official_postgres(pg_http, monkeypatch):
+    """Health eviction must reopen the fixture database, preserving real HTTP cleanup."""
+    f = pg_http
+    real_probe = deps.probe_chacha_connection
+    probed = []
+    rebuilt = None
+
+    def reject_first_probe(database):
+        probed.append(database)
+        if len(probed) == 1:
+            raise RuntimeError("Force the real dependency's cache-rebuild path")
+        return real_probe(database)
+
+    monkeypatch.setattr(deps, "probe_chacha_connection", reject_first_probe)
+
+    async def operation(client):
+        nonlocal rebuilt
+        rebuilt = await deps.get_chacha_db_for_owner(1)
+        assert rebuilt is not f.db
+        assert rebuilt.backend is f.backend
+        response = await client.get(NOTES_PATH)
+        assert response.status_code == 200
+        assert response.json()["notes"][0]["title"] == "Committed title"
+        assert probed[0] is f.db and rebuilt in probed[1:]
+        _assert_finished(f, NOTES_PATH)
+
+    try:
+        asyncio.run(_run(f, operation))
+    finally:
+        if rebuilt is not None:
+            rebuilt.close_all_connections()
 
 
 @pytest.mark.parametrize("pg_http", [False, True], indirect=True, ids=["empty", "populated"])

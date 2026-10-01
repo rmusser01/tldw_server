@@ -23,6 +23,7 @@ from typing import Any
 import aiofiles
 
 from tldw_Server_API.app.core.config import loaded_config_data
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import (
     FileValidationError,
     FileValidator,
@@ -51,7 +52,7 @@ class TempDirManager:
     def __enter__(self) -> FilePath:
         self.temp_dir_path = FilePath(tempfile.mkdtemp(prefix=self.prefix))
         self._created = True
-        logging.info(f"Created temporary directory: {self.temp_dir_path}")
+        logging.info("Created temporary upload directory")
         return self.temp_dir_path
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
@@ -59,12 +60,9 @@ class TempDirManager:
             # remove the fragile exists-check and always try to clean up
             try:
                 shutil.rmtree(self.temp_dir_path, ignore_errors=True)
-                logging.info(f"Cleaned up temporary directory: {self.temp_dir_path}")
+                logging.info("Cleaned up temporary upload directory")
             except Exception as e:  # pragma: no cover - defensive logging
-                logging.error(
-                    f"Failed to cleanup temporary directory {self.temp_dir_path}: {e}",
-                    exc_info=True,
-                )
+                logging.error("Temporary upload directory cleanup failed (error_type={})", exception_type_for_log(e))
         self.temp_dir_path = None
         self._created = False
 
@@ -124,7 +122,7 @@ async def save_uploaded_files(
 
         try:
             if not original_filename:
-                logger.warning("Received file upload with no filename. Skipping.")
+                logger.warning("File upload rejected: missing filename")
                 file_handling_errors.append(
                     {
                         "original_filename": "N/A",
@@ -190,9 +188,7 @@ async def save_uploaded_files(
                 blocked_extensions.discard(".js")
 
             if file_extension in blocked_extensions:
-                logger.warning(
-                    f"Rejecting potentially dangerous file type '{file_extension}' for file '{original_filename}'"
-                )
+                logger.warning("File upload rejected: dangerous extension")
                 file_handling_errors.append(
                     {
                         "original_filename": original_filename,
@@ -206,10 +202,7 @@ async def save_uploaded_files(
             if normalized_allowed_extensions and not any(
                 c in normalized_allowed_extensions for c in (candidates or [file_extension])
             ):
-                logger.warning(
-                    f"Skipping file '{original_filename}' due to disallowed extension '{file_extension}'. "
-                    f"Allowed: {allowed_extensions}"
-                )
+                logger.warning("File upload rejected: disallowed extension")
                 file_handling_errors.append(
                     {
                         "original_filename": original_filename,
@@ -255,9 +248,7 @@ async def save_uploaded_files(
             used_secure_names.add(secure_filename)
             local_file_path = temp_dir / secure_filename
 
-            logger.info(
-                f"Attempting to save uploaded file '{original_filename}' securely as: {local_file_path}"
-            )
+            logger.info("Saving uploaded file")
 
             inferred_media_key: str | None = None
             if candidates:
@@ -398,10 +389,7 @@ async def save_uploaded_files(
                     if local_file_path is not None:
                         local_file_path.unlink(missing_ok=True)
                 except OSError as unlink_err:  # pragma: no cover - defensive
-                    logger.warning(
-                        f"Failed to remove partially written upload file: {local_file_path}: {unlink_err}",
-                        exc_info=True,
-                    )
+                    logger.warning("Partial upload cleanup failed (error_type={})", exception_type_for_log(unlink_err))
                 error_detail = (
                     str(write_err)
                     if isinstance(write_err, ValueError)
@@ -418,7 +406,7 @@ async def save_uploaded_files(
                 continue
 
             if written == 0:
-                logger.warning(f"Uploaded file '{original_filename}' is empty. Skipping.")
+                logger.warning("File upload rejected: empty content")
                 file_handling_errors.append(
                     {
                         "original_filename": original_filename,
@@ -431,10 +419,7 @@ async def save_uploaded_files(
                     if local_file_path is not None:
                         local_file_path.unlink(missing_ok=True)
                 except OSError as unlink_err:  # pragma: no cover - defensive
-                    logger.warning(
-                        f"Failed to remove empty upload file: {local_file_path}: {unlink_err}",
-                        exc_info=True,
-                    )
+                    logger.warning("Empty upload cleanup failed (error_type={})", exception_type_for_log(unlink_err))
                 continue
 
             try:
@@ -486,9 +471,7 @@ async def save_uploaded_files(
                     )
             except FileValidationError as validation_err:
                 issues = getattr(validation_err, "issues", None) or [str(validation_err)]
-                logger.warning(
-                    f"Validation raised error for uploaded file '{original_filename}': {issues}"
-                )
+                logger.warning("Upload validation raised an error (error_type={}, issue_count={})", exception_type_for_log(validation_err), len(issues))
                 file_handling_errors.append(
                     {
                         "original_filename": original_filename,
@@ -501,10 +484,7 @@ async def save_uploaded_files(
                     local_file_path.unlink(missing_ok=True)
                 continue
             except Exception as validation_exc:
-                logger.error(
-                    f"Unexpected error validating uploaded file '{original_filename}': {validation_exc}",
-                    exc_info=True,
-                )
+                logger.error("Upload validation failed unexpectedly (error_type={})", exception_type_for_log(validation_exc))
                 file_handling_errors.append(
                     {
                         "original_filename": original_filename,
@@ -519,9 +499,7 @@ async def save_uploaded_files(
 
             if not validation_result:
                 issue_msg = "; ".join(getattr(validation_result, "issues", None) or ["Unknown validation failure"])
-                logger.warning(
-                    f"Validation failed for uploaded file '{original_filename}': {issue_msg}"
-                )
+                logger.warning("File upload rejected: validation failed")
                 file_handling_errors.append(
                     {
                         "original_filename": original_filename,
@@ -535,7 +513,7 @@ async def save_uploaded_files(
                 continue
 
             file_size = local_file_path.stat().st_size
-            logger.info(f"Successfully saved '{original_filename}' ({file_size} bytes) to {local_file_path}")
+            logger.info("Uploaded file saved (bytes={})", file_size)
 
             processed_files.append(
                 {
@@ -546,10 +524,7 @@ async def save_uploaded_files(
             )
 
         except Exception as e:
-            logger.error(
-                f"Failed to save or validate uploaded file '{original_filename or input_ref}': {e}",
-                exc_info=True,
-            )
+            logger.error("Upload processing failed (error_type={})", exception_type_for_log(e))
             file_handling_errors.append(
                 {
                     "original_filename": original_filename or "N/A",
@@ -563,9 +538,7 @@ async def save_uploaded_files(
                     local_file_path.unlink(missing_ok=True)
                     logger.debug(f"Cleaned up partially saved/failed file: {local_file_path}")
                 except OSError as unlink_err:  # pragma: no cover - defensive
-                    logger.warning(
-                        f"Failed to clean up partially saved/failed file {local_file_path}: {unlink_err}"
-                    )
+                    logger.warning("Failed upload cleanup failed (error_type={})", exception_type_for_log(unlink_err))
         finally:
             # Ensure the UploadFile is closed, releasing resources
             close = getattr(file, "close", None)

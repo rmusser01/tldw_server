@@ -25,6 +25,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import 
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import MediaDbLike
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.email_ingestion_metrics import (
+    record_email_dedupe,
+    track_email_persistence,
+)
 
 
 def _load_legacy_media_support():
@@ -46,6 +50,7 @@ class MediaRepository:
     def from_legacy_db(cls, db: MediaDbLike) -> MediaRepository:
         return cls(session=db)
 
+    @track_email_persistence
     def add_media_with_keywords(
         self,
         *,
@@ -121,7 +126,10 @@ class MediaRepository:
             dedupe_url_candidates = (url,)
 
         email_metadata: dict[str, Any] | None = None
-        email_tenant = str(owner_user_id if owner_user_id is not None else client_id)
+        email_owner_lookup = str(owner_user_id if owner_user_id is not None else client_id)
+        email_tenant = email_owner_lookup
+        if media_type == "email" and owner_user_id is None:
+            email_tenant = db._resolve_email_tenant_id()
         original_dedupe_candidates = dedupe_url_candidates
         if media_type == "email":
             try:
@@ -138,7 +146,7 @@ class MediaRepository:
 
         final_chunk_status = "completed" if chunks is not None else "pending"
 
-        logger.info("add_media_with_keywords: url={}, title={}, client={}", url, title, client_id)
+        logger.info("Media persistence started")
         try:
             from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import (
                 get_topic_monitoring_service,
@@ -171,17 +179,9 @@ class MediaRepository:
                     scope_id=uid,
                 )
         except noncritical_exceptions as exc:
-            logger.warning(
-                "Topic monitoring unavailable during media ingest for url {}: {}",
-                url,
-                exc,
-            )
+            logger.bind(error_type=type(exc).__name__[:80]).warning("Topic monitoring unavailable during media ingestion")
         except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
-            logger.warning(
-                "Topic monitoring failed unexpectedly during media ingest for url {}: {}",
-                url,
-                exc,
-            )
+            logger.bind(error_type=type(exc).__name__[:80]).warning("Topic monitoring failed during media ingestion")
 
         def _media_payload(
             uuid_: str,
@@ -299,37 +299,71 @@ class MediaRepository:
                 def _fetch_existing_by_url(select_columns: str):
                     if email_metadata is not None:
                         selected = ", ".join(f"m.{column.strip()}" for column in select_columns.split(","))
-                        row = _fetchone(
-                            f"SELECT {selected} FROM Media m WHERE m.url = ? "  # nosec B608
-                            "AND m.type = 'email' AND m.deleted = 0 AND m.system_operation_id IS NULL "
-                            "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1",
-                            (url, email_tenant),
-                        )
-                        if row:
-                            return row
                         email = email_metadata.get("email")
                         email = email if isinstance(email, dict) else {}
                         # Reuse normalized identities created before identity URLs,
                         # including the RFC secondary collision key for providers.
-                        for field, value in (
+                        identity_fields = (
                             ("source_message_id", email.get("source_message_id") or email.get("id") or email_metadata.get("source_message_id")),
                             ("message_id", email.get("message_id") or email_metadata.get("message_id")),
-                        ):
-                            if not value:
-                                continue
+                        )
+                        if db.backend_type == BackendType.POSTGRESQL:
+                            # Fixed column/identity branches preserve URL, provider
+                            # and RFC precedence in one bound database round trip.
+                            branches = [
+                                f"(SELECT {selected}, 0 AS identity_priority FROM Media m WHERE m.url = ? "  # nosec B608
+                                "AND m.type = 'email' AND m.deleted = 0 AND m.system_operation_id IS NULL "
+                                "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1)"
+                            ]
+                            identity_params = [url, email_owner_lookup]
+                            for priority, (field, value) in enumerate(identity_fields, start=1):
+                                if not value:
+                                    continue
+                                branches.append(
+                                    f"(SELECT {selected}, {priority} AS identity_priority FROM Media m "  # nosec B608
+                                    "JOIN email_messages e ON e.media_id = m.id "
+                                    "JOIN email_sources s ON s.id = e.source_id AND s.tenant_id = e.tenant_id "
+                                    "WHERE e.tenant_id = ? AND s.provider = ? AND s.source_key = ? "
+                                    f"AND e.{field} = ? AND m.type = 'email' AND m.deleted = 0 "
+                                    "AND m.system_operation_id IS NULL "
+                                    "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1)"
+                                )
+                                identity_params.extend(
+                                    (email_tenant, email_metadata["email_source_provider"], email_metadata["source_key"],
+                                     str(value).strip(), email_owner_lookup)
+                                )
                             row = _fetchone(
-                                f"SELECT {selected} FROM Media m "  # nosec B608
-                                "JOIN email_messages e ON e.media_id = m.id "
-                                "JOIN email_sources s ON s.id = e.source_id AND s.tenant_id = e.tenant_id "
-                                "WHERE e.tenant_id = ? AND s.provider = ? AND s.source_key = ? "
-                                f"AND e.{field} = ? AND m.type = 'email' AND m.deleted = 0 "
-                                "AND m.system_operation_id IS NULL "
-                                "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1",
-                                (email_tenant, email_metadata["email_source_provider"], email_metadata["source_key"],
-                                 str(value).strip(), email_tenant),
+                                f"SELECT {select_columns} FROM (" + " UNION ALL ".join(branches)  # nosec B608
+                                + ") AS identity_candidates ORDER BY identity_priority LIMIT 1",
+                                tuple(identity_params),
                             )
                             if row:
                                 return row
+                        else:
+                            row = _fetchone(
+                                f"SELECT {selected} FROM Media m WHERE m.url = ? "  # nosec B608
+                                "AND m.type = 'email' AND m.deleted = 0 AND m.system_operation_id IS NULL "
+                                "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1",
+                                (url, email_owner_lookup),
+                            )
+                            if row:
+                                return row
+                            for field, value in identity_fields:
+                                if not value:
+                                    continue
+                                row = _fetchone(
+                                    f"SELECT {selected} FROM Media m "  # nosec B608
+                                    "JOIN email_messages e ON e.media_id = m.id "
+                                    "JOIN email_sources s ON s.id = e.source_id AND s.tenant_id = e.tenant_id "
+                                    "WHERE e.tenant_id = ? AND s.provider = ? AND s.source_key = ? "
+                                    f"AND e.{field} = ? AND m.type = 'email' AND m.deleted = 0 "
+                                    "AND m.system_operation_id IS NULL "
+                                    "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ? LIMIT 1",
+                                    (email_tenant, email_metadata["email_source_provider"], email_metadata["source_key"],
+                                     str(value).strip(), email_owner_lookup),
+                                )
+                                if row:
+                                    return row
                         # Legacy-only imports may have no normalized row. Inspect
                         # only the original URL's candidates, never a mailbox scan.
                         for old_url in original_dedupe_candidates:
@@ -342,7 +376,7 @@ class MediaRepository:
                                 "FROM Media m WHERE m.url = ? AND m.type = 'email' AND m.deleted = 0 "
                                 "AND m.system_operation_id IS NULL "
                                 "AND COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ?",
-                                (old_url, email_tenant),
+                                (old_url, email_owner_lookup),
                             )
                             for candidate in candidates:
                                 try:
@@ -396,6 +430,8 @@ class MediaRepository:
                         )
 
                 if row:
+                    if media_type == "email":
+                        record_email_dedupe(backend=db.backend_type)
                     media_id = row["id"]
                     media_uuid = row["uuid"]
                     current_ver = row["version"]
@@ -677,6 +713,8 @@ class MediaRepository:
                 with db._media_insert_lock:
                     recheck_row = _fetch_existing_by_url("id, uuid, version")
                     if recheck_row:
+                        if media_type == "email":
+                            record_email_dedupe(backend=db.backend_type)
                         media_id = recheck_row["id"]
                         media_uuid = recheck_row["uuid"]
                         if not overwrite:
@@ -747,7 +785,10 @@ class MediaRepository:
 
                 db._log_sync_event(conn, "Media", media_uuid, "create", 1, payload)
                 db._update_fts_media(conn, media_id, payload["title"], payload["content"])
-                db.update_keywords_for_media(media_id, keywords_norm, conn=conn)
+                # A newly inserted row cannot have keyword links yet. Keep
+                # replacements and nonempty creation on the existing path.
+                if db.backend_type != BackendType.POSTGRESQL or keywords_norm:
+                    db.update_keywords_for_media(media_id, keywords_norm, conn=conn)
                 db.create_document_version(
                     media_id=media_id,
                     content=content,
@@ -888,7 +929,7 @@ class MediaRepository:
                                     )
                             except noncritical_exceptions as parent_error:
                                 logger.warning(
-                                    f"Structure index parent-link population failed (non-fatal): {parent_error}"
+                                    "Media structure population failed: parent-link; error_type={}", type(parent_error).__name__[:80]
                                 )
 
                         try:
@@ -962,19 +1003,19 @@ class MediaRepository:
                                 order += 1
                         except noncritical_exceptions as paragraph_error:
                             logger.warning(
-                                f"Paragraph index population failed (non-fatal): {paragraph_error}"
+                                "Media structure population failed: paragraph; error_type={}", type(paragraph_error).__name__[:80]
                             )
                     except noncritical_exceptions as structure_error:
                         logger.warning(
-                            f"Structure index population failed (non-fatal): {structure_error}"
+                            "Media structure population failed: structure; error_type={}", type(structure_error).__name__[:80]
                         )
                 if chunk_options:
-                    logger.info("chunk_options ignored (placeholder): {}", chunk_options)
+                    logger.info("Unused chunk options supplied")
 
                 return media_id, media_uuid, f"Media '{title}' added."
 
         except (InputError, ConflictError, sqlite3.IntegrityError) as exc:
-            logger.exception(f"Transaction failed, rolling back: {type(exc).__name__}")
+            logger.bind(error_type=type(exc).__name__[:80]).error("Media transaction failed; rolling back")
             raise
 
     def add_text_media(

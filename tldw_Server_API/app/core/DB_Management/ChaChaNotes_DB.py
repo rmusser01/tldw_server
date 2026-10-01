@@ -7272,9 +7272,13 @@ BEGIN
 
   IF (
     SELECT count(*)
-      FROM pg_policies
-     WHERE schemaname = current_schema()
-       AND (tablename, policyname) IN (
+      -- Presence checks need stored trees, not pg_policies expression deparsing.
+      -- Deparsing can lock Media relations during concurrent schema bootstrap.
+      FROM pg_policy AS policy
+      JOIN pg_class AS relation ON relation.oid = policy.polrelid
+      JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+     WHERE namespace.nspname = current_schema()
+       AND (relation.relname, policy.polname) IN (
          (
            'shared_workspace_chat_threads',
            'shared_workspace_chat_threads_tenant_isolation'
@@ -7284,8 +7288,8 @@ BEGIN
            'shared_workspace_chat_requests_tenant_isolation'
          )
        )
-       AND qual IS NOT NULL
-       AND with_check IS NOT NULL
+       AND policy.polqual IS NOT NULL
+       AND policy.polwithcheck IS NOT NULL
   ) <> 2 THEN
     RAISE EXCEPTION 'Shared workspace chat v61 policy catalog is incomplete';
   END IF;

@@ -483,6 +483,7 @@ class MemoryResourceGovernor(ResourceGovernor):
         now = self._time()
         policy_id = req.tags.get("policy_id") or "default"
         pol = self._get_policy(policy_id)
+        daily_req = req  # Daily quotas charge original units; relief applies only to minute windows.
         req = dataclasses.replace(req, categories=clamp_token_units(pol, req.categories, capacity_includes_burst=True))
         entity_scope, entity_value = self._parse_entity(req.entity)
         backend = self._backend_label
@@ -529,7 +530,7 @@ class MemoryResourceGovernor(ResourceGovernor):
                     entity_value=entity_value,
                     category=category,
                     daily_cap=daily_cap,
-                    units=units,
+                    units=int(daily_req.categories[category].get("units") or 0),
                 )
                 if not daily_allowed:
                     allowed = False
@@ -598,8 +599,7 @@ class MemoryResourceGovernor(ResourceGovernor):
         if rec is not None:
             return rec.get("decision"), rec.get("handle_id")  # type: ignore[return-value]
 
-        _pol_for_clamp = self._get_policy(req.tags.get("policy_id") or "default")
-        req = dataclasses.replace(req, categories=clamp_token_units(_pol_for_clamp, req.categories, capacity_includes_burst=True))
+        daily_req = req
         dec = await self.check(req)
         if not dec.allowed:
             if reserve_key:
@@ -610,13 +610,14 @@ class MemoryResourceGovernor(ResourceGovernor):
         now = self._time()
         policy_id = dec.details.get("policy_id") or req.tags.get("policy_id") or "default"
         pol = self._get_policy(policy_id)
+        req = dataclasses.replace(req, categories=clamp_token_units(pol, req.categories, capacity_includes_burst=True))
         entity_scope, entity_value = self._parse_entity(req.entity)
         handle_id = str(uuid.uuid4())
         ttl = self._default_handle_ttl
         h = _ReservationHandle(handle_id=handle_id, entity=req.entity, policy_id=policy_id, categories={}, created_at=now, expires_at=now + ttl)
 
         daily_denial = await self._consume_daily_caps_for_reserve(
-            req=req,
+            req=daily_req,
             policy_id=policy_id,
             policy=pol,
             entity_scope=entity_scope,

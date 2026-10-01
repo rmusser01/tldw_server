@@ -4,6 +4,7 @@ billing_deps.py
 FastAPI dependencies for billing and limit enforcement.
 Provides guards that check subscription limits before allowing operations.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -14,6 +15,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.API_Deps.org_deps import _is_membership_active
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.Billing.enforcement import (
@@ -24,7 +26,6 @@ from tldw_Server_API.app.core.Billing.enforcement import (
     get_billing_enforcer,
 )
 from tldw_Server_API.app.core.Resource_Governance import cost_units
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 # Warning header name for soft limit notifications
 BILLING_WARNING_HEADER = "X-Billing-Warning"
@@ -43,17 +44,11 @@ def propagate_billing_headers(source: Response, target: Response) -> None:
 
 
 def _principal_has_admin_claims(principal: AuthPrincipal) -> bool:
-    roles = {
-        str(role).strip().lower()
-        for role in (principal.roles or [])
-        if str(role).strip()
-    }
+    roles = {str(role).strip().lower() for role in (principal.roles or []) if str(role).strip()}
     if "admin" in roles:
         return True
     permissions = {
-        str(permission).strip().lower()
-        for permission in (principal.permissions or [])
-        if str(permission).strip()
+        str(permission).strip().lower() for permission in (principal.permissions or []) if str(permission).strip()
     }
     return bool(permissions & _ADMIN_CLAIM_PERMISSIONS)
 
@@ -75,9 +70,7 @@ def _allow_orgless_billing_access() -> bool:
             return True
         # Keep auth/claims/quota-focused test suites independent from org billing
         # context setup unless they explicitly monkeypatch this guard.
-        if is_test_mode() or is_explicit_pytest_runtime():
-            return True
-        return False
+        return is_test_mode() or is_explicit_pytest_runtime()
     except Exception:
         # Fail closed when settings resolution fails.
         return False
@@ -94,13 +87,24 @@ async def _resolve_org_id(
     Priority:
     1. org_id query parameter
     2. X-TLDW-Org-Id header
-    3. First org in user's membership list
-    4. None (user has no orgs)
+    3. Validated active organization from the principal
+    4. First org in user's membership list
+    5. None (user has no orgs)
     """
     try:
         pool = await get_db_pool()
         repo = AuthnzOrgsTeamsRepo(db_pool=pool)
+
+        def _check_claim_scope(selected_org_id: int) -> None:
+            if principal.org_ids and selected_org_id not in principal.org_ids:
+                if principal.kind == "api_key" or not _principal_has_admin_claims(principal):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Organization is outside the credential scope",
+                    )
+
         if org_id is not None:
+            _check_claim_scope(org_id)
             if _principal_has_admin_claims(principal):
                 return org_id
             membership = await repo.get_org_member(org_id, principal.user_id)
@@ -112,6 +116,7 @@ async def _resolve_org_id(
             return org_id
 
         if x_tldw_org_id is not None:
+            _check_claim_scope(x_tldw_org_id)
             if _principal_has_admin_claims(principal):
                 return x_tldw_org_id
             membership = await repo.get_org_member(x_tldw_org_id, principal.user_id)
@@ -122,9 +127,24 @@ async def _resolve_org_id(
                 detail="You do not have active access to the specified organization",
             )
 
+        if principal.active_org_id is not None:
+            active_org_id = int(principal.active_org_id)
+            _check_claim_scope(active_org_id)
+            if _principal_has_admin_claims(principal):
+                return active_org_id
+            membership = await repo.get_org_member(active_org_id, principal.user_id)
+            if membership and _is_membership_active(membership):
+                return active_org_id
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have active access to the active organization",
+            )
+
         memberships = await repo.list_org_memberships_for_user(principal.user_id)
         if memberships:
             for membership in memberships:
+                if principal.org_ids and membership.get("org_id") not in principal.org_ids:
+                    continue
                 if _is_membership_active(membership):
                     return membership.get("org_id")
             raise HTTPException(
@@ -204,6 +224,7 @@ def require_within_limit(category: LimitCategory, units: int = 1):
         ):
             ...
     """
+
     async def _check_limit(
         response: Response,
         principal: AuthPrincipal = Depends(get_auth_principal),
@@ -291,6 +312,7 @@ def require_feature(feature: str):
         ):
             ...
     """
+
     async def _check_feature(
         principal: AuthPrincipal = Depends(get_auth_principal),
         x_tldw_org_id: int | None = Header(None, alias="X-TLDW-Org-Id"),

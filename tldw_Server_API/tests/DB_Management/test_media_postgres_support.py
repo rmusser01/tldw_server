@@ -833,7 +833,9 @@ def test_search_media_db_postgres_uses_weighted_ts_rank_when_boost_fields_set():
     assert results and results[0]["title"] == "Deep Learning"
     result_sql, result_params = calls[1]
     assert "ts_rank(" in result_sql
-    assert "0.500000,1.000000,0.500000,4.000000" in result_sql
+    assert "ARRAY[0.250000,0.125000,0.250000,1.000000]::float4[]" in result_sql
+    assert "setweight(to_tsvector('english', COALESCE(m.title, '')), 'A')" in result_sql
+    assert "setweight(to_tsvector('english', COALESCE(m.content, '')), 'C')" in result_sql
     assert result_params[0] == "deep & learning"
     assert result_params[1] == "deep & learning"
 

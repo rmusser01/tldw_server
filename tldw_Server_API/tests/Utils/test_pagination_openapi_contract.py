@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import APIRouter, FastAPI
@@ -216,3 +218,37 @@ def test_canonical_matrix_response_models_expose_pagination_when_openapi_resolva
     from tldw_Server_API.app.main import app
 
     assert _pagination_mismatches(app, _matrix_rows()) == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("mounted", [False, True])
+def test_pagination_contract_distinguishes_mounted_response_model_names(
+    monkeypatch: pytest.MonkeyPatch,
+    mounted: bool,
+) -> None:
+    """Retired rows must not borrow a live component with the same model name."""
+    app = FastAPI()
+    router = APIRouter()
+    response_model = create_model("SharedListResponse", items=(list[str], ...))
+
+    @router.get("/items", response_model=response_model)
+    def list_page() -> dict[str, list[str]]:
+        return {"items": []}
+
+    app.include_router(router, prefix="/api")
+    endpoint = f"{list_page.__module__.replace('.', '/')}.py:{list_page.__name__}"
+    row = {
+        "method": "GET",
+        "endpoint": endpoint if mounted else "retired.py:list_page",
+        "response_model": "SharedListResponse",
+        "response_fields": "pagination",
+        "status": CANONICAL_STATUS,
+    }
+    with monkeypatch.context() as context:
+        context.setitem(sys.modules, "tldw_Server_API.app.main", SimpleNamespace(app=app))
+        context.setattr(sys.modules[__name__], "_matrix_rows", lambda: [row])
+        if mounted:
+            with pytest.raises(AssertionError, match="list_page -> SharedListResponse"):
+                test_canonical_matrix_response_models_expose_pagination_when_openapi_resolvable()
+        else:
+            test_canonical_matrix_response_models_expose_pagination_when_openapi_resolvable()
