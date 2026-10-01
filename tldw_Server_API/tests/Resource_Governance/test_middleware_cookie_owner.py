@@ -90,7 +90,7 @@ async def test_invalid_cookie_returns_canonical_auth_failure(governed_cookie_app
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
     assert response.json()["detail"] == "Not authenticated (provide Bearer token or X-API-KEY)"
-    # The middleware itself never answers 401 (ADR-057 / spec §2): it makes a best-effort
+    # The middleware itself never answers 401 (ADR-056 / spec §2): it makes a best-effort
     # attempt to resolve the principal for ingress charging, and on failure falls back to
     # the IP entity and forwards to the route, whose own Depends(get_auth_principal)
     # re-validates the same cookie (a failure never reaches request state; ingress's
@@ -144,7 +144,7 @@ def test_cookie_preflight_charges_the_owner_in_multi_user_mode_too(governed_cook
     resolver.get_settings().AUTH_MODE = "multi_user"
     with TestClient(app) as client:
         response = client.get("/api/v1/persona/profiles", headers={"Cookie": "custom_session=session-a"})
-    # Ingress identity resolution (ADR-057 / spec §2) is no longer gated to single-user
+    # Ingress identity resolution (ADR-056 / spec §2) is no longer gated to single-user
     # mode: RGSimpleMiddleware._principal_entity resolves the session cookie via
     # get_auth_principal in any AUTH_MODE, caching the AuthContext on request.state.
     # The route's own Depends(get_auth_principal) then reuses that cached context
@@ -158,7 +158,7 @@ def test_cookie_preflight_charges_the_owner_in_multi_user_mode_too(governed_cook
 async def test_cookie_preflight_resolver_failure_falls_back_to_ip(
     governed_cookie_app: GovernedCookieApp, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Ingress identity resolution is best-effort (ADR-057 / spec §2): it never blocks
+    """Ingress identity resolution is best-effort (ADR-056 / spec §2): it never blocks
     the request. A broken resolver charges the anonymous IP bucket instead of the
     owner's quota, and the route's own auth still runs (and here still succeeds,
     since the route's Depends captured the real, unpatched get_auth_principal).
@@ -207,7 +207,7 @@ def test_anonymous_policy_preserves_invalid_cookie_endpoint_behavior(governed_co
     with TestClient(app) as client:
         response = client.get("/api/v1/persona/public", headers={"Cookie": "custom_session=invalid"})
     assert response.status_code == 200
-    # Ingress identity resolution (ADR-057 / spec §2) no longer depends on the policy's
+    # Ingress identity resolution (ADR-056 / spec §2) no longer depends on the policy's
     # scopes: it always makes a best-effort attempt to resolve the principal when a
     # session cookie is present, even though this anonymous-friendly policy does not
     # require an owner bucket. The failed attempt still falls back to charging the IP.
@@ -238,7 +238,7 @@ def test_stale_cookie_health_and_idempotent_logout_keep_anonymous_admission(
         response = client.request(method, path, headers={"Cookie": "custom_session=stale"})
     assert response.status_code == 200
     assert response.json() == payload
-    # Ingress identity resolution (ADR-057 / spec §2) always makes a best-effort attempt
+    # Ingress identity resolution (ADR-056 / spec §2) always makes a best-effort attempt
     # to resolve the principal when a session cookie is present, even for policies that
     # admit anonymous traffic; the stale cookie fails validation and ingress falls back
     # to charging the IP entity.

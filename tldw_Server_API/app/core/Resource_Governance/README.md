@@ -10,7 +10,7 @@ Centralized rate limiting and concurrency control with policy-based configuratio
 ## New endpoints checklist (RG-aware design)
 
 - When adding new API endpoints, first wire authentication/authorization via `get_auth_principal` together with `RequirePermission(...)` / `RequireRole(...)` (and `require_service_principal()` for service-only routes). Authorization should be claim-first; do not gate new behavior on `AUTH_MODE` or `is_single_user_mode()` / `is_multi_user_mode()` checks.
-- A new router is governed automatically: any unmapped `/api/` route resolves to the catch-all `default` policy (see `policy_resolver.py` and [ADR-057](../../../../Docs/ADR/057-resource-governor-safety-net.md)). You don't have to do anything for baseline coverage.
+- A new router is governed automatically: any unmapped `/api/` route resolves to the catch-all `default` policy (see `policy_resolver.py` and [ADR-056](../../../../Docs/ADR/056-resource-governor-safety-net.md)). You don't have to do anything for baseline coverage.
 - To give an endpoint a **dedicated** policy instead of the safety-net default:
   - Add or reuse a policy in the RG policy store (`resource_governor_policies.yaml` or DB-backed `rg_policies`).
   - Map it via `route_map.by_tag` (preferred — tag the router, and the mapping follows every route under it) or `route_map.by_path` (for one specific, sensitive route; a `by_path` entry always wins over a tag).

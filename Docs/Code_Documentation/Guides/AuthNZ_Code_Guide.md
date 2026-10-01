@@ -333,7 +333,7 @@ When adding a new FastAPI endpoint that needs AuthNZ and guardrails:
   - `check_rate_limit(identifier, endpoint, limit=None, window_minutes=None, rate_limiter=...)` remains available for compatibility/testing and direct limiter call sites where explicitly used.
 - Endpoint helpers:
   - `check_rate_limit`: local fallback limit, 120/min (`AUTH_DEPS_FALLBACK_RATE_LIMIT`), applied only when RG ingress did not govern the request. Skipped only for a request that already resolved an authenticated single-user principal, or in test mode — not simply because `AUTH_MODE=single_user` (an anonymous single-user-mode request, e.g. `/auth/login`, is still floored). Off when `RG_ENABLED=false`.
-  - `check_auth_rate_limit`: local fallback limit, 30/min (`AUTH_DEPS_AUTH_FALLBACK_RATE_LIMIT`), same skip condition, but it stays on when `RG_ENABLED=false`: it is the auth brute-force floor (ADR-057).
+  - `check_auth_rate_limit`: local fallback limit, 30/min (`AUTH_DEPS_AUTH_FALLBACK_RATE_LIMIT`), same skip condition, but it stays on when `RG_ENABLED=false`: it is the auth brute-force floor (ADR-056).
   - Route abuse protection should come from RG ingress policies and endpoint-local RG checks.
 - LLM budgets: `llm_budget_middleware.py` and `llm_budget_guard.py` enforce endpoint/provider/model quotas when configured, always via `AuthGovernor.check_llm_budget_for_api_key`. Settings are `LLM_BUDGET_ENFORCE` (on/off) and `LLM_BUDGET_ENDPOINTS` (paths). Virtual key features are gated by `VIRTUAL_KEYS_ENABLED` (defaults true).
 

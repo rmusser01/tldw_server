@@ -86,7 +86,7 @@ def test_scope_pairs_add_global_only_when_listed():
 
 
 def test_scope_pairs_default_scopes_are_entity_only():
-    # A server-wide bucket is opt-in (ADR-057: global only for shared resources).
+    # A server-wide bucket is opt-in (ADR-056: global only for shared resources).
     assert scope_pairs({}, "user", "1") == [("user", "1")]
 
 

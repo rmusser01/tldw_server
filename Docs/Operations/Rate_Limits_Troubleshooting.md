@@ -2,7 +2,7 @@
 
 `tldw_server` has several independent layers that can reject a request for "too many" or "not enough budget." They don't share a switch, so the fix depends on which one fired. Match the response body (or message) you got against the table below, then tune the knob in that row.
 
-See also: [ADR-057](../ADR/057-resource-governor-safety-net.md) for why the Resource Governor (RG) ingress layer is a generous per-entity safety net by default, and [Env_Vars.md](Env_Vars.md#resource-governor-unified-rate-limiting) for the full RG env var reference.
+See also: [ADR-056](../ADR/056-resource-governor-safety-net.md) for why the Resource Governor (RG) ingress layer is a generous per-entity safety net by default, and [Env_Vars.md](Env_Vars.md#resource-governor-unified-rate-limiting) for the full RG env var reference.
 
 | Response | Layer | Where it lives | How to tune |
 |---|---|---|---|

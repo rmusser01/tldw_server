@@ -20,7 +20,7 @@ policies:
   # Core defaults for endpoints without explicit module-level policies.
   core.default: *core_policy
 
-  # Safety net for every /api/ route no path or tag maps (see ADR-057).
+  # Safety net for every /api/ route no path or tag maps (see ADR-056).
   default: *core_policy
 
   # Cheap health/readiness probes should not spend the same bucket as

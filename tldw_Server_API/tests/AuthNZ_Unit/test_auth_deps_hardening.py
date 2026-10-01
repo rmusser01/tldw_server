@@ -617,7 +617,7 @@ async def test_admin_rate_limit_bypass_is_principal_first(
 async def test_check_rate_limit_fallback_is_off_when_rg_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """R27 / ADR-057: RG_ENABLED=false must silence the general fallback too.
+    """R27 / ADR-056: RG_ENABLED=false must silence the general fallback too.
 
     Previously this fallback kept enforcing a hidden 120/min cap even with RG
     fully disabled, breaking the one-switch rule. It now honors the switch

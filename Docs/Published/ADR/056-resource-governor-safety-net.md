@@ -1,4 +1,4 @@
-# ADR-057: Resource Governor ingress safety net
+# ADR-056: Resource Governor ingress safety net
 
 **Status:** Accepted
 **Date:** 2026-09-29

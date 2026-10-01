@@ -97,7 +97,7 @@ class RGSimpleMiddleware:
             pass
 
     def _derive_policy_id(self, request: Request) -> str | None:
-        """Path, then the innermost mapped tag, then default (ADR-057)."""
+        """Path, then the innermost mapped tag, then default (ADR-056)."""
         from .policy_resolver import get_policy_resolver
 
         try:
