@@ -132,7 +132,7 @@ class RatchetError(RuntimeError):
     """Raised when the route inventory cannot be built or read."""
 
 
-def _load_app() -> Any:
+def load_app() -> Any:
     """Build the FastAPI app with every route family enabled.
 
     Mutates ``os.environ`` (route policy, ``AUTH_MODE``, ``TEST_MODE``) and
@@ -162,6 +162,9 @@ def _load_app() -> Any:
     except Exception as exc:  # noqa: BLE001 - surfaced, never swallowed
         raise RatchetError(f"could not build the FastAPI app: {exc}") from exc
     return app
+
+
+_load_app = load_app
 
 
 def iter_routes(app: Any) -> Iterator[tuple[str | None, list[str], Any]]:
@@ -272,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    app = _load_app()
+    app = load_app()
     current = unauthenticated_routes(app)
 
     if args.write_baseline:

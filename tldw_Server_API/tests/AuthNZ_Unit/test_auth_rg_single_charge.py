@@ -1,9 +1,10 @@
-"""Auth endpoints charge their per-IP RG bucket once per request.
+"""Auth endpoints charge a policy's RG bucket once per request.
 
-When RG ingress already charged this request's IP to the same policy, the auth
-handler skips its own IP reservation. It must not skip when ingress charged some
-other entity (e.g. a rotating fake API key), when ingress failed open and charged
-nothing, or when the auth reservation is keyed on email or user.
+When RG ingress already charged this request to the same policy and entity, the
+auth handler skips its own reservation. It must not skip when ingress failed open
+and charged nothing, when ingress resolved a different policy, or when ingress
+charged any other entity (a user, API key or tenant standing in for the IP would
+let a caller rotating accounts evade the per-IP limit).
 """
 
 from types import SimpleNamespace
@@ -60,10 +61,34 @@ async def test_ingress_charged_same_policy_skips_ip_reservation(spy):
     assert allowed and spy.entities == []
 
 
-async def test_ingress_charged_api_key_entity_still_reserves_ip(spy):
-    # A rotating fake X-API-KEY gets a fresh ingress bucket every time; the IP bucket is the real limit.
-    await auth_ep._reserve_auth_rg_requests(_request(_POLICY, "api_key:deadbeef"), policy_id=_POLICY, entity=_IP)
+async def test_ingress_charged_same_user_skips_user_reservation(spy):
+    # Authenticated /auth/mfa/verify: ingress already charged user:7 on authnz.mfa.verify.
+    allowed, _ = await auth_ep._reserve_auth_rg_requests(_request(_POLICY, "user:7"), policy_id=_POLICY, entity="user:7")
+    assert allowed and spy.entities == []
+
+
+async def test_ingress_charged_user_still_reserves_ip(spy):
+    # A logged-in caller of forgot-password: ingress charged user:7. Rotating valid accounts
+    # would give each request a fresh user bucket, so the per-IP auth charge still applies.
+    await auth_ep._reserve_auth_rg_requests(_request(_POLICY, "user:7"), policy_id=_POLICY, entity=_IP)
     assert spy.entities == [_IP]
+
+
+async def test_ingress_charged_tenant_still_reserves_ip(spy):
+    # A tenant: ingress entity comes from an unvalidated header; rotating it must not
+    # stand in for the per-IP auth charge.
+    await auth_ep._reserve_auth_rg_requests(_request(_POLICY, "tenant:acme"), policy_id=_POLICY, entity=_IP)
+    assert spy.entities == [_IP]
+
+
+async def test_ingress_charged_other_policy_still_reserves(spy):
+    await auth_ep._reserve_auth_rg_requests(_request("authnz.default", _IP), policy_id=_POLICY, entity=_IP)
+    assert spy.entities == [_IP]
+
+
+async def test_no_ingress_charge_reserves_by_user(spy):
+    await auth_ep._reserve_auth_rg_requests(_request(_POLICY), policy_id=_POLICY, entity="user:7")
+    assert spy.entities == ["user:7"]
 
 
 async def test_ingress_failed_open_still_reserves_ip(spy):
@@ -78,6 +103,7 @@ async def test_per_email_throttle_still_applies(spy):
 
 
 async def test_per_user_throttle_still_applies(spy):
+    # MFA pre-auth login: ingress charged the IP; the auth limit is per user.
     await auth_ep._reserve_auth_rg_requests(_request(_POLICY, _IP), policy_id=_POLICY, entity="user:7")
     assert spy.entities == ["user:7"]
 

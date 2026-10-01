@@ -302,92 +302,18 @@ policies:
 route_map:
   by_route:
     audio-realtime: audio.default
+  # by_path wins over by_tag, so list a tag only if it governs a route no by_path
+  # entry matches (Helper_Scripts/ci/rg_route_map_lint.py reports shadowed tags).
   by_tag:
     health: health.default
-    authentication: authnz.default
-    auth: authnz.default
-    users: core.default
     organizations: core.default
     org-team-keys: core.default
-    invites: core.default
-    privileges: core.default
-    admin: core.default
-    jobs: core.default
-    audit: core.default
-    billing: core.default
-    outputs-templates: core.default
-    outputs: core.default
-    reading: core.default
-    reading-highlights: core.default
-    items: core.default
-    kanban: core.default
-    flashcards: flashcards.default
-    quizzes: quizzes.default
-    moderation: core.default
-    authnz-debug: core.default
-    sandbox: core.default
-    setup: core.default
-    subscriptions-deprecated: core.default
-    chunking: core.default
-    chunking-templates: core.default
-    connectors: core.default
-    ocr: core.default
-    vlm: core.default
-    media: media.access
-    media-embeddings: embeddings.default
-    audio: audio.default
-    audio-websocket: audio.default
-    audio-ws: audio.default
-    audio-jobs: audio.default
-    web-scraping: web_scraping.default
-    research: research.default
-    paper-search: research.default
-    chat: chat.default
-    chat-dictionaries: chat.default
-    chat-documents: chat.default
-    characters: character_chat.default
-    character-chat-sessions: character_chat.default
-    character-messages: character_chat.default
-    persona: character_chat.default
-    rag-health: rag.default
-    rag-unified: rag.default
-    feedback: evals.default
-    evaluations: evals.default
-    benchmarks: evals.default
-    embeddings: embeddings.default
-    vector-stores: embeddings.default
-    claims: core.default
-    prompt-studio: prompt_studio.default
-    prompts: prompt_studio.default
-    notes: core.default
-    skills: core.default
     writing: core.default
-    notes-graph: core.default
-    personalization: core.default
-    chatbooks: core.default
-    tools: core.default
-    metrics: core.default
-    monitoring: core.default
-    config: core.default
-    sync: core.default
-    llm: core.default
     llamacpp: core.default
-    mcp-unified: mcp.default
-    mcp-catalogs: mcp.default
     mcp-catalogs-scope: mcp.default
-    mcp.ingestion: mcp.ingestion
-    embeddings_server: embeddings_server.default
-    character_chat: character_chat.default
-    web_scraping: web_scraping.default
-    workflows: workflows.default
-    rag: rag.default
-    watchlists: watchlists.default
     resource-governor: core.default
-    audio-realtime: audio.default
   by_path:
     "/health": health.default
-    "/healthz": health.default
-    "/readyz": health.default
     "/metrics": core.default
     "/setup*": core.default
     "/v1/rerank": core.default
@@ -416,11 +342,9 @@ route_map:
     "/api/v1/chats*": character_chat.default
     "/api/v1/messages*": character_chat.default
     "/api/v1/characters*": character_chat.default
-    "/api/v1/dictionaries*": chat.default
-    "/api/v1/documents*": chat.default
     "/api/v1/chat/*": chat.default
     "/api/v1/embeddings*": embeddings.default
-    "/api/v1/vector-stores*": embeddings.default
+    "/api/v1/vector_stores*": embeddings.default
     "/v1/realtime": audio.default
     "/api/v1/audio*": audio.default
     "/api/v1/evaluations*": evals.default
@@ -442,7 +366,6 @@ route_map:
     "/api/v1/media*": media.access
     "/api/v1/watchlists/*": watchlists.default
     "/api/v1/watchlists*": watchlists.default
-    "/api/v1/subscriptions*": core.default
     "/api/v1/billing*": core.default
     "/api/v1/auth/forgot-password": authnz.forgot_password
     "/api/v1/auth/reset-password": authnz.reset_password
@@ -450,7 +373,7 @@ route_map:
     "/api/v1/auth/magic-link/request": authnz.magic_link.request
     "/api/v1/auth/mfa/verify": authnz.mfa.verify
     "/api/v1/auth/mfa/login": authnz.mfa.login
-    "/api/v1/auth*": authnz.default
+    "/api/v1/auth/*": authnz.default
     "/api/v1/authnz*": core.default
     "/api/v1/users*": core.default
     "/api/v1/orgs*": core.default

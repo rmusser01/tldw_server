@@ -1,10 +1,10 @@
 ---
-id: TASK-13396
+id: TASK-13405
 title: RG ingress safety net (spec 1 of 2)
 status: To Do
 assignee: []
 created_date: '2026-09-30 01:39'
-updated_date: '2026-09-30 04:34'
+updated_date: '2026-09-30 22:35'
 labels:
   - resource-governance
   - backend
@@ -44,6 +44,8 @@ PR #3066 Qodo wave (2026-09-30). Fixed 9 of 11 findings; declined 2 with a poste
 - Redis token windows quantized to about 1000 members (G = max(1, per_min // 1000));
 - eviction rotates in place (also fixes a cursor that skipped keys).
 Also fixed a pre-existing bypass: ingress used the client X-Request-ID as the governor op_id, and the memory governor replays the cached decision for a repeated op_id without charging, so a fixed header was never rate limited on any route. The op_id is now always server-generated. Commits 67b07ae36a..d2ecf10cca.
+
+Renumbered from TASK-13396 on 2026-09-30. dev also gained TASK-13396 (Buddy canonical workspace URL, via #3056) before #3066 brought this one in. Content is unchanged; commit messages up to #3066 still say TASK-13396. PR A (#3066) merged 2026-09-30 22:32Z. The ADR is ADR-057, not ADR-056 as AC #3 says (PR #3041 claims 056).
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

@@ -11,6 +11,7 @@ safety-net rule is that no configuration can produce a permanent 429.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -70,19 +71,27 @@ def effective_policy(get_policy: Callable[[str], Mapping[str, Any] | None], poli
     if not _has_requests(policy):
         fallback = _lookup(get_policy, DEFAULT_POLICY_ID)
         policy["requests"] = dict((fallback if _has_requests(fallback) else BUILTIN_DEFAULT_POLICY)["requests"])
+    # A bucket that can't hold one request denies forever: raise burst so capacity is 1.
+    requests = policy["requests"]
+    rpm = float(requests["rpm"])
+    if rpm * max(1.0, float(requests.get("burst") or 1.0)) < 1:
+        burst = 1 / rpm
+        while rpm * burst < 1:  # float rounding: 0.41 * (1 / 0.41) == 0.9999999999999999
+            burst = math.nextafter(burst, math.inf)
+        policy["requests"] = {**requests, "burst": burst}
     return policy
 
 
 def scope_pairs(policy: Mapping[str, Any], entity_scope: str, entity_value: str) -> list[tuple[str, str]]:
     """Return the (scope, value) buckets a request charges.
 
-    A policy's ``scopes`` decide whether a server-wide bucket exists. They never
-    remove the caller's own bucket: a request whose entity kind the policy does not
-    list is charged a per-entity bucket instead of being denied (the ADR-044 bug
-    class).
+    A policy's ``scopes`` decide whether a server-wide bucket exists; it is opt-in
+    (listed ``global``), never implied by omitting ``scopes``. They never remove the
+    caller's own bucket: a request whose entity kind the policy does not list is
+    charged a per-entity bucket instead of being denied (the ADR-044 bug class).
     """
     raw = policy.get("scopes")
-    scopes = [str(s) for s in raw] if isinstance(raw, list) and raw else ["global", "entity"]
+    scopes = [str(s) for s in raw] if isinstance(raw, list) else []
     pairs: list[tuple[str, str]] = [("global", "*")] if "global" in scopes else []
     pairs.append((entity_scope, entity_value))
     return pairs
