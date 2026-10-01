@@ -173,6 +173,41 @@ async def test_policy_store_failure_is_logged_once_and_default_applies(backend, 
     assert len([m for m in seen if "'p'" in m and "PolicyLoader not initialized" in m]) == 1, seen
 
 
+async def test_fractional_rpm_admits_then_refills(backend):
+    # The shipped authnz.magic_link.email policy. Redis once used int(rpm) == 0 here.
+    clock = FakeTime()
+    gov, _ = _gov(backend, {"p": {"requests": {"rpm": 0.3, "burst": 10.0}, "scopes": ["user"]}}, clock)
+    first = await _admits(gov, _req("user:1", "p"), 5)
+    assert first[0] and not first[-1], first
+    clock.advance(201)  # one unit refills in 60 / 0.3 = 200 s
+    assert await _admits(gov, _req("user:1", "p"), 1) == [True]
+
+
+async def test_fractional_rpm_bucket_holds_at_least_one_unit(backend):
+    # rpm * burst < 1 used to be a bucket that could never hold one request.
+    gov, _ = _gov(backend, {"p": {"requests": {"rpm": 0.5, "burst": 1.0}, "scopes": ["user"]}}, FakeTime())
+    assert (await _admits(gov, _req("user:1", "p"), 3))[0] is True
+
+
+async def test_fractional_rpm_float_rounding_still_holds_one_unit(backend):
+    # 0.41 * (1 / 0.41) == 0.9999999999999999, which the memory bucket truncates to 0.
+    gov, _ = _gov(backend, {"p": {"requests": {"rpm": 0.41, "burst": 1.0}, "scopes": ["user"]}}, FakeTime())
+    assert (await _admits(gov, _req("user:1", "p"), 1))[0] is True
+
+
+async def test_policy_without_scopes_has_no_server_wide_bucket(backend):
+    gov, _ = _gov(backend, {"p": {"requests": {"rpm": 1, "burst": 1.0}}}, FakeTime())
+    assert await _admits(gov, _req("user:1", "p"), 1) == [True]
+    assert await _admits(gov, _req("user:2", "p"), 1) == [True]  # user:1 spent only its own bucket
+
+
+async def test_memory_refund_without_scopes_creates_no_global_bucket():
+    gov, _ = _gov("memory", {"p": {"requests": {"rpm": 100}, "tokens": {"per_min": 100}}}, FakeTime())
+    _dec, handle = await gov.reserve(_req("user:1", "p", tokens={"units": 10}), op_id="r")
+    await gov.commit(handle, actuals={"tokens": 5})
+    assert [k for k in gov._buckets if k[2] == "global"] == []
+
+
 async def test_memory_evicts_full_idle_buckets_only():
     clock = FakeTime()
     policies = {
@@ -208,6 +243,48 @@ async def test_memory_eviction_sweeps_rotate_through_every_bucket(monkeypatch):
     clock.advance(61)
     gov._maybe_evict_idle(clock())
     assert {k[3] for k in gov._buckets} == {"1", "4"}
+
+
+async def test_memory_eviction_batch_scales_with_a_flood(monkeypatch):
+    # A fixed batch falls behind a flood of one-shot entities; a sweep covers >= 1/10 of the map.
+    from tldw_Server_API.app.core.Resource_Governance import governor as governor_mod
+
+    monkeypatch.setattr(governor_mod, "_EVICT_BATCH", 2)
+    clock = FakeTime()
+    gov, _ = _gov("memory", {"fast": {"requests": {"rpm": 600, "burst": 1.0}, "scopes": ["user"]}}, clock)
+    for user in range(100):
+        await _admits(gov, _req(f"user:{user}", "fast"), 1)
+        gov._leases[("fast", "streams", "user", str(user))] = {}
+    clock.advance(601)
+    gov._maybe_evict_idle(clock())
+    assert (len(gov._buckets), len(gov._leases)) == (90, 90)
+
+
+async def test_memory_expired_op_id_is_not_replayed_before_the_purge_runs(monkeypatch):
+    clock = FakeTime()
+    gov, _ = _gov("memory", {"p": {"requests": {"rpm": 1, "burst": 1.0}, "scopes": ["user"]}}, clock)
+    monkeypatch.setattr(gov, "_purge_expired_ops", lambda _now: None)
+    req = _req("user:1", "p")
+    assert (await gov.reserve(req, op_id="a"))[0].allowed
+    assert not (await gov.reserve(req, op_id="x"))[0].allowed  # denial cached under "x"
+    clock.advance(gov._op_ttl + 1)  # "x" has expired and the bucket has refilled
+    assert (await gov.reserve(req, op_id="x"))[0].allowed
+
+
+async def test_memory_ops_purge_runs_at_most_once_per_interval():
+    from tldw_Server_API.app.core.Resource_Governance.governor import _OPS_PURGE_INTERVAL_SEC
+
+    clock = FakeTime()
+    gov, _ = _gov("memory", {"p": {"requests": {"rpm": 600}, "scopes": ["user"]}}, clock)
+    await gov.reserve(_req("user:1", "p"), op_id="old")
+    clock.advance(gov._op_ttl - 1)
+    await gov.reserve(_req("user:1", "p"), op_id="t1")  # purges; "old" not yet expired
+    clock.advance(2)
+    await gov.reserve(_req("user:1", "p"), op_id="t2")  # "old" expired, but within the interval
+    assert "reserve:old" in gov._ops
+    clock.advance(_OPS_PURGE_INTERVAL_SEC)
+    await gov.reserve(_req("user:1", "p"), op_id="t3")
+    assert "reserve:old" not in gov._ops
 
 
 # --- Redis tokens window: one ZSET member per quantum of max(1, per_min // 1000) tokens ---

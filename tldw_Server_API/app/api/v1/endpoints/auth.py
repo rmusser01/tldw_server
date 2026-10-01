@@ -1124,19 +1124,18 @@ async def _reserve_auth_rg_requests(
 
     rg_entity = entity or f"ip:{_auth_request_client_ip(request)}"
 
-    # Skip only when ingress actually charged this request to this policy's per-IP
-    # bucket: rg_ingress_entity is set only after an allowed ingress reservation, so a
-    # fail-open ingress or one keyed on a (possibly fake, rotating) API key never skips.
-    # The two IP derivations (AuthNZ trusted proxies vs RG_TRUSTED_PROXIES) can
-    # disagree, so compare the entity kind, not the IP. Reservations keyed on email or
-    # user (e.g. MFA per-user limits) must still apply. See TASK-13144 for unifying the
-    # IP derivations.
+    # Skip only when ingress already charged this exact entity to this policy.
+    # rg_ingress_entity is set only after an allowed ingress reservation, so a fail-open
+    # ingress never skips. Any other ingress entity must not stand in for this one: a
+    # user:/api_key: bucket is per account, so a caller rotating several valid accounts
+    # would get a fresh bucket each time and evade the per-IP limit on entity-scoped
+    # sensitive policies; a tenant: entity comes from an unvalidated header. When AuthNZ
+    # and RG derive different IPs (TASK-13144) the request is charged twice, never zero.
+    # Reservations keyed on some other entity (a per-email throttle, or the per-user MFA
+    # limit when ingress charged the IP) still apply.
     state = getattr(request, "state", None)
-    if (
-        rg_entity.startswith("ip:")
-        and getattr(state, "rg_policy_id", None) == policy_id
-        and str(getattr(state, "rg_ingress_entity", None)).startswith("ip:")
-    ):
+    ingress_entity = getattr(state, "rg_ingress_entity", None)
+    if getattr(state, "rg_policy_id", None) == policy_id and ingress_entity and rg_entity == ingress_entity:
         return True, None
 
     governor = await _get_auth_endpoint_rg_governor(request)

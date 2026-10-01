@@ -42,6 +42,18 @@ def test_policy_without_requests_inherits_default_requests():
     assert out["tokens"] == {"per_min": 100}
 
 
+def test_fractional_rpm_capacity_is_raised_to_one_unit():
+    src = {"requests": {"rpm": 0.5, "burst": 1.0}, "scopes": ["user"]}
+    out = effective_policy(_getter({"p": src}), "p")
+    assert out["requests"] == {"rpm": 0.5, "burst": 2.0}
+    assert src["requests"] == {"rpm": 0.5, "burst": 1.0}  # the store's dict is not mutated
+
+
+def test_fractional_rpm_with_enough_burst_is_unchanged():
+    pol = {"requests": {"rpm": 0.3, "burst": 10.0}}
+    assert effective_policy(_getter({"p": pol}), "p")["requests"] == {"rpm": 0.3, "burst": 10.0}
+
+
 def test_getter_errors_are_treated_as_unknown():
     def boom(_pid):
         raise RuntimeError("store down")
@@ -73,8 +85,9 @@ def test_scope_pairs_add_global_only_when_listed():
     assert scope_pairs({"scopes": ["user"]}, "user", "1") == [("user", "1")]
 
 
-def test_scope_pairs_default_scopes_are_global_plus_entity():
-    assert scope_pairs({}, "user", "1") == [("global", "*"), ("user", "1")]
+def test_scope_pairs_default_scopes_are_entity_only():
+    # A server-wide bucket is opt-in (ADR-057: global only for shared resources).
+    assert scope_pairs({}, "user", "1") == [("user", "1")]
 
 
 def test_clamp_caps_oversized_token_reservation_at_capacity():

@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import dataclasses
 import json
+import math
 import os
 import time
 import uuid
@@ -46,6 +47,11 @@ except _RG_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - metrics optional
 
 class _FallbackToMemory(Exception):
     """Signal that Redis operations failed and fallback_memory should be used."""
+
+
+def _requests_limit(policy: dict[str, Any]) -> int:
+    """Requests admitted per 60 s window. Rounds up: int(0.3) == 0 would deny forever."""
+    return max(1, math.ceil(float((policy.get("requests") or {}).get("rpm") or 0)))
 
 
 def _window_members(category: str, limit: int, units: int = 0) -> tuple[int, int, int]:
@@ -852,7 +858,7 @@ class RedisResourceGovernor(ResourceGovernor):
             for category, cfg in req.categories.items():
                 units = int(cfg.get("units") or 0)
                 if category == "requests":
-                    rpm = int((pol.get("requests") or {}).get("rpm") or 0)
+                    rpm = _requests_limit(pol)
                     window = 60
                     limit = rpm
                     allowed = True
@@ -1208,7 +1214,7 @@ class RedisResourceGovernor(ResourceGovernor):
             if "requests" in req.categories:
                 policy_id_bs = req.tags.get("policy_id") or "default"
                 pol_bs = self._get_policy(policy_id_bs)
-                limit_bs = int((pol_bs.get("requests") or {}).get("rpm") or 0)
+                limit_bs = _requests_limit(pol_bs)
                 if limit_bs > 0:
                     await self._bootstrap_accept_window_from_zset(policy_id=policy_id_bs, entity=req.entity, limit=limit_bs, now=self._time())
         except _RG_NONCRITICAL_EXCEPTIONS:
@@ -1224,7 +1230,7 @@ class RedisResourceGovernor(ResourceGovernor):
             # within this window, deny until the window reset even before running checks.
             try:
                 pol_e = self._get_policy(policy_id_early)
-                limit_e = int((pol_e.get("requests") or {}).get("rpm") or 0)
+                limit_e = _requests_limit(pol_e)
             except _RG_NONCRITICAL_EXCEPTIONS:
                 limit_e = 0
             # Floors are keyed by the limit in effect when they were set, so a policy
@@ -1329,7 +1335,7 @@ class RedisResourceGovernor(ResourceGovernor):
                 per_category_e: dict[str, Any] = {}
                 for category, _cfg in req.categories.items():
                     if category == "requests":
-                        lim = int((pol_e.get("requests") or {}).get("rpm") or 0)
+                        lim = _requests_limit(pol_e)
                         per_category_e[category] = {"allowed": False, "limit": lim, "retry_after": ra_e}
                     elif category in ("streams", "jobs"):
                         ttl_sec = int((pol_e.get(category) or {}).get("ttl_sec") or 60)
@@ -1432,7 +1438,7 @@ class RedisResourceGovernor(ResourceGovernor):
                             if cat_name == "requests":
                                 try:
                                     pol_b = self._get_policy(policy_id_b)
-                                    rpm_b = int((pol_b.get("requests") or {}).get("rpm") or 0)
+                                    rpm_b = _requests_limit(pol_b)
                                     win = int((pol_b.get("requests") or {}).get("window") or 60)
                                 except _RG_NONCRITICAL_EXCEPTIONS:
                                     rpm_b = 0
@@ -1553,7 +1559,7 @@ class RedisResourceGovernor(ResourceGovernor):
                     if units <= 0:
                         continue
                     if category in ("requests", "tokens"):
-                        limit = int((pol.get(category) or {}).get("rpm") or 0) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
+                        limit = _requests_limit(pol) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
                         # Treat tokens.per_min<=0 as unbounded: do not enforce or reserve per-minute windows.
                         if category == "tokens" and limit <= 0:
                             continue
@@ -1597,7 +1603,7 @@ class RedisResourceGovernor(ResourceGovernor):
                     if units <= 0:
                         continue
                     if category in ("requests", "tokens"):
-                        limit = int((pol.get(category) or {}).get("rpm") or 0) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
+                        limit = _requests_limit(pol) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
                         if category == "tokens" and limit <= 0:
                             continue
                         window = 60
@@ -1622,7 +1628,7 @@ class RedisResourceGovernor(ResourceGovernor):
                     per_category: dict[str, Any] = {}
                     for category, _cfg in req.categories.items():
                         if category in ("requests", "tokens"):
-                            lim = int((pol.get(category) or {}).get("rpm") or 0) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
+                            lim = _requests_limit(pol) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
                             per_category[category] = {"allowed": False, "limit": lim, "retry_after": int(denial_retry_after or 1)}
                         elif category in ("streams", "jobs"):
                             ttl_sec = int((pol.get(category) or {}).get("ttl_sec") or 60)
@@ -1641,7 +1647,7 @@ class RedisResourceGovernor(ResourceGovernor):
                     if units <= 0:
                         continue
                     if category in ("requests", "tokens"):
-                        limit = int((pol.get(category) or {}).get("rpm") or 0) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
+                        limit = _requests_limit(pol) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
                         if category == "tokens" and limit <= 0:
                             continue
                         _q, _limit_m, units_m = _window_members(category, limit, units)
@@ -1666,7 +1672,7 @@ class RedisResourceGovernor(ResourceGovernor):
                     if units <= 0:
                         continue
                     if category in ("requests", "tokens"):
-                        limit = int((pol.get(category) or {}).get("rpm") or 0) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
+                        limit = _requests_limit(pol) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
                         if category == "tokens" and limit <= 0:
                             continue
                         window = 60
@@ -1712,7 +1718,7 @@ class RedisResourceGovernor(ResourceGovernor):
                 if "requests" in req.categories:
                     # Prefer RA if >=2, else full window
                     floor_df = int(ra_df) if int(ra_df) >= 2 else 60
-                    rpm_df = int((pol.get("requests") or {}).get("rpm") or 0)
+                    rpm_df = _requests_limit(pol)
                     self._requests_deny_until[(self._keys.ns, policy_id_df, req.entity, rpm_df)] = now_df + float(floor_df)
                     self._stub_backoff_until[(self._keys.ns, policy_id_df, req.entity, "requests", rpm_df)] = now_df + float(ra_df)
             except _RG_NONCRITICAL_EXCEPTIONS:
@@ -1730,7 +1736,7 @@ class RedisResourceGovernor(ResourceGovernor):
             # Populate categories from request, overriding requests/tokens to denied
             for category, _cfg in req.categories.items():
                 if category in ("requests", "tokens"):
-                    lim = int((pol.get(category) or {}).get("rpm") or 0) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
+                    lim = _requests_limit(pol) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
                     per_category[category] = {"allowed": False, "limit": lim, "retry_after": int(denial_retry_after or 1)}
                 elif category in ("streams", "jobs"):
                     ttl_sec = int((pol.get(category) or {}).get("ttl_sec") or 60)
@@ -1996,7 +2002,7 @@ class RedisResourceGovernor(ResourceGovernor):
         # Harden burst behavior tracking (gated for tests)
         try:
             if self._accept_window_enabled() and "requests" in req.categories:
-                limit_req = int((pol.get("requests") or {}).get("rpm") or 0)
+                limit_req = _requests_limit(pol)
                 if limit_req > 0:
                     key_aw = (policy_id, req.entity)
                     start, lim, cnt = self._requests_accept_window.get((self._keys.ns,) + key_aw, (now, limit_req, 0))
@@ -2405,7 +2411,7 @@ class RedisResourceGovernor(ResourceGovernor):
             if category not in ("requests", "tokens"):
                 out[category] = {"remaining": None, "reset": None}
                 continue
-            limit = int((pol.get(category) or {}).get("rpm") or 0) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
+            limit = _requests_limit(pol) if category == "requests" else int((pol.get(category) or {}).get("per_min") or 0)
             quantum, limit_m, _units_m = _window_members(category, limit)
             window = 60
             remainings = []

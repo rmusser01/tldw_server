@@ -2980,17 +2980,13 @@ async def add_media_orchestrate(
                         entity_scope, entity_value = rg_entity.split(":", 1)
                     else:
                         entity_scope, entity_value = "entity", rg_entity
-                    request_id_part = request.headers.get("X-Request-ID", "") if request is not None else ""
-                    if not request_id_part:
-                        request_id_part = str(time.time_ns())
+                    # Server-generated: a client X-Request-ID is repeatable, so the ledger
+                    # would dedupe away every later upload's bytes.
                     await _record_media_ingestion_bytes_ledger_entry(
                         entity_scope=entity_scope,
                         entity_value=entity_value,
                         units=int(total_uploaded_bytes),
-                        op_id=(
-                            f"media-ingestion-bytes:{entity_scope}:{entity_value}:"
-                            f"{request_id_part}:{int(total_uploaded_bytes)}"
-                        ),
+                        op_id=f"media-ingestion-bytes:{entity_scope}:{entity_value}:{uuid4().hex}",
                     )
                 except HTTPException:
                     raise

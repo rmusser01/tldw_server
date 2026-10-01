@@ -169,7 +169,7 @@ async def test_daily_cap_consume_fails_open_on_authnz_database_error(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_log_llm_usage_writes_tokens_to_ledger_idempotent(tmp_path, monkeypatch):
+async def test_log_llm_usage_writes_every_call_to_ledger(tmp_path, monkeypatch):
     db_path = tmp_path / "authnz_tokens_idem.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
 
@@ -195,7 +195,8 @@ async def test_log_llm_usage_writes_tokens_to_ledger_idempotent(tmp_path, monkey
         request_id="rid-dup",
         estimated=False,
     )
-    # Repeat identical usage log should not double-count ledger.
+    # A second LLM call is real usage even under the same (client-supplied) request id;
+    # deduping on it let a replayed X-Request-ID skip the tokens/day charge.
     await log_llm_usage(
         user_id=1,
         key_id=None,
@@ -213,7 +214,7 @@ async def test_log_llm_usage_writes_tokens_to_ledger_idempotent(tmp_path, monkey
     )
 
     after = await ledger.total_for_day("user", "1", "tokens")
-    assert after == before + 5
+    assert after == before + 10
 
 
 @pytest.mark.asyncio
