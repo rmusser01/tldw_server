@@ -1346,3 +1346,29 @@ UAT556 child .45 / UAT546 .35: exact b38 macOS Prompt job 110219891984 prints 10
 UAT564 child .53 additionally tracks Python 3.13 chat-new-integration-property job 110219897001: explicit automatic one-hour maximum during uv setup step 5, tests skipped and no JUnit. This joins the original four scopes under the same unit. New AC4 requires the fifth actual final-head success; all ACs remain OPEN. V2 manifest /private/tmp/pr2979-uat564-native-setup-evidence-0751.json SHA256 f20b410d640fb6523dfe8da528417a5b7038b392628f356634393d343503da53 verifies 45 artifacts and preserves the initial four-job manifest. Exact setup bottleneck remains unproven, no speculative dependency/CI/budget/source repair.
 
 Read-only evidence plus official task/owned docs tracking only. Bandit N/A for this Markdown/task delta; no new source tests or local acceptance. Useful b38 automatic/native runs remain nonterminal and preserved, local UAT562/UAT563 repairs and tracking held. Final strict/native/whole macOS Prompt/Chatbook gates OPEN; full UAT paused/UAT261 open.
+
+## Final observed Character cancellations — UAT564 / UAT565, 2026-10-01 08:04 UTC
+
+UAT564 child .53 now covers SIX before-tests setup cancellations. New Python 3.12 chat-character-integration-context110219900398 cancels in uv setup step 5 under the explicit original one-hour maximum; tests are skipped/no JUnit. AC5 requires this sixth actual final-head scope success. V3 manifest /private/tmp/pr2979-uat564-native-setup-evidence-0800.json SHA256 1219d1712088b699132c068b83bd12e62b37deb6c7bb3309c01164d2ab0e2914 verifies 54 artifacts and retains prior four/five-job manifests. Exact bottleneck remains unproven, all ACs OPEN.
+
+New UAT565 child .54 separately tracks Python 3.12 Character unit-prd110219900367. Setup succeeds from06:55:55 to07:52:52 (56m57s), then test step22 runs07:52:56–07:55:13 and is cancelled by the job maximum. Digest-verified artifact11148132849 archive9e0a551c3cd7fdb175ae32b0e76280fa653facbac6c397055d7f1b8e3bbc6ecd contains XML plus pytest log: all34 cases pass, zero skips/errors/failures,621 warnings,121.84s summary. There is no independently timestamped summary or natural whole-process exit; do not infer direct shutdown timing by subtracting the pytest duration from the job step duration. No native shutdown-phase/stacks/thread ownership/retained-graph attribution is supplied. Manifest /private/tmp/pr2979-uat565-native-unit-prd-evidence-0800.json SHA256 f4ec666ea7a6b45fa3c87f70fdb59b67ae1477a8530463f94ff4adf686c66aa8 verifies17 artifacts; test source1b20972d191be24d5446406921c503107447a70eaef6153aa13a3521c9a2c7e3 and all101 assertions unchanged. Installed native Python3.12.14/FastAPI0.141.1/Pydantic2.13.5/core2.46.5/Starlette1.7.0/pytest9.1.1/torch2.14.1 are observed in this job’s log, not attributed to incomplete installations.
+
+Official UAT565 search found no duplicate; supported explicit-ID CLI created child .54 before docs edits. Its three stages are evidence preservation (complete), actual native causal observation (not started), and any justified minimal repair plus final native natural exit (not started). All UAT565 ACs OPEN. Initial private blanket setup-stage assertion rejected this late-test job and was excluded; actual metadata/artifact reading resolves classification. Tracking-only Markdown/tasks, Bandit N/A, no new source/tests/PG/static/GC/cleanup/exit/warning/dependency/timer/CI change or acceptance. Parent/children .1-.54 In Progress, useful current runs preserved, held batch awaits safe publication; final strict/native/whole macOS Prompt/Chatbook gates OPEN, full UAT paused/UAT261 open.
+
+### UAT565 Stage 1: Preserve the actual native result
+**Goal:** Verify setup/test-step timestamps, digest-verified log/XML, case identities and unchanged test source.
+**Success Criteria:** 34 passes and zero skips/errors/failures distinguished from whole-process cancellation; no fabricated shutdown timestamp.
+**Tests:** Read-only hosted artifact/source/hash verification.
+**Status:** Complete
+
+### UAT565 Stage 2: Identify the native shutdown and setup causes
+**Goal:** Obtain content-free native process-phase/stacks/thread/retained-graph and setup-stage observations after useful current diagnostics finish.
+**Success Criteria:** Causal attribution before any corrective source/dependency/CI edit; all original budgets and cleanup/exit contracts preserved.
+**Tests:** Actual native observations, not further whole local Prompt runs without new causal evidence.
+**Status:** Not Started
+
+### UAT565 Stage 3: Qualify any proven repair and final natural exit
+**Goal:** Verify a justified minimal shared fix if needed, then obtain final exact published native acceptance.
+**Success Criteria:** Relevant causal tests/static/security/independent review as applicable; actual final Character unit shard and strict/native matrix success with natural whole-process exit.
+**Tests:** Final exact-head hosted scopes; no old-head, passing-summary or cancellation acceptance.
+**Status:** Not Started
