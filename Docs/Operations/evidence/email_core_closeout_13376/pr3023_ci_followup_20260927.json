@@ -6995,5 +6995,346 @@
         "bytes": 5041
       }
     }
+  },
+  "chacha_http_pg_fixture_ci_repair_20261001": {
+    "task": "TASK13377.11",
+    "recorded_at": "2026-10-01T12:07:12.115357+00:00",
+    "head_before_repair": "6b56b08a6584095932531dcab3ffdccf1dd0d9b8",
+    "base_dev": "b365af1827b607fc221f9bf31ca76dde881edb4f",
+    "failure": {
+      "run": 36849509790,
+      "job": 110333165599,
+      "platform": "Ubuntu/Python3.12.14",
+      "failed": 1,
+      "passed": 669,
+      "warnings": 19,
+      "xml_errors": 0,
+      "xml_skips": 0,
+      "test": "test_http_caller_keeps_pending_write_until_explicit_decision[rollback-implicit]",
+      "observed": "HTTP500 after cached PG instance declared unhealthy and rebuilt defaultSQLite.",
+      "hosted_health_decision_cause": "unconfirmed",
+      "receipt": "/tmp/email_pr3023_chacha_core_failure_receipt_20261001.json"
+    },
+    "source_binding": {
+      "original_test_sha256": "cc2e60dcd0da33f599e8220dd083c7b6f27c0338e4cf96f8784ec35ebb62ccb9",
+      "final_test_sha256": "890ab2f8fdc7b281753be17dc571eef074a0e72cb99eaa474de67a4e81e24674",
+      "production_and_workflow_changed": false,
+      "equality": "/tmp/email_pr3023_chacha_core_source_equality_20261001.json",
+      "prior_certificates": "Preserved original source/transitive/dependency bindings; no new full repository or163-file certificate."
+    },
+    "verified_fixture_defects": [
+      "Cached PG injection did not configure normal backend resolution; real rebuild selected defaultSQLite.",
+      "Existing checkout observer was registered only on injected wrapper; rebuilt real PG handles escaped observation."
+    ],
+    "changes": [
+      "Patch existing content-backend resolver to official per-test PostgreSQL backend.",
+      "Delegate real independently scoped initializer, then reuse existing observer for its returned handle.",
+      "Close rebuilt cached handles in fixture teardown.",
+      "Add deterministic forced-health-eviction regression retaining real later probes, seeded HTTP notes and actual owned cleanup."
+    ],
+    "validation": {
+      "full_failed_shard_readonly_py312": {
+        "xml": "/tmp/email_pr3023_chacha_core_shard_py312_20261001.xml",
+        "log": "/tmp/email_pr3023_chacha_core_shard_py312_20261001.log",
+        "passed": 671,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "warnings": 19,
+        "duration_seconds": 652.54,
+        "http_lifecycle_subset": 56,
+        "xml_sha256": "19ebb39ddd8ad871c11934174cd1106332ee429690090b97ec5230fd05412fcc",
+        "selection": "Exact three chacha-core-stores workflow globs, -m not jobs and not e2e; hosted plugin/timeout flags. New regression adds1 to prior670.",
+        "runner": "Existing readonly Python3.12.11; macOS differences do not certify hosted Linux3.12.14."
+      },
+      "supported_py311_neighboring_dependencies": {
+        "passed": 37,
+        "warnings": 4,
+        "errors": 0,
+        "failures": 0,
+        "skips": 0,
+        "xml": "/tmp/email_pr3023_chacha_core_deps_confirmed_20261001.xml"
+      },
+      "supported_py311_final_delayed_original": {
+        "passed": 1,
+        "errors": 0,
+        "failures": 0,
+        "skips": 0,
+        "xml": "/tmp/email_pr3023_chacha_core_slow_final_20261001.xml",
+        "trace": "/tmp/email_pr3023_chacha_core_slow_final_trace_20261001.json"
+      },
+      "diagnostics": "/tmp/email_pr3023_chacha_core_diagnostic_results_20261001.json",
+      "documentation_result_files": {
+        "log": "/tmp/email_pr3023_chacha_core_docs_final_20261001.log",
+        "xml": "/tmp/email_pr3023_chacha_core_docs_final_20261001.xml",
+        "timing": "Executed after this evidence append; final publication receipt records its actual outcome."
+      },
+      "scopes_overlap": true
+    },
+    "quality": {
+      "recorded_at": "2026-10-01T12:01:18.694611+00:00",
+      "test_sha256": "890ab2f8fdc7b281753be17dc571eef074a0e72cb99eaa474de67a4e81e24674",
+      "source_patch_sha256": "22999c4176e7236103f68ebc4bb281e900048120dee0305dd9edd7fc6813a57e",
+      "compile": "passed using compile(), no bytecode writes",
+      "format": "full-file Ruff format --check passed",
+      "diff_check": "passed",
+      "ruff": {
+        "current": 0,
+        "properly_configured_baseline": 0,
+        "new": 0
+      },
+      "bandit": {
+        "scope": "/Users/macbook-dev/.codex/worktrees/email-authenticated-uploads-13256/tldw_server2/tldw_Server_API/tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py",
+        "test_only_exclusion": "B101 assertions",
+        "current_findings": 0,
+        "baseline_findings": 0,
+        "current_errors": 0,
+        "baseline_errors": 0,
+        "new": 0
+      },
+      "production_python_changed": false
+    },
+    "independent_source_review": {
+      "patch_sha256": "22999c4176e7236103f68ebc4bb281e900048120dee0305dd9edd7fc6813a57e",
+      "result": "clear; no actionable findings",
+      "receipt": "/tmp/email_pr3023_chacha_core_source_review_result_20261001.json"
+    },
+    "environment": {
+      "supported_py311_receipt": "/tmp/email_pr3023_chacha_core_dependencies_supported_py311_20261001.json",
+      "readonly_py312_receipt": "/tmp/email_pr3023_chacha_core_dependencies_readonly_py312_20261001.json",
+      "shared_installations_changed": false,
+      "unowned_py312_altered": false,
+      "official_postgres_fixture_used": true
+    },
+    "validation_limits": [
+      "Native delayed first probe verifies fixture defects; does not prove original hosted health-decision cause.",
+      "Existing1second health policy, production probes/runtime, HTTP assertions/cleanup and CI configuration unchanged.",
+      "Native macOS3.12.11/cryptography50.0.1 differs from hosted Linux3.12.14/50.0.2; fresh hosted CI pending.",
+      "Original isolated pass, failed delayed original, regression RED, provisional pass and failed first-repair cleanup assertion retained; setup diagnostic0collected is not test credit.",
+      "Temporary probe overwrote its fixed raw trace path once; original RED trace content was captured from prior tool output and retained with explicit reconstruction provenance. Original RED log/XML unchanged.",
+      "No native-PST/throughput/million-message/live VM drill rerun."
+    ],
+    "hosted_prior_head_revalidation": {
+      "sandbox_ws": {
+        "passed": 93,
+        "warnings": 34763,
+        "failures": 0,
+        "errors": 0,
+        "skips": 0,
+        "receipt": "/tmp/email_pr3023_sandbox_ws_currenthead_revalidation_20261001.json",
+        "limit": "Original6b7 hosted frame types remain unmeasured."
+      },
+      "sync_pc": {
+        "passed": 448,
+        "deselected": 183,
+        "warnings": 5,
+        "receipt": "/tmp/email_pr3023_sync_pc_currenthead_revalidation_20261001.json",
+        "limit": "Unchanged source revalidation, no verified cause/fix for old failure."
+      }
+    },
+    "publication_and_merge": {
+      "repair_publication": "Pending normal commit/push at this receipt.",
+      "fresh_review_and_hosted_checks": "Required for new head; prior6b56 seven required successes do not certify repair.",
+      "frontend_install_failure": "Prior-head6b56 install failure110330897741 remains unexplained; await fresh hosted result.",
+      "merge": "Pending."
+    },
+    "artifacts": {
+      "/tmp/email_pr3023_chacha_core_bandit_baseline_20261001.json": {
+        "sha256": "e4d33581f62e935522f4869b2f9e7784b32c9eab7bf4f66d0c553c94d7ff0cd1",
+        "bytes": 847
+      },
+      "/tmp/email_pr3023_chacha_core_bandit_baseline_20261001.log": {
+        "sha256": "bcc19fa5dbefcab9aa2697a7f3026f5df5b216de6510d64dfaa259c5e37bd093",
+        "bytes": 253
+      },
+      "/tmp/email_pr3023_chacha_core_bandit_current_20261001.json": {
+        "sha256": "dbc1f476f7193781213aa9c4b0fa7fc3479ff937c8154bc9c809e235f127eca5",
+        "bytes": 801
+      },
+      "/tmp/email_pr3023_chacha_core_bandit_current_20261001.log": {
+        "sha256": "8c960d142ecbb7992b9148ef5e41ee5017ee0232199e6777e54d36db572ec7d4",
+        "bytes": 252
+      },
+      "/tmp/email_pr3023_chacha_core_dependencies_readonly_py312_20261001.json": {
+        "sha256": "675d5c12447d7e1b2a45bb26cb79e2cba42c22ed6da5a00410d97149068bf413",
+        "bytes": 332
+      },
+      "/tmp/email_pr3023_chacha_core_dependencies_supported_py311_20261001.json": {
+        "sha256": "a818c8cea6f5be3e9d66f1513afec6306c4a90f3e16574f3ef4650a4b4c59da9",
+        "bytes": 332
+      },
+      "/tmp/email_pr3023_chacha_core_deps_20261001.log": {
+        "sha256": "9696a871ca8cfe89dfabf6b0b93f3836daf23f4ddb34f6378ad0a3ddbc6128c1",
+        "bytes": 44977
+      },
+      "/tmp/email_pr3023_chacha_core_deps_20261001.xml": {
+        "sha256": "e43077530d07f0d7b43f668e9fbaad47a75386cec6cdb106859e2f01cc360070",
+        "bytes": 253
+      },
+      "/tmp/email_pr3023_chacha_core_deps_confirmed_20261001.log": {
+        "sha256": "66e14f5589f8c3bb5e3bb1b8c268129fc58147ffd8d7c93df5da1453ce6d0d32",
+        "bytes": 6973
+      },
+      "/tmp/email_pr3023_chacha_core_deps_confirmed_20261001.xml": {
+        "sha256": "5cfc2e73bd10ae8b0a7f81ac18d434aad1442f847fe028d149f3b714e1fcfdee",
+        "bytes": 6610
+      },
+      "/tmp/email_pr3023_chacha_core_diagnostic_results_20261001.json": {
+        "sha256": "734460ad129f479a3b5a3dd281c74536d3d9f6cfe80799f440e4ff7561b0de37",
+        "bytes": 4121
+      },
+      "/tmp/email_pr3023_chacha_core_failure_20261001.log": {
+        "sha256": "044d6f09d720a09df28e3869394d8e47b6093a456e4123efa7daf138aa72850e",
+        "bytes": 396372
+      },
+      "/tmp/email_pr3023_chacha_core_failure_20261001.xml": {
+        "sha256": "928fba96d5a15d522c4c47b3557ce511b08e7c0a8a52114b103ef6dec00dc588",
+        "bytes": 124262
+      },
+      "/tmp/email_pr3023_chacha_core_failure_20261001.zip": {
+        "sha256": "f800351419e26f54836abd8727f8632bdbdbc056d94f9f899a323c675a96354b",
+        "bytes": 20080
+      },
+      "/tmp/email_pr3023_chacha_core_failure_job_20261001.json": {
+        "sha256": "96c6afb1ced15f8d305fc02163b10dadd0bd1c35298a583600ac471f7460b755",
+        "bytes": 5654
+      },
+      "/tmp/email_pr3023_chacha_core_failure_receipt_20261001.json": {
+        "sha256": "134447964c2cff8e17ea40e899d7a5f350f49bea5a57d0eed6e5f81ffc805e66",
+        "bytes": 761
+      },
+      "/tmp/email_pr3023_chacha_core_final_validation_20261001.json": {
+        "sha256": "54c45d40f941b9df279a135ab7000c4b3697989dc96ac442e368d4c9a158ee99",
+        "bytes": 618
+      },
+      "/tmp/email_pr3023_chacha_core_green_20261001.log": {
+        "sha256": "736d5a047188cc30a987ae08ee55b3a6e60aa8ec41ab25a054329217cd7d5bc4",
+        "bytes": 4060
+      },
+      "/tmp/email_pr3023_chacha_core_green_20261001.xml": {
+        "sha256": "fee1d352142bc95e67757fdd0d26ef27b29a25ec6e13c402940c00bc2fe3e15c",
+        "bytes": 450
+      },
+      "/tmp/email_pr3023_chacha_core_original_20261001.log": {
+        "sha256": "746e132c2efed6c25e331308b1759803d3444a3d8e217674ebc3a858d3fd2552",
+        "bytes": 5863
+      },
+      "/tmp/email_pr3023_chacha_core_original_20261001.xml": {
+        "sha256": "23d07aaa08f0bf757accdd0327f46b9724f79ccb676ebfef0b57cd03b6ef520a",
+        "bytes": 469
+      },
+      "/tmp/email_pr3023_chacha_core_parent_update_20261001.log": {
+        "sha256": "c335b47c18382843c64097e03eaa22595437734252ab480e2da7475eba2a420d",
+        "bytes": 24
+      },
+      "/tmp/email_pr3023_chacha_core_quality_20261001.json": {
+        "sha256": "18247f051368ca4a032169c3e27b1d61af951af2a0bece64550ff1dfe3863f51",
+        "bytes": 864
+      },
+      "/tmp/email_pr3023_chacha_core_red_20261001.log": {
+        "sha256": "917d4e7bc2a491c796682adc59f50df778ec05554fcbdb90ded1bb7d032eb567",
+        "bytes": 67689
+      },
+      "/tmp/email_pr3023_chacha_core_red_20261001.xml": {
+        "sha256": "c265b7dbc1728f7b0dcfe67d14e03be54161950729aa75e1d3bee5e3b3a7cc96",
+        "bytes": 3255
+      },
+      "/tmp/email_pr3023_chacha_core_ruff_baseline_20261001.json": {
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "bytes": 2
+      },
+      "/tmp/email_pr3023_chacha_core_ruff_current_20261001.json": {
+        "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "bytes": 2
+      },
+      "/tmp/email_pr3023_chacha_core_shard_py312_20261001.log": {
+        "sha256": "95f2c0437e3a7872962a96def4f61e66e40e9cbc89dd1a8d1c5a2a4f205599a0",
+        "bytes": 16197
+      },
+      "/tmp/email_pr3023_chacha_core_shard_py312_20261001.xml": {
+        "sha256": "19ebb39ddd8ad871c11934174cd1106332ee429690090b97ec5230fd05412fcc",
+        "bytes": 123291
+      },
+      "/tmp/email_pr3023_chacha_core_slow_final_20261001.log": {
+        "sha256": "fdbeba2a825e3fa00f8c84799cd842ba835669492a3f4fd7af27627b01b777ca",
+        "bytes": 4060
+      },
+      "/tmp/email_pr3023_chacha_core_slow_final_20261001.xml": {
+        "sha256": "b8dc4ff01d06d49ce7ec3f0e0fe6c9c79a14072aa16a7baed7b07175c1c868ed",
+        "bytes": 469
+      },
+      "/tmp/email_pr3023_chacha_core_slow_final_trace_20261001.json": {
+        "sha256": "a931b7d2e725148ccb3c6ef15d7b75de5fc8e5d67efdeecc950c308fb3e2449e",
+        "bytes": 330
+      },
+      "/tmp/email_pr3023_chacha_core_slow_first_repair_20261001.py": {
+        "sha256": "b153ac9da6e040e06aa7eabd27b27c03fe20df8430fd19a5130d33defe732c60",
+        "bytes": 859
+      },
+      "/tmp/email_pr3023_chacha_core_slow_green_20261001.log": {
+        "sha256": "aeb21ab386b0bcf3e04db728399c7ae46706da9fb3f5c954feefc912153785cb",
+        "bytes": 27027
+      },
+      "/tmp/email_pr3023_chacha_core_slow_green_20261001.xml": {
+        "sha256": "0ae245e8ce6704a60778b4bf3df6d5909529e140c89daa5c80a15660a3354e83",
+        "bytes": 2076
+      },
+      "/tmp/email_pr3023_chacha_core_slow_green_trace_20261001.json": {
+        "sha256": "a931b7d2e725148ccb3c6ef15d7b75de5fc8e5d67efdeecc950c308fb3e2449e",
+        "bytes": 330
+      },
+      "/tmp/email_pr3023_chacha_core_slow_probe_20261001.log": {
+        "sha256": "b2e061b6a1814985c496ee5fe1eb5d861fbf9b0e52fa4b089033a288fe6f25fc",
+        "bytes": 68282
+      },
+      "/tmp/email_pr3023_chacha_core_slow_probe_20261001.py": {
+        "sha256": "26173758d53b85ac1dc89c610a3ffaefa1a3d857ce807fbd33653daa77001552",
+        "bytes": 859
+      },
+      "/tmp/email_pr3023_chacha_core_slow_probe_20261001.xml": {
+        "sha256": "265833093e8b806945afc379a564bea59c5a173291698593ff624bc37826deb5",
+        "bytes": 1729
+      },
+      "/tmp/email_pr3023_chacha_core_slow_probe_trace_20261001.json": {
+        "sha256": "a931b7d2e725148ccb3c6ef15d7b75de5fc8e5d67efdeecc950c308fb3e2449e",
+        "bytes": 330
+      },
+      "/tmp/email_pr3023_chacha_core_slow_probe_trace_red_captured_20261001.json": {
+        "sha256": "bad7c86218c2b16ffb1aae9ad06885149c1673ea2e17833f63309456ebf25fc1",
+        "bytes": 626
+      },
+      "/tmp/email_pr3023_chacha_core_source_equality_20261001.json": {
+        "sha256": "568b86e901976b72a2a9a325f44d2c8fc316dca1e47b17e4e29ef829a2c6c399",
+        "bytes": 744
+      },
+      "/tmp/email_pr3023_chacha_core_source_review_20261001.patch": {
+        "sha256": "840c2063454141875cbe8dd514878930b4de02d7f25c4e52fe9c1a19cb8e9fa4",
+        "bytes": 2639
+      },
+      "/tmp/email_pr3023_chacha_core_source_review_result_20261001.json": {
+        "sha256": "bb80d3df313ff5c1ab74daf9890fc30618464f645ee77a2031b99e1195b0bc64",
+        "bytes": 4921
+      },
+      "/tmp/email_pr3023_chacha_core_source_review_v2_20261001.patch": {
+        "sha256": "22999c4176e7236103f68ebc4bb281e900048120dee0305dd9edd7fc6813a57e",
+        "bytes": 3660
+      },
+      "/tmp/email_pr3023_chacha_core_task_progress_20261001.log": {
+        "sha256": "ad169059684e332c39f5759c00e505fea617721aa5306cbb674173857219d908",
+        "bytes": 27
+      },
+      "/tmp/email_pr3023_chacha_core_task_search_health_20261001.txt": {
+        "sha256": "da539d854a8ab920946f3702634573f564c9f5a094b01bcc376dd56f0f0cc8b3",
+        "bytes": 3582
+      },
+      "/tmp/email_pr3023_chacha_core_task_search_http_20261001.txt": {
+        "sha256": "57d6a462db1998bf2466a511c6aa4d3d303925f46dabbe6994ebb08d0b0f14bd",
+        "bytes": 25212
+      },
+      "/tmp/email_pr3023_chacha_core_task_search_paths_20261001.txt": {
+        "sha256": "9ec71c6ca9ebf7a04cc1901cfd2dcc6dbe02c88d1bcbc94aa7543e104d4ae7d8",
+        "bytes": 4377
+      }
+    }
   }
 }
