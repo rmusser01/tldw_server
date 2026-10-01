@@ -17,6 +17,10 @@ See also: [ADR-056](../ADR/056-resource-governor-safety-net.md) for why the Reso
 | `{"status":"quota_exceeded","message":"Transcription quota exceeded (daily minutes)",...}`, HTTP 402 | Audio daily-minutes quota | `Usage/audio_quota.py`, `api/v1/endpoints/audio/audio_transcriptions.py` | Set `AUDIO_TIER_LIMITS_JSON` to raise the caller's tier's daily-minutes cap (JSON object mapping tier names to partial overrides). |
 | `Provider rate limit exceeded.` (surfaced as a `ChatRateLimitError` / provider error) | The upstream LLM or TTS provider itself | `LLM_Calls/error_utils.py` (`privacy_safe_chat_error`) | Not a local knob — this is the provider's own rate limit. Check the provider's dashboard/plan, or switch providers/models. |
 
+## If you use the DB policy store
+
+With `RG_POLICY_STORE=db`, policies come from the AuthNZ DB store (the `rg_policies` table) and the YAML supplies only `route_map`. Editing a policy's limits in `resource_governor_policies.yaml` then changes nothing until you either edit the stored policy or re-seed the store from the YAML with `python -m tldw_Server_API.app.core.Resource_Governance.seed_db_from_yaml --all` (without `--all` it seeds only the policies `route_map` references). Wherever the table above says "edit the policy in the YAML", DB-store users should edit or re-seed the store instead.
+
 ## Memory-backend buckets are per worker process
 
 The `memory` RG backend (`RG_BACKEND=memory`, the default) keeps rate-limit buckets in each uvicorn worker's own process memory — a bucket is not shared across workers. Worker count is set by `UVICORN_WORKERS` (read directly by `tldw_Server_API/scripts/run_server_guarded_mcp.py`, and passed through by `Dockerfiles/Dockerfile.prod` and the `Dockerfiles/docker-compose.*.yml` files, which default to 2–4 workers depending on the compose profile). With N workers, a policy's effective limit for one caller is roughly N times its configured `rpm`, spread unevenly across whichever worker(s) handle that caller's requests.

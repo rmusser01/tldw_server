@@ -19,7 +19,8 @@ APP = Path(__file__).resolve().parents[2] / "app"
 _DIVERGENT_DEFAULT_RE = re.compile(r"rg_enabled\w*\(\s*False\s*\)")
 
 
-def test_no_direct_env_reads_or_divergent_defaults():
+def test_no_direct_env_reads_or_divergent_defaults() -> None:
+    """No app module reads RG_ENABLED itself or calls rg_enabled with a divergent False default."""
     offenders = []
     for path in APP.rglob("*.py"):
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -31,7 +32,8 @@ def test_no_direct_env_reads_or_divergent_defaults():
 
 
 @pytest.mark.asyncio
-async def test_disabled_governance_attaches_no_governor(monkeypatch):
+async def test_disabled_governance_attaches_no_governor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Startup with RG disabled builds no governor but still loads policies for diagnostics."""
     monkeypatch.setenv("RG_ENABLED", "false")
     from tldw_Server_API.app.services.startup_resource_governor import init_resource_governor
 
@@ -45,7 +47,8 @@ async def test_disabled_governance_attaches_no_governor(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_disabled_governance_skips_auth_reservations(monkeypatch):
+async def test_disabled_governance_skips_auth_reservations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Auth endpoints get no RG governor when RG is disabled, so they reserve nothing."""
     monkeypatch.setenv("RG_ENABLED", "false")
     from tldw_Server_API.app.api.v1.endpoints import auth as auth_ep
 
@@ -53,7 +56,8 @@ async def test_disabled_governance_skips_auth_reservations(monkeypatch):
     assert await auth_ep._get_auth_endpoint_rg_governor(request) is None
 
 
-def test_diag_lazy_governor_is_not_attached_when_disabled(monkeypatch):
+def test_diag_lazy_governor_is_not_attached_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The diag endpoints' lazy governor stays local when RG is disabled, so enforcement stays off."""
     monkeypatch.setenv("RG_ENABLED", "false")
     from tldw_Server_API.app.api.v1.endpoints import resource_governor as rg_ep
 
@@ -66,7 +70,7 @@ def test_diag_lazy_governor_is_not_attached_when_disabled(monkeypatch):
 _RG_SWITCH_PATH = "/api/v1/rg-switch-check"
 
 
-async def _rg_switch_app(tmp_path, monkeypatch, *, fail_closed: bool = False) -> FastAPI:
+async def _rg_switch_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, fail_closed: bool = False) -> FastAPI:
     """A FastAPI app with RGSimpleMiddleware, a loader/route_map, and no attached governor.
 
     Mirrors the tmp_path + PolicyLoader pattern used by test_middleware_tag_enforcement.py.
@@ -102,7 +106,7 @@ async def _rg_switch_app(tmp_path, monkeypatch, *, fail_closed: bool = False) ->
 
 
 @pytest.mark.asyncio
-async def test_disabled_middleware_never_lazily_attaches_governor(tmp_path, monkeypatch):
+async def test_disabled_middleware_never_lazily_attaches_governor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A governed route under a disabled switch must never see a governor, ever, at ingress."""
     monkeypatch.setenv("RG_ENABLED", "false")
     app = await _rg_switch_app(tmp_path, monkeypatch)
@@ -115,7 +119,7 @@ async def test_disabled_middleware_never_lazily_attaches_governor(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_disabled_middleware_ignores_fail_closed_policy(tmp_path, monkeypatch):
+async def test_disabled_middleware_ignores_fail_closed_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Disabled overrides fail_mode: a fail_closed policy must not 503 when RG is off."""
     monkeypatch.setenv("RG_ENABLED", "false")
     app = await _rg_switch_app(tmp_path, monkeypatch, fail_closed=True)
@@ -128,7 +132,7 @@ async def test_disabled_middleware_ignores_fail_closed_policy(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_enabled_middleware_still_lazily_governs(tmp_path, monkeypatch):
+async def test_enabled_middleware_still_lazily_governs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Sanity: the disabled guard must not disable the enabled lazy-attach path."""
     monkeypatch.setenv("RG_ENABLED", "true")
     app = await _rg_switch_app(tmp_path, monkeypatch)
@@ -161,7 +165,7 @@ def _auth_deps_fallback_request(path: str) -> SimpleNamespace:
 
 
 @pytest.mark.asyncio
-async def test_check_rate_limit_fallback_honors_rg_switch(monkeypatch):
+async def test_check_rate_limit_fallback_honors_rg_switch(monkeypatch: pytest.MonkeyPatch) -> None:
     """RG_ENABLED=false must silence the *general* auth_deps fallback too."""
     monkeypatch.setenv("RG_ENABLED", "false")
     monkeypatch.setenv("TEST_MODE", "0")
@@ -186,7 +190,7 @@ async def test_check_rate_limit_fallback_honors_rg_switch(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_check_auth_rate_limit_fallback_ignores_rg_switch(monkeypatch):
+async def test_check_auth_rate_limit_fallback_ignores_rg_switch(monkeypatch: pytest.MonkeyPatch) -> None:
     """The auth brute-force floor (check_auth_rate_limit) keeps enforcing when RG is off."""
     monkeypatch.setenv("RG_ENABLED", "false")
     monkeypatch.setenv("TEST_MODE", "0")
@@ -212,7 +216,7 @@ async def test_check_auth_rate_limit_fallback_ignores_rg_switch(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_check_rate_limit_fallback_still_enforces_when_rg_enabled(monkeypatch):
+async def test_check_rate_limit_fallback_still_enforces_when_rg_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Sanity: RG_ENABLED=true, request ungoverned -> the general fallback is unchanged."""
     monkeypatch.setenv("RG_ENABLED", "true")
     monkeypatch.setenv("TEST_MODE", "0")

@@ -49,4 +49,5 @@ if __name__ == "__main__":
         data = convert(fh)
     with open(sys.argv[2], "w", encoding="utf-8") as fh:
         json.dump(data, fh, separators=(",", ":"))
+        fh.write("\n")  # pre-commit's end-of-file-fixer requires a final newline
     print(f"{len(data)} requests over {data[-1][0] if data else 0:.1f}s")

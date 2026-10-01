@@ -2,7 +2,10 @@
 
 **Status:** Accepted
 **Date:** 2026-09-29
+**Backfilled from:** `Docs/Design/2026-09-29-rg-ingress-safety-net-design.md`, implemented in PRs #3066 and #3068 (merged before this record) and #3070
+**Decision owner:** repository owner (@rmusser01), via the brainstorming session that produced the spec
 **Task:** TASK-13405 (closes TASK-13395)
+**Related spec/plan:** `Docs/Design/2026-09-29-rg-ingress-safety-net-design.md`, `Docs/superpowers/plans/2026-09-29-rg-ingress-safety-net.md`
 **Amends:** ADR-018 and ADR-044
 
 ## Decision
@@ -42,7 +45,7 @@ Self-hosters were being rate limited during ordinary single-person use. Three pr
   - **auth_deps.py's local fallback limiters are not RG, but one of them honors the switch anyway.** `check_rate_limit` and `check_auth_rate_limit` apply an in-process fallback rate limit to requests RG ingress did not govern (`request.state.rg_policy_id` unset) — a route outside `/api/`, or any route while RG is off — via `_enforce_auth_deps_ingress_guard`. That guard skips enforcement only when the request already resolved an already-authenticated single-user principal (`is_single_user_principal(request.state.auth.principal)`) or is running in test mode; an *anonymous* request in single-user mode — `POST /auth/login`, `/auth/register`, `/auth/single-user/session` before the API key is checked — is not skipped and is floored like any multi-user request. `check_rate_limit`'s 120/min general fallback takes an explicit `honor_rg_switch=True` and returns without enforcing when `rg_enabled()` is false, so disabling RG doesn't leave a hidden cap behind. `check_auth_rate_limit`'s 30/min auth-endpoint floor is a deliberate exception — it is a brute-force guard, not RG enforcement — and keeps enforcing regardless of the switch.
 - **Safety-net defaults.** `global` was removed from every policy except the three email-sending policies above; a new `default` policy (`requests: rpm 600, burst 2.0`, scopes `[user, api_key, ip]`) now catches every previously-unmapped `/api/` route. Per-entity limits across the board moved well above normal single-person WebUI/extension/chat use (see the before/after table in the design spec, §3); the numbers are starting points validated by a WebUI-replay regression test, not hard architecture.
 - **Config hygiene.** The policy loader accepts only `version`, `policies`, `tenant`, `route_map`, `templates`, `schema_version` at the top level and `by_path`/`by_tag` inside `route_map`; every other key logs a warning instead of being silently ignored (`policy_loader.py`). `Helper_Scripts/ci/rg_route_map_lint.py`, with its allowlist `Helper_Scripts/ci/rg_route_map_lint_allowlist.txt`, fails CI when a `by_path` pattern is dead or fully shadowed by an earlier one, or a `by_tag` key matches no served route.
-- **DB policy store upgrade step.** Installs running `RG_POLICY_STORE=db` keep whatever limits and `global` scopes are already in their `rg_policies` table until an operator re-seeds (`python -m tldw_Server_API.app.core.Resource_Governance.seed_db_from_yaml`, optionally `--all`) or edits the DB policies directly; the built-in `default` fallback keeps resolution safe in the meantime.
+- **DB policy store upgrade step.** Installs running `RG_POLICY_STORE=db` keep whatever limits and `global` scopes are already in their `rg_policies` table until an operator re-seeds (`python -m tldw_Server_API.app.core.Resource_Governance.seed_db_from_yaml --all`; without `--all` it seeds only the policies `route_map` references, so endpoint-only policies such as `authnz.*` keep their old limits) or edits the DB policies directly; the built-in `default` fallback keeps resolution safe in the meantime.
 
 ## Alternatives considered
 

@@ -175,7 +175,7 @@ These numbers are starting points. The WebUI replay test (see [Testing](#testing
   - The built-in `default` from §4 keeps resolution safe in the meantime.
   - The ADR and the docs state the upgrade step.
 - Remove the ignored YAML sections (`defaults`, `hot_reload`, `metadata`, `route_map.by_route`). The loader logs a warning for any other top-level key it does not consume. `templates` (which holds the YAML anchors the policies reference) and `schema_version` are explicitly allowed.
-- Add a new ADR (057): the safety-net posture, the resolution order, the identity rule, and "the `global` scope only for genuinely shared resources". It amends ADR-018 (resolution order, default policy) and ADR-044 (preflight generalised; invalid credentials fall through to IP).
+- Add a new ADR (056): the safety-net posture, the resolution order, the identity rule, and "the `global` scope only for genuinely shared resources". It amends ADR-018 (resolution order, default policy) and ADR-044 (preflight generalised; invalid credentials fall through to IP).
 - Correct the RG section of `Docs/Operations/Env_Vars.md` and `Resource_Governance/README.md` (drop `RG_TEST_BYPASS`).
 - Add a short self-hoster page, "Why am I getting 429s?". It maps each response shape to the layer that produced it:
   - `{"error":"rate_limited","policy_id":…}` → RG ingress
