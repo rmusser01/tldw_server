@@ -80,6 +80,13 @@ const submit = () => {
   fireEvent.click(screen.getByRole("button", { name: "Send" }))
 }
 
+it("keeps retained recovery controls in the transcript scroller outside the composer", () => {
+  render(<MemoryRouter><ChatPane /></MemoryRouter>)
+  const transcript = screen.getByRole("log", { name: "Chat messages" })
+  expect(transcript).toContainElement(screen.getByRole("button", { name: "Explicit reprepare" }))
+  expect(transcript).not.toContainElement(screen.getByRole("textbox", { name: "Chat message" }))
+})
+
 it.each(["normal", "rag"])("allocates a durable UUID for an explicit new saved %s send", async mode => {
   if (mode === "rag") useWorkspaceStore.setState({
     sources: [{ id: "source", mediaId: 1, title: "Selected source", type: "document", status: "ready", addedAt: new Date(0) }],

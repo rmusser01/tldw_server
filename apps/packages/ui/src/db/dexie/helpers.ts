@@ -1,3 +1,4 @@
+import { generateID } from "@/utils/generate-id"
 import type { LocalHistoryOwnerV1 } from "./history-selection"
 import { ensureLocalProfileId } from "./history-selection"
 import { historyResultV1ToMessageSources } from "@/utils/history-durable-sources"
@@ -40,13 +41,7 @@ import { ModelNickname } from "./nickname"
 import { ModelDb } from "./models"
 import { clearRecipePersistenceScoped, resolveRecipePersistenceOwnerView } from "@/services/recipe-persistence-uncertainty"
 
-// Helper function to generate IDs (keeping the same format)
-export const generateID = () => {
-  return "pa_xxxx-xxxx-xxx-xxxx".replace(/[x]/g, () => {
-    const r = Math.floor(Math.random() * 16)
-    return r.toString(16)
-  })
-}
+export { generateID }
 
 // Chat History Functions
 export const saveHistory = async (

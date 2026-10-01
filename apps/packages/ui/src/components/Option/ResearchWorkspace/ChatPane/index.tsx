@@ -3127,7 +3127,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
       {/* Context indicator */}
       <ChatContextIndicator statusGuardrailsEnabled={statusGuardrailsEnabled} />
-      {checkpoint.controller ? <HistorySelectionReview selection={checkpoint.controller} onReprepareRecovery={reprepareRecovery} /> : null}
 
       {/* Connection banner */}
       {showConnectionBanner && (
@@ -3293,6 +3292,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           className="custom-scrollbar flex-1 min-h-0 overflow-x-hidden overflow-y-auto px-4"
         >
           <div className={`mx-auto w-full ${contentMaxWidthClass} pb-6`}>
+            {checkpoint.controller ? <HistorySelectionReview selection={checkpoint.controller} onReprepareRecovery={reprepareRecovery} /> : null}
             {hasMessages ? (
               <div className="space-y-4 py-4">
                 {messages.map((msg, idx) => {

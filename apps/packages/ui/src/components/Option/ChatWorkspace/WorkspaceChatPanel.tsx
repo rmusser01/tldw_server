@@ -760,11 +760,10 @@ export const WorkspaceChatPanel = ({
         </h2>
       </div>
 
-      {checkpoint.controller ? (
-        <HistorySelectionReview selection={checkpoint.controller} onReprepareRecovery={reprepareRecovery} />
-      ) : null}
-
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
+        {checkpoint.controller ? (
+          <HistorySelectionReview selection={checkpoint.controller} onReprepareRecovery={reprepareRecovery} />
+        ) : null}
         {Array.isArray(messages) && messages.length > 0 ? (
           messages.map((message: WorkspacePanelMessage, index: number) => {
             const rawMacroMetadata = getChatMacroMetadata(message?.metadataExtra)
