@@ -3,23 +3,21 @@ id: TASK-13245
 title: Persist Workspace Persona opt-out and conversation provenance
 status: In Progress
 assignee: []
-created_date: '2026-09-13 18:15'
-updated_date: '2026-09-27 18:17'
+created_date: 2026-09-13 18:15
+updated_date: 2026-10-01 01:36
 labels:
-  - persona
-  - workspaces
-  - parity
+- persona
+- workspaces
+- parity
 dependencies:
-  - TASK-13244
+- TASK-13244
 references:
-  - 'https://github.com/rmusser01/tldw_server/issues/2950'
+- https://github.com/rmusser01/tldw_server/issues/2950
 documentation:
-  - >-
-    Docs/superpowers/plans/2026-09-13-persona-workspace-parity-implementation-plan.md
-  - Docs/Design/2026-09-13-persona-workspace-choice-provenance-design.md
-  - Docs/Design/2026-09-27-persona-workspace-strict-startup-refresh.md
-  - >-
-    Docs/superpowers/plans/2026-09-27-persona-workspace-strict-startup-implementation-plan.md
+- Docs/superpowers/plans/2026-09-13-persona-workspace-parity-implementation-plan.md
+- Docs/Design/2026-09-13-persona-workspace-choice-provenance-design.md
+- Docs/Design/2026-09-27-persona-workspace-strict-startup-refresh.md
+- Docs/superpowers/plans/2026-09-27-persona-workspace-strict-startup-implementation-plan.md
 priority: high
 ---
 
@@ -37,7 +35,7 @@ Distinguish unset defaults from an explicit None choice, preserve creation-time 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 2 contract design underway in child TASK-13245.1; runtime not started. Corrected prior assessment: existing resolve_new_conversation_assistant already handles omitted identity inheritance and explicit-null opt-out;9 existing startup tests pass. Workspace chat create bypasses Sync v2; strict replay needs a DB-owned atomic path. Proposed design preserves legacy semantics and keeps Workspace Sync/Buddy/UI out of scope.
 
 Stage 2 prompt/memory baseline: 13 passed, 9 failed with HTTP 503 missing_provider_credentials before mocked dispatch. Persona fixture patches chat.API_KEYS but runtime now uses provider_credential_runtime.load_server_config_snapshot. Diagnostic-only in-memory fixture supplying the same dummy credential via that loader yielded 22 passed. No runtime/test edits made. Repair the existing fixture and rerun ordinary suites during implementation; tracked in the staged plan and design validation record.
@@ -55,8 +53,8 @@ Requester-requested second design review completed in TASK-13245.1/PR #2958. Ver
 Requester-approved TASK-13245.6 follow-up planning amendments cover strict transaction ownership/post-commit responses, backend-safe bounded text/body, immutable-owner admission and typed unavailable translation. Session preparation/preview/complete-v2 explicitly remain global-only; no Workspace session parity is claimed. Current refresh/executable plan and canonical documents carry the constraints and test gates; no Stage 2C runtime implementation in this amendment. TASK-13245.7 remains prerequisite; Stage 2C/2D and broader parity work remain open.
 
 TASK-13245.7 local prerequisite repair Done in e1d05ddca0 (codex/persona-workspace-cascade-retry, dev35d6dd90d4 base). Hard/soft cascade enumeration and message-page reads now settle their own PostgreSQL transactions; outermost guard, caller work and admission closure unchanged. Final affected verification 714 passes/four SQLite-only driver skips/no failures across 15 files, official isolated SQLite/livePG. Multi-page image failure confirms earlier deletes durable and immediate retry; independent review gap closed, Ruff/compile/scoped Bandit pass. Repair is local, not a hosted CI or merged delivery. Completed task plan retained in implementation commit and retired from active tree. Parent remains In Progress; Stage2C strict receipts/admission, Stage2D and broader profile/provisioning/Research work remain open; create separate execution task before strict runtime edits.
-<!-- SECTION:NOTES:END -->
-
+2026-10-01 bounded Stage2C delivered: strict Workspace Persona startup PR#3041 merged normally into dev at01:28:52Z, merge85ede1f1df10c03505c603e4183920edcb7cbfef from exact qualified head1a29adc0203fb674f4f7be204d23cb3144219c97. TASK13245.8 Done; seven current-head required gates including trusted dev license, fresh reviews and approved requester summary satisfied without bypass. Final focused source integration795passed/two existing Redis xfails; official SQLite/livePG available, production17-file Bandit clean. Exact-head Sync rerun2411passed/one skip and original bootstrap/apply/pull node passed, historical intermittent root not claimed repaired. Ancillary full-summary/rate-limit jobs pending at merge remain separately inspected. SQLite74/PostgreSQL78 durable receipts, ADR057 and offline runbook delivered without UI controls or legacy creation change. Tests/documentation child#3055 is rebased locally onto actual merged dev85ede; fresh qualification, dev retarget/exact-head hosted gates and normal merge remain pending underTASK13245.10/.14. Parent remains In Progress with broad AC unchecked; tool-profile, provisioning/backfill and Research Workspace adoption remain open, issue2950 stays open. Shared checkout/dependencies/other agents containers preserved.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
