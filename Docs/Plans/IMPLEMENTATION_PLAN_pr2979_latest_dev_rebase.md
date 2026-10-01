@@ -1431,3 +1431,12 @@ Complete 08:36 required-native inventory: 792 unique jobs, all terminal, 774 suc
 **Success Criteria:** Actual-version checks and independent review where applicable; wheel and sdist consumers both pass within existing guards.
 **Tests:** Final published native MCP shard and all strict/native gates.
 **Status:** Not Started
+
+
+## UAT552 automatic cold-request recurrence — b38 (TASK-13260.278.18.83.41)
+
+Automatic Ubuntu/Python 3.12 Watchlists job110260468010 on CI36813334558 fails the same first runs-list request at1.261178327 s against the unchanged0.70 s limit, after HTTP/status/count guards pass. The remaining endpoint/throughput checks were not reached. Actual step22 exits1 naturally:241passes, one original skip, one failure/zero errors,7254warnings and165.75 s. Artifact11149768561 contains XML and pytest log; archiveSHA6754426433313e276faa6388f0c20db381b7fe8b69efa68ab7b5bcd23db50fc1 matches metadata, and all243 case identities equal the prior nativeb38 Ubuntu shard. Current/published sourceSHAfb497c7df8e349af7372db1a1760fdcd6fb8fb1f9c6b58838f50a61be00ab09b and all23 assertion ASTs remain unchanged.
+
+Actual native cold-request route/dependency/SQL/serialization/CPU-scheduling evidence is still absent, so the hosted cause remains unproven. This completed job observes Python3.12.14/FastAPI0.141.1/Pydantic2.13.5/core2.46.5/Starlette1.7.0/pytest9.1.1/torch2.14.1; do not apply those versions to incomplete installations. Immutable /private/tmp/pr2979-uat552-automatic-recurrence-0855.json SHA281c535aa53f5d1005981a7e5c416fe2062da9662fde62502b6e140c305102b7 verifies18 evidence artifacts. Existing evidence stage remains Complete; causal repair and final actual-head acceptance remain open. No source, warm-up, workload, timer, warning, dependency or CI change and no new local tests/PG/Ruff/Bandit/compile/import qualification; Bandit N/A for tracking-only tasks/Markdown. All child41 ACs remain open.
+
+Complete08:49 automatic inventory222jobs:203success/8skips/8running/3failed shards (two UAT566 installers and this UAT552); no cancellations. Required native is already terminal/failure with its08:36 verified792-job inventory. Preserve useful automatic diagnostics and hold the local repair/tracking batch until terminal/batch ready. Parent/children.1-.56 remain In Progress; final strict/native/UX/whole Prompt and Character natural exits/MCP wheel and sdist/CharacterRateLimits/Chatbook gates remain open. Full UAT stays paused and UAT261 stays open.
