@@ -212,3 +212,106 @@ The earlier c4cd5540 source identifies Qodo's finding; the 66-case file hashes a
   }
 }
 ```
+
+## Current-dev qualification — October 1
+
+Actual dev advanced to b365af1827b607fc221f9bf31ca76dde881edb4f with strict Workspace startup and resource-governance/auth changes. Rebased all four prior commits without conflicts; range-diff confirms all four patches are identical. The incoming frontend change is only the OpenAPI fingerprint; the catalog, cookie client, frontend smoke tests and UX workflow are unchanged. Earlier receipts keep their original tested sources.
+
+At tested source a7e14881f1d9b92100ce6ff2fbf31e473259f0ba, the existing five-file frontend scope passes 72 cases in 2.42 seconds. Seven incoming backend files pass 124 cases in 88.89 seconds, with 32 PostgreSQL-backed variants skipped and 25 warnings reported. These cover cookie authentication, RG ownership/replay and same-entity charging, Buddy model handoff, strict Workspace startup and migration. Scoped ESLint reports zero errors and the same 12 pre-existing warnings; diff checks pass. An initial lint command pointed to a nonexistent legacy config and is excluded; the corrected command used the repository's existing eslint.config.mjs. No full suite ran.
+
+A separate copy of the previous private upgraded profile migrated from SQLite schema 73 to 74 during current-dev startup. The real protected profile request returned 200 with a live opaque cookie, 401 after its exact owned session expiry was moved into the past, and 200 after that same expiry was restored. Public metadata remained 200 throughout. The existing chat read returned 200; hashes of the conversation and all three stored message rows remain unchanged. This is API/storage evidence; the earlier two-message mounted browser observation retains its original source. The original schema-73 private profile is untouched. No provider request or microphone capture occurred. The initial sandbox process could not bind its loopback socket; the approved native process supplied the live evidence. Only that owned API was stopped, both ports are closed, and existing private builds remain preserved.
+
+On previous published head 3f2625f4c04d9565dc0e40081b560669a7c6b1dd, all seven actual dev ruleset gates passed, Qodo reported zero findings, and all eight review threads are resolved. Those are previous-head results after this rebase. The auxiliary UX Smoke Gate failed before all-pages navigation because 31 existing exception ownership records expired on September 30. Earlier route, cockpit and audio stages passed; the expired guard supplies no all-pages route evidence. The expiry guard and exception dates remain unchanged. Matching-head reviews and hosted checks are required after publication; TASK-13398 stays In Progress.
+
+```json
+{
+  "tested_source": "a7e14881f1d9b92100ce6ff2fbf31e473259f0ba",
+  "base": "b365af1827b607fc221f9bf31ca76dde881edb4f",
+  "previous_published_head": "3f2625f4c04d9565dc0e40081b560669a7c6b1dd",
+  "all_four_prior_patches_identical": true,
+  "file_sha256": {
+    "apps/packages/ui/src/services/tldw/TldwModels.ts": "6de558a8bb24d9752f6c1d90224c8b7699d831e162da102488bc781d497f674a",
+    "apps/packages/ui/src/services/tldw/__tests__/TldwModels.test.ts": "ffe49510038476ee16833abb68bae9f123ad4a122f86cbd361c67a4b03d38ded",
+    "apps/packages/ui/src/services/tldw-server.ts": "4f4f52ee8aafec54cb5d42f1b188afa6804f1ebfb5e0701acbe6514c60de91d5",
+    "apps/packages/ui/src/services/__tests__/tldw-server.fetch-chat-models.test.ts": "c915ed0fd338cbbdc53d32ae3eceeaa2a46b282aecffa8608d6cead510432d03",
+    "apps/packages/ui/src/services/__tests__/tldw-server.chat-models.test.ts": "f9de4d245b781b8e3c005edb98996f5711ff7aae094740578b573c61addc7486"
+  },
+  "frontend_tests": {
+    "passed": 72,
+    "duration_seconds": 2.42,
+    "node": "26.0.0",
+    "vitest": "4.0.18"
+  },
+  "incoming_backend_tests": {
+    "passed": 124,
+    "skipped": 32,
+    "duration_seconds": 88.89,
+    "warnings_reported": 25,
+    "skip_scope": "PostgreSQL-backed fixture variants; no local PostgreSQL acceptance claimed",
+    "scope": "single-user cookie auth, RG cookie owner and WebUI replay, same-entity charging, Buddy/workspace model handoff, strict Workspace startup API and migration"
+  },
+  "lint": {
+    "errors": 0,
+    "pre_existing_warnings": 12,
+    "initial_missing_config_attempt_excluded": true
+  },
+  "real_api_probe": {
+    "tested_source": "a7e14881f1d9b92100ce6ff2fbf31e473259f0ba",
+    "base": "b365af1827b607fc221f9bf31ca76dde881edb4f",
+    "mint_status": 200,
+    "public_catalog_live_status": 200,
+    "public_catalog_expired_status": 200,
+    "authenticated_profile_live_status": 200,
+    "authenticated_profile_expired_status": 401,
+    "authenticated_profile_recovered_status": 200,
+    "exact_owned_session_expiry_restored": true,
+    "opaque_cookie_retained": true,
+    "static_key_used_only_to_mint": true,
+    "chat_read_status": 200,
+    "sqlite_schema_before": 74,
+    "sqlite_schema_after": 74,
+    "conversation_rows_retained": 1,
+    "message_rows_retained": 3,
+    "visible_messages_retained": 3,
+    "chat_row_hashes_unchanged": true,
+    "original_private_profile_untouched": true,
+    "provider_requests": 0,
+    "microphone_capture": false,
+    "browser_observation": false,
+    "credentials_recorded": false,
+    "original_and_initial_clone_schema": 73,
+    "migration_at_startup_before_api_probe": true,
+    "original_profile_row_hashes_unchanged": true
+  },
+  "cleanup": {
+    "owned_api_pid": 14630,
+    "signal": "SIGTERM",
+    "exit_code": 143,
+    "ports_closed": [
+      18280,
+      18281
+    ],
+    "original_profile_preserved": true,
+    "private_next_builds_preserved": true
+  },
+  "hosted_evidence": {
+    "head": "3f2625f4c04d9565dc0e40081b560669a7c6b1dd",
+    "required_gates_passed": 7,
+    "qodo_findings": 0,
+    "review_threads_resolved": 8,
+    "current_rebased_head_gates_and_review": "Pending publication and actual matching-head results",
+    "auxiliary_ux_smoke_failure": "31 all-pages allowlist ownership entries expired 2026-09-30; expiry guard retained",
+    "failure_url": "https://github.com/rmusser01/tldw_server/actions/runs/36799310033/job/110179389812"
+  },
+  "full_suite": false,
+  "paid_provider_requests": 0,
+  "microphone_capture": false,
+  "raw_logs_published": false,
+  "bandit": "Inapplicable: TypeScript/test/docs-only follow-up; incoming backend tests run against unchanged dev code",
+  "remaining_acceptance": [
+    "intentional human speech and heard audio with correlated floating states",
+    "physical native desktop interaction",
+    "historical reload initiating trigger"
+  ]
+}
+```
