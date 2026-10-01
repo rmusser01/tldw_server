@@ -1603,7 +1603,9 @@ async def test_analyzer_time_does_not_consume_shared_cleanup_budget(
     started_at = asyncio.get_running_loop().time()
     async with probe.open_page(BrowserProbeOptions()):
         pass
+    analyzer_started_at = asyncio.get_running_loop().time()
     await asyncio.sleep(analyzer_delay_s)
+    analyzer_elapsed_s = asyncio.get_running_loop().time() - analyzer_started_at
     async with probe.open_page(BrowserProbeOptions()):
         pass
     elapsed_s = asyncio.get_running_loop().time() - started_at
@@ -1614,7 +1616,7 @@ async def test_analyzer_time_does_not_consume_shared_cleanup_budget(
     assert [page.close_cancellations for page in pages] == [0, 0]
     assert [page.results.get("close_complete") for page in pages] == [True, True]
     assert [page.force_close_calls for page in pages] == [0, 0]
-    assert elapsed_s - analyzer_delay_s < grace_s
+    assert elapsed_s - analyzer_elapsed_s < grace_s
 
 
 @pytest.mark.asyncio

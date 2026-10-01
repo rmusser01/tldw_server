@@ -1275,3 +1275,38 @@ Limits retained: original WorldBooks empty response/repeat; initial candidate ac
 ### UAT562 final independent review / local commit record, 2026-10-01 06:03 UTC
 
 Stage 3 review: Complete. Independent final review `/private/tmp/pr2979-uat562-independent-final-review.json` SHA c019a294a70e530b1c805fd394dcd63bbb1708dab22ef8f6a88be7888512ae9d verifies39artifact hashes, immutable d897 source patch,138 relevant passes/zero skips/natural exits0, original16 fixture identity set in exact8+8 partitions and intended expiry-mutant assertion failure. Reviewer performed no own tests, imports, browser/static/PG checks or repository edits. This record accompanies the normal local commit; actual hooks/head/clean-state proof is `/private/tmp/pr2979-uat562-local-commit-proof.json`, generated after commit. Stage 4 publication/hosted acceptance remains Not Started while useful exact-head CI runs remain active. Child.51 local AC1/2 checked; hosted AC3 open. Preserve all earlier failures/exclusions and extra five action-label failures; no hosted, underlying UI-deprecation, whole native Prompt or Chatbook acceptance claim.
+
+
+## Browser cleanup elapsed oracle — UAT563 (TASK-13260.278.18.83.52)
+
+### Stage 1: Separate observed behavior from timing attribution
+**Goal:** Preserve exact-head hosted failure and test the nominal analyzer subtraction.
+**Success Criteria:** Digest-verified native XML matches one final elapsed assertion failure; controlled analyzer-only overrun reproduces it while existing cleanup ownership checks pass.
+**Tests:** Native job110219892029/3338cases; unchanged local baseline and40ms analyzer-only delay.
+**Status:** Complete
+
+Publishedb38 macOS integrations has3328passes/nine original skips/one failure/zero errors/naturalexit1. Only elapsed82.518959ms minus requested50ms fails unchanged30ms grace; both pages close once, zero cancellation, complete, zero force. Native stage/scheduling attribution is not logged. Actual archive11145629194 SHA185548846c85df024a34d0f9e770b704d9574c5f7fad0843d4eec73c029086f7 verified. Local unchanged baseline1pass/natural0; private module-local asyncio facade delegates real sleep and adds40ms only to analyzer50ms wait: actual92.208625ms, original final assertion fails/natural1. No fake clocks, production/timer/grace changes or hosted attribution claim. Evidence /private/tmp/pr2979-uat563-* and /private/tmp/pr2979-native-110219892029*.
+
+### Stage 2: Measure the actual analyzer interval
+**Goal:** Exclude actual analyzer wait using the same native loop clock as the original whole timer.
+**Success Criteria:** Minimal test-only interval accounting; original30ms grace, requested50ms analyzer sleep, close/count/cancellation/completion/force assertions and all unrelated definitions retained. Analyzer-charge fault remains detected.
+**Tests:** Same delayed causal green, live runtime analyzer-charge mutant, full browser/context adjacent controls, Ruff/compile/Bandit delta.
+**Status:** Complete
+
+Touch only test_phase3_preflight_browser.py plus official task/owned plan/tracker. The final elapsed assertion retains its strict original30ms bound and subtracts measured analyzer interval instead of the nominal requested wait. Production context/browser/fakes, dependencies, CI, warnings and cleanup ownership remain unchanged. Existing repair authorization covers this bounded test-oracle fix; no new scope decision.
+
+### Stage 3: Independent review and final hosted acceptance
+**Goal:** Review source/evidence, commit normally, then qualify actual final published head.
+**Success Criteria:** Independent source/artifact review clear; local finite checks exit normally; final native macOS integrations and strict/native gates pass.
+**Tests:** Source/AST preservation, independent artifact hashes, final actual-head automatic/native matrix.
+**Status:** In Progress
+
+Hold publication while current usefulb38 CI remains active; no rerun/cancel/push/replay over useful diagnostics. Local green is not hosted acceptance. ChatbookUAT523 pending, fullUAT paused/UAT261 open.
+
+Local verification and independent review are complete. The same controlled analyzer-only 40 ms delay now passes with the actual measured interval excluded. A live runtime fault charging analyzer time to the second cleanup still fails the original completion assertion. The full browser, analyzer and context contract scope has 330 passes, zero skips/errors/failures and natural exit 0 (pytest 4.09 s; controller 5.629578 s). No diagnostic plugin was active for that full scope.
+
+The change adds two clock readings around the existing analyzer await and corrects only the final elapsed accounting assertion. All 66 unrelated definitions and 189 of 190 original assertion ASTs are preserved; strict 30 ms grace, requested 50 ms analyzer wait and the five other target assertions remain. Production, fakes, CI and configuration are byte-identical. Ruff and compile pass. Bandit has the same 191 inherited LOW findings (190 B101 assertions and one B105), zero new findings/errors, with its actual exit 1 retained. No PostgreSQL scope is affected or claimed.
+
+Immutable local evidence: /private/tmp/pr2979-uat563-final-evidence.json (SHA256 45e29d5a132dc694e7f6682114b617fe67c90f84d87e292350150d2467a7d1a9). Independent review: /private/tmp/pr2979-uat563-independent-review.json (SHA256 0fe5aa2671745221bcd29e0f90499baf82401994de16d479cdb00137d21235e1), verifying 35 artifact hashes, source/AST preservation, exact 330 native/local case identities and mutation sensitivity. It performed no independent tests, imports, browser, static or PostgreSQL runs. /private/tmp/pr2979-uat563-review-completed-supplement.json resolves the manifest’s historical pending-review field. Focused baseline/red/green terminal exits are root-observed tool completions recorded in /private/tmp/pr2979-uat563-terminal-exits.json; full/charge also have supervisor records.
+
+Normal local commit is the next step. Final actual published macOS integrations and strict/native acceptance remain OPEN; controlled sufficiency does not attribute the hosted scheduling event. Hold publication while useful current CI remains nonterminal.
