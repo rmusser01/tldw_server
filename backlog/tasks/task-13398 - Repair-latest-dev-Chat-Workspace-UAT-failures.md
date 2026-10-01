@@ -4,7 +4,7 @@ title: Repair latest-dev Chat Workspace UAT failures
 status: In Progress
 assignee: []
 created_date: '2026-09-30 15:47'
-updated_date: '2026-10-01 17:06'
+updated_date: '2026-10-01 18:05'
 labels: []
 dependencies: []
 documentation:
@@ -111,6 +111,12 @@ Approved22/12designcontinuation completedbounded22and18citationnavigation: real 
 Finalboundedacceptance:8/9/18/22/23Done. Freshf3 UI253/25316files+nativerealGemmaH1->H2/singlePageH1/Send4.8356contrast/politeatomicLoading/assertiveatomicError/mobileofflineRetryactualpreview200/393chars; independentreviewclear. Privatevectorconfigrecoveredwithoutdeletion/forcedregen, originalmedia1oneMiniLMvector/media2newone, actualhybridRAGreturnsstoredvector/errors[]/noFTS-onerror; originalpurposequestionnowcorrectwithsupport, earlierabstentionretained/no universalmodelreliabilityclaim.12concretewirecandidate nowreviewed/correctedbodyqueryscopeP2 andincorporatedinexistingdesign; notimplemented/approvedprotocol. Humannewprotocol/bounds/matrixdecision andbackendparity/atomic saver/readproof/nativeprimarycheckpoint gatesremain. Source36/36, earlierfreshbackend343pass14skip2xfail/TS0/Bandit0 retained; inheritedlint3errors5warnings unchanged. Finalremote devf3,63stashIDsidentical/originalstashretained; onlyintentionalowneddesign/tracking/planlifecyclebyteschangedfrompreFFsnapshot, productionhashesstable. Completedparentnarrowplansarchivedbeforeremoval, active/otheragentsplansretained. Screenreaderspeech/exactabnormalstorage/fullprimarycheckpoint/fullUAT/epicnotaccepted. No commit/push/PR/GitHubmutation; finitecommandsdrained/nativeonline/allagentsclosed.
 
 Final complete reviewed checkout unit scope ran directly from owning configs/cwds: all80shared and3frontend suites exit0, including corrected existing IndexedDB dependency loader and exact realRAGfixture. Final build exit0/fullTS0; independent replacement3file reviewPASS77focused checks and complete240pathreview binding0mismatches. Main3763nativegrounded/Stop/routes/workspace UATPASS; finalpreview and validaccount/targetmatrixstillrunning. Prepare draft PR with honest pending acceptance/humanChangeSummary gates; no merge.
+
+Reviewed241pathcommit99182ae9f3b0216d79ee18e4c4ad17a940019541 pushed and requested draft PR created/attached https://github.com/rmusser01/tldw_server/pull/3071 base dev unchanged3763. Exactignoredreal-sourcefixturehashverifiedinstagedcommit. Fullcurrentcheckoutunit83files2270pass0fail:2220shared+50frontend, no skippedownedunits. Independentfullreview240+finalreplacement3PASS; finalNextbuild/fullTS0/Banditnonew. Realaccounttargetbaseline UATstillunderway, nativevalidJWTlogin/profile/session200 andUI-createdworkspace475704db verified, oneexplicitGemmasendawaitingreceipts, neverblindresend. PRremainsdraftwithtruthfulpendingnativeacceptance andrequiredhumanChangeSummary, no merge.
+
+2026-10-01 additionalCI follow-up associatedbeforeedits: shardcoverage guard genuineRED newownedlorebookdiagnostics testunregistered; registerit alongsideexistinglorebook/character-scope testinall5CI shardmatrices,notignore/baseline. FrontendowningESLint7hookspurity findsnewWebLayout.chat-scroll-contractProbe assignsoutercontrollerduringrender; movesonlytestobservercapture intoReacteffect matchingexistingadjacentProbe. Preserve assertions/testcoverage, no productionchange orrule suppression. Parentrepairs theseCIboundaries whileBohrtracesbundle andSingerrunsactualownerUAT; fullUAT remainsopen.
+
+CI boundary repairsGREEN2026-10-01: missingEOFhooks/chat-helper/index.ts restoredexact1newline; WebLayouttestobserverReacteffect retainsall39assertions(0fail/skip), ownESLint0errors/6existingwarnings; lorebookscopeapi testregisteredinall5existingCI shardmatrices, coverageguardRED1newuncovered -> GREEN0(shards830,4943tests,baseline44unchanged). gitdiffcheck0. No testdisabled/newignore/budgetraised. Nativeownertraceactual200workspace/H1 andvisibleChrome, matrixstillpending; bundleinvestigationcontinues.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
