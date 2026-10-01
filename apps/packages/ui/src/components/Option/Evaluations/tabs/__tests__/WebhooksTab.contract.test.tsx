@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { Modal } from "antd"
 import { WebhooksTab } from "../WebhooksTab"
 
@@ -159,7 +159,8 @@ describe("WebhooksTab backend contract", () => {
 
     render(<WebhooksTab />)
 
-    expect(screen.getByText("Unavailable")).toBeInTheDocument()
+    const recovery = screen.getByRole("heading", { name: "Unable to load webhooks" }).closest("section")!
+    expect(within(recovery).getByText("Error")).toBeInTheDocument()
     expect(screen.getByText("Unable to load webhooks")).toBeInTheDocument()
     expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
       "/api/v1/evaluations/webhooks"

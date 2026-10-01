@@ -293,20 +293,22 @@ def test_user_guide_uat_install_spec_uses_apps_project_by_default() -> None:
     """User-guide UAT install specs should default to the app package project."""
 
     harness = _load_user_guide_harness()
+    repo_root = Path("/repo")
+    project = repo_root / "apps" / "mcp-unified"
     wheel = Path("/tmp/mcp_unified-0.1.0-py3-none-any.whl")  # nosec B108
     relative_wheel = Path("dist/mcp_unified-0.1.0-py3-none-any.whl")
 
-    assert harness.default_package_project(Path("/repo")) == Path("/repo/apps/mcp-unified")  # nosec B101
+    assert harness.default_package_project(repo_root) == project  # nosec B101
     assert harness.package_install_spec(
-        repo_root=Path("/repo"),
+        repo_root=repo_root,
         wheel_path=None,
         editable=False,
-    ) == ["/repo/apps/mcp-unified[gateway]"]  # nosec B101
+    ) == [f"{project}[gateway]"]  # nosec B101
     assert harness.package_install_spec(
-        repo_root=Path("/repo"),
+        repo_root=repo_root,
         wheel_path=None,
         editable=True,
-    ) == ["-e", "/repo/apps/mcp-unified[gateway]"]  # nosec B101
+    ) == ["-e", f"{project}[gateway]"]  # nosec B101
     assert harness.package_install_spec(
         repo_root=Path("/repo"),
         wheel_path=wheel,
@@ -870,7 +872,7 @@ def test_rc_cli_uat_runs_user_guide_wheel_mode(
 
     assert len(commands) == 1  # nosec B101
     command = commands[0]
-    assert "Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py" in command  # nosec B101
+    assert str(Path("Helper_Scripts") / "Testing-related" / "mcp_standalone_user_guide_uat.py") in command  # nosec B101
     assert "--wheel" in command  # nosec B101
     assert str(wheel) in command  # nosec B101
     assert "--json-report" in command  # nosec B101
@@ -942,7 +944,7 @@ def test_rc_smoke_uat_runs_user_guide_transport_checks(
 
     assert len(commands) == 1  # nosec B101
     command = commands[0]
-    assert "Helper_Scripts/Testing-related/mcp_standalone_user_guide_uat.py" in command  # nosec B101
+    assert str(Path("Helper_Scripts") / "Testing-related" / "mcp_standalone_user_guide_uat.py") in command  # nosec B101
     assert "--wheel" in command  # nosec B101
     assert str(wheel) in command  # nosec B101
     assert recorder.results[0]["phase"] == "smoke_uat"  # nosec B101
@@ -1045,11 +1047,10 @@ def test_rc_extras_matrix_records_tier_specific_checks(
     assert "gateway_config_validation" in names  # nosec B101
     assert "sqlite_storage_smoke" in names  # nosec B101
     assert "dev_artifact_gate_selection" in names  # nosec B101
-    flattened_commands = [" ".join(command) for command in commands]
-    assert any("mcp-unified-gateway package-info" in command for command in flattened_commands)  # nosec B101
-    assert any("mcp-unified-gateway validate-config" in command for command in flattened_commands)  # nosec B101
-    assert any("SQLiteMCPStore" in command for command in flattened_commands)  # nosec B101
-    assert any(".github/tests/test_mcp_unified_artifact_gate.py" in command for command in flattened_commands)  # nosec B101
+    assert any(Path(command[0]).stem == "mcp-unified-gateway" and command[1] == "package-info" for command in commands)  # nosec B101
+    assert any(Path(command[0]).stem == "mcp-unified-gateway" and command[1] == "validate-config" for command in commands)  # nosec B101
+    assert any("SQLiteMCPStore" in arg for command in commands for arg in command)  # nosec B101
+    assert any(Path(arg).as_posix().endswith(".github/tests/test_mcp_unified_artifact_gate.py") for command in commands for arg in command)  # nosec B101
 
 
 def test_mcp_unified_dev_extra_declares_artifact_gate_dependencies() -> None:

@@ -2803,7 +2803,7 @@ def test_gateway_cli_approval_grant_lifecycle(
     assert [grant["grant_id"] for grant in listed["grants"]] == [grant_id]
 
     exit_code = gateway_cli.main(
-        ["revoke-approval-grant", grant_id, "--config", str(config_path)]
+        ["revoke-approval-grant", "--config", str(config_path), "--", grant_id]
     )
     revoked = json.loads(capsys.readouterr().out)
     assert exit_code == 0
@@ -2867,7 +2867,7 @@ def test_gateway_cli_skill_approval_grant_lifecycle_canonicalizes_value(
     assert listed["grants"] == [grant]
 
     exit_code = gateway_cli.main(
-        ["revoke-approval-grant", grant["grant_id"], "--config", str(config_path)]
+        ["revoke-approval-grant", "--config", str(config_path), "--", grant["grant_id"]]
     )
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -2918,11 +2918,17 @@ def test_gateway_cli_approval_grant_requires_persistent_store(
     assert payload["reason_code"] == "policy_grant_store_unavailable"
 
 
+@pytest.mark.parametrize("token_id", ["plain-token", "-leading-token", "--leading-token"])
 def test_gateway_cli_path_grant_lifecycle(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    token_id: str,
 ) -> None:
-    """Create, list, and revoke a TTL path grant through the CLI."""
+    """Create, list, and revoke opaque path grant IDs through the CLI."""
+    from mcp_unified.policy_grants import sqlite as grant_store
+
+    monkeypatch.setattr(grant_store.secrets, "token_urlsafe", lambda _bytes: token_id)
 
     config_path = tmp_path / "gateway.json"
     config_path.write_text(
@@ -2977,7 +2983,7 @@ def test_gateway_cli_path_grant_lifecycle(
     assert [grant["grant_id"] for grant in listed["grants"]] == [grant_id]
 
     exit_code = gateway_cli.main(
-        ["revoke-approval-grant", grant_id, "--config", str(config_path)]
+        ["revoke-approval-grant", "--config", str(config_path), "--", grant_id]
     )
     assert exit_code == 0
     capsys.readouterr()

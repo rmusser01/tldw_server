@@ -1,57 +1,49 @@
 #!/usr/bin/env node
 
 import fs from "node:fs"
+import { pathToFileURL } from "node:url"
 
-const reportPath = process.argv[2]
-
-if (!reportPath) {
-  console.error("[playwright-no-skips] Usage: node scripts/assert-playwright-no-skips.mjs <report.json>")
-  process.exit(2)
+export function assertPlaywrightNoSkips(report) {
+  const stats = report?.stats || {}
+  const counts = Object.fromEntries(
+    ["expected", "skipped", "unexpected", "flaky"].map((key) => {
+      const value = Number(stats[key] || 0)
+      if (!Number.isSafeInteger(value) || value < 0) {
+        throw new Error(`Invalid Playwright ${key} count`)
+      }
+      return [key, value]
+    })
+  )
+  const executed = Object.values(counts).reduce((sum, value) => sum + value, 0)
+  if (executed <= 0) throw new Error("No tests executed. Expected at least one executed test.")
+  if (counts.skipped) throw new Error(`Found ${counts.skipped} skipped test(s). Skips are not allowed.`)
+  if (counts.unexpected) throw new Error(`Found ${counts.unexpected} unexpected failure(s).`)
+  if (counts.flaky) throw new Error(`Found ${counts.flaky} flaky test(s).`)
+  if (report.errors?.length) throw new Error("Playwright reported global errors.")
+  return { ...counts, executed }
 }
 
-if (!fs.existsSync(reportPath)) {
-  console.error(`[playwright-no-skips] Report not found: ${reportPath}`)
-  process.exit(2)
-}
-
-let report
-
-try {
-  report = JSON.parse(fs.readFileSync(reportPath, "utf8"))
-} catch (error) {
-  const message = error instanceof Error ? error.message : String(error)
-  console.error(`[playwright-no-skips] Unable to parse Playwright JSON report: ${message}`)
-  process.exit(2)
-}
-
-const stats = report?.stats || {}
-
-const expected = Number(stats.expected || 0)
-const skipped = Number(stats.skipped || 0)
-const unexpected = Number(stats.unexpected || 0)
-const flaky = Number(stats.flaky || 0)
-const executed = expected + skipped + unexpected + flaky
-
-console.log(
-  `[playwright-no-skips] executed=${executed} expected=${expected} skipped=${skipped} unexpected=${unexpected} flaky=${flaky}`
-)
-
-if (executed <= 0) {
-  console.error("[playwright-no-skips] No tests executed. Expected at least one executed test.")
-  process.exit(1)
-}
-
-if (skipped > 0) {
-  console.error(`[playwright-no-skips] Found ${skipped} skipped test(s). Skips are not allowed.`)
-  process.exit(1)
-}
-
-if (unexpected > 0) {
-  console.error(`[playwright-no-skips] Found ${unexpected} unexpected failure(s).`)
-  process.exit(1)
-}
-
-if (flaky > 0) {
-  console.error(`[playwright-no-skips] Found ${flaky} flaky test(s).`)
-  process.exit(1)
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const reportPath = process.argv[2]
+  if (!reportPath || !fs.existsSync(reportPath)) {
+    console.error("[playwright-no-skips] Usage: node scripts/assert-playwright-no-skips.mjs <existing-report.json>")
+    process.exitCode = 2
+  } else {
+    let report
+    try {
+      report = JSON.parse(fs.readFileSync(reportPath, "utf8"))
+    } catch (error) {
+      console.error(`[playwright-no-skips] Unable to parse Playwright JSON report: ${error.message}`)
+      process.exitCode = 2
+    }
+    if (!process.exitCode) {
+      try {
+        const counts = assertPlaywrightNoSkips(report)
+        console.log(`[playwright-no-skips] ${Object.entries(counts).map(([key, value]) => `${key}=${value}`).join(" ")}`)
+      } catch (error) {
+        console.error(`[playwright-no-skips] ${error.message}`)
+        process.exitCode = 1
+      }
+    }
+  }
 }

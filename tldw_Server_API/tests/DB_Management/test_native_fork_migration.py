@@ -27,6 +27,7 @@ pytestmark = pytest.mark.integration
 def test_upgrade_reopen_preserves_chat_and_installs_native_storage(
     backend_name: str, request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Upgrade genuine prior native storage through the current registered schema."""
     kwargs = {"db_path": str(tmp_path / "native.sqlite"), "client_id": "alice"}
     if backend_name == "postgres":
         kwargs["backend"] = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
@@ -41,7 +42,10 @@ def test_upgrade_reopen_preserves_chat_and_installs_native_storage(
     for _ in range(2):
         upgraded = CharactersRAGDB(**kwargs)
         assert upgraded.execute_query("SELECT content FROM messages WHERE id = ?", (mid,)).fetchone()["content"] == "keep this turn"
-        expected_version = 77 if backend_name == "postgres" else 73
+        expected_version = (
+            CharactersRAGDB._POSTGRES_SCHEMA_VERSION if backend_name == "postgres"
+            else CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        )
         assert upgraded.execute_query(
             "SELECT version FROM db_schema_version WHERE schema_name = ?", (CharactersRAGDB._SCHEMA_NAME,)
         ).fetchone()["version"] == expected_version
@@ -216,7 +220,8 @@ def test_colliding_native_lineage_preserves_receipts_or_rolls_back(
                     )) == ("native-fork-v1", "native_fork_v1", "operation", '{"preserved":true}')
                     assert child["assistant_startup_json"] is None
                     assert upgraded.execute_query("SELECT version FROM db_schema_version").fetchone()["version"] == (
-                        77 if backend_name == "postgres" else 73
+                        CharactersRAGDB._POSTGRES_SCHEMA_VERSION if backend_name == "postgres"
+                        else CharactersRAGDB._CURRENT_SCHEMA_VERSION
                     )
                 finally:
                     upgraded.close_connection()

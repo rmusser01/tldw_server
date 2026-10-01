@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 
+from loguru import logger
+
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.clone_snapshot_repository import (
@@ -532,6 +534,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.sqlite_schema_versio
     get_db_version,
 )
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import begin_immediate_if_needed
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
 
 
 class MediaDatabase:
@@ -1912,8 +1915,8 @@ class MediaDatabase:
                 if outermost:
                     conn.commit()
                     logging.debug("Committed SQLite transaction.")
-            except MEDIA_NONCRITICAL_EXCEPTIONS:
-                logging.exception("SQLite transaction failed, rolling back")
+            except MEDIA_NONCRITICAL_EXCEPTIONS as exc:
+                logger.error("SQLite transaction rollback (error_type={})", exception_type_for_log(exc))
                 if outermost:
                     with suppress(sqlite3.Error):
                         conn.rollback()

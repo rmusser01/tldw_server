@@ -25,7 +25,7 @@ def _make_test_db():
 
     with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as tmp:
         db_path = tmp.name
-    db = CharactersRAGDB(db_path, "test_client")
+    db = CharactersRAGDB(db_path, "1", owner_user_id="1")
     db.add_character_card({
         "name": DEFAULT_CHARACTER_NAME,
         "description": "Default",
@@ -209,7 +209,7 @@ def test_output_guardian_proxy_receives_character_chat_type_for_continued_charac
             {
                 "character_id": character["id"],
                 "title": "Guardian Output Character Chat",
-                "client_id": "test_client",
+                "client_id": db.client_id,
             }
         )
         assert conversation_id
@@ -297,7 +297,7 @@ def test_output_guardian_proxy_receives_regular_chat_type_for_resumed_default_as
             {
                 "character_id": default_character["id"],
                 "title": "Guardian Output Ordinary Chat",
-                "client_id": "test_client",
+                "client_id": db.client_id,
             }
         )
         assert conversation_id

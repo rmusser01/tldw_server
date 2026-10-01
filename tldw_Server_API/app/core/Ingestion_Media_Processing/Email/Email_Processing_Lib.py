@@ -13,10 +13,12 @@ import contextlib
 import io
 import mailbox
 import os
-import quopri
 import re
 import tempfile
+import time
 import zipfile
+from collections.abc import Iterator
+from datetime import datetime
 from email import policy
 from email.header import decode_header, make_header
 from email.message import EmailMessage, Message
@@ -26,12 +28,18 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from tldw_Server_API.app.core.Chunking import improved_chunking_process
+from tldw_Server_API.app.core.config import loaded_config_data
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.attachment_policy import (
+    attachment_mime_skip_reason,
+    normalize_attachment_mime_patterns,
+)
+from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.email_ingestion_metrics import record_email_parse
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Upload_Sink import (
     DEFAULT_MEDIA_TYPE_CONFIG,
     FileValidator,
 )
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
-from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 _EMAIL_NONCRITICAL_EXCEPTIONS = (
@@ -53,7 +61,6 @@ _EMAIL_NONCRITICAL_EXCEPTIONS = (
     mailbox.Error,
     zipfile.BadZipFile,
 )
-_ATTACHMENT_SIZE_DECODE_LIMIT_BYTES = 1024 * 1024
 
 try:
     import html2text as _html2text
@@ -158,9 +165,7 @@ def _is_safe_archive_member_name(member_name: str) -> bool:
     if normalized.startswith("/"):
         return False
     pure_path = PurePosixPath(normalized)
-    if ".." in pure_path.parts:
-        return False
-    return True
+    return ".." not in pure_path.parts
 
 
 def _estimate_base64_decoded_size(payload: bytes | str) -> int:
@@ -197,10 +202,19 @@ def _attachment_payload_size(part: Message) -> int | None:
     if transfer_encoding == "base64":
         return _estimate_base64_decoded_size(payload_for_base64)
     if transfer_encoding == "quoted-printable":
-        if len(raw_bytes) > _ATTACHMENT_SIZE_DECODE_LIMIT_BYTES:
-            return None
-        return len(quopri.decodestring(raw_bytes))
+        # Keep descriptors metadata-only; selected captures check their actual size.
+        return None
     return len(raw_bytes)
+
+
+def _email_parts(message: Message) -> Iterator[Message]:
+    """Traverse MIME containers without visiting attachment descendants as body parts."""
+    yield message
+    if message.get_content_disposition() == "attachment" or message.get_filename():
+        return
+    if message.is_multipart() and message.get_content_type() != "message/rfc822":
+        for part in message.get_payload():
+            yield from _email_parts(part)
 
 
 def parse_eml_bytes(
@@ -208,11 +222,19 @@ def parse_eml_bytes(
     filename: str = "email.eml",
     *,
     return_children: bool = False,
+    attachment_mime_allowlist: list[str] | None = None,
+    attachment_mime_denylist: list[str] | None = None,
+    attachment_skip_reason: str = "disabled",
 ) -> tuple[str, dict[str, Any], list[tuple[bytes, str]]]:
     """
-    Parse EML bytes and return (content_text, metadata_dict).
+    Parse EML bytes and return (content_text, metadata_dict, selected_child_emls).
     metadata_dict contains email-specific fields in metadata['email'].
     """
+    allowlist = normalize_attachment_mime_patterns(attachment_mime_allowlist)
+    denylist = normalize_attachment_mime_patterns(attachment_mime_denylist)
+    cfg = DEFAULT_MEDIA_TYPE_CONFIG.get("archive", {})
+    max_children = int(cfg.get("max_internal_files", 100))
+    max_child_bytes = int(float(cfg.get("max_member_uncompressed_size_mb", 100)) * 1024 * 1024)
     msg: Message = BytesParser(policy=policy.default).parsebytes(file_bytes)
 
     # Headers and fields
@@ -239,56 +261,60 @@ def parse_eml_bytes(
     attachments_meta: list[dict[str, Any]] = []
     child_emls: list[tuple[bytes, str]] = []  # (bytes, filename)
 
-    if msg.is_multipart():
-        for part in msg.walk():
-            cdisp = (part.get_content_disposition() or "").lower()
-            ctype = (part.get_content_type() or "").lower()
-            filename_part = part.get_filename()
+    for part in _email_parts(msg):
+        cdisp = (part.get_content_disposition() or "").lower()
+        ctype = (part.get_content_type() or "").lower()
+        filename_part = part.get_filename()
 
-            if cdisp == "attachment" or filename_part:
-                decoded_size = _attachment_payload_size(part)
-                attachments_meta.append({
-                    "name": _decode_mime_header(filename_part) if filename_part else (part.get("Content-ID") or "unknown_file_name"),
-                    "content_type": ctype,
-                    "size": decoded_size,
-                    "content_id": part.get("Content-ID"),
-                    "disposition": cdisp or None,
-                })
-                # Capture nested EMLs if requested
-                if return_children and (
-                    ctype == "message/rfc822" or (filename_part and str(filename_part).lower().endswith('.eml'))
-                ):
-                    try:
-                        payload_obj = part.get_payload()
-                        if isinstance(payload_obj, list) and payload_obj and isinstance(payload_obj[0], Message):
-                            child_msg = payload_obj[0]
-                            child_bytes = child_msg.as_bytes(policy=policy.default)
-                        else:
-                            # Fallback: try decoded
-                            child_bytes = part.get_payload(decode=True) or b""
-                        if child_bytes:
-                            child_name = _decode_mime_header(filename_part) if filename_part else "attached.eml"
-                            child_emls.append((child_bytes, child_name))
-                    except _EMAIL_NONCRITICAL_EXCEPTIONS as ce:
-                        logging.debug(f"Failed to capture nested EML bytes: {ce}")
-                        with contextlib.suppress(_EMAIL_NONCRITICAL_EXCEPTIONS):
-                            get_metrics_registry().increment(
-                                "app_warning_events_total",
-                                labels={"component": "email_ingest", "event": "nested_eml_capture_failed"},
-                            )
+        if cdisp == "attachment" or filename_part or ctype == "message/rfc822":
+            decoded_size = _attachment_payload_size(part)
+            descriptor = {
+                "name": _decode_mime_header(filename_part) if filename_part else (part.get("Content-ID") or "unknown_file_name"),
+                "content_type": ctype,
+                "size": decoded_size,
+                "content_id": part.get("Content-ID"),
+                "disposition": cdisp or None,
+                "extraction_status": "skipped",
+            }
+            attachments_meta.append(descriptor)
+            reason = attachment_skip_reason if not return_children else attachment_mime_skip_reason(
+                ctype, filename_part, allowlist, denylist,
+            )
+            if reason is None and len(child_emls) >= max_children:
+                reason = "count_limit"
+            if reason is None and max_child_bytes > 0 and decoded_size is not None and decoded_size > max_child_bytes:
+                reason = "size_limit"
+            if reason is not None:
+                descriptor["extraction_reason"] = reason
                 continue
+            try:
+                payload_obj = part.get_payload()
+                if isinstance(payload_obj, list) and payload_obj and isinstance(payload_obj[0], Message):
+                    child_bytes = payload_obj[0].as_bytes(policy=policy.default)
+                else:
+                    child_bytes = part.get_payload(decode=True) or b""
+                if max_child_bytes > 0 and len(child_bytes) > max_child_bytes:
+                    descriptor["extraction_reason"] = "size_limit"
+                elif child_bytes:
+                    child_name = _decode_mime_header(filename_part) if filename_part else "attached.eml"
+                    child_emls.append((child_bytes, child_name))
+                    descriptor["extraction_status"] = "captured"
+                else:
+                    descriptor["extraction_reason"] = "empty_payload"
+            except _EMAIL_NONCRITICAL_EXCEPTIONS as ce:
+                descriptor["extraction_reason"] = "capture_failed"
+                logging.debug(f"Failed to capture nested EML bytes: {ce}")
+                with contextlib.suppress(_EMAIL_NONCRITICAL_EXCEPTIONS):
+                    get_metrics_registry().increment(
+                        "app_warning_events_total",
+                        labels={"component": "email_ingest", "event": "nested_eml_capture_failed"},
+                    )
+            continue
 
-            if ctype == "text/plain":
-                text_parts.append(_part_payload_to_text(part))
-            elif ctype == "text/html" and html_first is None:
-                html_first = _part_payload_to_text(part)
-    else:
-        # Single-part message
-        ctype = (msg.get_content_type() or "").lower()
         if ctype == "text/plain":
-            text_parts.append(_part_payload_to_text(msg))
-        elif ctype == "text/html":
-            html_first = _part_payload_to_text(msg)
+            text_parts.append(_part_payload_to_text(part))
+        elif ctype == "text/html" and html_first is None:
+            html_first = _part_payload_to_text(part)
 
     text_content = "\n".join([t for t in text_parts if t and t.strip()])
     if not text_content and html_first:
@@ -332,6 +358,9 @@ def process_email_task(
     system_prompt: str | None = None,
     summarize_recursively: bool = False,
     ingest_attachments: bool = False,
+    extract_attachments: bool | None = None,
+    attachment_mime_allowlist: list[str] | None = None,
+    attachment_mime_denylist: list[str] | None = None,
     max_depth: int = 1,
 ) -> dict[str, Any]:
     """
@@ -359,7 +388,23 @@ def process_email_task(
     }
 
     try:
-        content_text, metadata, child_emls = parse_eml_bytes(file_bytes, filename, return_children=True)
+        extraction_enabled = ingest_attachments if extract_attachments is None else extract_attachments
+        parse_started = time.perf_counter()
+        parse_outcome = "error"
+        try:
+            content_text, metadata, child_emls = parse_eml_bytes(
+                file_bytes, filename,
+                return_children=extraction_enabled and max_depth > 1,
+                attachment_mime_allowlist=attachment_mime_allowlist,
+                attachment_mime_denylist=attachment_mime_denylist,
+                attachment_skip_reason="depth_limit" if extraction_enabled else "disabled",
+            )
+            parse_outcome = "parsed"
+        finally:
+            record_email_parse(
+                source_format="eml", outcome=parse_outcome,
+                duration_seconds=time.perf_counter() - parse_started,
+            )
         if title_override:
             metadata["title"] = title_override
         if author_override:
@@ -379,7 +424,7 @@ def process_email_task(
                     result["warnings"].append("Chunking yielded no results; using full text.")
                 result["chunks"] = chunks
             except _EMAIL_NONCRITICAL_EXCEPTIONS as e:
-                logging.error(f"Email chunking failed for {filename}: {e}")
+                logging.error(f"Email chunking failed (error_type={exception_type_for_log(e)})")
                 with contextlib.suppress(_EMAIL_NONCRITICAL_EXCEPTIONS):
                     get_metrics_registry().increment(
                         "app_exception_events_total",
@@ -407,7 +452,7 @@ def process_email_task(
                 if analysis_text and isinstance(analysis_text, str):
                     result["analysis"] = analysis_text
             except _EMAIL_NONCRITICAL_EXCEPTIONS as e:
-                logging.warning(f"Email analysis failed for {filename}: {e}")
+                logging.warning(f"Email analysis failed (error_type={exception_type_for_log(e)})")
                 with contextlib.suppress(_EMAIL_NONCRITICAL_EXCEPTIONS):
                     get_metrics_registry().increment(
                         "app_warning_events_total",
@@ -416,7 +461,7 @@ def process_email_task(
                 result["warnings"].append(f"Analysis failed: {e}")
 
         # Optionally parse nested email attachments recursively (children are returned in 'children' key)
-        if ingest_attachments and max_depth > 1 and child_emls:
+        if child_emls:
             children_results: list[dict[str, Any]] = []
             for child_bytes, child_name in child_emls:
                 try:
@@ -435,6 +480,9 @@ def process_email_task(
                         system_prompt=system_prompt,
                         summarize_recursively=False,
                         ingest_attachments=ingest_attachments,
+                        extract_attachments=extract_attachments,
+                        attachment_mime_allowlist=attachment_mime_allowlist,
+                        attachment_mime_denylist=attachment_mime_denylist,
                         max_depth=max_depth - 1,
                     )
                     children_results.append(child_res)
@@ -451,7 +499,7 @@ def process_email_task(
         result["status"] = "Success"
         return result
     except _EMAIL_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Failed processing email '{filename}': {e}", exc_info=True)
+        logging.error(f"Email processing failed (error_type={exception_type_for_log(e)})")
         result["status"] = "Error"
         result["error"] = "Email processing failed"
         return result
@@ -473,17 +521,25 @@ def process_eml_archive_bytes(
     system_prompt: str | None = None,
     summarize_recursively: bool = False,
     ingest_attachments: bool = False,
+    extract_attachments: bool | None = None,
+    attachment_mime_allowlist: list[str] | None = None,
+    attachment_mime_denylist: list[str] | None = None,
     max_depth: int = 1,
 ) -> list[dict[str, Any]]:
     """
     Process a ZIP archive of EML files and return a list of per-email result dicts.
     Applies basic guardrails on member count and uncompressed size using archive config limits.
     """
+    container_started = time.perf_counter()
     results: list[dict[str, Any]] = []
     try:
         zf = zipfile.ZipFile(io.BytesIO(file_bytes), 'r')
     except _EMAIL_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Invalid or unreadable archive '{archive_name}': {e}")
+        logging.error(f"Email ZIP read failed (error_type={exception_type_for_log(e)})")
+        record_email_parse(
+            source_format='zip', outcome="error",
+            duration_seconds=time.perf_counter() - container_started,
+        )
         return [{
             "status": "Error",
             "input_ref": archive_name,
@@ -499,6 +555,10 @@ def process_eml_archive_bytes(
 
     members = zf.infolist()
     if len(members) > max_internal_files:
+        record_email_parse(
+            source_format='zip', outcome="error",
+            duration_seconds=time.perf_counter() - container_started,
+        )
         return [{
             "status": "Error",
             "input_ref": archive_name,
@@ -509,6 +569,10 @@ def process_eml_archive_bytes(
 
     total_size = sum(m.file_size for m in members)
     if total_size > max_uncompressed_size:
+        record_email_parse(
+            source_format='zip', outcome="error",
+            duration_seconds=time.perf_counter() - container_started,
+        )
         return [{
             "status": "Error",
             "input_ref": archive_name,
@@ -520,6 +584,10 @@ def process_eml_archive_bytes(
     for member in members:
         member_name = member.filename or ""
         if not _is_safe_archive_member_name(member_name):
+            record_email_parse(
+                source_format='zip', outcome="error",
+                duration_seconds=time.perf_counter() - container_started,
+            )
             return [{
                 "status": "Error",
                 "input_ref": archive_name,
@@ -528,6 +596,10 @@ def process_eml_archive_bytes(
                 "error": f"Archive contains unsafe member path: {member_name}",
             }]
         if getattr(member, "flag_bits", 0) & 0x1:
+            record_email_parse(
+                source_format='zip', outcome="error",
+                duration_seconds=time.perf_counter() - container_started,
+            )
             return [{
                 "status": "Error",
                 "input_ref": archive_name,
@@ -536,6 +608,10 @@ def process_eml_archive_bytes(
                 "error": "Encrypted ZIP archives are not supported for email ingestion.",
             }]
         if max_member_uncompressed_size > 0 and member.file_size > max_member_uncompressed_size:
+            record_email_parse(
+                source_format='zip', outcome="error",
+                duration_seconds=time.perf_counter() - container_started,
+            )
             return [{
                 "status": "Error",
                 "input_ref": archive_name,
@@ -566,6 +642,10 @@ def process_eml_archive_bytes(
         try:
             eml_bytes = zf.read(member)
         except _EMAIL_NONCRITICAL_EXCEPTIONS as e:
+            record_email_parse(
+                source_format='zip', outcome="error",
+                duration_seconds=time.perf_counter() - container_started,
+            )
             results.append({
                 "status": "Error",
                 "input_ref": f"{archive_name}::{member.filename}",
@@ -591,6 +671,9 @@ def process_eml_archive_bytes(
             system_prompt=system_prompt,
             summarize_recursively=summarize_recursively,
             ingest_attachments=ingest_attachments,
+            extract_attachments=extract_attachments,
+            attachment_mime_allowlist=attachment_mime_allowlist,
+            attachment_mime_denylist=attachment_mime_denylist,
             max_depth=max_depth,
         )
         # Normalize fields for clarity
@@ -627,6 +710,9 @@ def process_mbox_bytes(
     system_prompt: str | None = None,
     summarize_recursively: bool = False,
     ingest_attachments: bool = False,
+    extract_attachments: bool | None = None,
+    attachment_mime_allowlist: list[str] | None = None,
+    attachment_mime_denylist: list[str] | None = None,
     max_depth: int = 1,
 ) -> list[dict[str, Any]]:
     """
@@ -634,6 +720,7 @@ def process_mbox_bytes(
     Uses Python's mailbox.mbox by writing bytes to a temporary file. Applies guardrails
     using the same DEFAULT_MEDIA_TYPE_CONFIG['archive'] limits used for ZIP archives.
     """
+    container_started = time.perf_counter()
     results: list[dict[str, Any]] = []
 
     # Guardrails based on archive limits
@@ -644,6 +731,10 @@ def process_mbox_bytes(
     # Quick size check against cap
     try:
         if file_bytes is not None and len(file_bytes) > max_uncompressed_size:
+            record_email_parse(
+                source_format='mbox', outcome="error",
+                duration_seconds=time.perf_counter() - container_started,
+            )
             return [{
                 "status": "Error",
                 "input_ref": mbox_name,
@@ -689,6 +780,10 @@ def process_mbox_bytes(
                     # Fallback: use legacy as_bytes without policy
                     child_bytes = msg.as_bytes()  # type: ignore[attr-defined]
             except _EMAIL_NONCRITICAL_EXCEPTIONS as e:
+                record_email_parse(
+                    source_format='mbox', outcome="error",
+                    duration_seconds=time.perf_counter() - container_started,
+                )
                 staged.append({
                     "status": "Error",
                     "input_ref": f"{mbox_name}::message_{count}",
@@ -713,6 +808,9 @@ def process_mbox_bytes(
                 system_prompt=system_prompt,
                 summarize_recursively=summarize_recursively,
                 ingest_attachments=ingest_attachments,
+                extract_attachments=extract_attachments,
+                attachment_mime_allowlist=attachment_mime_allowlist,
+                attachment_mime_denylist=attachment_mime_denylist,
                 max_depth=max_depth,
             )
             # Normalize fields
@@ -731,6 +829,10 @@ def process_mbox_bytes(
 
         if limit_exceeded:
             # Emit a single guardrail error entry and ignore any previously staged successes
+            record_email_parse(
+                source_format='mbox', outcome="error",
+                duration_seconds=time.perf_counter() - container_started,
+            )
             return [{
                 "status": "Error",
                 "input_ref": mbox_name,
@@ -741,12 +843,16 @@ def process_mbox_bytes(
         # Otherwise, return the staged results
         results.extend(staged)
     except _EMAIL_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Invalid or unreadable MBOX '{mbox_name}': {e}")
+        logging.error(f"Email MBOX read failed (error_type={exception_type_for_log(e)})")
         with contextlib.suppress(_EMAIL_NONCRITICAL_EXCEPTIONS):
             get_metrics_registry().increment(
                 "app_exception_events_total",
                 labels={"component": "email_ingest", "event": "mbox_read_failed"},
             )
+        record_email_parse(
+            source_format='mbox', outcome="error",
+            duration_seconds=time.perf_counter() - container_started,
+        )
         return [{
             "status": "Error",
             "input_ref": mbox_name,
@@ -796,6 +902,9 @@ def process_pst_bytes(
     system_prompt: str | None = None,
     summarize_recursively: bool = False,
     ingest_attachments: bool = False,
+    extract_attachments: bool | None = None,
+    attachment_mime_allowlist: list[str] | None = None,
+    attachment_mime_denylist: list[str] | None = None,
     max_depth: int = 1,
 ) -> list[dict[str, Any]]:
     """
@@ -804,6 +913,8 @@ def process_pst_bytes(
     - When available, expands messages into RFC822 bytes and processes each via process_email_task.
     - Guardrails: total bytes size check and max message count (reuse archive caps).
     """
+    container_started = time.perf_counter()
+    source_format = "ost" if (pst_name or "").lower().endswith(".ost") else "pst"
     # Grouping keyword for PST/OST containers
     group_tag = f"email_pst:{(pst_name or '').rsplit('.', 1)[0]}" if pst_name else None
     base_keywords = list(keywords or [])
@@ -822,6 +933,10 @@ def process_pst_bytes(
     # Quick size check against cap
     try:
         if file_bytes is not None and len(file_bytes) > max_uncompressed_size:
+            record_email_parse(
+                source_format=source_format, outcome="error",
+                duration_seconds=time.perf_counter() - container_started,
+            )
             return [{
                 "status": "Error",
                 "input_ref": pst_name,
@@ -837,6 +952,10 @@ def process_pst_bytes(
     try:
         import pypff  # type: ignore
     except _EMAIL_NONCRITICAL_EXCEPTIONS:
+        record_email_parse(
+            source_format=source_format, outcome="error",
+            duration_seconds=time.perf_counter() - container_started,
+        )
         return [{
             "status": "Error",
             "input_ref": pst_name,
@@ -917,6 +1036,10 @@ def process_pst_bytes(
 
                 for i in range(num_msgs):
                     if count >= max_internal_files:
+                        record_email_parse(
+                            source_format=source_format, outcome="error",
+                            duration_seconds=time.perf_counter() - container_started,
+                        )
                         results.append({
                             "status": "Error",
                             "input_ref": pst_name,
@@ -939,7 +1062,7 @@ def process_pst_bytes(
                             continue
 
                         # Extract basic fields with broad compatibility
-                        def _get(obj, names: list[str]) -> str | None:
+                        def _get(obj, names: list[str]) -> str | datetime | None:
                             for n in names:
                                 v = getattr(obj, n, None)
                                 if callable(v):
@@ -949,6 +1072,8 @@ def process_pst_bytes(
                                         v = None
                                 if isinstance(v, (str, bytes)):
                                     return v.decode("utf-8", errors="ignore") if isinstance(v, (bytes, bytearray)) else v
+                                if isinstance(v, datetime):
+                                    return v
                             return None
 
                         subject = _get(msg, ["get_subject", "subject"]) or ""
@@ -956,6 +1081,12 @@ def process_pst_bytes(
                         sender_email = _get(msg, ["get_sender_email_address", "sender_email_address"]) or ""
                         plain_body = _get(msg, ["get_plain_text_body", "plain_text_body", "body"])
                         html_body = _get(msg, ["get_html_body", "html_body"]) if not plain_body else None
+                        # Native libpff exposes addresses in transport headers rather
+                        # than the recipient convenience methods available in some builds.
+                        raw_headers = _get(msg, ["get_transport_headers", "transport_headers"]) or ""
+                        headers = BytesParser(policy=policy.default).parsebytes(
+                            raw_headers.encode("utf-8"), headersonly=True,
+                        )
                         # Recipients
                         recipients_to: list[str] = []
                         recipients_cc: list[str] = []
@@ -1004,14 +1135,22 @@ def process_pst_bytes(
                                     recipients_bcc.append(rcpt_email)
                         except _EMAIL_NONCRITICAL_EXCEPTIONS:
                             pass
+                        if not recipients_to:
+                            recipients_to = _addresses_from_header(headers, "To").split(", ")
+                        if not recipients_cc:
+                            recipients_cc = _addresses_from_header(headers, "Cc").split(", ")
+                        if not recipients_bcc:
+                            recipients_bcc = _addresses_from_header(headers, "Bcc").split(", ")
                         # Date
-                        msg_date = _get(msg, ["get_delivery_time", "delivery_time", "get_client_submit_time", "client_submit_time"]) or None
+                        msg_date = _get(msg, ["get_delivery_time", "delivery_time", "get_client_submit_time", "client_submit_time"]) or str(headers.get("Date") or "")
 
-                        from_str = (f"{sender_name} <{sender_email}>".strip() if sender_email else sender_name) or "Unknown"
+                        from_str = (f"{sender_name} <{sender_email}>".strip() if sender_email else str(headers.get("From") or sender_name)) or "Unknown"
 
                         # Reconstruct a minimal RFC822 email
                         em = EmailMessage()
                         em["From"] = from_str
+                        if headers.get("Message-ID"):
+                            em["Message-ID"] = str(headers["Message-ID"])
                         if subject:
                             em["Subject"] = subject
                         # Normalize and set recipients once
@@ -1114,6 +1253,8 @@ def process_pst_bytes(
                                     "name": name,
                                     "content_type": content_type,
                                     "size": size,
+                                    "extraction_status": "skipped",
+                                    "extraction_reason": "pst_metadata_only",
                                 })
                         except _EMAIL_NONCRITICAL_EXCEPTIONS:
                             attachments_meta = []
@@ -1138,6 +1279,9 @@ def process_pst_bytes(
                             system_prompt=system_prompt,
                             summarize_recursively=summarize_recursively,
                             ingest_attachments=ingest_attachments,
+                            extract_attachments=extract_attachments,
+                            attachment_mime_allowlist=attachment_mime_allowlist,
+                            attachment_mime_denylist=attachment_mime_denylist,
                             max_depth=max_depth,
                         )
                         one.setdefault("media_type", "email")
@@ -1177,6 +1321,10 @@ def process_pst_bytes(
                             pass
                         results.append(one)
                     except _EMAIL_NONCRITICAL_EXCEPTIONS as e:
+                        record_email_parse(
+                            source_format=source_format, outcome="error",
+                            duration_seconds=time.perf_counter() - container_started,
+                        )
                         results.append({
                             "status": "Error",
                             "input_ref": f"{pst_name}::message_{count+1}",
@@ -1188,6 +1336,11 @@ def process_pst_bytes(
             except _EMAIL_NONCRITICAL_EXCEPTIONS:
                 continue
 
+        if not results:
+            record_email_parse(
+                source_format=source_format, outcome="error",
+                duration_seconds=time.perf_counter() - container_started,
+            )
         return results or [{
             "status": "Error",
             "input_ref": pst_name,
@@ -1197,12 +1350,16 @@ def process_pst_bytes(
             "error": "No messages found in PST/OST.",
         }]
     except _EMAIL_NONCRITICAL_EXCEPTIONS as e:
-        logging.error(f"Invalid or unreadable PST/OST '{pst_name}': {e}")
+        logging.error(f"Email PST/OST read failed (error_type={exception_type_for_log(e)})")
         with contextlib.suppress(_EMAIL_NONCRITICAL_EXCEPTIONS):
             get_metrics_registry().increment(
                 "app_exception_events_total",
                 labels={"component": "email_ingest", "event": "pst_read_failed"},
             )
+        record_email_parse(
+            source_format=source_format, outcome="error",
+            duration_seconds=time.perf_counter() - container_started,
+        )
         return [{
             "status": "Error",
             "input_ref": pst_name,
@@ -1216,7 +1373,7 @@ def process_pst_bytes(
             try:
                 pst.close()
             except _EMAIL_NONCRITICAL_EXCEPTIONS as close_err:
-                logging.warning(f"Failed to close PST/OST reader for '{pst_name}': {close_err}")
+                logging.warning(f"Email PST/OST close failed (error_type={exception_type_for_log(close_err)})")
                 with contextlib.suppress(_EMAIL_NONCRITICAL_EXCEPTIONS):
                     get_metrics_registry().increment(
                         "app_warning_events_total",
@@ -1226,7 +1383,7 @@ def process_pst_bytes(
             if tmp_path:
                 os.unlink(tmp_path)
         except _EMAIL_NONCRITICAL_EXCEPTIONS as cleanup_err:
-            logging.warning(f"Failed to remove temporary PST/OST file '{tmp_path}': {cleanup_err}")
+            logging.warning(f"Email PST/OST cleanup failed (error_type={exception_type_for_log(cleanup_err)})")
             with contextlib.suppress(_EMAIL_NONCRITICAL_EXCEPTIONS):
                 get_metrics_registry().increment(
                     "app_warning_events_total",

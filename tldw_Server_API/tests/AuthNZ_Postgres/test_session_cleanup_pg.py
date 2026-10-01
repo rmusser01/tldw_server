@@ -1,5 +1,6 @@
-import pytest
 from datetime import datetime, timedelta
+
+import pytest
 
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
@@ -15,7 +16,10 @@ async def test_postgres_session_cleanup_removes_expired(test_db_pool):
     await session_manager.initialize()
 
     # Insert a test user
-    user_id = await ensure_test_user(pool, "cleanup_user", "cleanup@example.com")
+    seed_hash = "hash"
+    user_id = await ensure_test_user(
+        pool, "cleanup_user", "cleanup@example.com", password_hash=seed_hash
+    )
 
     expired_at = datetime.utcnow() - timedelta(days=2)
     revoked_at = datetime.utcnow() - timedelta(days=8)

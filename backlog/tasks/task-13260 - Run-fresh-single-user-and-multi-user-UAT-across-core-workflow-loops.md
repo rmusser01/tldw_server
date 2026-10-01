@@ -4,7 +4,7 @@ title: Run fresh single-user and multi-user UAT across core workflow loops
 status: In Progress
 assignee: []
 created_date: '2026-09-15 01:27'
-updated_date: '2026-09-20 05:41'
+updated_date: '2026-09-29 01:24'
 labels:
   - uat
   - testing
@@ -13,9 +13,9 @@ dependencies: []
 documentation:
   - Docs/Reviews/FRESH_INSTALL_SINGLE_MULTI_UAT_TRACKER_2026_09_14.md
   - Docs/Design/2026-09-15-uat-cycle-2-repairs.md
-  - IMPLEMENTATION_PLAN_uat_cycle_2.md
+  - Docs/Plans/IMPLEMENTATION_PLAN_uat_cycle_2.md
   - Docs/Design/2026-09-15-uat-cycle-3-repairs.md
-  - IMPLEMENTATION_PLAN_uat_cycle_3.md
+  - Docs/Plans/IMPLEMENTATION_PLAN_uat_cycle_3.md
 ---
 
 ## Description
@@ -127,7 +127,7 @@ Cycle4 remains frozen at product7c9409fad2 while fresh single and multi matrices
 
 Cycle4 frozen execution closed on product7c9409fad2. Both mode FINAL_REPORT matrices retained;16new findings102-117 map to43-57 plus scope follow-ups058/067. Independent evidence review verified203single hashes and62diagnosis hashes;28multi JSON parse; no material outcome contradictions. Correcting historical current-status/provider labels before checkpoint. Single disconnected local Chat is expected connection-only retention; no cross-account leakage claim. Full acceptance is not achieved. Next: preserve checkpoint, integrate newer dev under32, execute cycle4 repairs and focused verification before another full fresh pass.
 
-Cycle4 repair design Docs/Design/2026-09-16-uat-cycle-4-repairs.md and IMPLEMENTATION_PLAN_uat_cycle_4.md written. Independent initial domains:44/51Chat acknowledgement;47/55consolidated model handoff;46safe summarization;root45minimize. Shared chat_service and AnalysisModal follow-ups serialize after owners release. No full new UAT until reviewed fixes and targeted checks pass.
+Cycle4 repair design Docs/Design/2026-09-16-uat-cycle-4-repairs.md and Docs/Plans/IMPLEMENTATION_PLAN_uat_cycle_4.md written. Independent initial domains:44/51Chat acknowledgement;47/55consolidated model handoff;46safe summarization;root45minimize. Shared chat_service and AnalysisModal follow-ups serialize after owners release. No full new UAT until reviewed fixes and targeted checks pass.
 
 Cycle4 reviewed repair checkpoints committed: feedback/minimize6d2f3abc55, model-selection0dcca3c032, analysis8128c93c1b, accessibilitydb141cbd90, hidden-tab transporte4552e4764, Chat acknowledgements+inventory14f33af27c. Tracker and plan now distinguish reviewed code from pending targeted native/full UAT. Remaining Chat/QA/title/form units active. Review raw Markdown confirmed existing060 omission under task17; permanent reading-pane regression begins.
 
@@ -156,7 +156,7 @@ Follow-up checkpoint: ordinary text Retry108 and Settings title/disconnect/recon
 
 Cycle5 checkpoint08:48UTC: source remains ab527eb3b4; docs/evidence d9c8854ec0.283 retained captures independently SHA256-verified, scanned0credential matches. New findings126-130/TASK13260.66-.70 tracked during frozen matrix. Both Biology5 and ordinary Chat/reload pass; multi naturalexpiredtoken refresh passes with1830.947sec untouched interval and ownNotes200; realfailedChat Retry preserves canonicaluser. Singlefile/soleDeleteTrashRestore/Review/reanalysis/failurepreserve pass. ExactsingleWikipedia AccessBlockedtruthful; dependentjourneyblocked. Read-only actualcomponent probes confirm127reattachStrictMode,128Cramreorder,130catalogidentity. Remainingworkflowrows stillrunning; no fullUATsignoff.
 
-Prepared bounded post-cycle5 design Docs/Design/2026-09-16-uat-cycle-5-repairs.md and unique IMPLEMENTATION_PLAN_uat_cycle_5.md while product remainsfrozen. Five new126-130 plus reopened068/task15 require repairs. Stage1currentmatricesstillrunning; no implementation dispatch untilbothfinishand evidencepreserved. Four-stageplan recordsdisjoint existingagentownership andindependentreview, targetednative acceptance, thennextfreshmatrix.
+Prepared bounded post-cycle5 design Docs/Design/2026-09-16-uat-cycle-5-repairs.md and unique Docs/Plans/IMPLEMENTATION_PLAN_uat_cycle_5.md while product remainsfrozen. Five new126-130 plus reopened068/task15 require repairs. Stage1currentmatricesstillrunning; no implementation dispatch untilbothfinishand evidencepreserved. Four-stageplan recordsdisjoint existingagentownership andindependentreview, targetednative acceptance, thennextfreshmatrix.
 
 Cycle5 checkpoint09:23UTC: frozen ab527eb3b4 remains source-clean. New findings126-133 plus reopened068 tracked; task72 owns Retry context ordering133, task73 owns FTS fallback132. Both real Media reanalysis/failure-preservation workflows pass. Both new Character completion/reload pass but picker replacement fails. Reciprocal owner API/browser controls pass with search filtering kept separate. Natural away-return expiry passes; later active sessions401 polling under diagnosis. Single intentional API offline window now beginning after successful visible disconnect/key reentry. 636 evidence captures independently verified by SHA256/length at latest checkpoint; no credential matches. Design and new plan updated before implementation.
 
@@ -210,9 +210,9 @@ SQLite multi-user checkpoint retained/reviewed: output/playwright/fresh-matrix-2
 
 2026-09-17 17:35UTC PostgreSQL multi native matrix: real natural expiry1829.414s after1800s login passes401→refresh200→Alice2/ownNotes200. Pirate Note/card/provenance/backlink pass; Study235/240/242 reproduced; exactWikipedia access denied/no storedsource. TestBot actualcomplete-v2 headers200 but no visibleanswer then45s timeout; read-onlydiagnosis pending, nocompletionpass. Reciprocalisolationandoutagerecovery underway. Frozen8f8774e6 unchanged;15new231–245 remainunresolved.
 
-Completed all48frozenmatrixoutcomes; finalPGmulti packet186payloads pending independentretentionreview.16new231–246 remainopen. Added Docs/Design/2026-09-17-fresh-matrix-repairs-231-246.md and IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md for boundedrepairs, combinedchecks/nativeacceptance, thenonly a newfullmatrix. Existinguserfix-allauthorization persists. Allapps/browsersstopped, officialPGholders/dataretained.
+Completed all48frozenmatrixoutcomes; finalPGmulti packet186payloads pending independentretentionreview.16new231–246 remainopen. Added Docs/Design/2026-09-17-fresh-matrix-repairs-231-246.md and Docs/Plans/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md for boundedrepairs, combinedchecks/nativeacceptance, thenonly a newfullmatrix. Existinguserfix-allauthorization persists. Allapps/browsersstopped, officialPGholders/dataretained.
 
-Final frozen matrix retention approved: pg-multi-completed-1751 has 186 payloads / 1,524,044 bytes, all 83 distinct row references and 15 frozen harness hashes verified. Manifest 1d4d60585e9cb0a48544ce212448559f51a4592f7b1bd93ca04f1be6b4f2c593; review 4cab6a7cc70de0a2c63e0f2192bbed62f3e72b057c952f14fbbcad5ef73e9254; 191-file auxiliary index d36de0b89bb1c60c79ad501d9f37f9bab2e683c31de7c183def0bc1db4d437f6. All 48 outcomes accounted for with failures; 16 new findings 231-246 remain open. Owned apps/browser stopped; official PostgreSQL holders/data retained. Evidence-only commit: no product source changes, Bandit not applicable. Repairs follow Docs/Design/2026-09-17-fresh-matrix-repairs-231-246.md and IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md; no new full UAT before reviewed repairs/dispositions and original native acceptance.
+Final frozen matrix retention approved: pg-multi-completed-1751 has 186 payloads / 1,524,044 bytes, all 83 distinct row references and 15 frozen harness hashes verified. Manifest 1d4d60585e9cb0a48544ce212448559f51a4592f7b1bd93ca04f1be6b4f2c593; review 4cab6a7cc70de0a2c63e0f2192bbed62f3e72b057c952f14fbbcad5ef73e9254; 191-file auxiliary index d36de0b89bb1c60c79ad501d9f37f9bab2e683c31de7c183def0bc1db4d437f6. All 48 outcomes accounted for with failures; 16 new findings 231-246 remain open. Owned apps/browser stopped; official PostgreSQL holders/data retained. Evidence-only commit: no product source changes, Bandit not applicable. Repairs follow Docs/Design/2026-09-17-fresh-matrix-repairs-231-246.md and Docs/Plans/IMPLEMENTATION_PLAN_fresh_matrix_231_246_repairs.md; no new full UAT before reviewed repairs/dispositions and original native acceptance.
 
 2026-09-18 targeted checkpoint:277 findings,276verified and one open261 model-output failure. Original PostgreSQL multi-user catalogue containment276 and truthful deletion wording277 accepted on committedc137 after26checks54inputs and89rootretention comparisons; tasks217/218Done. Packet14b1ccd4f63717037542fb83839bd7f327dd47ca72cf74ff8c752d5dd325088d. Original single-user PostgreSQL261 bounded diagnosis captured one nonexact and one exact final with matching current message/allowlisted-settings fingerprints; both persisted,25checks56inputs pass, ordinarybackend restored. No actionable application defect established; original exact criterion and failure remain. Owner asked whether to continue fullUAT with261 open or retain the full-run gate. No answer assumed; next fresh SQLite/PostgreSQL single/multi48-outcome matrix has not started.
 

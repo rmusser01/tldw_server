@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+import threading
 from collections.abc import Iterator
 
 import pytest
@@ -86,7 +88,10 @@ def route_client(
     app.include_router(prompt_studio_prompts.router)
 
     async def override_db():
-        yield isolated_db
+        try:
+            yield isolated_db
+        finally:
+            isolated_db.close_connection()
 
     app.dependency_overrides[get_prompt_studio_db] = override_db
     app.dependency_overrides[get_prompt_studio_user] = lambda: {
@@ -99,6 +104,29 @@ def route_client(
     )
     with TestClient(app) as client:
         yield client, isolated_db, project["id"]
+
+
+def test_route_client_releases_request_thread_sqlite_handle(route_client, monkeypatch) -> None:
+    client, db, project_id = route_client
+    main_thread = threading.get_ident()
+    db_path = db._impl.db_path_str
+    request_connections = []
+    original_connect = sqlite3.connect
+
+    def tracked_connect(database, *args, **kwargs):
+        connection = original_connect(database, *args, **kwargs)
+        if threading.get_ident() != main_thread and str(database) == db_path:
+            request_connections.append(connection)
+        return connection
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sqlite3, "connect", tracked_connect)
+        response = client.get(f"/api/v1/prompt-studio/prompts/list/{project_id}")
+
+    assert response.status_code == 200
+    assert request_connections
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        request_connections[-1].execute("SELECT 1")
 
 
 def _mutation_state(db: PromptStudioDatabase) -> tuple[tuple[tuple, ...], tuple[tuple, ...]]:

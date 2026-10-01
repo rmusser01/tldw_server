@@ -223,10 +223,18 @@ const assertOwnerLease = (
   if (
     opts?.signal?.aborted ||
     opts?.validate_lease?.() === false ||
-    (owner.kind === "native" && !owner.validate_lease())
+    (owner.kind !== "unavailable" && owner.validate_lease?.() === false)
   )
     fail("request_config_scope_changed")
 }
+const localOptions = (
+  owner: LocalHistoryOwnerV1,
+  opts?: HistoryOperationOptions
+): HistoryOperationOptions => ({
+  ...opts,
+  validate_lease: () =>
+    owner.validate_lease?.() !== false && opts?.validate_lease?.() !== false
+})
 const nativeOptions = (owner: NativeHistoryOwnerV1, signal?: AbortSignal) => ({
   requestScope: owner.request_scope,
   scope: owner.scope,
@@ -263,7 +271,7 @@ export const captureHistorySnapshot = async (
         owner,
         view as HistoryViewSelectionV1,
         purpose,
-        { signal }
+        localOptions(owner, { signal })
       )
     )
   }
@@ -414,7 +422,10 @@ export const confirmLegacyHistoryProjection = async (
   )
     fail("stale_selection")
   if (owner.kind === "local")
-    return confirmLocalHistoryProjection(owner, scope, intent, { signal, view })
+    return confirmLocalHistoryProjection(owner, scope, intent, {
+      ...localOptions(owner, { signal }),
+      view
+    })
   assertNativeBinding(owner, intent)
   const pendingView = structuredClone(view)
   const origin = await savePendingHistoryConfirmation(
@@ -566,7 +577,7 @@ export const appendSelectedUser = async (
   assertOwnerLease(owner, opts)
   if (owner.kind === "unavailable") return fail(owner.code)
   if (owner.kind === "local")
-    return appendLocalSelectedUser(owner, selection, input, opts)
+    return appendLocalSelectedUser(owner, selection, input, localOptions(owner, opts))
   assertNativeBinding(owner, selection, true)
   if (
     input.history_id !== owner.conversation_id ||
@@ -612,7 +623,7 @@ export const settleAcceptedAssistant = async (
   assertOwnerLease(owner, opts)
   if (owner.kind === "unavailable") return fail(owner.code)
   if (owner.kind === "local")
-    return settleLocalAcceptedAssistant(owner, admission, input, opts)
+    return settleLocalAcceptedAssistant(owner, admission, input, localOptions(owner, opts))
   // Every versioned write requires the live endpoint handshake, including settlement.
   assertNativeBinding(owner, admission, true)
   if (

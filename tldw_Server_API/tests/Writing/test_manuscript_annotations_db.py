@@ -111,25 +111,29 @@ def test_fresh_db_creates_manuscript_annotations_table(raw_db):
 
 def test_sqlite_v50_migration_routes_to_current_schema(tmp_path, monkeypatch):
     db_path = tmp_path / "migrating.db"
-
-    # Build a genuine v50 database from the registered historical steps. Downgrading a
-    # current database by dropping tables no longer works: later steps fail closed on
-    # objects that already exist (e.g. v58->v59, 6202f62b92).
     def initialize_historical(db: CharactersRAGDB) -> None:
         with db.transaction() as conn:
             db._apply_schema_v4(conn)
-            for prior in range(4, 50):
-                db._run_sqlite_linear_migration_step(conn, from_version=prior, target_version=50, initial_version=4)
-            assert db._get_db_version(conn) == 50
+            steps = db._sqlite_linear_migration_steps()
+            for version in range(4, 50):
+                steps[version](conn)
+                assert db._get_db_version(conn) == version + 1
 
     with monkeypatch.context() as patch:
         patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 50)
         patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical)
-        historical = CharactersRAGDB(str(db_path), client_id="test_client")
+        seed = CharactersRAGDB(db_path, "test_client")
     try:
-        assert "manuscript_annotations" not in _table_names(historical)
+        with seed.transaction() as conn:
+            assert seed._get_db_version(conn) == 50
+            assert {"manuscript_annotations", "note_attachments"}.isdisjoint(seed._sqlite_table_names(conn))
+            conn.execute(
+                "INSERT INTO manuscript_projects (id, title, client_id) VALUES (?, ?, ?)",
+                ("retained-project", "Historical manuscript", seed.client_id),
+            )
+            before = dict(conn.execute("SELECT * FROM manuscript_projects").fetchone())
     finally:
-        historical.close_connection()
+        seed.close_all_connections()
 
     migrated = CharactersRAGDB(str(db_path), client_id="test_client")
     try:
@@ -139,8 +143,11 @@ def test_sqlite_v50_migration_routes_to_current_schema(tmp_path, monkeypatch):
         assert "CHECK(anchor_status IN ('scene_level','attached','reattached','needs_review'))" in table_sql
         assert "idx_mann_project_target" in _index_names(migrated)
         assert "manuscript_annotations_sync_create" in _trigger_names(migrated)
+        with migrated.transaction() as conn:
+            after = dict(conn.execute("SELECT * FROM manuscript_projects WHERE id = ?", (before["id"],)).fetchone())
+        assert all(after[key] == value for key, value in before.items())
     finally:
-        migrated.close_connection()
+        migrated.close_all_connections()
 
 
 def test_postgres_v50_migration_script_contract_and_routing():

@@ -1,7 +1,7 @@
 import React from "react"
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
+import { render, screen, fireEvent } from "@testing-library/react"
+import { MemoryRouter, useNavigate, useLocation } from "react-router-dom"
 
 vi.mock("@/components/Common/PageAssistLoader", () => ({
   PageAssistLoader: ({ label }: { label: string }) => (
@@ -169,4 +169,19 @@ describe("DeferredOptionsRoute", () => {
       await screen.findByTestId("deferred-provider-keys-route")
     ).toBeInTheDocument()
   })
+})
+
+
+it.each(["/knowledge", "/chat", "/media", "/media-multi"])("UAT381 shows loading while replacing the settings registry with %s", async destination => {
+  const RouteSwitcher = () => {
+    const navigate = useNavigate()
+    const location = useLocation()
+    return <><button onClick={() => navigate(destination)}>Navigate</button><DeferredOptionsRoute attemptedRoute={location.pathname} capabilities={null} capabilitiesLoading={false} label="Loading options..." description="Preparing routes" /></>
+  }
+  render(<MemoryRouter initialEntries={["/settings/chat"]}><RouteSwitcher /></MemoryRouter>)
+  await screen.findByTestId("deferred-settings-route")
+  fireEvent.click(screen.getByRole("button", {name:"Navigate"}))
+  expect(screen.queryByTestId("route-not-found")).toBeNull()
+  expect(screen.getByTestId("route-loader")).toBeInTheDocument()
+  await screen.findByTestId(destination === "/knowledge" ? "deferred-knowledge-route" : destination === "/chat" ? "deferred-chat-route" : destination === "/media" ? "deferred-media-view-route" : "deferred-media-review-route")
 })

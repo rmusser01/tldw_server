@@ -1,3 +1,6 @@
+import { isDeepStrictEqual } from "node:util"
+import { assertPlaywrightNoSkips } from "../assert-playwright-no-skips.mjs"
+
 function emptyProjectResult() {
   return { passed: 0, failed: 0, skipped: 0, interrupted: 0, elapsedMs: 0 }
 }
@@ -5,16 +8,31 @@ function emptyProjectResult() {
 export function parseListOutput(output) {
   const counts = {}
   for (const line of String(output).split(/\r?\n/)) {
-    const match = line.match(/^\s*\[(tier-[123])\]\s+›/)
+    const match = line.match(/^\s*\[([^\]]+)\]\s+›/)
     if (match) counts[match[1]] = (counts[match[1]] ?? 0) + 1
   }
   return counts
 }
 
-function visitSpecs(node, callback) {
-  for (const spec of node?.specs ?? []) callback(spec)
-  for (const suite of node?.suites ?? []) visitSpecs(suite, callback)
+function visitSpecs(node, callback, parents = []) {
+  // The file-level suite is redundant with spec.file; describe titles are not.
+  const isFileSuite = node?.line === 0 && node?.title === node?.file
+  const titles = node?.title && !isFileSuite ? [...parents, node.title] : parents
+  for (const spec of node?.specs ?? []) callback(spec, [...titles, spec.title])
+  for (const suite of node?.suites ?? []) visitSpecs(suite, callback, titles)
 }
+
+export function collectPlaywrightCases(report) {
+  const cases = []
+  visitSpecs(report, (spec, titlePath) => {
+    for (const test of spec.tests ?? []) {
+      cases.push({ project: test.projectName, file: spec.file, titlePath, playwrightId: spec.id })
+    }
+  })
+  return cases
+}
+
+const caseKey = ({ project, file, titlePath }) => JSON.stringify([project, file, titlePath])
 
 export function summarizePlaywrightReport(report) {
   const summary = {}
@@ -44,7 +62,13 @@ export function assertProjectAccounting({
   listed,
   results,
   allowSkips = false,
+  requiredCases = undefined,
+  registeredCases = undefined,
+  report = undefined,
+  runContext = undefined,
 }) {
+  if (registeredCases !== undefined) assertRegisteredCases({ registeredCases, report, allowSkips })
+  if (requiredCases !== undefined) assertRequiredCases({ requiredCases, report, runContext })
   for (const project of projects) {
     const expected = listed[project] ?? 0
     const result = results[project] ?? emptyProjectResult()
@@ -116,7 +140,8 @@ export function renderMarkdownReport({
   inventory = [],
   health = {},
   artifacts = {},
-  certification = true,
+  certification = false,
+  report = undefined,
   skippedTests = [],
   error = null,
 }) {
@@ -182,6 +207,90 @@ export function renderMarkdownReport({
     }
   }
 
+  if (report) {
+    const cell = (value) => String(value ?? "").replaceAll("|", "\\|").replaceAll("\n", " ")
+    lines.push("", "## Individual attempts", "", "| Project | File / full title | Outcome | Attempt | Evidence |", "| --- | --- | --- | ---: | --- |")
+    visitSpecs(report, (spec, titlePath) => {
+      for (const test of spec.tests ?? []) {
+        const attempts = test.results?.length ? test.results : [{ status: "unrun", retry: 0 }]
+        for (const attempt of attempts) {
+          const evidence = (attempt.attachments ?? []).map(attachment => attachment.path ?? attachment.name).join(", ")
+          lines.push(`| ${cell(test.projectName)} | ${cell(spec.file)} / ${cell(titlePath.join(" > "))} | ${cell(attempt.status)} | ${attempt.retry ?? 0} | ${cell(evidence)} |`)
+        }
+      }
+    })
+  }
+
   if (error) lines.push("", "## Runner error", "", String(error))
   return `${lines.join("\n")}\n`
+}
+
+// The runner must independently verify these source/artifact hashes against its
+// owned runtime before recording runContext in Playwright metadata. This check
+// binds receipts; it does not prove a server is running the claimed artifact.
+function assertRequiredCases({ requiredCases, report, runContext }) {
+  const stats = assertPlaywrightNoSkips(report)
+  const sha256 = (value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value)
+  if (!runContext || !["sqlite-single", "sqlite-multi", "pg-single", "pg-multi"].includes(runContext.cell) ||
+      !["web", "extension-options", "extension-sidepanel", "cross-surface"].includes(runContext.surface) ||
+      !["clean-install", "fresh-state", "supported-upgrade"].includes(runContext.phase) ||
+      !/^[a-f0-9]{40}$/.test(runContext.revision ?? "") || !sha256(runContext.sourceSha256) ||
+      !sha256(runContext.artifacts?.backend) ||
+      (runContext.surface !== "web" && !sha256(runContext.artifacts?.extension)) ||
+      (["web", "cross-surface"].includes(runContext.surface) && !sha256(runContext.artifacts?.web))) {
+    throw new Error("Required-case accounting needs complete candidate/cell/surface/phase provenance")
+  }
+  if (!isDeepStrictEqual(runContext, report.config?.metadata?.uat)) {
+    throw new Error("Playwright candidate provenance differs from the planned run")
+  }
+  if (!Array.isArray(requiredCases) || !requiredCases.length) {
+    throw new Error("Required case manifest must not be empty")
+  }
+  const planned = new Set()
+  const caseIds = new Set()
+  for (const entry of requiredCases) {
+    if (![entry.id, entry.project, entry.file, entry.workflow, entry.variant].every(value => typeof value === "string" && value.trim()) ||
+        !Array.isArray(entry.titlePath) || !entry.titlePath.length ||
+        !entry.titlePath.every(value => typeof value === "string" && value.trim())) {
+      throw new Error("Each required case needs id, project, file, full titlePath, workflow and variant")
+    }
+    const identity = caseKey(entry)
+    if (planned.has(identity) || caseIds.has(entry.id)) throw new Error(`Duplicate required case: ${entry.id}`)
+    planned.add(identity)
+    caseIds.add(entry.id)
+    const project = report.config?.projects?.find(p => p.name === entry.project)
+    if (!project || project.retries !== 0 || project.repeatEach !== 1) {
+      throw new Error(`Required project ${entry.project} must use retries0 and repeatEach1`)
+    }
+  }
+  assertRegisteredCases({ registeredCases: requiredCases, report, allowSkips: false })
+  if (stats.expected !== planned.size) throw new Error("Playwright statistics disagree with exact case results")
+}
+
+
+/** Compare actual first attempts to the exact collection; this does not certify a release. */
+function assertRegisteredCases({ registeredCases, report, allowSkips }) {
+  if (!Array.isArray(registeredCases) || !registeredCases.length) {
+    throw new Error("Registered case inventory must not be empty")
+  }
+  const planned = new Set(registeredCases.map(caseKey))
+  if (planned.size !== registeredCases.length) throw new Error("Duplicate registered case identity")
+  const observed = new Set()
+  visitSpecs(report, (spec, titlePath) => {
+    for (const test of spec.tests ?? []) {
+      const identity = caseKey({ project: test.projectName, file: spec.file, titlePath })
+      if (!planned.has(identity)) throw new Error(`Unexpected registered-case result: ${identity}`)
+      if (observed.has(identity)) throw new Error(`Duplicate registered-case result: ${identity}`)
+      observed.add(identity)
+      if (allowSkips && test.status === "skipped" &&
+          (!test.results?.length || (test.results.length === 1 && test.results[0].status === "skipped"))) continue
+      if (test.status !== "expected" || test.expectedStatus !== "passed" || test.results?.length !== 1 ||
+          test.results[0].status !== "passed" || test.results[0].retry !== 0) {
+        throw new Error(`Registered case did not pass its first attempt: ${identity}`)
+      }
+    }
+  })
+  const missing = [...planned].filter(identity => !observed.has(identity))
+  if (missing.length) throw new Error(`Missing registered cases: ${missing.join(", ")}`)
+  if (report.errors?.length) throw new Error("Playwright reported a global execution error")
 }

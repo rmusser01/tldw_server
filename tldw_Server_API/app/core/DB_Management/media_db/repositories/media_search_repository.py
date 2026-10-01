@@ -19,6 +19,51 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import (
     require_media_database_like,
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
+
+
+def append_sqlite_media_visibility(conditions: list[str], params: list[Any]) -> None:
+    """Apply the current personal/shared scope to a query using Media alias m.
+
+    Args:
+        conditions: Mutable SQL predicates; append the current visibility filter.
+        params: Mutable bound values; append owner/team/org IDs in predicate order.
+
+    Returns:
+        None. An absent scope or admin scope leaves both inputs unchanged. A
+        non-admin scope without any identity adds a deny-all condition.
+
+    Raises:
+        No expected application exceptions; callers must supply mutable lists.
+    """
+    scope = get_scope()
+    if scope is None or scope.is_admin:
+        return
+    visibility_parts: list[str] = []
+    user_id_str = str(scope.user_id) if scope.user_id is not None else ""
+    if user_id_str:
+        visibility_parts.append(
+            "(COALESCE(m.visibility, 'personal') = 'personal' "
+            "AND (COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ?))"
+        )
+        params.append(user_id_str)
+    if scope.team_ids:
+        team_placeholders = ",".join("?" * len(scope.team_ids))
+        visibility_parts.append(
+            f"(m.visibility = 'team' AND m.team_id IN ({team_placeholders}))"
+        )
+        params.extend(scope.team_ids)
+    if scope.org_ids:
+        org_placeholders = ",".join("?" * len(scope.org_ids))
+        visibility_parts.append(
+            f"(m.visibility = 'org' AND m.org_id IN ({org_placeholders}))"
+        )
+        params.extend(scope.org_ids)
+
+    if visibility_parts:
+        conditions.append(f"({' OR '.join(visibility_parts)})")
+    else:
+        conditions.append("(0 = 1)")
 
 
 def _append_case_insensitive_like(
@@ -64,6 +109,17 @@ LEFT JOIN (
     ) latest_document_versions
     WHERE row_number = 1
 ) latest_source_metadata ON latest_source_metadata.media_id = m.id
+"""
+
+SQLITE_LATEST_SOURCE_METADATA_JOIN = """
+LEFT JOIN DocumentVersions latest_source_metadata
+    ON latest_source_metadata.id = (
+        SELECT dv.id
+        FROM DocumentVersions dv
+        WHERE dv.media_id = m.id AND dv.deleted = 0
+        ORDER BY dv.version_number DESC, dv.id DESC
+        LIMIT 1
+    )
 """
 
 
@@ -182,6 +238,14 @@ class MediaSearchRepository:
         ]
         count_select = "COUNT(DISTINCT m.id)"
         base_from = "FROM Media m"
+        # SQLite otherwise materializes all version metadata and scans it once
+        # per matching media row. The existing media/version index supports
+        # selecting each row's newest live version directly.
+        metadata_join = (
+            SQLITE_LATEST_SOURCE_METADATA_JOIN
+            if backend_type == BackendType.SQLITE
+            else LATEST_SOURCE_METADATA_JOIN
+        )
         joins: list[str] = []
         conditions: list[str] = ["m.system_operation_id IS NULL"]
         params: list[Any] = []
@@ -210,41 +274,7 @@ class MediaSearchRepository:
             conditions.append("m.is_trash = 0")
 
         if backend_type == BackendType.SQLITE:
-            try:
-                scope = get_scope()
-            except Exception as scope_err:  # pragma: no cover - defensive
-                logger.debug(
-                    "Failed to resolve scope for SQLite visibility filter; falling back to no scope: {}",
-                    scope_err,
-                )
-                scope = None
-
-            if scope and not scope.is_admin:
-                visibility_parts: list[str] = []
-                user_id_str = str(scope.user_id) if scope.user_id is not None else ""
-                if user_id_str:
-                    visibility_parts.append(
-                        "(COALESCE(m.visibility, 'personal') = 'personal' "
-                        "AND (COALESCE(CAST(m.owner_user_id AS TEXT), m.client_id) = ?))"
-                    )
-                    params.append(user_id_str)
-                if scope.team_ids:
-                    team_placeholders = ",".join("?" * len(scope.team_ids))
-                    visibility_parts.append(
-                        f"(m.visibility = 'team' AND m.team_id IN ({team_placeholders}))"
-                    )
-                    params.extend(scope.team_ids)
-                if scope.org_ids:
-                    org_placeholders = ",".join("?" * len(scope.org_ids))
-                    visibility_parts.append(
-                        f"(m.visibility = 'org' AND m.org_id IN ({org_placeholders}))"
-                    )
-                    params.extend(scope.org_ids)
-
-                if visibility_parts:
-                    conditions.append(f"({' OR '.join(visibility_parts)})")
-                else:
-                    conditions.append("(0 = 1)")
+            append_sqlite_media_visibility(conditions, params)
 
         if media_ids_filter:
             if not all(isinstance(media_id, (int, str)) for media_id in media_ids_filter):
@@ -340,21 +370,27 @@ class MediaSearchRepository:
                         fts_query_parts.append(search_query.lower())
 
                 combined_fts_query = " OR ".join(fts_query_parts)
-                logger.debug(f"Combined FTS query: '{combined_fts_query}'")
-                logger.info(f"Search using FTS with query parts: {fts_query_parts}")
+                logger.info("Media search using FTS (query_part_count={})", len(fts_query_parts))
 
                 if backend_type == BackendType.SQLITE:
-                    if not any("media_fts fts" in join_item for join_item in joins):
-                        joins.append("JOIN media_fts fts ON fts.rowid = m.id")
+                    # COUNT's planner otherwise scans Media and restarts MATCH
+                    # for every row. Keep one FTS scan, then primary-key media
+                    # lookups, retaining every visibility and filter predicate.
+                    base_from = "FROM media_fts fts CROSS JOIN Media m ON fts.rowid = m.id"
                     conditions.append("media_fts MATCH ?")
                     params.append(combined_fts_query)
                     fts_condition_index = len(conditions) - 1
                     fts_param_index = len(params) - 1
                 elif backend_type == BackendType.POSTGRESQL:
-                    postgres_tsquery = FTSQueryTranslator.normalize_query(
-                        combined_fts_query,
-                        "postgresql",
-                    )
+                    if search_query.startswith('"') and search_query.endswith('"'):
+                        # A wholly quoted phrase otherwise follows the simple
+                        # word normalizer and loses ordered-position matching.
+                        postgres_tsquery = FTSQueryTranslator.sqlite_to_postgres(combined_fts_query)
+                    else:
+                        postgres_tsquery = FTSQueryTranslator.normalize_query(
+                            combined_fts_query,
+                            "postgresql",
+                        )
                     if postgres_tsquery:
                         conditions.append("m.media_fts_tsv @@ to_tsquery('english', ?)")
                         params.append(postgres_tsquery)
@@ -417,7 +453,7 @@ class MediaSearchRepository:
                     like_conditions.append(f"({' OR '.join(like_parts)})")
 
             if like_conditions:
-                logger.info(f"Search using LIKE with patterns: {like_params}")
+                logger.info("Media search using LIKE (pattern_count={})", len(like_params))
                 conditions.append(f"({' OR '.join(like_conditions)})")
                 params.extend(like_params)
         elif sanitized_text_search_fields:
@@ -442,13 +478,21 @@ class MediaSearchRepository:
             elif backend_type == BackendType.POSTGRESQL and postgres_tsquery:
                 if not any("relevance_score" in part for part in base_select_parts):
                     if boost_fields_supplied:
+                        # PostgreSQL requires each weight <= 1. Scale every
+                        # category equally to retain requested boost ratios.
+                        weight_scale = max(1.0, title_boost, content_boost)
                         postgres_weights_literal = (
-                            f"{content_boost:.6f},1.000000,{content_boost:.6f},{title_boost:.6f}"
+                            f"{1.0 / weight_scale:.6f},{content_boost / weight_scale:.6f},"
+                            f"{1.0 / weight_scale:.6f},{title_boost / weight_scale:.6f}"
                         )
                         base_select_parts.append(
                             "ts_rank("
                             f"ARRAY[{postgres_weights_literal}]::float4[], "
-                            "m.media_fts_tsv, to_tsquery('english', ?)"
+                            # The generic trigger stores an unweighted vector;
+                            # explicit boosts rank fixed title A/content C fields.
+                            "setweight(to_tsvector('english', COALESCE(m.title, '')), 'A') || "
+                            "setweight(to_tsvector('english', COALESCE(m.content, '')), 'C'), "
+                            "to_tsquery('english', ?)"
                             ") AS relevance_score"
                         )
                     else:
@@ -517,12 +561,12 @@ class MediaSearchRepository:
             try:
                 count_cursor = db.execute_query(count_sql, tuple(count_params_seq))
                 total_matches = _extract_total(count_cursor.fetchone())
-                logger.info(f"Search query '{search_query}' found {total_matches} total matches")
+                logger.info("Media search count completed (match_count={})", total_matches)
             except (sqlite3.OperationalError, DatabaseError) as exc:
                 if not _is_sqlite_fts_query_error(exc):
                     raise
 
-                logger.warning(f"FTS MATCH error, falling back to LIKE-only search: {exc}")
+                logger.warning("Media search FTS fallback (error_type={})", exception_type_for_log(exc))
                 fallback_conditions, fallback_params, fallback_joins = _literal_fts_fallback()
 
                 if not fallback_conditions and not fallback_params and not fallback_joins and not search_query:
@@ -540,6 +584,7 @@ class MediaSearchRepository:
                 conditions[:] = fallback_conditions
                 params[:] = fallback_params
                 joins[:] = fallback_joins
+                base_from = "FROM Media m"
                 fts_condition_index = None
                 fts_param_index = None
                 join_clause = " ".join(list(dict.fromkeys(joins)))
@@ -549,12 +594,12 @@ class MediaSearchRepository:
                 logger.debug(f"Fallback Count Params: {params}")
                 count_cursor = db.execute_query(count_sql, tuple(params))
                 total_matches = _extract_total(count_cursor.fetchone())
-                logger.info(f"Fallback search query '{search_query}' found {total_matches} total matches")
+                logger.info("Media search fallback count completed (match_count={})", total_matches)
 
             results_list: list[dict[str, Any]] = []
             if total_matches > 0 and offset < total_matches:
                 results_join_clause = " ".join(
-                    part for part in (join_clause, LATEST_SOURCE_METADATA_JOIN.strip()) if part
+                    part for part in (join_clause, metadata_join.strip()) if part
                 )
                 results_sql = (
                     f"{final_select_stmt} {base_from} {results_join_clause} {where_clause} "
@@ -583,7 +628,7 @@ class MediaSearchRepository:
                     if not _is_sqlite_fts_query_error(exc):
                         raise
 
-                    logger.warning(f"FTS MATCH error in results query, falling back to LIKE-only search: {exc}")
+                    logger.warning("Media search results FTS fallback (error_type={})", exception_type_for_log(exc))
                     fallback_conditions, fallback_params, fallback_joins = _literal_fts_fallback()
 
                     if fts_relevance_added:
@@ -596,12 +641,13 @@ class MediaSearchRepository:
                     conditions[:] = fallback_conditions
                     params[:] = fallback_params
                     joins[:] = fallback_joins
+                    base_from = "FROM Media m"
                     fts_condition_index = None
                     fts_param_index = None
 
                     join_clause = " ".join(list(dict.fromkeys(joins)))
                     results_join_clause = " ".join(
-                        part for part in (join_clause, LATEST_SOURCE_METADATA_JOIN.strip()) if part
+                        part for part in (join_clause, metadata_join.strip()) if part
                     )
                     where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
                     final_select_stmt = f"SELECT DISTINCT {', '.join(base_select_parts)}"
@@ -622,27 +668,22 @@ class MediaSearchRepository:
                         item["safe_metadata"] = _parse_safe_metadata(item.get("safe_metadata"))
                         results_list.append(item)
 
-                titles = [row.get("title", "Untitled") for row in results_list]
-                logger.info(f"Search results for '{search_query}' (page {page}): {titles}")
+                logger.info("Media search page completed (page={}, result_count={})", page, len(results_list))
 
             return results_list, total_matches
         except sqlite3.Error as exc:
             if "no such table: media_fts" in str(exc).lower():
-                logger.exception(
-                    f"FTS table 'media_fts' missing in database '{db.db_path_str}'. Search will fail."
-                )
-                raise DatabaseError(f"FTS table 'media_fts' not found in {db.db_path_str}.") from exc  # noqa: TRY003
+                logger.error("Media search FTS table missing (error_type={})", exception_type_for_log(exc))  # noqa: TRY400 - private query data must not enter a traceback
+                raise DatabaseError("Media search FTS table not found.") from exc  # noqa: TRY003
             logger.error(
-                f"Database error during media search in '{db.db_path_str}': {exc}",
-                exc_info=True,
-            )
-            raise DatabaseError(f"Failed to search media in {db.db_path_str}: {exc}") from exc  # noqa: TRY003
+                "Media search database failure (error_type={})", exception_type_for_log(exc),
+            )  # noqa: TRY400 - private query data must not enter a traceback
+            raise DatabaseError("Failed to search media.") from exc  # noqa: TRY003
         except Exception as exc:
             logger.error(
-                f"Unexpected error during media search in '{db.db_path_str}': {exc}",
-                exc_info=True,
-            )
-            raise DatabaseError(f"An unexpected error occurred during media search: {exc}") from exc  # noqa: TRY003
+                "Media search unexpected failure (error_type={})", exception_type_for_log(exc),
+            )  # noqa: TRY400 - private query data must not enter a traceback
+            raise DatabaseError("An unexpected error occurred during media search.") from exc  # noqa: TRY003
 
 
 __all__ = ["MediaSearchRepository"]

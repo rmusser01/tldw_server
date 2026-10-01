@@ -12,7 +12,7 @@ import hashlib
 import uuid
 from collections.abc import AsyncIterator
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePath, PureWindowsPath
 from typing import BinaryIO
 
 import aiofiles
@@ -23,6 +23,17 @@ from tldw_Server_API.app.core.Storage.storage_interface import (
     StorageBackend,
     StorageError,
 )
+
+
+def _ordinary_windows_path(path: PurePath) -> PurePath:
+    """Use one Windows spelling when comparing resolved storage paths."""
+    if isinstance(path, PureWindowsPath):
+        raw = str(path)
+        if raw.startswith("\\\\?\\UNC\\"):
+            return type(path)("\\\\" + raw[8:])
+        if raw.startswith("\\\\?\\"):
+            return type(path)(raw[4:])
+    return path
 
 
 class FileSystemStorage(StorageBackend):
@@ -91,14 +102,14 @@ class FileSystemStorage(StorageBackend):
             Resolved path if valid, raises StorageError otherwise
         """
         try:
-            resolved = path.resolve()
+            resolved = _ordinary_windows_path(path.resolve())
             try:
-                resolved.relative_to(self.base_path)
+                resolved.relative_to(_ordinary_windows_path(self.base_path))
             except ValueError:
                 raise StorageError(
                     f"Path escapes base directory: {path}",
                     path=str(path),
-                )
+                ) from None
             return resolved
         except Exception as e:
             if isinstance(e, StorageError):

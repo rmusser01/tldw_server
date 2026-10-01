@@ -34,14 +34,19 @@ async def test_org_membership_audit_events_postgres(real_audit_service, test_db_
     )
 
     # Insert admin (role=admin, verified) and target user
-    admin_id = await ensure_test_user(pool, "pgadmin_org_audit", "pgadmin_org_audit@example.com", role="admin", is_verified=True)
-    target_id = await ensure_test_user(pool, "pgvictim_org", "pgvictim_org@example.com", is_verified=True)
+    admin_id = await ensure_test_user(
+        pool, "pgadmin_org_audit", "pgadmin_org_audit@example.com", role="admin", is_verified=True
+    )
+    target_id = await ensure_test_user(
+        pool, "pgvictim_org", "pgvictim_org@example.com", is_verified=True
+    )
 
     # Override AuthPrincipal to treat this user as admin for claim-first gates
-    from tldw_Server_API.app.main import app
-    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
     from starlette.requests import Request
+
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+    from tldw_Server_API.app.main import app
 
     async def _principal_override(request: Request) -> AuthPrincipal:  # type: ignore[override]
         principal = AuthPrincipal(

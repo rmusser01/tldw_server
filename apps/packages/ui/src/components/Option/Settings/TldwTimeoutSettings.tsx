@@ -8,6 +8,7 @@ import {
 import React from "react"
 import type { TFunction } from "i18next"
 import type { MessageInstance } from "antd/es/message/interface"
+import { CHAT_STARTUP_TIMEOUT_DEFAULT_MS } from "@/services/tldw/chat-timeouts"
 
 export type TimeoutPresetKey = "balanced" | "extended"
 
@@ -27,7 +28,7 @@ export const TIMEOUT_PRESETS: Record<TimeoutPresetKey, TimeoutValues> = {
     request: 10,
     stream: 15,
     chatRequest: 120,
-    chatStartup: 120,
+    chatStartup: CHAT_STARTUP_TIMEOUT_DEFAULT_MS / 1_000,
     chatStream: 15,
     ragRequest: 120,
     media: 60,

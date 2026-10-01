@@ -428,6 +428,8 @@ export type DraftSource = {
 }
 
 export type DraftAsset = {
+  /** Absent on legacy rows, which remain hidden until their owner is known. */
+  ownerScope?: string
   id: string
   draftId: string
   kind: "file"
@@ -439,6 +441,8 @@ export type DraftAsset = {
 }
 
 export type ContentDraft = {
+  /** Absent on legacy rows, which remain hidden until their owner is known. */
+  ownerScope?: string
   id: string
   batchId: string
   source: DraftSource
@@ -477,6 +481,8 @@ export type ContentDraft = {
 }
 
 export type DraftBatch = {
+  /** Absent on legacy rows, which remain hidden until their owner is known. */
+  ownerScope?: string
   id: string
   name?: string
   source: "url_list" | "file_upload" | "quick_ingest" | "manual"

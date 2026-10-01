@@ -10,6 +10,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -857,10 +858,19 @@ def test_parent_validates_posix_worker_resource_posture(
     resource_limits: dict[str, bool],
     expected: bool,
 ) -> None:
-    monkeypatch.setattr(safe_regex_module.os, "name", "posix")
-    monkeypatch.setattr(safe_regex_module.sys, "platform", platform)
+    native_os = safe_regex_module.os
+    native_sys = safe_regex_module.sys
+    native_name, native_platform = native_os.name, native_sys.platform
+    monkeypatch.setattr(
+        safe_regex_module, "os", SimpleNamespace(**{**vars(native_os), "name": "posix"})
+    )
+    monkeypatch.setattr(
+        safe_regex_module, "sys", SimpleNamespace(**{**vars(native_sys), "platform": platform})
+    )
 
     assert safe_regex_module._worker_resource_posture_is_acceptable(resource_limits) is expected
+    assert native_os.name == native_name
+    assert native_sys.platform == native_platform
 
 
 def test_stdlib_worker_module_owns_shared_replacement_parser() -> None:

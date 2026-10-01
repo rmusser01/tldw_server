@@ -518,6 +518,23 @@ def build_core_chat_rls_sql() -> list[str]:
     return stmts
 
 
+def build_workspace_chat_startup_rls_sql() -> list[str]:
+    """Keep orphan receipts owner-visible while denying absent or foreign scope."""
+    return ["""
+        DO $workspace_chat_startup_rls$
+        BEGIN
+          IF to_regclass('workspace_chat_startup_receipts') IS NULL THEN RETURN; END IF;
+          ALTER TABLE workspace_chat_startup_receipts ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE workspace_chat_startup_receipts FORCE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS workspace_chat_startup_owner ON workspace_chat_startup_receipts;
+          CREATE POLICY workspace_chat_startup_owner ON workspace_chat_startup_receipts
+            USING (owner_user_id = current_setting('app.current_user_id', true))
+            WITH CHECK (owner_user_id = current_setting('app.current_user_id', true));
+        END
+        $workspace_chat_startup_rls$;
+    """]
+
+
 def build_chacha_rls_sql() -> list[str]:
     """RLS for ChaChaNotes (notes, character_cards) using client_id scoping."""
     stmts: list[str] = []
@@ -924,6 +941,7 @@ def build_chacha_rls_sql() -> list[str]:
     stmts.extend(build_source_review_rls_sql())
     stmts.extend(build_workspace_source_saved_view_rls_sql())
     stmts.extend(build_shared_workspace_chat_rls_sql())
+    stmts.extend(build_workspace_chat_startup_rls_sql())
     # Native fork tables. Written out per table rather than looped over
     # NATIVE_CHAT_TABLES: the RLS coverage ratchet scans source text and cannot
     # see DDL assembled from a loop variable. Keep this list in step with

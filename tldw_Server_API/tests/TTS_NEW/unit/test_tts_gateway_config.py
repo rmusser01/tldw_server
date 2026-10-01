@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import MappingProxyType
@@ -755,8 +756,9 @@ def test_missing_ffmpeg_only_removes_conversion_formats():
 
 @pytest.mark.unit
 def test_gateway_normalization_pins_ffmpeg_identity_and_generation(monkeypatch, tmp_path):
-    first = tmp_path / "first" / "ffmpeg"
-    second = tmp_path / "second" / "ffmpeg"
+    ffmpeg_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+    first = tmp_path / "first" / ffmpeg_name
+    second = tmp_path / "second" / ffmpeg_name
     for executable in (first, second):
         executable.parent.mkdir()
         executable.write_text("#!/bin/sh\nexit 0\n")

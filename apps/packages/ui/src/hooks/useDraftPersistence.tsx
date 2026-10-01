@@ -123,6 +123,8 @@ interface DraftPersistenceOptions {
 
 interface DraftPersistenceResult {
   draftSaved: boolean
+  /** True only after this owner/key has finished restoring its saved draft. */
+  draftReady: boolean
   clearDraft: () => void
 }
 
@@ -153,6 +155,7 @@ export const useDraftPersistence = ({
   const [hydrated, setHydrated] = React.useState<object | null>(null)
   const draftSavedTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingPersistRef = React.useRef<(() => void) | null>(null)
   const setValueRef = React.useRef(setValue)
   const setValueWithMetadataRef = React.useRef(setValueWithMetadata)
   const getMetadataRef = React.useRef(getMetadata)
@@ -166,7 +169,7 @@ export const useDraftPersistence = ({
     setValueWithMetadataRef.current = setValueWithMetadata
   }, [setValueWithMetadata])
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     getMetadataRef.current = getMetadata
   }, [getMetadata])
 
@@ -244,8 +247,14 @@ export const useDraftPersistence = ({
   // Get current value for effect dependency
   const currentValue = getValue()
 
+  React.useLayoutEffect(() => () => {
+    // In-app navigation has no pagehide event. Flush before the persistence
+    // cleanup cancels this write and passive owner teardown revokes its lease.
+    pendingPersistRef.current?.()
+  }, [])
+
   // Persist draft whenever the message changes
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!enabled) return
     if (hydrated !== identity || (isCurrent && !isCurrent())) return
     let cancelled = false
@@ -270,7 +279,12 @@ export const useDraftPersistence = ({
       }
       return
     }
-    persistTimeoutRef.current = setTimeout(() => {
+    const persist = () => {
+      if (pendingPersistRef.current === persist) pendingPersistRef.current = null
+      if (persistTimeoutRef.current) {
+        clearTimeout(persistTimeoutRef.current)
+        persistTimeoutRef.current = null
+      }
       void (async () => {
         if (!current()) return
         let metadata: DraftMetadata | undefined
@@ -299,10 +313,13 @@ export const useDraftPersistence = ({
           setDraftSaved(false)
         }, COMPOSER_CONSTANTS.DRAFT_SAVED_DISPLAY_MS)
       })()
-    }, COMPOSER_CONSTANTS.DRAFT_SAVE_DEBOUNCE_MS)
+    }
+    pendingPersistRef.current = persist
+    persistTimeoutRef.current = setTimeout(persist, COMPOSER_CONSTANTS.DRAFT_SAVE_DEBOUNCE_MS)
 
     return () => {
       cancelled = true
+      if (pendingPersistRef.current === persist) pendingPersistRef.current = null
       if (persistTimeoutRef.current) {
         clearTimeout(persistTimeoutRef.current)
         persistTimeoutRef.current = null
@@ -313,6 +330,21 @@ export const useDraftPersistence = ({
       }
     }
   }, [currentValue, storageKey, enabled, hydrated, identity, isCurrent, draftBucket])
+
+  React.useEffect(() => {
+    // The tab-scoped bucket pins the record synchronously before its durable
+    // write awaits a lock, so a reload cannot drop the pending debounce edit.
+    const flush = () => pendingPersistRef.current?.()
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flush()
+    }
+    window.addEventListener("pagehide", flush)
+    document.addEventListener("visibilitychange", onVisibilityChange)
+    return () => {
+      window.removeEventListener("pagehide", flush)
+      document.removeEventListener("visibilitychange", onVisibilityChange)
+    }
+  }, [])
 
   // Cleanup timeout on unmount
   React.useEffect(() => {
@@ -328,6 +360,7 @@ export const useDraftPersistence = ({
 
   const clearDraft = React.useCallback(() => {
     if (isCurrent && !isCurrent()) return
+    pendingPersistRef.current = null
     if (persistTimeoutRef.current) {
       clearTimeout(persistTimeoutRef.current)
       persistTimeoutRef.current = null
@@ -340,6 +373,7 @@ export const useDraftPersistence = ({
 
   return {
     draftSaved,
+    draftReady: enabled && hydrated === identity && (!isCurrent || isCurrent()),
     clearDraft
   }
 }

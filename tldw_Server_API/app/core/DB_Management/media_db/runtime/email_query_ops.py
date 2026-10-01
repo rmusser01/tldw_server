@@ -266,8 +266,16 @@ def search_email_messages(
         where_params: list[Any] = [resolved_tenant]
 
         group_sql_clauses: list[str] = []
+        count_group_sql_clauses: list[str] = []
+        postgres_label_patterns: dict[int, str] = {}
+        direct_label_count = (
+            self.backend_type == BackendType.SQLITE and len(parsed_groups) == 1
+            and len(parsed_groups[0]) == 1 and parsed_groups[0][0].get("kind") == "label"
+            and not parsed_groups[0][0].get("negated")
+        )
         for group in parsed_groups:
             group_parts: list[str] = []
+            count_group_parts: list[str] = []
             for term in group:
                 kind = str(term.get("kind") or "").strip().lower()
                 value = term.get("value")
@@ -284,16 +292,15 @@ def search_email_messages(
                         f"OR {_email_like_clause(self, participant_display_expr)}"
                     )
                     part_sql = (
-                        "EXISTS ("  # nosec B608
-                        "SELECT 1 FROM email_message_participants emp "
-                        "JOIN email_participants ep ON ep.id = emp.participant_id "
-                        "WHERE emp.email_message_id = em.id "
+                        "em.id IN ("  # nosec B608
+                        "SELECT emp.email_message_id FROM email_participants ep "
+                        "JOIN email_message_participants emp ON emp.participant_id = ep.id "
+                        "WHERE ep.tenant_id = ? "
                         "AND emp.role = ? "
-                        "AND ep.tenant_id = em.tenant_id "
                         f"AND ({participant_text_clause})"
                         ")"
                     )
-                    part_params.extend([role, like_value, like_value])
+                    part_params.extend([resolved_tenant, role, like_value, like_value])
                 elif kind == "subject":
                     like_value = f"%{str(value or '').strip()}%"
                     part_sql = _email_like_clause(self, "COALESCE(em.subject, '')")
@@ -304,21 +311,33 @@ def search_email_messages(
                         f"{_email_like_clause(self, 'el.label_name')} "
                         f"OR {_email_like_clause(self, 'el.label_key')}"
                     )
-                    part_sql = (
-                        "EXISTS ("  # nosec B608
-                        "SELECT 1 FROM email_message_labels eml "
-                        "JOIN email_labels el ON el.id = eml.label_id "
-                        "WHERE eml.email_message_id = em.id "
-                        "AND el.tenant_id = em.tenant_id "
-                        f"AND ({label_text_clause})"
-                        ")"
-                    )
-                    part_params.extend([like_value, like_value])
+                    if self.backend_type == BackendType.POSTGRESQL:
+                        # Resolve the small matching label set in the same
+                        # transaction below. A bound array lets PostgreSQL use
+                        # label-ID frequency statistics for broad labels.
+                        postgres_label_patterns[len(where_params)] = like_value
+                        part_sql = (
+                            "EXISTS (SELECT 1 FROM email_message_labels eml "
+                            "WHERE eml.email_message_id = em.id "
+                            "AND eml.label_id = ANY(?))"
+                        )
+                        part_params.append([])
+                    else:
+                        part_sql = (
+                            "EXISTS ("  # nosec B608
+                            "SELECT 1 FROM email_message_labels eml "
+                            "WHERE eml.email_message_id = em.id "
+                            "AND eml.label_id IN (SELECT el.id FROM email_labels el "
+                            "WHERE el.tenant_id = ? "
+                            f"AND ({label_text_clause}))"
+                            ")"
+                        )
+                        part_params.extend([resolved_tenant, like_value, like_value])
                 elif kind == "has_attachment":
                     bool_true = True if self.backend_type == BackendType.POSTGRESQL else 1
                     part_sql = (
-                        "(em.has_attachments = ? OR EXISTS ("
-                        "SELECT 1 FROM email_attachments ea WHERE ea.email_message_id = em.id"
+                        "(em.has_attachments = ? OR em.id IN ("
+                        "SELECT ea.email_message_id FROM email_attachments ea"
                         "))"
                     )
                     part_params.append(bool_true)
@@ -361,23 +380,61 @@ def search_email_messages(
 
                 if not part_sql:
                     continue
+                count_part_sql = part_sql
+                if kind == "label" and direct_label_count:
+                    count_part_sql = f"el.tenant_id = ? AND ({label_text_clause})"
+                elif kind == "label" and self.backend_type == BackendType.POSTGRESQL:
+                    # Count all matching IDs through the reverse label index;
+                    # the page keeps its lazy per-message membership check.
+                    count_part_sql = (
+                        "em.id IN (SELECT eml.email_message_id FROM email_message_labels eml "
+                        "WHERE eml.label_id = ANY(?))"
+                    )
                 if negated:
                     part_sql = f"NOT ({part_sql})"
+                    count_part_sql = f"NOT ({count_part_sql})"
                 group_parts.append(part_sql)
+                count_group_parts.append(count_part_sql)
                 where_params.extend(part_params)
 
             if group_parts:
                 group_sql_clauses.append("(" + " AND ".join(group_parts) + ")")
+                count_group_sql_clauses.append("(" + " AND ".join(count_group_parts) + ")")
 
+        count_where_clauses = list(where_clauses)
+        if count_group_sql_clauses:
+            count_where_clauses.append("(" + " OR ".join(count_group_sql_clauses) + ")")
         if group_sql_clauses:
             where_clauses.append("(" + " OR ".join(group_sql_clauses) + ")")
 
         where_sql = " AND ".join(where_clauses)
         base_from = (
             " FROM email_messages em "
-            "JOIN Media m ON m.id = em.media_id "
-            "WHERE " + where_sql
+            + ("JOIN Media m INDEXED BY idx_email_media_visibility ON m.id = em.media_id "
+             if self.backend_type == BackendType.SQLITE else "JOIN Media m ON m.id = em.media_id ")
+            + "WHERE " + where_sql
         )
+        count_from = base_from[:base_from.index("WHERE ")] + "WHERE " + " AND ".join(count_where_clauses)
+        graph_only = parsed_groups and all(
+            term.get("kind") in {"participant", "label"} for group in parsed_groups for term in group
+        ) and any(parsed_groups)
+        if self.backend_type == BackendType.SQLITE and graph_only:
+            count_from = count_from.replace(
+                "FROM email_messages em ", "FROM email_messages em INDEXED BY idx_email_messages_identity_cover ",
+            )
+        if direct_label_count:
+            # Count directly through covering links rather than materializing
+            # every matched ID. DISTINCT preserves substring/multiple-label matches.
+            # SQLite otherwise chooses an identity scan to optimize DISTINCT,
+            # then inspects all labels for every email even after ANALYZE.
+            count_from = (
+                " FROM email_labels el CROSS JOIN email_message_labels eml "
+                "INDEXED BY idx_email_label_reverse ON eml.label_id = el.id "
+                "CROSS JOIN email_messages em INDEXED BY idx_email_messages_identity_cover "
+                "ON em.id = eml.email_message_id CROSS JOIN Media m "
+                "INDEXED BY idx_email_media_visibility ON m.id = em.media_id WHERE "
+                + " AND ".join(count_where_clauses)
+            )
         page_from = base_from
         page_params = list(where_params)
         if position is not None:
@@ -395,9 +452,34 @@ def search_email_messages(
             ordering = " ORDER BY em.internal_date DESC NULLS LAST, em.id DESC "
 
         with self.transaction() as conn:
+            if self.backend_type == BackendType.POSTGRESQL:
+                # Repeated parameterized searches must retain label/text
+                # selectivity; a generic prepared plan can become a large
+                # parallel hash join. Restore the session mode at transaction end.
+                self.backend.execute("SET LOCAL plan_cache_mode = 'force_custom_plan'", connection=conn)
+            for parameter_index, pattern in postgres_label_patterns.items():
+                matching_labels = self._fetchall_with_connection(
+                    conn,
+                    "SELECT id FROM email_labels WHERE tenant_id = ? "
+                    "AND (label_name ILIKE ? OR label_key ILIKE ?)",
+                    (resolved_tenant, pattern, pattern),
+                )
+                label_ids = [int(row["id"]) for row in matching_labels]
+                where_params[parameter_index] = label_ids
+                page_params[parameter_index] = label_ids
+            count_select = "SELECT COUNT(*) AS total"
+            if direct_label_count:
+                # One matched label cannot duplicate an email: the link's
+                # composite primary key proves this within the same snapshot.
+                matched_labels = self._fetchone_with_connection(
+                    conn, "SELECT COUNT(*) AS n FROM email_labels el WHERE el.tenant_id = ? "  # nosec B608 - fixed columns; values bound
+                    f"AND ({label_text_clause})", tuple(where_params[1:]),
+                )
+                if int((matched_labels or {}).get("n", 0)) > 1:
+                    count_select = "SELECT COUNT(DISTINCT em.id) AS total"
             count_row = self._fetchone_with_connection(
                 conn,
-                "SELECT COUNT(*) AS total" + base_from,
+                count_select + count_from,
                 tuple(where_params),
             )
             total = int((count_row or {}).get("total", 0) or 0)
@@ -467,14 +549,13 @@ def search_email_messages(
             },
         )
         raise
-    except _MEDIA_NONCRITICAL_EXCEPTIONS as exc:
+    except _MEDIA_NONCRITICAL_EXCEPTIONS:
         _emit_email_metric_counter(
             "email_native_search_requests_total",
             labels={
                 "phase": "error",
                 "query_present": query_present,
                 "include_deleted": include_deleted_label,
-                "error_type": type(exc).__name__,
             },
         )
         raise

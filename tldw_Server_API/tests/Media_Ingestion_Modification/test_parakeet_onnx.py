@@ -1076,7 +1076,7 @@ class TestParakeetONNX:
 
         assert result is not None
         mock_load_model.assert_called_with(
-            custom_path, 'cpu', allow_download=True, execution_route=None
+            custom_path, 'cpu', allow_download=True, execution_route=None,
         )
 
     def test_device_selection(self):
@@ -1092,8 +1092,15 @@ class TestParakeetONNXIntegration:
 
     @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX.load_parakeet_onnx_model')
     @patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Parakeet_ONNX.transcribe_with_parakeet_onnx')
-    def test_integration_with_nemo_module(self, mock_transcribe, mock_load_onnx_model):
+    def test_integration_with_nemo_module(self, mock_transcribe, mock_load_onnx_model, monkeypatch, tmp_path):
         """Test integration with Nemo module."""
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import (
+            Audio_Transcription_Nemo as nemo_mod,
+        )
+
+        monkeypatch.setattr(nemo_mod, "_model_cache", {})
+        cache_dir = tmp_path / "nemo"
+        monkeypatch.setenv("NEMO_CACHE_DIR", str(cache_dir))
         from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo import (
             _model_cache,
             transcribe_with_parakeet,
@@ -1106,9 +1113,13 @@ class TestParakeetONNXIntegration:
 
         audio_data = np.array([0.1, 0.2, 0.3])
 
-        # Need to patch the variant check
+        # Use the current flat STT config seam for the ONNX integration.
         with patch('tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Nemo.get_stt_config') as mock_config:
-            mock_config.return_value = {'nemo_model_variant': 'onnx'}
+            mock_config.return_value = {
+                'nemo_model_variant': 'onnx',
+                'nemo_device': 'cpu',
+                'nemo_cache_dir': str(cache_dir),
+            }
 
             result = transcribe_with_parakeet(audio_data, 16000, variant='onnx')
 

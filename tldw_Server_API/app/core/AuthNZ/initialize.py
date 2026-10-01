@@ -504,8 +504,17 @@ def generate_secure_keys(requested_keys: Optional[Iterable[str]] = None):
 
     return keys
 
+
+def _allow_unrepresentable_status_text() -> None:
+    """Keep console status messages writable under legacy output encodings."""
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfigure):
+        reconfigure(errors="backslashreplace")
+
+
 async def setup_database():
     """Setup database and run migrations"""
+    _allow_unrepresentable_status_text()
     print("\n🗄️  Setting up database...")
 
     settings = get_settings()
@@ -1175,6 +1184,7 @@ async def bootstrap_single_user_profile() -> bool:
     if settings.AUTH_MODE != "single_user":
         return True
 
+    _allow_unrepresentable_status_text()
     print("\n👤 Bootstrapping single-user profile (admin user + primary API key)...")
     logger.info("Bootstrapping single-user profile (admin user + primary API key)...")
 
@@ -1358,6 +1368,7 @@ async def start_services():
 
 async def main(*, non_interactive: bool = False, test_setup: bool = False):
     """Main initialization function"""
+    _allow_unrepresentable_status_text()
     print_banner()
 
     generated_keys_written = False

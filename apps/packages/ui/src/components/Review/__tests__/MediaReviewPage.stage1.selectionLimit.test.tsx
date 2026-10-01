@@ -1,3 +1,4 @@
+import * as mediaHandoff from "@/services/tldw/media-chat-handoff"
 import React from 'react'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -12,6 +13,8 @@ const mediaItems = Array.from({ length: 31 }).map((_, idx) => ({
   type: 'pdf',
   created_at: '2026-02-17T00:00:00.000Z'
 }))
+
+vi.mock('@/hooks/useHomeMilestoneScope', () => ({ useHomeMilestoneScope: () => 'server:alice' }))
 
 const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn(),
@@ -673,7 +676,7 @@ describe('MediaReviewPage stage 1 selection limit clarity', () => {
     })
   })
 
-  it('launches media-scoped chat with selected ids and backward-compatible discuss payload', async () => {
+  it('addresses selected media to the intended Chat route without broadcasting', async () => {
     const dispatchSpy = vi.spyOn(window, 'dispatchEvent')
     render(<MediaReviewPage />)
 
@@ -692,23 +695,13 @@ describe('MediaReviewPage stage 1 selection limit clarity', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Chat about selection (2)' }))
 
-    await waitFor(() => {
-      expect(mocks.setChatMode).toHaveBeenCalledWith('rag')
-      expect(mocks.setRagMediaIds).toHaveBeenCalledWith([1, 2])
-    expect(mocks.navigate).toHaveBeenCalledWith('/chat')
-    })
-
-    const discussEvent = dispatchSpy.mock.calls
-      .map((call) => call[0])
-      .find((event) => event.type === 'tldw:discuss-media') as CustomEvent | undefined
-    expect(discussEvent).toBeDefined()
-    expect(discussEvent?.detail).toEqual(
-      expect.objectContaining({
-        mediaId: '1',
-        mode: 'rag_media',
-        mediaIds: [1, 2]
-      })
-    )
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith(expect.stringContaining('/chat?media_handoff=')))
+    const route = mocks.navigate.mock.calls.at(-1)![0]
+    const token = new URL(route, 'http://localhost').searchParams.get(mediaHandoff.MEDIA_CHAT_HANDOFF_PARAM)!
+    expect(await mediaHandoff.readMediaChatHandoff(token, 'server:alice')).toEqual({ ownerScope: 'server:alice', mediaId: '1', mode: 'rag_media', mediaIds: [1, 2] })
+    expect(dispatchSpy.mock.calls.some(([event]) => event.type === 'tldw:discuss-media')).toBe(false)
+    expect(mocks.setChatMode).not.toHaveBeenCalled()
+    expect(mocks.setRagMediaIds).not.toHaveBeenCalled()
     dispatchSpy.mockRestore()
   })
 

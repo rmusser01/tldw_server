@@ -65,8 +65,8 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     get_override_model_priority,
     validate_provider_override,
 )
-from tldw_Server_API.app.core.Utils.base64url import SignatureMismatchError, verify_signed_token
 from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+from tldw_Server_API.app.core.Utils.base64url import SignatureMismatchError, verify_signed_token
 from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
     validate_image_url,
@@ -267,12 +267,16 @@ from tldw_Server_API.app.core.Notes.organization_capture import (
     replace_keywords,
     stable_note_id,
 )
+from tldw_Server_API.app.core.Persona.conversation_admission import require_current_persona
 from tldw_Server_API.app.core.Skills.context_integration import (
     add_skill_tool_to_tools_list_async,
     build_system_message_with_skills_async,
 )
 from tldw_Server_API.app.core.Utils.chunked_image_processor import get_image_processor
-from tldw_Server_API.app.core.Workspaces.assistant_defaults import project_assistant_startup
+from tldw_Server_API.app.core.Workspaces.assistant_defaults import (
+    project_assistant_startup,
+    require_workspace_for_chat_creation,
+)
 
 _ORIGINAL_PERFORM_CHAT_API_CALL = perform_chat_api_call
 from fastapi.encoders import jsonable_encoder
@@ -3150,6 +3154,12 @@ async def _save_message_turn_to_db(
             serialized_extra = {}
         serialized_extra["client_message_id"] = client_message_id
 
+    system_block_id = message_obj.get("system_instruction_block_id")
+    if role == "system" and isinstance(system_block_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", system_block_id):
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra["system_instruction_block_id"] = system_block_id
+
     if sender_meta:
         if serialized_extra is None:
             serialized_extra = {}
@@ -3476,6 +3486,26 @@ async def create_chat_completion(
     try:
         if request_data.conversation_id:
             request_data.conversation_id = validate_conversation_id(request_data.conversation_id)
+            supplied_scope = (
+                _resolve_conversation_scope(scope_type, workspace_id)
+                if scope_type is not None or workspace_id is not None else None
+            )
+            conversation = await asyncio.to_thread(
+                _verify_conversation_ownership,
+                chat_db, request_data.conversation_id, current_user, supplied_scope,
+                use_stored_scope=supplied_scope is None,
+                conceal_foreign=True,
+            )
+            conversation_scope = _resolve_conversation_scope(**_scoped_conversation_fields(conversation))
+            if conversation_scope.scope_type == "workspace":
+                workspace = await asyncio.to_thread(
+                    require_workspace_for_chat_creation, chat_db, conversation_scope.workspace_id,
+                )
+                if str(workspace.get("client_id") or "") != user_id:
+                    raise HTTPException(status_code=404, detail="Workspace not found")
+            await asyncio.to_thread(
+                require_current_persona, chat_db, owner_id=user_id, conversation=conversation,
+            )
         if request_data.character_id:
             request_data.character_id = validate_character_id(request_data.character_id)
         if request_data.tools:
@@ -4547,7 +4577,7 @@ async def create_chat_completion(
                         native_history_owner_key,
                         prepare_native_history_message,
                     )
-                    history_scope = _resolve_conversation_scope(scope_type, workspace_id)
+                    history_scope = conversation_scope
                     _verify_conversation_ownership(chat_db, final_conversation_id, current_user, history_scope)
                     if _active_message_sync_service(current_user, history_scope) is not None:
                         raise HTTPException(409, detail={"code": "sync_owner_unsupported", "status": "unsupported_history_capability"})
@@ -6120,7 +6150,9 @@ async def create_chat_completion(
                         client_detail = "Request failed."
                 else:
                     # Server errors should be generic
-                    if err_status == 502:
+                    if err_status == 502 and error_code == "provider_output_limit":
+                        client_detail = PROVIDER_STREAM_ERROR_MESSAGES[error_code]
+                    elif err_status == 502:
                         client_detail = "The chat service provider is currently unavailable."
                     elif err_status == 503:
                         client_detail = "The chat service is temporarily unavailable."
@@ -6458,21 +6490,32 @@ def _verify_conversation_ownership(
     conversation_id: str,
     current_user: User,
     scope: ConversationScopeParams | None = None,
+    *,
+    use_stored_scope: bool = False,
+    conceal_foreign: bool = False,
 ) -> dict[str, Any]:
+    """Verify ownership and scope, retaining Chat's concealed foreign-target denial."""
     conversation = db.get_conversation_by_id(conversation_id)
     if not conversation or conversation.get("deleted"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
     conv_client_id = conversation.get("client_id")
     user_id = current_user.id
+    ownership_error = HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND if conceal_foreign else status.HTTP_403_FORBIDDEN,
+        detail="Conversation not found" if conceal_foreign else "Forbidden for this conversation",
+    )
     if conv_client_id is None or user_id is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden for this conversation")
+        raise ownership_error
     try:
         if int(conv_client_id) != int(user_id):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden for this conversation")
+            raise ownership_error
     except (TypeError, ValueError):
         if str(conv_client_id) != str(user_id):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden for this conversation") from None
-    expected_scope = scope or ConversationScopeParams()
+            raise ownership_error from None
+    expected_scope = scope or (
+        _resolve_conversation_scope(**_scoped_conversation_fields(conversation))
+        if use_stored_scope else ConversationScopeParams()
+    )
     conversation_scope = conversation.get("scope_type") or "global"
     conversation_workspace_id = conversation.get("workspace_id")
     if conversation_scope != expected_scope.scope_type:
