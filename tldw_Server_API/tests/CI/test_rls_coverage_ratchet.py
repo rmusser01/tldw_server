@@ -74,6 +74,15 @@ def test_scan_finds_the_tables_and_policies_that_exist(report):
     assert "prompt_studio_projects" in report.policy_tables
 
 
+def test_workspace_startup_receipts_are_covered_without_baseline_exemption(report):
+    """Permanent retry tombstones must participate in the standard tenant ratchet."""
+    table = "workspace_chat_startup_receipts"
+    assert table in report.owned_tables
+    assert table in report.policy_tables
+    assert table not in load_baseline(BASELINE)
+    assert table not in load_exemptions(DEFAULT_EXEMPTIONS)
+
+
 def test_baseline_only_lists_tables_the_scan_still_finds():
     """A stale baseline entry hides a table that was renamed or dropped."""
     current = scan_source([APP_ROOT])
