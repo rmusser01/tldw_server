@@ -1218,3 +1218,31 @@ Local UAT561 qualification complete: actual unchanged79case multiset gives79pass
 ## Reviewed local85ede qualification batch — 2026-10-01
 
 Current local9c plus UAT559/560/561 qualification is complete locally and independently source/artifact reviewed. Actual storage802passes/13explicit backend applicability skips, RG331passes/two inheritedxfails (including9realRedis and4officialPG), authPG16passes, sync/RLS142passes, finalHTTP990passes/13exact original skips, finalPG79passes/zero skips, CI50passes and installedUI129passes/zero skips all exited normally. The first broadHTTP and laterPG failure evidence remains retained; repairs do not attribute unknown native causes. Actual final API fingerprint e261f2bc281c155149c02f529d92d4c440cac9e6fb84355095ce7c6599a79f1a from FastAPI0.141.1 source; ADR057 runbook reference and two import sorts reviewed. Final changedPython compile299files versus85ede has zero errors; source hashes match CI/fixture/PG reviewed evidence. Coverage835patterns/4900files/four ignored/44baseline/zero omissions; Actionlint/compile/diff checks pass. Static inherited findings and new LOW test assertions are recorded separately, no new production/nonassert finding. Normal-hook local commit next; no publication, final hosted/native/Chatbook or future b365 acceptance.
+
+
+## Reconciled b365 qualification — 2026-10-01
+
+B365 replay completed CLEAN898136197034cda3a847213c816836f8ad87b7ac:225commits/raw225equal/zero changed/added/removed. Exact46upstreamdelta files;44byte-identical todev, auth+Usage merge automatically retains PRmagic-link binding/exactupstream policy+entity guard and all46PRUsageasserts plus2newupstreamasserts. Every otherPR changedfile remains byte-identical to qualified40139cf. Recoverypre-b365 preserves40139cf. Actualreconciled qualification plan: fullRG memory/Redis/officialPG/resolver/identity/tag/default/route-map tests; authsinglecharge+loginbinding+magic/principal/limitsPG; affectedUsage/Audio/Embeddings/persistence op_id controls; required CI/lint/servedroute and realcoverageguard; compile/Ruff/Bandit/Actionlint/APIexport+installedUI/independentreview. No acceptance of upstream passes or oldheadgates; native observation/wholePromptnormalexit/Chatbook stillopen.
+
+### Stage 1: Preserve replay
+**Goal:** Preserve the225reviewed patches and all upstream policy changes.
+**Success Criteria:** Freshrefs/recovery/exactrange-diff/assertions/source hashes.
+**Tests:** replay-proof.json.
+**Status:** Complete
+
+### Stage 2: Qualify actual source
+**Goal:** Verify the changed RG/auth/ledger/CI source with actual dependencies and official fixtures.
+**Success Criteria:** Normal exits, original skips identified, static findings classified and no new production finding.
+**Tests:** Actual scopes listed above; no warning/budget/GC/exit bypass.
+**Status:** Complete
+
+### Stage 3: Review and retain final gates
+**Goal:** Independent source/artifact review and normal commit of qualification notes.
+**Success Criteria:** Review clear, source preserved, final hosted/native/Chatbook gates remain explicit.
+**Tests:** Immutable source/artifact review, fresh refs before later publication.
+**Status:** Complete
+
+
+## B365 final local qualification and independent review — 2026-10-01
+
+Actual b365reconciled898136 qualification completed: RG388passes/two EXACTinheritedxfails/naturalexit0(9realRedis/4officialPG); auth/Usage/Audio/Embeddings/ingestion/Utils/requiredCI+lint318passes/zero skips/naturalexit0; installedUI129passes/zero skips/naturalexit0 in11.71s with freshNode26.0.0/Vitest4.1.11. CurrentPython3.12.11/FastAPI0.141.1/Pydantic2.13.5/core2.46.5/Starlette1.7.0/asyncpg0.31.0 verified. OfficialPGfixture execution evidenced; literal server18.6 is prior cluster-query provenance, no current version query. ActualAPIe261 canonicalJSONb846 match/ignoredtypes unchanged. Compile331files versus85ede; coverage835patterns4905files4ignored44baseline0omissions; Actionlint/diff pass. StaticRuff420inherited/zero new, Bandit19317inherited(19263LOW54MEDIUM)/zero errors/new nonassert findings; extraUsageLOWassert comparedto upstream-only is originalPRassertion, all48currentassertion origins verified. Three privateJSONparser attempts retained/excluded; exactBandit Working progress-line proves parse cause, raw stdout kept and validstructuredreport parsed without rerun or warning suppression. Independentfinal source/artifact review clear7230f5a02ffd9263b584bc73017f707dec95c116ab078fb610499e4a3b304aec/26artifact46sourcehashesverified/noownpytest/static/PG/Redis. Replay225exact,46rename-aware/47rawidentities withintentionalRG13396→13405rename; separateBuddy13396 preserved. Rootmanifest /private/tmp/pr2979-b365-local-qualification-final.json. All localtests/readers terminal. Final hosted/native/wholeMacPromptnormalexit/ChatbookOPEN; sourcequalificationreadyforauthorizedpublication, no mergeacceptance.
