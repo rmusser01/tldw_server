@@ -4,7 +4,7 @@ title: RG ingress safety net (spec 1 of 2)
 status: To Do
 assignee: []
 created_date: '2026-09-30 01:39'
-updated_date: '2026-09-30 22:35'
+updated_date: '2026-10-01 03:03'
 labels:
   - resource-governance
   - backend
@@ -21,7 +21,7 @@ Implements Docs/Design/2026-09-29-rg-ingress-safety-net-design.md in three PRs (
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 PR A merged: safety-net defaults and permanent-429 fixes in both backends
-- [ ] #2 PR B merged: resolver, route index, principal identity, audits, route-map lints, WebUI replay; TASK-13395 closed
+- [x] #2 PR B merged: resolver, route index, principal identity, audits, route-map lints, WebUI replay; TASK-13395 closed
 - [ ] #3 PR C merged: single RG switch, config hygiene, ADR-056, docs
 <!-- AC:END -->
 
@@ -46,6 +46,8 @@ PR #3066 Qodo wave (2026-09-30). Fixed 9 of 11 findings; declined 2 with a poste
 Also fixed a pre-existing bypass: ingress used the client X-Request-ID as the governor op_id, and the memory governor replays the cached decision for a repeated op_id without charging, so a fixed header was never rate limited on any route. The op_id is now always server-generated. Commits 67b07ae36a..d2ecf10cca.
 
 Renumbered from TASK-13396 on 2026-09-30. dev also gained TASK-13396 (Buddy canonical workspace URL, via #3056) before #3066 brought this one in. Content is unchanged; commit messages up to #3066 still say TASK-13396. PR A (#3066) merged 2026-09-30 22:32Z. The ADR is ADR-057, not ADR-056 as AC #3 says (PR #3041 claims 056).
+
+PR B (#3068) merged 2026-10-01 02:58Z: resolver, principal identity, audits, route-map lint, WebUI replay. TASK-13395 closed. The ADR is ADR-056 after all: #3041 merged its workspace ADR as 057, freeing 056, the number the merged code already cites. This supersedes the earlier ADR-057 note.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
