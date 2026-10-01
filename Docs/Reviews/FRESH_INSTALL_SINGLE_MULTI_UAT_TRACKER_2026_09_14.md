@@ -5861,3 +5861,11 @@ All7enforcedchecks succeeded on6cd957e, but GitHub rejected the normalmerge as d
 Strict-base retry Stage1Complete/recovery6cd;Stage2InProgress/read-onlyreviewpending. ActualisolatedFastAPI0.142.1/Pydantic2.13.5/Starlette1.7.0:52route/floor/pagination/capabilitiespasses/zero skips/6inheritedwarnings/natural0. Official fingerprintunchanged435b3f05f927 (2105paths3245schemas);Ruffclean;Bandit0findings/errors/actual0. Only4upstreamfiles change, normalmergeconflictfree. Initialpiplauncherunavailable (venv has no pip), installedUV private-target succeeds; no shareddependency mutations ormacOS/native/PGqualification. Evidence `/private/tmp/pr2979-landing-ec86-*`.
 
 Strict-base retry independentreviewCLEAR139f8d6105229c84ab6e68c9bd6049d371eca52c:4files exactupstream, allprior6cdsourceunchanged, no introducedP1/P2. Stage2Complete;Stage3InProgress normalpush and7requiredchecks onthe refreshedactualhead. No independenttests/imports.
+
+## PR2979 landed — 2026-10-01 19:50 UTC
+
+Landing stages 1–3 are complete. [PR #2979](https://github.com/rmusser01/tldw_server/pull/2979) merged normally at 19:50:40Z from `4f419a1bb7f90afd2325c2c4e5a496c64b8c803f`. Remote `dev` is the verified merge commit `88f8b81f1efe8962e3fbbf6aa2962086fe84b087`. All seven enforced contexts succeeded on that exact head; the human Change summary remains unchanged. No admin privileges, hook bypass, check bypass or protection changes were used.
+
+Merge proof: `/private/tmp/pr2979-landing-1949-merge-proof.json`; actual PR and remote receipts are bound in that proof. Earlier recovery refs and evidence remain preserved. The original PR branch remains at its published head; separate `codex/pr2979-non-macos-followups-20261001` starts from the landed commit.
+
+Unresolved child criteria remain open. Optional/native diagnostics are deferred, not passed. macOS investigation remains stopped until expressly reauthorized; Full UAT remains paused and UAT261 open. The automation now continues the authorized non-macOS fixes, beginning with fresh-source verification of the existing Chatbook UAT523 follow-up. Parent/task updates use the supported official CLI. This checkpoint changes tracking only; tests, Ruff and Bandit are not applicable to its Markdown/task text.
