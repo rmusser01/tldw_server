@@ -5,8 +5,11 @@ termination watchdog: the original Actions job maximum remains the outer bound.
 Only symbols/phase numbers are recorded; native sample headers are discarded.
 """
 
+import ast
 import atexit
+import builtins
 import faulthandler
+import gc
 import importlib.metadata
 import json
 import os
@@ -17,12 +20,14 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from pathlib import Path
 
 ROOT = Path(os.environ["PROMPT_SHUTDOWN_PROBE_DIR"])
 ROOT.mkdir(parents=True, exist_ok=True)
 EVENT_PATH = ROOT / "events.jsonl"
 TRACE = (ROOT / "faulthandler.log").open("a", buffering=1)
+GRAPH_ENABLED = False
 
 
 def record(event: str, **fields) -> None:
@@ -66,20 +71,154 @@ def snapshot(event: str) -> None:
         record("snapshot_unavailable")
 
 
+def _graph_symbols(indices: dict[int, int]) -> tuple[dict[int, str], dict[int, str], bool]:
+    """Label fixed native types and source-attested exported class/module symbols."""
+    labels = {}
+    for name in ("dict", "list", "tuple", "set", "frozenset", "type", "object", "str", "int", "bytes"):
+        labels[id(builtins.__dict__[name])] = "builtins." + name
+    for name in ("SimpleNamespace", "FunctionType", "ModuleType", "CodeType", "FrameType", "TracebackType",
+                 "CellType", "MethodType", "GeneratorType", "CoroutineType", "AsyncGeneratorType"):
+        labels[id(types.__dict__[name])] = "types." + name
+    roots = {}
+    complete = True
+    paths = [Path(entry or os.getcwd()).resolve() for entry in sys.path if type(entry) is str]
+    exports = {}
+    for name in tuple(sys.modules):
+        module = sys.modules.get(name)
+        if type(module) is not types.ModuleType or type(name) is not str:
+            continue
+        if not all(part.isidentifier() for part in name.split(".")) or id(module) not in indices:
+            continue
+        namespace = types.ModuleType.__getattribute__(module, "__dict__")
+        filename = namespace.get("__file__")
+        if type(filename) is not str or not filename.endswith(".py"):
+            continue
+        try:
+            path = Path(filename).resolve()
+            attested = False
+            for base in paths:
+                if path.is_relative_to(base):
+                    parts = path.relative_to(base).with_suffix("").parts
+                    if parts[-1] == "__init__":
+                        parts = parts[:-1]
+                    if ".".join(parts) == name:
+                        attested = True
+                        break
+            if not attested:
+                continue
+            if str(path) not in exports:
+                with open(path, encoding="utf-8") as source:
+                    tree = ast.parse(source.read())
+                exports[str(path)] = [node.name for node in tree.body
+                                      if isinstance(node, ast.ClassDef) and not node.name.startswith("_")]
+                del tree
+            roots[id(module)] = name
+            for symbol in exports[str(path)]:
+                candidate = namespace.get(symbol)
+                if issubclass(type(candidate), type):
+                    owner = type.__dict__["__module__"].__get__(candidate)
+                    qualified = type.__dict__["__qualname__"].__get__(candidate)
+                    if type(owner) is str and type(qualified) is str and owner == name and qualified == symbol:
+                        labels[id(candidate)] = name + "." + symbol
+        except (OSError, ValueError, TypeError, RuntimeError, MemoryError, SyntaxError):
+            # Source faults only reduce symbol coverage; never expose dynamic names.
+            complete = False
+    return labels, roots, complete
+
+
+def graph_snapshot(phase: str) -> None:
+    """Stream tracked C tp_traverse edges; this is neither all roots nor causation.
+
+    The census temporarily holds every tracked object. Maps store primitive IDs
+    only; adjacency is streamed one object at a time. Census/index shallow bytes
+    exclude primitive entries, source parsing and JSON buffers, so are not peak RSS.
+    Edges are observed sequentially, not atomically. Allocations can perturb
+    automatic GC; its configuration is never changed.
+    """
+    if type(phase) is not str or phase not in ("pre-unconfigure", "pre-module-clear"):
+        return
+    started = time.monotonic_ns()
+    objects = references = obj = handle = None
+    indices, type_indices, labels, roots = {}, {}, {}, {}
+    type_labels = []
+    count = written = census_bytes = indices_bytes = max_referents = 0
+    complete = symbols_complete = False
+    try:
+        handle = (ROOT / ("graph-" + phase + ".jsonl")).open("w", encoding="utf-8")
+        handle.write(json.dumps({"phase": phase, "scope": "tracked-tp_traverse"}) + "\n")
+        objects = gc.get_objects()
+        count = len(objects)
+        indices = {id(obj): index for index, obj in enumerate(objects)}
+        census_bytes, indices_bytes = sys.getsizeof(objects), sys.getsizeof(indices)
+        labels, roots, symbols_complete = _graph_symbols(indices)
+        for node, obj in enumerate(objects):
+            kind = id(type(obj))
+            if kind not in type_indices:
+                type_indices[kind] = len(type_labels)
+                type_labels.append(labels.get(kind))
+            references = gc.get_referents(obj)
+            max_referents = max(max_referents, len(references))
+            edges = [indices[id(target)] for target in references if id(target) in indices]
+            handle.write(json.dumps([node, type_indices[kind], edges], separators=(",", ":")) + "\n")
+            references = None
+            written += 1
+        complete = True
+    except (OSError, ValueError, TypeError, RuntimeError, MemoryError):
+        # No observation failure, including MemoryError, may replace cleanup.
+        complete = False
+    finally:
+        elapsed = time.monotonic_ns() - started
+        try:
+            if handle is not None:
+                handle.write(json.dumps({"complete": complete, "tracked_objects": count, "nodes_written": written,
+                                         "types": type_labels, "module_roots": [[indices[key], label]
+                                                                                for key, label in roots.items()],
+                                         "source_symbols_complete": symbols_complete, "elapsed_ns": elapsed,
+                                         "census_shallow_bytes": census_bytes, "indices_shallow_bytes": indices_bytes,
+                                         "max_referents": max_referents}) + "\n")
+                handle.close()
+        except (OSError, ValueError, TypeError, RuntimeError, MemoryError):
+            complete = False
+        finally:
+            # Drop census and current tp_traverse results before original cleanup,
+            # including failure paths. Nothing retaining instances is cached.
+            objects = references = obj = handle = None
+            indices = type_indices = labels = roots = None
+            type_labels = None
+        try:
+            record("graph_capture", phase=phase, complete=complete, source_symbols_complete=symbols_complete,
+                   tracked_objects=count, nodes_written=written, elapsed_ns=time.monotonic_ns() - started)
+        except (OSError, ValueError, TypeError, RuntimeError, MemoryError):
+            return  # Even event allocation failure cannot replace delegated cleanup.
+
+
+def _pre_module_clear() -> None:
+    """Observe after later ordinary atexit callbacks, before module clearing."""
+    graph_snapshot("pre-module-clear")
+    snapshot("atexit_early_registration")
+
+
 def initialize() -> None:
     """Register the same private probe's normal shutdown and stack observers."""
+    global GRAPH_ENABLED
+    GRAPH_ENABLED = True
     faulthandler.enable(file=TRACE, all_threads=True)
     faulthandler.register(signal.SIGUSR1, file=TRACE, all_threads=True, chain=False)
     record("launcher_start", python_version=sys.version.split()[0], implementation=sys.implementation.name)
-    atexit.register(snapshot, "atexit_early_registration")
+    atexit.register(_pre_module_clear)
     threading._register_atexit(snapshot, "threading_atexit_early_registration")
 
 
 def pytest_configure(config) -> None:
     """Delegate every original call once, including its exceptions and return."""
     original = config._ensure_unconfigure
+    captured = False
 
     def observed_unconfigure():
+        nonlocal captured
+        if GRAPH_ENABLED and not captured:
+            captured = True
+            graph_snapshot("pre-unconfigure")
         snapshot("ensure_unconfigure_enter")
         try:
             return original()
