@@ -6066,5 +6066,438 @@
     "scope_limit": "Suites overlap; not a full repository test suite. No native-PST/throughput/million-message/live VM drill rerun; earlier results retain original source/dependency bindings.",
     "tracking_diagnostic": "CLI creation stack overflow; MCP reported300s timeout but later produced exact child13377.8, verified through official CLI. Parent13377 recorded the repair before source edits; no manual task edits or duplicate tasks.",
     "publication_state": "Final local source verified and reviewed; publication and fresh exact-head hosted review/required contexts remain pending."
+  },
+  "ux_smoke_allowlist_ci_repair_20261001": {
+    "task": "TASK-13377.9",
+    "recorded_at": "2026-10-01T08:16:36.841825+00:00",
+    "head_before_repair": "0f24ac61310c52f5eb1196af7216c749125d12d6",
+    "base_dev": "b365af1827b607fc221f9bf31ca76dde881edb4f",
+    "failure": {
+      "workflow": 36815061080,
+      "job": 110221608849,
+      "cause": "All 31 allowlist entries expired at the September 30 UTC midnight boundary.",
+      "failed": 1,
+      "test_cases_did_not_run": 100,
+      "page_cases_did_not_run": 99,
+      "additional_metadata_cases_did_not_run": 1
+    },
+    "source_binding": {
+      "head": "0f24ac61310c52f5eb1196af7216c749125d12d6",
+      "dev": "b365af1827b607fc221f9bf31ca76dde881edb4f",
+      "archive": "/tmp/email_pr3023_ux_apps_source_20261001.tar",
+      "archive_sha256": "76d1e0f4db362f271b0b163aa672f2fe845e299c66a0584c52c15d57d953b477",
+      "source_root": "/tmp/email_pr3023_ux_source_20261001",
+      "exact_dev_files": {
+        "apps/tldw-frontend/e2e/smoke/smoke.setup.ts": {
+          "sha256": "bc43e5c8fa5ace06a54f47df2dce1fb9086f4a60b0504f142f65502c4f93d466",
+          "exact_dev": true
+        },
+        "apps/tldw-frontend/e2e/smoke/all-pages.spec.ts": {
+          "sha256": "c917744c39cdf2fa235aa61a4d911cc93b6afade05f7528a91f8b66112f675ca",
+          "exact_dev": true
+        },
+        ".github/workflows/frontend-ux-gates.yml": {
+          "sha256": "da0cf2436155451a2a8667011292ea3e44fd18e84de1a5e27af8766928ffc165",
+          "exact_dev": true
+        },
+        "Docs/Product/Completed/WebUI-related/M5_1_Smoke_Warning_HardGate_Allowlist_Policy_2026_02.md": {
+          "sha256": "932432f8a2e89cc7a2e2cc4679269d68145e470cd0502d98c700a029e99f3adb",
+          "exact_dev": true
+        }
+      },
+      "node": "v26.0.0",
+      "bun": "1.3.2"
+    },
+    "changes": {
+      "task": "TASK-13377.9",
+      "removed": [
+        "m5-chat-history-rate-limit",
+        "m5-http-429-resource",
+        "m5-react-key-prop-spread-warning",
+        "m5-react-non-boolean-attribute-warning",
+        "m5-media-max-update-depth-warning",
+        "m5-model-oauth-status-403-noise",
+        "m5-notes-title-settings-cors-noise",
+        "m5-notes-title-settings-net-failed-noise",
+        "m5-notes-title-settings-request-failure-noise",
+        "m5-media-not-found-search-console-noise",
+        "m5-quiz-tabs-deprecation-warning",
+        "m5-quiz-list-deprecation-warning",
+        "m5-quiz-attempts-422-noise",
+        "m5-prompt-studio-422-noise",
+        "m5-dictionaries-optional-endpoint-500",
+        "m5-collections-antd-message-context-warning",
+        "m5-characters-useform-context-warning",
+        "m5-chat-workspace-startup-backend-refused-console",
+        "m5-chat-workspace-startup-backend-refused-request",
+        "m5-model-metadata-rate-limit-log-noise",
+        "m5-model-metadata-abort-noise",
+        "m5-chatbooks-evaluations-cors-noise",
+        "m5-chatbooks-evaluations-net-failed-noise",
+        "m5-chatbooks-evaluations-request-failure-noise",
+        "m5-chatbooks-optional-dictionaries-500",
+        "m5-admin-optional-endpoint-500",
+        "m5-llamacpp-unavailable-503"
+      ],
+      "retained": [
+        "m5-drawer-width-deprecation-noise",
+        "m5-optional-resource-404-noise",
+        "m5-route-boundary-forced-error-log",
+        "m5-route-boundary-forced-react-overlay-warning"
+      ],
+      "expiry": "2026-10-08",
+      "metadata_validator_unchanged": true,
+      "scope": "Remove27 unobserved/obsolete exceptions. Retain4 freshly observed classes. Narrow404 to exact moderation resource and route, preserving console location through native existing data types. Regression red2/4 proves prior masking of unrelated/unlocated404s."
+    },
+    "quality": {
+      "head_before_repair": "0f24ac61310c52f5eb1196af7216c749125d12d6",
+      "dev": "b365af1827b607fc221f9bf31ca76dde881edb4f",
+      "sources": {
+        "apps/tldw-frontend/e2e/smoke/smoke.setup.ts": "15d60e95bf52b18862d1e9897e21033fc1f2daedd329c2cdbf38a4b3e3b34ce3",
+        "apps/tldw-frontend/e2e/smoke/smoke-allowlist.spec.ts": "3c2e3d2b86729e282f2a1d194eca3e9ad97462699cfd6b9188989cc177a15913"
+      },
+      "patch_sha256": "d001ed8bde3cc2aff39c1a4abe4faa59f68961c282241cae14f19f998740966f",
+      "compile": {
+        "exit_code": 0,
+        "scope": [
+          "apps/tldw-frontend/e2e/smoke/smoke.setup.ts",
+          "apps/tldw-frontend/e2e/smoke/smoke-allowlist.spec.ts"
+        ],
+        "command": "tsc --noEmit --skipLibCheck --target ES2022 --module commonjs --moduleResolution node --esModuleInterop e2e/smoke/smoke.setup.ts e2e/smoke/smoke-allowlist.spec.ts",
+        "log": "/tmp/email_pr3023_ux_compile_confirmed_20261001.log"
+      },
+      "eslint": {
+        "current": {
+          "errors": 0,
+          "warnings": 0,
+          "receipt": "/tmp/email_pr3023_ux_eslint_confirmed_20261001.json"
+        },
+        "baseline": {
+          "errors": 0,
+          "warnings": 0,
+          "receipt": "/tmp/email_pr3023_ux_eslint_baseline_20261001.json"
+        }
+      },
+      "bandit": {
+        "disposition": "Not applicable: touched source is TypeScript test metadata/classification only, with no Python source edits; no unsupported scanner zero-findings claim."
+      },
+      "tests": {
+        "metadata_red": {
+          "failed": 1,
+          "log": "/tmp/email_pr3023_ux_metadata_red_20261001.log"
+        },
+        "location_regression_red": {
+          "failed": 2,
+          "passed": 2,
+          "log": "/tmp/email_pr3023_ux_location_regression_red_confirmed_20261001.log"
+        },
+        "focused_green": {
+          "passed": 6,
+          "log": "/tmp/email_pr3023_ux_focused_green_confirmed_20261001.log"
+        },
+        "all_pages_gate": {
+          "startTime": "2026-10-01T07:54:38.340Z",
+          "duration": 38684.255000000005,
+          "expected": 101,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "forced_fixtures": {
+          "startTime": "2026-10-01T07:51:07.729Z",
+          "duration": 119791.67899999999,
+          "expected": 16,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "retained_media_render_loop": {
+          "startTime": "2026-10-01T08:01:45.839Z",
+          "duration": 5065.45,
+          "expected": 1,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0,
+          "log": "/tmp/email_pr3023_ux_media_no_loop_green_20261001.log"
+        },
+        "final_docs_contracts": {
+          "tests": 212,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "log": "/tmp/email_pr3023_ux_docs_confirmed_20261001.log",
+          "xml": "/tmp/email_pr3023_ux_docs_confirmed_20261001.xml",
+          "seed": 4293640905
+        }
+      },
+      "limitations": [
+        "Suites overlap; counts are not unique full-repository test counts.",
+        "Production frontend bundle was built with local Node26 before test-only repair; final test runners use Node20.19.5/Bun1.3.2. Hosted Node20/Python3.12 remains a separate binding.",
+        "Final development fixture proof uses task-owned8GB heap after verified4GB Next memory-threshold restarts; hosted CI unchanged.",
+        "Initial provisional31-date diagnostics and failed/incomplete setup variants retained but not credited as final repair.",
+        "Raw teardown captured a late documentation-manifest500 outside existing matching; it remains unexpected and is not renewed/masked. Standalone documentation source lookup needs separate product follow-up."
+      ],
+      "followup_task": "TASK-13406",
+      "followup_status": "To Do",
+      "documentation_followup_task": "TASK-13407",
+      "independent_review_receipt": "/tmp/email_pr3023_ux_independent_review_20261001.json",
+      "unchanged_tracked_python_sources_vs_head": "0f24ac61310c52f5eb1196af7216c749125d12d6",
+      "unchanged_gate_source_hashes": {
+        "apps/tldw-frontend/e2e/smoke/all-pages.spec.ts": "c917744c39cdf2fa235aa61a4d911cc93b6afade05f7528a91f8b66112f675ca",
+        "apps/tldw-frontend/e2e/media-render-loop.spec.ts": "2a2cbb37f222a3409611879f5ab2757e64b881d6af240d1c2340d08e39d5f81c",
+        "apps/tldw-frontend/playwright.config.ts": "828c15d712b8cb366919d24761de4fbec69ac97746a8a6eb1ae66717b37d3cc3",
+        "apps/bun.lock": "db787afa7475de3ec837e19490be358712720e2efb8c4a24bbb8a4608d52ef6b",
+        ".github/workflows/frontend-ux-gates.yml": "da0cf2436155451a2a8667011292ea3e44fd18e84de1a5e27af8766928ffc165",
+        "Docs/Product/Completed/WebUI-related/M5_1_Smoke_Warning_HardGate_Allowlist_Policy_2026_02.md": "932432f8a2e89cc7a2e2cc4679269d68145e470cd0502d98c700a029e99f3adb"
+      }
+    },
+    "independent_review": {
+      "reviewer": "/root/email_dev85ed_integration_review",
+      "patch_sha256": "d001ed8bde3cc2aff39c1a4abe4faa59f68961c282241cae14f19f998740966f",
+      "source_hashes": {
+        "apps/tldw-frontend/e2e/smoke/smoke.setup.ts": "15d60e95bf52b18862d1e9897e21033fc1f2daedd329c2cdbf38a4b3e3b34ce3",
+        "apps/tldw-frontend/e2e/smoke/smoke-allowlist.spec.ts": "3c2e3d2b86729e282f2a1d194eca3e9ad97462699cfd6b9188989cc177a15913"
+      },
+      "result": "No actionable source finding in the immutable patch.",
+      "independently_verified": [
+        "Patch and both source hashes match worktree and tested archive.",
+        "Actual regression RED two failures; final focused GREEN six passes.",
+        "101 selected all-pages cases and 16 forced-recovery cases pass without skipped, unexpected or flaky results.",
+        "Four retained signatures have fresh raw evidence, stable IDs/owners and finite October 8 expiry.",
+        "UTC validator, page inventory, assertions, workflow and policy remain unchanged.",
+        "Touched-scope TypeScript, ESLint and formatting evidence is clear."
+      ],
+      "limitations": [
+        "The inherited late documentation-manifest HTTP500 remains unallowlisted and separately tracked; it does not block this test-maintenance patch.",
+        "Do not claim zero raw browser errors or functional documentation acceptance.",
+        "Local Node26 bundle, Node20 runners and task-owned 8GB development heap do not certify hosted Node20/Python3.12 CI.",
+        "Link future exception remediation before publication."
+      ],
+      "reviewer_reran_tests": false,
+      "reviewer_edited_files": false,
+      "future_exception_remediation": "TASK-13406",
+      "standalone_documentation_and_smoke_timing": "TASK-13407"
+    },
+    "environment": {
+      "frontend_workspace": "/tmp/email_pr3023_ux_source_20261001/apps/tldw-frontend",
+      "bun": "1.3.2",
+      "next": "16.1.4",
+      "playwright": "1.58.0",
+      "build_node": "26.0.0",
+      "final_test_runner_node": "20.19.5",
+      "backend_wrapper": "/tmp/email_pr3023_dev6074_python_20260929",
+      "backend_python": "3.11.13",
+      "backend_fastapi": "0.141.1",
+      "minimal_backend": true,
+      "disable_heavy_startup": true,
+      "mock_server_port": 18325,
+      "backend_port": 18323,
+      "standalone_port": 18324,
+      "development_port": 18326,
+      "sqlite_runtime": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/email_pr3023_ux_runtime_20261001",
+      "final_forced_development_heap_mb": 8192,
+      "shared_installations_changed": false,
+      "hosted_environment_remains_separate": "Node20/Python3.12; exact new published-head checks must pass."
+    },
+    "final_native_playwright_selection": {
+      "strict_production": {
+        "file": "e2e/smoke/all-pages.spec.ts",
+        "project": "chromium",
+        "grep": "Smoke Tests - All Pages",
+        "workers": 1,
+        "global_timeout_ms": 1800000,
+        "passed": 101
+      },
+      "forced_recovery": {
+        "file": "e2e/smoke/all-pages.spec.ts",
+        "project": "chromium",
+        "grep": "Smoke Tests - Route Error Boundaries",
+        "workers": 1,
+        "global_timeout_ms": 900000,
+        "passed": 16
+      },
+      "focused": {
+        "files": [
+          "e2e/smoke/all-pages.spec.ts",
+          "e2e/smoke/smoke-allowlist.spec.ts"
+        ],
+        "passed": 6,
+        "scope": "Two existing metadata checks and four new 404 resource/page classification scenarios."
+      },
+      "retained_media": {
+        "file": "e2e/media-render-loop.spec.ts",
+        "passed": 1
+      },
+      "limits": "Native test reports contain config, individual outcomes and times. Scopes overlap; no full repository acceptance or zero-raw-error claim."
+    },
+    "raw_phase_binding": "/tmp/email_pr3023_ux_raw_phase_binding_20261001.json",
+    "preserved_diagnostics": "Actual hosted and local RED failures, wrong-cwd/config diagnostic, provisional date and instrumented copies, aborted production fixture selection, Node26/20 4GB dev failures, initial formatting warning, CLI stack-overflows, MCP timeout/rejected setup variants remain retained and are not final GREEN credit.",
+    "followups": {
+      "exceptions_before_2026_10_08": "TASK-13406",
+      "standalone_documentation_and_smoke_assertion_timing": "TASK-13407"
+    },
+    "artifacts": {
+      "/tmp/email_pr3023_ux_source_binding_20261001.json": {
+        "sha256": "8e8fc6be7e9550a976062665d3d0087824bd7baeadde25e9ceac2ca755960741",
+        "bytes": 1103
+      },
+      "/tmp/email_pr3023_ux_quality_20261001.json": {
+        "sha256": "93e48f88535bff528c77f0f8d46849e23534b93647503110e3c70599e73d8d86",
+        "bytes": 4542
+      },
+      "/tmp/email_pr3023_ux_candidate_changes_20261001.json": {
+        "sha256": "4c0c9056d1b9b069ab3e2556913761886ef63f951f8912826f96672dff2ba370",
+        "bytes": 1748
+      },
+      "/tmp/email_pr3023_ux_independent_review_20261001.json": {
+        "sha256": "b4a6538c68cc00218b8490b6dbb2e934cd950326a1086b4184e5bc3d4067f5e5",
+        "bytes": 1664
+      },
+      "/tmp/email_pr3023_ux_raw_phase_binding_20261001.json": {
+        "sha256": "86534c26feed7e2ff62403d9309f70cbb227b0ea0fb95f7a109256a2484ae7e3",
+        "bytes": 2034
+      },
+      "/tmp/email_pr3023_ux_expiry_boundary_20261001.json": {
+        "sha256": "45c7a5661a1964f54a43ffb0395e1c60c1a38082b288d7d13adc0bbf181dde4d",
+        "bytes": 4229
+      },
+      "/tmp/email_pr3023_ux_metadata_red_20261001.log": {
+        "sha256": "b1495ef4ce37d14758f9ee514257b077132d4068f43e682710e1491dd6d6b324",
+        "bytes": 6407
+      },
+      "/tmp/email_pr3023_ux_location_regression_red_confirmed_20261001.log": {
+        "sha256": "b219a4c082ce3f74fc46a1f44792b1399a64e1a9b2152c34ce5c5e46c83f89b3",
+        "bytes": 2138
+      },
+      "/tmp/email_pr3023_ux_focused_green_confirmed_20261001.log": {
+        "sha256": "e88b4adab4a78516e6473b256d019ad5951d9bb177513bae65c36519f18f4b6f",
+        "bytes": 1230
+      },
+      "/tmp/email_pr3023_ux_candidate_gate_green_20261001.json": {
+        "sha256": "b772cc758b88ae0f832339766c1f9d8bea36a0845dab346cfea7acdcdef72474",
+        "bytes": 131526
+      },
+      "/tmp/email_pr3023_ux_candidate_gate_green_20261001.log": {
+        "sha256": "a4e606fbe0b3ed289054ec27a09d05446b8cd64cb074b260ad00150a8fd8476a",
+        "bytes": 13667
+      },
+      "/tmp/email_pr3023_ux_candidate_fixtures_green_20261001.json": {
+        "sha256": "73d0cc5069acb6ccdb88681a46a2123a35a75f0b5ae0fdcbb7d3d1088918c6fb",
+        "bytes": 31458
+      },
+      "/tmp/email_pr3023_ux_candidate_fixtures_green_20261001.log": {
+        "sha256": "ea8de14922f65679c50207d8ec0d9bb73ae1056a119e9e515cf0acfb58d8f0d9",
+        "bytes": 3360
+      },
+      "/tmp/email_pr3023_ux_media_no_loop_green_20261001.json": {
+        "sha256": "d226227a38faf02ad2763e44a2cd0b6322f13757ee7c5595f8cacdeaa2f4305e",
+        "bytes": 12814
+      },
+      "/tmp/email_pr3023_ux_media_no_loop_green_20261001.log": {
+        "sha256": "699f4e3866e1b624c699fd096f7fc814006ae243fc47f9b551f08bdb86da3aa4",
+        "bytes": 396
+      },
+      "/tmp/email_pr3023_ux_compile_confirmed_20261001.log": {
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "bytes": 0
+      },
+      "/tmp/email_pr3023_ux_eslint_confirmed_20261001.json": {
+        "sha256": "8afabd1186218270af34e881a7134e17855c1bc522ca2918a7a90e4867777f66",
+        "bytes": 541
+      },
+      "/tmp/email_pr3023_ux_eslint_baseline_20261001.json": {
+        "sha256": "57d756ef8296756edcc3d086770dda59dd75a1dd6e5f422bdb24148250237be8",
+        "bytes": 276
+      },
+      "/tmp/email_pr3023_ux_new_test_format_confirmed_20261001.log": {
+        "sha256": "17aa973d3f004560237d9a95171210b0671deff23d61628eecf7322ff5938f20",
+        "bytes": 66
+      },
+      "/tmp/email_pr3023_ux_repair_review_20261001.patch": {
+        "sha256": "d001ed8bde3cc2aff39c1a4abe4faa59f68961c282241cae14f19f998740966f",
+        "bytes": 17187
+      },
+      "/tmp/email_pr3023_ux_raw_diagnostics_20261001.jsonl": {
+        "sha256": "bdf93831f47b959bbc41104e2881db36fe2e2539b33368fe706a000fc186bb75",
+        "bytes": 1454748
+      },
+      "/tmp/email_pr3023_ux_build_20261001.log": {
+        "sha256": "6058b79a61cbaf12ed93baf07fad55765277d96ca7c69a04a24b95cf01ce2945",
+        "bytes": 10156
+      },
+      "/tmp/email_pr3023_ux_install_20261001.log": {
+        "sha256": "372b5b877d5be7a6cc2e58d7d855a310d45a62c0fd5aeb39a6b121ba0318d21b",
+        "bytes": 250
+      },
+      "/tmp/email_pr3023_ux_backend_health_confirmed_20261001.log": {
+        "sha256": "180e824ec08702523ac756b1048869193fddb4747b772901b6ca09e7ec381cd6",
+        "bytes": 82
+      },
+      "/tmp/email_pr3023_ux_failure_jobs_confirmed_20261001.json": {
+        "sha256": "8735162e2610889b6ba60a07afd9ba7e2a1e9d6b061ee589aa8f8873b6899a9b",
+        "bytes": 12640
+      },
+      "/tmp/email_pr3023_ux_failure_log_20261001.log": {
+        "sha256": "5a0ab0f786b5878788b86eebc46e6743bf9f14fa6459de80e45659839961eea2",
+        "bytes": 37191
+      },
+      "/tmp/email_pr3023_ux_provisional_binding_20261001.json": {
+        "sha256": "6ce9866cce8eb4ca73d198d92ad96eddde3da045cd9ca41a8eaf82e11593a946",
+        "bytes": 528
+      },
+      "/tmp/email_pr3023_ux_instrumentation_binding_20261001.json": {
+        "sha256": "296053c9cc1982dc7e3ed6cde457680afe6cee680baaeabf906c9bcb7b499da9",
+        "bytes": 355
+      },
+      "/tmp/email_pr3023_ux_forced_provisional_20261001.json": {
+        "sha256": "1658d719fe616c3f7259c4b15048c8afe95afa5235d0a07e58f0042f16020da7",
+        "bytes": 38860
+      },
+      "/tmp/email_pr3023_ux_forced_provisional_20261001.log": {
+        "sha256": "3ea847b59ae99431f65aa9471fea7b5529fe089057ae138d2f2727a51f9cb854",
+        "bytes": 11035
+      },
+      "/tmp/email_pr3023_ux_forced_node20_20261001.json": {
+        "sha256": "bb4be35d7678c37915b48fc3a9b95af4e5941b8051db2d8bc89bd110561dddd7",
+        "bytes": 34543
+      },
+      "/tmp/email_pr3023_ux_forced_node20_20261001.log": {
+        "sha256": "f0deb1d0ccc0678541029c4d557409a29e40867b059276f9d3e89269a7cd919c",
+        "bytes": 5657
+      },
+      "/tmp/email_pr3023_ux_gate_provisional_20261001.json": {
+        "sha256": "330400aeea73ecff4b8f9f62562da6274ba8995993d18ce47380b064bda289f9",
+        "bytes": 131440
+      },
+      "/tmp/email_pr3023_ux_gate_provisional_20261001.log": {
+        "sha256": "c88e03e03e37805ef90d81769b14a0a9342cdf30abe4b9a2e941b033ce6209ff",
+        "bytes": 14162
+      },
+      "/tmp/email_pr3023_ux_followup_task_confirmed_20261001.txt": {
+        "sha256": "e7c3d26d29b2720e6ef3a17a8d2b902b2f3a749f940ac00caaf839770ef91310",
+        "bytes": 2983
+      },
+      "/tmp/email_pr3023_ux_docs_followup_search_20261001.txt": {
+        "sha256": "f70c66b40cf17fa7e387b7fe2617aab8c7c574f84744e1cb02defd179dd9e682",
+        "bytes": 43683
+      },
+      "/tmp/email_pr3023_ux_docs_confirmed_20261001.xml": {
+        "sha256": "b32b58b0034ef95707a25fca7bb75cba42c72d626c9a0f42b4f1a313c8b9aca0",
+        "bytes": 35412
+      },
+      "/tmp/email_pr3023_ux_docs_confirmed_20261001.log": {
+        "sha256": "5cda091a644e1813e5b806a2e6718112ceb864234a4da1ae7a37303867727334",
+        "bytes": 11838
+      },
+      "/tmp/email_pr3023_ux_docs_followup_task_confirmed_20261001.txt": {
+        "sha256": "d4f00c11069582306482738b0e4cfe71f04b42c80c19ef5a76b692ba6ae05cf2",
+        "bytes": 3368
+      },
+      "/tmp/email_pr3023_ux_task_final_confirmed_20261001.txt": {
+        "sha256": "1525f8c1a7461adf932c63dc30786955aa5342b983fd267237c1ea5ef8c0d7ce",
+        "bytes": 5687
+      }
+    },
+    "publication_and_merge": "Pending at this receipt; only newly published exact-head review and all seven required contexts can authorize merge."
   }
 }
