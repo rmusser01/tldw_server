@@ -1309,4 +1309,32 @@ The change adds two clock readings around the existing analyzer await and correc
 
 Immutable local evidence: /private/tmp/pr2979-uat563-final-evidence.json (SHA256 45e29d5a132dc694e7f6682114b617fe67c90f84d87e292350150d2467a7d1a9). Independent review: /private/tmp/pr2979-uat563-independent-review.json (SHA256 0fe5aa2671745221bcd29e0f90499baf82401994de16d479cdb00137d21235e1), verifying 35 artifact hashes, source/AST preservation, exact 330 native/local case identities and mutation sensitivity. It performed no independent tests, imports, browser, static or PostgreSQL runs. /private/tmp/pr2979-uat563-review-completed-supplement.json resolves the manifest’s historical pending-review field. Focused baseline/red/green terminal exits are root-observed tool completions recorded in /private/tmp/pr2979-uat563-terminal-exits.json; full/charge also have supervisor records.
 
-Normal local commit is the next step. Final actual published macOS integrations and strict/native acceptance remain OPEN; controlled sufficiency does not attribute the hosted scheduling event. Hold publication while useful current CI remains nonterminal.
+Normal-hook local UAT563 commit 9914517f7d550e045f60f7cd1ebe96093213e11b is complete; /private/tmp/pr2979-uat563-local-commit-proof.json verifies its clean tree and two held commits above b38. Final actual published macOS integrations and strict/native acceptance remain OPEN; controlled sufficiency does not attribute the hosted scheduling event. Hold publication while useful current CI remains nonterminal.
+
+## Native recurrence and dependency setup — UAT552 / UAT564
+
+### Stage 1: Preserve exact native results
+**Goal:** Verify the new Watchlists recurrence and four setup cancellations using actual hosted logs, metadata, annotations and available artifacts.
+**Success Criteria:** Exact run/head identities, archive digest and case identities verified; automatic maximum-time cancellation distinguished from test failure.
+**Tests:** Read-only evidence and source preservation, no local test rerun.
+**Status:** Complete
+
+UAT552 / child .41 recurs on Ubuntu/Python 3.12 product-watchlists-pipeline job 110219900664 in b38 native run 36813387762: first runs GET takes 1.417514295 s against the unchanged 0.70 s budget. HTTP/status/count guards before the latency assertion pass. It has 241 passes, one original skip, one failure, zero errors, 7254 warnings and natural exit 1 in 169.48 s. Artifact 11146084309 contains XML plus pytest log; archive SHA256 c461cf9a102b17085e079089a78a5053de63e87726ceb6b5a3c97e1849786370 matches metadata. Exact 243 identities match the previous native macOS result, with platform fixture skips differing. Source remains fb497c7df8e349af7372db1a1760fdcd6fb8fb1f9c6b58838f50a61be00ab09b / 23 unchanged assertions. No actual request-stage profile is supplied, so hosted cause remains unproven. Evidence /private/tmp/pr2979-uat552-ubuntu-native-recurrence-0738.json SHA256 d6e1a5818e500f0330baf32c3652719c13e7ad18695a0804189aab8631cdfd4f verifies 17 artifacts. Two initial XML-only archive guards were private parser mistakes; corrected named-member reading succeeds, and those mistakes are excluded from CI/source/test failures.
+
+New UAT564 / child .53 tracks four automatic one-hour setup cancellations: 110219884066 (Python 3.13 media-ingestion-new-unit-processing), 110219886916 (Python 3.12 rag-new-integration-core), 110219886928 (rag-new-integration-batch), 110219886970 (rag-new-unit-rag-contracts). Every annotation explicitly reports 1h0m0s maximum. Setup step 5 runs uv pip install --system -e .[dev,multiplayer] and shows large Nvidia/CUDA downloads; tests never start and no JUnit is uploaded. Exact throughput/network/cache/install-stage cause remains unproven. Evidence /private/tmp/pr2979-uat564-native-setup-evidence-0741.json SHA256 0e40527fa5296f9cac71b2b969195ccf22b10147180a3b516febf22caaab68a2 verifies 36 artifacts. Official searches found no duplicate, supported explicit-ID Backlog Python CLI created child .53 before these docs edits. This is distinct from UAT555’s earlier apt setup cancellations and scopes.
+
+### Stage 2: Obtain actual native causal observations
+**Goal:** Attribute the request and setup bottlenecks before corrective edits.
+**Success Criteria:** Content-free cold-request route/dependency/SQL/serialization/scheduling profile for UAT552, and throughput/cache/install-stage evidence for UAT564. Any repair preserves all original workload, budgets, dependency and ownership contracts.
+**Tests:** Actual native diagnostics after useful current runs are terminal; no further whole local Prompt rerun without new causal evidence.
+**Status:** Not Started
+
+No production/test/dependency/CI/timer/warning/GC/cleanup repair is justified by these read-only observations. No new local pytest, PG, static or independent test run is claimed. Bandit is N/A for this tracking-only Markdown/task delta; UAT563’s prior source qualification remains separate.
+
+### Stage 3: Qualify the final published head
+**Goal:** Obtain final strict/native success with every affected scope and unresolved review disposition settled.
+**Success Criteria:** Watchlists and all four setup-cancelled scopes succeed on actual final head; whole native macOS Prompt exits naturally; Chatbook disposition settled.
+**Tests:** Final exact-head automatic/native checks, preserving useful current diagnostics.
+**Status:** Not Started
+
+All UAT552/UAT564 acceptance criteria remain OPEN. Current useful b38 runs remain nonterminal; hold reviewed UAT562/UAT563 and tracking commits. No rerun, cancellation, dispatch, push, body mutation, replay or merge. Parent and children .1 through .53 remain In Progress, full UAT paused/UAT261 open.
