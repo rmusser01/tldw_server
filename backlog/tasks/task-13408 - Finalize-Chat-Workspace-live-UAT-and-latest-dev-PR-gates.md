@@ -1,10 +1,10 @@
 ---
 id: TASK-13408
 title: Finalize Chat Workspace live UAT and latest-dev PR gates
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-01 18:39'
-updated_date: '2026-10-01 19:10'
+updated_date: '2026-10-01 19:12'
 labels: []
 dependencies: []
 references:
@@ -24,7 +24,7 @@ Continue reviewed TASK-13398 Chat Workspace fixes and PR3071. Latest upstream ec
 <!-- AC:BEGIN -->
 - [x] #1 Complete live Browse/staging/external-link and mobile recovery/composer keyboard UAT plus fresh owner-target visual proof without mocks.
 - [x] #2 Integrate latest dev FastAPI0.142.1 and verify backend contracts and original data/tab/stash preservation.
-- [ ] #3 Verify production Turbopack token-sync and unchanged bundle budgets, scoped tests/security; push reviewed fixes to PR3071 without merging or inventing the human Change summary.
+- [x] #3 Verify production Turbopack token-sync and unchanged bundle budgets, scoped tests/security; push reviewed fixes to PR3071 without merging or inventing the human Change summary.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -35,12 +35,14 @@ Final no-mock native acceptance is complete: real Chrome raw CDP with actual aut
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Official completed-history archive finished: 32 exact-content records moved via backlog task archive; upstream Pin-FastAPI record SHA unchanged. Catalog/result retained externally. Removed only the completed owner-checkpoint plan, preserving unrelated plans. Final acceptance doc and PR body include verified old remote bundle failures and new-head CI limits.
+
+Publication verified using gh pr view: PR3071 OPEN DRAFT, base dev, branch codex/chat-workspace-a11y, head b9b6571e8fdd30005d2d62a410f2f528cd6219e5; final PR body successfully updated and artifact attachment confirmed. Latest remote dev still ec86ba4. Final task-status commit follows; no production bytes change.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-All approved native no-mock acceptance gates pass, including actual account/backend isolation, Browse and staging, mobile recovery controls, fresh visuals and a grounded Gemma/citation/checkpoint/reload round trip on merged latest dev ec86/FastAPI0.142.1. Scoped tests, security, TypeScript, independent reviews and unchanged production bundle gates are recorded in the acceptance document. Reviewed code fixes are committed; final PR publication and remote CI verification remain the last gate. Both task histories are retained: the completed 32-record Chat Workspace family was officially archived with byte-identical contents and upstream FastAPI task unchanged. No merge or fabricated requester-authored Change summary.
+Completed all approved no-mock native acceptance and scoped verification gates on merged latest dev ec86/FastAPI0.142.1. Published reviewed mobile recovery and eager bundle dependency fixes, latest-dev integration and final evidence to draft PR3071; remote verified head b9b6571e8fdd30005d2d62a410f2f528cd6219e5. Actual Chrome/CDP account/backend isolation, Browse/staging/external link, mobile keyboard/fresh visuals, grounded Gemma/citations/canonical receipts/checkpoint/reload, recovery and routes all pass. Tests2278direct owned assertions, backend34latest-upstream checks, fullTypeScript and independent reviews pass; scopedBandit has no new findings. Matched final production Turbopack539.9KBshared/842.3KBheaviest passes unchanged600/900budgets. Original data, two tabs and68stashes preserved. Officially archived32completed historical records with byte-identical content and upstream task unchanged; removed only the completed task-owned plan. Updated PR body and committed acceptance doc. Remote CI is newly queued and not claimed passing; untouched neighbor failures and inherited environment limits remain documented. PR remains draft/unmerged pending remote CI and requester-authored Change summary; no epic closure or policy bypass.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
@@ -49,10 +51,10 @@ All approved native no-mock acceptance gates pass, including actual account/back
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
