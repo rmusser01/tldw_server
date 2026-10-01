@@ -202,6 +202,8 @@
     "researchWorkspace": "Research Workspace",
     "explainer": "Explainer",
     "explainerDesc": "Explore topics and sources through branching explanations",
+    "chatWorkspace": "Chat Workspace",
+    "chatWorkspaceDesc": "Chat-first workspace with staged sources and runtime context",
     "modeKanban": "Kanban",
     "modeShortcutHint": "{{shortcut}} to switch",
     "quickIngest": "Quick Ingest",

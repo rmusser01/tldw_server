@@ -34,7 +34,7 @@ import { humanMessageFormatter } from "@/utils/human-message"
 import { systemPromptFormatter } from "@/utils/system-message"
 import type { ActorSettings } from "@/types/actor"
 import { maybeInjectActorMessage } from "@/utils/actor"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { tldwClient, type ChatTurnIdentity } from "@/services/tldw/TldwApiClient"
 import { getSearchSettings } from "@/services/search"
 import { resolveImageBackendCandidates } from "@/utils/image-backends"
 import {
@@ -63,8 +63,10 @@ import {
   type ServicePromptSnapshot
 } from "@/services/service-prompts"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
-import type { ChatScope } from "@/types/chat-scope"
 import { WEBUI_CHAT_SOURCE } from "@/utils/character-chat-session"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { getSelectedDurableTurnSupport } from "@/services/tldw/server-capabilities"
+import { toChatScopeParams, type ChatScope } from "@/types/chat-scope"
 
 interface WebSearchPayload {
   query: string
@@ -154,6 +156,7 @@ const buildWebSearchSources = (results: any[]) => {
 }
 
 type NormalChatModeParams = {
+  scope?: ChatScope
   historySelection?: {
     controller: HistorySelectionController
     originIsCurrent: () => boolean
@@ -196,7 +199,8 @@ type NormalChatModeParams = {
   historyId: string | null
   serverChatId?: string | null
   setServerChatId?: (id: string) => void
-  scope?: ChatScope
+  conversationId?: string
+  tldwTurn?: ChatTurnIdentity
   setHistoryId: (id: string) => void
   uploadedFiles?: any[]
   actorSettings?: ActorSettings
@@ -216,6 +220,7 @@ type NormalChatModeParams = {
   messageForModel?: string
   regenerateFromMessage?: Message
   servicePromptSnapshot?: ServicePromptSnapshot
+  requestScope?: ServicePromptRequestScope
 }
 
 const isBackendUnavailableError = (error: unknown): boolean => {
@@ -563,7 +568,7 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
     }
 
     let applicationChatHistory = generateHistory(
-      ctx.historyForModel ?? ctx.history,
+      ctx.historyTurn?.serverOwned ? [] : (ctx.historyForModel ?? ctx.history),
       ctx.selectedModel,
       ctx.historyTurn ? { versioned: true } : undefined
     )
@@ -642,13 +647,16 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
 }
 
 /** Establish one operation-lived adapter; display leases never authorize its later writes. */
-const captureNormalHistoryTurn = async (
-  params: NormalChatModeParams,
+export const captureNormalHistoryTurn = async (
+  params: Pick<NormalChatModeParams,
+    "historySelection" | "historyId" | "serverChatId" | "setHistoryId" | "setServerChatId" |
+    "tldwTurn" | "scope" | "selectionSource" | "toolChoice" | "selectedModel">,
   message: string,
   snapshot: ServicePromptSnapshot,
   signal: AbortSignal
 ): Promise<HistorySendTurn> => {
   const { controller, originIsCurrent, temporary } = params.historySelection!
+  const serverOwned = Boolean(params.tldwTurn)
   if (temporary || params.historyId === "temp")
     throw new Error("temporary_history_unavailable")
   if (!originIsCurrent()) throw new Error("stale_selection")
@@ -809,6 +817,22 @@ const captureNormalHistoryTurn = async (
   const capture = await captureHistorySnapshot(owner, view, "send", signal)
   if (capture.status !== "captured") throw new Error(capture.code)
   if (!canUpdateView()) throw new Error("stale_selection")
+  if (serverOwned) {
+    if (owner.kind !== "native" || owner.conversation_id !== params.serverChatId ||
+        JSON.stringify(toChatScopeParams(owner.scope)) !== JSON.stringify(toChatScopeParams(params.scope)))
+      throw new Error("owner_conversation_mismatch")
+    if (!(await getSelectedDurableTurnSupport(snapshot.requestScope, signal)))
+      throw new Error("unsupported_history_durable_capability")
+    if (!validateLease() || !canUpdateView()) throw new Error("stale_selection")
+  }
+  const previousAttempts = serverOwned ? controller.recoveries.flatMap(({ turn }) =>
+    turn.persistence === "server" && turn.logical_user_message_id === params.tldwTurn!.user_message_id ? [turn] : []
+  ) : []
+  const prior = previousAttempts[0]
+  if (prior && (prior.input_text !== message || !prior.admission || !prior.finalized_selection))
+    throw new Error("history_recovery_inspection_required")
+  if (previousAttempts.some(turn => turn.admission?.selection_digest !== prior?.admission?.selection_digest))
+    throw new Error("history_operation_conflict")
   const operationId = crypto.randomUUID()
   const record = (
     turn: HistorySendTurn,
@@ -818,11 +842,16 @@ const captureNormalHistoryTurn = async (
     operation_id: operationId,
     origin_view: view,
     selection_digest: turn.selection!.selection_digest,
-    request_context_digest: turn.selection!.request_context_digest,
+    request_context_digest: turn.requestContextDigest ?? turn.selection!.request_context_digest,
     owner_key: view.owner_key,
     conversation_id: view.conversation_id,
-    input_id: turn.input!.id,
-    assistant_id: turn.assistantId!,
+    ...(serverOwned ? {
+      persistence: "server" as const,
+      logical_user_message_id: params.tldwTurn!.user_message_id,
+      finalized_selection: turn.selection!,
+      ...(turn.admission ? { input_id: turn.admission.input_message_id } : {}),
+      ...(turn.observedResult ? { assistant_id: turn.observedResult.result_message_id, observed_result: turn.observedResult } : {})
+    } : { input_id: turn.input!.id, assistant_id: turn.assistantId! }),
     created_at: turn.createdAt!,
     input_text: turn.input!.content,
     input_images: turn.input!.images ?? [],
@@ -833,6 +862,8 @@ const captureNormalHistoryTurn = async (
       : {})
   })
   const turn: HistorySendTurn = {
+    serverOwned,
+    ...(prior?.admission ? { retryAdmission: prior.admission, selection: prior.finalized_selection } : {}),
     owner,
     capture,
     currentView: () => controller.getCurrent().view,
@@ -896,24 +927,24 @@ export const normalChatMode = async (
   params: NormalChatModeParams
 ): Promise<ChatSubmitResult> => {
   console.log("Using normalChatMode")
+  if (params.historySelection && params.tldwTurn && !params.serverChatId)
+    throw new Error("unsupported_history_durable_turn")
+  const historyOwner = params.historySelection?.controller.getCurrent().owner
+  const needsRequestScope = Boolean(
+    params.webSearch || params.historySelection || params.tldwTurn || params.requestScope
+  )
   const ownsServicePromptSnapshot =
-    !params.servicePromptSnapshot &&
-    (params.webSearch || !!params.historySelection)
+    !params.servicePromptSnapshot && needsRequestScope
   const servicePromptSnapshot =
     params.servicePromptSnapshot ??
-    (params.webSearch || params.historySelection
+    (needsRequestScope
       ? await loadServicePromptSnapshot(
           params.webSearch ? ["chat.web_search.answer"] : [],
           {
             signal,
-            requestScope:
-              params.historySelection?.controller.getCurrent().owner?.kind ===
-              "native"
-                ? (
-                    params.historySelection.controller.getCurrent()
-                      .owner as import("@/services/chat-history-selection").NativeHistoryOwnerV1
-                  ).request_scope
-                : undefined
+            requestScope: historyOwner?.kind === "native"
+              ? historyOwner.request_scope
+              : params.requestScope
           }
         )
       : undefined)
@@ -928,6 +959,8 @@ export const normalChatMode = async (
       if (isRegenerate) throw new Error("unsupported_history_action")
       if (params.uploadedFiles?.length)
         throw new Error("unsupported_history_message_assets")
+      if (params.tldwTurn && (image || params.webSearch || params.dynamicUIRequest || params.overlaySystemPrompt || params.actorSettings?.isEnabled))
+        throw new Error("unsupported_history_action_context")
       const historyTurn = await captureNormalHistoryTurn(
         params,
         message,

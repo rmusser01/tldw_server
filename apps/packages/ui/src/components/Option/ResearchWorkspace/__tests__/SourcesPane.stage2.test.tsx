@@ -1,8 +1,18 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { createStore } from "zustand/vanilla"
 import type { WorkspaceSource } from "@/types/workspace"
 import { SourcesPane } from "../SourcesPane"
+import { DEFAULT_SOURCE_LIST_VIEW_STATE } from "../SourcesPane/source-list-view"
 import { WORKSPACE_SOURCE_DRAG_TYPE } from "../drag-source"
+const { mockResolveServicePromptScope } = vi.hoisted(() => ({
+  mockResolveServicePromptScope: vi.fn()
+}))
+
+vi.mock("@/services/service-prompts", () => ({
+  resolveServicePromptScope: mockResolveServicePromptScope
+}))
+vi.mock("wxt/browser", () => ({ browser: {} }))
 const { mockScheduleWorkspaceUndoAction, mockUndoWorkspaceAction } = vi.hoisted(
   () => ({
     mockScheduleWorkspaceUndoAction: vi.fn(),
@@ -67,6 +77,7 @@ const workspaceStoreState = {
   reorderSource: mockReorderSource,
   mergeSourceReviewUpdates: mockMergeSourceReviewUpdates,
 }
+const fixtureWorkspaceStore = createStore(() => workspaceStoreState)
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -102,9 +113,13 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
+  useWorkspaceStore: Object.assign((
     selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  ) => selector(workspaceStoreState), {
+    getState: () => fixtureWorkspaceStore.getState(),
+    subscribe: (listener: Parameters<typeof fixtureWorkspaceStore.subscribe>[0]) =>
+      fixtureWorkspaceStore.subscribe(listener)
+  })
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -129,6 +144,10 @@ describe("SourcesPane Stage 2 source highlighting", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     window.localStorage.clear()
+    mockResolveServicePromptScope.mockResolvedValue({
+      config: { serverUrl: "https://workspace.test", authMode: "multi-user", authSource: "manual" },
+      scopeKey: "workspace-owner-7", userId: 7, clientPrincipalVerified: true
+    })
     mockGetWorkspaceSourcePreview.mockResolvedValue({
       workspace_id: "workspace-1",
       source_id: "s1",
@@ -218,23 +237,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     render(
       <SourcesPane
         sourceListViewState={{
-          sort: "manual",
-          dateField: "addedAt",
-          dateFrom: null,
-          dateTo: null,
-          statusFilters: [],
-          reviewStateFilters: [],
-          typeFilters: [],
-          requireUrl: false,
-          requireFileSize: false,
-          requireDuration: false,
-          requirePageCount: false,
-          fileSizeMin: null,
-          fileSizeMax: null,
-          durationMin: null,
-          durationMax: null,
-          pageCountMin: null,
-          pageCountMax: null,
+          ...DEFAULT_SOURCE_LIST_VIEW_STATE,
           expanded: true
         }}
       />
@@ -733,17 +736,19 @@ describe("SourcesPane Stage 2 source highlighting", () => {
 
     expect(await screen.findByText("Captured content")).toBeInTheDocument()
     expect(
-      screen.getByText("Captured source text that the user can inspect.")
+      await screen.findByText("Captured source text that the user can inspect.")
     ).toBeInTheDocument()
     expect(screen.getByText("Evidence snippets")).toBeInTheDocument()
     expect(screen.getByText("Chunk evidence used for citations.")).toBeInTheDocument()
     expect(
       screen.getByText("Showing first 47 of 2,400 characters.")
     ).toBeInTheDocument()
-    expect(mockGetWorkspaceSourcePreview).toHaveBeenCalledWith("workspace-1", "s1", {
-      max_chars: 3000,
-      chunk_limit: 3
-    })
+    expect(mockGetWorkspaceSourcePreview).toHaveBeenCalledWith("workspace-1", "s1",
+      { max_chars: 3000, chunk_limit: 3 },
+      { signal: expect.any(AbortSignal), requestScope: {
+        config: { serverUrl: "https://workspace.test", authMode: "multi-user", authSource: "manual" },
+        scopeKey: "workspace-owner-7", userId: 7, clientPrincipalVerified: true
+      } })
   })
 
   it("explains when captured content is pending instead of replacing inspection with annotations", async () => {
@@ -781,7 +786,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
 
     expect(await screen.findByText("Captured content")).toBeInTheDocument()
     expect(
-      screen.getByText("Text extraction has not completed yet.")
+      await screen.findByText("Text extraction has not completed yet.")
     ).toBeInTheDocument()
     expect(screen.getByText("Local highlights & annotations")).toBeInTheDocument()
     expect(

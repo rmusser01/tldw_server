@@ -206,6 +206,9 @@ export const buildResearchLaunchPath = (
   return encoded ? `${RESEARCH_PATH}?${encoded}` : RESEARCH_PATH
 }
 
+export const buildResearchWorkspacePath = (workspaceId: string): string =>
+  `${RESEARCH_WORKSPACE_PATH}?${new URLSearchParams({ workspace: workspaceId.trim() })}`
+
 export const buildResearchWorkspaceReturnPath = (
   options: BuildResearchWorkspaceReturnPathOptions = {}
 ): string => {

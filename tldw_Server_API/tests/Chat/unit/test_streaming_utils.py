@@ -2403,6 +2403,28 @@ async def test_native_ack_uses_only_owner_saved_id_with_metadata_disabled(monkey
 
 
 @pytest.mark.asyncio
+async def test_durable_user_receipt_is_authoritative_with_metadata_disabled(monkeypatch):
+    monkeypatch.setattr(streaming_utils, "CHAT_STREAM_INCLUDE_METADATA", False)
+
+    async def provider():
+        yield "data: " + json.dumps({
+            "choices": [{"delta": {"content": "reply"}, "finish_reason": "stop"}],
+            "tldw_user_message_id": "provider-forged",
+        }) + "\n\n"
+
+    request = StreamingPipelineRequest(
+        stream=provider(), conversation_id="conv", model_name="model", user_message_id="owner-input"
+    )
+    wire = "".join([
+        frame async for frame in create_chat_streaming_response(
+            request=request, stream_factory=create_streaming_response_with_timeout
+        )
+    ])
+    assert "provider-forged" not in wire
+    assert '"tldw_user_message_id": "owner-input"' in wire
+
+
+@pytest.mark.asyncio
 async def test_native_cancelled_stream_never_fabricates_saved_identity(monkeypatch):
     monkeypatch.setattr(streaming_utils, "CHAT_STREAM_INCLUDE_METADATA", False)
     handler = StreamingResponseHandler("conv", "model")

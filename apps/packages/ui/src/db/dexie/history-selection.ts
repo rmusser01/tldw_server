@@ -1,6 +1,8 @@
 /** Local H1 authority. All hashes run synchronously within the owning Dexie transaction. */
 import { sha256 } from "@noble/hashes/sha2.js"
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js"
+import { z } from "zod"
+import { validateHistoryDurableResultReceipt } from "@/utils/history-durable-sources"
 import { db } from "./schema"
 import type {
   HistoryInfo,
@@ -918,23 +920,88 @@ export const settleLocalAcceptedAssistant = (
 
 
 /** Store a credential-free operation intent before dispatch, separate from all ancestry. */
+const recoveryString = z.string().min(1)
+const recoveryInterpretation = z.discriminatedUnion("kind", [
+  z.object({kind: z.literal("parent_graph_v1")}).strict(),
+  z.object({kind: z.literal("legacy_linear_v1"), projection_id: recoveryString}).strict()
+])
+const recoveryCursor = z.discriminatedUnion("kind", [
+  z.object({kind: z.literal("empty")}).strict(),
+  z.object({kind: z.literal("after_message"), message_id: recoveryString}).strict(),
+  z.object({kind: z.literal("before_message"), message_id: recoveryString}).strict()
+])
+const recoveryViewSchema = z.object({
+  view_session_id: recoveryString, owner_key: recoveryString, conversation_id: recoveryString,
+  interpretation: recoveryInterpretation, cursor: recoveryCursor, selection_revision: z.number().int().nonnegative()
+}).strict()
+const recoverySelectionSchema = z.object({
+  version: z.literal(1), owner_key: recoveryString, conversation_id: recoveryString,
+  interpretation: recoveryInterpretation, cursor: recoveryCursor, selection_revision: z.number().int().nonnegative(),
+  purpose: z.literal("send"),
+  messages: z.array(z.object({id: recoveryString, revision: recoveryString}).strict()),
+  fences: z.object({conversation: z.string(), history: z.string(), settings: z.string()}).strict(),
+  storage_context_digest: z.string(), request_context_digest: z.string().regex(/^[0-9a-f]{64}$/),
+  selection_digest: z.string().regex(/^[0-9a-f]{64}$/)
+}).strict()
+const recoveryAdmissionSchema = z.object({
+  version: z.literal(1), owner_key: recoveryString, conversation_id: recoveryString,
+  input_message_id: z.guid(), input_message_revision: z.literal("1"),
+  selection_digest: z.string().regex(/^[0-9a-f]{64}$/)
+}).strict()
+const parseRecoveryAdmission = (value: HistoryAdmissionReferenceV1): HistoryAdmissionReferenceV1 => {
+  const parsed = recoveryAdmissionSchema.safeParse(value)
+  return parsed.success ? parsed.data : fail("invalid_history_operation")
+}
+const recoveryObservationSchema = z.object({
+  operation_id: recoveryString, created_at: z.number().int().nonnegative(),
+  request_context_digest: z.string().regex(/^[0-9a-f]{64}$/),
+  input_text: z.string(), input_images: z.tuple([]), result_text: z.string(),
+  state: z.enum(["dispatching", "unknown", "accepted_unsent", "generated_unsaved"]),
+  input_id: z.guid().optional(), assistant_id: z.guid().optional(),
+  admission: z.object({}).passthrough().optional(),
+  observed_result: z.object({}).passthrough().optional()
+})
+
 export const saveHistoryTurnRecovery = async (
   scope: HistoryBookmarkScope, view: HistoryViewSelectionV1, turn: HistoryTurnRecovery
 ): Promise<void> => {
+  const server = turn.persistence === "server" ? turn : undefined
+  const selected = server && (server.logical_user_message_id !== undefined || server.finalized_selection !== undefined || server.observed_result !== undefined)
+  if (selected) {
+    const parsed = recoverySelectionSchema.safeParse(server.finalized_selection)
+    if (!z.guid().safeParse(server.logical_user_message_id).success || !parsed.success ||
+        parsed.data.owner_key !== turn.owner_key || parsed.data.conversation_id !== turn.conversation_id ||
+        parsed.data.selection_digest !== turn.selection_digest || selectionDigest(parsed.data as HistorySelectionV1) !== turn.selection_digest ||
+        !recoveryViewSchema.safeParse(turn.origin_view).success || !recoveryViewSchema.safeParse(view).success ||
+        !recoveryObservationSchema.safeParse(turn).success)
+      fail("invalid_history_operation")
+  }
   // Whitelist the recovery projection; runtime extras cannot persist credentials/capabilities.
-  const detached: HistoryTurnRecovery = structuredClone({
+  let detached: HistoryTurnRecovery = structuredClone({
     operation_id: turn.operation_id, origin_view: turn.origin_view,
     selection_digest: turn.selection_digest, request_context_digest: turn.request_context_digest,
     owner_key: turn.owner_key, conversation_id: turn.conversation_id,
     persistence: turn.persistence ?? "client",
     input_id: turn.input_id, assistant_id: turn.assistant_id, created_at: turn.created_at,
     input_text: turn.input_text, input_images: turn.input_images, result_text: turn.result_text, state: turn.state,
+    ...(selected ? {
+      logical_user_message_id: server.logical_user_message_id,
+      finalized_selection: server.finalized_selection,
+      ...(server.observed_result !== undefined ? {observed_result: server.observed_result} : {})
+    } : {}),
     ...(turn.admission ? {admission: {
       version: turn.admission.version, owner_key: turn.admission.owner_key,
       conversation_id: turn.admission.conversation_id, input_message_id: turn.admission.input_message_id,
       input_message_revision: turn.admission.input_message_revision, selection_digest: turn.admission.selection_digest
     }} : {})
   }) as HistoryTurnRecovery
+  if (selected && detached.persistence === "server") {
+    if (detached.input_id === undefined) delete detached.input_id
+    if (detached.assistant_id === undefined) delete detached.assistant_id
+    if (detached.admission) {
+      detached.admission = parseRecoveryAdmission(detached.admission)
+    }
+  }
   await db.transaction("rw", [db.userSettings, db.historySelections], async () => {
     await assertBookmarkProfile(scope)
     if (!detached.operation_id || detached.owner_key !== view.owner_key || detached.conversation_id !== view.conversation_id)
@@ -943,27 +1010,62 @@ export const saveHistoryTurnRecovery = async (
     if (previous?.history_turn_outcomes?.[detached.operation_id]) return
     if (!detached.origin_view || detached.origin_view.owner_key !== view.owner_key || detached.origin_view.conversation_id !== view.conversation_id || !detached.selection_digest || !detached.request_context_digest || (detached.persistence !== "server" && (!detached.input_id || !detached.assistant_id)))
       fail("invalid_history_operation")
-    if (detached.persistence === "server" && ((detached.input_id && !detached.admission) || (detached.assistant_id && !detached.admission)))
-      fail("history_operation_conflict")
-    if (detached.admission && (detached.admission.owner_key !== detached.owner_key || detached.admission.conversation_id !== detached.conversation_id || detached.admission.input_message_id !== detached.input_id || detached.admission.selection_digest !== detached.selection_digest))
-      fail("history_operation_conflict")
+    const assertAdmission = () => {
+      if (detached.persistence === "server" && ((detached.input_id && !detached.admission) || (detached.assistant_id && !detached.admission)))
+        fail("history_operation_conflict")
+      if (detached.admission && (detached.admission.owner_key !== detached.owner_key || detached.admission.conversation_id !== detached.conversation_id || detached.admission.input_message_id !== detached.input_id || detached.admission.selection_digest !== detached.selection_digest))
+        fail("history_operation_conflict")
+    }
+    if (!selected) assertAdmission()
     const prior = previous?.pending_turns?.[detached.operation_id]
     if (prior) {
       const immutable = (value: HistoryTurnRecovery) => ({
         origin_view: value.origin_view, selection_digest: value.selection_digest, request_context_digest: value.request_context_digest,
         operation_id: value.operation_id, owner_key: value.owner_key, conversation_id: value.conversation_id,
         persistence: value.persistence ?? "client",
+        ...(value.persistence === "server" ? {logical_user_message_id: value.logical_user_message_id, finalized_selection: value.finalized_selection} : {}),
         ...(value.persistence === "server" ? {} : {input_id: value.input_id, assistant_id: value.assistant_id}), created_at: value.created_at,
         input_text: value.input_text, input_images: value.input_images
       })
       if (canonicalHistoryJson(immutable(prior)) !== canonicalHistoryJson(immutable(detached))) fail("history_operation_conflict")
       if (prior.persistence === "server") {
         if ((prior.input_id && detached.input_id && prior.input_id !== detached.input_id) || (prior.assistant_id && detached.assistant_id && prior.assistant_id !== detached.assistant_id)) fail("history_operation_conflict")
-        if (prior.assistant_id && !detached.assistant_id) return
+        if (!selected && prior.assistant_id && !detached.assistant_id) return
       }
       if (prior.admission && detached.admission && canonicalHistoryJson(prior.admission) !== canonicalHistoryJson(detached.admission)) fail("history_operation_conflict")
-      if (prior.admission && !detached.admission) return
-      if (prior.result_text && !detached.result_text) return
+      if (!selected && prior.admission && !detached.admission) return
+      if (!selected && prior.result_text && !detached.result_text) return
+      if (selected && prior.persistence === "server" && detached.persistence === "server") {
+        // Retain stronger observations without copying arbitrary cached record members.
+        detached = {
+          ...detached,
+          ...(detached.input_id ?? prior.input_id ? {input_id: detached.input_id ?? prior.input_id} : {}),
+          ...(detached.assistant_id ?? prior.assistant_id ? {assistant_id: detached.assistant_id ?? prior.assistant_id} : {}),
+          ...(detached.admission ?? prior.admission ? {admission: parseRecoveryAdmission(detached.admission ?? prior.admission!)} : {}),
+          ...(detached.observed_result ?? prior.observed_result ? {observed_result: detached.observed_result ?? prior.observed_result} : {}),
+          result_text: detached.result_text || prior.result_text,
+          ...((prior.observed_result && !detached.observed_result) ||
+            (prior.admission && !detached.admission && !detached.observed_result && !detached.result_text)
+            ? {state: prior.state} : {})
+        }
+      }
+    }
+    if (selected && detached.persistence === "server") {
+      assertAdmission()
+      if (detached.admission && detached.admission.input_message_id !== detached.logical_user_message_id)
+        fail("history_operation_conflict")
+      if (detached.observed_result) {
+        if (!detached.admission || !Array.isArray(detached.observed_result.sources)) fail("history_operation_conflict")
+        const previousResult = prior?.persistence === "server" ? prior.observed_result : undefined
+        const observed = validateHistoryDurableResultReceipt(
+          detached, detached.admission, detached.request_context_digest,
+          previousResult?.sources ?? detached.observed_result.sources, detached.observed_result
+        )
+        if ((detached.assistant_id && detached.assistant_id !== observed.result_message_id) ||
+            (previousResult && canonicalHistoryJson(previousResult) !== canonicalHistoryJson(observed)))
+          fail("history_operation_conflict")
+        detached.observed_result = observed
+      }
     }
     await db.historySelections.put({
       ...(previous ?? {...scope, owner_key: view.owner_key, conversation_id: view.conversation_id, view: structuredClone(view)}),

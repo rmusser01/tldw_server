@@ -2,6 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
 from tldw_Server_API.app.core.Chat import chat_service
@@ -11,6 +13,96 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     resolve_provider_and_model,
 )
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "../../../Working/Language_Models/Qwen3.8-27B-UD-Q8_K_XL.gguf",
+        "./models/local-model.gguf",
+        "/models/local-model.gguf",
+        "models/local-model.gguf",
+        "Qwen/local-model",
+        "Qwen/local-model:Q8_0",
+    ],
+)
+def test_local_model_id_is_preserved_in_provider_request(model_id: str) -> None:
+    request = ChatCompletionRequest(
+        api_provider="llama.cpp",
+        model=model_id,
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+
+    metrics_provider, metrics_model, provider, model, _ = resolve_provider_and_model(
+        request, "openai", "openai"
+    )
+    params = build_call_params_from_request(
+        request_data=request,
+        target_api_provider=provider,
+        provider_api_key=None,
+        templated_llm_payload=[{"role": "user", "content": "Hello"}],
+        final_system_message=None,
+        resolved_model=model,
+    )
+
+    assert (metrics_provider, metrics_model) == ("llama.cpp", model_id)
+    assert (provider, params["model"]) == ("llama.cpp", model_id)
+    assert request.model == model_id
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "selection", ["llama:../../../models/local.gguf", "llama/../../../models/local.gguf"]
+)
+def test_provider_qualified_local_path_keeps_all_path_segments(selection: str) -> None:
+    request = ChatCompletionRequest(
+        model=selection,
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+
+    metrics_provider, metrics_model, provider, model, _ = resolve_provider_and_model(
+        request, "openai", "openai"
+    )
+
+    assert (metrics_provider, metrics_model) == ("llama.cpp", "../../../models/local.gguf")
+    assert (provider, model) == ("llama.cpp", "../../../models/local.gguf")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("api_provider", "selection", "expected_model"),
+    [
+        ("openai", "oai/gpt-4o", "gpt-4o"),
+        ("kobold", "koboldcpp/local-model.gguf", "local-model.gguf"),
+        ("ooba", "oobabooga/local-model", "local-model"),
+        ("oai", "openai/gpt-4o", "gpt-4o"),
+        ("openai", "oai:gpt-4o", "gpt-4o"),
+    ],
+)
+def test_registered_provider_aliases_still_strip_qualification(
+    api_provider: str, selection: str, expected_model: str
+) -> None:
+    request = SimpleNamespace(api_provider=api_provider, model=selection)
+
+    _, _, _, model, _ = resolve_provider_and_model(request, "openai", "openai")
+
+    assert model == expected_model
+
+
+@pytest.mark.unit
+@settings(max_examples=25, deadline=None)
+@given(
+    st.lists(st.text(alphabet="abcXYZ019_-", min_size=1, max_size=12), min_size=1, max_size=4)
+)
+def test_relative_model_paths_remain_opaque(segments: list[str]) -> None:
+    model_id = "../../" + "/".join(segments) + ".gguf"
+    request = SimpleNamespace(api_provider="llama.cpp", model=model_id)
+
+    _, metrics_model, _, model, _ = resolve_provider_and_model(request, "openai", "openai")
+
+    assert metrics_model == model_id
+    assert model == model_id
 
 
 @pytest.mark.unit

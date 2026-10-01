@@ -105,15 +105,47 @@ import {
 } from "@/services/settings/chat-opacity-css-vars"
 
 const Markdown = React.lazy(() => import("../../Common/Markdown"))
+const MarkdownHeadingScope = React.lazy(() =>
+  import("../../Common/Markdown").then(module => ({
+    default: module.MarkdownHeadingScope
+  }))
+)
+
+export type MessageRecoveryAction = {
+  id: string
+  label: string
+  onClick: () => void
+  disabled?: boolean
+  disabledReason?: string
+}
+
+const RecoveryActionButton = ({ action, className }: {
+  action: MessageRecoveryAction
+  className: string
+}) => {
+  const reasonId = React.useId()
+  return (
+    <span className="inline-flex max-w-full flex-col items-start gap-1">
+      <button
+        type="button"
+        onClick={action.onClick}
+        disabled={action.disabled}
+        aria-describedby={action.disabledReason ? reasonId : undefined}
+        className={`${className} disabled:cursor-not-allowed disabled:opacity-60`}
+      >
+        {action.label}
+      </button>
+      {action.disabledReason && (
+        <span id={reasonId} className="text-xs text-text-muted">{action.disabledReason}</span>
+      )}
+    </span>
+  )
+}
 
 const ErrorBubble: React.FC<{
   payload: ChatErrorPayload
   toggleLabels: { show: string; hide: string }
-  recoveryActions?: Array<{
-    id: string
-    label: string
-    onClick: () => void
-  }>
+  recoveryActions?: MessageRecoveryAction[]
 }> = ({ payload, toggleLabels, recoveryActions = [] }) => {
   const [showDetails, setShowDetails] = React.useState(false)
 
@@ -121,10 +153,10 @@ const ErrorBubble: React.FC<{
     <div
       role="alert"
       aria-live="assertive"
-      className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
+      className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-text">
       <p className="font-semibold">{payload.summary}</p>
       {payload.hint && (
-        <p className="mt-1 text-xs text-danger">
+        <p className="mt-1 text-xs text-text">
           {payload.hint}
         </p>
       )}
@@ -133,12 +165,12 @@ const ErrorBubble: React.FC<{
           type="button"
           onClick={() => setShowDetails((prev) => !prev)}
           title={showDetails ? toggleLabels.hide : toggleLabels.show}
-          className="mt-2 text-xs font-medium text-danger underline hover:text-danger">
+          className="mt-2 min-h-11 text-xs font-medium text-text underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus xl:min-h-8">
           {showDetails ? toggleLabels.hide : toggleLabels.show}
         </button>
       )}
       {showDetails && payload.detail && (
-        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-danger/10 p-2 text-xs text-danger">
+        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap rounded bg-danger/10 p-2 text-xs text-text">
           {payload.detail}
         </pre>
       )}
@@ -149,14 +181,11 @@ const ErrorBubble: React.FC<{
             {recoveryActions.map((action) => action.label).join(", ")}
           </span>
           {recoveryActions.map((action) => (
-            <button
+            <RecoveryActionButton
               key={action.id}
-              type="button"
-              onClick={action.onClick}
-              className="rounded border border-danger/40 bg-surface px-2 py-1 text-[11px] font-medium text-danger transition hover:bg-danger/10"
-            >
-              {action.label}
-            </button>
+              action={action}
+              className="min-h-11 rounded border border-danger/40 bg-surface px-2 py-1 text-[11px] font-medium text-text transition hover:bg-danger/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus xl:min-h-8"
+            />
           ))}
         </div>
       )}
@@ -167,11 +196,7 @@ const ErrorBubble: React.FC<{
 const EmptyAssistantResponseNotice: React.FC<{
   summary: string
   detail: string
-  recoveryActions: Array<{
-    id: string
-    label: string
-    onClick: () => void
-  }>
+  recoveryActions: MessageRecoveryAction[]
 }> = ({ summary, detail, recoveryActions }) => (
   <div
     role="status"
@@ -187,14 +212,11 @@ const EmptyAssistantResponseNotice: React.FC<{
           {recoveryActions.map((action) => action.label).join(", ")}
         </span>
         {recoveryActions.map((action) => (
-          <button
+          <RecoveryActionButton
             key={action.id}
-            type="button"
-            onClick={action.onClick}
+            action={action}
             className="rounded border border-warn/40 bg-surface px-2 py-1 text-[11px] font-medium text-warn transition hover:bg-warn/10"
-          >
-            {action.label}
-          </button>
+          />
         ))}
       </div>
     )}
@@ -214,6 +236,8 @@ type Props = {
   currentMessageIndex: number
   totalMessages: number
   onRegenerate: () => void
+  // Omit to retain the main Chat recovery behavior; [] suppresses recovery.
+  recoveryActions?: MessageRecoveryAction[]
   onEditFormSubmit: (value: string, isSend: boolean) => void
   isProcessing: boolean
   webSearch?: Record<string, unknown>
@@ -221,6 +245,7 @@ type Props = {
   sources?: any[]
   hideEditAndRegenerate?: boolean
   hideContinue?: boolean
+  hideSourceActions?: boolean
   onSourceClick?: (source: any) => void
   isTTSEnabled?: boolean
   generationInfo?: any
@@ -299,6 +324,7 @@ type Props = {
   onClearMessageSteering?: () => void
   metadataExtra?: MessageMetadataExtra
   dynamicUISurface?: DynamicUISurface
+  headingOffset?: number
   onDynamicUIAction?: (payload: unknown) => void
   researchActions?: MessageResearchActions
   onRegenerateImage?: (payload: {
@@ -1553,6 +1579,7 @@ export const PlaygroundMessage = (props: Props) => {
   }, [apiProviderOverride, props.onRegenerate, t, updateChatModelSetting])
   const errorRecoveryActions = React.useMemo(() => {
     if (!errorPayload) return []
+    if (props.recoveryActions !== undefined) return props.recoveryActions
     const actions: Array<{ id: string; label: string; onClick: () => void }> = [
       {
         id: "retry",
@@ -1623,10 +1650,12 @@ export const PlaygroundMessage = (props: Props) => {
     props.hideContinue,
     props.onContinue,
     props.onRegenerate,
+    props.recoveryActions,
     t
   ])
   const interruptionRecoveryActions = React.useMemo(() => {
     if (!interruptedGeneration || errorPayload) return []
+    if (props.recoveryActions !== undefined) return props.recoveryActions
     const actions: Array<{ id: string; label: string; onClick: () => void }> = [
       {
         id: "retry",
@@ -1672,10 +1701,11 @@ export const PlaygroundMessage = (props: Props) => {
     props.hideContinue,
     props.onContinue,
     props.onRegenerate,
+    props.recoveryActions,
     t
   ])
   const emptyResponseRecoveryActions = React.useMemo(
-    () => [
+    () => props.recoveryActions ?? [
       {
         id: "retry",
         label: t(
@@ -1705,6 +1735,7 @@ export const PlaygroundMessage = (props: Props) => {
       handleEnableProviderFallback,
       handleOpenModelSettings,
       props.onRegenerate,
+      props.recoveryActions,
       t
     ]
   )
@@ -2574,14 +2605,11 @@ export const PlaygroundMessage = (props: Props) => {
                       .join(", ")}
                   </span>
                   {interruptionRecoveryActions.map((action) => (
-                    <button
+                    <RecoveryActionButton
                       key={action.id}
-                      type="button"
-                      onClick={action.onClick}
+                      action={action}
                       className="rounded border border-warn/40 bg-surface px-2 py-1 text-[11px] font-medium text-warn transition hover:bg-warn/10"
-                    >
-                      {action.label}
-                    </button>
+                    />
                   ))}
                 </div>
               )}
@@ -2656,6 +2684,7 @@ export const PlaygroundMessage = (props: Props) => {
                       message={props.message}
                       className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                       searchQuery={props.searchQuery}
+                      headingOffset={props.headingOffset}
                       codeBlockVariant="compact"
                       artifactContextId={`${mermaidArtifactBaseContextId}-greeting`}
                       enableMermaidArtifactActions={enableAssistantMermaidDiagrams}
@@ -2666,7 +2695,7 @@ export const PlaygroundMessage = (props: Props) => {
                   <>
                     {parseReasoning(props.message).map((e, i) => {
                       if (e.type === "reasoning") {
-                        return (
+                        const reasoning = (
                           <ReasoningBlock
                             key={`reasoning-${i}`}
                             content={e.content}
@@ -2681,6 +2710,13 @@ export const PlaygroundMessage = (props: Props) => {
                             enableMermaidDiagrams={enableAssistantMermaidDiagrams}
                           />
                         )
+                        return props.headingOffset ? (
+                          <React.Suspense key={`reasoning-${i}`} fallback={<p>{t("reasoning.loading")}</p>}>
+                            <MarkdownHeadingScope value={props.headingOffset}>
+                              {reasoning}
+                            </MarkdownHeadingScope>
+                          </React.Suspense>
+                        ) : reasoning
                       }
 
                       return (
@@ -2696,6 +2732,7 @@ export const PlaygroundMessage = (props: Props) => {
                             message={e.content}
                             className={`${MARKDOWN_BASE_CLASSES} ${assistantTextClass}`}
                             searchQuery={props.searchQuery}
+                            headingOffset={props.headingOffset}
                             codeBlockVariant="github"
                             artifactContextId={`${mermaidArtifactBaseContextId}-segment-${i}`}
                             enableMermaidArtifactActions={enableAssistantMermaidDiagrams}
@@ -2975,36 +3012,38 @@ export const PlaygroundMessage = (props: Props) => {
                   ),
                   children: (
                     <div className="mb-3 flex flex-col gap-2">
-                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface2 px-2 py-1 text-[11px] text-text-muted">
-                        <span>
-                          {t(
-                            "playground:sources.citationWorkflowHint",
-                            "Inspect source rationale, then seed a follow-up from selected citations."
-                          )}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleAskWithSources(props.sources || [])}
-                            className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text-subtle hover:bg-surface2 hover:text-text"
-                          >
+                      {!props.hideSourceActions && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface2 px-2 py-1 text-[11px] text-text-muted">
+                          <span>
                             {t(
-                              "playground:sources.askWithSources",
-                              "Ask with these sources"
+                              "playground:sources.citationWorkflowHint",
+                              "Inspect source rationale, then seed a follow-up from selected citations."
                             )}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleOpenKnowledgePanel}
-                            className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text-subtle hover:bg-surface2 hover:text-text"
-                          >
-                            {t(
-                              "playground:sources.openKnowledgePanel",
-                              "Open Search & Context"
-                            )}
-                          </button>
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleAskWithSources(props.sources || [])}
+                              className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text-subtle hover:bg-surface2 hover:text-text"
+                            >
+                              {t(
+                                "playground:sources.askWithSources",
+                                "Ask with these sources"
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleOpenKnowledgePanel}
+                              className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text-subtle hover:bg-surface2 hover:text-text"
+                            >
+                              {t(
+                                "playground:sources.openKnowledgePanel",
+                                "Open Search & Context"
+                              )}
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      )}
                       {props?.sources?.map((source, index) => {
                         const sourceKey = getSourceFeedbackKey(source, index)
                         const selected =
@@ -3026,10 +3065,14 @@ export const PlaygroundMessage = (props: Props) => {
                                 thumb
                               })
                             }
-                            onAskWithSource={(payload) =>
-                              handleAskWithSources([payload])
+                            onAskWithSource={props.hideSourceActions
+                              ? undefined
+                              : (payload) => handleAskWithSources([payload])
                             }
-                            onOpenKnowledgePanel={handleOpenKnowledgePanel}
+                            onOpenKnowledgePanel={props.hideSourceActions
+                              ? undefined
+                              : handleOpenKnowledgePanel
+                            }
                             onSourceClick={props.onSourceClick}
                             onTrackClick={trackSourceClick}
                             onTrackCitation={trackCitationUsed}

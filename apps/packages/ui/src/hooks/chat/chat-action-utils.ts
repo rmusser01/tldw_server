@@ -12,6 +12,7 @@ import type { ChatResearchContext } from "@/services/tldw/TldwApiClient";
 import type { DynamicUIRequest } from "@/types/dynamic-ui";
 import { isGreetingMessageType } from "@/utils/character-greetings";
 import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider";
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -33,6 +34,7 @@ export type ChatModeOverrides = {
   researchContext?: ChatResearchContext;
   dynamicUIRequest?: DynamicUIRequest;
   userMetadataExtra?: MessageMetadataExtra;
+  requestScope?: ServicePromptRequestScope;
   ragMediaIds?: number[] | null;
   fileRetrievalEnabled?: boolean;
   contextFiles?: UploadedFile[];

@@ -4,6 +4,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import axe from "axe-core"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { ResearchWorkspace } from "../index"
+import type { ServerWorkspaceCache } from "@/store/workspace-api"
+import { buildResearchWorkspaceServerSourceSignature } from "../workspace-server-reconcile"
+import { serverWorkspaceMetadata } from "@/store/__tests__/workspace-activation.fixtures"
 
 const {
   mockGetMediaDetails,
@@ -66,6 +69,8 @@ const testState = {
   rightPaneCollapsed: false,
   workspaceId: "workspace-1",
   workspaceName: "New Research",
+  studyMaterialsPolicy: null as "general" | "workspace" | null,
+  serverWorkspace: null as ServerWorkspaceCache | null,
   workspaceTag: "workspace:test",
   initializeWorkspace: vi.fn(),
   restoreServerWorkspace: vi.fn(),
@@ -105,6 +110,8 @@ const testState = {
   }
 }
 
+const workspaceChangeListeners = new Set<() => void>()
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (
@@ -128,8 +135,16 @@ vi.mock("@/hooks/useMediaQuery", () => ({
 
 vi.mock("@/store/workspace", async original => ({
   ...await original<typeof import("@/store/workspace")>(),
-  useWorkspaceStore: (selector: (state: typeof testState) => unknown) =>
-    selector(testState),
+  useWorkspaceStore: Object.assign(
+    (selector: (state: typeof testState) => unknown) => selector(testState),
+    {
+      getState: () => testState,
+      subscribe: (listener: () => void) => {
+        workspaceChangeListeners.add(listener)
+        return () => workspaceChangeListeners.delete(listener)
+      }
+    }
+  ),
   createWorkspaceStorage: () => ({
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -159,9 +174,9 @@ vi.mock("@/services/background-proxy", () => ({
   bgRequest: mockBgRequest
 }))
 
-vi.mock("@/store/workspace-migration", () => ({
-  runResearchWorkspaceMigration: mockRunResearchWorkspaceMigration,
-  RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX: "tldw:research-workspace:migration:tombstone"
+vi.mock("@/store/workspace-migration", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/store/workspace-migration")>(),
+  runResearchWorkspaceMigration: mockRunResearchWorkspaceMigration
 }))
 
 vi.mock("@/services/service-prompts", () => ({
@@ -479,6 +494,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    workspaceChangeListeners.clear()
     ensureLocalStorage()
     delete (window as Window & {
       __tldwResearchWorkspaceFreshInitialization?: Set<string>
@@ -507,6 +523,8 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     testState.rightPaneCollapsed = false
     testState.workspaceId = "workspace-1"
     testState.workspaceName = "New Research"
+    testState.studyMaterialsPolicy = null
+    testState.serverWorkspace = null
     testState.workspaceTag = "workspace:test"
     testState.selectedSourceIds = []
     testState.generatedArtifacts = []
@@ -638,6 +656,33 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("does not migrate an edited canonical workspace after remount or provenance installation", async () => {
+    const payload = JSON.stringify({
+      schema: "workspace_split_v1",
+      state: { workspaceId: "workspace-1", workspaceIds: ["workspace-1"] }
+    })
+    window.localStorage.setItem("tldw-workspace", payload)
+    testState.storeHydrated = false
+    const first = render(<ResearchWorkspace />)
+    testState.serverWorkspace = {
+      scopeKey: "owner-a", notes: [],
+      metadata: { ...serverWorkspaceMetadata, id: testState.workspaceId },
+      sourceSignature: "different-before-edit", selectedSourceSignature: "different"
+    }
+    testState.currentNote.content = "Edited canonical draft"
+    testState.currentNote.isDirty = true
+    testState.storeHydrated = true
+    first.rerender(<ResearchWorkspace />)
+    await act(async () => {})
+    first.unmount()
+    render(<ResearchWorkspace />)
+    await act(async () => {})
+
+    expect(mockRunResearchWorkspaceMigration).not.toHaveBeenCalled()
+    expect(window.localStorage.getItem("tldw-workspace")).toBe(payload)
+    expect(screen.queryByTestId("workspace-statusbar-notice")).not.toBeInTheDocument()
+  })
+
   it("still migrates a different workspace discovered after fresh initialization", async () => {
     testState.workspaceId = ""
     testState.workspaceName = ""
@@ -727,14 +772,14 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     await expect(
       migrationInput.readLocalStorageValue("tldw-workspace")
     ).resolves.toBe(legacyPayload)
-    expect(migrationInput.deleteLocalStorageValue).toEqual(expect.any(Function))
-    expect(migrationInput.writeLocalStorageValue).toEqual(expect.any(Function))
+    expect(migrationInput.compareAndDeleteLocalStorageValue).toBeUndefined()
+    expect(migrationInput.writeLocalStorageValue).toBeUndefined()
 
     const notice = await screen.findByTestId("workspace-statusbar-notice")
     expect(notice).toHaveTextContent("Legacy workspace data found")
     expect(notice).toHaveTextContent("Server receipt saved")
     expect(notice).toHaveTextContent(
-      "Local data retained until server deletion eligibility is available"
+      "Automatic local cleanup is disabled"
     )
     fireEvent.click(
       screen.getByRole("button", { name: "Review migration recovery details" })
@@ -855,6 +900,69 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     expect(dialog).toHaveTextContent("tldw:research-workspace:unknown")
   })
 
+  it("passes only read-only storage access and the identity transition subscription to migration", async () => {
+    window.localStorage.setItem("tldw-workspace", JSON.stringify({ workspaceId: "workspace-1" }))
+    render(<ResearchWorkspace />)
+    await waitFor(() => expect(mockRunResearchWorkspaceMigration).toHaveBeenCalledOnce())
+    const input = mockRunResearchWorkspaceMigration.mock.calls[0][0]
+    expect(input.compareAndDeleteLocalStorageValue).toBeUndefined()
+    expect(input.writeLocalStorageValue).toBeUndefined()
+    expect(input.readLocalStorageValueSync).toBeUndefined()
+    expect(input.api.ackWorkspaceMigrationClientDelete).toBeUndefined()
+    expect(input.subscribeToWorkspaceChanges).toEqual(expect.any(Function))
+
+    window.localStorage.setItem("test-migration-key", "new edit")
+    expect(await input.readLocalStorageValue("test-migration-key")).toBe("new edit")
+    expect(window.localStorage.getItem("test-migration-key")).toBe("new edit")
+
+    const identities: string[] = []
+    const unsubscribe = input.subscribeToWorkspaceChanges(() => {
+      identities.push(input.getCurrentWorkspace().workspaceId)
+    })
+    testState.workspaceId = "other"
+    workspaceChangeListeners.forEach((listener) => listener())
+    testState.workspaceId = "workspace-1"
+    workspaceChangeListeners.forEach((listener) => listener())
+    unsubscribe()
+    expect(identities).toEqual(["other", "workspace-1"])
+    expect(workspaceChangeListeners.size).toBe(0)
+  })
+
+  it("truthfully shows automatic cleanup disabled for an eligible metadata receipt", async () => {
+    window.localStorage.setItem("tldw-workspace", JSON.stringify({ workspaceId: "workspace-1" }))
+    mockRunResearchWorkspaceMigration.mockResolvedValue({
+      status: "blocked", migrationId: "receipt", manifestHash: "hash",
+      serverMigration: { id: "receipt", status: "finalized", client_delete_eligible: true },
+      localDeletionEligibility: { eligible: true, blockingSurfaces: [], unknownSurfaces: [], coveredContentSurfaces: [], retainedLocalSurfaces: [] },
+      deletedSurfaceIds: [], message: "Automatic local cleanup is disabled. Writable legacy copies are retained."
+    })
+    render(<ResearchWorkspace />)
+    const notice = await screen.findByTestId("workspace-statusbar-notice")
+    await waitFor(() => expect(notice).toHaveTextContent(/automatic local cleanup is disabled/i))
+    expect(notice).toHaveTextContent("Server receipt saved")
+    expect(notice).not.toHaveTextContent(/data moved|imported/i)
+  })
+
+  it.each([
+    ["API failure", []],
+    ["preflight failure", []],
+    ["partial removal failure", ["localStorage:tldw-workspace"]]
+  ])("reports %s without denying completed local removals", async (_failure, deletedSurfaceIds) => {
+    window.localStorage.setItem("tldw-workspace", JSON.stringify({ workspaceId: "workspace-1" }))
+    mockRunResearchWorkspaceMigration.mockResolvedValue({
+      status: "failed", migrationId: "migration", manifestHash: "hash",
+      serverMigration: null, localDeletionEligibility: null, deletedSurfaceIds,
+      message: "Research Workspace migration failed. Further deletion was stopped."
+    })
+    render(<ResearchWorkspace />)
+
+    const notice = await screen.findByTestId("workspace-statusbar-notice")
+    expect(notice).toHaveTextContent(deletedSurfaceIds.length
+      ? "Migration failed after local deletion began"
+      : "Migration failed before local deletion")
+    if (deletedSurfaceIds.length) expect(notice).not.toHaveTextContent("before local deletion")
+  })
+
   it("settles migration status when React StrictMode remounts effects", async () => {
     const migrationDeferred = createDeferred<{
       status: string
@@ -923,7 +1031,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     const notice = await screen.findByTestId("workspace-statusbar-notice")
     expect(notice).toHaveTextContent("Server receipt saved")
     expect(notice).toHaveTextContent(
-      "Local data retained until server deletion eligibility is available"
+      "Automatic local cleanup is disabled"
     )
   })
 
@@ -1756,6 +1864,22 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     expect(
       mockGetWorkspaceSources.mock.invocationCallOrder[0]
     ).toBeLessThan(mockAddWorkspaceSource.mock.invocationCallOrder[0])
+  })
+
+  it("does not write a freshly hydrated server baseline on mount (unit store/API doubles)", async () => {
+    testState.studyMaterialsPolicy = "general"
+    testState.serverWorkspace = {
+      scopeKey: "owner-a", notes: [],
+      metadata: { ...serverWorkspaceMetadata, id: testState.workspaceId, name: testState.workspaceName },
+      sourceSignature: buildResearchWorkspaceServerSourceSignature(testState.sources),
+      selectedSourceSignature: testState.selectedSourceIds.join("|")
+    }
+    render(<ResearchWorkspace />)
+    await act(async () => {})
+    expect(mockUpsertWorkspace).not.toHaveBeenCalled()
+    expect(mockGetWorkspaceSources).not.toHaveBeenCalled()
+    expect(mockAddWorkspaceSource).not.toHaveBeenCalled()
+    expect(mockUpdateWorkspaceSourceSelection).not.toHaveBeenCalled()
   })
 
   it("persists the canonical local source selection during server bootstrap", async () => {

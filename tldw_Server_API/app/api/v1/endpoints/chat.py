@@ -3358,9 +3358,87 @@ async def _persist_system_message_if_needed(
         _release_system_message_lock(conversation_id)
 
 
+async def _verify_selected_durable_wire(request: Request, request_data: ChatCompletionRequest) -> str:
+    """Verify the dispatched body, not a model dump containing server defaults."""
+    from tldw_Server_API.app.core.Chat.history_wire import selected_durable_request_digest
+
+    try:
+        body = json.loads(await request.body())
+        if (type(body.get("stream")) is not bool
+                or any(type(body.get(key)) is not str or not body[key].strip() for key in ("model", "api_provider"))
+                or body["model"].strip().lower() == "auto"):
+            raise ValueError("explicit frozen inference fields required")
+        digest = selected_durable_request_digest(body)
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(422, detail={"code": "invalid_selected_durable_wire"}) from exc
+    history = request_data.tldw_turn.history_v1
+    expected = history.selection.request_context_digest if history.kind == "selection" else history.request_context_digest
+    if digest != expected:
+        raise HTTPException(409, detail={"code": "request_context_digest_mismatch"})
+    return digest
+
+
+async def _settle_selected_durable_result(
+    db: Any, cid: str, payload: dict[str, Any], *, reference: dict[str, Any],
+    owner_client_id: str, owner_key: str, scope: dict[str, Any],
+    result_metadata: dict[str, Any], runtime: dict[str, Any],
+) -> str:
+    """Commit the normalized text intent and expose only its live verified receipt."""
+    from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistoryResultV1
+
+    if (payload.get("role") != "assistant" or not isinstance(payload.get("content"), str)
+            or any(payload.get(key) is not None for key in ("tool_calls", "function_call", "images"))):
+        raise HTTPException(409, detail={"code": "unsupported_history_result_projection"})
+    prepared = {"id": str(uuid.uuid4()), "sender": "assistant", "content": payload["content"],
+        "images": [], "tool_calls": None, "extra_metadata": {
+            "sender_role": "assistant", "history_result_v1": result_metadata},
+        "parent_message_id": reference["input_message_id"]}
+    try:
+        mid = await asyncio.to_thread(db.settle_history_admission, cid, reference, prepared,
+            owner_client_id=owner_client_id, owner_key=owner_key)
+        rows, _ = await asyncio.to_thread(db.read_history_recovery_messages, cid,
+            owner_client_id=owner_client_id, owner_key=owner_key, scope=scope, message_id=mid)
+        proof = rows[0].get("tldw_history_recovery_v1") if len(rows) == 1 else None
+        if not isinstance(proof, dict) or proof.get("status") != "result_verified" or proof.get("scope") != scope:
+            raise HistorySelectionError("unverified_history_result")
+        result = HistoryResultV1.model_validate(proof["result"]).model_dump(mode="json", exclude_none=True)
+        if (result["result_message_id"] != mid or result["admission"] != reference
+                or any(result[key] != result_metadata[key] for key in ("version", "request_context_digest", "sources"))):
+            raise HistorySelectionError("unverified_history_result")
+    except (HistorySelectionError, ValidationError, KeyError) as exc:
+        raise HTTPException(409, detail={"code": "unverified_history_result"}) from exc
+    runtime["tldw_history_result_v1"] = result
+    return mid
+
+
+def _selected_durable_response_payload(
+    payload: dict[str, Any], cid: str, admission: dict[str, Any], runtime: dict[str, Any],
+) -> dict[str, Any]:
+    """Replace provider identity and receipt claims with server-owned values."""
+    owned = {"tldw_message_id", "tldw_user_message_id", "tldw_conversation_id", "tldw_system_message_id",
+        "tldw_history_admission_v1", "tldw_history_result_v1", "tldw_history_recovery_v1", "conversation_id"}
+    cleaned = {key: value for key, value in payload.items() if key not in owned}
+    cleaned.update(tldw_conversation_id=cid, tldw_user_message_id=admission["input_message_id"],
+        tldw_history_admission_v1=admission)
+    result = runtime.get("tldw_history_result_v1")
+    if result is not None:
+        cleaned.update(tldw_message_id=result["result_message_id"], tldw_history_result_v1=result)
+    return cleaned
+
+
 @router.post(
     "/completions",
     response_model=ChatCompletionResponse,
+    openapi_extra={
+        "x-tldw-selected-durable-turn": {
+            "version": 1,
+            "history": "h1_single_input_v1",
+            "result": "rag_source_v1",
+            "request_digest": "history_context_wire_v1",
+            "recovery_read": "protected_live_v1",
+            "inference_guarantee": "multiple_results_possible",
+        }
+    },
     summary="Create chat completion (OpenAI-compatible)",
     description=(
         "Generates an assistant response using the configured LLM provider. "
@@ -3427,6 +3505,8 @@ async def create_chat_completion(
     Returns:
         Response: A StreamingResponse (for streaming requests) or JSONResponse containing the LLM completion payload or an error body; raises HTTPException for client/server errors.
     """
+    selected_durable = getattr(getattr(request_data, "tldw_turn", None), "history_v1", None) is not None
+    selected_request_digest = await _verify_selected_durable_wire(request, request_data) if selected_durable else None
     current_loop = asyncio.get_running_loop()
 
     # Generate unique request ID for tracking and set it in context
@@ -3453,6 +3533,7 @@ async def create_chat_completion(
     strict_model_selection = _should_enforce_strict_model_selection()
     allow_provider_fallback_for_request = (
         ENABLE_PROVIDER_FALLBACK
+        and not selected_durable
         and not (strict_model_selection and explicit_model_requested)
     )
     routing_decision = None
@@ -3523,6 +3604,7 @@ async def create_chat_completion(
             request_data.tools = validate_tool_definitions(tools_as_dicts, provider=provider_hint)
         if (
             request_data.tldw_history_selection_v1 is None
+            and not selected_durable
             and user_base_dir is not None
             and current_user
             and getattr(current_user, "id", None) is not None
@@ -3613,6 +3695,8 @@ async def create_chat_completion(
             normalize_default_provider=_get_default_provider(),
             routing_decision=routing_decision,
         )
+        if selected_durable and (selected_provider != raw_api_provider_input or selected_model != raw_model_input):
+            raise HTTPException(409, detail={"code": "resolved_inference_mismatch"})
 
         provider = metrics_provider
         model = metrics_model
@@ -3674,6 +3758,19 @@ async def create_chat_completion(
         try:
             # Authentication is enforced via get_request_user dependency (JWT or X-API-KEY).
             # If it fails, FastAPI raises 401 before reaching here. No further checks needed.
+
+            if (
+                request_data.tldw_turn is not None
+                and command_router.commands_enabled()
+                and command_router.extract_slash_candidate(_extract_latest_user_turn_text(request_data.messages))
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={
+                        "error_code": "unsupported_durable_slash_command",
+                        "message": "tldw_turn does not support enabled slash commands or chat macros. Disable commands to send literal text.",
+                    },
+                )
 
             # Slash command handling: compute, moderate, then optionally inject
             try:
@@ -4589,7 +4686,7 @@ async def create_chat_completion(
                     if any(str(provider_api_key).lower().startswith(p) for p in invalid_patterns):
                         raise _provider_credential_http_exception_for_code("provider_authentication_failed")
 
-                if request_data.tldw_history_selection_v1 is None:
+                if request_data.tldw_history_selection_v1 is None and request_data.tldw_turn is None:
                     await asyncio.to_thread(
                         save_workspace_chat_model_selection,
                         chat_db=chat_db,
@@ -4604,7 +4701,7 @@ async def create_chat_completion(
 
                 # --- Character/Conversation Context, History, and Current Turn ---
                 continuation_runtime: dict[str, Any] = {}
-                if request_data.tldw_history_selection_v1 is not None:
+                if request_data.tldw_history_selection_v1 is not None or selected_durable:
                     from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
                     from tldw_Server_API.app.core.Chat.persistence_service import (
                         native_history_owner_key,
@@ -4615,7 +4712,10 @@ async def create_chat_completion(
                     if _active_message_sync_service(current_user, history_scope) is not None:
                         raise HTTPException(409, detail={"code": "sync_owner_unsupported", "status": "unsupported_history_capability"})
                     history_owner = native_history_owner_key(request, current_user.id)
-                    if request_data.tldw_history_selection_v1.owner_key != history_owner:
+                    durable_history = request_data.tldw_turn.history_v1 if selected_durable else None
+                    history_binding = ((durable_history.selection if durable_history.kind == "selection" else durable_history.admission)
+                        if selected_durable else request_data.tldw_history_selection_v1)
+                    if history_binding.owner_key != history_owner:
                         raise HTTPException(409, detail={"code": "owner_conversation_mismatch"})
                     from tldw_Server_API.app.core.Chat.history_context import require_history_skill_absence
                     if user_base_dir is None:
@@ -4628,8 +4728,11 @@ async def create_chat_completion(
                     except HistorySelectionError as exc:
                         raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": exc.code}) from exc
                     continuation_runtime.update(history_owner_key=history_owner, history_owner_client_id=str(current_user.id),
-                        history_inputs=[await prepare_native_history_message(message.model_dump(exclude_none=True), final_conversation_id,
-                            _process_content_for_db_sync) for message in request_data.messages if message.role != "system"])
+                        history_scope=history_scope.model_dump())
+                    if not selected_durable:
+                        continuation_runtime["history_inputs"] = [await prepare_native_history_message(
+                            message.model_dump(exclude_none=True), final_conversation_id, _process_content_for_db_sync)
+                            for message in request_data.messages if message.role != "system"]
 
                 (
                     character_card_for_context,
@@ -4648,6 +4751,18 @@ async def create_chat_completion(
                     save_message_fn=_save_message_turn_to_db,
                     runtime_state=continuation_runtime,
                 )
+                if request_data.tldw_turn is not None and not selected_durable:
+                    await asyncio.to_thread(
+                        save_workspace_chat_model_selection,
+                        chat_db=chat_db,
+                        conversation_id=final_conversation_id,
+                        owner_client_id=user_id,
+                        provider=target_api_provider,
+                        model=model,
+                        save_to_db=request_data.save_to_db,
+                        explicit_provider_requested=explicit_provider_requested,
+                        explicit_model_requested=explicit_model_requested,
+                    )
                 completion_save_message = _save_message_turn_to_db
                 history_admission = continuation_runtime.get("tldw_history_admission_v1")
                 if history_admission is not None:
@@ -4657,6 +4772,25 @@ async def create_chat_completion(
                     async def completion_save_message(db, cid, payload, use_transaction=False):
                         if payload.get("role") == "system":
                             return None
+                        if selected_durable:
+                            result_metadata = request_data.tldw_turn.result_v1.model_dump(mode="json", exclude_none=True)
+                            result_metadata["request_context_digest"] = selected_request_digest
+                            try:
+                                return await _settle_selected_durable_result(
+                                    db,
+                                    cid,
+                                    payload,
+                                    reference=reference,
+                                    owner_client_id=str(current_user.id),
+                                    owner_key=history_owner,
+                                    scope=continuation_runtime["history_scope"],
+                                    result_metadata=result_metadata,
+                                    runtime=continuation_runtime,
+                                )
+                            except Exception:
+                                # Mandatory failure must survive the generic SSE callback's catcher.
+                                continuation_runtime["selected_durable_result_error"] = True
+                                raise
                         prepared = await prepare_native_history_message(payload, cid, _process_content_for_db_sync)
                         prepared["id"] = str(uuid.uuid4())
                         prepared["parent_message_id"] = reference["input_message_id"]
@@ -4665,10 +4799,11 @@ async def create_chat_completion(
                                 owner_client_id=str(current_user.id), owner_key=history_owner)
                         except HistorySelectionError as exc:
                             raise HTTPException(409, detail={"code": exc.code}) from exc
-                    await asyncio.to_thread(save_workspace_chat_model_selection, chat_db=chat_db,
-                        conversation_id=final_conversation_id, owner_client_id=user_id, provider=target_api_provider,
-                        model=model, save_to_db=request_data.save_to_db, explicit_provider_requested=explicit_provider_requested,
-                        explicit_model_requested=explicit_model_requested)
+                    if not selected_durable:
+                        await asyncio.to_thread(save_workspace_chat_model_selection, chat_db=chat_db,
+                            conversation_id=final_conversation_id, owner_client_id=user_id, provider=target_api_provider,
+                            model=model, save_to_db=request_data.save_to_db, explicit_provider_requested=explicit_provider_requested,
+                            explicit_model_requested=explicit_model_requested)
                 continuation_meta = (
                     continuation_runtime.get("tldw_continuation")
                     if isinstance(continuation_runtime.get("tldw_continuation"), dict)
@@ -4906,7 +5041,7 @@ async def create_chat_completion(
                     )
 
                 system_message_id: str | None = None
-                if should_persist and final_conversation_id:
+                if should_persist and final_conversation_id and request_data.tldw_turn is None:
                     system_message_id = await _persist_system_message_if_needed(
                         db=chat_db,
                         conversation_id=final_conversation_id,
@@ -5473,6 +5608,7 @@ async def create_chat_completion(
                             chat_db=chat_db,
                             save_message_fn=completion_save_message,
                             history_persistence_ack=history_admission is not None,
+                            selected_durable_text_only=selected_durable,
                             system_message_id=system_message_id,
                             user_message_id=continuation_runtime.get("user_message_id"),
                             audit_service=audit_service,
@@ -5741,7 +5877,61 @@ async def create_chat_completion(
                         ),
                     )
                     credential_runtime_owned_by_stream = True
-                    if history_admission is not None:
+                    if selected_durable:
+                        accepted_stream = stream_response.body_iterator
+                        async def with_selected_durable_receipts():
+                            pending = ""
+                            result_emitted = False
+                            try:
+                                yield sse_data(_selected_durable_response_payload({}, final_conversation_id,
+                                    history_admission, continuation_runtime))
+                                async for chunk in accepted_stream:
+                                    if continuation_runtime.get("selected_durable_result_error"):
+                                        yield sse_data(
+                                            _selected_durable_response_payload(
+                                                {
+                                                    "error": {
+                                                        "code": "selected_durable_result_unverified",
+                                                        "type": "history_result_error",
+                                                        "message": "Selected durable result could not be verified.",
+                                                    }
+                                                },
+                                                final_conversation_id,
+                                                history_admission,
+                                                continuation_runtime,
+                                            )
+                                        )
+                                        yield sse_done()
+                                        return
+                                    pending += chunk.decode("utf-8") if isinstance(chunk, bytes) else chunk
+                                    pending = pending.replace("\r\n", "\n")
+                                    while "\n\n" in pending:
+                                        frame, pending = pending.split("\n\n", 1)
+                                        lines = frame.splitlines()
+                                        data = "\n".join(line[5:].lstrip(" ") for line in lines if line.startswith("data:"))
+                                        if is_done_line("data: " + data):
+                                            if continuation_runtime.get("tldw_history_result_v1") and not result_emitted:
+                                                yield sse_data(_selected_durable_response_payload({}, final_conversation_id,
+                                                    history_admission, continuation_runtime))
+                                                result_emitted = True
+                                            yield sse_done()
+                                        elif data:
+                                            payload = json.loads(data)
+                                            if not isinstance(payload, dict):
+                                                raise HTTPException(502, detail="Invalid selected durable stream payload.")
+                                            cleaned = _selected_durable_response_payload(payload, final_conversation_id,
+                                                history_admission, continuation_runtime)
+                                            result_emitted = result_emitted or "tldw_history_result_v1" in cleaned
+                                            prefix = "\n".join(line for line in lines if not line.startswith("data:"))
+                                            yield (prefix + "\n" if prefix else "") + sse_data(cleaned)
+                                if pending.strip():
+                                    raise HTTPException(502, detail="Incomplete selected durable stream payload.")
+                            finally:
+                                close = getattr(accepted_stream, "aclose", None)
+                                if close is not None:
+                                    await close()
+                        stream_response.body_iterator = with_selected_durable_receipts()
+                    elif history_admission is not None:
                         accepted_stream = stream_response.body_iterator
                         async def with_history_admission():
                             try:
@@ -5788,6 +5978,7 @@ async def create_chat_completion(
                             self_monitoring_service=_self_mon_service,
                             assistant_parent_message_id=assistant_parent_message_id,
                             continuation_metadata=continuation_meta,
+                            selected_durable_text_only=selected_durable,
                         )
 
                     while True:
@@ -5924,7 +6115,10 @@ async def create_chat_completion(
                         except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as _billing_err:
                             logger.debug(f"Billing token recording failed: {_billing_err}")
                     alias_headers = _build_persona_alias_deprecation_headers(persona_alias_used)
-                    if history_admission is not None:
+                    if selected_durable:
+                        encoded_payload = _selected_durable_response_payload(encoded_payload, final_conversation_id,
+                            history_admission, continuation_runtime)
+                    elif history_admission is not None:
                         encoded_payload["tldw_history_admission_v1"] = history_admission
                     return JSONResponse(content=encoded_payload, headers=alias_headers or None)
 

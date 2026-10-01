@@ -33,6 +33,13 @@ export const humanMessageFormatter = async ({
   model,
   useOCR = false
 }: HumanMessageType) => {
+  if (Array.isArray(content) && content.length === 1) {
+    const part = content[0]
+    const text = getTextPart(part)
+    if (text !== null && Object.keys(part).every(key => key === "type" || key === "text")) {
+      return new HumanMessage({ content: text })
+    }
+  }
   const isCustom = isCustomModel(model)
 
   if (isCustom) {

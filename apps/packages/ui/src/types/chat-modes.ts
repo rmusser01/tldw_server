@@ -1,14 +1,19 @@
 import type { HistoryOwnerV1 } from "@/services/chat-history-selection"
 import type {
   HistoryAdmissionV1,
+  HistoryAdmissionReferenceV1,
   HistorySelectionCaptureV1,
   HistoryViewSelectionV1,
   HistorySelectionV1
 } from "@/types/history-selection"
 import type { Message as StoredMessage } from "@/db/dexie/types"
+import type { HistoryDurableResultReceiptV1 } from "@/types/history-durable-turn"
 
 /** One operation owns its adapter and immutable pending intent across display navigation. */
 export interface HistorySendTurn {
+  serverOwned?: boolean
+  retryAdmission?: HistoryAdmissionReferenceV1
+  observedResult?: HistoryDurableResultReceiptV1
   owner: HistoryOwnerV1
   capture: HistorySelectionCaptureV1
   currentView: () => HistoryViewSelectionV1 | null
@@ -16,6 +21,7 @@ export interface HistorySendTurn {
   canUpdateView: () => boolean
   admission?: HistoryAdmissionV1
   selection?: HistorySelectionV1
+  requestContextDigest?: string
   input?: StoredMessage
   resultId?: string
   assistantId?: string
@@ -71,6 +77,8 @@ export interface SaveMessageBase {
 }
 
 export interface SaveMessageData extends SaveMessageBase {
+  serverOwnsUserMessage?: boolean
+  serverMessagesAlreadyPersisted?: boolean
   isRegenerate: boolean
   message: string
   fullText: string
@@ -85,6 +93,7 @@ export interface SaveMessageData extends SaveMessageBase {
 }
 
 export interface SaveMessageErrorData extends SaveMessageBase {
+  generationInfo?: Record<string, unknown>
   e: unknown
   botMessage: string
   history: ChatHistory

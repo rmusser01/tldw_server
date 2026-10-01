@@ -134,6 +134,24 @@ def read_messages_with_images(
             status_code=503,
             detail="Saved chat attachments could not be read completely. Retry loading the conversation.",
         ) from exc
+    attachment_urls = expand_message_images(
+        db, messages, for_completions=for_completions, image_byte_limit=image_byte_limit,
+    )
+    return messages, attachment_urls
+
+
+def expand_message_images(
+    db: CharactersRAGDB,
+    messages: list[dict[str, Any]],
+    *,
+    for_completions: bool = False,
+    image_byte_limit: int = MAX_CHAT_ATTACHMENT_READ_BYTES,
+) -> dict[str, list[str]]:
+    """Expand a complete authorized page without rereading its protected rows.
+
+    This synchronous helper applies the same attachment bounds and saved options
+    to ordinary and protected recovery reads. Call it off the event loop.
+    """
     attachment_urls = {}
     decoded_total = 0
     for message in messages:
@@ -168,7 +186,7 @@ def read_messages_with_images(
 
                 message["content"] = _saved_image_text(message, extra)
 
-    return messages, attachment_urls
+    return attachment_urls
 
 
 def format_message_content(

@@ -6,6 +6,13 @@ import { useMcpToolsStore } from "@/store/mcp-tools"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useStoreMessageOption } from "@/store/option"
 import { buildChatToolFilterState } from "@/utils/chat-tools"
+import { getChatTurnIdentitySupport } from "@/services/tldw/server-capabilities"
+import { getAllDefaultModelSettings, getModelSettings } from "@/services/model-settings"
+
+vi.mock("@/services/tldw/server-capabilities", () => ({
+  getServerCapabilities: vi.fn(async () => ({ hasChatTurnIdentity: true })),
+  getChatTurnIdentitySupport: vi.fn(async () => true)
+}))
 
 vi.mock("@/services/model-settings", () => ({
   getAllDefaultModelSettings: vi.fn(async () => ({})),
@@ -42,8 +49,16 @@ const modelInfo = (capabilities: string[] = ["tools"]): ModelInfo => ({
   capabilities
 })
 
+const durableScope = {
+  config: { serverUrl: "https://research-one.test", authMode: "multi-user" as const },
+  userId: 42
+}
+
 describe("pageAssistModel MCP tools", () => {
   beforeEach(() => {
+    vi.mocked(getModelSettings).mockResolvedValue({})
+    vi.mocked(getAllDefaultModelSettings).mockResolvedValue({})
+    vi.mocked(getChatTurnIdentitySupport).mockResolvedValue(true)
     vi.mocked(tldwModels.getModel).mockResolvedValue(modelInfo(["tools"]))
     useStoreChatModelSettings.getState().reset()
     useStoreMessageOption.setState({
@@ -92,6 +107,81 @@ describe("pageAssistModel MCP tools", () => {
     useStoreMessageOption.setState({ temporaryChat: true, serverChatId: "old-chat" })
     const chat = await pageAssistModel({ model: "tool-model" })
     expect({ saved: chat.saveToDb, id: chat.conversationId }).toEqual({ saved: false, id: undefined })
+  })
+
+  it.each([false, undefined, "true", 1])("rejects durable turns without explicit identity support (%s)", async (flag) => {
+    vi.mocked(getChatTurnIdentitySupport).mockResolvedValue(flag as boolean)
+    await expect(pageAssistModel({
+      model: "tool-model", saveToDb: true, conversationId: "workspace-chat",
+      requestScope: durableScope,
+      tldwTurn: { user_message_id: "12803947-a1f4-4c49-b6eb-bf4218765f6a" }, originalUserMessage: "Question"
+    })).rejects.toThrow(/durable.*turn/i)
+  })
+
+  it("rejects a durable turn without a captured server scope", async () => {
+    await expect(pageAssistModel({
+      model: "tool-model", saveToDb: true, conversationId: "workspace-chat",
+      tldwTurn: { user_message_id: "12803947-a1f4-4c49-b6eb-bf4218765f6a" }, originalUserMessage: "Question"
+    })).rejects.toThrow(/scope/i)
+  })
+
+  it("keeps the captured scope on a supported durable model", async () => {
+    const model = await pageAssistModel({
+      model: "tool-model", saveToDb: true, conversationId: "workspace-chat",
+      requestScope: durableScope,
+      tldwTurn: { user_message_id: "12803947-a1f4-4c49-b6eb-bf4218765f6a" }, originalUserMessage: "Question"
+    })
+    expect(model.requestScope).toBe(durableScope)
+    expect(getChatTurnIdentitySupport).toHaveBeenCalledWith(durableScope, undefined)
+  })
+
+  it("does not bind a durable turn to a background global conversation", async () => {
+    useStoreMessageOption.setState({ serverChatId: "unrelated-chat", temporaryChat: false })
+    await expect(pageAssistModel({
+      model: "tool-model", saveToDb: true,
+      tldwTurn: { user_message_id: "12803947-a1f4-4c49-b6eb-bf4218765f6a" }, originalUserMessage: "Question"
+    })).rejects.toThrow(/conversation/i)
+  })
+
+  it.each([false, true])("uses captured generation settings only when supplied (%s)", async (captured) => {
+    useStoreChatModelSettings.getState().updateSettings({
+      temperature: 0.9, topP: 0.95, numPredict: 128, reasoningEffort: "high",
+      historyMessageLimit: 36, historyMessageOrder: "newest", slashCommandInjectionMode: "live",
+      extraHeaders: '{"X-Request":"live"}', extraBody: '{"request_label":"live"}'
+    })
+    const chat = await pageAssistModel({
+      model: "tool-model",
+      ...(captured ? { generationSettings: {
+        temperature: 0.42, topP: 0.8, numPredict: 96, reasoningEffort: "low",
+        historyMessageLimit: 12, historyMessageOrder: "oldest", slashCommandInjectionMode: "captured",
+        extraHeaders: '{"X-Request":"captured"}', extraBody: '{"request_label":"captured"}'
+      } } : {})
+    })
+    expect(chat).toMatchObject(captured ? {
+      temperature: 0.42, topP: 0.8, maxTokens: 96, reasoningEffort: "low",
+      historyMessageLimit: 12, historyMessageOrder: "oldest", slashCommandInjectionMode: "captured",
+      extraHeaders: { "X-Request": "captured" }, extraBody: { request_label: "captured" }
+    } : {
+      temperature: 0.9, topP: 0.95, maxTokens: 128, reasoningEffort: "high",
+      historyMessageLimit: 36, historyMessageOrder: "newest", slashCommandInjectionMode: "live",
+      extraHeaders: { "X-Request": "live" }, extraBody: { request_label: "live" }
+    })
+  })
+
+  it.each([0, 0.2])("keeps per-model settings ahead of the captured defaults (temperature=%s)", async (temperature) => {
+    useStoreChatModelSettings.getState().setTemperature(0.9)
+    vi.mocked(getModelSettings).mockResolvedValueOnce({ temperature, topP: 0.5, numPredict: 64, reasoningEffort: "high" })
+    const chat = await pageAssistModel({ model: "tool-model", generationSettings: {
+      temperature: 0.42, topP: 0.8, numPredict: 96, reasoningEffort: "low"
+    } })
+    expect(chat).toMatchObject({ temperature, topP: 0.5, maxTokens: 64, reasoningEffort: "high" })
+  })
+
+  it("uses configured defaults instead of live values absent from the captured settings", async () => {
+    useStoreChatModelSettings.getState().setTemperature(0.9)
+    vi.mocked(getAllDefaultModelSettings).mockResolvedValueOnce({ temperature: 0.17 })
+    const chat = await pageAssistModel({ model: "tool-model", generationSettings: {} })
+    expect(chat.temperature).toBe(0.17)
   })
 
   it("uses stored chatTools instead of all executable MCP tools", async () => {

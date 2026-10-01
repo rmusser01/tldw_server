@@ -280,7 +280,13 @@ export type HistoryTurnRecovery = {
   admission?: import("@/types/history-selection").HistoryAdmissionReferenceV1;
 } & (
   | { persistence?: "client"; input_id: string; assistant_id: string }
-  | { persistence: "server"; input_id?: string; assistant_id?: string }
+  | {
+      persistence: "server"; input_id?: string; assistant_id?: string;
+      /** Credential-free observations, not server input or inference authority. */
+      logical_user_message_id?: string;
+      finalized_selection?: import("@/types/history-selection").HistorySelectionV1;
+      observed_result?: import("@/types/history-durable-turn").HistoryDurableResultReceiptV1;
+    }
 );
 
 export type HistoryBookmark = HistoryBookmarkScope & {
