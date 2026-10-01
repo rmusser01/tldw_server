@@ -38,7 +38,8 @@ vi.mock("@/services/background-proxy", () => ({
     (mocks.bgRequest as (...args: unknown[]) => unknown)(...args)
 }))
 
-vi.mock("@/utils/safe-storage", () => ({
+vi.mock("@/utils/safe-storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/utils/safe-storage")>()),
   createSafeStorage: () => ({
     get: vi.fn(async () => undefined),
     set: vi.fn(async () => undefined)
@@ -58,6 +59,7 @@ const deferred = <T>() => {
 describe("fetchChatModels", () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
     vi.resetModules()
     mocks.getConfig.mockReset()
     mocks.getChatModels.mockReset()
@@ -84,6 +86,32 @@ describe("fetchChatModels", () => {
       mocks.invalidationSequence += 1
       mocks.invalidationListener?.(`test-token-${mocks.invalidationSequence}`)
     })
+  })
+
+  it.each(["expired", "cache-only", "fetch-failure"])("withholds cookie models in the outer %s cache path", async (path) => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://localhost:3000",
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })
+    mocks.getChatModels.mockResolvedValueOnce([
+      { id: "cookie-model", name: "Cookie Model", provider: "llama", type: "chat" }
+    ])
+    const { fetchChatModels } = await importService()
+    expect(await fetchChatModels()).toHaveLength(1)
+    if (path === "fetch-failure") {
+      mocks.getChatModels.mockRejectedValueOnce(Object.assign(new Error("Expired cookie session"), { status: 401 }))
+    } else {
+      mocks.getChatModels.mockResolvedValueOnce([])
+    }
+    await expect(fetchChatModels({
+      returnEmpty: true,
+      allowNetwork: path !== "cache-only",
+      forceRefresh: path === "fetch-failure"
+    })).resolves.toEqual([])
+    expect(mocks.getChatModels).toHaveBeenCalledTimes(path === "cache-only" ? 1 : 2)
   })
 
   it("does not cache an empty startup result over later configured models", async () => {

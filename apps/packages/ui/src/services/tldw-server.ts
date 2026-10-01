@@ -1,4 +1,5 @@
 import { tldwClient, tldwModels } from "./tldw"
+import { isActiveCookieSessionConfig } from "./tldw/TldwApiClient"
 import { setNoOfRetrievedDocs, setTotalFilePerKB } from "./app"
 import { createSafeStorage } from "@/utils/safe-storage"
 import {
@@ -337,11 +338,15 @@ export const fetchChatModels = async ({
   allowNetwork?: boolean
 } = {}) => {
   const fetchGeneration = chatModelsCacheGeneration
+  const cookieSession = isActiveCookieSessionConfig(
+    await tldwClient.getConfig().catch(() => null)
+  )
   const now = Date.now()
-  if (!forceRefresh && chatModelsCache && chatModelsCache.expiresAt > now) {
+  if (!cookieSession && !forceRefresh && chatModelsCache && chatModelsCache.expiresAt > now) {
     return chatModelsCache.value
   }
   if (!forceRefresh && !allowNetwork) {
+    if (cookieSession) return []
     if (chatModelsCache?.value) {
       return chatModelsCache.value
     }
@@ -404,6 +409,7 @@ export const fetchChatModels = async ({
         })
       }
       if (
+        !cookieSession &&
         resolved.length > 0 &&
         fetchGeneration === chatModelsCacheGeneration
       ) {
@@ -431,7 +437,7 @@ export const fetchChatModels = async ({
       })
     }
     console.error("Failed to fetch chat models:", e)
-    if (chatModelsCache?.value?.length) {
+    if (!cookieSession && chatModelsCache?.value?.length) {
       return chatModelsCache.value
     }
     if (returnEmpty) return []

@@ -359,14 +359,16 @@ export class TldwModelsService {
     const config = await tldwClient.getConfig().catch(() => null)
     const scopeKey = this.buildCacheScope(config)
     fetchGeneration = this.reconcileCacheScope(scopeKey, fetchGeneration)
+    const cookieSession = isActiveCookieSessionConfig(config)
 
     const now = Date.now()
 
     // Return cached models if available and not expired
-    if (!requireFresh && !forceRefresh && this.cachedModels && (now - this.lastFetchTime) < this.CACHE_DURATION) {
+    if (!cookieSession && !requireFresh && !forceRefresh && this.cachedModels && (now - this.lastFetchTime) < this.CACHE_DURATION) {
       return this.cachedModels
     }
     if (
+      !cookieSession &&
       forceRefresh &&
       !requireFresh &&
       this.cachedModels &&
@@ -393,6 +395,8 @@ export class TldwModelsService {
 
     const fetchFromServer = async () => {
       await tldwClient.initialize()
+      // Model metadata is public; the existing profile route validates the cookie.
+      if (cookieSession) await tldwClient.getCurrentUserProfile()
       const models = await tldwClient.getModels({
         refreshOpenRouter: options?.refreshOpenRouter === true
       })
@@ -417,6 +421,14 @@ export class TldwModelsService {
     }
 
     const fetchPromise = fetchFromServer().catch(async (error) => {
+      // Cookie metadata can outlive the server session; require a successful fetch.
+      if (cookieSession) {
+        if (fetchGeneration === this.invalidationGeneration) {
+          this.invalidateCacheState()
+          await this.persistCache()
+        }
+        return []
+      }
       if (requireFresh) return []
       if (isAbortLikeModelFetchError(error)) {
         return this.cachedModels || []
@@ -468,6 +480,7 @@ export class TldwModelsService {
     const config = await tldwClient.getConfig().catch(() => null)
     const scopeKey = this.buildCacheScope(config)
     this.reconcileCacheScope(scopeKey, requestGeneration)
+    if (isActiveCookieSessionConfig(config)) return []
     return (this.cachedModels || []).filter((model) =>
       this.isSelectableChatModel(model)
     )
