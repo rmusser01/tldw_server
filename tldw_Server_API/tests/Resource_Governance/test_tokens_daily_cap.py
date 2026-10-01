@@ -259,3 +259,56 @@ async def test_backfill_legacy_tokens_to_ledger_idempotent(tmp_path, monkeypatch
     # Second backfill is a no-op (per process/entity/day).
     await backfill_legacy_tokens_to_ledger(entity_scope="user", entity_value="1")
     assert await ledger.total_for_day("user", "1", "tokens") == 7
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["memory", "redis"])
+@pytest.mark.parametrize("daily_cap", [200, 600])
+async def test_oversized_token_reservation_preserves_daily_quota(
+    backend, daily_cap, tmp_path, monkeypatch,
+):
+    """Minute-window relief must not reduce durable daily-token charges."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Resource_Governance import daily_caps
+
+    await _init_authnz_sqlite(tmp_path / "authnz_original_tokens.db", monkeypatch)
+    policy = {
+        "requests": {"rpm": 600},
+        "tokens": {"per_min": 100, "daily_cap": daily_cap},
+        "scopes": ["user"],
+    }
+    loader = SimpleNamespace(get_policy=lambda _pid: policy)
+    clock = [1000.0]
+    if backend == "memory":
+        gov = MemoryResourceGovernor(policy_loader=loader, time_source=lambda: clock[0])
+    else:
+        from tldw_Server_API.app.core.Infrastructure.redis_factory import InMemoryAsyncRedis
+        from tldw_Server_API.app.core.Resource_Governance import RedisResourceGovernor
+
+        gov = RedisResourceGovernor(policy_loader=loader, time_source=lambda: clock[0])
+        gov._client = InMemoryAsyncRedis()
+    req = RGRequest(
+        entity="user:1", categories={"tokens": {"units": 500}},
+        tags={"policy_id": "chat.test"},
+    )
+    ledger = await daily_caps._get_ledger()
+    expected = daily_cap >= 500
+    assert (await gov.check(req)).allowed is expected
+    decision, handle = await gov.reserve(req, op_id="original-tokens")
+    assert decision.allowed is expected
+    if not expected:
+        assert handle is None
+        assert await ledger.total_for_day("user", "1", "tokens") == 0
+        return
+
+    assert handle is not None
+    repeated, repeated_handle = await gov.reserve(req, op_id="original-tokens")
+    assert repeated.allowed is True and repeated_handle == handle
+    await gov.commit(handle, actuals={"tokens": 500})
+    assert await ledger.total_for_day("user", "1", "tokens") == 500
+    clock[0] += 61
+    assert (await gov.check(req)).allowed is False
+    denied, denied_handle = await gov.reserve(req, op_id="original-tokens-next")
+    assert denied.allowed is False and denied_handle is None
+    assert await ledger.total_for_day("user", "1", "tokens") == 500

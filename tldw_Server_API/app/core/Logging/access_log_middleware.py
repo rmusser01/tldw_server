@@ -16,12 +16,24 @@ _AUDIO_STUDIO_MEDIA_TICKET_PATH = re.compile(
 )
 
 
+_EMAIL_SEARCH_QUERY_TARGET = re.compile(
+    r"(/api/v1/(?:email(?:/[^?\s\"']*)?|media/search)/?)\?[^\s]*"
+)
+
+
 def redact_access_log_path(path: str) -> str:
     return _AUDIO_STUDIO_MEDIA_TICKET_PATH.sub(r"\1[REDACTED]", path)
 
 
 def redact_access_log_message(message: str) -> str:
-    return redact_access_log_path(message)
+    """Redact ticket tokens and email search queries in server request lines.
+
+    Uvicorn includes the query string in its access record even though the
+    structured middleware logs only the path. Search text can contain private
+    email content; retain the route and status while dropping its query.
+    """
+    redacted = redact_access_log_path(message)
+    return _EMAIL_SEARCH_QUERY_TARGET.sub(r"\1?[REDACTED]", redacted)
 
 
 class AccessLogMiddleware(BaseHTTPMiddleware):

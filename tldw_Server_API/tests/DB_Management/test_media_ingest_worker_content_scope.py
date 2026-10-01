@@ -367,6 +367,13 @@ async def test_direct_authorized_persistence_preserves_scope_for_primary_and_chi
         return original_session(**kwargs)
 
     monkeypatch.setattr(persistence, "_with_media_db_session", observe)
+    if path == "archive":
+        # Archives own one lazy DB handle on their worker instead of a per-item session.
+        def observe_archive(client_id, **kwargs):
+            observed.append(get_scope())
+            return store.factory(client_id, **kwargs)
+
+        monkeypatch.setattr(persistence, "create_media_database", observe_archive)
     if path == "pdf":
         from tldw_Server_API.app.core.Ingestion_Media_Processing import visual_ingestion
 
