@@ -5,6 +5,7 @@ import {
   type Knowledge
 } from "~/store/option"
 import { generateHistory } from "@/utils/generate-history"
+import { formatSelectedHistory } from "@/db/dexie/helpers"
 import { pageAssistModel } from "@/models"
 import { humanMessageFormatter } from "@/utils/human-message"
 import { removeReasoning } from "@/libs/reasoning"
@@ -29,12 +30,20 @@ import {
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import { isAbortLikeError } from "@/hooks/chat/abort-turn-cleanup"
 import {
   loadServicePromptSnapshot,
   renderServicePromptPart,
   type ServicePromptSnapshot
 } from "@/services/service-prompts"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { captureNormalHistoryTurn } from "./normalChatMode"
+import type { HistorySendTurn } from "@/types/chat-modes"
+import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import type { ChatTurnIdentity } from "@/services/tldw/TldwApiClient"
+import { projectHistoryDurableSources } from "@/services/history-durable-turn"
+import type { ChatScope } from "@/types/chat-scope"
 
 const RAG_STRING_ARRAY_KEYS = new Set([
   "sources",
@@ -231,6 +240,12 @@ type RagSourceEntry = {
 }
 
 type RagModeParams = {
+  scope?: ChatScope
+  historySelection?: { controller: HistorySelectionController; originIsCurrent: () => boolean; temporary?: boolean }
+  historyTurn?: HistorySendTurn
+  tldwTurn?: ChatTurnIdentity
+  serverChatId?: string | null
+  conversationId?: string
   selectedModel: string
   useOCR: boolean
   selectedKnowledge: Knowledge | null
@@ -267,6 +282,7 @@ type RagModeParams = {
   historyForModel?: ChatHistory
   regenerateFromMessage?: Message
   servicePromptSnapshot?: ServicePromptSnapshot
+  requestScope?: ServicePromptRequestScope
 }
 
 type PreparedRagRetrieval = {
@@ -434,8 +450,12 @@ const buildRagOptions = async (
     ragOptions.top_k = top_k
   }
   ragOptions.search_mode = ctx.ragSearchMode
-  // Delete false flags so the backend can apply its default behavior.
-  if (ctx.ragEnableGeneration) {
+  // Durable answers must be generated only after the chat endpoint admits input.
+  if (ctx.historyTurn?.serverOwned) {
+    ragOptions.enable_generation = false
+    delete ragOptions.generation_model
+    delete ragOptions.generation_provider
+  } else if (ctx.ragEnableGeneration) {
     ragOptions.enable_generation = true
     const rawSelectedGenerationModel = ctx.selectedModel?.trim()
     const selectedModelSelection = parseProviderQualifiedModelSelection(
@@ -491,13 +511,7 @@ const prepareRagRetrieval = async (
   const ragOptions = await buildRagOptions(ctx, defaultTopK)
   const ragRes = (await tldwClient.ragSearch(query, ragOptions)) as RagResponse
   const docs = getRagDocuments(ragRes)
-  const context = formatDocs(
-    docs.map((doc) => ({
-      pageContent: doc.content || doc.text || doc.chunk || "",
-      metadata: doc.metadata || {}
-    }))
-  )
-  const source = docs.map((doc) => ({
+  const rawSources = docs.map((doc) => ({
     name:
       getMetadataString(doc.metadata, "title") ||
       getMetadataString(doc.metadata, "source") ||
@@ -511,6 +525,10 @@ const prepareRagRetrieval = async (
     pageContent: doc.content || doc.text || doc.chunk || "",
     metadata: doc.metadata || {}
   }))
+  const source = ctx.historyTurn?.serverOwned && rawSources.length
+    ? [...projectHistoryDurableSources(rawSources)] as RagSourceEntry[]
+    : rawSources
+  const context = formatDocs(source)
   return {
     query,
     context,
@@ -566,7 +584,11 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
         retrieval.rawResponse
       )
     } catch (error) {
-      if (ctx.signal.aborted || isRequestConfigScopeChangedError(error)) {
+      if (
+        ctx.signal.aborted || isAbortLikeError(error) ||
+        isRequestConfigScopeChangedError(error) ||
+        typeof (error as { status?: unknown })?.status === "number"
+      ) {
         throw error
       }
       return buildSelectedSourceGroundingResponse(
@@ -665,14 +687,22 @@ export const ragMode = async (
     params.servicePromptSnapshot ??
     (await loadServicePromptSnapshot(
       ["chat.rag.answer", "chat.rag.question_rewrite"],
-      { signal }
+      { signal, ...(params.requestScope ? { requestScope: params.requestScope } : {}) }
     ))
   const executionSignal = servicePromptSnapshot.scopeSignal
   const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal
   try {
     getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
     getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.question_rewrite")
-    return await runChatPipeline(
+    if (params.historySelection) {
+      if (!params.tldwTurn || isRegenerate || image || !hasSelectedMediaSources(params) || params.actorSettings?.isEnabled)
+        throw new Error("unsupported_history_action_context")
+      const historyTurn = await captureNormalHistoryTurn(params, message, servicePromptSnapshot, executionSignal)
+      messages = formatSelectedHistory(historyTurn.capture).messages
+      const selectedParent = historyTurn.retryAdmission?.input_message_id ?? historyTurn.capture.rows.at(-1)?.id ?? null
+      params = { ...params, historyTurn, userParentMessageId: selectedParent, historyForModel: [] }
+    }
+    const result = await runChatPipeline(
       ragModeDefinition,
       message,
       image,
@@ -690,6 +720,9 @@ export const ragMode = async (
           : undefined
       }
     )
+    if (result.status === "submitted" && params.historyTurn?.resultId)
+      await params.historyTurn.followResult(params.historyTurn.resultId)
+    return result
   } finally {
     if (ownsServicePromptSnapshot) servicePromptSnapshot.release()
   }

@@ -18,6 +18,60 @@ vi.mock("react-i18next", () => ({
 }))
 
 describe("MessageSource citation transparency integration", () => {
+  it.each([
+    "lumen-field-memo.md",
+    "/lumen-field-memo.md",
+    "./lumen-field-memo.md",
+    "//example.com/document",
+    "http:document",
+    "mailto:research@example.com",
+    "java\tscript:alert(1)",
+    "https://"
+  ])("keeps provenance without inventing navigation for %s", (url) => {
+    const { container } = render(
+      <MessageSource source={{ url, content: "Preserved source evidence" }} />
+    )
+
+    expect(container.querySelector("summary")?.textContent).toBe(url)
+    expect(screen.getByText("Preserved source evidence")).toBeInTheDocument()
+    expect(container.querySelector("a")).toBeNull()
+  })
+
+  it("retains an uploaded filename without content as non-navigable provenance", () => {
+    const { container } = render(
+      <MessageSource source={{ url: "lumen-field-memo.md" }} />
+    )
+
+    expect(screen.getByText("lumen-field-memo.md")).toBeInTheDocument()
+    expect(container.querySelector("a")).toBeNull()
+  })
+
+  it.each([undefined, "Preserved source evidence"])(
+    "retains sanitized absolute source navigation with content %s",
+    async (content) => {
+      const user = userEvent.setup()
+      const onSourceNavigate = vi.fn()
+      const source = {
+        name: "Published document",
+        url: " \nHTTPS://example.com/document?q=1#section ",
+        content
+      }
+      render(
+        <MessageSource source={source} onSourceNavigate={onSourceNavigate} />
+      )
+
+      if (content) await user.click(screen.getByText(source.name))
+      const link = screen.getByRole("link")
+      expect(link).toHaveAttribute(
+        "href",
+        "HTTPS://example.com/document?q=1#section"
+      )
+      expect(link).toHaveAttribute("rel", "noopener noreferrer")
+      await user.click(link)
+      expect(onSourceNavigate).toHaveBeenCalledWith(source)
+    }
+  )
+
   it("shows why-this-source diagnostics and opens knowledge panel from citation card", async () => {
     const user = userEvent.setup()
     const onOpenKnowledgePanel = vi.fn()

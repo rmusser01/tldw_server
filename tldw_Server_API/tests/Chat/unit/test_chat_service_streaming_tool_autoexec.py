@@ -9,6 +9,7 @@ from typing import Any
 from unittest.mock import Mock
 
 import pytest
+from fastapi import HTTPException
 from starlette.responses import StreamingResponse
 
 from tldw_Server_API.app.core.Chat import chat_service
@@ -241,6 +242,45 @@ async def _run_execute_streaming_call(
         refresh_provider_params=refresh_provider_params or (lambda *_args, **_kwargs: ({}, None)),
         moderation_getter=lambda: _NoModeration(),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize("branch", ["http_error", "provider_error", "fallback_guard", "unified", "legacy"])
+async def test_all_chat_sse_responses_disable_proxy_transformation(monkeypatch, branch):
+    monkeypatch.setenv("STREAMS_UNIFIED", "1" if branch == "unified" else "0")
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: branch == "fallback_guard")
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "saved-reply"
+
+    def stream_factory():
+        if branch == "http_error":
+            raise HTTPException(429, "Rate limited")
+        if branch in {"provider_error", "fallback_guard"}:
+            error = chat_service.ChatAPIError("Provider unavailable")
+            error.upstream_dispatched = False
+            error.output_emitted = False
+            error.allow_non_stream_fallback = True
+            raise error
+        return _content_stream()
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=stream_factory,
+        save_message_fn=save_message_fn,
+        provider_manager=_ProviderManagerStub("openai") if branch == "fallback_guard" else None,
+        enable_provider_fallback=branch == "fallback_guard",
+        refresh_provider_params=lambda _: ({
+            "api_endpoint": "openai", "model": "gpt-4o-mini", "messages_payload": [],
+            "n": 2, "tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}],
+        }, "gpt-4o-mini"),
+    )
+    try:
+        assert response.headers["cache-control"] == "no-cache, no-transform"
+        assert response.headers["x-accel-buffering"] == "no"
+        assert response.media_type == "text/event-stream"
+    finally:
+        await response.body_iterator.aclose()
 
 
 @pytest.mark.asyncio

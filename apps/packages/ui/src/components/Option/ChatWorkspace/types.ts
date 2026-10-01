@@ -2,6 +2,7 @@ import type {
   WorkspaceAssistantDefaultDegradedReason,
   WorkspaceSourceType
 } from "@/types/workspace"
+import { getDesignSystemState } from "@/design-system"
 
 export type StagedSourceAvailability =
   | "ready"
@@ -25,10 +26,43 @@ export type ChatWorkspaceAssistantSource =
   | "none"
   | "unavailable"
 
-export type ChatWorkspaceRuntimeState = {
+export type ChatWorkspaceRuntimeStatus = {
   backendAvailable: boolean
+  workspaceReady: boolean
+  connectionMode?: "live" | "demo" | "bypass"
   streaming: boolean
+  sending?: boolean
+  historyLoading?: boolean
+  historyLoadError?: string | null
   sendError?: string | null
+}
+
+export const getChatWorkspaceRuntimeLabel = ({
+  backendAvailable,
+  workspaceReady,
+  connectionMode,
+  streaming,
+  sending,
+  historyLoading,
+  historyLoadError,
+  sendError
+}: ChatWorkspaceRuntimeStatus): string => {
+  if (connectionMode === "demo") return "Demo mode - not live"
+  if (connectionMode === "bypass") return "Offline bypass - not verified"
+  if (!backendAvailable) return "Server unavailable"
+  if (!workspaceReady) return "Loading workspace context"
+  if (historyLoading) return "Loading chat history"
+  if (historyLoadError) return "Chat history unavailable"
+  if (streaming) return "Streaming"
+  if (sending) return "Sending"
+  if (sendError) return "Send failed"
+  return getDesignSystemState("ready").label
+}
+
+export type ChatWorkspaceRuntimeState = Omit<
+  ChatWorkspaceRuntimeStatus,
+  "workspaceReady"
+> & {
   selectedModelLabel: string
   hasModelSelected: boolean
   selectedPersonaLabel: string | null

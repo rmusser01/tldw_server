@@ -66,6 +66,8 @@ vi.mock("@/db/dexie/fork-operations", () => ({findForkCandidate: async () => nul
 vi.mock("@/services/chat-history-selection", () => ({captureHistorySnapshot: mocks.captureHistorySnapshot.mockImplementation(async (owner: any, view: any) => ({status: "legacy_review_required", code: "legacy_review_required", view, snapshot: {version: 1, owner_key: owner.owner_key, conversation_id: owner.conversation_id, nodes: [], source_digest: "source", storage_context_digest: "storage", fences: {}, interpretation_status: {kind: "legacy_review_required"}}}))}))
 import {useHistorySelection} from "@/hooks/chat/useHistorySelection"
 import {usePlaygroundSessionStore} from "@/store/playground-session"
+import { createServerChatSlice } from "@/store/option/slices/server-chat-slice"
+import type { State } from "@/store/option/types"
 
 vi.mock("@/hooks/chat/useChatBaseState", () => ({
   useChatBaseState: () => ({
@@ -91,8 +93,8 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({ getSelectedAssistantOperationRe
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    initialize: mocks.initialize,
     getChat: mocks.getChat,
+    initialize: mocks.initialize,
     ensureConfigForRequest: mocks.ensureConfigForRequest,
     listChatMessages: mocks.listChatMessages,
     getCharacter: mocks.getCharacter
@@ -251,6 +253,17 @@ describe("useServerChatLoader scoped local history", () => {
     expect(ensureServerChatHistoryId.mock.calls[0][3]).toMatchObject({ requestScope: { userId: "A" } })
   })
 
+  it("keeps the owning workspace scope when reconciling local history settings", async () => {
+    const scope = { type: "workspace" as const, workspaceId: "workspace-a" }
+    const ensureServerChatHistoryId = vi.fn().mockResolvedValue("history-a")
+    renderHook(() => useServerChatLoader({ scope, ensureServerChatHistoryId,
+      notification: { error: vi.fn() }, t: ((_key: string) => "Assistant") as unknown as TFunction }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+    expect(mocks.syncChatSettingsForServerChat).toHaveBeenCalledWith({
+      historyId: "history-a", serverChatId: "chat-a", scope, allowScratchFallback: false
+    })
+  })
+
   it.each(["invalidated", "different-owner", "valid-rotation"])("revalidates canonical %s while an owned response is held", async kind => {
     const response = deferred<ServerChatMessage[]>()
     mocks.listChatMessages.mockReturnValue(response.promise)
@@ -302,6 +315,361 @@ describe("useServerChatLoader scoped local history", () => {
     expect(oldSignal.aborted).toBe(true)
     expect(mocks.setSelectedAssistant.mock.calls.some(([selection]) => selection?.id === "4")).toBe(false)
     expect(mocks.setSelectedAssistant.mock.calls.some(([selection]) => selection?.id === "5")).toBe(true)
+  })
+  it("does not let a passive global consumer clear an active workspace chat", async () => {
+    const scope = { type: "workspace", workspaceId: "workspace-a" } as const
+    const options = {
+      ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-a"),
+      notification: { error: vi.fn() },
+      t: ((key: string) => key) as unknown as TFunction
+    }
+    mocks.listChatMessages.mockImplementation(async (_id, _params, request) => {
+      if (request.scope?.type !== "workspace") {
+        throw Object.assign(new Error("Chat not found"), { status: 404 })
+      }
+      return []
+    })
+    renderHook(() => {
+      useServerChatLoader({ ...options, enabled: false })
+      useServerChatLoader({ ...options, scope, enabled: true })
+    })
+
+    await act(() => vi.advanceTimersByTimeAsync(250))
+
+    expect(mocks.store.setServerChatId).not.toHaveBeenCalled()
+    expect(mocks.listChatMessages).toHaveBeenCalledExactlyOnceWith(
+      "chat-a",
+      expect.any(Object),
+      expect.objectContaining({ scope })
+    )
+    expect(mocks.store.setServerChatLoadState).toHaveBeenCalledWith("loaded")
+  })
+
+  it.each([false, true])("rehydrates a same-chat restoration only when metadata was reset: %s", async reset => {
+    const options = {
+      ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-a"),
+      notification: { error: vi.fn() },
+      t: ((key: string) => key) as unknown as TFunction
+    }
+    const { rerender } = renderHook(() => useServerChatLoader(options))
+    await act(() => vi.advanceTimersByTimeAsync(250))
+    mocks.renderedMessages = [{ id: "saved", message: "Verified history" }]
+    mocks.listChatMessages.mockClear()
+    mocks.store.setServerChatLoadState.mockClear()
+    if (reset) {
+      const slice = createServerChatSlice(update => {
+        Object.assign(mocks.store, typeof update === "function" ? update(mocks.store as unknown as State) : update)
+      }, () => mocks.store as unknown as State)
+      slice.setServerChatId(null)
+      slice.setServerChatId("chat-a")
+      expect(mocks.store).toMatchObject({ serverChatLoadState: "loading", serverChatMetaLoaded: false })
+      mocks.getChat.mockResolvedValue({ id: "chat-a", scope_type: "global" })
+    }
+    rerender()
+    await act(() => vi.advanceTimersByTimeAsync(250))
+    expect(mocks.listChatMessages).toHaveBeenCalledTimes(reset ? 1 : 0)
+    if (reset) expect(mocks.store.setServerChatLoadState).toHaveBeenLastCalledWith("loaded")
+  })
+
+  it("ignores an in-flight missing-chat response after loading is disabled", async () => {
+    const response = deferred<never>()
+    mocks.listChatMessages.mockReturnValue(response.promise)
+    const options = {
+      ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-a"),
+      notification: { error: vi.fn() },
+      t: ((key: string) => key) as unknown as TFunction
+    }
+    const { rerender } = renderHook(
+      ({ enabled }) => useServerChatLoader({ ...options, enabled }),
+      { initialProps: { enabled: true } }
+    )
+    await act(() => vi.advanceTimersByTimeAsync(250))
+    const signal = mocks.listChatMessages.mock.calls[0][2].signal
+
+    rerender({ enabled: false })
+    await act(async () => {
+      response.reject(Object.assign(new Error("Chat not found"), { status: 404 }))
+    })
+
+    expect(signal.aborted).toBe(true)
+    expect(mocks.store.setServerChatId).not.toHaveBeenCalled()
+    expect(options.notification.error).not.toHaveBeenCalled()
+  })
+
+  it.each([404, 403, "scope mismatch"] as const)("clears busy after a real native controller rejects %s", async rejection => {
+    let busy = false
+    mocks.setIsLoading.mockImplementation(value => { busy = value })
+    mocks.store.serverChatMetaLoaded = false
+    mocks.getChat.mockImplementation(async () => {
+      if (typeof rejection === "number") {
+        throw Object.assign(new Error(`HTTP ${rejection}`), { status: rejection })
+      }
+      return { id: "chat-a", scope_type: "workspace", workspace_id: "foreign" }
+    })
+    const options = {
+      ensureServerChatHistoryId: vi.fn(),
+      notification: { error: vi.fn() },
+      t: ((key: string) => key) as unknown as TFunction
+    }
+    const mounted = renderHook(() => {
+      const control = useHistorySelection()
+      mocks.selection = control
+      useServerChatLoader(options)
+      return control
+    })
+    await act(async () => {
+      await mounted.result.current.open({
+        kind: "native", owner_key: "owner", conversation_id: "chat-a",
+        validate_lease: () => true
+      } as Parameters<typeof mounted.result.current.open>[0])
+    })
+
+    await act(() => vi.advanceTimersByTimeAsync(250))
+
+    expect(mounted.result.current.getCurrent().owner).toEqual({
+      kind: "unavailable",
+      code: rejection === 404 ? "server_chat_not_found"
+        : rejection === 403 ? "server_chat_access_denied" : "server_chat_scope_mismatch"
+    })
+    expect(mocks.store.serverChatId).toBe("chat-a")
+    expect(busy).toBe(false)
+    mounted.unmount()
+  })
+
+  it.each([
+    ["disable", "chat-a"], ["disable", "chat-b"],
+    ["unmount", "chat-a"], ["unmount", "chat-b"]
+  ] as const)("does not let old-loader %s clear replacement %s's busy state", async (cleanup, replacementId) => {
+    let busy = false
+    mocks.setIsLoading.mockImplementation(value => { busy = value })
+    mocks.store.serverChatMetaLoaded = false
+    const firstResponse = deferred<never>()
+    const replacementResponse = deferred<{ id: string; scope_type: string }>()
+    mocks.getChat.mockReset().mockReturnValueOnce(firstResponse.promise)
+      .mockReturnValueOnce(replacementResponse.promise)
+    const options = {
+      ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-a"),
+      notification: { error: vi.fn() },
+      t: ((key: string) => key) as unknown as TFunction
+    }
+    const first = renderHook(
+      ({ enabled }) => useServerChatLoader({ ...options, enabled }),
+      { initialProps: { enabled: true } }
+    )
+    await act(() => vi.advanceTimersByTimeAsync(250))
+    mocks.store.serverChatId = replacementId
+    const replacement = renderHook(() => useServerChatLoader(options))
+    await act(() => vi.advanceTimersByTimeAsync(250))
+    expect(busy).toBe(true)
+
+    if (cleanup === "disable") first.rerender({ enabled: false })
+    else first.unmount()
+    expect(busy).toBe(true)
+    await act(async () => {
+      firstResponse.reject(new DOMException("Aborted", "AbortError"))
+    })
+    expect(busy).toBe(true)
+
+    await act(async () => {
+      replacementResponse.resolve({ id: replacementId, scope_type: "global" })
+    })
+    expect(busy).toBe(false)
+    first.unmount()
+    replacement.unmount()
+  })
+
+  it("clears its own busy state on unmount without waiting for an aborted read", async () => {
+    let busy = false
+    mocks.setIsLoading.mockImplementation(value => { busy = value })
+    mocks.store.serverChatMetaLoaded = false
+    const response = deferred<never>()
+    mocks.getChat.mockReturnValue(response.promise)
+    const mounted = renderHook(() => useServerChatLoader({
+      ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() },
+      t: ((key: string) => key) as unknown as TFunction
+    }))
+    await act(() => vi.advanceTimersByTimeAsync(250))
+    expect(busy).toBe(true)
+
+    mounted.unmount()
+    expect(busy).toBe(false)
+    await act(async () => { response.reject(new DOMException("Aborted", "AbortError")) })
+  })
+
+  it.each(["chat-a", "chat-b"])("keeps pending selection %s busy when the old request settles before debounce", async replacementId => {
+    let busy = false
+    mocks.setIsLoading.mockImplementation(value => { busy = value })
+    mocks.store.serverChatMetaLoaded = false
+    const firstResponse = deferred<never>()
+    const replacementResponse = deferred<{ id: string; scope_type: string }>()
+    mocks.getChat.mockReturnValueOnce(firstResponse.promise)
+      .mockReturnValueOnce(replacementResponse.promise)
+    const mounted = renderHook(() => useServerChatLoader({
+      ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-a"),
+      notification: { error: vi.fn() },
+      t: ((key: string) => key) as unknown as TFunction
+    }))
+    try {
+      await act(() => vi.advanceTimersByTimeAsync(250))
+      act(() => {
+        mocks.store.serverChatId = replacementId
+        mocks.setIsLoading(true)
+        usePlaygroundSessionStore.getState().requestServerChatSelection(replacementId)
+      })
+      await act(async () => {
+        firstResponse.reject(new DOMException("Aborted", "AbortError"))
+      })
+      expect(mocks.getChat).toHaveBeenCalledTimes(1)
+      expect(busy).toBe(true)
+      await act(() => vi.advanceTimersByTimeAsync(200))
+      await act(async () => {
+        replacementResponse.resolve({ id: replacementId, scope_type: "global" })
+      })
+      expect(busy).toBe(false)
+    } finally {
+      mounted.unmount()
+      usePlaygroundSessionStore.getState().clearSession()
+      mocks.getChat.mockReset()
+    }
+  })
+
+  it("finishes busy when deliberate selection qualification rejects before message loading", async () => {
+    let busy = true
+    mocks.setIsLoading.mockImplementation(value => { busy = value })
+    const qualification = deferred<boolean>()
+    mocks.selection = {
+      fence: () => () => true,
+      loadConversation: () => qualification.promise,
+      canAutomaticallyLoad: () => false
+    }
+    usePlaygroundSessionStore.getState().requestServerChatSelection("chat-a")
+    const mounted = renderHook(() => useServerChatLoader({
+      ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() },
+      t: ((key: string) => key) as unknown as TFunction
+    }))
+    try {
+      await act(() => vi.advanceTimersByTimeAsync(200))
+      expect(busy).toBe(true)
+      await act(async () => { qualification.resolve(false) })
+      expect(busy).toBe(false)
+      expect(mocks.getChat).not.toHaveBeenCalled()
+      expect(mocks.listChatMessages).not.toHaveBeenCalled()
+    } finally {
+      mounted.unmount()
+      usePlaygroundSessionStore.getState().clearSession()
+      mocks.getChat.mockReset()
+    }
+  })
+
+  it("releases its busy state when the session resets during a deliberate load", async () => {
+    let busy = false
+    mocks.setIsLoading.mockImplementation(value => { busy = value })
+    mocks.store.serverChatMetaLoaded = false
+    const response = deferred<{ id: string; scope_type: string }>()
+    mocks.getChat.mockReset().mockReturnValue(response.promise)
+    usePlaygroundSessionStore.getState().requestServerChatSelection("chat-a")
+    const mounted = renderHook(() => useServerChatLoader({
+      ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-a"),
+      notification: { error: vi.fn() },
+      t: ((key: string) => key) as unknown as TFunction
+    }))
+    try {
+      await act(() => vi.advanceTimersByTimeAsync(200))
+      expect(busy).toBe(true)
+      act(() => { usePlaygroundSessionStore.getState().clearSession() })
+      await act(async () => { response.resolve({ id: "chat-a", scope_type: "global" }) })
+      expect(busy).toBe(false)
+    } finally {
+      mounted.unmount()
+      usePlaygroundSessionStore.getState().clearSession()
+      mocks.getChat.mockReset()
+    }
+  })
+
+  it("leaves shared busy state alone when automatic loading is not qualified", async () => {
+    let busy = true
+    mocks.setIsLoading.mockImplementation(value => { busy = value })
+    mocks.selection = {
+      fence: () => () => true,
+      canAutomaticallyLoad: () => false
+    }
+    const mounted = renderHook(() => useServerChatLoader({
+      ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() },
+      t: ((key: string) => key) as unknown as TFunction
+    }))
+    try {
+      await act(() => vi.advanceTimersByTimeAsync(200))
+      expect(busy).toBe(true)
+      expect(mocks.listChatMessages).not.toHaveBeenCalled()
+    } finally {
+      mounted.unmount()
+    }
+  })
+
+  it("keeps a replacement load busy when a disabled metadata request settles", async () => {
+    mocks.store.serverChatMetaLoaded = false
+    const firstResponse = deferred<never>()
+    const replacementResponse = deferred<never>()
+    mocks.getChat
+      .mockReturnValueOnce(firstResponse.promise)
+      .mockReturnValueOnce(replacementResponse.promise)
+    const options = {
+      ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-a"),
+      notification: { error: vi.fn() },
+      t: ((key: string) => key) as unknown as TFunction
+    }
+    const { rerender, unmount } = renderHook(
+      ({ enabled }) => useServerChatLoader({ ...options, enabled }),
+      { initialProps: { enabled: true } }
+    )
+    await act(() => vi.advanceTimersByTimeAsync(250))
+    rerender({ enabled: false })
+    expect(mocks.setIsLoading).toHaveBeenLastCalledWith(false)
+
+    rerender({ enabled: true })
+    await act(() => vi.advanceTimersByTimeAsync(250))
+    expect(mocks.getChat).toHaveBeenCalledTimes(2)
+    mocks.setIsLoading.mockClear()
+    await act(async () => {
+      firstResponse.reject(new DOMException("Aborted", "AbortError"))
+    })
+
+    expect(mocks.setIsLoading).not.toHaveBeenCalledWith(false)
+    unmount()
+    await act(async () => {
+      replacementResponse.reject(new DOMException("Aborted", "AbortError"))
+    })
+  })
+
+  it("does not clear a new surface's loading state after the old surface unmounts", async () => {
+    mocks.store.serverChatMetaLoaded = false
+    const firstResponse = deferred<never>()
+    const replacementResponse = deferred<never>()
+    mocks.getChat
+      .mockReturnValueOnce(firstResponse.promise)
+      .mockReturnValueOnce(replacementResponse.promise)
+    const options = {
+      ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-a"),
+      notification: { error: vi.fn() },
+      t: ((key: string) => key) as unknown as TFunction
+    }
+    const oldSurface = renderHook(() => useServerChatLoader(options))
+    await act(() => vi.advanceTimersByTimeAsync(250))
+    oldSurface.unmount()
+    const newSurface = renderHook(() => useServerChatLoader(options))
+    await act(() => vi.advanceTimersByTimeAsync(250))
+    expect(mocks.getChat).toHaveBeenCalledTimes(2)
+    mocks.setIsLoading.mockClear()
+
+    await act(async () => {
+      firstResponse.reject(new DOMException("Aborted", "AbortError"))
+    })
+
+    expect(mocks.setIsLoading).not.toHaveBeenCalledWith(false)
+    newSurface.unmount()
+    await act(async () => {
+      replacementResponse.reject(new DOMException("Aborted", "AbortError"))
+    })
   })
 
   it("does not publish a superseded load after history linking is aborted", async () => {

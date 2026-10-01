@@ -6,6 +6,7 @@
 import { createWithEqualityFn } from "zustand/traditional"
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware"
 import type { ChatHistory, Message } from "@/store/option"
+import type { HistorySelectionReference } from "@/hooks/chat/useHistorySelection"
 import {
   WORKSPACE_STORAGE_CHANNEL_NAME,
   WORKSPACE_STORAGE_KEY,
@@ -30,7 +31,6 @@ import {
   extractWorkspaceIdFromChatSessionKey,
   isWorkspaceChatSessionKeyForWorkspace
 } from "@/store/workspace-chat-session-key"
-import { buildResearchWorkspaceMigrationTombstoneKey } from "@/store/workspace-migration"
 import type {
   AddSourceModalState,
   AddSourceTab,
@@ -78,6 +78,7 @@ import { createSourcesSlice } from "./workspace-slices/sources-slice"
 import { createStudioSlice } from "./workspace-slices/studio-slice"
 import { createUISlice } from "./workspace-slices/ui-slice"
 import { createWorkspaceListSlice } from "./workspace-slices/workspace-list-slice"
+import type { LocalWorkspaceState, ServerWorkspaceCache } from "./workspace-api"
 import { isWorkspaceSourceSelectable } from "./workspace-source-status"
 
 export {
@@ -306,6 +307,8 @@ type WorkspaceSplitIndexEnvelope = {
 
 let workspaceIndexedDbConnectionPromise: Promise<IDBDatabase> | null = null
 let workspaceIndexedDbAdapterSingleton: WorkspaceIndexedDbAdapter | null = null
+let workspacePersistenceGeneration = 0
+const workspaceIndexedDbWriteTransactions = new Set<IDBTransaction>()
 
 const isWorkspaceIndexedDbRuntimeAvailable = (): boolean =>
   typeof window !== "undefined" && typeof indexedDB !== "undefined"
@@ -319,7 +322,12 @@ const openWorkspaceIndexedDbConnection = async (): Promise<IDBDatabase> => {
     return workspaceIndexedDbConnectionPromise
   }
 
-  workspaceIndexedDbConnectionPromise = new Promise<IDBDatabase>(
+  const invalidateConnection = () => {
+    if (workspaceIndexedDbConnectionPromise === connectionPromise) {
+      workspaceIndexedDbConnectionPromise = null
+    }
+  }
+  const connectionPromise: Promise<IDBDatabase> = new Promise<IDBDatabase>(
     (resolve, reject) => {
       const request = indexedDB.open(
         WORKSPACE_INDEXEDDB_NAME,
@@ -344,9 +352,10 @@ const openWorkspaceIndexedDbConnection = async (): Promise<IDBDatabase> => {
 
       request.onsuccess = () => {
         const database = request.result
+        database.onclose = invalidateConnection
         database.onversionchange = () => {
           database.close()
-          workspaceIndexedDbConnectionPromise = null
+          invalidateConnection()
         }
         resolve(database)
       }
@@ -356,11 +365,12 @@ const openWorkspaceIndexedDbConnection = async (): Promise<IDBDatabase> => {
         reject(new Error("Workspace IndexedDB upgrade is blocked."))
     }
   ).catch((error) => {
-    workspaceIndexedDbConnectionPromise = null
+    invalidateConnection()
     throw error
   })
+  workspaceIndexedDbConnectionPromise = connectionPromise
 
-  return workspaceIndexedDbConnectionPromise
+  return connectionPromise
 }
 
 const withWorkspaceIndexedDbStore = async <TResult>(
@@ -370,10 +380,29 @@ const withWorkspaceIndexedDbStore = async <TResult>(
   mode: IDBTransactionMode,
   operation: (store: IDBObjectStore) => IDBRequest<TResult>
 ): Promise<TResult | null> => {
-  const database = await openWorkspaceIndexedDbConnection()
+  const generation = workspacePersistenceGeneration
+  const pendingConnection = openWorkspaceIndexedDbConnection()
+  const connectionPromise = workspaceIndexedDbConnectionPromise
+  const database = await pendingConnection
+  if (mode === "readwrite" && generation !== workspacePersistenceGeneration) {
+    throw new Error("Workspace persistence was invalidated by hydration.")
+  }
   return new Promise<TResult | null>((resolve, reject) => {
-    const transaction = database.transaction(storeName, mode)
+    let transaction: IDBTransaction
+    try {
+      transaction = database.transaction(storeName, mode)
+    } catch (error) {
+      if (
+        (error as { name?: string } | null)?.name === "InvalidStateError" &&
+        workspaceIndexedDbConnectionPromise === connectionPromise
+      ) {
+        workspaceIndexedDbConnectionPromise = null
+      }
+      reject(error)
+      return
+    }
     const store = transaction.objectStore(storeName)
+    if (mode === "readwrite") workspaceIndexedDbWriteTransactions.add(transaction)
 
     let settled = false
     const settleResolve = (value: TResult | null) => {
@@ -387,44 +416,57 @@ const withWorkspaceIndexedDbStore = async <TResult>(
       reject(error)
     }
 
-    const request = operation(store)
-    request.onsuccess = () => settleResolve(request.result ?? null)
-    request.onerror = () =>
-      settleReject(request.error || new Error("Workspace IndexedDB request failed."))
-    transaction.onabort = () =>
+    let result: TResult | null = null
+    transaction.oncomplete = () => {
+      workspaceIndexedDbWriteTransactions.delete(transaction)
+      settleResolve(result)
+    }
+    transaction.onabort = () => {
+      workspaceIndexedDbWriteTransactions.delete(transaction)
       settleReject(
         transaction.error || new Error("Workspace IndexedDB transaction aborted.")
       )
-    transaction.onerror = () =>
+    }
+    transaction.onerror = () => {
       settleReject(
         transaction.error || new Error("Workspace IndexedDB transaction failed.")
       )
+    }
+
+    let request: IDBRequest<TResult>
+    try {
+      request = operation(store)
+    } catch (error) {
+      transaction.abort()
+      settleReject(error)
+      return
+    }
+    // Publish offload pointers only after the transaction has committed.
+    request.onsuccess = () => {
+      result = request.result ?? null
+    }
+    request.onerror = () =>
+      settleReject(request.error || new Error("Workspace IndexedDB request failed."))
   })
 }
 
 const createWorkspaceIndexedDbAdapter = (): WorkspaceIndexedDbAdapter => {
-  let disabled = false
-  const disableAdapter = () => {
-    disabled = true
-  }
-
   const run = async <T>(
     operation: () => Promise<T>,
     fallbackValue: T
   ): Promise<T> => {
-    if (disabled || !isWorkspaceIndexedDbRuntimeAvailable()) {
+    if (!isWorkspaceIndexedDbRuntimeAvailable()) {
       return fallbackValue
     }
     try {
       return await operation()
     } catch {
-      disableAdapter()
       return fallbackValue
     }
   }
 
   return {
-    isAvailable: () => !disabled && isWorkspaceIndexedDbRuntimeAvailable(),
+    isAvailable: isWorkspaceIndexedDbRuntimeAvailable,
     putChatRecord: (record) =>
       run(
         async () => {
@@ -438,14 +480,10 @@ const createWorkspaceIndexedDbAdapter = (): WorkspaceIndexedDbAdapter => {
         false
       ),
     getChatRecord: (key) =>
-      run(
-        () =>
-          withWorkspaceIndexedDbStore<WorkspaceIndexedDbChatRecord>(
-            WORKSPACE_INDEXEDDB_CHAT_STORE,
-            "readonly",
-            (store) => store.get(key)
-          ),
-        null
+      withWorkspaceIndexedDbStore<WorkspaceIndexedDbChatRecord>(
+        WORKSPACE_INDEXEDDB_CHAT_STORE,
+        "readonly",
+        (store) => store.get(key)
       ),
     deleteChatRecord: (key) =>
       run(
@@ -472,14 +510,10 @@ const createWorkspaceIndexedDbAdapter = (): WorkspaceIndexedDbAdapter => {
         false
       ),
     getArtifactPayloadRecord: (key) =>
-      run(
-        () =>
-          withWorkspaceIndexedDbStore<WorkspaceIndexedDbArtifactPayloadRecord>(
-            WORKSPACE_INDEXEDDB_ARTIFACT_STORE,
-            "readonly",
-            (store) => store.get(key)
-          ),
-        null
+      withWorkspaceIndexedDbStore<WorkspaceIndexedDbArtifactPayloadRecord>(
+        WORKSPACE_INDEXEDDB_ARTIFACT_STORE,
+        "readonly",
+        (store) => store.get(key)
       ),
     deleteArtifactPayloadRecord: (key) =>
       run(
@@ -865,31 +899,6 @@ const safeParseJson = (raw: string | null | undefined): unknown => {
   }
 }
 
-const hasResearchWorkspaceMigrationTombstone = (workspaceId: string): boolean => {
-  const trimmedWorkspaceId = workspaceId.trim()
-  if (!trimmedWorkspaceId || typeof localStorage === "undefined") return false
-
-  let tombstoneRaw: string | null
-  try {
-    tombstoneRaw = localStorage.getItem(
-      buildResearchWorkspaceMigrationTombstoneKey(trimmedWorkspaceId)
-    )
-  } catch {
-    return false
-  }
-
-  const tombstone = safeParseJson(tombstoneRaw)
-  if (!isRecord(tombstone)) return false
-  return (
-    tombstone.contentRetained === false &&
-    tombstone.legacyWorkspaceId === trimmedWorkspaceId &&
-    typeof tombstone.migrationId === "string" &&
-    tombstone.migrationId.trim().length > 0
-  )
-}
-
-const cleanedUpMigrationTombstoneWorkspaceIds = new Set<string>()
-
 const parseWorkspaceFeatureFlagCandidate = (
   candidate: unknown
 ): boolean | null => {
@@ -998,6 +1007,7 @@ const offloadWorkspaceSnapshotArtifacts = async (
   snapshot: WorkspaceSnapshot
   offloadedArtifactIds: Set<string>
 }> => {
+  const generation = workspacePersistenceGeneration
   if (!indexedDbAdapter.isAvailable()) {
     return { snapshot, offloadedArtifactIds: new Set<string>() }
   }
@@ -1007,6 +1017,7 @@ const offloadWorkspaceSnapshotArtifacts = async (
   const updatedAt = Date.now()
 
   for (const artifact of snapshot.generatedArtifacts || []) {
+    if (generation !== workspacePersistenceGeneration) break
     if (!artifact || typeof artifact.id !== "string") {
       persistedArtifacts.push({ ...artifact })
       continue
@@ -1077,23 +1088,27 @@ const rehydrateWorkspaceSnapshotArtifacts = async (
     const clonedArtifact: PersistedWorkspaceArtifact = { ...artifact }
     const pointer = getWorkspaceArtifactPayloadPointer(clonedArtifact)
 
-    if (pointer && indexedDbAdapter.isAvailable()) {
+    if (pointer) {
+      if (!indexedDbAdapter.isAvailable()) {
+        throw new Error("Stored workspace artifact payload is unavailable.")
+      }
       const payloadRecord = await indexedDbAdapter.getArtifactPayloadRecord(
         pointer.key
       )
-      if (payloadRecord?.payload) {
-        if (
-          pointer.fields.includes("content") &&
-          typeof payloadRecord.payload.content === "string"
-        ) {
-          clonedArtifact.content = payloadRecord.payload.content
-        }
-        if (
-          pointer.fields.includes("data") &&
-          isRecord(payloadRecord.payload.data)
-        ) {
-          clonedArtifact.data = cloneWorkspaceValue(payloadRecord.payload.data)
-        }
+      if (
+        !payloadRecord?.payload ||
+        (pointer.fields.includes("content") &&
+          typeof payloadRecord.payload.content !== "string") ||
+        (pointer.fields.includes("data") &&
+          !isRecord(payloadRecord.payload.data))
+      ) {
+        throw new Error("Stored workspace artifact payload is missing or invalid.")
+      }
+      if (pointer.fields.includes("content")) {
+        clonedArtifact.content = payloadRecord.payload.content
+      }
+      if (pointer.fields.includes("data")) {
+        clonedArtifact.data = cloneWorkspaceValue(payloadRecord.payload.data!)
       }
     }
 
@@ -1115,21 +1130,17 @@ const rehydrateWorkspaceChatSessionReference = async (
 ): Promise<PersistedWorkspaceChatSession | null> => {
   if (isWorkspaceIndexedDbChatPointer(reference)) {
     if (!indexedDbAdapter.isAvailable()) {
-      return {
-        messages: [],
-        historyId: reference.historyId,
-        serverChatId: reference.serverChatId
-      }
+      throw new Error("Stored workspace chat payload is unavailable.")
     }
     const chatRecord = await indexedDbAdapter.getChatRecord(reference.key)
-    if (chatRecord?.session && isRecord(chatRecord.session)) {
+    if (
+      chatRecord?.session &&
+      isRecord(chatRecord.session) &&
+      Array.isArray(chatRecord.session.messages)
+    ) {
       return chatRecord.session as PersistedWorkspaceChatSession
     }
-    return {
-      messages: [],
-      historyId: reference.historyId,
-      serverChatId: reference.serverChatId
-    }
+    throw new Error("Stored workspace chat payload is missing or invalid.")
   }
 
   if (!isRecord(reference)) return null
@@ -1141,6 +1152,7 @@ const cleanupWorkspaceIndexedDbRecords = async (
   snapshot: unknown,
   indexedDbAdapter: WorkspaceIndexedDbAdapter
 ): Promise<void> => {
+  const generation = workspacePersistenceGeneration
   if (!indexedDbAdapter.isAvailable()) return
 
   const artifactIds = collectWorkspaceArtifactIdsFromSnapshot(snapshot)
@@ -1156,70 +1168,13 @@ const cleanupWorkspaceIndexedDbRecords = async (
   await indexedDbAdapter.deleteChatRecord(
     buildWorkspaceIndexedDbChatRecordKey(workspaceId)
   )
+  if (generation !== workspacePersistenceGeneration) return
   await Promise.all(
     Array.from(artifactKeys, (key) =>
       indexedDbAdapter.deleteArtifactPayloadRecord(key)
     )
   )
 }
-
-const removeWorkspaceLocalPersistenceForId = async (
-  workspaceId: string,
-  indexedDbAdapter: WorkspaceIndexedDbAdapter
-): Promise<void> => {
-  const snapshot = readWorkspaceSnapshotFromStorage(workspaceId)
-  const chatKey = buildWorkspaceChatStorageKey(workspaceId)
-  const chatCandidate = safeParseJson(localStorage.getItem(chatKey))
-  const chatPointerKey = isWorkspaceIndexedDbChatPointer(chatCandidate)
-    ? chatCandidate.key
-    : null
-
-  localStorage.removeItem(buildWorkspaceSnapshotStorageKey(workspaceId))
-  localStorage.removeItem(chatKey)
-
-  if (!indexedDbAdapter.isAvailable()) return
-
-  await cleanupWorkspaceIndexedDbRecords(workspaceId, snapshot, indexedDbAdapter)
-  if (chatPointerKey) {
-    await indexedDbAdapter.deleteChatRecord(chatPointerKey)
-  }
-}
-
-const omitTombstonedWorkspaceRecords = <T>(
-  records: Record<string, T>,
-  tombstonedWorkspaceIds: Set<string>
-): Record<string, T> => {
-  if (tombstonedWorkspaceIds.size === 0) return records
-
-  const filtered: Record<string, T> = {}
-  for (const [workspaceId, value] of Object.entries(records)) {
-    if (!tombstonedWorkspaceIds.has(workspaceId)) {
-      filtered[workspaceId] = value
-    }
-  }
-  return filtered
-}
-
-const omitTombstonedSavedWorkspaces = (
-  workspaces: SavedWorkspace[],
-  tombstonedWorkspaceIds: Set<string>
-): SavedWorkspace[] => {
-  if (tombstonedWorkspaceIds.size === 0) return workspaces
-  return workspaces.filter(
-    (workspace) => !tombstonedWorkspaceIds.has(workspace.id)
-  )
-}
-
-const collectTombstonedSavedWorkspaceIds = (workspaces: unknown[]): Set<string> =>
-  new Set(
-    workspaces
-      .map((workspace) => (isRecord(workspace) ? workspace.id : null))
-      .filter(
-        (workspaceId): workspaceId is string =>
-          typeof workspaceId === "string" &&
-          hasResearchWorkspaceMigrationTombstone(workspaceId)
-      )
-  )
 
 const hasPersistableWorkspaceIndexState = (
   state: PersistedWorkspaceState
@@ -1371,26 +1326,15 @@ const reconstructPersistedWorkspaceStateFromSplitIndex = (
   indexedDbAdapter: WorkspaceIndexedDbAdapter
 ): PersistedWorkspaceState | Promise<PersistedWorkspaceState> => {
   const stateCandidate = envelope.state
-  const candidateWorkspaceId =
+  const workspaceId =
     typeof stateCandidate.workspaceId === "string"
       ? stateCandidate.workspaceId
       : ""
-  const workspaceId =
-    candidateWorkspaceId &&
-    !hasResearchWorkspaceMigrationTombstone(candidateWorkspaceId)
-      ? candidateWorkspaceId
-      : ""
   const savedWorkspaces = Array.isArray(stateCandidate.savedWorkspaces)
-    ? omitTombstonedSavedWorkspaces(
-        stateCandidate.savedWorkspaces as SavedWorkspace[],
-        collectTombstonedSavedWorkspaceIds(stateCandidate.savedWorkspaces)
-      )
+    ? (stateCandidate.savedWorkspaces as SavedWorkspace[])
     : []
   const archivedWorkspaces = Array.isArray(stateCandidate.archivedWorkspaces)
-    ? omitTombstonedSavedWorkspaces(
-        stateCandidate.archivedWorkspaces as SavedWorkspace[],
-        collectTombstonedSavedWorkspaceIds(stateCandidate.archivedWorkspaces)
-      )
+    ? (stateCandidate.archivedWorkspaces as SavedWorkspace[])
     : []
   const workspaceCollections = Array.isArray(stateCandidate.workspaceCollections)
     ? (stateCandidate.workspaceCollections as WorkspaceCollection[])
@@ -1398,8 +1342,7 @@ const reconstructPersistedWorkspaceStateFromSplitIndex = (
   const workspaceIds = Array.isArray(stateCandidate.workspaceIds)
     ? stateCandidate.workspaceIds.filter(
         (workspaceStorageId): workspaceStorageId is string =>
-          typeof workspaceStorageId === "string" &&
-          !hasResearchWorkspaceMigrationTombstone(workspaceStorageId)
+          typeof workspaceStorageId === "string"
       )
     : []
 
@@ -1525,6 +1468,7 @@ const writeSplitWorkspacePersistence = async (
   serializedValue: string,
   indexedDbAdapter: WorkspaceIndexedDbAdapter
 ): Promise<boolean> => {
+  const generation = workspacePersistenceGeneration
   if (name !== WORKSPACE_STORAGE_KEY) return false
 
   const envelope = parsePersistedWorkspaceEnvelope(serializedValue)
@@ -1540,42 +1484,6 @@ const writeSplitWorkspacePersistence = async (
     ...Object.keys(migrated.workspaceChatSessions || {}),
     migrated.workspaceId
   )
-  const candidateWorkspaceIds = normalizeWorkspaceStorageIds(
-    ...nextWorkspaceIds,
-    ...migrated.savedWorkspaces.map((workspace) => workspace.id),
-    ...migrated.archivedWorkspaces.map((workspace) => workspace.id)
-  )
-  const tombstonedWorkspaceIds = new Set(
-    candidateWorkspaceIds.filter(hasResearchWorkspaceMigrationTombstone)
-  )
-  const migratedForIndex: PersistedWorkspaceState =
-    tombstonedWorkspaceIds.size === 0
-      ? migrated
-      : {
-          ...migrated,
-          workspaceId: tombstonedWorkspaceIds.has(migrated.workspaceId)
-            ? ""
-            : migrated.workspaceId,
-          savedWorkspaces: omitTombstonedSavedWorkspaces(
-            migrated.savedWorkspaces,
-            tombstonedWorkspaceIds
-          ),
-          archivedWorkspaces: omitTombstonedSavedWorkspaces(
-            migrated.archivedWorkspaces,
-            tombstonedWorkspaceIds
-          ),
-          workspaceSnapshots: omitTombstonedWorkspaceRecords(
-            migrated.workspaceSnapshots,
-            tombstonedWorkspaceIds
-          ),
-          workspaceChatSessions: omitTombstonedWorkspaceRecords(
-            migrated.workspaceChatSessions,
-            tombstonedWorkspaceIds
-          )
-        }
-  const persistedWorkspaceIds = nextWorkspaceIds.filter(
-    (workspaceId) => !tombstonedWorkspaceIds.has(workspaceId)
-  )
   const existingWorkspaceIds = getWorkspaceIdsFromStoredValue(
     localStorage.getItem(name)
   )
@@ -1586,17 +1494,7 @@ const writeSplitWorkspacePersistence = async (
   > = {}
 
   for (const workspaceStorageId of nextWorkspaceIds) {
-    if (tombstonedWorkspaceIds.has(workspaceStorageId)) {
-      if (!cleanedUpMigrationTombstoneWorkspaceIds.has(workspaceStorageId)) {
-        await removeWorkspaceLocalPersistenceForId(
-          workspaceStorageId,
-          indexedDbAdapter
-        )
-        cleanedUpMigrationTombstoneWorkspaceIds.add(workspaceStorageId)
-      }
-      continue
-    }
-
+    if (generation !== workspacePersistenceGeneration) return true
     const snapshotKey = buildWorkspaceSnapshotStorageKey(workspaceStorageId)
     const previousSnapshot = readWorkspaceSnapshotFromStorage(workspaceStorageId)
     const previousArtifactIds = collectWorkspaceArtifactIdsFromSnapshot(
@@ -1621,6 +1519,7 @@ const writeSplitWorkspacePersistence = async (
           snapshot,
           indexedDbAdapter
         )
+        if (generation !== workspacePersistenceGeneration) return true
         snapshotForStorage = offloadResult.snapshot
         offloadedArtifactIds = offloadResult.offloadedArtifactIds
         for (const artifactId of offloadedArtifactIds) {
@@ -1662,6 +1561,7 @@ const writeSplitWorkspacePersistence = async (
           indexedDbAdapter.deleteArtifactPayloadRecord(key)
         )
       )
+      if (generation !== workspacePersistenceGeneration) return true
     }
 
     const chatKey = buildWorkspaceChatStorageKey(workspaceStorageId)
@@ -1688,6 +1588,7 @@ const writeSplitWorkspacePersistence = async (
           session: chatSession,
           updatedAt
         })
+        if (generation !== workspacePersistenceGeneration) return true
         if (didPersist) {
           retainedChatRecordKey = chatRecordKey
           chatReference = {
@@ -1723,11 +1624,13 @@ const writeSplitWorkspacePersistence = async (
           indexedDbAdapter.deleteChatRecord(key)
         )
       )
+      if (generation !== workspacePersistenceGeneration) return true
     }
   }
 
   for (const staleWorkspaceId of existingWorkspaceIds) {
-    if (persistedWorkspaceIds.includes(staleWorkspaceId)) continue
+    if (generation !== workspacePersistenceGeneration) return true
+    if (nextWorkspaceIds.includes(staleWorkspaceId)) continue
 
     const staleSnapshot = readWorkspaceSnapshotFromStorage(staleWorkspaceId)
     const staleChatRaw = safeParseJson(
@@ -1746,27 +1649,21 @@ const writeSplitWorkspacePersistence = async (
         staleSnapshot,
         indexedDbAdapter
       )
+      if (generation !== workspacePersistenceGeneration) return true
       if (staleChatPointerKey) {
         await indexedDbAdapter.deleteChatRecord(staleChatPointerKey)
+        if (generation !== workspacePersistenceGeneration) return true
       }
     }
   }
 
-  if (
-    tombstonedWorkspaceIds.size > 0 &&
-    !hasPersistableWorkspaceIndexState(migratedForIndex)
-  ) {
-    localStorage.removeItem(name)
-    return true
-  }
-
-  const splitIndex = buildWorkspaceSplitIndexEnvelope(migratedForIndex, version, {
+  const splitIndex = buildWorkspaceSplitIndexEnvelope(migrated, version, {
     workspaceSnapshots: {
-      ...migratedForIndex.workspaceSnapshots,
+      ...migrated.workspaceSnapshots,
       ...persistedSnapshotsForIndex
     },
     workspaceChatSessions: {
-      ...migratedForIndex.workspaceChatSessions,
+      ...migrated.workspaceChatSessions,
       ...persistedChatReferencesForIndex
     }
   })
@@ -1780,7 +1677,8 @@ const writeSplitWorkspacePersistence = async (
 
 const rebuildWorkspaceEnvelopeFromStorage = (
   name: string,
-  indexedDbAdapter: WorkspaceIndexedDbAdapter
+  indexedDbAdapter: WorkspaceIndexedDbAdapter,
+  writeIndexedDbAdapter: WorkspaceIndexedDbAdapter
 ): string | null | Promise<string | null> => {
   const raw = localStorage.getItem(name)
   if (raw === null) return null
@@ -1800,7 +1698,7 @@ const rebuildWorkspaceEnvelopeFromStorage = (
     void writeSplitWorkspacePersistence(
       name,
       migratedEnvelope,
-      indexedDbAdapter
+      writeIndexedDbAdapter
     ).catch(() => {
       // Ignore migration failures and continue with in-memory rehydrate value.
     })
@@ -1886,8 +1784,11 @@ export const createWorkspaceStorage = (
   const splitStorageEnabled = isWorkspaceSplitKeyStorageEnabled()
   const indexedDbOffloadEnabled =
     splitStorageEnabled && isWorkspaceIndexedDbOffloadEnabled()
-  const indexedDbAdapter = indexedDbOffloadEnabled
-    ? options.indexedDbAdapter || getWorkspaceIndexedDbAdapter()
+  // Existing references still require reads when new offloading is disabled.
+  const indexedDbAdapter =
+    options.indexedDbAdapter || getWorkspaceIndexedDbAdapter()
+  const writeIndexedDbAdapter = indexedDbOffloadEnabled
+    ? indexedDbAdapter
     : noopWorkspaceIndexedDbAdapter
 
   return {
@@ -1896,22 +1797,29 @@ export const createWorkspaceStorage = (
         if (!splitStorageEnabled) {
           return localStorage.getItem(name)
         }
-        return rebuildWorkspaceEnvelopeFromStorage(name, indexedDbAdapter)
+        return rebuildWorkspaceEnvelopeFromStorage(
+          name,
+          indexedDbAdapter,
+          writeIndexedDbAdapter
+        )
       }
       return localStorage.getItem(name)
     },
     setItem: async (name: string, value: string): Promise<void> => {
+      const generation = workspacePersistenceGeneration
       try {
         if (shouldSuppressInitialEmptyWorkspaceWrite(name, value)) return
 
         const handledBySplitStorage = splitStorageEnabled
-          ? await writeSplitWorkspacePersistence(name, value, indexedDbAdapter)
+          ? await writeSplitWorkspacePersistence(name, value, writeIndexedDbAdapter)
           : false
+        if (generation !== workspacePersistenceGeneration) return
         if (!handledBySplitStorage) {
           localStorage.setItem(name, value)
         }
         broadcastWorkspaceStorageUpdate(name)
       } catch (error) {
+        if (generation !== workspacePersistenceGeneration) return
         if (isQuotaExceededError(error)) {
           const recoveryAttempt = attemptWorkspaceStorageRecovery(name, value)
           if (!recoveryAttempt) {
@@ -1946,9 +1854,10 @@ export const createWorkspaceStorage = (
               ? await writeSplitWorkspacePersistence(
                   name,
                   recoveryAttempt.value,
-                  indexedDbAdapter
+                  writeIndexedDbAdapter
                 )
               : false
+            if (generation !== workspacePersistenceGeneration) return
             if (!handledBySplitStorage) {
               localStorage.setItem(name, recoveryAttempt.value)
             }
@@ -1963,6 +1872,7 @@ export const createWorkspaceStorage = (
             })
             return
           } catch (retryError) {
+            if (generation !== workspacePersistenceGeneration) return
             if (!isQuotaExceededError(retryError)) {
               throw retryError
             }
@@ -1986,11 +1896,13 @@ export const createWorkspaceStorage = (
       }
     },
     removeItem: async (name: string): Promise<void> => {
+      const generation = workspacePersistenceGeneration
       if (name === WORKSPACE_STORAGE_KEY) {
         const workspaceIds = getWorkspaceIdsFromStoredValue(
           localStorage.getItem(name)
         )
         for (const workspaceStorageId of workspaceIds) {
+          if (generation !== workspacePersistenceGeneration) return
           const snapshot = readWorkspaceSnapshotFromStorage(workspaceStorageId)
           const chatCandidate = safeParseJson(
             localStorage.getItem(buildWorkspaceChatStorageKey(workspaceStorageId))
@@ -2012,8 +1924,10 @@ export const createWorkspaceStorage = (
               snapshot,
               indexedDbAdapter
             )
+            if (generation !== workspacePersistenceGeneration) return
             if (chatPointerKey) {
               await indexedDbAdapter.deleteChatRecord(chatPointerKey)
+              if (generation !== workspacePersistenceGeneration) return
             }
           }
         }
@@ -2052,6 +1966,7 @@ interface SourcesState {
 }
 
 interface StudioState {
+  serverWorkspace: ServerWorkspaceCache | null
   generatedArtifacts: GeneratedArtifact[]
   notes: string // Legacy simple notes field
   currentNote: WorkspaceNote // Full note with title, keywords, versioning
@@ -2062,6 +1977,7 @@ interface StudioState {
 
 interface UIState {
   storeHydrated: boolean
+  storeHydrationError: string | null
   leftPaneCollapsed: boolean
   rightPaneCollapsed: boolean
   addSourceModalOpen: boolean
@@ -2083,6 +1999,7 @@ interface WorkspaceListState {
 }
 
 interface WorkspaceSnapshot {
+  serverWorkspace?: ServerWorkspaceCache | null
   workspaceId: string
   workspaceName: string
   workspaceTag: string
@@ -2109,17 +2026,31 @@ interface WorkspaceSnapshotsState {
   workspaceSnapshots: Record<string, WorkspaceSnapshot>
 }
 
+export type WorkspaceChatSessionQualification = {
+  ownerKey: string
+  workspaceId: string
+  referenceId: string
+}
+
+export type WorkspaceChatSessionCheckpoint = WorkspaceChatSessionQualification & {
+  version: 1
+  historySelectionReference: HistorySelectionReference | null
+  draft: string
+}
+
 export interface WorkspaceChatSession {
   messages: Message[]
   history: ChatHistory
   historyId: string | null
   serverChatId: string | null
+  checkpoint?: WorkspaceChatSessionCheckpoint
 }
 
 interface PersistedWorkspaceChatSession {
   messages: Message[]
   historyId: string | null
   serverChatId: string | null
+  checkpoint?: WorkspaceChatSessionCheckpoint
   // Legacy fallback persisted by older versions.
   history?: ChatHistory
 }
@@ -2338,6 +2269,10 @@ interface WorkspaceListActions {
   importWorkspaceBundle: (bundle: WorkspaceExportBundle) => string | null
   /** Switch to a different workspace by ID */
   switchWorkspace: (id: string) => void
+  installServerWorkspace: (workspace: LocalWorkspaceState, options: {
+    scopeKey: string
+    expectedWorkspaceId: string
+  }) => boolean
   /** Create a new workspace (optionally with a name), saving current first */
   createNewWorkspace: (name?: string) => void
   /** Duplicate a workspace (defaults to current) and switch to the duplicate */
@@ -2363,7 +2298,8 @@ interface WorkspaceListActions {
   ) => void
   /** Retrieve chat session state for a workspace */
   getWorkspaceChatSession: (
-    workspaceSessionKey: string
+    workspaceSessionKey: string,
+    qualification?: WorkspaceChatSessionQualification
   ) => WorkspaceChatSession | null
   /** Clear chat session state for a workspace */
   clearWorkspaceChatSession: (workspaceSessionKey: string) => void
@@ -2438,6 +2374,7 @@ export const initialSourcesState: SourcesState = {
 }
 
 export const initialStudioState: StudioState = {
+  serverWorkspace: null,
   generatedArtifacts: [],
   notes: "",
   currentNote: { ...DEFAULT_WORKSPACE_NOTE },
@@ -2448,6 +2385,7 @@ export const initialStudioState: StudioState = {
 
 const initialUIState: UIState = {
   storeHydrated: false,
+  storeHydrationError: null,
   leftPaneCollapsed: false,
   rightPaneCollapsed: false,
   addSourceModalOpen: false,
@@ -3078,13 +3016,18 @@ const normalizeWorkspaceChatSession = (
     typeof sessionCandidate.serverChatId === "string"
       ? sessionCandidate.serverChatId
       : null
+  // Retain checkpoint copies; qualification is enforced at the read boundary.
+  const checkpoint = isRecord(sessionCandidate.checkpoint)
+    ? cloneWorkspaceValue(sessionCandidate.checkpoint) as WorkspaceChatSessionCheckpoint
+    : undefined
 
   // Drop empty shells so we don't keep expanding persisted payloads with no data.
   if (
     messages.length === 0 &&
     history.length === 0 &&
     historyId === null &&
-    serverChatId === null
+    serverChatId === null &&
+    !checkpoint
   ) {
     return null
   }
@@ -3093,7 +3036,8 @@ const normalizeWorkspaceChatSession = (
     messages,
     history,
     historyId,
-    serverChatId
+    serverChatId,
+    ...(checkpoint ? { checkpoint } : {})
   }
 }
 
@@ -3178,6 +3122,8 @@ const coerceWorkspaceNoteForRehydrate = (candidate: unknown): WorkspaceNote => {
 
   return {
     id: typeof candidate.id === "number" ? candidate.id : undefined,
+    ...(typeof candidate.serverWorkspaceId === "string" && typeof candidate.serverScopeKey === "string"
+      ? { serverWorkspaceId: candidate.serverWorkspaceId, serverScopeKey: candidate.serverScopeKey } : {}),
     title: typeof candidate.title === "string" ? candidate.title : "",
     content: typeof candidate.content === "string" ? candidate.content : "",
     keywords: Array.isArray(candidate.keywords)
@@ -3480,6 +3426,7 @@ export const applyWorkspaceSnapshot = (
   | "generatedArtifacts"
   | "notes"
   | "currentNote"
+  | "serverWorkspace"
   | "workspaceBanner"
   | "leftPaneCollapsed"
   | "rightPaneCollapsed"
@@ -3506,6 +3453,7 @@ export const applyWorkspaceSnapshot = (
   })),
   notes: snapshot.notes,
   currentNote: { ...snapshot.currentNote },
+  serverWorkspace: snapshot.serverWorkspace ? cloneWorkspaceValue(snapshot.serverWorkspace) : null,
   workspaceBanner: cloneWorkspaceValue(snapshot.workspaceBanner),
   leftPaneCollapsed: snapshot.leftPaneCollapsed,
   rightPaneCollapsed: snapshot.rightPaneCollapsed,
@@ -3533,6 +3481,7 @@ export const buildWorkspaceSnapshot = (state: WorkspaceState): WorkspaceSnapshot
   })),
   notes: state.notes,
   currentNote: { ...state.currentNote },
+  serverWorkspace: state.serverWorkspace ? cloneWorkspaceValue(state.serverWorkspace) : null,
   workspaceBanner: cloneWorkspaceValue(state.workspaceBanner),
   leftPaneCollapsed: state.leftPaneCollapsed,
   rightPaneCollapsed: state.rightPaneCollapsed,
@@ -3733,7 +3682,10 @@ export const cloneWorkspaceChatSession = (
   messages: session.messages.map((message) => ({ ...message })),
   history: session.history.map((entry) => ({ ...entry })),
   historyId: session.historyId,
-  serverChatId: session.serverChatId
+  serverChatId: session.serverChatId,
+  ...(session.checkpoint
+    ? { checkpoint: cloneWorkspaceValue(session.checkpoint) }
+    : {})
 })
 
 const buildPersistedWorkspaceChatSession = (
@@ -3747,7 +3699,10 @@ const buildPersistedWorkspaceChatSession = (
   return {
     messages: boundedMessages.map((message) => ({ ...message })),
     historyId: session.historyId,
-    serverChatId: session.serverChatId
+    serverChatId: session.serverChatId,
+    ...(session.checkpoint
+      ? { checkpoint: cloneWorkspaceValue(session.checkpoint) }
+      : {})
   }
 }
 
@@ -3883,12 +3838,13 @@ export const duplicateWorkspaceSnapshot = (
 // this is always assigned by the time the rehydrate callback fires (this also
 // avoids a temporal-dead-zone reference to `useWorkspaceStore` when the backing
 // storage is synchronous and hydration happens during store construction).
-let publishWorkspaceHydration: ((next: WorkspaceState) => void) | null = null
+let publishWorkspaceHydration: ((next: Partial<WorkspaceState>) => void) | null = null
+let workspaceHydrationBlocked = true
 
 export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
   persist<WorkspaceState, [], [], PersistedWorkspaceState>(
     (set, get) => {
-      publishWorkspaceHydration = (next) => set(next, true)
+      publishWorkspaceHydration = (next) => set(next)
       return {
         ...initialState,
         ...createSourcesSlice(set, get),
@@ -3899,7 +3855,20 @@ export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
     },
     {
       name: WORKSPACE_STORAGE_KEY,
-      storage: createJSONStorage(() => createWorkspaceStorage()),
+      storage: createJSONStorage(() => {
+        const storage = createWorkspaceStorage()
+        return {
+          ...storage,
+          // Persist wraps both action setters and setState with writes. Keep
+          // unreadable storage intact until a retry has successfully hydrated.
+          setItem: (name, value) => {
+            if (!workspaceHydrationBlocked) return storage.setItem(name, value)
+          },
+          removeItem: (name) => {
+            if (!workspaceHydrationBlocked) return storage.removeItem(name)
+          }
+        }
+      }),
       version: 1,
       migrate: (persistedState) => migratePersistedWorkspaceState(persistedState),
       // NOTE: The rest of persist config follows below (was already here)
@@ -3947,8 +3916,36 @@ export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
         return persistedState
       },
       // Rehydrate dates properly and handle migration
-      onRehydrateStorage: () => (state) => {
-        if (state) {
+      onRehydrateStorage: (currentState) => {
+        workspaceHydrationBlocked = true
+        workspacePersistenceGeneration += 1
+        for (const transaction of workspaceIndexedDbWriteTransactions) {
+          try {
+            transaction.abort()
+          } catch (error) {
+            // A committed transaction can finish before its completion event.
+            if (!(error instanceof DOMException) || error.name !== "InvalidStateError") {
+              throw error
+            }
+          }
+        }
+        workspaceIndexedDbWriteTransactions.clear()
+        currentState.storeHydrated = false
+        currentState.storeHydrationError = null
+        publishWorkspaceHydration?.({ ...currentState })
+        return (state, error) => {
+          if (error || !state) {
+            workspaceHydrationBlocked = true
+            // Also update the creator result: synchronous startup failures
+            // return it after the callback, replacing any published state.
+            currentState.storeHydrationError =
+              "Workspace storage could not be loaded. Repair the stored data or restore storage access, then retry."
+            publishWorkspaceHydration?.({
+              storeHydrated: false,
+              storeHydrationError: currentState.storeHydrationError
+            })
+            return
+          }
           // Ensure dates are Date objects after rehydration
           state.workspaceCreatedAt = reviveDateOrNull(state.workspaceCreatedAt)
           state.sources = reviveSources(
@@ -4042,6 +4039,8 @@ export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
           }
 
           state.storeHydrated = true
+          state.storeHydrationError = null
+          workspaceHydrationBlocked = false
 
           // Publish the post-processed hydrated state THROUGH the store so
           // subscribers (already-mounted components, loading gates keyed on
@@ -4050,7 +4049,7 @@ export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
           // above (date revival, snapshot application, `storeHydrated`) happen
           // afterwards and would otherwise never be broadcast. Spreading into a
           // fresh object gives `set` a new reference so the update is not
-          // dropped as a no-op; `replace: true` matches the shape we mutated.
+          // dropped as a no-op.
           publishWorkspaceHydration?.({ ...state })
         }
       }

@@ -13,6 +13,37 @@ import {
 
 describe("Service Prompt scope policy", () => {
   it.each([
+    "/api/v1/workspaces/ws-1", "/api/v1/workspaces/ws-1/sources",
+    "/api/v1/workspaces/ws-1/artifacts", "/api/v1/workspaces/ws-1/notes"
+  ])("allows only GET for captured activation read %s", (path) => {
+    expect(isServicePromptRequestPath(path, "GET")).toBe(true)
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      expect(isServicePromptRequestPath(path, method)).toBe(false)
+    }
+  })
+  it.each([
+    "/api/v1/workspaces", "/api/v1/workspaces/ws-1/settings",
+    "/api/v1/workspaces/ws-1/sources/status", "/api/v1/workspaces/ws-1/notes/extra",
+    "/api/v1/workspaces/a%2fb", "/api/v1/workspaces/a%5cb/notes",
+    "/api/v1/workspaces/%2e%2e/artifacts", "/api/v1/workspaces/../sources",
+    "/api/v1/workspaces//sources", "/api/v1/workspaces/ws-1/notes/"
+  ])("rejects noncanonical or unapproved activation read %s", (path) => {
+    expect(isServicePromptRequestPath(path, "GET")).toBe(false)
+  })
+  it.each([
+    ["/api/v1/workspaces/ws-1/sources/s1/preview?max_chars=3000&chunk_limit=3", "GET", true],
+    ["/api/v1/workspaces/ws%20one/sources/source%20one/preview", "GET", true],
+    ["/api/v1/workspaces/ws-1/sources/s1/preview", "POST", false],
+    ["/api/v1/workspaces/ws-1/sources/s1/preview", "DELETE", false],
+    ["/api/v1/workspaces/ws-1/sources/s1", "GET", false],
+    ["/api/v1/workspaces/ws-1/sources/s1/preview/extra", "GET", false],
+    ["/api/v1/workspaces/ws-1/sources/a%2fb/preview", "GET", false],
+    ["/api/v1/workspaces/%2e%2e/sources/s1/preview", "GET", false],
+    ["/api/v1/workspaces/ws-1/sources//preview", "GET", false]
+  ])("bounds captured source preview %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+  it.each([
     ["/api/v1/chats/owned/complete-v2", "POST", true],
     ["/api/v1/chats/owned/complete-v2?scope_type=workspace&workspace_id=w", "POST", true],
     ["/api/v1/chats/owned/complete-v2", "GET", false],
@@ -65,6 +96,7 @@ describe("Service Prompt scope policy", () => {
     expect(isServicePromptRequestPath(path, method)).toBe(allowed)
   })
   it.each([
+    "/openapi.json",
     "/api/v1/writing/manuscripts/scenes/scene-a",
     "/api/v1/writing/manuscripts/projects/project-a/characters?role=protagonist",
     "/api/v1/writing/manuscripts/projects/project-a/world-info?kind=location",
@@ -76,6 +108,12 @@ describe("Service Prompt scope policy", () => {
   })
 
   it.each([
+    "/api/v1/chats/",
+    "/api/v1/chats/%2e%2e",
+    "/api/v1/chats/a%2fb",
+    "/api/v1/chats/a%5cb",
+    "/api/v1/chats/..",
+    "/api/v1/chats//chat-1",
     "/api/v1/writing/manuscripts/projects/project-a",
     "/api/v1/writing/manuscripts/scenes/scene-a/annotations",
     "/api/v1/writing/manuscripts/projects/project-a/characters/relationships",

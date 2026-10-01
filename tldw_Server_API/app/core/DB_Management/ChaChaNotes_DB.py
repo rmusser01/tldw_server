@@ -785,8 +785,8 @@ class CharactersRAGDB:
         is_memory_db (bool): True if the database is in-memory.
         db_path_str (str): String representation of the database path for SQLite connection.
     """
-    _CURRENT_SCHEMA_VERSION = 74  # Permanent Workspace startup receipts after Companion storage
-    _POSTGRES_SCHEMA_VERSION = 78
+    _CURRENT_SCHEMA_VERSION = 75  # Immutable insertion order after permanent Workspace startup receipts
+    _POSTGRES_SCHEMA_VERSION = 79
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -8745,6 +8745,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (71, "_migrate_from_v71_to_v72"),
             (72, "_migrate_from_v72_to_v73_persona_companion"),
             (73, "_migrate_from_v73_to_v74"),
+            (74, "_migrate_from_v74_to_v75"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -17989,6 +17990,100 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             raise SchemaError("OSCE PostgreSQL migration V66->V67 failed version verification.")  # noqa: TRY003
         self._sync_postgres_sequences(conn)
 
+    def _migrate_from_v74_to_v75(self, conn: sqlite3.Connection) -> None:
+        """Record new inserts only; legacy insertion order cannot be reconstructed."""
+        # The prior native V74 installed ordering instead of startup receipts.
+        if not self.backend.table_exists("workspace_chat_startup_receipts", connection=conn):
+            self._migrate_from_v73_to_v74(conn)
+        # The statement splitter does not parse SQLite trigger BEGIN/END blocks.
+        statements = (
+            """
+            CREATE TABLE message_insertion_order (
+                sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id TEXT UNIQUE NOT NULL REFERENCES messages(id) ON DELETE CASCADE
+            )
+            """,
+            """
+            CREATE TRIGGER messages_record_insertion_order AFTER INSERT ON messages
+            BEGIN
+                INSERT INTO message_insertion_order(message_id) VALUES (NEW.id);
+            END
+            """,
+            """
+            CREATE TRIGGER message_insertion_order_immutable BEFORE UPDATE ON message_insertion_order
+            BEGIN
+                SELECT RAISE(ABORT, 'Message insertion order is immutable.');
+            END
+            """,
+        )
+        if not self.backend.table_exists("message_insertion_order", connection=conn):
+            for statement in statements:
+                conn.execute(statement)
+        conn.execute(
+            "UPDATE db_schema_version SET version = 75 WHERE schema_name = ? AND version = 74",
+            (self._SCHEMA_NAME,),
+        )
+        if self._get_db_version(conn) != 75:
+            raise SchemaError("Message insertion-order migration V74->V75 failed version verification.")  # noqa: TRY003
+
+    def _migrate_from_v78_to_v79_postgres(self, conn: Any) -> None:
+        """Serialize all message writers before FK checks and sequence allocation."""
+        # The prior native V78 installed ordering instead of startup receipts.
+        if not self.backend.table_exists("workspace_chat_startup_receipts", connection=conn):
+            self._migrate_from_v77_to_v78_postgres(conn)
+        sql = """
+            CREATE TABLE message_insertion_order (
+                sequence BIGSERIAL PRIMARY KEY,
+                message_id TEXT UNIQUE NOT NULL REFERENCES messages(id) ON DELETE CASCADE
+            );
+            ALTER TABLE message_insertion_order ENABLE ROW LEVEL SECURITY;
+            ALTER TABLE message_insertion_order FORCE ROW LEVEL SECURITY;
+            CREATE POLICY message_insertion_order_tenant_isolation ON message_insertion_order
+                USING (EXISTS (
+                    SELECT 1 FROM messages AS message
+                    WHERE message.id = message_insertion_order.message_id
+                        AND message.client_id = current_setting('app.current_user_id', true)
+                ))
+                WITH CHECK (EXISTS (
+                    SELECT 1 FROM messages AS message
+                    WHERE message.id = message_insertion_order.message_id
+                        AND message.client_id = current_setting('app.current_user_id', true)
+                ));
+            CREATE FUNCTION messages_lock_insertion_order() RETURNS TRIGGER AS $$
+            BEGIN
+                PERFORM id FROM conversations WHERE id = NEW.conversation_id FOR UPDATE;
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            CREATE TRIGGER messages_lock_insertion_order BEFORE INSERT ON messages
+                FOR EACH ROW EXECUTE FUNCTION messages_lock_insertion_order();
+            CREATE FUNCTION messages_record_insertion_order() RETURNS TRIGGER AS $$
+            BEGIN
+                INSERT INTO message_insertion_order(message_id) VALUES (NEW.id);
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+            CREATE TRIGGER messages_record_insertion_order AFTER INSERT ON messages
+                FOR EACH ROW EXECUTE FUNCTION messages_record_insertion_order();
+            CREATE FUNCTION message_insertion_order_immutable() RETURNS TRIGGER AS $$
+            BEGIN
+                RAISE EXCEPTION 'Message insertion order is immutable.';
+            END;
+            $$ LANGUAGE plpgsql;
+            CREATE TRIGGER message_insertion_order_immutable BEFORE UPDATE ON message_insertion_order
+                FOR EACH ROW EXECUTE FUNCTION message_insertion_order_immutable();
+        """
+        if not self.backend.table_exists("message_insertion_order", connection=conn):
+            for statement in split_sql_statements(sql):
+                self.backend.execute(statement, connection=conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = %s",
+            (79, self._SCHEMA_NAME, 78),
+            connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 79:
+            raise SchemaError("Message insertion-order PostgreSQL migration V78->V79 failed version verification.")  # noqa: TRY003
+
     def _migrate_from_v67_to_v68(self, conn: sqlite3.Connection) -> None:
         """Retain local merge targets without changing historical keyword records."""
         if self._get_db_version(conn) != 67:
@@ -25464,7 +25559,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76, 77) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77, 78) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -25489,6 +25584,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 78 and current_version < 78:
                     self._migrate_from_v77_to_v78_postgres(conn)
                     current_version = 78
+                if target_version >= 79 and current_version < 79:
+                    self._migrate_from_v78_to_v79_postgres(conn)
+                    current_version = 79
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -25930,11 +26028,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v76_to_v77_persona_companion_postgres(conn)
                 self._runtime_schema_version = 77
                 current_version = 77
-
             if target_version >= 78 and current_version < 78:
                 self._migrate_from_v77_to_v78_postgres(conn)
                 self._runtime_schema_version = 78
                 current_version = 78
+
+            if target_version >= 79 and current_version < 79:
+                self._migrate_from_v78_to_v79_postgres(conn)
+                self._runtime_schema_version = 79
+                current_version = 79
 
             if current_version < target_version:
                 logger.warning(
@@ -45774,6 +45876,7 @@ for _character_store_method in (
 
 for _message_store_method in (
     "add_message",
+    "insert_or_validate_user_turn",
     "lock_message_for_edit",
     "lock_message_metadata_for_edit",
     "get_conversation_history_snapshot",
@@ -45783,6 +45886,7 @@ for _message_store_method in (
     "append_selected_history_input",
     "append_selected_history_inputs",
     "settle_history_admission",
+    "read_history_recovery_messages",
     "append_message_from_sync",
     "tombstone_message_from_sync",
     "get_messages_by_sync_stable_id",

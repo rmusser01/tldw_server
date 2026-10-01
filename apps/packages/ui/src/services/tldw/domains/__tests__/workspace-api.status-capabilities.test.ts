@@ -210,6 +210,22 @@ describe("workspace API status and capabilities methods", () => {
     })
   })
 
+  it("pins source preview dispatch to the captured owner and cancellation signal", async () => {
+    const signal = new AbortController().signal
+    const requestScope = {
+      config: { serverUrl: "https://owner.test", authMode: "multi-user" as const },
+      userId: 7
+    }
+    await workspaceApiMethods.getWorkspaceSourcePreview("ws-1", "src-1", undefined,
+      { signal, requestScope })
+    expect(bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/workspaces/ws-1/sources/src-1/preview", method: "GET",
+      abortSignal: signal,
+      servicePromptConfig: { ...requestScope.config, expectedUserId: 7 },
+      headers: { "X-TLDW-Expected-User-ID": "7" }
+    })
+  })
+
   it("rejects slash-delimited source ids before building source preview paths", async () => {
     await expect(
       workspaceApiMethods.getWorkspaceSourcePreview("ws-1", "source/with/slash")

@@ -155,6 +155,10 @@ const nextConfig = {
         destination: `${internalApiOrigin}/health`,
       },
       {
+        source: '/openapi.json',
+        destination: `${internalApiOrigin}/openapi.json`,
+      },
+      {
         source: '/api/v1/media',
         destination: `${internalApiOrigin}/api/v1/media/`,
       },

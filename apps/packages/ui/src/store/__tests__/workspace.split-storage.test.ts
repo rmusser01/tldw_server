@@ -27,13 +27,66 @@ describe("workspace split-key persistence storage adapter", () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
     localStorage.clear()
   })
 
+  it.each(["split-read", "fresh-write", "monolithic-read"])(
+    "retains historical migration metadata without hiding or deleting fresh content on %s",
+    async (mode) => {
+      const workspaceId = "historically-migrated"
+      const markerKey = `tldw:research-workspace:migration:tombstone:${workspaceId}`
+      const marker = JSON.stringify({
+        legacyWorkspaceId: workspaceId, serverWorkspaceId: workspaceId,
+        migrationId: "old-attempt", contentRetained: false,
+        deletedAt: "2026-05-26T00:00:00Z"
+      })
+      const snapshot = {
+        workspaceId, workspaceName: "Fresh writable workspace",
+        sources: [], selectedSourceIds: [], generatedArtifacts: [], notes: "Fresh notes",
+        currentNote: { title: "Draft", content: "Fresh writable draft", isDirty: true }
+      }
+      const chat = {
+        messages: [{ isBot: false, name: "You", message: "Fresh writable chat", sources: [] }],
+        historyId: "fresh-history", serverChatId: null
+      }
+      const state = {
+        workspaceId, savedWorkspaces: [{ id: workspaceId, name: "Fresh saved" }],
+        archivedWorkspaces: [{ id: "archived", name: "Archived" }], workspaceCollections: [],
+        workspaceIds: [workspaceId], workspaceSnapshots: { [workspaceId]: snapshot },
+        workspaceChatSessions: { [workspaceId]: chat }
+      }
+      localStorage.setItem(markerKey, marker)
+      const storage = createWorkspaceStorage()
+      if (mode === "fresh-write") {
+        await storage.setItem(STORAGE_KEY, buildEnvelope(state))
+      } else if (mode === "monolithic-read") {
+        localStorage.setItem(STORAGE_KEY, buildEnvelope(state))
+      } else {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          schema: "workspace_split_v1", splitVersion: 1, version: 1, state
+        }))
+        localStorage.setItem(snapshotKey(workspaceId), JSON.stringify(snapshot))
+        localStorage.setItem(chatKey(workspaceId), JSON.stringify(chat))
+      }
+
+      const hydrated = JSON.parse((await storage.getItem(STORAGE_KEY))!)
+      expect(hydrated.state.workspaceId).toBe(workspaceId)
+      expect(hydrated.state.savedWorkspaces).toEqual(expect.arrayContaining([expect.objectContaining({ id: workspaceId })]))
+      expect(hydrated.state.workspaceSnapshots[workspaceId].currentNote.content).toBe("Fresh writable draft")
+      expect(hydrated.state.workspaceChatSessions[workspaceId].messages[0].message).toBe("Fresh writable chat")
+      // Persistence is allowed to normalize an index, but not discard writable content.
+      expect(localStorage.getItem(STORAGE_KEY)).toContain(workspaceId)
+      expect(localStorage.getItem(snapshotKey(workspaceId))).toContain("Fresh writable draft")
+      expect(localStorage.getItem(chatKey(workspaceId))).toContain("Fresh writable chat")
+      expect(localStorage.getItem(markerKey)).toBe(marker)
+    }
+  )
+
   it("writes split index and only updates changed workspace keys", async () => {
     const storage = createWorkspaceStorage()
-    const setItemSpy = vi.spyOn(localStorage, "setItem")
+    const setItemSpy = vi.spyOn(Object.getPrototypeOf(localStorage), "setItem")
 
     const baseState = {
       workspaceId: "workspace-a",

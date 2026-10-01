@@ -394,9 +394,7 @@ export class TldwModelsService {
         return this.cachedModels || []
       }
 
-      if (!import.meta.env?.DEV) {
-        console.error('Failed to fetch models from tldw:', error)
-      }
+      console.warn('Failed to fetch models from tldw:', error)
 
       // Return cached models if available, even if expired
       if (this.cachedModels) {

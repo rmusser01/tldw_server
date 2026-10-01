@@ -38,7 +38,7 @@ const researchWorkspaceBasics: TutorialDefinition = {
     {
       target: '#workspace-main-content',
       titleKey: "tutorials:researchWorkspace.basics.chatTitle",
-      titleFallback: "Chat Workspace",
+      titleFallback: "Source Chat",
       contentKey: "tutorials:researchWorkspace.basics.chatContent",
       contentFallback:
         "Ask questions against your selected sources and review grounded answers before generating outputs.",

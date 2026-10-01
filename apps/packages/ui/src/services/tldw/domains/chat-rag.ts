@@ -433,7 +433,9 @@ export const chatRagMethods = {
   },
 
   async *streamChatCompletion(this: TldwApiClientCore, request: ChatCompletionRequest, options?: ChatCompletionStreamOptions): AsyncGenerator<any, void, unknown> {
-    request = { ...request, stream: true }
+    const selectedDurable = request.tldw_turn?.history_v1 !== undefined
+    if (selectedDurable && request.stream !== true) throw new Error("invalid_history_durable_request")
+    if (!selectedDurable) request = { ...request, stream: true }
     captureChatRequestDebugSnapshot({
       endpoint: "/api/v1/chat/completions",
       method: "POST",
@@ -456,18 +458,23 @@ export const chatRagMethods = {
         ? { servicePromptConfig: scopeFields.servicePromptConfig }
         : {})
     })) {
+      const trimmed = line.trim()
+      if (selectedDurable && (!trimmed || trimmed === "[DONE]" || trimmed.startsWith(":"))) continue
+      let parsed: unknown
       try {
-        const parsed = JSON.parse(line)
-        yield parsed
+        parsed = JSON.parse(line)
       } catch (e) {
-        if (request.tldw_history_selection_v1 && line.trim() && line.trim() !== "[DONE]" && !line.trim().startsWith(":"))
+        if ((selectedDurable || request.tldw_history_selection_v1) && trimmed && trimmed !== "[DONE]" && !trimmed.startsWith(":"))
           throw new Error("unparseable_native_completion_stream")
         // Ignore empty/whitespace-only lines and SSE comments (": ...")
-        const trimmed = line.trim()
         if (trimmed && !trimmed.startsWith(":")) {
           console.warn("[tldw:stream] Unparseable SSE line:", trimmed.slice(0, 200))
         }
+        continue
       }
+      if (selectedDurable && (!parsed || typeof parsed !== "object" || Array.isArray(parsed)))
+        throw new Error("unparseable_native_completion_stream")
+      yield parsed
     }
   },
 
@@ -770,8 +777,6 @@ export const chatRagMethods = {
     const cid = String(chat_id)
     const query = buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<any>({
-      ...scopeFields,
-      ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: appendPathQuery(`/api/v1/chats/${cid}`, query),
       method: "GET",
       headers: scopeFields.headers,

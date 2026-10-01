@@ -23,6 +23,32 @@ vi.mock("@/design-system", async (importActual) => {
 })
 
 describe("InspectorRail", () => {
+  it.each([
+    [{ connectionMode: "demo" }, "Demo mode - not live"],
+    [{ connectionMode: "bypass" }, "Offline bypass - not verified"],
+    [{ historyLoading: true }, "Loading chat history"],
+    [{ historyLoadError: "History unavailable" }, "Chat history unavailable"],
+    [{ sending: true }, "Sending"]
+  ] as const)("does not report Ready for %j", (runtime, label) => {
+    render(
+      <InspectorRail
+        scopeLabel="Workspace"
+        stagedSourceCount={0}
+        stagedSources={[]}
+        selectedModelLabel="global-model"
+        hasModelSelected
+        selectedPersonaLabel={null}
+        assistantSource="none"
+        backendAvailable
+        workspaceReady
+        streaming={false}
+        {...runtime}
+      />
+    )
+    expect(screen.getByText(label)).toBeInTheDocument()
+    expect(screen.queryByText("Ready via registry")).not.toBeInTheDocument()
+  })
+
   it("shows real scope and staged source state", () => {
     render(
       <InspectorRail

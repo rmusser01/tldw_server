@@ -26,6 +26,9 @@ import {
   isWorkspaceChatSessionKeyForWorkspace
 } from '@/store/workspace-chat-session-key'
 import { applyWorkspaceSourceTransfer } from '../workspace-source-transfer'
+import { normalizeWorkspaceAssistantDefaults } from '@/types/workspace-assistant-defaults'
+import { buildResearchWorkspaceServerSourceSignature } from '../workspace-api'
+import { parseHistorySelectionHandoff } from '@/hooks/chat/useHistorySelection'
 
 // TODO: These helpers need to be exported from workspace.ts
 import {
@@ -83,6 +86,7 @@ type WorkspaceListSliceActions = Pick<
   | 'exportWorkspaceBundle'
   | 'importWorkspaceBundle'
   | 'switchWorkspace'
+  | 'installServerWorkspace'
   | 'createNewWorkspace'
   | 'duplicateWorkspace'
   | 'transferSourcesBetweenWorkspaces'
@@ -556,6 +560,81 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
     } as Partial<WorkspaceState>)
 
     return importedSnapshot.workspaceId
+  },
+
+  installServerWorkspace: (workspace, { scopeKey, expectedWorkspaceId }) => {
+    const state = get()
+    if (state.workspaceId !== expectedWorkspaceId || !workspace.metadata) return false
+    const metadata = workspace.metadata
+    const now = new Date()
+    const outgoing = state.workspaceId ? buildWorkspaceSnapshot(state) : null
+    const cached = workspace.id === state.workspaceId ? outgoing : state.workspaceSnapshots[workspace.id]
+    const foreignOwner = cached?.serverWorkspace && cached.serverWorkspace.scopeKey !== scopeKey
+    if (foreignOwner) return false
+    const hasLegacyChat = Object.entries(state.workspaceChatSessions).some(([key, session]) =>
+      isWorkspaceChatSessionKeyForWorkspace(key, workspace.id) &&
+      (session.messages.length > 0 || session.history.length > 0 || session.serverChatId || session.historyId))
+    // Older snapshots have no principal provenance. Do not adopt or discard their content.
+    if (cached && !cached.serverWorkspace && (cached.currentNote.isDirty || cached.currentNote.id ||
+        cached.currentNote.title || cached.currentNote.content || cached.notes || cached.workspaceBanner.image ||
+        cached.sources.length || cached.generatedArtifacts.length || hasLegacyChat ||
+        cached.workspaceChatReferenceId !== workspace.id)) return false
+    const previous = cached?.serverWorkspace ? cached : null
+    if (previous?.currentNote.isDirty && previous.currentNote.serverScopeKey && previous.currentNote.serverScopeKey !== scopeKey) return false
+    const snapshot = {
+      ...createEmptyWorkspaceSnapshot({
+        id: workspace.id,
+        name: workspace.name || "Untitled Workspace",
+        tag: `workspace:${createSlug(workspace.name) || workspace.id.slice(0, 8)}`,
+        createdAt: reviveDateOrNull(metadata.created_at) || now,
+        studyMaterialsPolicy: metadata.study_materials_policy,
+        assistantDefaults: normalizeWorkspaceAssistantDefaults(metadata.assistantDefaults ?? metadata.assistant_defaults)
+      }),
+      ...(previous ? {
+        workspaceTag: previous.workspaceTag,
+        workspaceChatReferenceId: previous.workspaceChatReferenceId,
+        sourceFolders: previous.sourceFolders,
+        sourceFolderMemberships: previous.sourceFolderMemberships.filter(item => workspace.sources.some(source => source.id === item.sourceId)),
+        selectedSourceFolderIds: previous.selectedSourceFolderIds,
+        activeFolderId: previous.activeFolderId,
+        leftPaneCollapsed: previous.leftPaneCollapsed,
+        rightPaneCollapsed: previous.rightPaneCollapsed
+      } : {}),
+      sources: workspace.sources,
+      selectedSourceIds: workspace.selectedSourceIds,
+      generatedArtifacts: workspace.artifacts,
+      workspaceBanner: {
+        title: metadata.banner_title || "", subtitle: metadata.banner_subtitle || "", image: previous?.workspaceBanner.image || null
+      },
+      audioSettings: {
+        ...DEFAULT_AUDIO_SETTINGS,
+        ...(previous?.audioSettings || {}),
+        ...(metadata.audio_provider && ["browser", "elevenlabs", "openai", "tldw"].includes(metadata.audio_provider)
+          ? { provider: metadata.audio_provider as typeof DEFAULT_AUDIO_SETTINGS.provider } : {}),
+        model: metadata.audio_model ?? DEFAULT_AUDIO_SETTINGS.model,
+        voice: metadata.audio_voice ?? DEFAULT_AUDIO_SETTINGS.voice,
+        speed: metadata.audio_speed ?? DEFAULT_AUDIO_SETTINGS.speed
+      },
+      currentNote: previous?.currentNote.isDirty ? { ...previous.currentNote } : { ...DEFAULT_WORKSPACE_NOTE },
+      notes: previous?.notes || "",
+      serverWorkspace: {
+        scopeKey,
+        sourceSignature: buildResearchWorkspaceServerSourceSignature(workspace.sources),
+        selectedSourceSignature: workspace.selectedSourceIds.join("|"),
+        metadata: Object.fromEntries(Object.entries(metadata).filter(([key]) =>
+          key !== "effectiveAssistantDefault" && key !== "effective_assistant_default")) as typeof metadata,
+        notes: workspace.notes.map(note => ({ ...note }))
+      }
+    }
+    const snapshots = { ...state.workspaceSnapshots, ...(outgoing ? { [outgoing.workspaceId]: outgoing } : {}), [workspace.id]: snapshot }
+    let saved = state.savedWorkspaces
+    for (const item of [outgoing, snapshot]) {
+      if (item) saved = upsertSavedWorkspace(saved, createSavedWorkspaceEntry(item, now,
+        getSavedWorkspaceCollectionId(state.savedWorkspaces, state.archivedWorkspaces, item.workspaceId)))
+    }
+    set({ ...applyWorkspaceSnapshot(snapshot), workspaceSnapshots: snapshots, savedWorkspaces: saved,
+      archivedWorkspaces: state.archivedWorkspaces.filter(item => item.id !== workspace.id) })
+    return true
   },
 
   switchWorkspace: (id) => {
@@ -1106,15 +1185,58 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
     }))
   },
 
-  getWorkspaceChatSession: (workspaceSessionKey) => {
+  getWorkspaceChatSession: (workspaceSessionKey, qualification) => {
     const state = get()
     const normalizedSessionKey = workspaceSessionKey.trim()
     if (!normalizedSessionKey) return null
-    const session =
-      state.workspaceChatSessions[normalizedSessionKey] ??
-      state.workspaceChatSessions[
+    let session = state.workspaceChatSessions[normalizedSessionKey]
+    if (qualification) {
+      const checkpoint = session?.checkpoint
+      if (
+        !checkpoint || checkpoint.version !== 1 ||
+        typeof checkpoint.draft !== 'string' ||
+        typeof qualification.ownerKey !== 'string' || !qualification.ownerKey.trim() ||
+        typeof qualification.workspaceId !== 'string' || !qualification.workspaceId.trim() ||
+        typeof qualification.referenceId !== 'string' || !qualification.referenceId.trim() ||
+        checkpoint.ownerKey !== qualification.ownerKey ||
+        checkpoint.workspaceId !== qualification.workspaceId ||
+        checkpoint.referenceId !== qualification.referenceId ||
+        normalizedSessionKey !== buildWorkspaceChatSessionKey(
+          qualification.workspaceId, qualification.referenceId
+        ) ||
+        [session.historyId, session.serverChatId].some(
+          (id) => id !== null && (typeof id !== 'string' || !id.trim())
+        )
+      ) return null
+
+      const reference = checkpoint.historySelectionReference
+      if (reference === null) {
+        if (
+          session.messages.length || session.history.length ||
+          session.historyId !== null || session.serverChatId !== null
+        ) return null
+      } else {
+        try {
+          if ('owner_kind' in reference) return null
+          const handoff = parseHistorySelectionHandoff(
+            `?historySelection=${encodeURIComponent(JSON.stringify({
+              ...reference,
+              owner_kind: session.serverChatId !== null ? 'native' : 'local'
+            }))}`
+          )
+          if (
+            !handoff ||
+            handoff.conversation_id !== (session.serverChatId ?? session.historyId)
+          ) return null
+        } catch {
+          return null
+        }
+      }
+    } else {
+      session = session ?? state.workspaceChatSessions[
         extractWorkspaceIdFromChatSessionKey(normalizedSessionKey)
       ]
+    }
     return session ? cloneWorkspaceChatSession(session) : null
   },
 
@@ -1137,6 +1259,15 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
 
   restoreUndoSnapshot: (snapshot) => {
     const clonedSnapshot = cloneWorkspaceValue(snapshot)
+    const restoredSnapshots = Object.fromEntries(
+      Object.entries(clonedSnapshot.workspaceSnapshots || {}).map(
+        ([workspaceId, workspaceSnapshot]) => [
+          workspaceId,
+          reviveWorkspaceSnapshot(workspaceId, workspaceSnapshot)
+        ]
+      )
+    )
+    const restoredActiveSnapshot = restoredSnapshots[clonedSnapshot.workspaceId]
     const restoredSources = reviveSources(clonedSnapshot.sources || [])
     const restoredSourceIdSet = new Set(
       restoredSources.map((source) => source.id)
@@ -1180,6 +1311,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
       generatedArtifacts: reviveArtifacts(clonedSnapshot.generatedArtifacts || []),
       notes: clonedSnapshot.notes || "",
       currentNote: clonedSnapshot.currentNote || { ...DEFAULT_WORKSPACE_NOTE },
+      serverWorkspace: restoredActiveSnapshot?.serverWorkspace ?? null,
       workspaceBanner: coerceWorkspaceBannerForRehydrate(
         clonedSnapshot.workspaceBanner
       ),
@@ -1196,14 +1328,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
       workspaceCollections: reviveWorkspaceCollections(
         clonedSnapshot.workspaceCollections || []
       ),
-      workspaceSnapshots: Object.fromEntries(
-        Object.entries(clonedSnapshot.workspaceSnapshots || {}).map(
-          ([workspaceId, workspaceSnapshot]) => [
-            workspaceId,
-            reviveWorkspaceSnapshot(workspaceId, workspaceSnapshot)
-          ]
-        )
-      ),
+      workspaceSnapshots: restoredSnapshots,
       workspaceChatSessions: clonedSnapshot.workspaceChatSessions || {}
     })
   },

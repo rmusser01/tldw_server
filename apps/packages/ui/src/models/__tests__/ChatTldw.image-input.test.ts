@@ -103,6 +103,38 @@ describe("image input at the real formatter and model boundary", () => {
     expect(mocks.sendMessage.mock.calls[0][0]).toEqual([{ role: "user", content: "  plain text  " }])
   })
 
+  it.each(["ordinary", "tldw:gemma", customModel])("formats a single exact text block as scalar content for %s", async model => {
+    const text = "  Exact question\n\ud83d\ude00  "
+    const content = [{ type: "text" as const, text }]
+    const message = await humanMessageFormatter({ content, model, useOCR: false })
+    expect(message.content).toBe(text)
+    expect(content).toEqual([{ type: "text", text }])
+    expect(mocks.ocr).not.toHaveBeenCalled()
+  })
+
+  it("passes the actual plain producer into the strict selected durable serializer", async () => {
+    const text = "  Exact native question\n"
+    const message = await humanMessageFormatter({
+      content: [{ type: "text", text }], model: "tldw:gemma", useOCR: false
+    })
+    const model = new ChatTldw({ model: "gemma", apiProvider: "custom", saveToDb: true,
+      conversationId: "chat", originalUserMessage: text,
+      tldwTurn: { user_message_id: "12345678-1234-4321-8123-123456789abc" } })
+    expect(model.prepareSelectedDurableRequest([message], []).messages).toEqual([{ role: "user", content: text }])
+    expect(mocks.streamMessage).not.toHaveBeenCalled()
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it("does not turn unrecognized text-block fields into selected durable content", async () => {
+    const content = [{ type: "text" as const, text: "Question", unrecognized: "Must not disappear" }]
+    const message = await humanMessageFormatter({ content, model: "tldw:gemma", useOCR: false })
+    expect(message.content).toEqual(content)
+    const model = new ChatTldw({ model: "gemma", apiProvider: "custom", saveToDb: true,
+      conversationId: "chat", originalUserMessage: "Question",
+      tldwTurn: { user_message_id: "12345678-1234-4321-8123-123456789abc" } })
+    expect(() => model.prepareSelectedDurableRequest([message], [])).toThrow("invalid_history_durable_request")
+  })
+
   it.each(["no-vision", "missing-model", "catalog-failure"])("uses the actual model factory to block unconfirmed vision: %s", async state => {
     if (state === "missing-model") mocks.getModel.mockResolvedValue(null)
     if (state === "catalog-failure") mocks.getModel.mockRejectedValue(new Error("Catalog unavailable"))

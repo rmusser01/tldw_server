@@ -20,12 +20,17 @@ import {
   WORKSPACE_STORAGE_CHANNEL_NAME,
   WORKSPACE_STORAGE_KEY,
   WORKSPACE_STORAGE_QUOTA_EVENT,
+  WORKSPACE_STORAGE_SPLIT_KEY_PREFIX,
+  collectResearchWorkspaceLegacyLocalStorageKeys,
   isWorkspaceBroadcastSyncEnabled,
   isWorkspaceBroadcastUpdateMessage,
+  markFreshWorkspaceInitializationForRuntime,
   shouldSurfaceWorkspaceConflictNotice,
+  wasWorkspaceFreshlyInitializedInRuntime,
   type WorkspaceStorageQuotaEventDetail
 } from "@/store/workspace-events"
 import {
+  getResearchWorkspaceMigrationEligibility,
   runResearchWorkspaceMigration,
   type ResearchWorkspaceIndexedDbStoreRef,
   type ResearchWorkspaceMigrationRunResult
@@ -116,6 +121,7 @@ import {
 } from "@/store/workspace-organization"
 import {
   buildResearchWorkspaceServerSourceSignature,
+  matchesHydratedWorkspaceBaseline,
   reconcileResearchWorkspaceServerState
 } from "./workspace-server-reconcile"
 import {
@@ -146,7 +152,6 @@ const WORKSPACE_STORAGE_PAYLOAD_BUDGET_VITE_ENV =
   "VITE_WORKSPACE_STORAGE_PAYLOAD_BUDGET_MB"
 const WORKSPACE_STORAGE_PAYLOAD_BUDGET_NEXT_ENV =
   "NEXT_PUBLIC_WORKSPACE_STORAGE_PAYLOAD_BUDGET_MB"
-const WORKSPACE_STORAGE_SPLIT_KEY_PREFIX = `${WORKSPACE_STORAGE_KEY}:workspace:`
 const WORKSPACE_STORAGE_USAGE_REFRESH_DELAY_MS = 120
 const WEB_CLIP_AGENT_TASK_ROUTE_FLAG = "agent_task_handoff"
 const ACCOUNT_STORAGE_USAGE_REFRESH_DELAY_MS = 1400
@@ -156,8 +161,6 @@ const WORKSPACE_REFRESH_LOOP_TRACE_SESSION_KEY =
   "tldw:research-workspace:refresh-loop-trace:v1"
 const WORKSPACE_REFRESH_LOOP_PENDING_SIGNAL_SESSION_KEY =
   "tldw:research-workspace:refresh-loop-pending:v1"
-const WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER =
-  "__tldwResearchWorkspaceFreshInitialization"
 const WORKSPACE_REFRESH_LOOP_WINDOW_MS = 45_000
 const WORKSPACE_REFRESH_LOOP_THRESHOLD = 3
 const WORKSPACE_CONFLICT_TRACKED_FIELDS = [
@@ -216,55 +219,6 @@ const buildWebClipAgentTaskPrefill = (
     .filter((line) => line !== "")
     .join("\n")
 })
-
-const collectResearchWorkspaceLegacyLocalStorageKeys = (): string[] => {
-  if (typeof window === "undefined") return []
-  const keys: string[] = []
-  try {
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index)
-      if (!key) continue
-      if (
-        key === WORKSPACE_STORAGE_KEY ||
-        key.startsWith(WORKSPACE_STORAGE_SPLIT_KEY_PREFIX) ||
-        key.startsWith("tldw:research-workspace:") ||
-        key.startsWith("tldw:workspace:playground:")
-      ) {
-        keys.push(key)
-      }
-    }
-  } catch {
-    return []
-  }
-  return keys.sort()
-}
-
-type ResearchWorkspaceRuntimeWindow = Window & {
-  [WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER]?: Set<string>
-}
-
-const markFreshWorkspaceInitializationForRuntime = (
-  workspaceId: string
-): void => {
-  if (typeof window === "undefined" || !workspaceId) return
-  const runtimeWindow = window as ResearchWorkspaceRuntimeWindow
-  const initializedWorkspaceIds =
-    runtimeWindow[WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER] ??
-    new Set<string>()
-  initializedWorkspaceIds.add(workspaceId)
-  runtimeWindow[WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER] =
-    initializedWorkspaceIds
-}
-
-const wasWorkspaceFreshlyInitializedInRuntime = (
-  workspaceId: string
-): boolean =>
-  typeof window !== "undefined" &&
-  Boolean(
-    (window as ResearchWorkspaceRuntimeWindow)[
-      WORKSPACE_FRESH_INITIALIZATION_RUNTIME_MARKER
-    ]?.has(workspaceId)
-  )
 
 const jsonValueContainsOffloadPointer = (
   value: unknown,
@@ -1273,6 +1227,8 @@ const ResearchWorkspaceBody: React.FC = () => {
   // Workspace store
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
   const workspaceName = useWorkspaceStore((s) => s.workspaceName) || ""
+  const serverWorkspace = useWorkspaceStore((s) => s.serverWorkspace)
+  const studyMaterialsPolicy = useWorkspaceStore((s) => s.studyMaterialsPolicy)
   const activeDeepResearchReturnContext =
     isResearchWorkspaceDeepResearchReturnForWorkspace(
       initialDeepResearchReturnContextRef.current,
@@ -1422,9 +1378,19 @@ const ResearchWorkspaceBody: React.FC = () => {
     const reconcileSignature = [
       activeWorkspaceId,
       workspaceName,
+      studyMaterialsPolicy,
       workspaceServerSourceSignature,
       workspaceServerSelectedSourceSignature
     ].join("::")
+    if (matchesHydratedWorkspaceBaseline({
+      workspaceId: activeWorkspaceId, workspaceName, studyMaterialsPolicy,
+      sourceSignature: workspaceServerSourceSignature,
+      selectedSourceSignature: workspaceServerSelectedSourceSignature, baseline: serverWorkspace
+    })) {
+      workspaceServerReconcileSignatureRef.current = reconcileSignature
+      setServerWorkspaceIdentity(activeWorkspaceId)
+      return
+    }
     if (workspaceServerReconcileSignatureRef.current === reconcileSignature) {
       setServerWorkspaceIdentity(activeWorkspaceId)
       return
@@ -1441,6 +1407,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       client: tldwClient,
       workspaceId: activeWorkspaceId,
       workspaceName,
+      studyMaterialsPolicy,
       sources: workspaceServerSourcesRef.current,
       selectedSourceIds,
       onWorkspaceReady: () => {
@@ -1491,6 +1458,8 @@ const ResearchWorkspaceBody: React.FC = () => {
     statusGuardrailsEnabled,
     workspaceId,
     workspaceName,
+    serverWorkspace,
+    studyMaterialsPolicy,
     workspaceServerSelectedSourceSignature,
     workspaceServerSourceSignature
   ])
@@ -1661,7 +1630,8 @@ const ResearchWorkspaceBody: React.FC = () => {
       return [
         "Legacy workspace data found",
         "Server receipt saved",
-        "Local data retained until server deletion eligibility is available"
+        "Local data retained",
+        "Automatic local cleanup is disabled"
       ]
     }
 
@@ -1671,14 +1641,17 @@ const ResearchWorkspaceBody: React.FC = () => {
         ...(workspaceMigrationResult.serverMigration
           ? ["Server receipt saved"]
           : []),
-        "Local data retained"
+        "Local data retained",
+        "Automatic local cleanup is disabled"
       ]
     }
 
     if (workspaceMigrationResult.status === "failed") {
       return [
         "Legacy workspace data found",
-        "Migration failed before local deletion"
+        workspaceMigrationResult.deletedSurfaceIds.length > 0
+          ? "Migration failed after local deletion began"
+          : "Migration failed before local deletion"
       ]
     }
 
@@ -1751,7 +1724,11 @@ const ResearchWorkspaceBody: React.FC = () => {
     if (!isStoreHydrated || !workspaceId) return
     if (typeof window === "undefined") return
 
-    if (wasWorkspaceFreshlyInitializedInRuntime(workspaceId)) {
+    if (
+      getResearchWorkspaceMigrationEligibility(workspaceId, serverWorkspace) !==
+        "legacy" ||
+      wasWorkspaceFreshlyInitializedInRuntime(workspaceId)
+    ) {
       workspaceMigrationSignatureRef.current = null
       workspaceMigrationInFlightRef.current = null
       setWorkspaceMigrationLoading(false)
@@ -1808,6 +1785,16 @@ const ResearchWorkspaceBody: React.FC = () => {
         : runResearchWorkspaceMigration({
             targetWorkspaceId: workspaceId,
             targetWorkspaceName: workspaceName || "Research Workspace",
+            serverWorkspace,
+            getCurrentWorkspace: () => {
+              const current = useWorkspaceStore.getState()
+              return {
+                workspaceId: current.workspaceId,
+                serverWorkspace: current.serverWorkspace
+              }
+            },
+            subscribeToWorkspaceChanges: (listener) =>
+              useWorkspaceStore.subscribe(listener),
             discoveredLocalStorageKeys,
             discoveredIndexedDbStores,
             readLocalStorageValue: async (key) => window.localStorage.getItem(key),
@@ -1815,14 +1802,8 @@ const ResearchWorkspaceBody: React.FC = () => {
               createWorkspaceMigration: tldwClient.createWorkspaceMigration,
               putWorkspaceMigrationChunk: tldwClient.putWorkspaceMigrationChunk,
               finalizeWorkspaceMigration: tldwClient.finalizeWorkspaceMigration,
-              getWorkspaceMigration: tldwClient.getWorkspaceMigration,
-              ackWorkspaceMigrationClientDelete:
-                tldwClient.ackWorkspaceMigrationClientDelete
-            },
-            deleteLocalStorageValue: (key) => window.localStorage.removeItem(key),
-            writeLocalStorageValue: (key, value) =>
-              window.localStorage.setItem(key, value),
-            now: () => new Date().toISOString()
+              getWorkspaceMigration: tldwClient.getWorkspaceMigration
+            }
           })
 
     if (!canReuseInFlightMigration) {
@@ -1864,6 +1845,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
   }, [
     isStoreHydrated,
+    serverWorkspace,
     statusGuardrailsEnabled,
     workspaceId,
     workspaceMigrationRetryNonce,

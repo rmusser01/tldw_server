@@ -1,4 +1,5 @@
 import { HistorySelectionProvider } from "@/hooks/chat/useHistorySelection"
+import { WorkspaceChatRouteSearchContext } from "@/hooks/chat/useWorkspaceChatCheckpoint"
 import { formatSelectedHistory } from "@/db/dexie/helpers"
 import React, { lazy, Suspense, useContext, useState } from "react"
 
@@ -69,7 +70,7 @@ const CurrentChatModelSettings = lazy(() =>
 )
 
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
-import { useHelpModal } from "@/store/tutorials"
+import { useHelpModal, useTutorialStore } from "@/store/tutorials"
 import { isMac } from "@/hooks/keyboard/useKeyboardShortcuts"
 import { DemoModeProvider, useDemoMode } from "@/context/demo-mode"
 import { isEditableTarget } from "@/utils/editable-target"
@@ -119,6 +120,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
 }) => {
   const confirmDanger = useConfirmDanger()
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const activeTutorialId = useTutorialStore((state) => state.activeTutorialId)
+  React.useEffect(() => {
+    if (activeTutorialId) setSidebarOpen(false)
+  }, [activeTutorialId])
   const [chatSidebarOpenResetKey, setChatSidebarOpenResetKey] = useState(0)
   const signalChatSidebarOpen = React.useCallback(() => {
     setChatSidebarOpenResetKey((value) => value + 1)
@@ -794,16 +799,19 @@ function RootLayoutShell({
       </LayoutShellContext.Provider>
     </DemoModeProvider>
   )
-  return location.pathname === "/chat" ? (
+  return ["/chat", "/chat-workspace", "/research-workspace"].includes(location.pathname) ? (
     <HistorySelectionProvider
-      storageKey="tldw-h1-playground-reference"
+      key={location.pathname}
+      storageKey={location.pathname === "/chat" ? "tldw-h1-playground-reference" : undefined}
       onCapture={(capture) => {
         const display = formatSelectedHistory(capture)
         useStoreMessageOption.getState().setHistory(display.history)
         useStoreMessageOption.getState().setMessages(display.messages)
       }}
     >
-      {content}
+      <WorkspaceChatRouteSearchContext.Provider value={location.search}>
+        {content}
+      </WorkspaceChatRouteSearchContext.Provider>
     </HistorySelectionProvider>
   ) : content
 }

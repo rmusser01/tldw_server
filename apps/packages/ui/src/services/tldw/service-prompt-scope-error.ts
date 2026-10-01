@@ -98,6 +98,10 @@ export const isServicePromptRequestPath = (
   const pathname = readCanonicalPathname(path)
   if (!pathname) return false
   const requestMethod = String(method || "GET").toUpperCase()
+  if (requestMethod === "GET" && (
+    /^\/api\/v1\/workspaces\/[^/]+(?:\/(?:sources|artifacts|notes))?$/.test(pathname) ||
+    /^\/api\/v1\/workspaces\/[^/]+\/sources\/[^/]+\/preview$/.test(pathname)
+  )) return true
   if (pathname === "/api/v1/users/me/profile") return ["GET", "PATCH"].includes(requestMethod)
   if (pathname === "/api/v1/feedback/explicit") return requestMethod === "POST"
   if (requestMethod === "GET" && (pathname === "/api/v1/notes/tasks/activity" || /^\/api\/v1\/notes\/[^/]+\/tasks$/.test(pathname))) return true
@@ -135,6 +139,7 @@ export const isServicePromptRequestPath = (
   if (requestMethod === "GET" && /^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return true
   if (/^\/api\/v1\/flashcards\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)
   if (requestMethod === "GET") {
+    if (pathname === "/openapi.json") return true
     return pathname === "/api/v1/flashcards/decks" || /^\/api\/v1\/media\/[0-9]+$/.test(pathname) || pathname === "/api/v1/monitoring/alerts" ||
       pathname === "/api/v1/scheduled-tasks" ||
       pathname === "/api/v1/scheduled-tasks/results" ||

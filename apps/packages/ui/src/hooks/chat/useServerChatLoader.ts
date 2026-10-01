@@ -621,6 +621,12 @@ const resolveDeferredCharacterId = (value: string | number | null): number | nul
   return null
 }
 
+// Loading is shared across loader instances; history-selection fences are not.
+let serverChatLoadingOwner: {
+  controller: AbortController
+  selectionIntent: ReturnType<typeof usePlaygroundSessionStore.getState>["serverChatSelectionIntent"]
+} | null = null
+
 export const useServerChatLoader = ({
   ensureServerChatHistoryId,
   notification,
@@ -640,6 +646,14 @@ export const useServerChatLoader = ({
     setMessages,
     setIsLoading
   } = useChatBaseState(useStoreMessageOption)
+  const clearOwnedLoading = React.useCallback((controller: AbortController | null) => {
+    if (!controller || serverChatLoadingOwner?.controller !== controller) return
+    const selectionIntent = serverChatLoadingOwner.selectionIntent
+    serverChatLoadingOwner = null
+    const currentIntent = usePlaygroundSessionStore.getState().serverChatSelectionIntent
+    if (currentIntent && currentIntent !== selectionIntent) return
+    setIsLoading(false)
+  }, [setIsLoading])
   const messagesRef = React.useRef(messages)
   const streamingRef = React.useRef(streaming)
   const processingRef = React.useRef(isProcessing)
@@ -723,13 +737,20 @@ export const useServerChatLoader = ({
       if (serverChatLoadRef.current.controller) {
         serverChatLoadRef.current.controller.abort()
       }
+      clearOwnedLoading(serverChatLoadRef.current.controller)
     }
-  }, [])
+  }, [clearOwnedLoading])
 
   React.useEffect(() => {
     if (!enabled) {
       serverChatLoadRef.current.controller?.abort()
-      serverChatLoadRef.current.inFlight = false
+      clearOwnedLoading(serverChatLoadRef.current.controller)
+      serverChatLoadRef.current = {
+        chatId: null,
+        controller: null,
+        inFlight: false,
+        loaded: false
+      }
       return
     }
     if (!serverChatId || assistantMeta?.isLoading) return
@@ -737,6 +758,7 @@ export const useServerChatLoader = ({
       selectionIntent !== handledSelectionIntent.current
     if (
       !deliberateSelection &&
+      serverChatMetaLoaded &&
       shouldSkipLoadedServerChatReload({
         activeServerChatId: serverChatId,
         loadedChatId: serverChatLoadRef.current.chatId,
@@ -821,8 +843,13 @@ export const useServerChatLoader = ({
         let stopWatchingAuthority: (() => void) | undefined
         let pendingAssistantPresentation: Promise<unknown> | undefined
         try {
+          if (controller.signal.aborted || useStoreMessageOption.getState().serverChatId !== serverChatId) return
           if (deliberateSelection) {
             if (usePlaygroundSessionStore.getState().serverChatSelectionIntent !== selectionIntent) return
+          } else if (selectionRef.current?.canAutomaticallyLoad?.() === false) return
+          serverChatLoadingOwner = { controller, selectionIntent }
+          setIsLoading(true)
+          if (deliberateSelection) {
             handledSelectionIntent.current = selectionIntent
             const control = selectionRef.current
             if (control && !await control.loadConversation({ serverChatId, scope, temporary: temporaryChat,
@@ -832,8 +859,7 @@ export const useServerChatLoader = ({
             })) return
             selectionCurrent = control?.fence() || (() => true)
             if (controller.signal.aborted || usePlaygroundSessionStore.getState().serverChatSelectionIntent !== selectionIntent) return
-          } else if (selectionRef.current?.canAutomaticallyLoad?.() === false) return
-          setIsLoading(true)
+          }
           setServerChatLoadState("loading")
           setServerChatLoadError(null)
           snapshot = await loadServicePromptSnapshot([], { signal: controller.signal })
@@ -903,7 +929,7 @@ export const useServerChatLoader = ({
                 setMessages([])
                 setHistory([])
                 setServerChatTitle(null)
-                setIsLoading(false)
+                clearOwnedLoading(controller)
                 setServerChatId(null)
                 }
                 return
@@ -1195,6 +1221,7 @@ export const useServerChatLoader = ({
                   await syncChatSettingsForServerChat({
                     historyId: localHistoryId,
                     serverChatId,
+                    scope,
                     allowScratchFallback: false
                   })
                 } catch {
@@ -1251,7 +1278,7 @@ export const useServerChatLoader = ({
               setHistory([])
               setServerChatTitle(null)
               updatePageTitle()
-              setIsLoading(false)
+              clearOwnedLoading(controller)
               setServerChatId(null)
             }
             return
@@ -1271,7 +1298,7 @@ export const useServerChatLoader = ({
             })
           }
         } finally {
-          if (useStoreMessageOption.getState().serverChatId === serverChatId) setIsLoading(false)
+          clearOwnedLoading(controller)
           // Messages are ready independently of optional profile enrichment.
           // Keep this load's authority alive until that guarded work settles.
           await pendingAssistantPresentation?.catch(() => undefined)
@@ -1298,6 +1325,7 @@ export const useServerChatLoader = ({
       }
     }
   }, [
+    clearOwnedLoading,
     enabled,
     selectionIntent,
     assistantMeta?.isLoading,

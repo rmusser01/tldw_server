@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   tldwInitialize: vi.fn(),
   ragSearch: vi.fn(),
   maybeInjectActorMessage: vi.fn(),
-  resolveApiProviderForModel: vi.fn(),
+  getModels: vi.fn(),
   runChatPipeline: vi.fn(),
   appendSystemPromptSuffix: vi.fn()
 }))
@@ -56,6 +56,8 @@ vi.mock("@/services/rag/unified-rag", () => ({
     top_k: 8,
     search_mode: "hybrid",
     enable_generation: true,
+    generation_model: null,
+    generation_provider: null,
     enable_citations: true,
     enable_intent_routing: true,
     accumulation_time_budget_sec: null,
@@ -70,7 +72,8 @@ vi.mock("@/services/rag/unified-rag", () => ({
   }
 }))
 
-vi.mock("@/services/settings/registry", () => ({
+vi.mock("@/services/settings/registry", async (original) => ({
+  ...(await original<typeof import("@/services/settings/registry")>()),
   coerceBooleanOrNull: (...args: unknown[]) =>
     mocks.coerceBooleanOrNull(...args)
 }))
@@ -87,25 +90,9 @@ vi.mock("@/utils/actor", () => ({
     mocks.maybeInjectActorMessage(...args)
 }))
 
-vi.mock("@/utils/resolve-api-provider", () => ({
-  resolveApiProviderForModel: (...args: unknown[]) =>
-    mocks.resolveApiProviderForModel(...args),
-  parseProviderQualifiedModelSelection: (value: unknown) => {
-    const raw = String(value || "").trim()
-    if (!raw.startsWith("llama.cpp:")) {
-      return {
-        raw,
-        modelId: raw,
-        provider: undefined,
-        isProviderQualified: false
-      }
-    }
-    return {
-      raw,
-      modelId: raw.slice("llama.cpp:".length),
-      provider: "llama.cpp",
-      isProviderQualified: true
-    }
+vi.mock("@/services/tldw", () => ({
+  tldwModels: {
+    getModels: (...args: unknown[]) => mocks.getModels(...args)
   }
 }))
 
@@ -237,7 +224,8 @@ describe("ragMode sanitizer", () => {
     )
     mocks.tldwInitialize.mockResolvedValue(undefined)
     mocks.maybeInjectActorMessage.mockImplementation(async (history) => history)
-    mocks.resolveApiProviderForModel.mockResolvedValue("ollama")
+    mocks.getModels.mockReset()
+    mocks.getModels.mockResolvedValue([])
     mocks.appendSystemPromptSuffix.mockImplementation(
       (prompt, suffix) => `${prompt}${suffix ?? ""}`
     )
@@ -390,6 +378,37 @@ describe("ragMode sanitizer", () => {
     )
   })
 
+  it.each([true, false])("retrieves server-owned evidence without generating an unadmitted answer when generation is %s", async (ragEnableGeneration) => {
+    mocks.ragSearch.mockResolvedValue({
+      documents: [{
+        content: "The selected memo's launch date is 18 November 2026.",
+        metadata: { source: "media_db", title: "Selected memo", type: "text" }
+      }]
+    })
+    const context = createRagContext({
+      historyTurn: { serverOwned: true },
+      ragEnableGeneration,
+      ragAdvancedOptions: {
+        enable_generation: true,
+        generation_model: "unadmitted-model",
+        generation_provider: "unadmitted-provider"
+      },
+      currentChatModelSettings: { apiProvider: undefined }
+    })
+
+    await expect(__testing__.ragModeDefinition.preflight?.(context)).resolves.toBeNull()
+    const prompt = await __testing__.ragModeDefinition.preparePrompt(context)
+
+    expect(mocks.ragSearch).toHaveBeenCalledTimes(1)
+    const options = mocks.ragSearch.mock.calls[0][1]
+    expect(options.enable_generation).toBe(false)
+    expect(options).not.toHaveProperty("generation_model")
+    expect(options).not.toHaveProperty("generation_provider")
+    expect(mocks.getModels).not.toHaveBeenCalled()
+    expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+    expect(prompt.sources[0].pageContent).toContain("18 November 2026")
+  })
+
   it("sends raw generation_model when the selected RAG model is provider-qualified", async () => {
     mocks.ragSearch.mockResolvedValue({
       documents: [
@@ -403,8 +422,6 @@ describe("ragMode sanitizer", () => {
         }
       ]
     })
-    mocks.resolveApiProviderForModel.mockResolvedValue("llama.cpp")
-
     await expect(
       __testing__.ragModeDefinition.preflight?.(
         createRagContext({
@@ -420,6 +437,68 @@ describe("ragMode sanitizer", () => {
       expect.objectContaining({
         generation_model:
           "gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
+        generation_provider: "llama.cpp"
+      })
+    )
+  })
+
+  it.each(["missing", "unavailable", "stale"])(
+    "routes a llama-qualified RAG selection with %s metadata without changing the path",
+    async (metadataState) => {
+      if (metadataState === "unavailable") {
+        mocks.getModels.mockRejectedValue(new Error("Metadata unavailable"))
+      } else if (metadataState === "stale") {
+        mocks.getModels.mockResolvedValue([
+          {
+            id: "../../../models/gemma:Q4_K_M/model.gguf",
+            name: "../../../models/gemma:Q4_K_M/model.gguf",
+            provider: "openai",
+            type: "chat"
+          }
+        ])
+      }
+      mocks.ragSearch.mockResolvedValue({ documents: [] })
+
+      await __testing__.ragModeDefinition.preflight?.(
+        createRagContext({
+          selectedModel: "llama:../../../models/gemma:Q4_K_M/model.gguf",
+          currentChatModelSettings: { apiProvider: "openai" }
+        })
+      )
+
+      expect(mocks.ragSearch).toHaveBeenCalledWith(
+        "What phrase proves the selected source was used?",
+        expect.objectContaining({
+          generation_model: "../../../models/gemma:Q4_K_M/model.gguf",
+          generation_provider: "llama.cpp"
+        })
+      )
+      expect(mocks.getModels).not.toHaveBeenCalled()
+    }
+  )
+
+  it("routes an unqualified RAG model using the catalog llama alias", async () => {
+    mocks.getModels.mockResolvedValue([
+      {
+        id: "../../../models/gemma:Q4_K_M/model.gguf",
+        name: "../../../models/gemma:Q4_K_M/model.gguf",
+        provider: "llama",
+        type: "chat"
+      }
+    ])
+    mocks.ragSearch.mockResolvedValue({ documents: [] })
+
+    await __testing__.ragModeDefinition.preflight?.(
+      createRagContext({
+        selectedModel: "../../../models/gemma:Q4_K_M/model.gguf",
+        currentChatModelSettings: { apiProvider: undefined }
+      })
+    )
+
+    expect(mocks.ragSearch).toHaveBeenCalledWith(
+      "What phrase proves the selected source was used?",
+      expect.objectContaining({
+        generation_model: "../../../models/gemma:Q4_K_M/model.gguf",
         generation_provider: "llama.cpp"
       })
     )
@@ -462,6 +541,23 @@ describe("ragMode sanitizer", () => {
     await expect(
       __testing__.ragModeDefinition.preflight?.(createRagContext())
     ).rejects.toBe(scopeError)
+  })
+
+  it.each([
+    ["transport", Object.assign(new Error("Cannot reach server"), { status: 0 })],
+    [
+      "provider",
+      Object.assign(new Error("The selected provider configuration is invalid."), {
+        status: 503,
+        code: "provider_configuration_invalid"
+      })
+    ]
+  ])("propagates a selected-source %s failure instead of completing an answer", async (_, error) => {
+    mocks.ragSearch.mockRejectedValueOnce(error)
+
+    await expect(
+      __testing__.ragModeDefinition.preflight?.(createRagContext())
+    ).rejects.toBe(error)
   })
 
   it("does not require an LLM query rewrite before retrieving selected workspace media sources", async () => {

@@ -3992,6 +3992,12 @@
   "header_researchWorkspace": {
     "message": "Research Workspace"
   },
+  "header_chatWorkspace": {
+    "message": "Chat Workspace"
+  },
+  "header_chatWorkspaceDesc": {
+    "message": "Chat-first workspace with staged sources and runtime context"
+  },
   "omniSearch_searchError": {
     "message": "Search failed. Please try again."
   },
