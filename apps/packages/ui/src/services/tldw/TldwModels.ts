@@ -393,10 +393,14 @@ export class TldwModelsService {
       fetchGeneration = ++this.invalidationGeneration
     }
 
+    let cookieAuthenticated = false
     const fetchFromServer = async () => {
       await tldwClient.initialize()
       // Model metadata is public; the existing profile route validates the cookie.
-      if (cookieSession) await tldwClient.getCurrentUserProfile()
+      if (cookieSession) {
+        await tldwClient.getCurrentUserProfile()
+        cookieAuthenticated = true
+      }
       const models = await tldwClient.getModels({
         refreshOpenRouter: options?.refreshOpenRouter === true
       })
@@ -412,7 +416,8 @@ export class TldwModelsService {
         if (forceRefresh) {
           this.lastForcedFetchTime = this.lastFetchTime
         }
-        await this.persistCache(fetchGeneration)
+        // Cookie catalogs require live auth and never hydrate offline.
+        if (!cookieSession) await this.persistCache(fetchGeneration)
       }
 
       return requireFresh && fetchGeneration !== this.invalidationGeneration
@@ -420,13 +425,17 @@ export class TldwModelsService {
         : transformedModels
     }
 
-    const fetchPromise = fetchFromServer().catch(async (error) => {
-      // Cookie metadata can outlive the server session; require a successful fetch.
+    const fetchPromise = fetchFromServer().catch((error) => {
       if (cookieSession) {
+        const status = (error as { status?: number } | null)?.status
         if (fetchGeneration === this.invalidationGeneration) {
-          this.invalidateCacheState()
-          await this.persistCache()
+          if (status === 401 || status === 403) {
+            this.invalidateCacheState()
+          } else if (cookieAuthenticated) {
+            return this.cachedModels || []
+          }
         }
+        // A failed profile check cannot authorize fallback to a cached catalog.
         return []
       }
       if (requireFresh) return []

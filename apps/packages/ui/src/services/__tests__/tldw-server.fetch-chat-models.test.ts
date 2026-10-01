@@ -101,7 +101,7 @@ describe("fetchChatModels", () => {
     ])
     const { fetchChatModels } = await importService()
     expect(await fetchChatModels()).toHaveLength(1)
-    if (path === "fetch-failure") {
+    if (path !== "cache-only") {
       mocks.getChatModels.mockRejectedValueOnce(Object.assign(new Error("Expired cookie session"), { status: 401 }))
     } else {
       mocks.getChatModels.mockResolvedValueOnce([])
@@ -112,6 +112,46 @@ describe("fetchChatModels", () => {
       forceRefresh: path === "fetch-failure"
     })).resolves.toEqual([])
     expect(mocks.getChatModels).toHaveBeenCalledTimes(path === "cache-only" ? 1 : 2)
+  })
+
+  it.each([false, true])("does not share in-flight requests across cookie and key auth (cookie first=%s)", async (cookieFirst) => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    const keyConfig = { serverUrl: "http://localhost:3000", authMode: "single-user", apiKey: "test-key" }
+    const cookieConfig = { serverUrl: "http://localhost:3000", authMode: "single-user", authSource: "cookie-session" }
+    mocks.getConfig.mockResolvedValue(cookieFirst ? cookieConfig : keyConfig)
+    const pending = deferred<Array<Record<string, unknown>>>()
+    mocks.getChatModels.mockImplementationOnce(() => pending.promise).mockResolvedValueOnce(
+      cookieFirst ? [{ id: "key-model", name: "Key Model", provider: "llama", type: "chat" }] : []
+    )
+    const { fetchChatModels } = await importService()
+    const first = fetchChatModels({ returnEmpty: true })
+    await vi.waitFor(() => expect(mocks.getChatModels).toHaveBeenCalledOnce())
+    mocks.getConfig.mockResolvedValue(cookieFirst ? keyConfig : cookieConfig)
+    const second = fetchChatModels({ returnEmpty: true })
+    await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledTimes(2))
+    pending.resolve(cookieFirst ? [] : [{ id: "key-model", name: "Key Model", provider: "llama", type: "chat" }])
+    await first
+    await expect(second).resolves.toEqual(cookieFirst ? [expect.objectContaining({ model: "tldw:key-model" })] : [])
+    expect(mocks.getChatModels).toHaveBeenCalledTimes(2)
+  })
+
+  it("shares simultaneous cookie requests with the same authentication mode", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({ serverUrl: "http://localhost:3000", authMode: "single-user", authSource: "cookie-session" })
+    const pending = deferred<Array<Record<string, unknown>>>()
+    mocks.getChatModels.mockImplementation(() => pending.promise)
+    const { fetchChatModels } = await importService()
+    const first = fetchChatModels()
+    await vi.waitFor(() => expect(mocks.getChatModels).toHaveBeenCalledOnce())
+    const second = fetchChatModels()
+    await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledTimes(2))
+    pending.resolve([{ id: "cookie-model", name: "Cookie Model", provider: "llama", type: "chat" }])
+    const [a, b] = await Promise.all([first, second])
+    expect(a).toEqual(b)
+    expect(a).toHaveLength(1)
+    expect(mocks.getChatModels).toHaveBeenCalledOnce()
   })
 
   it("does not cache an empty startup result over later configured models", async () => {

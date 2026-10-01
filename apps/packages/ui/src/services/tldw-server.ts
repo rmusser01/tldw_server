@@ -162,6 +162,7 @@ const CHAT_MODELS_CACHE_TTL_MS = 60_000
 const CHAT_MODELS_INVALIDATION_HISTORY_LIMIT = 64
 let chatModelsCache: { value: any[]; expiresAt: number } | null = null
 let chatModelsInFlight: Promise<any[]> | null = null
+let chatModelsInFlightCookieSession: boolean | null = null
 let chatModelsCacheGeneration = 0
 
 type ChatModelsCacheListenerState = {
@@ -244,6 +245,7 @@ export const clearChatModelsCache = () => {
   chatModelsCacheGeneration += 1
   chatModelsCache = null
   chatModelsInFlight = null
+  chatModelsInFlightCookieSession = null
 }
 
 let chatModelsLastInvalidationToken: string | null = null
@@ -372,7 +374,7 @@ export const fetchChatModels = async ({
     }
     return resolved
   }
-  if (!forceRefresh && chatModelsInFlight) {
+  if (!forceRefresh && chatModelsInFlight && chatModelsInFlightCookieSession === cookieSession) {
     return await chatModelsInFlight
   }
 
@@ -398,7 +400,7 @@ export const fetchChatModels = async ({
       const resolved = dedupeChatModelsByModel(combined)
       if (fetchGeneration !== chatModelsCacheGeneration) {
         const currentFetch = chatModelsInFlight
-        if (currentFetch && currentFetch !== fetchPromise) {
+        if (currentFetch && currentFetch !== fetchPromise && chatModelsInFlightCookieSession === cookieSession) {
           return await currentFetch
         }
         return await fetchChatModels({
@@ -422,11 +424,12 @@ export const fetchChatModels = async ({
     })()
 
     chatModelsInFlight = fetchPromise
+    chatModelsInFlightCookieSession = cookieSession
     return await fetchPromise
   } catch (e) {
     if (fetchGeneration !== chatModelsCacheGeneration) {
       const currentFetch = chatModelsInFlight
-      if (currentFetch && currentFetch !== fetchPromise) {
+      if (currentFetch && currentFetch !== fetchPromise && chatModelsInFlightCookieSession === cookieSession) {
         return await currentFetch
       }
       return await fetchChatModels({
@@ -445,6 +448,7 @@ export const fetchChatModels = async ({
   } finally {
     if (fetchPromise && chatModelsInFlight === fetchPromise) {
       chatModelsInFlight = null
+      chatModelsInFlightCookieSession = null
     }
   }
 }
