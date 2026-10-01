@@ -8,12 +8,12 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 
 @pytest.fixture
 def history_api(credentialed_test_client, populated_chacha_db, auth_headers):
+    """Use the authenticated owner for API writes while retaining seeded data."""
     client = credentialed_test_client
-    # Preserve fixture writer attribution while supplying the authenticated owner
-    # through the same trusted construction boundary as the real dependency.
+    # Match request dependency ownership; existing seed attribution is unchanged.
     db = CharactersRAGDB(
         db_path=populated_chacha_db.db_path_str,
-        client_id=populated_chacha_db.client_id,
+        client_id="1",
         owner_user_id="1",
     )
     client.app.dependency_overrides[get_chacha_db_for_user] = lambda: db
@@ -239,7 +239,9 @@ def test_native_owner_namespace_uses_transport_account_and_base_path():
     assert key() == key(headers=[(b"x-forwarded-host", b"forged.example")])
 
 
-def test_versioned_workspace_scope_and_stale_selection_do_not_update_defaults(history_api):
+@pytest.mark.parametrize("send_scoped", [False, True])
+def test_versioned_workspace_scope_and_stale_selection_do_not_update_defaults(history_api, send_scoped):
+    """Verified id-only and explicit Workspace turns preserve history admission guards."""
     client, db, _, headers = history_api
     db.upsert_workspace("scope-workspace", "Scope Workspace")
     cid = db.add_conversation({"character_id": None, "scope_type": "workspace", "workspace_id": "scope-workspace",
@@ -252,14 +254,15 @@ def test_versioned_workspace_scope_and_stale_selection_do_not_update_defaults(hi
     payload = {"api_provider": "openai", "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True,
         "messages": [{"role": "user", "content": "workspace"}], "tldw_history_selection_v1": selection}
     before = db.get_conversation_settings(cid)
-    rejected = client.post("/api/v1/chat/completions", headers=headers, json=payload)
+    rejected = client.post("/api/v1/chat/completions?scope_type=global", headers=headers, json=payload)
     assert rejected.status_code == 404, rejected.text
     assert db.get_conversation_settings(cid) == before
     assert db.count_messages_for_conversation(cid) == 0
     # Owner context drift must reject before saving explicitly requested defaults.
     db.upsert_conversation_settings(cid, {"model": "changed"})
     changed = db.get_conversation_settings(cid)
-    rejected = client.post("/api/v1/chat/completions" + query, headers=headers, json=payload)
+    send_query = query if send_scoped else ""
+    rejected = client.post("/api/v1/chat/completions" + send_query, headers=headers, json=payload)
     assert rejected.status_code == 409, rejected.text
     assert db.get_conversation_settings(cid) == changed
     assert db.count_messages_for_conversation(cid) == 0
@@ -267,7 +270,7 @@ def test_versioned_workspace_scope_and_stale_selection_do_not_update_defaults(hi
     payload["tldw_history_selection_v1"] = resolve_history_selection(refreshed["snapshot"], refreshed["view"], "send", "new-model")["selection"]
     from tldw_Server_API.app.core.Chat.rate_limiter import initialize_rate_limiter
     initialize_rate_limiter()
-    success = client.post("/api/v1/chat/completions" + query, headers=headers, json=payload)
+    success = client.post("/api/v1/chat/completions" + send_query, headers=headers, json=payload)
     assert success.status_code == 200, success.text
     admission = success.json()["tldw_history_admission_v1"]
     replies = [row for row in db.get_messages_for_conversation(cid) if row["sender"] == "assistant"]

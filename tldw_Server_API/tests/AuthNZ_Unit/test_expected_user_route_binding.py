@@ -1,3 +1,5 @@
+"""Scope-bound routes retain their expected-user guard as the first dependency."""
+
 from fastapi.routing import APIRoute
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
@@ -13,6 +15,7 @@ from tldw_Server_API.app.api.v1.endpoints.media import add as media_add
 
 
 def test_expected_user_guard_is_bound_only_to_scope_bound_routes() -> None:
+    """Reject missing, misplaced or unexpectedly broadened identity guards."""
     guarded_routes: set[tuple[str, str, str]] = set()
 
     for router_name, router in (
@@ -36,6 +39,7 @@ def test_expected_user_guard_is_bound_only_to_scope_bound_routes() -> None:
 
     assert guarded_routes == {
         ("character-chat-sessions", "POST", "/"),
+        ("character-chat-sessions", "POST", "/workspace-startup"),
         # da0f1cd3a3 (reviewed history selection) scope-binds session reads,
         # settings and the history capture routes.
         ("character-chat-sessions", "GET", "/{chat_id}"),

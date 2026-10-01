@@ -217,7 +217,8 @@ def chacha_db(temp_db_path) -> Generator[CharactersRAGDB, None, None]:
     """Create a real CharactersRAGDB instance for testing."""
     db = CharactersRAGDB(
         db_path=str(temp_db_path),
-        client_id="test_user"
+        client_id="1",
+        owner_user_id="1",
     )
     # Database is initialized in __init__, no need to call initialize_db
     try:
@@ -235,7 +236,7 @@ def populated_chacha_db(chacha_db) -> CharactersRAGDB:
         'description': 'A helpful assistant',
         'personality': 'Helpful and friendly',
         'system_prompt': 'You are a helpful AI assistant.',
-        'client_id': 'test_user'
+        'client_id': chacha_db.client_id
     }
     character_id = chacha_db.add_character_card(character_data)
 

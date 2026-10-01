@@ -136,10 +136,12 @@ def test_workspace_chat_does_not_save_implicit_or_ephemeral_selection(
     assert db.get_conversation_settings(conversation_id)["settings"] == previous_settings
 
 
+@pytest.mark.parametrize("explicit_scope", [False, True], ids=["stored-scope", "explicit-scope"])
 def test_workspace_model_handoff_rejects_a_foreign_conversation(
     persona_chat_client: tuple[TestClient, dict[str, str], MagicMock],
     persona_chat_db: CharactersRAGDB,
     monkeypatch: pytest.MonkeyPatch,
+    explicit_scope: bool,
 ) -> None:
     """Reject foreign workspace Chat before provider execution or settings mutation.
 
@@ -147,6 +149,7 @@ def test_workspace_model_handoff_rejects_a_foreign_conversation(
         persona_chat_client: Real API client, auth headers and mocked provider call.
         persona_chat_db: Disposable SQLite database containing another owner's chat.
         monkeypatch: Scoped test-only provider credential bypass.
+        explicit_scope: Whether the caller supplies the workspace scope explicitly.
     """
     monkeypatch.setenv("CHAT_FORCE_MOCK", "1")
     client, headers, provider = persona_chat_client
@@ -160,6 +163,7 @@ def test_workspace_model_handoff_rejects_a_foreign_conversation(
     generated = client.post(
         "/api/v1/chat/completions",
         headers=headers,
+        params={"scope_type": "workspace", "workspace_id": "foreign-workspace"} if explicit_scope else None,
         json={
             "conversation_id": conversation_id,
             "api_provider": "openai",

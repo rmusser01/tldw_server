@@ -22,7 +22,10 @@ from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import buddies, flashcards, notes
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
+    ChaChaOperationMiddleware,
+    current_connection_state,
+)
 from tldw_Server_API.app.core.DB_Management.chacha.runtime import ChaChaRuntimeManager
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
@@ -38,6 +41,9 @@ _inside_endpoint = ContextVar("http_lifecycle_test_inside_endpoint", default=Fal
 @pytest.fixture
 def pg_http(request, pg_database_config, tmp_path, monkeypatch):
     """Supply the official DB to the real cached dependency, without replacing it."""
+    import psycopg
+    from psycopg.rows import dict_row
+
     monkeypatch.setattr(CharactersRAGDB, "_NOTES_MOODBOARD_STUDIO_V61_POSTGRES_LOCK_TIMEOUT", "100ms")
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = CharactersRAGDB(tmp_path / "http.db", client_id="1", backend=backend)
@@ -71,16 +77,75 @@ def pg_http(request, pg_database_config, tmp_path, monkeypatch):
     monkeypatch.setattr(deps, "_get_chacha_executor", lambda: executor)
 
     observations = []
-    original_connection = db._get_thread_connection
+    checkouts = []
+    observer = psycopg.connect(
+        host=pg_database_config.pg_host,
+        port=pg_database_config.pg_port,
+        dbname=pg_database_config.pg_database,
+        user=pg_database_config.pg_user,
+        password=pg_database_config.pg_password,
+        autocommit=True,
+        row_factory=dict_row,
+    )
 
-    def observe_connection():
-        raw = original_connection()
-        path = _request_path.get()
-        if path is not None and _inside_endpoint.get():
-            observations.append((path, threading.get_ident(), raw))
-        return raw
+    def observe_database(database, *, path=None):
+        """Track owned checkout generations without adopting borrowed connections."""
+        original_connection = database._get_thread_connection
 
-    monkeypatch.setattr(db, "_get_thread_connection", observe_connection)
+        def observe_connection():
+            """Record the actual owner and checkout, retaining native acquisition."""
+            raw = original_connection()
+            observed_path = _request_path.get() or path
+            if observed_path is not None:
+                if _inside_endpoint.get():
+                    observations.append((observed_path, threading.get_ident(), raw))
+                state = current_connection_state(database)
+                if (
+                    state is not None
+                    and not state.borrowed
+                    and not any(item.state is state and item.raw is raw and item.snapshot is None for item in checkouts)
+                ):
+                    checkouts.append(
+                        SimpleNamespace(
+                            path=observed_path, state=state, raw=raw, snapshot=None, handed_back=threading.Event()
+                        )
+                    )
+            return raw
+
+        monkeypatch.setattr(database, "_get_thread_connection", observe_connection)
+
+    def capture_handback(raw):
+        """Freeze cleanup evidence before another owner can reuse this checkout."""
+        for item in tuple(checkouts):
+            if item.raw is raw and item.snapshot is None:
+                item.snapshot = _snapshot(observer, raw)
+                item.handed_back.set()
+
+    # Delegate all transaction cleanup. Observe only after reset/rollback, while
+    # the checkout is still unavailable to a different operation. The observer
+    # must not borrow from this pool (the fallback publication holds its lock).
+    pool = backend.get_pool()
+    if pool._use_psycopg_pool:
+        original_publish = pool._pool._add_to_pool
+
+        def publish(raw):
+            """Observe native psycopg reset, then delegate checkout publication."""
+            capture_handback(raw)
+            return original_publish(raw)
+
+        monkeypatch.setattr(pool._pool, "_add_to_pool", publish)
+    else:
+
+        class ObservedFreeList(list):
+            """Observe fallback handback after native rollback, before reuse."""
+
+            def append(self, raw):
+                """Snapshot the still-private checkout before publishing it."""
+                capture_handback(raw)
+                super().append(raw)
+
+        monkeypatch.setattr(pool, "_free", ObservedFreeList(pool._free))
+    observe_database(db)
     app = FastAPI()
     app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(flashcards.router, prefix="/api/v1")
@@ -126,6 +191,9 @@ def pg_http(request, pg_database_config, tmp_path, monkeypatch):
         note=note,
         populated=populated,
         observations=observations,
+        observer=observer,
+        checkouts=checkouts,
+        observe_database=observe_database,
     )
     try:
         yield f
@@ -133,6 +201,7 @@ def pg_http(request, pg_database_config, tmp_path, monkeypatch):
         executor.shutdown(wait=True)
         db.close_all_connections()
         backend.get_pool().close_all()
+        observer.close()
 
 
 async def _run(f, operation):
@@ -182,28 +251,52 @@ async def _run(f, operation):
         limiter.total_tokens = previous
 
 
-def _states(f, path=None):
-    unique = {
-        raw.info.backend_pid: raw for observed_path, _, raw in f.observations if path is None or observed_path == path
+def _snapshot(observer, raw):
+    """Sample a withheld checkout using an independent autocommit lock observer."""
+    pid = raw.info.backend_pid
+    rows = observer.execute(
+        "SELECT DISTINCT c.relname FROM pg_locks l JOIN pg_class c ON c.oid=l.relation "
+        "JOIN pg_namespace n ON n.oid=c.relnamespace WHERE l.pid=%s AND n.nspname='public' "
+        "AND c.relkind IN ('r','p') ORDER BY c.relname",
+        (pid,),
+    ).fetchall()
+    return {
+        "pid": pid,
+        "closed": raw.closed,
+        "transaction": raw.info.transaction_status.name,
+        "relations": [row["relname"] for row in rows],
     }
-    result = []
-    for pid, raw in unique.items():
-        rows = f.backend.execute(
-            "SELECT DISTINCT c.relname FROM pg_locks l JOIN pg_class c ON c.oid=l.relation "
-            "JOIN pg_namespace n ON n.oid=c.relnamespace WHERE l.pid=%s AND n.nspname='public' "
-            "AND c.relkind IN ('r','p') ORDER BY c.relname",
-            (pid,),
-        ).rows
-        result.append(
-            {
-                "pid": pid,
-                "closed": raw.closed,
-                "transaction": raw.info.transaction_status.name,
-                "relations": [row["relname"] for row in rows],
-            }
-        )
-    assert result, "The real request did not reach a database connection"
-    return result
+
+
+def _states(f, path=None):
+    """Require handback evidence for every observed request-owned checkout."""
+    checkouts = [item for item in f.checkouts if path is None or item.path == path]
+    assert checkouts, "The real request did not reach an owned database connection"
+    for item in checkouts:
+        assert item.handed_back.wait(5), "Request checkout was not handed back"
+    return [item.snapshot for item in checkouts]
+
+
+def _prefer_returned_checkout(f, raw, monkeypatch):
+    """Select the real returned checkout without assuming FIFO or LIFO ordering."""
+    pool = f.backend.get_pool()
+    original_get = pool.get_connection
+
+    def prefer_returned_checkout():
+        """Hold competing checkouts only while finding the requested connection."""
+        held = []
+        try:
+            for _ in range(f.config.pool_size):
+                candidate = original_get()
+                if candidate is raw:
+                    return candidate
+                held.append(candidate)
+            pytest.fail("The original open checkout was not returned to its pool")
+        finally:
+            for candidate in held:
+                pool.return_connection(candidate)
+
+    monkeypatch.setattr(pool, "get_connection", prefer_returned_checkout)
 
 
 def _assert_finished(f, path=None):
@@ -326,6 +419,75 @@ def test_http_failure_handoff_and_child_work_release_their_owned_reads(pg_http, 
     asyncio.run(_run(f, operation))
 
 
+@pytest.mark.parametrize("pending_write", [False, True], ids=["read", "undecided-write"])
+def test_http_cleanup_survives_default_worker_reusing_endpoint_pid(pg_http, monkeypatch, pending_write):
+    """Qualify request cleanup while real maintenance holds the returned PID."""
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendCursorWrapper
+
+    f = pg_http
+    begin = threading.Event()
+    read_entered = threading.Event()
+    release = threading.Event()
+    worker = {}
+    endpoint = []
+    owned = deps._ensure_default_character_owned
+    original_execute = BackendCursorWrapper.execute
+
+    def hold_worker(db):
+        """Keep independent maintenance from checking out until the response ends."""
+        worker["thread"] = threading.get_ident()
+        assert begin.wait(5), "The HTTP request did not hand back its checkout"
+        return owned(db)
+
+    def hold_read(cursor, query, *args, **kwargs):
+        """Hold maintenance's real SELECT open across the cleanup assertion."""
+        result = original_execute(cursor, query, *args, **kwargs)
+        if threading.get_ident() == worker.get("thread") and "SELECT * FROM character_cards" in query:
+            worker["raw"] = cursor._connection
+            read_entered.set()
+            assert release.wait(5), "The cleanup assertion did not release maintenance"
+        return result
+
+    monkeypatch.setattr(deps, "_ensure_default_character_owned", hold_worker)
+    monkeypatch.setattr(BackendCursorWrapper, "execute", hold_read)
+
+    @f.app.get("/probe/reuse")
+    async def read(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
+        """Leave request reads and any undecided write to native owner teardown."""
+        endpoint.append(db._get_thread_connection())
+        assert db.get_note_by_id(f.note)["title"] == "Committed title"
+        if pending_write:
+            db.execute_query("UPDATE notes SET title=? WHERE id=?", ("Undecided title", f.note))
+        return {"read": True}
+
+    async def operation(client):
+        """Check handback while the reused PID is provably busy with maintenance."""
+        try:
+            assert (await client.get("/probe/reuse")).status_code == 200
+            _assert_finished(f, "/probe/reuse")
+            _prefer_returned_checkout(f, endpoint[0], monkeypatch)
+            begin.set()
+            assert await asyncio.to_thread(read_entered.wait, 5), "Maintenance did not enter its real SELECT"
+            assert worker["raw"] is endpoint[0], "Maintenance did not reuse the endpoint checkout"
+            pid = endpoint[0].info.backend_pid
+            assert worker["raw"].info.transaction_status.name == "INTRANS"
+            assert f.observer.execute(
+                "SELECT 1 FROM pg_locks l JOIN pg_class c ON c.oid=l.relation "
+                "WHERE l.pid=%s AND c.relname='character_cards'",
+                (pid,),
+            ).fetchall()
+            assert (
+                f.observer.execute("SELECT title FROM notes WHERE id=%s", (f.note,)).fetchone()["title"]
+                == "Committed title"
+            )
+            _assert_finished(f, "/probe/reuse")
+        finally:
+            begin.set()
+            release.set()
+
+    asyncio.run(_run(f, operation))
+
+
 @pytest.mark.parametrize("owner", ["implicit", "raw-begin", "chacha", "nested", "external-backend"])
 @pytest.mark.parametrize("commit", [False, True], ids=["rollback", "commit"])
 def test_http_caller_keeps_pending_write_until_explicit_decision(pg_http, owner, commit):
@@ -430,7 +592,6 @@ def test_detached_task_must_not_reuse_finished_http_owner(pg_http, independent_c
     f = pg_http
     release = asyncio.Event()
     children = []
-    observed = []
 
     @f.app.get("/probe/detached")
     async def detach(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
@@ -440,7 +601,6 @@ def test_detached_task_must_not_reuse_finished_http_owner(pg_http, independent_c
             await release.wait()
             if independent_child:
                 with chacha_operation(independent=True):
-                    observed.append(db._get_thread_connection())
                     db.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
             else:
                 with pytest.raises(ClosedChaChaOperationError):
@@ -454,7 +614,6 @@ def test_detached_task_must_not_reuse_finished_http_owner(pg_http, independent_c
         release.set()
         await asyncio.gather(*children)
         _assert_finished(f, "/probe/detached")
-        assert all(raw.info.transaction_status.name == "IDLE" for raw in observed)
 
     asyncio.run(_run(f, operation))
 
@@ -538,7 +697,7 @@ def test_http_owner_lives_through_stream_and_background_work(pg_http, failure):
         assert response.status_code == 200 and response.text == "first last"
         assert phases == ["stream-start", "stream-end", "background"]
         assert len({id(raw) for raw in raw_connections}) == 1
-        assert raw_connections[0].info.transaction_status.name == "IDLE"
+        _assert_finished(f, "/probe/stream")
 
     asyncio.run(_run(f, operation))
 
@@ -550,6 +709,7 @@ def test_two_account_databases_have_separate_checkouts_and_visible_notes(pg_http
     other = CharactersRAGDB(f.tmp_path / "second-owner.db", client_id="2", backend=f.backend)
     other_note = other.add_note(title="Other owner", content="Private second owner fixture")
     other.close_connection()
+    f.observe_database(other)
     owner_dirs = {1: f.tmp_path / "owner", 2: f.tmp_path / "other-owner"}
     monkeypatch.setattr(
         deps.DatabasePaths, "get_user_base_directory", staticmethod(lambda user_id: owner_dirs[int(user_id)])
@@ -590,12 +750,7 @@ def test_two_account_databases_have_separate_checkouts_and_visible_notes(pg_http
             release.set()
             completed = await first
         assert completed.status_code == 200
-        # A first request schedules default-character work that checks out a pooled
-        # connection -- possibly the one owner 1 just returned. Let it finish before
-        # asserting the requests released their checkouts.
-        if deps._chacha_default_char_tasks:
-            await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
-        assert all(raw.info.transaction_status.name == "IDLE" for raw in raw_by_user.values())
+        _assert_finished(f, "/probe/account")
         assert f.backend.execute("SELECT title FROM notes WHERE id=%s", (f.note,)).scalar == "Committed title"
 
     asyncio.run(_run(f, operation))
@@ -613,10 +768,9 @@ def test_request_can_finalize_repeatedly_without_reusing_closed_owner(pg_http):
     async def finish(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
         with chacha_operation() as owner:
             db.list_due_source_review_occurrences(now_utc="2026-09-17T00:00:00Z")
-            raw = db._get_thread_connection()
             owner.close()
             owner.close()
-            assert raw.info.transaction_status.name == "IDLE"
+            _assert_finished(f, "/probe/finish")
             with pytest.raises(ClosedChaChaOperationError):
                 db.get_note_by_id(f.note)
         return {"finished": True}
@@ -630,24 +784,17 @@ def test_request_can_finalize_repeatedly_without_reusing_closed_owner(pg_http):
 
 
 def test_real_initializer_and_default_worker_finish_independent_scopes(pg_http, monkeypatch):
+    """Observe initializer ownership and default-worker cleanup before pool reuse."""
     from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import current_connection_state
 
     f = pg_http
     created = []
     initialization_states = []
-    raw_connections = []
 
     def construct(*args, **kwargs):
         db = CharactersRAGDB(*args, **kwargs, backend=f.backend)
         initialization_states.append(current_connection_state(db))
-        original = db._get_thread_connection
-
-        def observe():
-            raw = original()
-            raw_connections.append(raw)
-            return raw
-
-        monkeypatch.setattr(db, "_get_thread_connection", observe)
+        f.observe_database(db, path="default-worker")
         created.append(db)
         return db
 
@@ -660,8 +807,7 @@ def test_real_initializer_and_default_worker_finish_independent_scopes(pg_http, 
     # PostgreSQL intentionally skips the SQLite-only bundled visual seed.
     # Exercise the real default-character worker, which does use a checkout.
     asyncio.run(deps._ensure_default_character_async(published, 3))
-    assert raw_connections, "The real default worker did not perform database work"
-    assert all(raw.info.transaction_status.name == "IDLE" for raw in raw_connections)
+    _assert_finished(f, "default-worker")
     assert published._get_pinned_backend() is None
 
 
@@ -803,7 +949,7 @@ def test_inflight_detached_worker_cannot_use_a_returned_http_checkout(
         else:
             assert rows[0]["id"] == f.note
         assert premature_returns == [False], "The pool received the checkout before its in-flight query finished"
-        assert checkouts[0].info.transaction_status.name == "IDLE"
+        _assert_finished(f, "/probe/inflight")
 
     try:
         asyncio.run(_run(f, operation))
@@ -856,7 +1002,7 @@ def test_inflight_explicit_transaction_retains_checkout_through_its_decision(pg_
         result = await asyncio.gather(*workers, return_exceptions=True)
         assert isinstance(result[0], ValueError) if decision == "error" else result == [None]
         assert returns == raw_connections
-        assert raw_connections[0].info.transaction_status.name == "IDLE"
+        _assert_finished(f, "/probe/inflight-transaction")
         assert f.backend.execute("SELECT title FROM notes WHERE id=%s", (f.note,)).scalar == (
             "Explicit pending" if decision == "commit" else "Committed title"
         )
@@ -920,23 +1066,7 @@ def test_retained_connection_cannot_rebind_a_new_cursor_after_return(pg_http, mo
             await asyncio.sleep(0)
             if deps._chacha_default_char_tasks:
                 await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
-            pool = f.backend.get_pool()
-            original_get = pool.get_connection
-
-            def prefer_returned_checkout():
-                held = []
-                try:
-                    for _ in range(f.config.pool_size):
-                        raw = original_get()
-                        if raw is retained[0]._connection:
-                            return raw
-                        held.append(raw)
-                    pytest.fail("The original open checkout was not returned to its pool")
-                finally:
-                    for raw in held:
-                        pool.return_connection(raw)
-
-            monkeypatch.setattr(pool, "get_connection", prefer_returned_checkout)
+            _prefer_returned_checkout(f, retained[0]._connection, monkeypatch)
             assert (await client.get("/probe/new-cursor")).json() == {"rejected": True}
         else:
             with pytest.raises(ClosedChaChaOperationError):

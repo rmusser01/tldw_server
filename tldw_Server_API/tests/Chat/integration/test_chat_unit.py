@@ -310,21 +310,27 @@ class TestChatErrorHandling:
         finally:
             app.dependency_overrides = original_overrides
 
-    def test_database_error(self, unit_test_client, isolated_db):
-        """Test handling of invalid conversation ID."""
+    def test_database_error(self, unit_test_client, isolated_db, isolated_chat_endpoint_mocks):
+        """Reject an unknown conversation before provider or persistence effects."""
         request_data = {
             "model": "test-model",
             "api_provider": "openai",
             "messages": [{"role": "user", "content": "Hello"}],
             "conversation_id": "invalid-conv-id",
+            "save_to_db": True,
         }
 
-        # The endpoint should handle invalid conversation ID gracefully
+        before = isolated_db.count_conversations_for_user("1", include_deleted=True)
+        writer_before = isolated_db.count_conversations_for_user(isolated_db.client_id, include_deleted=True)
         response = unit_test_client.post_with_auth("/api/v1/chat/completions", json_data=request_data)
 
-        # Should handle the invalid ID gracefully - creates new conversation or returns success
-        # When conversation ID is invalid, the endpoint creates a new conversation
-        assert response.status_code == 200  # Should succeed with new conversation
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+        assert response.json() == {"detail": "Conversation not found"}
+        isolated_chat_endpoint_mocks["perform_chat_api_call"].assert_not_called()
+        isolated_chat_endpoint_mocks["chat_api_call"].assert_not_called()
+        assert isolated_db.get_conversation_by_id("invalid-conv-id") is None
+        assert isolated_db.count_conversations_for_user("1", include_deleted=True) == before
+        assert isolated_db.count_conversations_for_user(isolated_db.client_id, include_deleted=True) == writer_before
 
     def test_invalid_message_format(self, unit_test_client):
         """Test handling of invalid message format."""
