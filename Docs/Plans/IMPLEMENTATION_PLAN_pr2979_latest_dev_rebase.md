@@ -1404,3 +1404,30 @@ Immutable evidence /private/tmp/pr2979-uat566-automatic-setup-evidence-0830.json
 **Success Criteria:** Relevant actual-version checks and independent review where applicable; both affected final-head scopes succeed.
 **Tests:** Final exact-head automatic/native gates; skipped tests and old-head successes do not qualify.
 **Status:** Not Started
+
+
+## UAT567 — native MCP isolated source-distribution build timeout (TASK-13260.278.18.83.56)
+
+Exact b38 native macOS MCP job 110219892070 fails one strict installed source-distribution consumer test: pip’s isolated build downloads setuptools 84.0.0 from files.pythonhosted.org, raises an HTTPS read timeout, and exits 1 after the build subprocess exits 2. The original return-code assertion fails before the sdist consumer body runs. The shard has 3,447 passes, three original skips, one failure, zero errors, 1,515 warnings and 371.50 seconds; the test step exits 1. The wheel case passes. Neither it nor other platform results accepts the failed sdist case. The underlying host transfer/cache/network/resource trigger remains unproven; no safe corrective source/dependency/CI/timer change is established.
+
+Artifact 11149302822 contains only platform-mcp-inapp.xml: 3,451 cases. Its archive SHA256 68a248f3376fc001f5419ec5e72d8d7de28f46a2c773a3bf6fb09b5e8318a5c5 matches metadata. Both consumer and helper files are byte-identical to publication; the outer module has 61 assertion ASTs and the helper two. Immutable manifest /private/tmp/pr2979-uat567-native-mcp-evidence-0842.json SHA256 ebebd12c85a53bdd3d67d4437b2a12b869f0841aa07f90ccfae361bf3b4758ba verifies 28 artifacts. Official search found no duplicate; the supported CLI created child .56 before documentation edits. All acceptance criteria remain open. Build isolation, cache policy, sanitized downstream venv, 600-second subprocess guard and strict installed-consumer assertions remain intact. Tracking-only tasks/Markdown require no Bandit, local tests or PostgreSQL run; existing ADRs 020, 049 and 050 remain unchanged.
+
+Complete 08:36 required-native inventory: 792 unique jobs, all terminal, 774 successes, three skips, nine automatic cancellations and six failures. Three failures are actual shards (macOS integrations/UAT563, macOS MCP/UAT567, Ubuntu Watchlists/UAT552); three aggregate logs propagate failed/cancelled shard results. The skipped Character Chat Rate-Limits gate has no acceptance. Automatic CI remains active; all local repairs/tracking remain held. Parent/children .1–.56 are In Progress. Final strict/native/UX/whole macOS Prompt/Character unit natural-exit/Chatbook gates remain open; full UAT stays paused and UAT261 stays open.
+
+### UAT567 Stage 1: Preserve actual native failure evidence
+**Goal:** Verify artifact digest, exact failing install stage, case outcomes and unchanged source.
+**Success Criteria:** 28 hashes verified; sdist failure distinguished from wheel success and whole-shard acceptance.
+**Tests:** Read-only native artifact/log/metadata/source checks.
+**Status:** Complete
+
+### UAT567 Stage 2: Establish the isolated build transfer cause
+**Goal:** Obtain content-free actual native transfer/cache/network observations before a corrective edit.
+**Success Criteria:** Proven cause and safe correction preserving installed-artifact isolation and all budgets.
+**Tests:** Actual native evidence; no speculative dependency, cache or timer change.
+**Status:** Not Started
+
+### UAT567 Stage 3: Qualify final installed-artifact acceptance
+**Goal:** Qualify any justified minimal correction and final exact-head native MCP success.
+**Success Criteria:** Actual-version checks and independent review where applicable; wheel and sdist consumers both pass within existing guards.
+**Tests:** Final published native MCP shard and all strict/native gates.
+**Status:** Not Started
