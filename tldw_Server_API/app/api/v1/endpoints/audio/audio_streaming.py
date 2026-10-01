@@ -4442,6 +4442,7 @@ async def websocket_tts_realtime(
     "/stream/status",
     response_model=StreamingStatusResponse,
     summary="Check streaming transcription availability",
+    dependencies=[Depends(get_request_user)],
 )
 async def streaming_status():
     """
