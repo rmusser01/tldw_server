@@ -15,6 +15,8 @@ from tldw_Server_API.app.core.PrivilegeMaps.introspection import RouteMetadata
 from tldw_Server_API.app.core.PrivilegeMaps.service import PrivilegeMapService
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
+# These service fixtures never authenticate their seeded users.
+
 
 async def _fetch_id(pool, query: str, value: str) -> int:
     result = await pool.fetchval(query, (value,))

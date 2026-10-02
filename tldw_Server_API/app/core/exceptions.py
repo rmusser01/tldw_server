@@ -134,13 +134,11 @@ class TransactionPassthroughError(Exception):
     """Sanitized domain failure that may cross a rolled-back DB transaction."""
 
 
-class ApiKeyNotFoundError(TransactionPassthroughError, ValueError):
-    """An API key is missing, not owned by the caller, or no longer active.
+class APIKeyRotationRejected(ValueError, TransactionPassthroughError):
+    """Source-key validation failed without distinguishing absence from ownership."""
 
-    Raised inside AuthNZ transactions. Passthrough lets it survive the
-    transaction boundary (which otherwise sanitizes to ``TransactionError``);
-    subclassing ``ValueError`` keeps existing callers' 4xx mapping.
-    """
+    def __init__(self) -> None:
+        super().__init__("API key not found or unauthorized")
 
 
 class BuiltinCharacterSeedError(TransactionPassthroughError):
@@ -965,6 +963,14 @@ def raise_detached_error(error: BaseException) -> NoReturn:
         detached.__context__ = None
         detached.__suppress_context__ = True
         raise
+
+
+class SchemaReadinessError(RuntimeError):
+    """A schema readiness check failed.
+
+    Messages are fixed operator-facing reasons, never row data, so transaction
+    boundaries that sanitize other failures pass this reason through.
+    """
 
 
 def exception_type_chain(error: BaseException, *, limit: int = 6) -> str:

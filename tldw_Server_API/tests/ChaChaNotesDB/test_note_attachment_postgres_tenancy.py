@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -13,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
+from tldw_Server_API.app.core.DB_Management import Sync_DB as sync_db_module
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -22,8 +24,14 @@ from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.attachment_refs import (
     AttachmentRefDomainAdapter,
 )
+from tldw_Server_API.app.core.Sync.v2.errors import SyncIdempotencyConflictError
 from tldw_Server_API.app.core.Sync.v2.materializers import AttachmentRefMaterializer
-from tldw_Server_API.app.core.Sync.v2.models import SyncDatasetCreate
+from tldw_Server_API.app.core.Sync.v2.models import (
+    SyncBlobObjectCreate,
+    SyncBlobUploadSessionCreate,
+    SyncDatasetCreate,
+    SyncDeviceUpsert,
+)
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -293,6 +301,7 @@ def test_postgres_canonical_content_supports_all_single_byte_range_forms(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(sync_db_module, "utcnow_iso", lambda: "2026-08-11T20:30:00+00:00")
     owner = "940001"
     dataset_id = f"dataset-{uuid4()}"
     note_id = str(uuid4())
@@ -435,3 +444,108 @@ def test_postgres_canonical_content_supports_all_single_byte_range_forms(
         note_db.close_all_connections()
         note_backend.get_pool().close_all()
         sync_backend.get_pool().close_all()
+
+
+@pytest.mark.parametrize("device_id", [None, "postgres-upload-device"])
+def test_postgres_blob_upload_idempotency_supports_nullable_device(
+    pg_database_config: DatabaseConfig,
+    device_id: str | None,
+) -> None:
+    owner = "940002"
+    dataset_id = f"dataset-{uuid4()}"
+    attachment_id = str(uuid4())
+    payload = b"postgres idempotency"
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    try:
+        store = SyncV2Store(SyncDatabase(backend=backend))
+        store.enroll_dataset(
+            SyncDatasetCreate(dataset_id=dataset_id, owner_user_id=owner, domains=["attachment.ref"])
+        )
+        if device_id is not None:
+            store.upsert_device(
+                SyncDeviceUpsert(
+                    device_id=device_id,
+                    user_id=owner,
+                    display_name="PostgreSQL upload device",
+                    client_type="chatbook",
+                )
+            )
+        request = SyncBlobUploadSessionCreate(
+            upload_id=str(uuid4()),
+            dataset_id=dataset_id,
+            owner_user_id=owner,
+            device_id=device_id,
+            attachment_id=attachment_id,
+            domain="attachment.ref",
+            object_id=attachment_id,
+            content_type="application/pdf",
+            size_bytes=len(payload),
+            payload_hash=_sha256(payload),
+            chunk_size=len(payload),
+            chunk_count=1,
+            reserved_quota_bytes=len(payload),
+            idempotency_key="postgres-nullable-upload",
+            expires_at="2999-01-01T00:00:00+00:00",
+        )
+        first = store.create_blob_upload_session(request)
+        retry = store.create_blob_upload_session(replace(request, upload_id=str(uuid4())))
+
+        assert retry.upload_id == first.upload_id
+        assert store.summarize_blob_quota(owner).reserved_blob_bytes == len(payload)
+        with pytest.raises(SyncIdempotencyConflictError):
+            store.create_blob_upload_session(
+                replace(request, upload_id=str(uuid4()), payload_hash=_sha256(b"changed payload"))
+            )
+        assert store.get_blob_upload_session(first.upload_id, dataset_id=dataset_id) == first
+        assert store.summarize_blob_quota(owner).reserved_blob_bytes == len(payload)
+    finally:
+        backend.get_pool().close_all()
+
+
+@pytest.mark.parametrize("identity_filter", [None, "blob_id", "payload_hash", "attachment_id"])
+def test_postgres_blob_lookup_supports_nullable_filters_and_owner_scope(
+    pg_database_config: DatabaseConfig,
+    identity_filter: str | None,
+) -> None:
+    owner = "940003"
+    dataset_id = f"dataset-{uuid4()}"
+    other_dataset_id = f"dataset-{uuid4()}"
+    attachment_id = str(uuid4())
+    payload = b"postgres blob filters"
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    try:
+        store = SyncV2Store(SyncDatabase(backend=backend))
+        for scoped_dataset_id in (dataset_id, other_dataset_id):
+            store.enroll_dataset(
+                SyncDatasetCreate(
+                    dataset_id=scoped_dataset_id,
+                    owner_user_id=owner,
+                    domains=["attachment.ref"],
+                )
+            )
+        blob = store.complete_blob_upload(
+            SyncBlobObjectCreate(
+                blob_id=str(uuid4()),
+                dataset_id=dataset_id,
+                owner_user_id=owner,
+                attachment_id=attachment_id,
+                payload_hash=_sha256(payload),
+                content_type="application/pdf",
+                size_bytes=len(payload),
+                storage_backend="local",
+                storage_key="postgres-nullable-filter-blob",
+            )
+        )
+        filters = {identity_filter: getattr(blob, identity_filter)} if identity_filter else {}
+
+        assert store.get_blob_object(dataset_id, **filters) == blob
+        assert store.get_blob_object(dataset_id, owner_user_id=owner, **filters) == blob
+        assert store.get_blob_object(dataset_id, owner_user_id="another-owner", **filters) is None
+        assert store.get_blob_object(other_dataset_id, owner_user_id=owner, **filters) is None
+        if identity_filter is not None:
+            missing_identity = _sha256(b"missing") if identity_filter == "payload_hash" else str(uuid4())
+            assert store.get_blob_object(
+                dataset_id, owner_user_id=owner, **{identity_filter: missing_identity}
+            ) is None
+    finally:
+        backend.get_pool().close_all()

@@ -271,7 +271,13 @@ def test_sqlite_shared_file_preserves_sync_client_semantics(tmp_path, existing_f
         character = first.add_character_card({"name": "Shared per-user file"})
         assert second.get_character_card_by_id(character)["client_id"] == "device-first"
         assert second.update_character_card(character, {"description": "Device edit"}, expected_version=1)
-        assert first.get_character_card_by_id(character)["client_id"] == "device-second"
+        edited = first.get_character_card_by_id(character)
+        assert (edited["client_id"], edited["description"], edited["version"]) == ("device-second", "Device edit", 2)
+        reopened = CharactersRAGDB(path, client_id="device-reopened")
+        try:
+            assert reopened.get_character_card_by_id(character) == edited
+        finally:
+            reopened.close_all_connections()
     finally:
         first.close_all_connections()
         second.close_all_connections()

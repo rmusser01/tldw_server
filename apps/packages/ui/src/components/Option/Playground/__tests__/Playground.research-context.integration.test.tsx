@@ -35,6 +35,15 @@ const messageOptionState = vi.hoisted(() => ({
     selectedCharacter: null,
     setSelectedCharacter: vi.fn(),
     selectedAssistant: null,
+    effectiveAssistantState: {
+      mode: "plain" as const,
+      kind: null,
+      id: null,
+      displayName: null,
+      avatarUrl: null,
+      systemPromptSnapshot: null,
+      source: "none" as const
+    },
     setSelectedAssistant: vi.fn(),
     serverChatPersonaMemoryMode: null as "read_only" | "read_write" | null,
     temporaryChat: false,
@@ -75,6 +84,17 @@ const smartScrollState = vi.hoisted(() => ({
 
 const mobileViewportState = vi.hoisted(() => ({
   value: false
+}))
+
+const historySelectionState = vi.hoisted(() => ({
+  status: "idle",
+  forkCandidate: null,
+  forkSettings: null,
+  settingsMode: () => "ordinary" as const,
+  getCurrent: () => ({ status: "idle", owner: null, capture: null }),
+  getStoredReference: () => null,
+  canAutomaticallyLoad: () => false,
+  fence: () => () => true
 }))
 
 const storeOptionState = vi.hoisted(() => ({
@@ -420,18 +440,14 @@ vi.mock("@/hooks/useMessageOption", () => ({
   useMessageOption: () => messageOptionState.value
 }))
 
-// Server-chat settings are read and written only through a history-selection
-// owner (settingsMode is "pending" until one is bound). These tests inject the
-// server chat through useMessageOption instead of loading it, so report an
-// ordinary owner the way Playground.search.integration.test.tsx does.
-vi.mock("@/hooks/chat/useHistorySelection", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
+vi.mock("@/hooks/chat/useHistorySelection", async () => {
+  const actual = await vi.importActual<typeof import("@/hooks/chat/useHistorySelection")>(
+    "@/hooks/chat/useHistorySelection"
+  )
   return {
     ...actual,
-    useHistorySelectionContext: () => ({
-      ...actual.useHistorySelectionContext()!,
-      settingsMode: () => "ordinary" as const
-    })
+    HistorySelectionProvider: ({ children }: { children: React.ReactNode }) => children,
+    useHistorySelectionContext: () => historySelectionState
   }
 })
 

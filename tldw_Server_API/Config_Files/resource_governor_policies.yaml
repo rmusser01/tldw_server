@@ -5,23 +5,6 @@
 
 schema_version: 1
 
-hot_reload:
-  enabled: true
-  interval_sec: 5  # watcher/TTL interval for file store
-
-metadata:
-  description: Default example policies for tldw_server Resource Governor
-  owner: core-platform
-  version: 1
-
-# Global defaults applied when a policy omits a field.
-defaults:
-  fail_mode: fail_closed  # can be overridden per policy
-  algorithm:
-    requests: token_bucket   # token_bucket | sliding_window
-    tokens: token_bucket     # preferred for model tokens
-  scopes_order: [global, tenant, user, api_key, conversation, client, ip, service, entity]
-
 # Policy templates (anchors) for quick customization.
 templates:
   core: &core_policy
@@ -300,8 +283,6 @@ policies:
 
 # Route/tag mapping helpers. Middleware may use these to resolve policy_id.
 route_map:
-  by_route:
-    audio-realtime: audio.default
   # by_path wins over by_tag, so list a tag only if it governs a route no by_path
   # entry matches (Helper_Scripts/ci/rg_route_map_lint.py reports shadowed tags).
   by_tag:

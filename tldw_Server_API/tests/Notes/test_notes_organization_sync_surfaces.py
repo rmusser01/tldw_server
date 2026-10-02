@@ -1156,6 +1156,10 @@ async def test_notes_studio_regeneration_retry_repairs_stale_sidecar_after_captu
 def test_notes_tasks_projection_uses_active_sync_authority(tmp_path, monkeypatch) -> None:
     db, sync_store, service = build_ready_notes_sync_stack(tmp_path)
     _patch_active_service(monkeypatch, service)
+    db.bind_local_task_graph_to_dataset(
+        owner_user_id="user-1",
+        target_dataset_id=sync_store.list_datasets_for_user("user-1")[0].dataset_id,
+    )
     coordinator = NotesOrganizationCoordinator(service=service, note_db=db, user_id="user-1")
     note_id = str(uuid4())
     note = capture_note_upsert(

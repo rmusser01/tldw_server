@@ -158,7 +158,10 @@ describe("saveMessageOnError", () => {
     expect(mocks.saveHistory).toHaveBeenCalledWith(
       "Please summarize this cockpit error recovery path",
       false,
-      "web-ui"
+      "web-ui",
+      undefined,
+      undefined,
+      undefined
     )
     expect(mocks.updatePageTitle).toHaveBeenCalledWith(
       "Please summarize this cockpit error recovery path"

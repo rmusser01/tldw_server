@@ -5,6 +5,8 @@ import { useConnectionStore } from "@/store/connection"
 import { isRecoverableAuthConfigError } from "@/services/auth-errors"
 import { tldwClient, type ServerChatSummary } from "@/services/tldw/TldwApiClient"
 import type { ChatScope } from "@/types/chat-scope"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 export type ServerChatHistoryItem = ServerChatSummary & {
   createdAtMs: number
@@ -170,6 +172,11 @@ export const fetchAllServerChatPages = async (
 }
 
 type UseServerChatHistoryOptions = {
+  owner?: {
+    key: string
+    requestScope: ServicePromptRequestScope
+    isCurrent: () => boolean
+  }
   enabled?: boolean
   includeDeleted?: boolean
   deletedOnly?: boolean
@@ -216,6 +223,8 @@ export const useServerChatHistory = (
   const includeDeleted = options?.includeDeleted ?? false
   const deletedOnly = options?.deletedOnly ?? false
   const scope = options?.scope
+  const owner = options?.owner
+  const ownerCurrent = !owner || owner.isCurrent()
   const filterMode = options?.filterMode ?? (deletedOnly ? "trash" : "all")
   const characterScope = getCharacterScopeForFilterMode(filterMode)
   const overviewPage = Math.max(1, Math.trunc(options?.page ?? 1))
@@ -245,6 +254,7 @@ export const useServerChatHistory = (
       ? "overview-page"
       : "overview-full"
   const isEnabled =
+    ownerCurrent &&
     isConnected &&
     (options?.enabled ?? true) &&
     (mode !== "search" || normalizedQuery.length > 0)
@@ -269,12 +279,18 @@ export const useServerChatHistory = (
             : overviewLimit
           : null,
         filterMode,
+        ...(owner ? { ownerKey: owner.key } : {}),
         scope
       }
     ],
     enabled: isEnabled,
     queryFn: async ({ signal }): Promise<ServerChatHistoryQueryData> => {
+      const assertOwner = () => {
+        if (owner && !owner.isCurrent()) throw createServicePromptScopeChangedError()
+      }
+      assertOwner()
       await tldwClient.initialize().catch(() => null)
+      assertOwner()
       try {
         if (canUseConversationSearch) {
           const response = await tldwClient.searchConversationsWithMeta(
@@ -287,9 +303,9 @@ export const useServerChatHistory = (
               ...(deletedOnly ? { deleted_only: true } : {}),
               ...(characterScope ? { character_scope: characterScope } : {})
             },
-            { signal, scope }
+            { signal, scope, ...(owner ? { requestScope: owner.requestScope } : {}) }
           )
-
+          assertOwner()
           return {
             items: mapServerChatHistoryItems(response.chats),
             total:
@@ -308,9 +324,9 @@ export const useServerChatHistory = (
               ...(includeDeleted ? { include_deleted: true } : {}),
               ...(deletedOnly ? { deleted_only: true } : {})
             },
-            { signal, scope }
+            { signal, scope, ...(owner ? { requestScope: owner.requestScope } : {}) }
           )
-
+          assertOwner()
           return {
             items: mapServerChatHistoryItems(response.chats),
             total: response.total
@@ -329,13 +345,14 @@ export const useServerChatHistory = (
                 ...(includeDeleted ? { include_deleted: true } : {}),
                 ...(deletedOnly ? { deleted_only: true } : {})
               },
-              { signal: pageSignal, scope }
+              { signal: pageSignal, scope, ...(owner ? { requestScope: owner.requestScope } : {}) }
             ),
           {
             signal
           }
         )
 
+        assertOwner()
         const items = mapServerChatHistoryItems(chats)
         return {
           items,
@@ -364,17 +381,18 @@ export const useServerChatHistory = (
 
   const filteredData = useMemo(
     () =>
-      canUseConversationSearch
+      !ownerCurrent ? [] : canUseConversationSearch
         ? query.data?.items || []
         : filterServerChatHistoryItems(query.data?.items || [], normalizedQuery),
-    [canUseConversationSearch, query.data, normalizedQuery]
+    [ownerCurrent, canUseConversationSearch, query.data, normalizedQuery]
   )
   const resolvedTotal = useMemo(() => {
+    if (!ownerCurrent) return 0
     if (isServerPagedResult) {
       return query.data?.total ?? filteredData.length
     }
     return filteredData.length
-  }, [filteredData.length, isServerPagedResult, query.data])
+  }, [ownerCurrent, filteredData.length, isServerPagedResult, query.data])
 
   const sidebarState = useMemo(() => {
     if (query.status === "success") {

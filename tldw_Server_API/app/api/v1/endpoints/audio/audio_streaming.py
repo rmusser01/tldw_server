@@ -277,6 +277,8 @@ _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS = (
     *EXPECTED_DB_EXC,
     *EXPECTED_REDIS_EXC,
 )
+
+
 _AUDIO_QUOTA_DB_EXC = (*EXPECTED_DB_EXC, AudioQuotaStoreUnavailable)
 
 
@@ -4440,6 +4442,7 @@ async def websocket_tts_realtime(
     "/stream/status",
     response_model=StreamingStatusResponse,
     summary="Check streaming transcription availability",
+    dependencies=[Depends(get_request_user)],
 )
 async def streaming_status():
     """

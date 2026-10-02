@@ -5,7 +5,8 @@ const mocks = vi.hoisted(() => ({
   history: vi.fn(),
   details: vi.fn(),
   files: vi.fn(),
-  prompt: vi.fn()
+  prompt: vi.fn(),
+  loadSnapshot: vi.fn(async () => ({ requestScope: {}, scopeSignal: new AbortController().signal, scopeInvalidatedSignal: new AbortController().signal, release: vi.fn() }))
 }))
 vi.mock("@/db/dexie/chat", () => ({
   PageAssistDatabase: class {
@@ -23,6 +24,12 @@ vi.mock("@/services/model-settings", () => ({
   lastUsedChatModelEnabled: async () => false
 }))
 vi.mock("@/utils/update-page-title", () => ({ updatePageTitle: vi.fn() }))
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: mocks.loadSnapshot,
+  resolveServicePromptScope: async () => ({}),
+  subscribeToServicePromptConfigChanges: () => () => {}
+}))
+vi.mock("@/db/dexie/server-chat-mirror", () => ({ serverChatMirrorOwnerKey: () => "scope" }))
 vi.mock("@/hooks/chat/useHistorySelection", () => ({
   useHistorySelectionContext: () => null
 }))
@@ -35,7 +42,9 @@ const deferred = () => {
   return { promise, resolve }
 }
 beforeEach(() => {
-  mocks.details.mockResolvedValue({})
+  vi.clearAllMocks()
+  mocks.loadSnapshot.mockReset().mockResolvedValue({ requestScope: {}, scopeSignal: new AbortController().signal, scopeInvalidatedSignal: new AbortController().signal, release: vi.fn() })
+  mocks.details.mockResolvedValue({ server_scope_key: "scope" })
   mocks.files.mockResolvedValue([])
 })
 it("does not install an older conversation after a new navigation finishes", async () => {
@@ -113,6 +122,7 @@ const mountNativeImportRace = async () => {
   )
   const admission = vi.fn()
   const provider = vi.fn()
+  const onCapture = vi.fn()
   vi.doMock("@/db/dexie/history-selection", () => ({
     ensureLocalProfileId: async () => "profile",
     loadHistoryBookmark: async () => null,
@@ -135,6 +145,7 @@ const mountNativeImportRace = async () => {
     tldwChat: { streamMessage: provider }
   }))
   vi.doMock("@/services/service-prompts", () => ({
+    loadServicePromptSnapshot: mocks.loadSnapshot,
     resolveServicePromptScope: async ({ signal }: any) => {
       if (signal.aborted) throw new Error("aborted")
       return {}
@@ -164,7 +175,7 @@ const mountNativeImportRace = async () => {
     setContextFiles: vi.fn()
   }
   const mounted = renderHook(() => {
-    const selection = useHistorySelection()
+    const selection = useHistorySelection({ onCapture })
     currentController = selection
     const load = useActualLoader(deps, {
       t: (key) => key,
@@ -173,8 +184,99 @@ const mountNativeImportRace = async () => {
     })
     return { selection, load }
   })
-  return { ...mounted, deps, captures, admission, provider }
+  return { ...mounted, deps, captures, admission, provider, onCapture }
 }
+
+it("reopens an intentional profile-only fork when account scope is unavailable", async () => {
+  const mounted = await mountNativeImportRace()
+  mocks.loadSnapshot.mockRejectedValue(new Error("account_scope_unavailable"))
+  mocks.details.mockResolvedValue({ id: "A", local_owner_key: "local-A", last_used_prompt: { prompt_content: "Local fork prompt" } })
+  mocks.history.mockResolvedValue([])
+  mocks.files.mockResolvedValue([{ id: "local-file" }])
+  await act(async () => { expect(await mounted.result.current.load("A")).toBe(true) })
+  expect(mocks.loadSnapshot).not.toHaveBeenCalled()
+  expect(mounted.result.current.selection.getCurrent()).toMatchObject({
+    status: "ready", owner: { kind: "local", conversation_id: "A" }
+  })
+  expect(mounted.onCapture).toHaveBeenCalledOnce()
+  expect(mounted.deps.setHistoryId).toHaveBeenCalledWith("A")
+  expect(mounted.deps.setSystemPrompt).toHaveBeenCalledWith("Local fork prompt")
+  expect(mounted.deps.setContextFiles).toHaveBeenCalledWith([{ id: "local-file" }])
+  expect(mounted.admission).not.toHaveBeenCalled()
+  expect(mounted.provider).not.toHaveBeenCalled()
+})
+
+it.each([
+  { id: "A", server_scope_key: "scope", local_owner_key: "local-A" },
+  { id: "A", server_scope_key: "foreign", local_owner_key: "local-A" },
+  { id: "A", server_chat_id: "A", local_owner_key: "local-A" },
+  { id: "A", message_source: "server", local_owner_key: "local-A" },
+  { id: "A" },
+  null
+])("keeps non-profile caches closed while account scope is unavailable: %j", async (details) => {
+  const mounted = await mountNativeImportRace()
+  mocks.loadSnapshot.mockRejectedValue(new Error("account_scope_unavailable"))
+  mocks.details.mockResolvedValue(details && { ...details, last_used_prompt: { prompt_content: "Private cache prompt" } })
+  mocks.history.mockResolvedValue([{ content: "Private cache transcript" }])
+  await act(async () => { expect(await mounted.result.current.load("A")).toBe(false) })
+  expect(mounted.captures).not.toHaveBeenCalled()
+  expect(mounted.onCapture).not.toHaveBeenCalled()
+  expect(mounted.deps.setHistoryId).not.toHaveBeenCalled()
+  expect(mounted.deps.setSystemPrompt).not.toHaveBeenCalled()
+  expect(mounted.deps.setMessages).not.toHaveBeenCalled()
+})
+
+it.each(["principal", "navigation"])("fences profile-only metadata completion after %s changes", async (boundary) => {
+  const mounted = await mountNativeImportRace()
+  const started = deferred(), finish = deferred()
+  mocks.details.mockImplementationOnce(() => { started.resolve(undefined); return finish.promise })
+  mocks.history.mockResolvedValue([])
+  await act(async () => {
+    const pending = mounted.result.current.load("A")
+    await started.promise
+    if (boundary === "principal") window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+    else {
+      mocks.details.mockResolvedValue({ id: "B", local_owner_key: "local-B" })
+      expect(await mounted.result.current.load("B")).toBe(true)
+    }
+    finish.resolve({ id: "A", local_owner_key: "local-A", last_used_prompt: { prompt_content: "Stale fork prompt" } })
+    expect(await pending).toBe(false)
+  })
+  expect(mounted.captures.mock.calls.some(([owner]) => owner.conversation_id === "A")).toBe(false)
+  expect(mounted.deps.setHistoryId).not.toHaveBeenCalledWith("A")
+  expect(mounted.deps.setSystemPrompt).not.toHaveBeenCalledWith("Stale fork prompt")
+})
+
+it.each(["account-local", "profile-fork", "native"])(
+  "does not publish a held %s navigation capture after restore cancellation",
+  async (kind) => {
+    const mounted = await mountNativeImportRace()
+    mocks.details.mockResolvedValue({ id: "A", ...(kind === "profile-fork"
+      ? { local_owner_key: "local-A" }
+      : { server_scope_key: "scope", ...(kind === "native" ? { server_chat_id: "A" } : {}) }) })
+    mocks.history.mockResolvedValue([])
+    const started = deferred()
+    const finish = deferred()
+    const capture = mounted.captures.getMockImplementation()!
+    mounted.captures.mockImplementationOnce(async (...args) => {
+      started.resolve(undefined)
+      await finish.promise
+      return capture(...args)
+    })
+    const { usePlaygroundSessionStore } = await import("@/store/playground-session")
+    await act(async () => {
+      const pending = mounted.result.current.load("A")
+      await started.promise
+      usePlaygroundSessionStore.getState().clearSession()
+      finish.resolve(undefined)
+      expect(await pending).toBe(false)
+    })
+    expect(mounted.onCapture).not.toHaveBeenCalled()
+    expect(mounted.result.current.selection.getCurrent().capture).toBeNull()
+    expect(mounted.deps.setHistoryId).not.toHaveBeenCalled()
+    expect(mounted.deps.setSystemPrompt).not.toHaveBeenCalled()
+  }
+)
 
 it.each(["beginLoad", "ready-local-B"])(
   "rejects stale native import completion after %s navigation",
@@ -194,7 +296,7 @@ it.each(["beginLoad", "ready-local-B"])(
     mocks.details.mockImplementation(async (id: string) =>
       id === "A"
         ? { id, server_chat_id: "A", server_scope_key: "scope" }
-        : { id }
+        : { id, local_owner_key: `local-${id}` }
     )
     mocks.history.mockImplementation((id: string) =>
       id === "B" && navigation === "beginLoad"
@@ -249,12 +351,13 @@ it("a superseded service-module import cannot install a subscription or resolve 
     entered.resolve(undefined)
     await moduleGate.promise
     return {
+      loadServicePromptSnapshot: mocks.loadSnapshot,
       resolveServicePromptScope: resolveScope,
       subscribeToServicePromptConfigChanges: staleSubscribe
     }
   })
   mocks.details.mockImplementation(async (id: string) =>
-    id === "A" ? { id, server_chat_id: "A", server_scope_key: "scope" } : { id }
+    id === "A" ? { id, server_chat_id: "A", server_scope_key: "scope" } : { id, local_owner_key: `local-${id}` }
   )
   mocks.history.mockResolvedValue([])
   const receipt = vi.fn()

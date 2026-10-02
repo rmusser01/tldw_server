@@ -57,7 +57,11 @@ from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statement
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection_async,
 )
-from tldw_Server_API.app.core.exceptions import TransactionPassthroughError, exception_type_chain
+from tldw_Server_API.app.core.exceptions import (
+    SchemaReadinessError,
+    TransactionPassthroughError,
+    exception_type_chain,
+)
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime, is_test_mode
 
 _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS = (
@@ -1116,7 +1120,10 @@ class DatabasePool:
                 backend="postgres",
                 operation="authnz_schema_readiness",
                 exception_type=type(exc).__name__,
-            ).error("PostgreSQL AuthNZ schema readiness failed")
+            ).error(
+                "PostgreSQL AuthNZ schema readiness failed{}",
+                f": {exc}" if isinstance(exc, SchemaReadinessError) else "",
+            )
             raise DatabaseError(
                 "PostgreSQL AuthNZ schema readiness failed"
             ) from None
@@ -1317,7 +1324,13 @@ class DatabasePool:
                     "PostgreSQL transaction failed: cause={}",
                     exception_type_chain(primary_failure),
                 )
-                raise TransactionError("PostgreSQL transaction") from None
+                # Readiness reasons are fixed text; any other message may carry row data.
+                reason = (
+                    str(primary_failure)
+                    if isinstance(primary_failure, SchemaReadinessError)
+                    else None
+                )
+                raise TransactionError("PostgreSQL transaction", reason) from None
             raise primary_failure from None
 
         conn = None

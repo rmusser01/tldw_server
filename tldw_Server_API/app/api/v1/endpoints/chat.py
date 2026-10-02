@@ -2526,7 +2526,7 @@ async def _maybe_rg_shadow_chat_decision(
         return
 
     try:
-        if not bool(_rg_enabled_flag(False)):  # type: ignore[arg-type]
+        if not bool(_rg_enabled_flag(True)):  # type: ignore[arg-type]
             return
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001 - defensive
         logger.debug("RG shadow: rg_enabled check failed, skipping shadow comparison: {}", exc)
@@ -3153,6 +3153,12 @@ async def _save_message_turn_to_db(
         if serialized_extra is None:
             serialized_extra = {}
         serialized_extra["client_message_id"] = client_message_id
+
+    system_block_id = message_obj.get("system_instruction_block_id")
+    if role == "system" and isinstance(system_block_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", system_block_id):
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra["system_instruction_block_id"] = system_block_id
 
     if sender_meta:
         if serialized_extra is None:
@@ -3966,7 +3972,7 @@ async def create_chat_completion(
             try:
                 from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
 
-                rg_active = bool(_rg_enabled_flag(False))
+                rg_active = bool(_rg_enabled_flag(True))
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(
                     "Chat RG: rg_enabled lookup failed; disabling RG path: {}",
@@ -6144,7 +6150,9 @@ async def create_chat_completion(
                         client_detail = "Request failed."
                 else:
                     # Server errors should be generic
-                    if err_status == 502:
+                    if err_status == 502 and error_code == "provider_output_limit":
+                        client_detail = PROVIDER_STREAM_ERROR_MESSAGES[error_code]
+                    elif err_status == 502:
                         client_detail = "The chat service provider is currently unavailable."
                     elif err_status == 503:
                         client_detail = "The chat service is temporarily unavailable."

@@ -3718,5 +3718,20 @@
   },
   "standaloneHtml_downloadFailed": {
     "message": "Download could not be prepared. Your draft is preserved."
+  },
+  "mediaHandoff_conflictLabel": {
+    "message": "Media handoff conflict"
+  },
+  "mediaHandoff_conflict": {
+    "message": "Your composer already has a draft. Insert the media source, replace your draft, or cancel the import."
+  },
+  "mediaHandoff_insert": {
+    "message": "Insert media source"
+  },
+  "mediaHandoff_replace": {
+    "message": "Replace current draft"
+  },
+  "mediaHandoff_cancel": {
+    "message": "Cancel import"
   }
 }

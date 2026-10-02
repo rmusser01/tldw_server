@@ -95,17 +95,27 @@ async def init_resource_governor(app: Any) -> None:
         app.state.rg_policy_loader = rg_loader
         app.state.rg_policy_store = _store_mode
 
-        try:
-            _backend = _rg_backend_sel()
-            if _backend == "redis":
-                await _ensure_redis_boot_health_if_required()
-                app.state.rg_governor = RedisResourceGovernor(policy_loader=rg_loader)
-                logger.info("ResourceGovernor initialized (redis backend)")
-            else:
-                app.state.rg_governor = MemoryResourceGovernor(policy_loader=rg_loader)
-                logger.info("ResourceGovernor initialized (memory backend)")
-        except _STARTUP_GUARD_EXCEPTIONS as _rg_gov_err:
-            logger.warning(f"ResourceGovernor initialization failed/skipped: {_rg_gov_err}")
+        from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
+
+        _governance_enabled = bool(_rg_enabled_flag(True))
+        if not _governance_enabled:
+            app.state.rg_governor = None
+            logger.info(
+                "Resource Governor disabled (RG_ENABLED / [ResourceGovernor] enabled); "
+                "policies loaded for diagnostics only"
+            )
+        else:
+            try:
+                _backend = _rg_backend_sel()
+                if _backend == "redis":
+                    await _ensure_redis_boot_health_if_required()
+                    app.state.rg_governor = RedisResourceGovernor(policy_loader=rg_loader)
+                    logger.info("ResourceGovernor initialized (redis backend)")
+                else:
+                    app.state.rg_governor = MemoryResourceGovernor(policy_loader=rg_loader)
+                    logger.info("ResourceGovernor initialized (memory backend)")
+            except _STARTUP_GUARD_EXCEPTIONS as _rg_gov_err:
+                logger.warning(f"ResourceGovernor initialization failed/skipped: {_rg_gov_err}")
 
         _update_policy_snapshot_state(app, rg_loader)
         _register_policy_snapshot_callback(app, rg_loader)
@@ -113,8 +123,10 @@ async def init_resource_governor(app: Any) -> None:
         _audit_route_map_coverage(app, rg_loader)
     except _IMPORT_EXCEPTIONS as _rg_err:
         logger.warning(f"ResourceGovernor policy loader initialization skipped: {_rg_err}")
+        _governance_enabled = True  # unknown state; let the warning below decide
 
-    _warn_if_enabled_without_governor(app)
+    if _governance_enabled:
+        _warn_if_enabled_without_governor(app)
 
 
 async def _ensure_redis_boot_health_if_required() -> None:
@@ -246,7 +258,7 @@ def _warn_if_enabled_without_governor(app: Any) -> None:
             rg_policy_store as _rg_store_sel,
         )
 
-        if bool(_rg_enabled_flag(False)) and getattr(app.state, "rg_governor", None) is None:
+        if bool(_rg_enabled_flag(True)) and getattr(app.state, "rg_governor", None) is None:
             logger.warning(
                 "ResourceGovernor enabled but not initialized; rate limiting will fail closed. "
                 f"policy_path={_rg_policy_path()} backend={_rg_backend_sel()} "

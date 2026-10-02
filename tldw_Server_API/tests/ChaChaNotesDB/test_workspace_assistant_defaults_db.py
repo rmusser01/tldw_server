@@ -158,6 +158,55 @@ def test_historical_v4_sqlite_full_upgrade_preserves_data_and_adds_workspace_def
         migrated.close_connection()
 
 
+def test_historical_v48_sqlite_full_upgrade_preserves_workspace_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Upgrade the registered v48 schema without losing the retained workspace row."""
+    db_path = tmp_path / "historical-v48.db"
+    def initialize_historical(db: CharactersRAGDB) -> None:
+        with db.transaction() as conn:
+            db._apply_schema_v4(conn)
+            steps = db._sqlite_linear_migration_steps()
+            for version in range(4, 48):
+                steps[version](conn)
+                assert db._get_db_version(conn) == version + 1
+
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 48)
+        patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical)
+        seed = CharactersRAGDB(db_path, "historical-fixture")
+    try:
+        with seed.transaction() as conn:
+            assert seed._get_db_version(conn) == 48
+            assert "note_attachments" not in seed._sqlite_table_names(conn)
+            # The maintained v35 workspace definition includes this later v49 addition.
+            conn.execute("ALTER TABLE workspaces DROP COLUMN assistant_defaults_json")
+            assert "assistant_defaults_json" not in {
+                row["name"] for row in conn.execute("PRAGMA table_info(workspaces)")
+            }
+            conn.execute(
+                "INSERT INTO workspaces (id, name, client_id) VALUES (?, ?, ?)",
+                ("retained-workspace", "Historical workspace", seed.client_id),
+            )
+            before = dict(conn.execute("SELECT * FROM workspaces").fetchone())
+            seed._migrate_from_v48_to_v49(conn)
+            assert seed._get_db_version(conn) == 49
+            after = dict(conn.execute("SELECT * FROM workspaces").fetchone())
+            assert after == {**before, "assistant_defaults_json": None}
+    finally:
+        seed.close_all_connections()
+
+    migrated = CharactersRAGDB(db_path=str(db_path), client_id="user-1")
+    try:
+        assert "assistant_defaults_json" in _workspace_columns(db_path)
+        conn = migrated.get_connection()
+        assert migrated._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        current = dict(conn.execute("SELECT * FROM workspaces WHERE id = ?", (before["id"],)).fetchone())
+        assert all(current[key] == value for key, value in after.items())
+    finally:
+        migrated.close_all_connections()
+
+
 def test_workspace_assistant_defaults_round_trip_and_increment_version(chacha_db: CharactersRAGDB) -> None:
     """Persist only reference defaults and increment the workspace version."""
     created = chacha_db.upsert_workspace("ws-1", "Research")

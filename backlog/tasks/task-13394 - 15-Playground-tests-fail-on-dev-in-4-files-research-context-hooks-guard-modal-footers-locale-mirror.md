@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-09-28 19:59'
-updated_date: '2026-09-29 15:33'
+updated_date: '2026-09-30 18:38'
 labels:
   - frontend
   - tests
@@ -42,7 +42,19 @@ Like the Media and chat-submit breaks fixed in #3035/#3046, these are hidden by 
 - PlaygroundModalFooters.design-system.test.tsx: STALE FIXTURE. The preview is cast from an object without systemPrompt, which PlaygroundStartupTemplate declares as a required string (loaders normalize it); describeRolePlaySetupPreview now reads it. Added systemPrompt: ''.
 - Playground.research-context.integration.test.tsx (12): STALE. da0f1cd3a3 (2026-09-23) gated the attachment restore and persistence on historySelection.settingsMode(serverChatId) !== 'pending', which holds only once history selection has bound a native owner via loadConversation. The test (last edited 2026-09-05) injects serverChatId through a mocked useMessageOption and never binds an owner, so settingsMode stayed 'pending' and nothing restored. It now mocks useHistorySelectionContext to report an ordinary owner, the pattern Playground.search.integration.test.tsx already uses.
 AC2 / verification: all four files pass (18/18 research context). Whole src/components/Option/Playground: 115 files, 861 tests passed. DoD: no docs change; bandit N/A (frontend tests and locale data); no skips.
+
+2026-09-29 PR2979 latest-dev rebase reproduces 21 failures across four files (source a8503fe543, local Vitest). Research fixture omitted effectiveAssistantState and bypassed H1 saved-chat owner qualification; provide an ordinary qualified history context for research-only checks. JSX guard named a hook that no longer renders JSX. Startup template footer fixture omitted required systemPrompt. English extension mirror lagged 54 canonical strings, and parity test did not apply the generator key normalization for dotted keys. Local red 21/26 then green 26/26; official locale sync dry run clean. Hosted frontend rerun and PR review remain open.
+
+Package-wide UI tsc run with a 12 GiB heap completed with 357 existing diagnostics outside these four touched test files; the default 4 GiB heap exhausted memory first. This standalone package tsconfig is not the hosted WebUI/extension type gate. Retain the broader inherited type backlog under UAT419.
+
+2026-09-30 PR2979 b709 reconciliation: preserve both upstream PR3054 and branch history. The upstream generalized JSX detector is retained alongside the existing composer Profiler extension assertions. PR effectiveAssistantState and ordinary history facade remain for research-only fixtures; all research test bodies stay identical. Upstream per-segment locale normalization and all 54 mirrored values are retained; UAT522 supported-locale conflict assertions and five new strings replay separately. Final combined qualification and hosted acceptance remain pending.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Fixed four inherited Playground test files and synchronized the English extension locale mirror. Focused local verification: 26 passed, zero skips. Type check and hosted acceptance recorded separately; Bandit is not applicable to the touched TypeScript/JSON/docs.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

@@ -488,7 +488,7 @@ class DatabaseMigrator:
 
     def _load_sql_migration(self, filepath: Path) -> Optional[Migration]:
         try:
-            sql_text = filepath.read_text()
+            sql_text = filepath.read_text(encoding="utf-8")
         except OSError as exc:
             raise MigrationError(
                 f"Unable to read migration file: {filepath.name}"

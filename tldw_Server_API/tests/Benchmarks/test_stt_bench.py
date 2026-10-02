@@ -1676,7 +1676,7 @@ def test_atomic_persist_replaces_in_same_directory_and_fsyncs_file_and_parent(
     assert len(replacements) == 1
     assert replacements[0][0].parent == destination.parent
     assert replacements[0][1] == destination
-    assert len(fsync_calls) >= 2
+    assert len(fsync_calls) >= (2 if os.name == "posix" else 1)
     if os.name == "posix":
         assert stat.S_IMODE(destination.stat().st_mode) == 0o600
         assert stat.S_IMODE(destination.parent.stat().st_mode) == 0o700
@@ -2814,7 +2814,7 @@ def _configure_audio_cpp_planning(
     return stt_adapter
 
 
-def test_prepared_target_and_worker_settings_are_frozen_pickleable_and_secret_safe():
+def test_prepared_target_and_worker_settings_are_frozen_pickleable_and_secret_safe(tmp_path):
     plan = _planned_target()
     contract_json, contract_hash = stt_bench.build_execution_contract(
         plan=plan,
@@ -2838,6 +2838,7 @@ def test_prepared_target_and_worker_settings_are_frozen_pickleable_and_secret_sa
         execution_contract_json=contract_json,
         execution_contract_hash=contract_hash,
     )
+    private_audio = tmp_path / "private" / "audio" / "sample-1.wav"
     settings = stt_bench.WorkerSettings(
         run_id="run-1",
         results_path="results.jsonl",
@@ -2849,14 +2850,14 @@ def test_prepared_target_and_worker_settings_are_frozen_pickleable_and_secret_sa
         text_retention="full",
         retry_errors=False,
         worker_attempt_id=1,
-        audio_paths=("/private/audio/sample-1.wav",),
+        audio_paths=(str(private_audio),),
     )
 
     assert pickle.loads(pickle.dumps(target)) == target
     assert pickle.loads(pickle.dumps(settings)) == settings
     assert "/private/models/secret-model" not in repr(target)
     assert "tests:factory" not in repr(target)
-    assert "/private/audio" not in repr(settings)
+    assert str(private_audio.parent) not in repr(settings)
     with pytest.raises(FrozenInstanceError):
         target.provider = "changed"
 

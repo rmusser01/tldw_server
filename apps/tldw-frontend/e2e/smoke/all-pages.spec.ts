@@ -418,6 +418,23 @@ test.describe('Smoke Tests - All Pages', () => {
     );
   });
 
+  test('hard-gate allowlist expires immediately after its UTC expiry day', () => {
+    const baseRule = SMOKE_HARD_GATE_ALLOWLIST[0];
+    expect(baseRule).toBeDefined();
+    const rule = {
+      ...baseRule!,
+      id: 'utc-expiry-boundary',
+      expiresOn: '2026-09-30',
+    };
+
+    expect(
+      validateSmokeHardGateAllowlist([rule], new Date('2026-09-30T23:59:59.999Z'))
+    ).toEqual([]);
+    expect(
+      validateSmokeHardGateAllowlist([rule], new Date('2026-10-01T00:00:00.000Z'))
+    ).toEqual(['utc-expiry-boundary: expired on 2026-09-30']);
+  });
+
   // Generate a test for each active page
   for (const entry of getActivePages()) {
     test(`${entry.name} (${entry.path})`, async ({ page, diagnostics }) => {

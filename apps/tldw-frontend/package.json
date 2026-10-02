@@ -76,7 +76,8 @@
     "e2e:critical": "playwright test --project=tier-1 --project=journeys",
     "e2e:features": "playwright test --project=tier-2 --project=tier-3",
     "e2e:admin": "playwright test --project=tier-4 --project=tier-5",
-    "e2e:all-tiers": "playwright test --project=tier-1 --project=tier-2 --project=tier-3 --project=tier-4 --project=tier-5 --project=journeys"
+    "e2e:all-tiers": "playwright test e2e/workflows",
+    "e2e:list:release": "node scripts/list-release-tests.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^9.27.0",

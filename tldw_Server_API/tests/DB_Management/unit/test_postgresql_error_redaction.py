@@ -19,6 +19,11 @@ from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import (
     PostgreSQLBackend,
 )
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
+    ExternalConnection,
+    chacha_operation,
+    current_connection_state,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     BackendConnectionWrapper,
     CharactersRAGDB,
@@ -151,6 +156,9 @@ def test_chacha_redacted_query_reaches_postgres_backend() -> None:
     class _ChaChaHarness:
         backend_type = BackendType.POSTGRESQL
 
+        def _connection_state(self) -> Any:
+            return current_connection_state(self)
+
         @staticmethod
         def _prepare_backend_statement(query: str, params: Any = None) -> tuple[str, Any]:
             return query, params
@@ -164,11 +172,18 @@ def test_chacha_redacted_query_reaches_postgres_backend() -> None:
         def get_connection(self) -> BackendConnectionWrapper:
             return BackendConnectionWrapper(self, connection, backend)
 
+    harness = _ChaChaHarness()
     messages, sink_id = _capture_messages()
     try:
-        with pytest.raises(CharactersRAGDBError) as exc_info:
+        with (
+            chacha_operation(
+                independent=True,
+                bindings=(ExternalConnection(harness, connection, backend),),
+            ),
+            pytest.raises(CharactersRAGDBError) as exc_info,
+        ):
             CharactersRAGDB.execute_query(
-                _ChaChaHarness(),
+                harness,
                 "SELECT content FROM messages",
                 log_params=False,
                 log_errors=False,

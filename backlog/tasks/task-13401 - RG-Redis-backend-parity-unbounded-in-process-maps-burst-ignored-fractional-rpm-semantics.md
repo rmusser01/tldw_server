@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-30 09:45'
+updated_date: '2026-10-01 03:03'
 labels:
   - rate-limit
 dependencies: []
@@ -28,6 +29,12 @@ Found in the final review of the RG ingress safety net (plan 2026-09-29-rg-ingre
 - [ ] #3 Fractional-rpm policies behave the same on both backends within one window, with a test
 - [ ] #4 Rate-limit headers never report a limit of 0 for a fractional policy
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+ADR reference: AC #2's 'ADR-057' means the RG safety-net ADR, now Docs/ADR/056-resource-governor-safety-net.md.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

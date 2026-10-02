@@ -8,7 +8,7 @@ Reviewed worktree: `/Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/
 
 **R1, R2 and R3 are closed in the revised design and implementation plan. No remaining concrete P1/P2 finding in this focused re-review.** The design can proceed to implementation. This verdict does not qualify any H2 production behavior, SQLite/PostgreSQL transaction, browser flow, storage race or parity gate.
 
-Read the actual revised `Docs/Design/2026-09-18-chatbook-h2-native-fork-design.md` and the now-present `IMPLEMENTATION_PLAN_chatbook_h2_native_fork.md`, including the applied quota L/N correction and generic native bundle descriptor. Rechecked the relevant original source rather than treating the proposed features as implemented. No applications, tests, database operations, repository edits, Git mutations, main checkout or UAT changes were performed. Only this temporary review report was written by this review seat.
+Read the actual revised `Docs/Design/2026-09-18-chatbook-h2-native-fork-design.md` and the now-present `Docs/Plans/IMPLEMENTATION_PLAN_chatbook_h2_native_fork.md`, including the applied quota L/N correction and generic native bundle descriptor. Rechecked the relevant original source rather than treating the proposed features as implemented. No applications, tests, database operations, repository edits, Git mutations, main checkout or UAT changes were performed. Only this temporary review report was written by this review seat.
 
 ## Finding dispositions
 

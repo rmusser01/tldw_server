@@ -537,9 +537,9 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     scope: "console",
     pattern: /Warning:\s+\[antd:\s*Drawer\]\s+`width` is deprecated\. Please use `size` instead\./i,
     rationale:
-      "Kanban retry recovery still works with this Drawer deprecation warning; TASK-13377.9 records fresh fixture evidence.",
+      "TASK-13260.278.18.83.51: current Kanban development fixture emits this Drawer width warning; removal fails its unchanged recovery gate. TASK-13377.9 also records fresh fixture evidence.",
     owner: "WebUI",
-    expiresOn: "2026-10-08",
+    expiresOn: "2026-10-31",
     routes: ["/kanban"]
   },
   {
@@ -548,7 +548,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     pattern: /The above error occurred in the <ForcedRouteErrorProbe> component/i,
     rationale: "Expected React error-overlay emission from deliberate route-boundary fixtures; TASK-13377.9 records fresh recovery evidence.",
     owner: "WebUI",
-    expiresOn: "2026-10-08",
+    expiresOn: "2026-10-31",
     routes: [
       "/admin/server",
       "/admin/llamacpp",
@@ -574,7 +574,7 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     pattern: /\[RouteErrorBoundary:[^\]]+\]\s+Error:\s+Forced route boundary error/i,
     rationale: "Deliberate route-boundary fixture logs confirm the recovery branch; TASK-13377.9 records fresh evidence.",
     owner: "WebUI",
-    expiresOn: "2026-10-08",
+    expiresOn: "2026-10-31",
     routes: [
       "/admin/server",
       "/admin/llamacpp",

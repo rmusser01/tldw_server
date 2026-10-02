@@ -53,7 +53,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 let latestContext: ReturnType<typeof useKnowledgeQA> | null = null
 
 function ContextProbe() {
-  latestContext = useKnowledgeQA()
+  const context = useKnowledgeQA()
+  React.useEffect(() => { latestContext = context }, [context])
   return null
 }
 
@@ -90,6 +91,34 @@ describe("KnowledgeQAProvider persistence safeguards", () => {
         json: async () => [],
         text: async () => "",
       }
+    })
+  })
+
+  it.each([
+    { generation_provider: "openai", generation_model: "gpt-4.1-mini" },
+    { generation_provider: null, generation_model: null },
+  ])("saves answer choices in canonical and account-owned history: %j", async (choices) => {
+    let savedContext: Record<string, unknown> | null = null
+    ragSearchMock.mockResolvedValue({ results: [], generated_answer: "Saved answer" })
+    fetchWithAuthMock.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.includes("/rag-context")) {
+        savedContext = JSON.parse(String(init?.body)).rag_context
+        return { ok: true, status: 200, json: async () => ({ success: true }) }
+      }
+      return { ok: true, status: 200, json: async () => [] }
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    act(() => {
+      latestContext!.updateSetting("generation_provider", choices.generation_provider)
+      latestContext!.updateSetting("generation_model", choices.generation_model)
+      latestContext!.setQuery("Remember this model selection")
+    })
+    await act(async () => { await latestContext!.search() })
+    expect(savedContext?.settings_snapshot).toMatchObject(choices)
+    await waitFor(() => {
+      const history = JSON.parse(localStorage.getItem(TEST_HISTORY_STORAGE_KEY) || "[]")
+      expect(history[0]?.settingsSnapshot).toMatchObject(choices)
     })
   })
 
