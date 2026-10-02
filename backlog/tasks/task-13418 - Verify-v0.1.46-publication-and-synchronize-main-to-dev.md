@@ -1,10 +1,10 @@
 ---
 id: TASK-13418
 title: Verify v0.1.46 publication and synchronize main to dev
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-10-02 07:36'
-updated_date: '2026-10-02 12:10'
+updated_date: '2026-10-02 12:42'
 labels:
   - release
 dependencies: []
@@ -25,8 +25,8 @@ Continue the approved v0.1.46 release under a unique task ID because late dev co
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 PyPI 0.1.46 and app/worker/audio-worker GHCR artifacts are verified against the reviewed main merge
-- [ ] #2 A normal synchronization PR preserves latest dev changes and dev contains the released main merge
-- [ ] #3 Release tracking is closed, only this release plan is removed and its managed worktree is cleaned up safely
+- [x] #2 A normal synchronization PR preserves latest dev changes and dev contains the released main merge
+- [x] #3 Release tracking is closed, only this release completed plan is removed, and managed worktree archival is prepared after remote closeout verification
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -51,12 +51,16 @@ Formal GHCR workflow36978977010 completed successfully for all three images. Reg
 PyPI workflow36978827799 Build Distributions completed successfully on released revision75cc3eed14. Wheel tldw_server-0.1.46-py3-none-any.whl and sdist tldw_server-0.1.46.tar.gz built; both Twine checks passed and existing backend/API-only artifact validation passed. Publish to PyPI job110790681336 is queued on ubuntu-latest, no runner assigned and pending_deployments empty. PyPI version0.1.46 JSON still404; publication is not yet verified. Build log /tmp/release046-pypi-build.log.
 
 PyPI workflow36978827799 completed successfully at reviewed main75cc3eed14. Published PyPI0.1.46 metadata requires Python>=3.12; wheel and sdist not yanked. Downloaded artifacts verified against official SHA256: wheel6e1f49a89461d093b9bb42a08cbef50cdbb8497098cd3d5cc605cfdade2b13b3; sdist3940be2404e28a168a945a03b0530948755215c7cc56defa7a95552e4a4698e7. Existing check_pypi_artifacts.py passes on published archives; main entrypoint and AuthNZ initializer/Sync relay source bytes in both archives match released main75cc exactly. All three formal GHCR outputs previously verified. Artifact acceptance criterion complete. Latest remote dev remains3caebcfc; normal synchronization PR is next.
+
+Created normal synchronization PR https://github.com/rmusser01/tldw_server/pull/3088 atdd440e57af8dcf5f65129e1340cd7c9ccd4355b8 and attached it to this chat. Latest dev3caebcfc and released main75cc3eed14 remain ancestors; worktree clean before PR creation. Normal CI/trusted licensing checks queued or running, no reported failure. Publication verification is complete; PR merge/remote ancestry and owned-plan/tracking/worktree cleanup remain pending.
+
+PR3088 merged normally at0fd6631dd887cdeb452b3df8150906a3bdf8a146 on2026-10-02T12:40:28Z after all six required gates, trusted licensing and CodeQL passed. Exact reviewed head dd440e57af matched. No reported CI failures; optional broad full-suite jobs still running are outside the requested certification scope. Remote dev ancestry verifies released main75cc3eed14 and preserved late dev3caebcfc. Removed only the completed release plan. Closeout changes are limited to this task and that plan; managed worktree will be archived after the normal cleanup PR lands. Primary checkout untouched.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Published v0.1.46 from tested candidate3b5051d9fb via normal main merge75cc3eed14, annotated tag and requester-selected changelog release. PyPI0.1.46 wheel/sdist hashes, Python>=3.12, backend-only contents and repair sources match main; all three formal GHCR versions/revisions/digests verified. Normal dev synchronization PR3088 merged0fd6631dd8 after six gates, trusted licensing and CodeQL passed; remote dev retains released main and late cookie-model/route-auth fixes. Historical release TASK13408 archived without changing unrelated dev cookie task; unique TASK13418 records verification. Owned release plan removed in closeout. Final operational step: archive managed worktree after closeout merge and remove heartbeat; no claim that those steps have already happened.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
@@ -65,10 +69,10 @@ PyPI workflow36978827799 completed successfully at reviewed main75cc3eed14. Publ
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
