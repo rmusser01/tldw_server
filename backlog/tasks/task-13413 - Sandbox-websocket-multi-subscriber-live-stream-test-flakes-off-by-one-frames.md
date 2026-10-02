@@ -4,7 +4,7 @@ title: Sandbox websocket multi-subscriber live stream test flakes (off-by-one fr
 status: Done
 assignee: []
 created_date: '2026-10-01 17:53'
-updated_date: '2026-10-02 22:04'
+updated_date: '2026-10-02 22:05'
 labels:
   - bug
   - sandbox
@@ -35,7 +35,7 @@ Qodo follow-up on PR #3081 (commit d380ec64bf). The previous commit ran the full
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-The CI flake was an unbuffered heartbeat (made fast by the old global sleep patch) counted as data by the old test. Both causes were already fixed on dev. Fixed a real hub race in the product: a subscriber attaching between publish and dispatch got frames twice, and seq could be stamped out of publish order. Subscribe now dispatches pending frames first and replays the buffer once. Also fixed the live-stream test's settings-cache isolation (it failed when run alone) and added hub and WS regressions plus API doc guarantees. 30/30 runs pass. PR #3081.
+The CI flake was an unbuffered heartbeat (made fast by the old global sleep patch) that the old test counted as data. Both causes were already fixed on dev. Fixed a real hub race in the product: a subscriber attaching between publish and dispatch got frames twice, and seq could be stamped out of publish order. Subscribe now stamps queued frames in publish order, replays the buffer once and registers with a live_from threshold. Fan-out runs outside the hub lock, so one run cannot stall others. Also fixed the live-stream test's settings-cache isolation (it failed when run alone) and added hub, WS and cross-run blocking regressions plus API doc guarantees. 30/30 runs pass. PR #3081.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
