@@ -33,7 +33,6 @@ import { useLayoutEffectsOwner } from "@/hooks/useLayoutEffectsOwner"
 import { useChatSidebar } from "@/hooks/useFeatureFlags"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { ChatSidebar } from "@/components/Common/ChatSidebar"
-import { EventOnlyHosts } from "@/components/Common/EventHosts"
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { setSettingsReturnTo } from "@/utils/settings-return"
@@ -604,14 +603,10 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           )}
 
           {/* Command Palette - global keyboard shortcut ⌘K */}
-          {!hideHeader && (
-            <CommandPaletteHost commandPaletteProps={commandPaletteProps} />
-          )}
+          <CommandPaletteHost commandPaletteProps={commandPaletteProps} />
 
           {/* Page Help Modal (Tutorials + Shortcuts) - triggered by ? */}
-          {!hideHeader && (
-            <PageHelpModalHost />
-          )}
+          <PageHelpModalHost />
 
           {/* Tutorial Runner - executes active tutorials */}
           {!hideHeader && (
@@ -632,11 +627,6 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
 
           {/* Notes Dock Host - floating notes panel */}
           <NotesDockHost />
-
-          {/* Ensure event-driven modals are available even when the header is hidden */}
-          {hideHeader && (
-            <EventOnlyHosts commandPaletteProps={commandPaletteProps} />
-          )}
         </main>
       </div>
     </>

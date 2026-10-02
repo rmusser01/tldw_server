@@ -35,6 +35,7 @@ import {
   installTerminationHandlers,
   parseArgs,
   readPlaywrightReport,
+  readPlaywrightOutcome,
   removeGeneratedPath,
   runCommand,
   runLiveTierUat,
@@ -502,6 +503,24 @@ describe("live Tier UAT runner contract", () => {
     }
   })
 
+  it("list-only never initializes an application profile or starts services", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "tldw-list-only-"))
+    const runId = `list-only-${process.pid}-${Date.now()}`
+    try {
+      const result = await runLiveTierUat({
+        options: { ...parseArgs(["--list-only"]), runId }, repoRoot: root,
+        frontendRoot: root, baseEnv: { PATH: process.env.PATH, NODE_ENV: "test" },
+      })
+      // This isolated tree has no Playwright installation; fail at collection,
+      // without attempting auth config, reserving ports or creating a runtime.
+      expect(result.error).toMatch(/Playwright list failed/)
+      expect(result.ports).toEqual({})
+      expect(existsSync(path.join(tmpdir(), `tldw-onboarding-uat-${runId}`))).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it("requires a Playwright JSON report instead of accepting missing evidence", () => {
     expect(() => readPlaywrightReport("/tmp/missing-playwright.json", {
       exists: () => false,
@@ -526,20 +545,8 @@ describe("live Tier UAT runner contract", () => {
     })).toThrow(/tier-1.*failed 1/i)
   })
 
-  it("labels only strict skip-failing complete runs as certification", () => {
-    const complete = {
-      listOnly: false,
-      grep: null,
-      failOnSkip: true,
-      projects: ["tier-1", "tier-2", "tier-3"],
-      workers: 1,
-    }
-
-    expect(isCertificationRun(complete)).toBe(true)
-    expect(isCertificationRun({ ...complete, failOnSkip: false })).toBe(false)
-    expect(isCertificationRun({ ...complete, grep: "focused" })).toBe(false)
-    expect(isCertificationRun({ ...complete, projects: ["tier-1"] })).toBe(false)
-    expect(isCertificationRun({ ...complete, workers: 2 })).toBe(false)
+  it("never labels development-server diagnostic runs as release certification", () => {
+    expect(isCertificationRun()).toBe(false)
   })
 
   it("rejects certification when any spawned service remains reachable", () => {
@@ -643,5 +650,25 @@ describe("live Tier UAT runner contract", () => {
 
     expect(nextConfig).toContain("TLDW_NEXT_DIST_DIR")
     expect(nextConfig).toContain("liveTierDistDir")
+  })
+})
+
+
+describe("interrupted execution evidence", () => {
+  it.each([true, false])("preserves abort reason and readable partial report=%s", (hasReport) => {
+    const root = mkdtempSync(path.join(tmpdir(), "tldw-partial-result-"))
+    const reportPath = path.join(root, "partial.json")
+    const partial = { errors: [], suites: [], stats: { interrupted: 1 } }
+    const controller = new AbortController()
+    const reason = new Error("SIGTERM received")
+    controller.abort(reason)
+    try {
+      if (hasReport) writeFileSync(reportPath, JSON.stringify(partial))
+      const outcome = readPlaywrightOutcome(reportPath, { signal: controller.signal })
+      expect(outcome.error).toBe(reason)
+      expect(outcome.report).toEqual(hasReport ? partial : null)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

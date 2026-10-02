@@ -17,6 +17,22 @@ const metadata = { title: "downloaded_323911489848964201", media_type: "document
 const excerpt = "This domain is for use in documentation examples without needing permission. This is not a service, avoid relying on it for testing and monitoring purposes."
 const source = { name: metadata.title, type: metadata.media_type, mode: "rag", url: metadata.url, pageContent: excerpt, metadata }
 describe("pure durable sources and observed retrieval metadata", () => {
+  it("projects latest-dev retrieval bookkeeping without changing source evidence or locators", () => {
+    const observed = { ...metadata, source_id: "2", evidence_origin: "local_library",
+      section_path: "Lumen Project Field Memo", ancestry_titles: ["Lumen Project Field Memo"] }
+    expect(projectHistoryDurableSources([{ ...source, metadata: observed }])).toEqual(
+      projectHistoryDurableSources([source])
+    )
+  })
+  it.each([
+    { source_id: null }, { source_id: 2 }, { source_id: "x".repeat(513) },
+    { evidence_origin: null }, { evidence_origin: 1 }, { evidence_origin: "x".repeat(129) },
+    { section_path: null }, { section_path: "x".repeat(1001) },
+    { ancestry_titles: null }, { ancestry_titles: [1] },
+    { ancestry_titles: ["x".repeat(1001)] }, { ancestry_titles: Array(21).fill("Title") },
+  ])("rejects malformed latest-dev retrieval bookkeeping %#", addition => {
+    expect(() => projectHistoryDurableSources([{ ...source, metadata: { ...metadata, ...addition } }])).toThrow()
+  })
   it("preserves the winning source_type through raw projection, strict validation and display restoration", () => {
     const raw = { name: "PDF evidence", type: "pdf", source_type: " vector-evidence ", mode: "rag", url: "urn:exact:evidence",
       pageContent: "Exact excerpt", metadata: { source: "Attribution", title: "Title", chunk_id: "chunk:1", page: 2 } }

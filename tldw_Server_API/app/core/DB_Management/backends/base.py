@@ -40,6 +40,10 @@ class UniqueConstraintError(ConstraintViolationError):
     """A uniqueness conflict, without driver diagnostics or identifying payload."""
 
 
+class SavedViewNameUniqueConstraintError(UniqueConstraintError):
+    """A saved-view owner/workspace/name conflict without driver payload."""
+
+
 class TransientContentionError(DatabaseError):
     """Lock or serialization contention that retrying the whole transaction can clear.
 

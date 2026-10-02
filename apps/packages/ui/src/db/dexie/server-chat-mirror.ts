@@ -5,6 +5,7 @@ import { db } from "./schema"
 import { generateID } from "./helpers"
 import { runChatPersistenceTransaction } from "./chat-persistence-transaction"
 import type { Message } from "./types"
+import type { HistoryOperationOptions } from "./history-selection"
 
 /** Full verified target/owner identity; never stores bearer tokens or API keys. */
 export const serverChatMirrorOwnerKey = (snapshot: Pick<ServicePromptSnapshot, "requestScope">): string => {
@@ -18,11 +19,11 @@ export const serverChatMirrorOwnerKey = (snapshot: Pick<ServicePromptSnapshot, "
 }
 
 export const linkServerChatMirror = async ({
-  chatId, title, ownerKey, currentHistoryId, legacyHistoryId, signal
+  chatId, title, ownerKey, currentHistoryId, legacyHistoryId, signal, validate_lease
 }: {
   chatId: string; title: string; ownerKey: string
-  currentHistoryId?: string | null; legacyHistoryId?: string | null; signal?: AbortSignal
-}): Promise<string> => runChatPersistenceTransaction(signal, async () => {
+  currentHistoryId?: string | null; legacyHistoryId?: string | null
+} & HistoryOperationOptions): Promise<string> => runChatPersistenceTransaction(signal, async () => {
   const candidates = await db.chatHistories.where("server_chat_id").equals(chatId).toArray()
   const owned = candidates.find(history => history.server_scope_key === ownerKey)
   const current = currentHistoryId ? await db.chatHistories.get(currentHistoryId) : undefined
@@ -38,7 +39,7 @@ export const linkServerChatMirror = async ({
   await db.chatHistories.add({ id, title, createdAt: Date.now(), is_rag: false,
     message_source: "server", server_chat_id: chatId, server_scope_key: ownerKey })
   return id
-})
+}, undefined, validate_lease)
 
 /** Persist a receipt only onto the captured source row; edits are never replaced. */
 export const acknowledgePromotedChatMessage = async ({
@@ -176,10 +177,10 @@ export const reconcileServerChatMessages = (
 }
 
 export const reconcileServerChatMirror = async ({
-  historyId, chatId, ownerKey, messages, localMessages = [], signal
+  historyId, chatId, ownerKey, messages, localMessages = [], signal, validate_lease
 }: {
-  historyId: string; chatId: string; ownerKey: string; messages: ChatMessage[]; localMessages?: ChatMessage[]; signal?: AbortSignal
-}): Promise<{ localIds: Map<string, string>; rows: Message[] }> => runChatPersistenceTransaction(signal, async () => {
+  historyId: string; chatId: string; ownerKey: string; messages: ChatMessage[]; localMessages?: ChatMessage[]
+} & HistoryOperationOptions): Promise<{ localIds: Map<string, string>; rows: Message[] }> => runChatPersistenceTransaction(signal, async () => {
   const history = await db.chatHistories.get(historyId)
   if (history?.server_chat_id !== chatId || history.server_scope_key !== ownerKey) {
     throw createServicePromptScopeChangedError()
@@ -228,7 +229,7 @@ export const reconcileServerChatMirror = async ({
     localIds.set(serverMessageId, id)
   }
   return { localIds, rows: await db.messages.where("history_id").equals(historyId).toArray() }
-})
+}, undefined, validate_lease)
 
 /** Apply a successful canonical delete to only its already-acknowledged local mirror. */
 export const removeAcknowledgedServerMirrorMessage = async ({

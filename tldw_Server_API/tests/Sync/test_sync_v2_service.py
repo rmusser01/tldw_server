@@ -93,6 +93,12 @@ def _clock() -> str:
     return "2026-05-10T12:00:00+00:00"
 
 
+@pytest.fixture(autouse=True)
+def _fixed_sync_storage_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep database expiry checks on the service fixture's fixed clock."""
+    monkeypatch.setattr(sync_db_module, "utcnow_iso", _clock)
+
+
 def _sha256(data: bytes) -> str:
     return "sha256:" + hashlib.sha256(data).hexdigest()
 
@@ -7760,7 +7766,7 @@ def test_versioned_pull_does_not_advance_past_unresolved_conflict(
 
 
 @pytest.mark.unit
-def test_legacy_pull_does_not_advance_past_unresolved_conflict(
+def test_legacy_pull_holds_cursor_and_reports_no_more_for_unresolved_conflict(
     sync_store: SyncV2Store,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

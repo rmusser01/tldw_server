@@ -32,6 +32,17 @@ class ResponsePattern:
                 if messages:
                     last_message = messages[-1]
                     content = last_message.get("content", "")
+                    # Primary Chat templates plain text into OpenAI text blocks.
+                    # Keep text fixtures strict: images and malformed parts do not qualify.
+                    if isinstance(content, list):
+                        if not content or not all(
+                            isinstance(part, dict)
+                            and part.get("type") == "text"
+                            and isinstance(part.get("text"), str)
+                            for part in content
+                        ):
+                            return False
+                        content = "\n".join(part["text"] for part in content)
                     if isinstance(content, str):
                         if not re.search(pattern, content):
                             return False

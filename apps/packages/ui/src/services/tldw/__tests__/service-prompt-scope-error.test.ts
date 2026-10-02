@@ -13,6 +13,19 @@ import {
 
 describe("Service Prompt scope policy", () => {
   it.each([
+    ["/api/v1/messages/12345678-1234-4123-8123-123456789abc?scope_type=global&include_history_recovery_v1=true", "GET", true],
+    ["/api/v1/messages/12345678-1234-4123-8123-123456789abc", "POST", false],
+    ["/api/v1/messages/12345678-1234-4123-8123-123456789abc", "PUT", false],
+    ["/api/v1/messages/12345678-1234-4123-8123-123456789abc", "DELETE", false],
+    ["/api/v1/messages/12345678-1234-4123-8123-123456789abc/", "GET", false],
+    ["/api/v1/messages/12345678-1234-4123-8123-123456789abc/extra", "GET", false],
+    ["/api/v1/messages/not-a-uuid", "GET", false],
+    ["/api/v1/messages/a%2fb", "GET", false],
+    ["/api/v1/messages/%2e%2e", "GET", false],
+  ])("bounds the captured recovery message read %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+  it.each([
     "/api/v1/workspaces/ws-1", "/api/v1/workspaces/ws-1/sources",
     "/api/v1/workspaces/ws-1/artifacts", "/api/v1/workspaces/ws-1/notes"
   ])("allows only GET for captured activation read %s", (path) => {
@@ -43,6 +56,19 @@ describe("Service Prompt scope policy", () => {
   ])("bounds captured source preview %s %s", (path, method, allowed) => {
     expect(isServicePromptRequestPath(path, method)).toBe(allowed)
   })
+  it.each([
+    ["/api/v1/media/389", "PUT", true],
+    ["/api/v1/media/389/metadata", "PATCH", true],
+    ["/api/v1/media/389/reprocess", "POST", true],
+    ["/api/v1/media/389/metadata", "PUT", false],
+    ["/api/v1/media/389/reprocess", "GET", false],
+    ["/api/v1/media/389/reprocess/extra", "POST", false],
+    ["/api/v1/media/389%2fother", "PUT", false],
+    ["/api/v1/media/../settings", "PUT", false],
+  ])("bounds owned Content Review commit %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+
   it.each([
     ["/api/v1/chats/owned/complete-v2", "POST", true],
     ["/api/v1/chats/owned/complete-v2?scope_type=workspace&workspace_id=w", "POST", true],
@@ -108,7 +134,7 @@ describe("Service Prompt scope policy", () => {
   })
 
   it.each([
-    "/api/v1/chats/",
+    "/api/v1/chats",
     "/api/v1/chats/%2e%2e",
     "/api/v1/chats/a%2fb",
     "/api/v1/chats/a%5cb",
@@ -209,7 +235,12 @@ describe("Service Prompt scope policy", () => {
     expect(isServicePromptRequestPath("/api/v1/rag/search", "DELETE")).toBe(false)
     expect(isServicePromptRequestPath("/api/v1/research/websearch", "PATCH")).toBe(false)
     expect(isServicePromptRequestPath("/api/v1/chats/chat-1/messages", "GET")).toBe(true)
-    expect(isServicePromptRequestPath("/api/v1/chats/", "GET")).toBe(false)
+    expect(isServicePromptRequestPath("/api/v1/chats/", "GET")).toBe(true)
+    expect(isServicePromptRequestPath("/api/v1/chats/conversations", "GET")).toBe(true)
+    expect(isServicePromptRequestPath("/api/v1/chats", "GET")).toBe(false)
+    expect(isServicePromptRequestPath("/api/v1/chats/conversations/", "GET")).toBe(false)
+    expect(isServicePromptRequestPath("/api/v1/chats/conversations", "POST")).toBe(false)
+    expect(isServicePromptRequestPath("/api/v1/chats/conversations/nested", "GET")).toBe(false)
     expect(isServicePromptRequestPath("/api/v1/chats", "POST")).toBe(false)
     expect(isServicePromptRequestPath("/api/v1/media/add", "GET")).toBe(false)
     expect(isServicePromptRequestPath("/api/v1/auth/refresh", "GET")).toBe(false)

@@ -8,7 +8,6 @@ virtual key on the same FastAPI app, ensuring both guardrails operate together.
 
 import os
 from pathlib import Path
-from typing import Dict
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,9 +24,9 @@ async def test_guardrail_stack_login_lockout_and_chat_budget(tmp_path):
     os.environ["VIRTUAL_KEYS_ENABLED"] = "true"
     os.environ["LLM_BUDGET_ENFORCE"] = "true"
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
     await reset_db_pool()
@@ -59,7 +58,7 @@ async def test_guardrail_stack_login_lockout_and_chat_budget(tmp_path):
         def __init__(self, threshold: int = 3) -> None:
             self.enabled = True
             self.threshold = threshold
-            self._attempts: Dict[str, int] = {}
+            self._attempts: dict[str, int] = {}
             self._locked_ids: set[str] = set()
 
         async def check_lockout(self, identifier: str):
@@ -85,8 +84,8 @@ async def test_guardrail_stack_login_lockout_and_chat_budget(tmp_path):
 
     limiter = _StubLimiter(threshold=3)
 
-    from tldw_Server_API.app.main import app
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.main import app
 
     async def _get_stub_limiter():
         return limiter

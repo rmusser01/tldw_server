@@ -97,6 +97,10 @@ from tldw_Server_API.app.api.v1.schemas.workspace_chat_startup_schemas import (
     STARTUP_IDEMPOTENCY_KEY_PATTERN,
     WorkspaceChatStartupRequest,
 )
+from tldw_Server_API.app.api.v1.utils.chat_message_images import (
+    format_message_content,
+    read_messages_with_images,
+)
 from tldw_Server_API.app.api.v1.utils.deprecation import build_deprecation_headers
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
@@ -5299,7 +5303,9 @@ async def get_chat_context(
         _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
 
         settings_row = db.get_conversation_settings(chat_id)
-        history_messages = db.get_messages_for_conversation(chat_id, limit=1000, offset=0) or []
+        history_messages, attachment_urls = await run_in_threadpool(
+            read_messages_with_images, db, chat_id, limit=1000, for_completions=True,
+        )
         history_messages = [m for m in history_messages if not m.get('deleted')]
         turn_context = _resolve_chat_turn_context(
             db=db,
@@ -5323,7 +5329,7 @@ async def get_chat_context(
                 participant_aliases,
             )
             content = _safe_replace_placeholders(m.get('content'), char_name, user_name)
-            formatted.append({"role": role, "content": content})
+            formatted.append({"role": role, "content": format_message_content(content, attachment_urls.get(m["id"], []), m.get("image_details"))})
 
         # If no messages, include first_message as an initial assistant message (with placeholders resolved)
         if not formatted and character.get('first_message'):
@@ -5466,7 +5472,9 @@ async def prepare_chat_completion(
             owner_user_id=str(current_user.id),
         )
 
-        messages = db.get_messages_for_conversation(chat_id, limit=limit, offset=offset) or []
+        messages, attachment_urls = await run_in_threadpool(
+            read_messages_with_images, db, chat_id, limit=limit, offset=offset, for_completions=True,
+        )
         # Filter deleted
         messages = [m for m in messages if not m.get('deleted')]
         paginated = messages
@@ -5538,7 +5546,11 @@ async def prepare_chat_completion(
                     primary_character_name,
                     participant_aliases,
                 ),
-                "content": _safe_replace_placeholders(msg.get('content'), char_label, user_name)
+                "content": format_message_content(
+                    _safe_replace_placeholders(msg.get('content'), char_label, user_name),
+                    attachment_urls.get(msg["id"], []),
+                    msg.get("image_details"),
+                )
             })
 
         if body.append_user_message:
@@ -6294,7 +6306,9 @@ async def character_chat_completion(
             if _active_chat_sync_service(current_user, conversation_scope) is not None:
                 raise _chat_completion_persist_sync_unsupported_error()
 
-        messages = db.get_messages_for_conversation(chat_id, limit=limit, offset=offset) or []
+        messages, attachment_urls = await run_in_threadpool(
+            read_messages_with_images, db, chat_id, limit=limit, offset=offset, for_completions=True,
+        )
         messages = [m for m in messages if not m.get('deleted')]
         paginated = messages
         summary_content = ""
@@ -6341,7 +6355,11 @@ async def character_chat_completion(
                     primary_character_name,
                     participant_aliases,
                 ),
-                "content": _safe_replace_placeholders(msg.get('content'), char_label, user_name)
+                "content": format_message_content(
+                    _safe_replace_placeholders(msg.get('content'), char_label, user_name),
+                    attachment_urls.get(msg["id"], []),
+                    msg.get("image_details"),
+                )
             })
 
         # Optional appended user message
@@ -6729,7 +6747,7 @@ async def character_chat_completion(
                     raise_detached_error(
                         HTTPException(
                             status_code=provider_status_code,
-                            detail="Chat provider error",
+                            detail=provider_stream_error_payload(e),
                         )
                     )
                 except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS as e:
@@ -6920,7 +6938,7 @@ async def character_chat_completion(
             last_user = None
             for m in reversed(formatted):
                 if m.get("role") == "user":
-                    last_user = m.get("content")
+                    last_user = _extract_character_latest_user_turn_text([m])
                     break
             assistant_text = (last_user or "OK").strip()
             assistant_tool_calls = []
@@ -7044,7 +7062,9 @@ async def character_chat_completion(
                             "Character stream provider failure error_type={}",
                             type(exc).__name__,
                         )
-                        await stream.error("provider_error", "Chat provider error")
+                        payload = provider_stream_error_payload(exc)
+                        await stream.send_json(payload)
+                        await stream.done()
                     except Exception as exc:  # noqa: BLE001 - lazy adapter failures are terminal frames
                         stream_success_state["successful"] = False
                         logger.debug(
@@ -7137,7 +7157,7 @@ async def character_chat_completion(
                         "Character stream provider failure error_type={}",
                         type(exc).__name__,
                     )
-                    yield sse_data({'error': 'Chat provider error'})
+                    yield sse_data(provider_stream_error_payload(exc))
                 except Exception as exc:  # noqa: BLE001 - lazy adapter failures are terminal frames
                     stream_success_state["successful"] = False
                     logger.debug(
@@ -8676,7 +8696,7 @@ async def persist_streamed_assistant_message(
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail=_build_persist_validation_degraded_detail(existing_id),
-                )
+                ) from None
             return CharacterChatStreamPersistResponse(
                 chat_id=chat_id,
                 assistant_message_id=existing_id,

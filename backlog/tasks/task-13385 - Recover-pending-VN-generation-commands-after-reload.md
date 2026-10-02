@@ -3,20 +3,20 @@ id: TASK-13385
 title: Recover pending VN generation commands after reload
 status: In Progress
 assignee: []
-created_date: 2026-09-27 15:25
-updated_date: 2026-09-28 04:00
+created_date: '2026-09-27 15:25'
+updated_date: '2026-09-29 01:25'
 labels:
-- vn-assets
-- frontend
-- recovery
+  - vn-assets
+  - frontend
+  - recovery
 dependencies: []
 references:
-- https://github.com/rmusser01/tldw_server/issues/2021
-- https://github.com/rmusser01/tldw_server/pull/3015
-- https://github.com/rmusser01/tldw_server/pull/3028
+  - 'https://github.com/rmusser01/tldw_server/issues/2021'
+  - 'https://github.com/rmusser01/tldw_server/pull/3015'
+  - 'https://github.com/rmusser01/tldw_server/pull/3028'
 documentation:
-- Docs/Design/VN_PENDING_COMMAND_RECOVERY.md
-- IMPLEMENTATION_PLAN_vn_command_recovery_pr_review.md
+  - Docs/Design/VN_PENDING_COMMAND_RECOVERY.md
+  - Docs/Plans/IMPLEMENTATION_PLAN_vn_command_recovery_pr_review.md
 priority: high
 ---
 
@@ -36,7 +36,7 @@ Requester-approved continuation of #2021 after PR #3015 / TASK-13378. Persist un
 
 ## Implementation Notes
 
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+<!-- SECTION:NOTES:BEGIN -->
 Inventory across registered worktrees found maximum ID 13384. CLI auto-allocation selected already-used 13379; the newly created duplicate was archived through CLI without altering the unrelated Chat Macros task. Explicit unused ID 13385 is the authoritative VN slice record.
 
 Approved design and three-stage plan added. Branch codex/vn-command-recovery reuses the VN worktree on dev f2830058d5; prior completion commit retained on original branch and cherry-picked as 6bbe71ab9e. Frontend-only closed session journal, verified account lifecycle and explicit same-payload/key recovery implemented. No automatic generation. Storage failures fail closed; unreadable data requires warned discard confirmation. Account changes reject pre-send replay; epochs and per-command tokens fence stale responses/locks; logout invalidates entries. Canonical profile 404/410 permits existing authenticated /auth/me compatibility path, never cached identity.
@@ -55,7 +55,7 @@ Requester selected option2 (push and create PR), not merge. Fetched dev718c19108
 
 Published requester-approved branch codex/vn-command-recovery by normal push, verified local/remote head01a964685dbe0b667ac85c898ab97496c63d6a06, and created PR3028 against dev: https://github.com/rmusser01/tldw_server/pull/3028. Attached PR to this chat. Human-owned Change summary explicitly pending; AI-authored summary is not a substitute. No merge or auto-merge enabled. Task implementation remains Done; hosted CI/review and human summary are PR integration gates, not claims of completion. Final tracking-only commit will be pushed normally after verifying remote ownership.
 
-Requester explicitly authorized protected rebase of PR3028 onto latest dev, scoped remediation of posted Qodo findings and a normal merge only after complete current-head review and all live required gates. Human-written Change summary was provided and published verbatim before this authorization; design approval was never merge authorization. Verified clean owned local/remote head5de2ed11671f593968a86aef24d3be0422488f75; latest dev35d6dd90d4c3b703a753efdbd926e30af4f9eac5 contains only unrelated MCP tests/task records. Rebase was conflict-free and all five prior patches are unchanged in range-diff. Local preview-only UI dependency link and CLI-created colliding archive13379 remain untracked and excluded. PR review plan: IMPLEMENTATION_PLAN_vn_command_recovery_pr_review.md. Fresh verification and new-head reviews remain pending.
+Requester explicitly authorized protected rebase of PR3028 onto latest dev, scoped remediation of posted Qodo findings and a normal merge only after complete current-head review and all live required gates. Human-written Change summary was provided and published verbatim before this authorization; design approval was never merge authorization. Verified clean owned local/remote head5de2ed11671f593968a86aef24d3be0422488f75; latest dev35d6dd90d4c3b703a753efdbd926e30af4f9eac5 contains only unrelated MCP tests/task records. Rebase was conflict-free and all five prior patches are unchanged in range-diff. Local preview-only UI dependency link and CLI-created colliding archive13379 remain untracked and excluded. PR review plan: Docs/Plans/IMPLEMENTATION_PLAN_vn_command_recovery_pr_review.md. Fresh verification and new-head reviews remain pending.
 
 Fresh verification after rebase onto dev35d6dd90d4c3b703a753efdbd926e30af4f9eac5: all97 VN/frontend real fetch-client tests passed (15.28s), frontend typecheck passed, scoped ESLint zero warnings and diff checks passed. Unrelated MCP tests/task13358/task13380/base workflows match dev byte-for-byte. Bandit unchanged VN Python baseline returned zero findings/errors; it does not scan touched TypeScript. Only scoped design wording distinguishes approved design from human-summary/current-head review/CI merge gates; no production behavior changed. Qodo discussion4116043591 was posted before the human summary, while merge/auto-merge were intentionally disabled. Human summary now published verbatim, explicit gated merge authorization received; reply and exact-new-head hosted reviews will follow protected publication. Task remains In Progress until verified merge.
 Protected rebase published as581979a4a87543aedd73ac0f11667c2dc253e73b with explicit lease on full remote5de2ed11671f593968a86aef24d3be0422488f75; head/base/clean tracked checkout and verbatim human summary reverified. Qodo exact-head full-diff reassessment comment5858115068 found no production defects and accepted the human-gate clarification. It flagged duplicate task final-summary end markers and stale review-plan statuses; synchronize these through official Backlog mutation and own plan edit. CodeRabbit full review trigger5858113221 is running and exact-head CI/license audit pending. No merge attempted. Task remains In Progress.
@@ -114,7 +114,8 @@ FINAL fresh qualification of conflict-free rebase onto devbd2ae757d274e7eda3edb4
 2026-09-28T03:35Z FINAL de7 rebase qualification completed: all236VN/frontend realfetch/sharedauth PASS50.66s total/41.59s testtime/11files/oneworker; all393VNbackend PASS504.28s/13warnings/normalexit0 (owned session12193 fullycompleted, notterminated), activatedmainvenv/existingCIoverlay/approvedDBbasetemp. Typecheck/frontendESLint/sharedESLint/backendcompile/diff/basefileequality PASS. Fresh unchangedPythonVNBandit /tmp/bandit_vn3028_rebase_de7f45.json0findings0errors9068LOC, NOTTSscan. No skippedtests/weakenedlimits/environment/config/package changes. Inherited independentPR3039/backend/settings/TASK13264 remain byte-equalde7, no authorship/scopeexpansion. Additional evidence changes only TASK13385 and ownplan; allhistory and exactlyonefinal-summary endmarker retained. The protected rebase's28patch FINALequals includes unpushed scoped449fix; explicitpublication lease protects full remote ba3f8d7e5909bd4a340658cb7cc18b96049a062a, after freshlatestdev/ownership. Changedhead completeFIRST reviews, exacthead CI and verified normalmerge remain pending. No livePostgres/backend/GPU/deployment acceptance claim.
 2026-09-28T03:55Z: Current 7ee1cd4bf5b306ff417ca7889da3554018f678c1 Qodo FIRST full reassessment completed in Deep mode (sticky updated 03:51:33, explicit update 5863015836 at 03:51:37), with zero bugs and one scoped rule finding 4118397636: URL normalization, three invalid server cases and an unverified principal are combined in one test. The original 29-test journal suite passed before edits (1.09s total, 13ms test time). Split those existing scenarios into independent normalization, it.each invalid URL cases and principal rejection tests; this is test hygiene, NOT a new runtime defect or invented red evidence. CodeRabbit current first full review is still pending, but valid minor tracking finding 4118400067 asks for spaces and shorter sentences in the latest final summary. Correct only the AI-owned current final summary through official task_edit, retaining all historical notes and exactly one final-summary end marker. Clean tracked local and owned remote 7ee and latest dev de7f453593dbb40f069a4666fd562fc5f3622817 were verified unchanged before edits. No runtime, design, backend, auth, CI, dependency, environment or unrelated task changes. New publication will require complete changed-head full reviews and exact-head CI before normal merge; task and review stages remain In Progress.
 2026-09-28T03:59Z FINAL scoped review cleanup: Qodo 4118397636 is addressed with independent URL-normalization and principal-rejection tests plus it.each invalid URLs. The original 29 journal tests passed before edits (1.09s total), so this is test isolation, not new runtime-bug red evidence. All 33 journal tests pass in 0.788s (11ms test time); all 240 VN/fetch/shared-auth tests pass in 53.78s (44.39s test time), 11 files, one worker, no skipped tests or changed limits. Typecheck, both scoped ESLint commands, diff and runtime/design/backend/CI equality against published 7ee pass. Fresh Python VN Bandit /tmp/bandit_vn3028_test_scope_cleanup.json reports zero findings or file errors over 9068 lines; it does not scan TypeScript. Shared environment, config, dependency policy, preview and intentional local artifacts remain untouched. CodeRabbit 4118400067 is addressed by rewriting only the current AI-owned final summary with spaces and shorter paragraphs, retaining all historical notes and one final-summary end marker. After the initial tracking snapshot, CodeRabbit's trigger was verified explicitly full-finished at 03:54:59 (5862971038), sticky 03:54:49 with both full7ee source/covered IDs and kind reviewed, Low merge risk and this minor non-blocking tracking comment. Its Moderate architecture inference repeats the existing server partial-failure/idempotency limit; current Risk & Rollback already acknowledges original-key replay is not exactly-once and UI/storage rollback does not cancel accepted Jobs. Qodo exact7ee full Deep result completed at 03:51:33/explicit 5863015836 at 03:51:37 with zero bugs and one now-addressed test rule. No additional inline findings appeared by 03:59. This three-file test/tracking cleanup will be normal-pushed from owned 7ee after fresh head/dev checks; changed-head complete reviews and exact-head gates remain required before verified normal merge. The fresh 393-test backend result on unchanged dev DE7 remains applicable; it was not unnecessarily rerun.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+<!-- SECTION:NOTES:END -->
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
@@ -126,6 +127,7 @@ The fix was preserved locally as 4490d2dae00cede179a31eb5f5b1fed4e7b1a9b5 before
 
 The first complete 7ee full reassessments finished: Qodo Deep at 03:51:33 UTC (explicit update 5863015836) and CodeRabbit at 03:54:59 UTC (trigger 5862971038, exact reviewed source/covered commit). Qodo test-isolation finding 4118397636 is addressed by separate normalization and principal tests plus parameterized invalid URLs. The original 29-test journal suite passed before this split; this is test hygiene, not new runtime-bug evidence. All 33 isolated journal tests pass in 0.788s, and all 240 VN/fetch/shared-auth tests pass in 53.78s across 11 files with one worker. Typecheck, both scoped lint commands, diff and runtime/base-file equality checks pass. Fresh Python VN Bandit reports zero findings or file errors over 9068 lines. CodeRabbit readability finding 4118400067 is addressed in this current final summary through official task editing. All historical notes remain intact, with one final-summary end marker. Runtime, backend and design are unchanged, so the fresh 393-test backend qualification above still applies. CodeRabbit's remaining server-idempotency and rollback inference is already documented, not a new established code defect. This cleanup changes only the validation tests, TASK-13385 and its own plan. Historical notes, the verbatim human Change summary, local artifacts, shared environments and preview are preserved. Complete changed-head reassessments, exact-head gates and verified normal merge remain pending. TASK-13385 and review stages 2/3 remain In Progress until verified merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

@@ -4,7 +4,7 @@ title: Finalize Chat Workspace live UAT and latest-dev PR gates
 status: In Progress
 assignee: []
 created_date: '2026-10-01 18:39'
-updated_date: '2026-10-02 00:26'
+updated_date: '2026-10-02 00:53'
 labels: []
 dependencies: []
 references:
@@ -48,6 +48,8 @@ Publication verified using gh pr view: PR3071 OPEN DRAFT, base dev, branch codex
 Requester supplied Change summary on2026-10-01; add verbatim to PR3071. Completed head792b6CI has281passing/36skipped checks; Onboarding andUXSmoke bothPASS. Three failing backend shards: selected-durable transformative moderation fixture returns mandatory_audit_unavailable503 instead409; SourceV1 malformed locator metadata9 unexpectedlyvalid; Streaming expectedno-cache but nowcorrectno-cache,no-transform. Actual failed joblogs saved externally. Latestdev5f3ed81e88ec44750a5baa7838f7c69672e32694 includes1060changedpaths; immutable mergepreview shows7conflicts in useChatActions/useHistorySelection/service-prompt-scope-error+test/character_messages/chat_service/raw-contenttest. Reopening finalization for root-cause repairs and conservative latest-dev reconciliation, followed by scoped tests/Bandit/review and actual no-mock runtime UAT. Do notmergeGitHubPR.
 
 Human Change summary was published verbatim in PR3071 and readback will verify exact prose. No merge authorization inferred. New plan records3stages. Schema and moderation fixture root diagnoses delegated read-only with no source/tests/services writes while parent reconciles7mergeconflicts. Parent owns runtime preservation and all merge operations.
+
+Latest-dev merge follow-up: source total_chunks bounds reproduced under cached Pydantic 2.13.5 and fixed without pinning; moderation audit override leakage reproduced and scoped fixture cleanup green in both orders; stale SSE assertions updated to require no-cache and no-transform. Fresh live Chrome UAT exposed valid RAG source bookkeeping rejected before inference (zero completion dispatches), now under diagnosis. Independent merge review found protected image read 503 mapping regression under repair. Restored all five exact live services. Local PostgreSQL gate failed on unavailable/unhealthy Docker daemon; retain failed evidence, do not count as a pass. Original stored conversation rows remain exact, but historical Chrome target IDs are absent while same-URL tabs remain; no tabs were created or closed by this follow-up.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

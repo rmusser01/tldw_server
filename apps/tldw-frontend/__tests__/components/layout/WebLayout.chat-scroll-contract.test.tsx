@@ -379,8 +379,8 @@ vi.mock('@web/components/ui/ToastProvider', () => ({
   useToast: () => ({ show: vi.fn() }),
 }));
 
-vi.mock('@/components/Common/CommandPalette', () => ({
-  CommandPalette: () => null,
+vi.mock('@/components/Common/CommandPaletteHost', () => ({
+  CommandPaletteHost: () => null,
 }));
 
 vi.mock('@/components/Common/TutorialRunner', () => ({

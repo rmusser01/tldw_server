@@ -39,6 +39,20 @@ def test_protected_result_schema_advertises_enforced_uuid(selected_openapi):
     assert result["properties"]["result_message_id"].get("format") == "uuid"
 
 
+def test_source_metadata_total_chunks_advertises_positive_safe_integer(selected_openapi):
+    metadata = [
+        schema for name, schema in selected_openapi["components"]["schemas"].items()
+        if name.startswith("SourceMetadataV1")
+    ]
+    assert metadata
+    for schema in metadata:
+        total = schema["properties"]["total_chunks"]
+        assert {key: total[key] for key in ("type", "minimum", "maximum")} == {
+            "type": "integer", "minimum": 1, "maximum": 9007199254740991,
+        }
+        assert "total_chunks" not in schema.get("required", [])
+
+
 @pytest.mark.parametrize("path", ["/api/v1/messages/{message_id}", "/api/v1/chats/{chat_id}/messages"])
 def test_recovery_operations_advertise_protected_read(selected_openapi, path):
     operation = selected_openapi["paths"][path]["get"]

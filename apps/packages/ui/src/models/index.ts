@@ -43,6 +43,7 @@ type PageAssistModelOptions = {
   scope?: ChatScope
   signal?: AbortSignal
   retryFailedTurn?: boolean
+  refreshImageCapability?: boolean
   clientMessageId?: string
   regenerateFromMessageId?: string
 }
@@ -83,6 +84,7 @@ export const pageAssistModel = async ({
   scope,
   signal,
   retryFailedTurn,
+  refreshImageCapability,
   clientMessageId,
   regenerateFromMessageId
 }: PageAssistModelOptions): Promise<ChatTldw> => {
@@ -115,17 +117,34 @@ export const pageAssistModel = async ({
   const resolvedToolChoice = toolChoice ?? storedToolChoice
   const selectedModel = parseProviderQualifiedModelSelection(model)
   const normalizedModelId = selectedModel.modelId.replace(/^tldw:/, "")
+  const rawProvider = apiProvider ?? currentChatModelSettings.apiProvider
+  const explicitProvider =
+    typeof rawProvider === "string" && rawProvider.trim().length > 0
+      ? rawProvider.trim()
+      : undefined
+  const defaultApiProvider =
+    !explicitProvider ? await getDefaultApiProvider() : null
+  const normalizedApiProvider = await resolveApiProviderForModel({
+    modelId: model,
+    explicitProvider: explicitProvider ?? defaultApiProvider ?? undefined
+  })
   let modelSupportsTools = false
   let modelSupportsMultimodal = false
   try {
-    const modelInfo = selectedModel.provider
-      ? (await tldwModels.getModels()).find(
-          (info) =>
-            normalizeProviderAvailabilityKey(info.provider) ===
-              normalizeProviderAvailabilityKey(selectedModel.provider) &&
-            info.id === normalizedModelId
-        )
+    const matchesModel = (info: { id: string; provider?: string }) =>
+      info.id === normalizedModelId &&
+      (!normalizedApiProvider ||
+        normalizeProviderAvailabilityKey(info.provider) ===
+          normalizeProviderAvailabilityKey(normalizedApiProvider))
+    let modelInfo = selectedModel.provider
+      ? (await tldwModels.getModels()).find(matchesModel)
       : await tldwModels.getModel(normalizedModelId)
+    if (modelInfo && !matchesModel(modelInfo)) {
+      modelInfo = (await tldwModels.getModels()).find(matchesModel)
+    }
+    if (refreshImageCapability && !modelInfo?.capabilities?.includes("vision")) {
+      modelInfo = (await tldwModels.getModels(true, { requireFresh: true })).find(matchesModel)
+    }
     modelSupportsTools = Boolean(modelInfo?.capabilities?.includes("tools"))
     modelSupportsMultimodal = Boolean(
       modelInfo?.capabilities?.includes("vision")
@@ -179,18 +198,6 @@ export const pageAssistModel = async ({
     resolvedSlashInjectionMode && resolvedSlashInjectionMode.trim().length > 0
       ? resolvedSlashInjectionMode.trim()
       : undefined
-  const rawProvider = apiProvider ?? currentChatModelSettings.apiProvider
-  const explicitProvider =
-    typeof rawProvider === "string" && rawProvider.trim().length > 0
-      ? rawProvider.trim()
-      : undefined
-  const defaultApiProvider = !explicitProvider
-    ? await getDefaultApiProvider()
-    : null
-  const normalizedApiProvider = await resolveApiProviderForModel({
-    modelId: model,
-    explicitProvider: explicitProvider ?? defaultApiProvider ?? undefined
-  })
   const resolvedExtraHeadersBase = parseJsonObject(
     extraHeaders ?? currentChatModelSettings.extraHeaders
   )

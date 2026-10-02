@@ -737,6 +737,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     promptId = promptData.promptId
     const sources = promptData.sources ?? []
     const humanMessage = promptData.humanMessage
+    const outgoingMessages = humanMessage
+      ? [...promptData.chatHistory, humanMessage]
+      : [...promptData.chatHistory]
 
     const requestProvider =
       selectedModelSelection.provider ?? context.currentChatModelSettings?.apiProvider
@@ -757,11 +760,23 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       researchContext: context.researchContext,
       clientMessageId: resolvedUserMessageId,
       retryFailedTurn: serverRetryRequired,
+      // A local refusal is a UI Retry even when no server request was sent.
+      // Inspect prepared content so explicit OCR does not force discovery.
+      refreshImageCapability: retryFailedTurn && outgoingMessages.some(
+        (entry) => Array.isArray(entry.content) &&
+          entry.content.some((part) => part?.type === "image_url")
+      ),
       regenerateFromMessageId: isRegenerate && !retryFailedTurn
         ? regenerateFromMessage?.serverMessageId
         : undefined,
       requestScope: params.servicePromptSnapshot?.requestScope
     })
+
+    if (signal.aborted || params.servicePromptSnapshot?.scopeInvalidatedSignal?.aborted) {
+      const error = new Error("Request cancelled")
+      error.name = "AbortError"
+      throw error
+    }
 
     const finalMessages = humanMessage
       ? [...promptData.chatHistory, humanMessage]

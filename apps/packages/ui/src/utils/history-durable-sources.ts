@@ -72,6 +72,7 @@ const rawMetadataKeys = ["source", "title", "chunk_id", "chunkId", "retrieval_st
   "score", "relevance", "rerank_score", "bm25_norm", "page", "loc", "url", "media_type", "chunk_type",
   "created_at", "last_modified", "transcription_model", "retrieval_mode", "paragraph_kind", "highlighted",
   "match_count", "snippets", "ancestry_titles", "embedding_model", "embedding_provider",
+  "source_id", "evidence_origin", "section_path",
   "media_id", "author", "chunk_index", "total_chunks", "start_char", "end_char", "chunk_start", "chunk_end"]
 const first = (...values: unknown[]) => values.find(value => Boolean(value))
 const firstScore = (...values: unknown[]) => values.find(value => typeof value === "number" && Number.isFinite(value))
@@ -92,7 +93,10 @@ export const projectHistoryDurableSources = (value: unknown): readonly HistoryDu
     // Search decoration/bookkeeping is not consumed by citation display or navigation.
     if ((metadata.match_count !== undefined && !safeInt.safeParse(metadata.match_count).success) ||
         (metadata.snippets !== undefined && !z.array(z.string()).safeParse(metadata.snippets).success) ||
-        (metadata.ancestry_titles !== undefined && (!Array.isArray(metadata.ancestry_titles) || metadata.ancestry_titles.length))) fail()
+        (metadata.source_id !== undefined && !text(512).safeParse(metadata.source_id).success) ||
+        (metadata.evidence_origin !== undefined && !text(128).safeParse(metadata.evidence_origin).success) ||
+        (metadata.section_path !== undefined && !text(1000).safeParse(metadata.section_path).success) ||
+        (metadata.ancestry_titles !== undefined && !z.array(text(1000)).max(20).safeParse(metadata.ancestry_titles).success)) fail()
     if ((metadata.url !== undefined && metadata.url !== source.url) ||
         (metadata.media_type !== undefined && metadata.media_type !== source.type)) fail()
     const projected: Record<string, unknown> = {}

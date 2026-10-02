@@ -36,6 +36,7 @@ from .base import (
     DatabaseError,
     FTSQuery,
     QueryResult,
+    SavedViewNameUniqueConstraintError,
     TransientContentionError,
     UniqueConstraintError,
 )
@@ -1074,6 +1075,7 @@ class PostgreSQLBackend(DatabaseBackend):
         query, params = self._prepare_query(query, params)
         redacted_failure = False
         unique_failure = False
+        saved_view_name_failure = False
         constraint_failure = False
         contention_failure = False
         authorization_failure = False
@@ -1150,6 +1152,10 @@ class PostgreSQLBackend(DatabaseBackend):
                 else None
             )
             unique_failure = _sqlstate == "23505"
+            saved_view_name_failure = unique_failure and (
+                getattr(getattr(e, "diag", None), "constraint_name", None)
+                == "uq_workspace_source_saved_views_owner_name"
+            )
             # SQLSTATE class 23 is integrity_constraint_violation: NOT NULL (23502),
             # FOREIGN KEY (23503), UNIQUE (23505), CHECK (23514) and friends. The CLASS
             # of failure only -- the driver exception is still never chained and the
@@ -1180,6 +1186,8 @@ class PostgreSQLBackend(DatabaseBackend):
                 self.get_pool().return_connection(conn)
 
         if redacted_failure:
+            if saved_view_name_failure:
+                raise SavedViewNameUniqueConstraintError("PostgreSQL query execution failed")
             if unique_failure:
                 raise UniqueConstraintError("PostgreSQL query execution failed")
             if authorization_failure:

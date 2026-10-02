@@ -30,7 +30,7 @@ describe("CurrentChatModelSettings llama.cpp controls guard", () => {
     expect(source).not.toContain('queryKey: ["playground:chatModels", open]')
     expect(source).toContain("return getCanonicalModelKey({")
     expect(source).toContain(
-      "explicitSettingsScope ||\n        selectedModelSettingsScope ||\n        latestSettingsState.activeSettingsScope"
+      "explicitSettingsScope ||\n        selectedSettingsScope ||\n        latestSettingsState.activeSettingsScope"
     )
     expect(source).toContain("updateScopedSetting(targetSettingsScope")
     expect(source).toContain("setActiveSettingsScope(targetSettingsScope)")

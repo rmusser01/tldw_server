@@ -11,10 +11,12 @@ pytestmark = pytest.mark.postgres
 
 @pytest.mark.asyncio
 async def test_profile_version_lock_uses_transaction_connection(test_db_pool):
+    seed_hash = "hash"
     user_id = await ensure_test_user(
         test_db_pool,
         "pg-profile-version-lock",
         "pg-profile-version-lock@example.com",
+        password_hash=seed_hash,
     )
     gateway = ProfileVersionGateway(test_db_pool)
     backend_pool = test_db_pool.pool
@@ -35,9 +37,7 @@ async def test_profile_version_lock_uses_transaction_connection(test_db_pool):
                         await competing_conn.execute(
                             "SET LOCAL lock_timeout = '500ms'"
                         )
-                        # A row lock conflicts with the gateway's FOR UPDATE the
-                        # same way an UPDATE would, without a raw users write.
-                        await competing_conn.execute(
+                        await competing_conn.fetchrow(
                             "SELECT id FROM users WHERE id = $1 FOR UPDATE",
                             int(user_id),
                         )

@@ -1,6 +1,7 @@
 """Raw message-list recovery preserves stored text and existing access checks."""
 
 from types import SimpleNamespace
+from typing import Any
 
 import httpx
 import pytest
@@ -189,3 +190,204 @@ async def test_recovery_listing_rejects_transformed_or_deleted_views(listing_sta
             "include_history_recovery_v1": "true", "render_placeholders": "false", **incompatible,
         })
     assert response.status_code == 422
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recovery", [False, True])
+async def test_image_listing_runs_off_event_loop_with_operation_context(
+    listing_state: tuple[CharactersRAGDB, str, str, str], monkeypatch: pytest.MonkeyPatch,
+    recovery: bool,
+) -> None:
+    """Attachment decoding must not block the loop or lose request-owned DB cleanup."""
+    import threading
+
+    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
+        chacha_operation,
+        current_connection_state,
+    )
+
+    db, chat_id, _, _ = listing_state
+    helper_name = "expand_message_images" if recovery else "read_messages_with_images"
+    original = getattr(character_messages, helper_name)
+    observed = []
+
+    def read(*args: Any, **kwargs: Any) -> Any:
+        """Capture the execution owner while performing the real complete read."""
+        observed.append((threading.get_ident(), current_connection_state(db)))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(character_messages, helper_name, read)
+    app = FastAPI()
+    app.include_router(character_messages.router, prefix="/api/v1")
+    app.dependency_overrides[character_messages.get_request_user] = lambda: SimpleNamespace(id=41)
+    app.dependency_overrides[character_messages.get_chacha_db_for_user] = lambda: db
+    loop_thread = threading.get_ident()
+    with chacha_operation() as operation:
+        expected_state = operation.state_for(db)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get(f"/api/v1/chats/{chat_id}/messages", params={
+                "include_images": True, "include_history_recovery_v1": recovery,
+                "render_placeholders": not recovery, "scope_type": "global",
+            })
+    assert response.status_code == 200
+    assert observed[0][0] != loop_thread
+    assert observed[0][1] is expected_state
+    if recovery:
+        assert response.json()["messages"][0]["tldw_history_recovery_v1"]["status"] == "unverified"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recovery", [False, True])
+@pytest.mark.parametrize("corruption,ordinary_status", [("empty", 409), ("gap", 503)])
+async def test_stored_attachment_read_failure_is_bounded(listing_state, recovery, corruption, ordinary_status):
+    """An incomplete stored page must fail without exposing any message or receipt."""
+    import io
+
+    from PIL import Image
+
+    db, chat_id, message_id, _ = listing_state
+    output = io.BytesIO()
+    Image.new("RGB", (2, 2), "red").save(output, format="PNG")
+    db.append_message_image(message_id, b"" if corruption == "empty" else output.getvalue(), "image/png")
+    if corruption == "gap":
+        with db.transaction() as conn:
+            conn.execute("UPDATE message_images SET position = 2 WHERE message_id = ?", (message_id,))
+    stored = db.get_message_images(message_id)
+    assert stored[0]["image_data"] == (b"" if corruption == "empty" else output.getvalue())
+    assert stored[0]["position"] == (2 if corruption == "gap" else 0)
+    db.close_connection()
+    app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
+    app.include_router(character_messages.router, prefix="/api/v1")
+    app.dependency_overrides[character_messages.get_request_user] = lambda: SimpleNamespace(id=41)
+    app.dependency_overrides[character_messages.get_chacha_db_for_user] = lambda: db
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test",
+    ) as client:
+        response = await client.get(f"/api/v1/chats/{chat_id}/messages", params={
+            "include_images": True, "include_history_recovery_v1": recovery,
+            "render_placeholders": False, "scope_type": "global",
+        })
+    assert response.status_code == (503 if recovery else ordinary_status)
+    assert response.json() == {"detail": (
+        "Saved chat attachments could not be read completely. Retry loading the conversation."
+        if recovery or corruption == "gap" else "A saved chat attachment is incomplete or invalid."
+    )}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("include_images", [False, True])
+@pytest.mark.parametrize("failure,image_status", [("read", 503), ("budget", 413), ("missing", 404)])
+async def test_protected_image_read_failure_translation_is_scoped(
+    listing_state, monkeypatch, include_images, failure, image_status,
+):
+    """Only image reads translate DB failures; unavailable protected rows remain 404."""
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError, InputError
+    from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
+
+    db, chat_id, _, _ = listing_state
+    error = {
+        "read": CharactersRAGDBError("private read failure"),
+        "budget": InputError("private budget failure"),
+        "missing": NotFoundError("private unavailable row"),
+    }[failure]
+
+    def fail_read(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(db, "read_history_recovery_messages", fail_read)
+    app = FastAPI()
+    app.include_router(character_messages.router, prefix="/api/v1")
+    principal = SimpleNamespace(id=41)
+    app.dependency_overrides[character_messages.get_request_user] = lambda: principal
+    app.dependency_overrides[character_messages.get_chacha_db_for_user] = lambda: db
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url="http://test",
+    ) as client:
+        path = f"/api/v1/chats/{chat_id}/messages"
+        params = {"include_images": include_images, "include_history_recovery_v1": True,
+                  "render_placeholders": False, "scope_type": "global"}
+        response = await client.get(path, params=params)
+        assert response.status_code == (image_status if include_images or failure == "missing" else 500)
+        assert "private" not in response.text
+        wrong_scope = await client.get(path, params={**params, "scope_type": "workspace", "workspace_id": "other"})
+        assert wrong_scope.status_code == 404
+        principal.id = 42
+        assert (await client.get(path, params=params)).status_code == 403
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("for_completions", [False, True])
+def test_image_helper_retains_ordered_bytes_and_proven_placeholder_policy(for_completions: bool) -> None:
+    """Direct reads preserve both attachments and remove only a proven placeholder."""
+    import base64
+    import io
+    from unittest.mock import Mock
+
+    from PIL import Image
+
+    from tldw_Server_API.app.api.v1.utils.chat_message_images import read_messages_with_images
+
+    output = io.BytesIO()
+    Image.new("RGB", (2, 2), "red").save(output, format="PNG")
+    png = output.getvalue()
+    row = {"id": "image-turn", "sender": "user", "version": 1, "content": "<Image attachment x2>",
+           "images": [{"image_data": memoryview(png), "image_mime_type": "image/png"},
+                      {"image_data": png, "image_mime_type": "image/png"}]}
+    db = Mock(spec=CharactersRAGDB)
+    db.get_messages_for_conversation.return_value = [row]
+    db.get_message_metadata.return_value = {"extra": {
+        "image_details": ["high", "low"], "content_placeholder_reason": "image_attachment",
+    }}
+    messages, urls = read_messages_with_images(db, "owned", limit=2, for_completions=for_completions)
+    assert urls == {"image-turn": ["data:image/png;base64," + base64.b64encode(png).decode("ascii")] * 2}
+    assert messages[0]["content"] == ("" if for_completions else "<Image attachment x2>")
+    assert messages[0]["image_details"] == ["high", "low"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure,expected_status", [("row_read", 503), ("budget", 413), ("corrupt", 409)])
+def test_image_helper_never_returns_a_partial_page(failure: str, expected_status: int) -> None:
+    """Unreadable, oversized or corrupt attachments fail the complete requested page."""
+    from unittest.mock import Mock
+
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.utils.chat_message_images import read_messages_with_images
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError, InputError
+
+    db = Mock(spec=CharactersRAGDB)
+    if failure == "corrupt":
+        db.get_messages_for_conversation.return_value = [{"id": "broken", "image_data": b"broken",
+                                                          "image_mime_type": "image/png"}]
+    else:
+        db.get_messages_for_conversation.side_effect = (
+            InputError("too large") if failure == "budget" else CharactersRAGDBError("incomplete")
+        )
+    with pytest.raises(HTTPException) as error:
+        read_messages_with_images(db, "owned", limit=2)
+    assert error.value.status_code == expected_status
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("details", [None, ["high", "low"], ["auto"], ["high", "invalid"]])
+def test_image_content_formatter_keeps_order_and_rejects_invalid_options(details: list[str] | None) -> None:
+    """Formatting preserves text-only output and validates ordered image option lists."""
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.utils.chat_message_images import format_message_content
+
+    assert format_message_content("literal text", [], details) == "literal text"
+    urls = ["data:image/png;base64,first", "data:image/jpeg;base64,second"]
+    if details in (["auto"], ["high", "invalid"]):
+        with pytest.raises(HTTPException) as error:
+            format_message_content("", urls, details)
+        assert error.value.status_code == 409
+    else:
+        parts = format_message_content("", urls, details)
+        assert parts == [{"type": "image_url", "image_url": {"url": url, **({"detail": details[i]} if details else {})}}
+                         for i, url in enumerate(urls)]
+    assert urls == ["data:image/png;base64,first", "data:image/jpeg;base64,second"]

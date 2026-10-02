@@ -1240,7 +1240,7 @@ def _install_runtime_tripwires(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("discovery V2 attempted an alternate effect path")
 
     monkeypatch.setattr(socket, "create_connection", forbidden)
-    monkeypatch.setattr(socket, "socket", forbidden)
+    monkeypatch.setattr(socket.socket, "__new__", forbidden)
     for name in ("getaddrinfo", "gethostbyaddr", "gethostbyname", "gethostbyname_ex", "getnameinfo"):
         monkeypatch.setattr(socket, name, forbidden)
     monkeypatch.setattr(http.client, "HTTPConnection", forbidden)
@@ -1256,6 +1256,8 @@ def _install_runtime_tripwires(monkeypatch: pytest.MonkeyPatch) -> None:
         "open_unix_connection",
         "start_unix_server",
     ):
+        if name in ("open_unix_connection", "start_unix_server") and not hasattr(asyncio, name):
+            continue
         monkeypatch.setattr(asyncio, name, forbidden)
     for name in ("Popen", "call", "check_call", "check_output", "run"):
         monkeypatch.setattr(subprocess, name, forbidden)
@@ -1298,6 +1300,47 @@ def _install_runtime_tripwires(monkeypatch: pytest.MonkeyPatch) -> None:
         return original_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+
+@pytest.mark.parametrize(
+    "missing_apis",
+    [(), ("open_unix_connection",), ("start_unix_server",),
+     ("open_unix_connection", "start_unix_server"), ("open_connection",)],
+    ids=["unix", "no-unix-client", "no-unix-server", "windows", "missing-mandatory"],
+)
+def test_runtime_tripwires_preserve_socket_type_and_platform_capabilities(
+    missing_apis: tuple[str, ...],
+) -> None:
+    """Absent Unix APIs are optional; available egress and mandatory seams remain guarded."""
+    def available_api(*_args, **_kwargs):
+        return None
+
+    with pytest.MonkeyPatch.context() as patch:
+        for name in ("open_unix_connection", "start_unix_server"):
+            patch.setattr(asyncio, name, available_api, raising=False)
+        for name in missing_apis:
+            patch.delattr(asyncio, name)
+        existing_socket = socket.socket()
+        try:
+            if "open_connection" in missing_apis:
+                with pytest.raises(AttributeError, match="open_connection"):
+                    _install_runtime_tripwires(patch)
+                return
+            _install_runtime_tripwires(patch)
+            assert isinstance(existing_socket, socket.socket)
+            with pytest.raises(AssertionError, match="alternate effect path"):
+                socket.socket()
+            for name in (
+                "open_connection", "start_server", "create_subprocess_exec", "create_subprocess_shell",
+                "open_unix_connection", "start_unix_server",
+            ):
+                if name in missing_apis:
+                    assert not hasattr(asyncio, name)
+                else:
+                    with pytest.raises(AssertionError, match="alternate effect path"):
+                        getattr(asyncio, name)()
+        finally:
+            existing_socket.close()
 
 
 def _aggregator_plan():

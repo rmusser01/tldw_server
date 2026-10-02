@@ -587,31 +587,67 @@ def test_output_presets_are_user_scoped_and_validated(tmp_path):
     assert db.delete_output_preset(preset_id=int(preset.id)) is False
 
 
-def test_output_preset_unique_constraint_races_map_to_name_exists(tmp_path, monkeypatch):
+@pytest.mark.parametrize("operation", ["create", "update"])
+def test_output_preset_unique_constraint_races_map_to_name_exists(tmp_path, monkeypatch, operation):
     db = _make_db(tmp_path)
     existing = db.create_output_preset(
         name="Daily newsletter",
         description=None,
         output_prefs={"generate_audio": True},
+        is_default=True,
     )
     other = db.create_output_preset(
         name="Other preset",
         description=None,
         output_prefs={"generate_audio": False},
     )
-    monkeypatch.setattr(db, "_check_output_preset_name_available", lambda **_kwargs: None)
+    check_name = db._check_output_preset_name_available
+    skip_preflight = True
 
-    with pytest.raises(ValueError, match="output_preset_name_exists"):
+    def race_check(**kwargs):
+        nonlocal skip_preflight
+        if skip_preflight:
+            skip_preflight = False
+            return
+        check_name(**kwargs)
+
+    monkeypatch.setattr(db, "_check_output_preset_name_available", race_check)
+
+    with pytest.raises(ValueError, match="^output_preset_name_exists$"):
+        if operation == "create":
+            db.create_output_preset(
+                name="daily newsletter",
+                description=None,
+                output_prefs={"generate_audio": False},
+                is_default=True,
+            )
+        else:
+            db.update_output_preset(
+                preset_id=int(other.id),
+                fields={"name": str(existing.name).upper(), "is_default": True},
+            )
+    assert int(db.get_output_preset(preset_id=int(existing.id)).is_default) == 1
+
+
+def test_output_preset_other_unique_constraint_is_not_a_name_conflict(tmp_path):
+    from tldw_Server_API.app.core.DB_Management.backends.base import UniqueConstraintError
+
+    db = _make_db(tmp_path)
+    db.backend.execute(
+        "CREATE UNIQUE INDEX ux_output_presets_user_description "
+        "ON watchlist_output_presets (user_id, description)"
+    )
+    db.create_output_preset(
+        name="First preset",
+        description="Shared description",
+        output_prefs={},
+    )
+
+    with pytest.raises(UniqueConstraintError, match="^SQLite query execution failed$"):
         db.create_output_preset(
-            name="daily newsletter",
-            description=None,
-            output_prefs={"generate_audio": False},
-        )
-
-    with pytest.raises(ValueError, match="output_preset_name_exists"):
-        db.update_output_preset(
-            preset_id=int(other.id),
-            fields={"name": str(existing.name).upper()},
+            name="Second preset",
+            description="Shared description",
+            output_prefs={},
         )
 
 

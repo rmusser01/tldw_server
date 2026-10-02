@@ -14,7 +14,8 @@ import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
-from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError, UniqueConstraintError
+from tldw_Server_API.app.core.DB_Management.backends import base as backend_errors
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import ensure_chacha_rls
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -182,7 +183,7 @@ def test_postgres_fresh_schema_named_unique_crud_order_and_owner_predicates(
         backend.get_pool().close_all()
 
 
-def test_postgres_v53_migration_creates_table_and_forced_policy_immediately(
+def test_postgres_v53_to_v54_saved_view_checkpoint_creates_table_and_forced_policy_immediately(
     pg_database_config: DatabaseConfig,
 ) -> None:
     # Replaying the whole initializer from v53 on a current catalog is not a
@@ -332,7 +333,7 @@ def test_postgres_named_unique_recovery_uses_independent_connection_when_nested(
     original_find = db._find_workspace_source_saved_view_name_with_conn
     original_detect = db._is_workspace_source_saved_view_postgres_unique_error
     find_connection_ids: list[int] = []
-    detected_errors: list[Exception] = []
+    detected_errors: list[type[BaseException]] = []
 
     def stale_once(
         conn: Any,
@@ -355,7 +356,7 @@ def test_postgres_named_unique_recovery_uses_independent_connection_when_nested(
         )
 
     def record_named_unique(exc: Exception) -> bool:
-        detected_errors.append(exc)
+        detected_errors.append(type(exc))
         return original_detect(exc)
 
     monkeypatch.setattr(db, "_find_workspace_source_saved_view_name_with_conn", stale_once)
@@ -381,9 +382,7 @@ def test_postgres_named_unique_recovery_uses_independent_connection_when_nested(
 
         assert exc_info.value.code == "source_view_name_exists"
         assert exc_info.value.metadata == {"view_id": conflict["id"], "version": 2}
-        # Backends redact driver diagnostics (no sqlstate/constraint name, no
-        # __cause__); the uniqueness class travels in the exception type.
-        assert any(isinstance(error, UniqueConstraintError) for error in detected_errors)
+        assert detected_errors == [backend_errors.SavedViewNameUniqueConstraintError]
         assert len(find_connection_ids) == 2
         assert find_connection_ids[0] != find_connection_ids[1]
         unchanged = db.get_workspace_source_saved_view(OWNER_A, workspace_id, candidate["id"])

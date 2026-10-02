@@ -6,6 +6,7 @@ import axe from 'axe-core'
 import ViewMediaPage from '../ViewMediaPage'
 
 const mocks = vi.hoisted(() => ({
+  queryClient: { removeQueries: vi.fn() },
   queryData: [] as Array<any>,
   detailSequencesById: {} as Record<string, Array<{ ok: boolean; value: any }>>,
   refetch: vi.fn(),
@@ -35,6 +36,7 @@ vi.mock('react-i18next', () => ({
 }))
 
 vi.mock('@tanstack/react-query', () => ({
+  useQueryClient: () => mocks.queryClient,
   useQuery: () => ({
     data: mocks.queryData,
     refetch: mocks.refetch,

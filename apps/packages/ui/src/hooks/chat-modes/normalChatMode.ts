@@ -655,7 +655,10 @@ export const captureNormalHistoryTurn = async (
       const created = await saveHistory(
         message.trim().slice(0, 80) || "Untitled Chat",
         false,
-        "web-ui"
+        "web-ui",
+        undefined,
+        undefined,
+        snapshot.requestScope
       )
       // Creation may have succeeded after navigation. It remains its own local history.
       if (!originIsCurrent()) throw new Error("stale_selection")
