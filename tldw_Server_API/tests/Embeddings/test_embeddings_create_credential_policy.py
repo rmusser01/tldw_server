@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
@@ -730,7 +731,22 @@ def test_legacy_openai_transient_failure_retains_retry_policy(monkeypatch, tmp_p
         raise RetryableLegacyError("legacy retry remains unchanged")
 
     monkeypatch.setattr(ec, "get_openai_embeddings_batch", fail_legacy)
-    monkeypatch.setattr(ec.time, "sleep", sleeps.append)
+
+    # `ec.time` is the *global* `time` module object (import time), not a copy:
+    # patching `ec.time.sleep` directly patches `time.sleep` for every module in
+    # the process, including the system_log_buffer writer daemon thread, whose
+    # 0.05s flock poll (time.sleep) can land in `sleeps` from another thread and
+    # corrupt this test's count/ordering assertions below. Replace the `time`
+    # *name* inside `ec`'s own module namespace instead, so only code that calls
+    # bare `time.sleep(...)` from within `ec` is affected.
+    class _ScopedTime:
+        def __getattr__(self, name):
+            return getattr(time, name)
+
+        def sleep(self, seconds):
+            sleeps.append(seconds)
+
+    monkeypatch.setattr(ec, "time", _ScopedTime())
 
     with pytest.raises(RetryableLegacyError):
         ec.create_embeddings_batch(["hello"], config, model_id)

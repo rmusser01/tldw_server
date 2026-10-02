@@ -8,8 +8,28 @@ pytestmark = pytest.mark.rate_limit
 
 
 @pytest.fixture(params=["memory", "redis"], ids=["rg-memory", "rg-redis"])
-def rg_backend(request) -> str:
-    return str(request.param)
+def rg_backend(request, monkeypatch) -> str:
+    backend = str(request.param)
+    if backend == "redis":
+        # RGSimpleMiddleware lazily builds a RedisResourceGovernor (connecting to
+        # the real Redis at 127.0.0.1:6379 by default) the first time a request
+        # needs one. An ambient Redis left running locally -- with stale `rg*`
+        # keys from earlier runs -- can start these tests already rate-limited,
+        # and a real shared Redis also means other xdist workers' tests can
+        # interleave with these. Make the "redis" backend hermetic by injecting
+        # the in-memory stub, same as test_governor_safety_net.py's `_gov`.
+        from tldw_Server_API.app.core.Infrastructure.redis_factory import InMemoryAsyncRedis
+        from tldw_Server_API.app.core.Resource_Governance import governor_redis as _governor_redis_mod
+
+        _RealRedisGovernor = _governor_redis_mod.RedisResourceGovernor
+
+        class _InMemoryRedisGovernor(_RealRedisGovernor):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self._client = InMemoryAsyncRedis()
+
+        monkeypatch.setattr(_governor_redis_mod, "RedisResourceGovernor", _InMemoryRedisGovernor)
+    return backend
 
 
 def _write_policy(

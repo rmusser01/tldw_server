@@ -466,6 +466,9 @@ def event_loop():
 async def reset_singletons(request):
     """Auto-reset all singletons before and after each test for clean state."""
     # No session-wide default DB. Tests must use isolated DB fixtures or mocks.
+    # Set below (and restored after `yield`) only if the middleware-stripping
+    # block further down actually removes anything from app.user_middleware.
+    _stripped_user_middleware = None
     # Reset before test
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
@@ -549,17 +552,25 @@ async def reset_singletons(request):
             _ = None
 
         # Also, in TEST_MODE, strip non-essential middlewares that may perform
-        # background DB work after response (to avoid TaskGroup noise in full runs)
+        # background DB work after response (to avoid TaskGroup noise in full runs).
+        # `app` is the process-wide FastAPI singleton: this fixture is autouse (and,
+        # via the `authnz_full_fixtures` plugin, effectively global for the whole
+        # xdist worker once any file opts into it), so stripping user_middleware
+        # without restoring it permanently removes RequestIDMiddleware/etc. from
+        # every later test in the same worker (TASK-13400). Save the pre-strip list
+        # and restore it below, after `yield`.
         try:
             from tldw_Server_API.app.core.Metrics.http_middleware import HTTPMetricsMiddleware as _HTTPMM
             from tldw_Server_API.app.core.Security.middleware import SecurityHeadersMiddleware as _SHM
             from tldw_Server_API.app.core.Security.request_id_middleware import RequestIDMiddleware as _RID
+            original_user_middleware = list(getattr(_app, 'user_middleware', []))
             kept = []
-            for m in getattr(_app, 'user_middleware', []):
+            for m in original_user_middleware:
                 if getattr(m, 'cls', None) in (_HTTPMM, _SHM, _RID):
                     continue
                 kept.append(m)
-            if len(kept) != len(getattr(_app, 'user_middleware', [])):
+            if len(kept) != len(original_user_middleware):
+                _stripped_user_middleware = original_user_middleware
                 _app.user_middleware = kept
                 # Rebuild the Starlette middleware stack
                 _app.middleware_stack = _app.build_middleware_stack()
@@ -594,6 +605,9 @@ async def reset_singletons(request):
     try:
         from tldw_Server_API.app.main import app as _app
         _app.dependency_overrides.clear()
+        if _stripped_user_middleware is not None:
+            _app.user_middleware = _stripped_user_middleware
+            _app.middleware_stack = _app.build_middleware_stack()
     except Exception:
         _ = None
 

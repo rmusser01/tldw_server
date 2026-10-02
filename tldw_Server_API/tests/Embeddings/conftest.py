@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import os
+import re
 from collections.abc import Iterable
 from typing import Final
 
@@ -139,6 +140,19 @@ class _RedisHarness:
         return getattr(self.client, item)
 
 
+def _xdist_worker_db_index() -> int:
+    """Map the current pytest-xdist worker to a stable Redis logical DB index.
+
+    Redis exposes 16 logical DBs (0-15) by default. Without this, every xdist
+    worker's `redis_client` fixture would flushdb/flushdb the same shared DB 0,
+    wiping out streams/keys another worker's test is mid-assertion on (ADR:
+    TASK-13400). Falls back to DB 0 outside of xdist (plain `pytest` runs).
+    """
+    worker_id = os.getenv("PYTEST_XDIST_WORKER", "")
+    match = re.search(r"(\d+)", worker_id)
+    return int(match.group(1)) % 16 if match else 0
+
+
 @pytest.fixture
 def redis_client():
     """Provide a real Redis client when available; skip otherwise."""
@@ -152,7 +166,7 @@ def redis_client():
         os.getenv("TEST_REDIS_URL")
         or os.getenv("EMBEDDINGS_REDIS_URL")
         or os.getenv("REDIS_URL")
-        or "redis://localhost:6379/0"
+        or f"redis://localhost:6379/{_xdist_worker_db_index()}"
     )
 
     sync_client = redis.Redis.from_url(url, decode_responses=True)
