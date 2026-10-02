@@ -37,8 +37,9 @@ class RunStreamHub:
     """In-memory pub/sub for run log/event streaming with caps and backpressure."""
 
     def __init__(self) -> None:
-        # Map run_id -> list of (loop, subscriber queue) pairs (fan-out to all subscribers)
-        self._queues: dict[str, list[tuple[asyncio.AbstractEventLoop, asyncio.Queue]]] = {}
+        # Map run_id -> (loop, subscriber queue, live_from) entries, fanned out to all.
+        # Live delivery skips frames with seq < live_from (the subscriber replayed them).
+        self._queues: dict[str, list[tuple[asyncio.AbstractEventLoop, asyncio.Queue, int]]] = {}
         self._buffers: dict[str, list[dict]] = {}
         self._log_bytes: dict[str, int] = {}
         self._truncated: set[str] = set()
@@ -89,61 +90,67 @@ class RunStreamHub:
         with self._lock:
             q = asyncio.Queue(self._max_queue)
             loop = self._resolve_subscriber_loop()
-            self._queues.setdefault(run_id, []).append((loop, q))
+            # live_from=0: every frame dispatched after registration
+            self._queues.setdefault(run_id, []).append((loop, q, 0))
             return q
 
     def subscribe(self, run_id: str) -> asyncio.Queue:
         return self._get_queue(run_id)
 
     def subscribe_with_buffer(self, run_id: str) -> asyncio.Queue:
-        """Subscribe a new consumer and pre-fill its queue with buffered frames.
-
-        Frames published but not yet dispatched are dispatched first, to the
-        existing subscribers only. The new subscriber then gets the whole
-        buffer as history and is registered under the same lock, so it sees
-        every frame exactly once and in seq order. Without the first step a
-        frame still queued for dispatch would reach the new subscriber twice
-        (replay, then dispatch) and get a seq ahead of heartbeats queued
-        before it.
-        """
-        with self._lock:
-            q = asyncio.Queue(self._max_queue)
-            loop = self._resolve_subscriber_loop()
-            self._dispatch_pending_locked(run_id)
-            buf = self._buffers.get(run_id) or []
-            import copy as _copy
-            for frame in buf[-100:]:
-                try:
-                    q.put_nowait(_copy.deepcopy(frame))
-                except _SANDBOX_STREAMS_NONCRITICAL_EXCEPTIONS:
-                    break
-            # Finally register this subscriber for future live frames
-            self._queues.setdefault(run_id, []).append((loop, q))
-            return q
+        """Subscribe a new consumer and pre-fill its queue with buffered frames."""
+        return self._subscribe_replaying(run_id, 0)
 
     def subscribe_with_buffer_from_seq(self, run_id: str, from_seq: int) -> asyncio.Queue:
         """Subscribe and pre-fill only buffered frames with seq >= from_seq.
 
-        Pending frames are dispatched first, as in subscribe_with_buffer, so
-        every buffered frame has its final seq before the filter applies.
         Live frames are delivered as usual.
         """
-        if from_seq is None or int(from_seq) <= 0:
-            return self.subscribe_with_buffer(run_id)
+        return self._subscribe_replaying(run_id, max(0, int(from_seq or 0)))
+
+    def _subscribe_replaying(self, run_id: str, from_seq: int) -> asyncio.Queue:
+        """Register a subscriber that replays history, then receives live frames.
+
+        Frames still queued for dispatch get their seq here, in publish order
+        (heartbeats included), so every frame up to now has a final seq. The
+        subscriber replays the buffered ones and skips live delivery of
+        anything at or below that point. Each frame therefore arrives exactly
+        once and in seq order.
+
+        Copies happen after the lock is released so a large replay does not
+        stall other runs. Call this on the subscriber's event loop thread, as
+        the WS endpoint and ACP client do: live frames reach the queue through
+        that loop's call_soon_threadsafe, so they cannot land before the
+        replay below.
+        """
         with self._lock:
             q = asyncio.Queue(self._max_queue)
             loop = self._resolve_subscriber_loop()
-            self._dispatch_pending_locked(run_id)
-            buf = self._buffers.get(run_id) or []
-            import copy as _copy
-            for frame in buf[-100:]:
-                try:
-                    if isinstance(frame, dict) and int(frame.get("seq", 0)) >= int(from_seq):
-                        q.put_nowait(_copy.deepcopy(frame))
-                except _SANDBOX_STREAMS_NONCRITICAL_EXCEPTIONS:
-                    break
-            self._queues.setdefault(run_id, []).append((loop, q))
-            return q
+            live_from = self._stamp_pending_locked(run_id)
+            history = [
+                frame
+                for frame in (self._buffers.get(run_id) or [])[-100:]
+                if int(frame.get("seq", 0)) >= from_seq
+            ]
+            self._queues.setdefault(run_id, []).append((loop, q, live_from))
+        import copy as _copy
+        for frame in history:
+            try:
+                q.put_nowait(_copy.deepcopy(frame))
+            except _SANDBOX_STREAMS_NONCRITICAL_EXCEPTIONS:
+                break
+        return q
+
+    def _stamp_pending_locked(self, run_id: str) -> int:
+        """Stamp seq on frames still queued for dispatch; return the next seq.
+
+        Stamps in queue (publish) order so seq never runs ahead of a
+        heartbeat queued earlier. Caller must hold ``self._lock``.
+        """
+        for frame in self._dispatch.get(run_id) or []:
+            if "seq" not in frame:
+                frame["seq"] = self._next_seq(run_id)
+        return self._seq.get(run_id, 0) + 1
 
     def _resolve_subscriber_loop(self) -> asyncio.AbstractEventLoop:
         try:
@@ -168,7 +175,7 @@ class RunStreamHub:
             subs = self._queues.get(run_id) or []
             if not subs:
                 return
-            remaining = [(lp, sq) for (lp, sq) in subs if sq is not q]
+            remaining = [sub for sub in subs if sub[1] is not q]
             if remaining:
                 self._queues[run_id] = remaining
             else:
@@ -240,32 +247,34 @@ class RunStreamHub:
             logger.debug(f"dispatch schedule failed: {e}")
 
     def _do_dispatch(self, run_id: str) -> None:
-        with self._lock:
-            self._dispatch_pending_locked(run_id)
-
-    def _dispatch_pending_locked(self, run_id: str) -> None:
-        """Drain queued frames and fan out to current subscribers in arrival order.
-
-        Caller must hold ``self._lock``. Fan-out stays under the lock so a
-        subscriber that drains the queue itself cannot interleave its frames
-        with this one's.
-        """
+        # Drain queued frames and fan-out to all subscribers in arrival order.
+        # Only the pop/stamp/snapshot holds the hub lock; copying and delivery
+        # happen outside it so a slow fan-out cannot stall other runs.
         import copy as _copy
-        queue = self._dispatch.get(run_id) or []
-        while queue:
-            frame = queue.pop(0)
-            # Stamp sequence centrally here to ensure strict ordering for all subscribers.
-            # Update in-place so the buffered frame also carries the seq for future drains.
-            if isinstance(frame, dict) and "seq" not in frame:
-                frame["seq"] = self._next_seq(run_id)
-            for (lp, q) in self._queues.get(run_id) or []:
+        while True:
+            with self._lock:
+                queue = self._dispatch.get(run_id) or []
+                if not queue:
+                    self._dispatching.discard(run_id)
+                    return
+                frame = queue.pop(0)
+                # Stamp sequence centrally here to ensure strict ordering for all subscribers.
+                # Update in-place so the buffered frame also carries the seq for future drains.
+                if isinstance(frame, dict) and "seq" not in frame:
+                    frame["seq"] = self._next_seq(run_id)
+                seq = int(frame.get("seq", 0))
+                # Subscribers that replayed this frame on subscribe skip it here.
+                subs = [
+                    (lp, q)
+                    for (lp, q, live_from) in self._queues.get(run_id) or []
+                    if seq >= live_from
+                ]
+            for (lp, q) in subs:
                 try:
                     lp.call_soon_threadsafe(self._queue_put_nowait, q, _copy.deepcopy(frame))
                 except _SANDBOX_STREAMS_NONCRITICAL_EXCEPTIONS:
                     # Swallow delivery errors to individual subscribers
                     pass
-        # Queue is empty: the next publish schedules a fresh dispatch.
-        self._dispatching.discard(run_id)
 
     @staticmethod
     def _queue_put_nowait(q: asyncio.Queue, item: dict) -> None:

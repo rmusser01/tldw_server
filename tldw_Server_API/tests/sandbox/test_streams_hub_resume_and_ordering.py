@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import types
 import uuid
 
@@ -121,6 +122,7 @@ async def test_hub_multi_subscriber_ordering() -> None:
     hub.cleanup_run(run_id)
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
 async def test_hub_subscriber_attaching_before_dispatch_sees_each_frame_once() -> None:
     """Frames published but not yet dispatched reach a new subscriber exactly once, in seq order."""
@@ -150,6 +152,45 @@ async def test_hub_subscriber_attaching_before_dispatch_sees_each_frame_once() -
         assert [(f["type"], f["seq"]) for f in got] == expected
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(q.get(), timeout=0.1)
+
+
+@pytest.mark.unit
+def test_hub_slow_fanout_on_one_run_does_not_block_other_runs() -> None:
+    """A dispatcher stuck copying one run's frame must not stall other runs."""
+    from tldw_Server_API.app.core.Sandbox.streams import RunStreamHub
+
+    copying = threading.Event()
+    release = threading.Event()
+
+    class _SlowPayload:
+        def __deepcopy__(self, memo: dict) -> _SlowPayload:
+            copying.set()
+            release.wait(5)
+            return self
+
+    loop = asyncio.new_event_loop()
+    loop_thread = threading.Thread(target=loop.run_forever, daemon=True)
+    loop_thread.start()
+    try:
+        hub = RunStreamHub()
+        hub.set_loop(loop)
+        hub.subscribe("run-slow")
+        hub.publish_event("run-slow", "start", {"payload": _SlowPayload()})
+        assert copying.wait(2), "dispatcher never reached the slow fan-out"
+
+        def _other_run() -> None:
+            hub.subscribe_with_buffer("run-fast")
+            hub.publish_stdout("run-fast", b"hi\n", max_log_bytes=1024)
+
+        other = threading.Thread(target=_other_run, daemon=True)
+        other.start()
+        other.join(2)
+        assert not other.is_alive(), "another run's subscribe/publish blocked behind a slow fan-out"
+    finally:
+        release.set()
+        loop.call_soon_threadsafe(loop.stop)
+        loop_thread.join(2)
+        loop.close()
 
 
 @pytest.mark.asyncio
