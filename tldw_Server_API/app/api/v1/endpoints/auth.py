@@ -1134,7 +1134,7 @@ async def _reserve_auth_rg_requests(
     # ingress never skips. Any other ingress entity must not stand in for this one: a
     # user:/api_key: bucket is per account, so a caller rotating several valid accounts
     # would get a fresh bucket each time and evade the per-IP limit on entity-scoped
-    # sensitive policies; a tenant: entity comes from an unvalidated header. When AuthNZ
+    # sensitive policies; a tenant: bucket is shared by the tenant, not one IP. When AuthNZ
     # and RG derive different IPs (TASK-13144) the request is charged twice, never zero.
     # Reservations keyed on some other entity (a per-email throttle, or the per-user MFA
     # limit when ingress charged the IP) still apply.
