@@ -85,3 +85,9 @@ tracked frontend bytes/symlink still bind to the qualified production snapshot.
 Final preservation again confirms original10/eight-row hashes,68stashes and
 six baseline tabs; historical missing tabs remain explicit. Latest fetch still
 points to frozen dcae0cbd. Publish this reviewed integration without merging PR.
+
+Integration1fb829cf25 is published to PR3071; exact head/body and unchanged
+requester Change summary read back with base dev/open draft/unmerged. Head-bound
+hosted license/await-license jobs remain queued with no assigned runner, and
+backend admission is skipped. Current CI qualification remains open; the final
+publication-record follow-up is documentation/tracking only.

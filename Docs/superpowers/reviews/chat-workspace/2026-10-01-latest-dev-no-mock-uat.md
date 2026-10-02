@@ -350,3 +350,12 @@ standard build is540.5/844.1KB; the real-loopback cookie build is540.3/842.7KB,
 under600/900KB. Existing dependencies are reused; only external tracing roots
 include their sibling clone. Original limits (fresh PostgreSQL, historical tabs,
 broader Hypothesis timing failure and current-head hosted CI) remain explicit.
+
+Published integration: `1fb829cf256efe452f6d9b137d7ba2e9f6d70081` on existing
+PR3071. GitHub readback verifies the exact head/body, base `dev`, open draft
+state and unchanged requester-supplied Change summary; the PR remains attached
+to this chat and unmerged. Head-bound hosted runs are queued, not passing. The
+replacement license audit36960989844 and backend await-license36960906531
+have no assigned runner; backend admission is skipped. The earlier same-head
+license audit was cancelled and is not counted as a code/test failure or pass.
+This publication-record follow-up changes no tested application source.

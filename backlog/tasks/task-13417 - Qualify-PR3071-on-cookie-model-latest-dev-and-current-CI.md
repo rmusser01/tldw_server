@@ -4,7 +4,7 @@ title: Qualify PR3071 on cookie-model latest dev and current CI
 status: In Progress
 assignee: []
 created_date: 2026-10-02 02:39
-updated_date: 2026-10-02 03:35
+updated_date: 2026-10-02 03:40
 labels: []
 dependencies: []
 references:
@@ -24,7 +24,7 @@ Continue PR3071 against dev dcae0cbd while preserving cookie-auth model discover
 <!-- AC:BEGIN -->
 - [x] #1 Preserve both task histories without an active ID collision and integrate frozen dev dcae0cbd.
 - [x] #2 Affected regression checks, TypeScript, production gates and real no-mock Chrome acceptance are freshly qualified.
-- [ ] #3 Publish the existing draft PR with unchanged human Change summary and truthful current CI and PostgreSQL status.
+- [x] #3 Publish the existing draft PR with unchanged human Change summary and truthful current CI and PostgreSQL status.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -51,18 +51,19 @@ Real mounted cookie catalog PASS on corrected byte-bound production build: exist
 Fresh native dcae Stop/recovery PASS: real admission then Stop; reload retains unknown without automatic resend; exact logical-input protected GET200; explicit Reprepare then Send gives two deliberate dispatches and one canonical input/result while original unknown ledger entry remains. Cookie metadata/profile response-based checks pass; its immediate reload screenshot is transitional, so a separate actual settled Healthy/Gemma capture is required, not a cached-frame claim.
 Fresh route6/workspace11 and settled cookie Healthy/Gemma visual PASS with zero sends. Final previews both HTTP200, actual memo facts and external Example Domain loaded, staging/clear/draft retained. Original preview runner remains FAIL at fixed80-tab mobile traversal. Separate mobile continuation uses native Tabs and actual visible tab-order bound: reaches composer in four observations, then Send without dispatch; loaded390x844, zero overflow, unchanged nonempty draft and visible composer/Send. Three fresh preview/mobile PNGs plus full-source, Stop, route and workspace images inspected. Combined acceptance is qualified without relabeling failed runners or changing app state. Current original ten/eight-row hashes,68stashes and six follow-up targets pass; historical missing tabs remain explicit. Remaining: normal hooks/publication/current-head CI; fresh PostgreSQL unavailable.
 Final affected292-check rerun PASS; normal applicable cached pre-commit hooks PASS without bypass (existing deprecated-stage warnings retained). All7217 tracked frontend files/symlink SHA256 still match the qualified production snapshot. Final actual API/OpenAPI/data/tab/stash preservation PASS: original10/eight-row projections unchanged, served contract PASS,68stashes and six follow-up targets retained; historical missing IDs/same-URL tabs remain unavailable. Final fetch origin/dev still dcae0cbd. Publish normal merge commit to existing draft PR3071, retaining requester Change summary verbatim; do not merge. Current-head hosted CI and fresh PostgreSQL are not certified green.
+Published integration1fb829cf256efe452f6d9b137d7ba2e9f6d70081 with normal non-force push to existing PR3071. Exact GitHub head/body readback verifies dev base, OPEN/DRAFT, unchanged requester Change summary and attached PR; no merge. All pre-cookie baseline seven Chrome target IDs remain among eleven current targets, without replacing missing historical tabs. Head-bound CI runs queued: replacement license36960989844 and backend36960906531 await_license have empty runner names; backend admission skipped. Earlier same-head audit36960903479 cancelled, not a code/test pass or failure. Current remote CI qualification remains open and fresh PostgreSQL unavailable. This final publication-record follow-up changes no tested app/backend source.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Integrated and locally qualified frozen cookie-model dev dcae0cbd with both task histories retained,292 fresh owning checks, TypeScript, scoped lint/Bandit, byte-bound production budgets and real native Chrome/no-mock acceptance. Failed drivers/provider context-capacity traces remain separate; original data/stashes/current baseline tabs preserved. Publication and current-head remote check inspection remain next; PostgreSQL and historical tabs remain explicit limits.
+Published verified cookie-model dev integration1fb829cf25 to existing draft PR3071 without force or merge. Preserved both tracker histories and requester Change summary verbatim. Fresh292 owning checks, TypeScript, scoped lint/Bandit, byte-bound production budgets and actual native Chrome/no-mock UAT qualify local behavior; retained failed traces, unchanged originals/stashes/current tabs and historical-tab limits are documented. Current head-bound CI remains queued at license/admission with no runner; fresh PostgreSQL is unavailable. Task stays In Progress for those qualification gates.
 <!-- SECTION:FINAL_SUMMARY:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
