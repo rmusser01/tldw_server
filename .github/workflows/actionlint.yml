@@ -87,3 +87,10 @@ jobs:
         run: |
           set -euo pipefail
           ./actionlint -color -config-file .github/actionlint.yaml
+
+      - name: Check required gates fail closed on a license failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -c 'import yaml' 2>/dev/null || pip install --quiet pyyaml
+          python3 Helper_Scripts/ci/license_first_failclosed_check.py
