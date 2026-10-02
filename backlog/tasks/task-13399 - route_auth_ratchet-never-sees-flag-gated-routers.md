@@ -4,7 +4,7 @@ title: route_auth_ratchet never sees flag-gated routers
 status: Done
 assignee: []
 created_date: '2026-09-30 06:33'
-updated_date: '2026-10-02 01:56'
+updated_date: '2026-10-02 02:15'
 labels:
   - ci
   - security
@@ -59,6 +59,14 @@ Final verification: tldw_Server_API/tests/lint -q -p no:cacheprovider -n 4 -> 71
 Commits: f0e59bd0b1 (ratchet mechanism fix + sibling-dependency fixes), 252db8d493 (benchmark_api.py auth + baseline additions + TASK-13417).
 
 Bandit -ll on changed files: No issues identified (35 low-severity findings exist in the files but are below the -ll medium+ threshold; 0 medium, 0 high). Final: lint 71 passed; benchmark auth 11 passed; rg_route_map_lint exit 0.
+
+PR #3079 Qodo findings fixed, same branch:
+
+(1) "Ratchet goes blind again if a config path is set": _ratchet_config_dir() only set TLDW_CONFIG_DIR, but config_paths._resolve_env_root()/resolve_config_file() check TLDW_CONFIG_FILE then TLDW_CONFIG_PATH before TLDW_CONFIG_DIR -- a caller environment that already set either of the higher-priority vars made load_app() read the original config.txt and the enable injection silently did nothing. Renamed to _ratchet_config_file(): resolves the config file the same way the app does (resolve_config_file(), respecting whatever the caller already set), copies that single file (not an arbitrary parent directory) into a temp dir, adds the forced route keys to its [API-Routes] enable, and load_app() always overwrites TLDW_CONFIG_FILE (not setdefault) to point at the copy -- the variable both resolvers check first, so it wins regardless of what else is set. Test-first: added test_force_enabled_routers_are_mounted_with_explicit_config_file to tldw_Server_API/tests/lint/test_route_auth_ratchet.py, which sets TLDW_CONFIG_FILE to the real repo config.txt (whose enable list lacks these route keys) and asserts benchmarks/connectors/personalization are still mounted. Verified red against the pre-fix code, green after.
+
+(2)-(4): tldw_Server_API/tests/Evaluations/test_benchmark_api_auth.py -- added `pytestmark = pytest.mark.unit` (matching sibling Evaluations test files), `-> None`/`-> str`/`-> User` return annotations on every function including the nested override closures, and a one-line docstring on every function (_make_app, _override_user and its two nested overrides, and all 5 test functions).
+
+Final verification: tldw_Server_API/tests/lint -n 4 -> 72 passed, 1 skipped (pre-existing, unrelated), 0 failed. test_benchmark_api_auth.py -> 5 passed. ruff check clean on both touched files.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
