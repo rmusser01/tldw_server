@@ -4,7 +4,7 @@ title: Four tests fail under pytest -n 8 from cross-test pollution
 status: Done
 assignee: []
 created_date: '2026-09-30 07:02'
-updated_date: '2026-10-02 03:14'
+updated_date: '2026-10-02 05:24'
 labels:
   - tests
 dependencies: []
@@ -61,6 +61,20 @@ Test-only changes across 7 files (tests/AuthNZ/conftest.py, tests/Embeddings/con
 Both required `-n 8` runs and the changed-files-alone run are in the implementer's final report. Known out-of-scope flake found during verification: tests/Embeddings/test_backpressure_and_quotas.py::test_tenant_quota_429 fails standalone on this checkout (pre-existing, unrelated to xdist pollution) -- not part of this task's AC, not fixed here.
 
 DoD: test-only change, so Bandit doesn't apply (no app code touched). Known limits: the per-worker Redis DB index wraps at 16 workers, and an explicit TEST_REDIS_URL/EMBEDDINGS_REDIS_URL/REDIS_URL bypasses it (pre-existing precedence).
+
+Qodo review on PR #3085: addressed all 8 findings, commit 7afbbce75e (not pushed yet; coordinator will push when this PR's turn comes).
+
+(5) reset_singletons restored onto a freshly re-imported app.main.app at teardown instead of the object it actually stripped at setup, so a mid-fixture app reload (auth tests do this) would leave the real stripped app untouched. Fixed: capture the app object itself (_stripped_app) at setup, restore onto that same object.
+
+(7) The restore ran after ~16 unguarded teardown calls; any one raising skipped it. Fixed: wrap `yield` in try/finally, restore first inside the finally.
+
+Verified (5) and (7) directly: drove reset_singletons.__wrapped__ as a plain async generator (bypassing pytest), swapped app.main.app for an unrelated object between setup/teardown (restore still landed on the real stripped object -- 5), and made reset_db_pool raise on its 2nd call only, i.e. the teardown one (middleware still restored despite the raise -- 7). Both passed.
+
+(6)/(8) _xdist_worker_db_index() mapped gw0 to DB 0 (the app's default DB) and wrapped at 16 workers. Fixed: workers map to DB 1..15 (1+n); a 16th+ worker (gw15+) now pytest.skip()s with a clear reason instead of reusing an index; outside xdist, DB 1 instead of 0. Explicit TEST_REDIS_URL/EMBEDDINGS_REDIS_URL/REDIS_URL precedence unchanged (short-circuits before the function is called). Verified: gw0->1, gw1->2, gw7->8, gw14->15, no-worker->1, gw15->skipped with the stated reason.
+
+(1)-(4) Added type hints (test_trace_headers.py's middleware helper + its Iterator[None] return, the _ScopedTime proxy in test_embeddings_create_credential_policy.py, the rg_backend fixture's request/monkeypatch params in test_e2e_domains_headers.py) and a docstring on the _InMemoryRedisGovernor test double explaining why it's a subclass rather than an instance patch.
+
+Re-ran: all 5 changed files alone (131 passed) plus test_orchestrator_summary_endpoint.py (9 passed); the tokens_daily_cap victim in the polluted order (2 passed); the AuthNZ_Unit + trace_headers + utils_general polluted-order combo in full (1218 passed, 1 skipped, 0 failed) and the fast 4-file subset of it (35 passed). No regressions.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
