@@ -575,7 +575,9 @@ def test_http_caller_keeps_pending_write_until_explicit_decision(pg_http, owner,
     asyncio.run(_run(f, operation))
 
 
-def test_nested_accessor_keeps_request_instance_when_reprobe_would_evict(pg_http, monkeypatch):
+def test_nested_accessor_keeps_request_instance_when_reprobe_would_evict(
+    pg_http: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A mid-request health re-probe must not split the request across two instances.
 
     The cached-instance probe has a 1s deadline. When it expired for the nested
@@ -585,9 +587,9 @@ def test_nested_accessor_keeps_request_instance_when_reprobe_would_evict(pg_http
     """
     f = pg_http
     real_probe = deps.probe_chacha_connection
-    probed = []
+    probed: list[CharactersRAGDB] = []
 
-    def fail_after_first_probe(database):
+    def fail_after_first_probe(database: CharactersRAGDB) -> None:
         """Stand in for the deadline expiring on any probe after the dependency's."""
         probed.append(database)
         if len(probed) > 1:
@@ -597,7 +599,10 @@ def test_nested_accessor_keeps_request_instance_when_reprobe_would_evict(pg_http
     monkeypatch.setattr(deps, "probe_chacha_connection", fail_after_first_probe)
 
     @f.app.post("/probe/nested-reprobe")
-    async def nested_reprobe(db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user)):
+    async def nested_reprobe(
+        db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user),
+    ) -> dict[str, object]:
+        """Write without committing, then resolve the DB again mid-request and read back."""
         raw = db._get_thread_connection()
         db.execute_query("UPDATE notes SET title=? WHERE id=?", ("Pending title", f.note))
         nested = await deps.get_chacha_db_for_user_id(1)
@@ -605,7 +610,8 @@ def test_nested_accessor_keeps_request_instance_when_reprobe_would_evict(pg_http
         raw.rollback()
         return {"same_instance": nested is db, "title": title}
 
-    async def operation(client):
+    async def operation(client: httpx.AsyncClient) -> None:
+        """Run the nested lookup and check it shared the request's instance and connection."""
         response = await client.post("/probe/nested-reprobe")
         assert response.json() == {"same_instance": True, "title": "Pending title"}
         assert probed == [f.db], "Only the request's first resolution should probe"
