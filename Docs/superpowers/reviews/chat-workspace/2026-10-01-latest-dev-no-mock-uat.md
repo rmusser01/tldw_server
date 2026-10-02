@@ -1,13 +1,20 @@
 # Chat Workspace Latest-Dev Acceptance
 
-Tracking: TASK-13408; historical Chat Workspace TASK-13398 and its children.
+Tracking: TASK-13421; previous qualifications TASK-13418 and TASK-13417 and finalization
+TASK-13408 archived intact;
+historical Chat Workspace TASK-13398 and its children.
 Epic: https://github.com/rmusser01/tldw_server/issues/1239.
 Initial acceptance baseline: dev `ec86ba4e871d844ff4a3a53c607e80eb85bd0e9b`.
-Current integration baseline: dev `d81c13fddd1dac1948b30401af0388932a0af8f2`.
+Current integration baseline: dev `413c2c9123509f17d96d514a7722e076598ea28f`.
 
 ## Current Gate
 
-Source integration `5dbf0b076883907dccbb174332d83dae20daf541` on frozen
+The current frozen-dev qualification is recorded in Release And Redis Dev
+Qualification below. Its fresh hosted checks are not inferred from earlier
+heads. The approved fresh mobile viewport check is now complete, as recorded
+in Approved Mobile Closure below; hosted CI remains head-specific.
+
+Historical source integration `5dbf0b076883907dccbb174332d83dae20daf541` on frozen
 dev `3caebcfc` now qualifies the required hosted backend/frontend checks and
 all seven owning PostgreSQL cases, including the image-recovery snapshot.
 The recorded real Chrome acceptance covers grounded chat, citations, durable
@@ -532,9 +539,9 @@ predicates and twelve negative controls. Original conversation projections
 remain byte-identical at ten/eight rows, six follow-up baseline targets remain
 open and all68 stashes remain retained. Historical missing target IDs/same-URL
 tabs remain missing and are not claimed preserved. Current mobile viewport
-UAT is blocked by auto-review pending explicit viewport-only approval; earlier
-390x844 native mobile/recovery/keyboard results above remain historical, not a
-fresh413 pass. No alternate emulation or focus/visibility workaround is used.
+UAT was initially blocked by auto-review pending explicit viewport-only approval;
+the approved fresh413 pass is recorded below. Earlier390x844 mobile results
+remain historical. No alternate emulation or focus/visibility workaround is used.
 
 Owning source binding verifies394 unchanged backend/API-dependency/DB/chat and
 fixture files against qualified source5dbf, including both owning PostgreSQL
@@ -571,3 +578,44 @@ confirmed ordinary native details/summary behavior. After stopping/reassessing,
 the already-working complete-key helper supplies the successful alternate
 approach without application edits, emulation or another send. Evidence:
 `native-full-memo-keyboard` (FAIL), `native-full-memo-complete-key` (PASS).
+
+## Approved Mobile Closure
+
+After the user continued following the explicit viewport-only approval request,
+auto-review permits the original native Chrome runner. It completes against
+metadata head `d6a7beca75d380322328017cdd9ce32ef28702ed`, whose application/test
+bytes are unchanged from source integration93780ae on frozen dev413c2c9.
+
+Fresh no-mock mobile acceptance passes at390x844: actual `visible`/`loaded`
+document, retained verified Gemma transcript and nonempty draft, fresh document
+loader and protected historyHTTP200. Composer bounds(17,650,356,88) and Send
+bounds(242.34,746,130.66,44) fit completely with zero horizontal overflow.
+Twenty-one native Tabs reach the composer; a separate native Tab then reaches
+Send without activating it or altering the draft. Both checks observe zero
+completion dispatches. Fresh mobile transcript/composer and Send-focus
+screenshots were inspected. No focus/visibility emulation, mocked services,
+request interception, state injection or provider resend is used.
+
+The original mobile Send-focus driver has a read-expression quoting error and
+fails before keyboard navigation; its evidence remains FAIL. The corrected
+read-only selector expression and distinct output record pass. No application
+change is needed. The accompanying `fromSurface=false` desktop capture crops
+to the native physical window/compositor; it is not substituted for the earlier
+inspected full desktop acceptance image.
+
+Final latest-API preservation again passes actual capability predicates/twelve
+negative controls, original ten/eight-row hashes, six baseline tabs and all68
+stashes. Historical missing tabs remain missing, not claimed preserved. TASK-13421
+acceptance is complete; only its owned completed plan is retired. Prior plans,
+failures, profiles, services and unrelated files remain intact.
+
+At the resumed d6a7 head, actual workflow metadata identifies a successful
+replacement license audit; required backend/frontend/e2e/security/coverage runs
+are queued, not failed or qualified. Hosted CI completion is not claimed for
+d6a7 or a later documentation-only closeout. PR3071 remains draft and unmerged,
+and the requester Change summary remains byte-identical.
+
+Private evidence remains under the preceding root: `native-reload` and
+`native-mobile-send-focus-qualified` pass; `native-mobile-send-focus` retains
+the quoting failure. `final-mobile-closure-preservation`, exact-head PR/workflow
+readbacks and the inspected mobile PNGs bind this closure to the real runtime.
