@@ -96,8 +96,9 @@ def requests_window(policy: Mapping[str, Any]) -> tuple[int, int]:
     rpm = float(cfg.get("rpm") or 0)
     if 0 < rpm < 1:
         burst = max(1.0, float(cfg.get("burst") or 1.0))
-        # round(): float noise such as 0.29 * 100 == 28.999999999999996 must not floor to 28.
-        limit = max(1, math.floor(round(rpm * burst, 6)))
+        # The raw float product, as the memory bucket holds it: 1.9999996 admits 1 there too.
+        limit = max(1, math.floor(rpm * burst))
+        # round(): float noise in 60 * limit / rpm must not add a second to the window.
         return limit, math.ceil(round(60 * limit / rpm, 6))
     return max(1, math.ceil(rpm)), 60
 

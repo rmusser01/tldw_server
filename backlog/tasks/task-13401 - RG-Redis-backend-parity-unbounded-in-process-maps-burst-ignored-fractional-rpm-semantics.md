@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-09-30 09:45'
-updated_date: '2026-10-02 02:01'
+updated_date: '2026-10-02 04:52'
 labels:
   - rate-limit
 dependencies: []
@@ -109,6 +109,39 @@ Known skips / follow-up: the Redis server-side window ZSET keys (`rg:win:*`) get
    - A lease bucket holding one lapsed lease and one live lease survives and still counts 1. The stub-only lease purge is disabled, as real Redis never runs it.
    - I checked it against three mutations, restoring the code after each; it fails on all three: lease predicate `any(...)`, deny-floor predicate `until < now`, and deny-floor predicate flipped to evict live floors (`now <= until`).
 4. **RG suite** (`TLDW_TEST_NO_DOCKER=1`, `-n 4`): 377 passed, 5 skipped (the Postgres-fixture tests, with Docker disabled), 2 xfailed, 0 failed.
+
+### Qodo follow-up on PR #3080
+
+**Formula correction.** The description above, and earlier notes, quote two formulas that are now replaced: first `ceil(rpm*burst)` per `ceil(60*burst)` s, then `floor(round(rpm*burst, 6))`. The final `policy_eval.requests_window` for rpm < 1 is:
+- `limit = max(1, math.floor(rpm * burst))`, flooring the raw float product with no rounding. This matches the memory bucket's own float math, so `0.29*100 == 28.999999999999996` gives 28 on both backends and `{0.5, 3.9999992}` gives 1.
+- `window = ceil(round(60 * limit / rpm, 6))`. The rounding here only stops float noise from adding a second.
+
+From 1 rpm up, it is still `max(1, ceil(rpm))` per 60 s.
+
+**Changes:**
+- **(5) Near-integer capacity.** The raw product is floored, as above. New both-backend test `test_fractional_rpm_near_integer_capacity_floors_like_memory`: with `{0.5, 3.9999992}`, both backends admit exactly 1 up front.
+- **(7) Policy reload that keeps the limit but changes the window.**
+  - The accept-window tracker is now `(window_end, limit, count, window)`. It is reset when either `limit` or `window` changes.
+  - The requests deny floors and backoffs are keyed by `(limit, window)` instead of `limit`.
+  - New both-backend test `test_policy_reload_that_shortens_the_window_applies_mid_window`: reloading `{0.25, 1}` (240 s window) to `{0.5, 1}` (120 s window) mid-window admits the user 130 s after the first admit, inside the old 240 s window.
+- **(8) A retry within the last second of a window.** A computed `retry_after` ≤ 1 now reports `max(1, computed)` everywhere it used to fall back to the full window:
+  - `check()`: the accept-window deny, the deny floor and the backoff;
+  - `_allow_requests_sliding_check_only` (stub path);
+  - both Lua scripts (`math.max(1, ...)`);
+  - the reserve denial-path floor and the rollback floor.
+
+  The full window is now used only when nothing was computed: no oldest member, or a rollback with no `retry_after`. New test `test_redis_retry_in_the_last_second_of_a_window_is_one_second` runs two workers sharing one Redis:
+  - With a `{0.3, 10}` window that frees in 0.5 s, the acceptance-window path and the ZSET/reserve-floor path both report 1, and the caller is admitted 1 s later.
+  - Before the fix, both paths reported 600.
+- **(1)** New unit test `test_requests_window_boundaries` covers:
+  - integer rpm, and non-integer rpm ≥ 1;
+  - rpm < 1 with a whole capacity and with a fractional capacity;
+  - a near-integer capacity, and `0.29*100`;
+  - bursts raised by `effective_policy`: `{0.5, 1}` gives (1, 120) and `{0.41}` gives (1, 147).
+- **(2)(3)(4)** Type hints on the new test functions, docstrings on the new helpers, and `@pytest.mark.unit` on the new middleware tests.
+- **(6)** Declined, per the coordinator.
+
+**Tests.** The new tests failed before the fix (5 failing in `test_governor_safety_net.py`). RG suite (`TLDW_TEST_NO_DOCKER=1`, `-n 4`): 391 passed, 5 skipped (Postgres fixture), 2 xfailed, 0 failed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
