@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
+from pytest import MonkeyPatch
 
 pytestmark = pytest.mark.unit
 
@@ -41,12 +42,13 @@ def _run_helper(
 ) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+    child_path = f"{bin_dir}:/usr/bin:/bin"
     stubs = {
         "apt-get": _APT_GET_STUB,
         "sudo": '#!/bin/bash\nexec "$@"\n',
         "dpkg": f"#!/bin/bash\n{dpkg_body}\n",
     }
-    if shutil.which("timeout") is None:  # macOS has no coreutils timeout
+    if shutil.which("timeout", path=child_path) is None:  # macOS has no coreutils timeout
         stubs["timeout"] = _TIMEOUT_SHIM
     for name, body in stubs.items():
         stub = bin_dir / name
@@ -54,16 +56,14 @@ def _run_helper(
         stub.chmod(0o755)
     script = f'source "{HELPER}"; apt_bounded update "${{apt_opts[@]}}"'
     env = {
-        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "PATH": child_path,
         "APT_ATTEMPT_SECONDS": "2",
         "APT_TOTAL_SECONDS": total_seconds,
         "APT_RETRY_BASE_SECONDS": "0",
         "APT_STUB_MODE": mode,
         "APT_STUB_STATE": str(tmp_path / "seen"),
     }
-    return subprocess.run(
-        ["bash", "-c", script], env=env, capture_output=True, text=True, timeout=60
-    )
+    return subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True, timeout=60)
 
 
 def test_stalled_attempt_is_cut_off_and_retried(tmp_path: Path) -> None:
@@ -72,6 +72,19 @@ def test_stalled_attempt_is_cut_off_and_retried(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     assert "::warning::apt-get update attempt 1 failed or timed out" in result.stdout
     assert "apt-get ok: update -o Acquire::Retries=3" in result.stdout
+
+
+def test_parent_only_timeout_does_not_disable_child_shim(tmp_path: Path, monkeypatch: MonkeyPatch) -> None:
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            shutil,
+            "which",
+            lambda command, *, path=None: "/parent-only/timeout" if path is None else None,
+        )
+        result = _run_helper(tmp_path, "hang-once")
+
+    assert (tmp_path / "bin" / "timeout").is_file(), result.stdout + result.stderr
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_persistent_failure_stops_after_three_attempts(tmp_path: Path) -> None:
