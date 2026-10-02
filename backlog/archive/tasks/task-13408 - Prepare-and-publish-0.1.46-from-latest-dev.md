@@ -4,7 +4,7 @@ title: Prepare and publish 0.1.46 from latest dev
 status: In Progress
 assignee: []
 created_date: '2026-10-02 00:22'
-updated_date: '2026-10-02 04:05'
+updated_date: '2026-10-02 07:38'
 labels:
   - release
 dependencies: []
@@ -20,7 +20,7 @@ Release remote dev 3304f6cf0c2cab8836c6a73308d7210534a759d9 through PR #3073 as 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Version, changelog and protected-source records agree on the frozen source
-- [ ] #2 Existing required checks pass on the release candidate
+- [x] #2 Existing required checks pass on the release candidate
 - [ ] #3 Merge main, publish v0.1.46 using existing workflows and synchronize main into dev
 <!-- AC:END -->
 
@@ -65,12 +65,16 @@ All six normal release gates and both CodeQL refs pass on b5. Found existing PR3
 Reuse of PR3078 minimal two-file relay repair verified: new fake-clock regression failed before source fix (stage-only vs record/ack/finalize); same60ms-controlled installer test passes afterward. Existing relay/recovery/activation suites207passed6fixture-reportedPostgresunavailable skips; initial custom /tmp basetemp rejected trusted database roots, rerun using pytest default native temp passed. Release/docs/licensing/helper80passed again. Production/test Ruff clean; scoped production Bandit0findings0errors, diffcheckclean. Changelog includes this exact CI root fix. Independent review requested via requesting-code-review skill before pushing.
 
 Independent read-only relay review: no actionable findings; only successfully staged current-attempt row finishes after deadline, while lease/receipt/purge/current-row guards remain and next row/batch completion retain deadline. Canceled obsolete runner-queued old-head retry after concrete root repair; updated PR3074 body and changelog. Await normal CI on new committed candidate before main merge/tag/publication.
+
+Pushed verified repair candidate3b5051d9fb2a301a0cfda33fc425846a1be6cc9e. Normal workflows remained runner-queued20minutes; no merge/tag/release/publication yet. Native thread follow-up finish-v0-1-46-release checks every15minutes and continues already authorized merge/publication/sync when normal gates and repaired Sync shard pass, quiet while unchanged. Latest dev dcae0cbd3f3ba6c7cd4287dc443628d93ee2cd64 includes late PR3069 cookie model discovery; retain frozen reviewed release source3304through3073 and preserve later dev work during sync. Later dev also contains unrelated TASK13408 cookie-model task: resolve tracking collision through official Backlog tools during sync, do not overwrite that record.
+
+All six release gates, trusted license and CodeQL passed on3b5051d9fb; Sync shard449passed. PR3074 merged normally as75cc3eed14d550aee08d47cd6373c0509dfa84a8; tested candidate and main trees match exactly. Annotated v0.1.46 points to that merge; GitHub changelog release published2026-10-02T07:31:04Z. Existing PyPI/GHCR workflows queued. Tracking continues under unique TASK13418 because later dev contains a different cookie-model TASK13408. Archive this historical release record before merging dev, preserving all notes; do not overwrite the cookie task. Publication verification and dev synchronization remain in progress under TASK13418.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Release preparation, verified source repairs, normal main merge and changelog-based GitHub publication are complete. Server artifact verification and dev synchronization continue under TASK-13418; this record is archived solely to avoid a task-ID collision with later dev.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
