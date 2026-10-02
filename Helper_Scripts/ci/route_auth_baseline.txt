@@ -29,8 +29,12 @@ GET /api/v1/config/jobs
 GET /api/v1/config/providers
 GET /api/v1/config/quickstart
 GET /api/v1/config/tokenizer
+# TASK-13399: visible once the ratchet mounted flag-gated routers. OAuth redirect callback (code/state are the credential); matches /api/v1/auth/federation/{provider_slug}/callback above.
+GET /api/v1/discord/oauth/callback
 GET /api/v1/embeddings/health
 GET /api/v1/evaluations/health
+# TASK-13399: visible once the ratchet mounted flag-gated routers. Invite-token gated (the token is the credential); matches /api/v1/invites/preview above.
+GET /api/v1/guardian/wizard/invites/preview
 GET /api/v1/invites/preview
 GET /api/v1/llm/health
 GET /api/v1/llm/models
@@ -39,6 +43,8 @@ GET /api/v1/llm/providers
 GET /api/v1/llm/providers/{provider_name}
 GET /api/v1/mcp/health
 GET /api/v1/media/transcription-models
+# TASK-13399: visible once the ratchet mounted flag-gated routers. Health check, public by design.
+GET /api/v1/meetings/health
 GET /api/v1/notes/health
 GET /api/v1/paper-search/acm
 GET /api/v1/paper-search/acm/by-doi
@@ -127,6 +133,12 @@ GET /api/v1/rag/health/ready
 GET /api/v1/rag/health/simple
 GET /api/v1/research/semantic-scholar-search
 GET /api/v1/research/sources
+# TASK-13399: visible once the ratchet mounted flag-gated routers. Health check, public by design (route name says so).
+GET /api/v1/sandbox/health/public
+# TASK-13399: visible once the ratchet mounted flag-gated routers. Deny-only traversal-guard fallback (sandbox.py @router.get(..., include_in_schema=False)); always 400s or 404s, never serves data. The real artifact routes require get_request_user plus an ownership check.
+GET /api/v1/sandbox/runs/{run_id}/{rest:path}
+# TASK-13399: visible once the ratchet mounted flag-gated routers. Static crisis/safety-resource info, public by design.
+GET /api/v1/self-monitoring/crisis-resources
 GET /api/v1/setup/audio/readiness
 GET /api/v1/setup/audio/recommendations
 GET /api/v1/setup/config
@@ -139,6 +151,8 @@ GET /api/v1/setup/readiness/profiles
 GET /api/v1/setup/readiness/status
 GET /api/v1/setup/status
 GET /api/v1/sharing/public/{token}
+# TASK-13399: visible once the ratchet mounted flag-gated routers. OAuth redirect callback (code/state are the credential); matches /api/v1/auth/federation/{provider_slug}/callback above.
+GET /api/v1/slack/oauth/callback
 GET /api/v1/users/keys/openai/oauth/callback
 GET /api/v1/vlm/backends
 GET /api/v1/vn/vn-capabilities
@@ -147,6 +161,8 @@ GET /favicon.ico
 GET /health
 GET /setup
 GET,HEAD /internal/ready
+# TASK-13399: visible once the ratchet mounted flag-gated routers. Signed webhook: provider-specific shared secret (X-Goog-Channel-Token / clientState), not identity auth.
+GET,POST /api/v1/connectors/providers/{provider}/webhook
 HEAD /health
 POST /api/v1/acp/triggers/webhook/{trigger_id}
 POST /api/v1/auth/forgot-password
@@ -159,6 +175,10 @@ POST /api/v1/auth/register
 POST /api/v1/auth/resend-verification
 POST /api/v1/auth/reset-password
 POST /api/v1/config/validate-provider
+# TASK-13399: visible once the ratchet mounted flag-gated routers. Signed webhook: Discord Ed25519 request signature, verified in-handler, not identity auth.
+POST /api/v1/discord/interactions
+# TASK-13399: visible once the ratchet mounted flag-gated routers. Invite-token gated (the token is the credential); matches /api/v1/auth/register above.
+POST /api/v1/guardian/wizard/invites/accept/register
 POST /api/v1/mcp/auth/refresh
 POST /api/v1/mcp/auth/token
 POST /api/v1/mcp/catalog/test-connection
@@ -188,4 +208,10 @@ POST /api/v1/setup/readiness/provision
 POST /api/v1/setup/readiness/verify
 POST /api/v1/sharing/public/{token}/prototype-session
 POST /api/v1/sharing/public/{token}/verify
+# TASK-13399: visible once the ratchet mounted flag-gated routers. Signed webhook: Slack request signing secret, not identity auth.
+POST /api/v1/slack/commands
+# TASK-13399: visible once the ratchet mounted flag-gated routers. Signed webhook: Slack request signing secret, not identity auth.
+POST /api/v1/slack/events
+# TASK-13399: visible once the ratchet mounted flag-gated routers. Signed webhook: Telegram secret token header, not identity auth.
+POST /api/v1/telegram/webhook
 POST /api/v1/websub/callback/{user_id}/{callback_token}

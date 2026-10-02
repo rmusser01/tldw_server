@@ -23,6 +23,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from .deps import derive_client_ip, derive_entity_key
 from .governor import RGRequest
+from .policy_eval import requests_window
 from .tenant import TenantScopeConfig, parse_tenant_config
 
 _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
@@ -55,6 +56,11 @@ _IDENTITY_RESOLVE_BUDGET_PER_MIN = 120
 _IDENTITY_RESOLVE_WINDOW_SEC = 60.0
 _BUDGET_SPENT = object()  # _resolve_principal_entity sentinel: charge the IP, cache nothing
 _IDENTITY_BUDGET_IPS_MAX = 4096
+
+
+def _policy_requests_limit(pol: dict) -> int:
+    """Header limit for a policy's requests block, as the governors report it; 0 if none."""
+    return requests_window(pol)[0] if float((pol.get("requests") or {}).get("rpm") or 0) > 0 else 0
 
 
 class RGSimpleMiddleware:
@@ -377,7 +383,7 @@ class RGSimpleMiddleware:
                     if loader is not None and policy_id:
                         pol = loader.get_policy(policy_id) or {}
                         if primary == "requests":
-                            limit = int((pol.get("requests") or {}).get("rpm") or 0)
+                            limit = _policy_requests_limit(pol)
                         elif primary == "tokens":
                             limit = int((pol.get("tokens") or {}).get("per_min") or 0)
                         elif primary in ("streams", "jobs"):
@@ -447,7 +453,7 @@ class RGSimpleMiddleware:
                             loader = getattr(request.app.state, "rg_policy_loader", None)
                             if loader is not None and policy_id:
                                 pol = loader.get_policy(policy_id) or {}
-                                eff_limit = int((pol.get("requests") or {}).get("rpm") or 0)
+                                eff_limit = _policy_requests_limit(pol)
                         except _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS:
                             eff_limit = 0
                     if eff_limit:
