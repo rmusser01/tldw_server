@@ -1,4 +1,3 @@
-import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Drawer, Button, Popconfirm, Empty, Spin, Collapse, message } from "antd"
 import { Archive, RotateCcw, Trash2 } from "lucide-react"
@@ -13,7 +12,7 @@ import {
   unarchiveCard,
   deleteCard
 } from "@/services/kanban"
-import type { Board, KanbanList, Card, BoardWithLists } from "@/types/kanban"
+import type { KanbanList, Card } from "@/types/kanban"
 
 interface ArchivedItemsDrawerProps {
   open: boolean
@@ -262,7 +261,7 @@ export const ArchivedItemsDrawer = ({
       }
       open={open}
       onClose={onClose}
-      width={400}
+      size={400}
     >
       {boardsLoading || boardArchiveLoading ? (
         <div className="flex justify-center py-10">

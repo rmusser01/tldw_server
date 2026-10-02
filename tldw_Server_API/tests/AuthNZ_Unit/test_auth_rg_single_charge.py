@@ -75,8 +75,8 @@ async def test_ingress_charged_user_still_reserves_ip(spy):
 
 
 async def test_ingress_charged_tenant_still_reserves_ip(spy):
-    # A tenant: ingress entity comes from an unvalidated header; rotating it must not
-    # stand in for the per-IP auth charge.
+    # A tenant: ingress bucket is shared by the tenant's members; it must not stand in
+    # for the per-IP auth charge.
     await auth_ep._reserve_auth_rg_requests(_request(_POLICY, "tenant:acme"), policy_id=_POLICY, entity=_IP)
     assert spy.entities == [_IP]
 

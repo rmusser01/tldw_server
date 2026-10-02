@@ -438,6 +438,31 @@ def test_unknown_nested_prompt_carrier_rejects(accepted_state):
         project_native_fork_context(state, (), ())
 
 
+@pytest.mark.parametrize("generation", [{"temperature": "0.9", "stopStrings": ["END"]}, {"future_effect": True}])
+def test_native_fork_generation_extension_preserves_sampling_or_rejects_unknown_effect(accepted_state, generation):
+    state = accepted_state.state
+    payload = state["behavior_snapshot"]["payload"]
+    participant = payload["participants"][0]
+    participant["prompt"]["prompt_relevant_extensions"]["character_extensions"] = {"tldw": {"generation": generation}}
+    participant["generation_defaults"]["sampling"] = {"temperature": 0.25, "stop": ["SAVED"]}
+    snapshot = build_behavior_snapshot(payload)
+    state["behavior_snapshot"].update(payload=snapshot.payload, digest=snapshot.digest)
+    values = state["settings"]["roleplayBehaviorV1"]["values"]
+    values["base_snapshot"]["digest"] = snapshot.digest
+    state["settings"]["roleplayBehaviorV1"] = build_materialized_behavior_settings(values)
+
+    if "future_effect" in generation:
+        with pytest.raises(HistorySelectionError, match="prompt_extensions"):
+            project_native_fork_context(state, (), ())
+    else:
+        result = project_native_fork_context(state, (), ())
+        retained = json.loads(result.snapshot_json)
+        assert retained["participants"][0]["generation_defaults"]["sampling"] == {
+            "temperature": 0.25,
+            "stop": ["SAVED"],
+        }
+
+
 def test_tool_arguments_cannot_retain_source_credentials():
     tools = [{"id": "c", "type": "function", "function": {"name": "fetch", "arguments": '{"api_key":"source-secret"}'}}]
     rows = (row(tools=tools), row("b", role="tool", extra={"tool_call_id": "c"}))

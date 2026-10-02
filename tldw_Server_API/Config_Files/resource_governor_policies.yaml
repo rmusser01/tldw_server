@@ -128,46 +128,46 @@ policies:
   # Evaluations module
   evals.default:
     # Ingress middleware enforces `requests` for `/api/v1/evaluations/*`.
-    # The Evaluations module reserves `evaluations` (+ optional `tokens`) at
-    # endpoint-level to enforce durable caps via `ResourceDailyLedger`.
+    # The Evaluations module reserves `evaluations` (+ optional `tokens`) for
+    # per-minute rates; per-user daily caps are UserProfiles `limits.*` keys
+    # (spec 2).
     requests: { rpm: 120, burst: 2.0 }
-    evaluations: { daily_cap: 500 }
-    tokens: { per_min: 1000000, burst: 1.0, daily_cap: 500000 }
+    tokens: { per_min: 1000000, burst: 1.0 }
     scopes: [user, api_key]
 
   # Evaluations tier policies (used by the evaluations module)
   evals.free:
-    evaluations: { per_min: 10, burst: 1.5, daily_cap: 100 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 100000 }
+    evaluations: { per_min: 10, burst: 1.5 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
   evals.basic:
-    evaluations: { per_min: 30, burst: 1.33, daily_cap: 1000 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 1000000 }
+    evaluations: { per_min: 30, burst: 1.33 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
   evals.premium:
-    evaluations: { per_min: 100, burst: 1.25, daily_cap: 10000 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 10000000 }
+    evaluations: { per_min: 100, burst: 1.25 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
   evals.enterprise:
-    evaluations: { per_min: 500, burst: 1.2, daily_cap: 100000 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 100000000 }
+    evaluations: { per_min: 500, burst: 1.2 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
 
   evals.free.batch:
-    evaluations: { per_min: 2, burst: 3.5, daily_cap: 100 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 100000 }
+    evaluations: { per_min: 2, burst: 3.5 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
   evals.basic.batch:
-    evaluations: { per_min: 5, burst: 3.0, daily_cap: 1000 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 1000000 }
+    evaluations: { per_min: 5, burst: 3.0 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
   evals.premium.batch:
-    evaluations: { per_min: 20, burst: 2.25, daily_cap: 10000 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 10000000 }
+    evaluations: { per_min: 20, burst: 2.25 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
   evals.enterprise.batch:
-    evaluations: { per_min: 100, burst: 2.0, daily_cap: 100000 }
-    tokens: { per_min: 0, burst: 1.0, daily_cap: 100000000 }
+    evaluations: { per_min: 100, burst: 2.0 }
+    tokens: { per_min: 0, burst: 1.0 }
     scopes: [user, api_key]
 
   # Web scraping service (internal service scope).

@@ -107,7 +107,8 @@ async def test_exhausted_org_storage_quota_rejects_before_persistence(authentica
     assert await _count(env, alice) == before
 
 
-async def test_org_scoped_upload_is_searchable_with_same_credentials(authenticated_email):
+async def test_org_scoped_upload_is_searchable_with_same_credentials(authenticated_email, billing_repo_wired):
+    # Billing headers exist only on the hosted path (a wired billing repository); OSS never runs billing checks (spec 2 §6).
     env = authenticated_email
     alice = env.users[0]
     org_repo = AuthnzOrgsTeamsRepo(env.pool)

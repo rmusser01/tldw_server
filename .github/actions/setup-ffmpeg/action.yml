@@ -23,14 +23,16 @@ runs:
         if [ -f /etc/apt/sources.list ]; then
           sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
         fi
-        sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20
-        if [ "${{ inputs.install-ffmpeg }}" = "true" ] && [ "${{ inputs.install-portaudio }}" = "true" ]; then
-          sudo apt-get install -y --no-install-recommends ffmpeg portaudio19-dev python3-all-dev
-        elif [ "${{ inputs.install-ffmpeg }}" = "true" ]; then
-          sudo apt-get install -y --no-install-recommends ffmpeg
-        elif [ "${{ inputs.install-portaudio }}" = "true" ]; then
-          sudo apt-get install -y --no-install-recommends portaudio19-dev python3-all-dev
+        source "${{ github.action_path }}/../apt-bounded.sh"
+        apt_bounded update "${apt_opts[@]}"
+        packages=()
+        if [ "${{ inputs.install-ffmpeg }}" = "true" ]; then
+          packages+=(ffmpeg)
         fi
+        if [ "${{ inputs.install-portaudio }}" = "true" ]; then
+          packages+=(portaudio19-dev python3-all-dev)
+        fi
+        apt_bounded install -y --no-install-recommends "${apt_opts[@]}" "${packages[@]}"
     - name: Install FFmpeg (macOS)
       if: runner.os == 'macOS'
       shell: bash

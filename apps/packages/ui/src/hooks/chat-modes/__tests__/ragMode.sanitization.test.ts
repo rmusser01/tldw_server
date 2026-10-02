@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   coerceBooleanOrNull: vi.fn(),
   tldwInitialize: vi.fn(),
   ragSearch: vi.fn(),
+  bgRequest: vi.fn(),
+  stream: vi.fn(),
   maybeInjectActorMessage: vi.fn(),
   getModels: vi.fn(),
   runChatPipeline: vi.fn(),
@@ -34,21 +36,35 @@ vi.mock("@/utils/human-message", () => ({
     mocks.humanMessageFormatter(...args)
 }))
 
-vi.mock("@/libs/reasoning", () => ({
+vi.mock("@/libs/reasoning", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/libs/reasoning")>(),
   removeReasoning: (...args: unknown[]) => mocks.removeReasoning(...args)
+}))
+
+vi.mock("@/db/dexie/nickname", () => ({ getModelNicknameByID: vi.fn().mockResolvedValue(null) }))
+vi.mock("@/utils/mcp-disclosure", () => ({ applyMcpModuleDisclosureFromToolCalls: vi.fn() }))
+vi.mock("@/services/background-proxy", () => ({
+  bgRequest: (...args: unknown[]) => mocks.bgRequest(...args),
+  bgStream: vi.fn(),
+  bgUpload: vi.fn()
 }))
 
 vi.mock("@/utils/format-docs", () => ({
   formatDocs: (...args: unknown[]) => mocks.formatDocs(...args)
 }))
 
-vi.mock("@/services/app", () => ({
+vi.mock("@/services/app", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/app")>(),
   getNoOfRetrievedDocs: (...args: unknown[]) =>
     mocks.getNoOfRetrievedDocs(...args)
 }))
 
-vi.mock("@/services/rag/unified-rag", () => ({
+vi.mock("@/services/rag/unified-rag", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/rag/unified-rag")>()
+  return {
+  ...actual,
   DEFAULT_RAG_SETTINGS: {
+    ...actual.DEFAULT_RAG_SETTINGS,
     collection_id: null,
     include_note_ids: [],
     include_media_ids: [],
@@ -70,10 +86,11 @@ vi.mock("@/services/rag/unified-rag", () => ({
     utility_grading_provider: null,
     utility_grading_model: null
   }
-}))
+  }
+})
 
-vi.mock("@/services/settings/registry", async (original) => ({
-  ...(await original<typeof import("@/services/settings/registry")>()),
+vi.mock("@/services/settings/registry", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/settings/registry")>(),
   coerceBooleanOrNull: (...args: unknown[]) =>
     mocks.coerceBooleanOrNull(...args)
 }))
@@ -96,7 +113,8 @@ vi.mock("@/services/tldw", () => ({
   }
 }))
 
-vi.mock("../chatModePipeline", () => ({
+vi.mock("../chatModePipeline", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../chatModePipeline")>(),
   runChatPipeline: (...args: unknown[]) => mocks.runChatPipeline(...args),
   getRequiredServicePrompt: (snapshot: any, id: string) => {
     const resolved = snapshot?.definitions?.[id]
@@ -391,7 +409,8 @@ describe("ragMode sanitizer", () => {
       ragAdvancedOptions: {
         enable_generation: true,
         generation_model: "unadmitted-model",
-        generation_provider: "unadmitted-provider"
+        generation_provider: "unadmitted-provider",
+        generation_prompt: "Do not generate this before admission."
       },
       currentChatModelSettings: { apiProvider: undefined }
     })
@@ -404,12 +423,13 @@ describe("ragMode sanitizer", () => {
     expect(options.enable_generation).toBe(false)
     expect(options).not.toHaveProperty("generation_model")
     expect(options).not.toHaveProperty("generation_provider")
+    expect(options).not.toHaveProperty("generation_prompt")
     expect(mocks.getModels).not.toHaveBeenCalled()
     expect(mocks.pageAssistModel).not.toHaveBeenCalled()
     expect(prompt.sources[0].pageContent).toContain("18 November 2026")
   })
 
-  it("sends raw generation_model when the selected RAG model is provider-qualified", async () => {
+  it("retrieves selected evidence without generating a discarded answer for a provider-qualified model", async () => {
     mocks.ragSearch.mockResolvedValue({
       documents: [
         {
@@ -435,15 +455,17 @@ describe("ragMode sanitizer", () => {
     expect(mocks.ragSearch).toHaveBeenCalledWith(
       "What phrase proves the selected source was used?",
       expect.objectContaining({
-        generation_model:
-          "gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
-        generation_provider: "llama.cpp"
+        enable_generation: false,
+        include_media_ids: [7, 8],
+        sources: ["media_db"]
       })
     )
+    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty("generation_model")
+    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty("generation_provider")
   })
 
   it.each(["missing", "unavailable", "stale"])(
-    "routes a llama-qualified RAG selection with %s metadata without changing the path",
+    "retrieves without generation or model lookup with %s metadata for a llama-qualified selection",
     async (metadataState) => {
       if (metadataState === "unavailable") {
         mocks.getModels.mockRejectedValue(new Error("Metadata unavailable"))
@@ -469,15 +491,18 @@ describe("ragMode sanitizer", () => {
       expect(mocks.ragSearch).toHaveBeenCalledWith(
         "What phrase proves the selected source was used?",
         expect.objectContaining({
-          generation_model: "../../../models/gemma:Q4_K_M/model.gguf",
-          generation_provider: "llama.cpp"
+          enable_generation: false,
+          include_media_ids: [7, 8],
+          sources: ["media_db"]
         })
       )
+      expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty("generation_model")
+      expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty("generation_provider")
       expect(mocks.getModels).not.toHaveBeenCalled()
     }
   )
 
-  it("routes an unqualified RAG model using the catalog llama alias", async () => {
+  it("retrieves without generation or catalog lookup for an unqualified model", async () => {
     mocks.getModels.mockResolvedValue([
       {
         id: "../../../models/gemma:Q4_K_M/model.gguf",
@@ -498,13 +523,61 @@ describe("ragMode sanitizer", () => {
     expect(mocks.ragSearch).toHaveBeenCalledWith(
       "What phrase proves the selected source was used?",
       expect.objectContaining({
-        generation_model: "../../../models/gemma:Q4_K_M/model.gguf",
-        generation_provider: "llama.cpp"
+        enable_generation: false,
+        include_media_ids: [7, 8],
+        sources: ["media_db"]
       })
     )
+    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty("generation_model")
+    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty("generation_provider")
+    expect(mocks.getModels).not.toHaveBeenCalled()
   })
 
-  it("handles selected-source RAG with no evidence without continuing as general chat", async () => {
+  it("sends retrieval-only RAG on the wire then streams one grounded answer with the same selected sources", async () => {
+    const { chatRagMethods } = await import("@/services/tldw/domains/chat-rag")
+    const { runChatPipeline } = await vi.importActual<typeof import("../chatModePipeline")>("../chatModePipeline")
+    const context = createRagContext()
+    mocks.ragSearch.mockImplementation((query, options) => chatRagMethods.ragSearch.call(
+      { normalizeRagQuery: (value: string) => value } as unknown as ThisParameterType<typeof chatRagMethods.ragSearch>, query, options
+    ))
+    mocks.bgRequest.mockResolvedValue({ documents: [{
+      content: "Larch is the selected source's marker.",
+      metadata: { title: "Selected Larch source", type: "text", source: "media_db" }
+    }] })
+    mocks.stream.mockImplementation(async function* () { yield { content: "The marker is Larch." } })
+    mocks.pageAssistModel.mockResolvedValue({ stream: mocks.stream })
+
+    const result = await runChatPipeline(__testing__.ragModeDefinition, context.message, "", false,
+      [], [], context.signal, context)
+
+    expect(result).toMatchObject({ status: "submitted" })
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/rag/search",
+      method: "POST",
+      body: expect.objectContaining({
+        query: context.message,
+        enable_generation: false,
+        include_media_ids: [7, 8],
+        sources: ["media_db"],
+        top_k: 8,
+        enable_citations: true,
+        enable_intent_routing: false
+      })
+    }))
+    expect(mocks.stream).toHaveBeenCalledTimes(1)
+    expect(mocks.stream.mock.calls[0][0]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ content: expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringContaining("Larch is the selected source's marker.") })
+      ]) })
+    ]))
+    expect(context.saveMessageOnSuccess).toHaveBeenCalledWith(expect.objectContaining({
+      fullText: "The marker is Larch.",
+      source: [expect.objectContaining({ name: "Selected Larch source", mode: "rag" })]
+    }))
+  })
+
+  it("does not display a stray generated answer when selected-source retrieval has no evidence", async () => {
     mocks.ragSearch.mockResolvedValue({
       documents: [],
       generated_answer:
@@ -524,9 +597,10 @@ describe("ragMode sanitizer", () => {
 
     expect(response).toMatchObject({
       handled: true,
-      fullText: expect.stringContaining("Could you clarify")
+      fullText: expect.stringContaining("couldn't find supporting evidence")
     })
     expect(response?.fullText).toContain("did not send this as general chat")
+    expect(response?.fullText).not.toContain("Could you clarify")
   })
 
   it("does not convert a selected-source scope rejection into a handled response", async () => {

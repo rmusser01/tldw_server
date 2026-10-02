@@ -1,6 +1,15 @@
 import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { Button, Input, Checkbox, Progress, Collapse, Popconfirm, message } from "antd"
+import {
+  Alert,
+  Button,
+  Input,
+  Checkbox,
+  Progress,
+  Collapse,
+  Popconfirm,
+  message
+} from "antd"
 import { Plus, Trash2 } from "lucide-react"
 
 import type { ChecklistWithItems, ChecklistItem } from "@/types/kanban"
@@ -23,7 +32,7 @@ export const ChecklistSection = ({ cardId }: ChecklistSectionProps) => {
   const queryClient = useQueryClient()
   const queryKey = ["kanban-card-checklists", cardId]
 
-  const { data: checklists = [], isLoading } = useQuery({
+  const { data: checklists = [], isError } = useQuery({
     queryKey,
     queryFn: () => listChecklists(cardId),
     staleTime: 20 * 1000
@@ -48,6 +57,7 @@ export const ChecklistSection = ({ cardId }: ChecklistSectionProps) => {
   })
 
   const handleAddChecklist = () => {
+    if (isError) return
     const trimmed = newChecklistTitle.trim()
     if (!trimmed) return
     createChecklistMutation.mutate(trimmed)
@@ -58,6 +68,10 @@ export const ChecklistSection = ({ cardId }: ChecklistSectionProps) => {
       <div className="flex items-center justify-between">
         <label className="block text-sm font-medium">Checklists</label>
       </div>
+
+      {isError && (
+        <Alert type="error" showIcon title="Unable to load checklists." />
+      )}
 
       {checklists.map((cl) => (
         <SingleChecklist key={cl.id} checklist={cl} onChanged={invalidate} />
@@ -79,6 +93,7 @@ export const ChecklistSection = ({ cardId }: ChecklistSectionProps) => {
               type="primary"
               onClick={handleAddChecklist}
               loading={createChecklistMutation.isPending}
+              disabled={isError}
             >
               Add
             </Button>
@@ -93,6 +108,7 @@ export const ChecklistSection = ({ cardId }: ChecklistSectionProps) => {
           type="dashed"
           icon={<Plus className="w-3.5 h-3.5" />}
           onClick={() => setAddingChecklist(true)}
+          disabled={isError}
         >
           Add Checklist
         </Button>

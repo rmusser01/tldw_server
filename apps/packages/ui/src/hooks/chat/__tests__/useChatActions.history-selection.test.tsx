@@ -49,6 +49,7 @@ const {
 const messageStoreState = vi.hoisted(() => ({
   value: {
     selectedModel: "deepseek-chat" as string | null,
+    toolChoice: "auto" as "auto" | "none" | "required",
     serverChatId: null as string | null,
     serverChatCharacterId: null as string | number | null,
     serverChatAssistantKind: null as "character" | "persona" | null,
@@ -286,7 +287,8 @@ const h1 = vi.hoisted(() => ({
   mirror: vi.fn(),
   localCapture: vi.fn(),
   localAppend: vi.fn(),
-  localSettle: vi.fn()
+  localSettle: vi.fn(),
+  beforeModel: vi.fn()
 }))
 vi.mock("@/hooks/chat/useHistorySelection", async (original) => ({
   ...(await original<any>()),
@@ -331,8 +333,9 @@ vi.mock("@/utils/actor", () => ({
 vi.mock("@/models", async () => {
   const { ChatTldw } = await import("@/models/ChatTldw")
   return {
-    pageAssistModel: async (options: any) =>
-      new ChatTldw({
+    pageAssistModel: async (options: any) => {
+      await h1.beforeModel()
+      return new ChatTldw({
         ...options,
         temperature: 0.23,
         supportsMultimodal: true,
@@ -340,6 +343,7 @@ vi.mock("@/models", async () => {
           await import("@/store/model")
         ).useStoreChatModelSettings.getState().slashCommandInjectionMode
       })
+    }
   }
 })
 vi.mock("@/hooks/utils/messageHelpers", async (original) => original())
@@ -444,6 +448,9 @@ const makeController = () => {
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  h1.beforeModel.mockReset()
+  messageStoreState.value.selectedModel = "deepseek-chat"
+  messageStoreState.value.toolChoice = "auto"
   h1.auth = new AbortController()
   h1.mirror.mockImplementation((await vi.importActual<any>("@/db/dexie/server-chat-mirror")).linkServerChatMirror)
   const actual = await vi.importActual<any>("@/hooks/chat-modes/normalChatMode")
@@ -670,6 +677,36 @@ it("mounted ordinary submit sends the selected A1 and settles once under its pre
   ).toEqual(["u-old", "a1"])
   expect(assistant.tldw_history_admission_v1.input_message_id).toBe(user.id)
   expect(assistant.parent_message_id).toBe(user.id)
+  expect(addChatMessageMock).toHaveBeenCalledTimes(2)
+})
+
+it.each(["model", "tools"])("rejects an ordinary playground send after its global %s selector changes during preparation", async changed => {
+  const { result } = renderHook(() => useChatActions(ordinaryOptions() as any))
+  h1.beforeModel.mockImplementation(() => {
+    if (changed === "model") messageStoreState.value.selectedModel = "changed-model"
+    else messageStoreState.value.toolChoice = "none"
+  })
+  await act(async () => { await result.current.onSubmit({ message: "next", image: "" }) })
+  expect(addChatMessageMock).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
+})
+
+it.each(["model", "tools"])("keeps an explicit playground %s override after its unrelated global selector changes", async overridden => {
+  const { result } = renderHook(() => useChatActions(ordinaryOptions() as any))
+  h1.beforeModel.mockImplementation(() => {
+    if (overridden === "model") messageStoreState.value.selectedModel = "changed-model"
+    else messageStoreState.value.toolChoice = "required"
+  })
+  await act(async () => {
+    await result.current.onSubmit({
+      message: "next", image: "",
+      requestOverrides: overridden === "model"
+        ? { selectedModel: "fixed-model" }
+        : { toolChoice: "none" }
+    })
+  })
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.wire.mock.calls[0][0].model).toBe(overridden === "model" ? "fixed-model" : "deepseek-chat")
   expect(addChatMessageMock).toHaveBeenCalledTimes(2)
 })
 

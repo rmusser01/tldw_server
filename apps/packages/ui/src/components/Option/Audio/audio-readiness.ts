@@ -408,10 +408,14 @@ export function buildTtsReadinessItems({
   items.push({
     id: `${provider}-provider`,
     label: providerInfo?.provider_name || provider,
-    state: providerInfo || provider === "openai" || provider === "tldw"
+    state: providerInfo || provider === "openai"
       ? "ready"
-      : "unknown",
-    detail: `Current provider selected.${formats}`,
+      : providersInfo === undefined ? "unknown" : "blocked",
+    detail: providerInfo || provider === "openai"
+      ? `Current provider selected.${formats}`
+      : providersInfo === undefined
+        ? "Loading server TTS providers."
+        : "No configured TTS provider reported. Open Settings -> Speech and choose a configured provider.",
     source: providerInfo ? "provider" : "unknown"
   })
 

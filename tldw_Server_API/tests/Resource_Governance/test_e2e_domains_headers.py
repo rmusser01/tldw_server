@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -8,8 +10,39 @@ pytestmark = pytest.mark.rate_limit
 
 
 @pytest.fixture(params=["memory", "redis"], ids=["rg-memory", "rg-redis"])
-def rg_backend(request) -> str:
-    return str(request.param)
+def rg_backend(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
+    backend = str(request.param)
+    if backend == "redis":
+        # RGSimpleMiddleware lazily builds a RedisResourceGovernor (connecting to
+        # the real Redis at 127.0.0.1:6379 by default) the first time a request
+        # needs one. An ambient Redis left running locally -- with stale `rg*`
+        # keys from earlier runs -- can start these tests already rate-limited,
+        # and a real shared Redis also means other xdist workers' tests can
+        # interleave with these. Make the "redis" backend hermetic by injecting
+        # the in-memory stub, same as test_governor_safety_net.py's `_gov`.
+        from tldw_Server_API.app.core.Infrastructure.redis_factory import InMemoryAsyncRedis
+        from tldw_Server_API.app.core.Resource_Governance import governor_redis as _governor_redis_mod
+
+        _RealRedisGovernor = _governor_redis_mod.RedisResourceGovernor
+
+        class _InMemoryRedisGovernor(_RealRedisGovernor):
+            """Redis test double: a real `RedisResourceGovernor` wired to an
+            in-process stub client instead of a real Redis connection.
+
+            Subclassing (rather than monkeypatching an instance after the
+            fact) is necessary because `RGSimpleMiddleware` constructs the
+            governor itself, lazily, on first request; this class is what
+            gets built in its place once patched onto `governor_redis.
+            RedisResourceGovernor` below, so the real governor logic runs
+            unchanged against `InMemoryAsyncRedis` instead of a live server.
+            """
+
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                super().__init__(*args, **kwargs)
+                self._client = InMemoryAsyncRedis()
+
+        monkeypatch.setattr(_governor_redis_mod, "RedisResourceGovernor", _InMemoryRedisGovernor)
+    return backend
 
 
 def _write_policy(

@@ -19,6 +19,7 @@ from loguru import logger
 # Sentinel value for unlimited quotas (avoids arithmetic overflow issues with sys.maxsize)
 UNLIMITED_QUOTA = -1
 
+from tldw_Server_API.app.core.config import usage_quotas_enabled
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.testing import is_truthy
@@ -100,7 +101,13 @@ class QuotaManager:
         self.user_tier = normalized_tier
         self.quotas = self._get_quotas_for_tier(normalized_tier)
         self.db = db  # Optional DB handle for persistent quota checks
-        self._quotas_disabled = _env_flag("CHATBOOKS_DISABLE_QUOTAS") or _env_flag("TEST_MODE") or _env_flag("TESTING") or bool(os.getenv("PYTEST_CURRENT_TEST"))
+        self._quotas_disabled = (
+            not usage_quotas_enabled()
+            or _env_flag("CHATBOOKS_DISABLE_QUOTAS")
+            or _env_flag("TEST_MODE")
+            or _env_flag("TESTING")
+            or bool(os.getenv("PYTEST_CURRENT_TEST"))
+        )
 
         # Usage tracking (in production, use database)
         self.usage_cache: dict[str, Any] = {}

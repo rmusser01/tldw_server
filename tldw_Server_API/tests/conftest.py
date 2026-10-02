@@ -39,6 +39,10 @@ os.environ["MPLBACKEND"] = "Agg"
 # Full-app TestClient fixtures should not trigger CI embedding model preloads.
 # Tests that exercise model downloads can opt in explicitly.
 os.environ.setdefault("AUTO_DOWNLOAD_MODELS", "false")
+# Usage quotas are off by default in production (spec 2). The existing quota suites
+# test enforcement, so keep it on for the test session through the legacy spelling,
+# which tests can still flip with setenv. Stock-default tests clear both variables.
+os.environ.setdefault("LIMIT_ENFORCEMENT_ENABLED", "true")
 # Provide an explicit, deterministic API key for tests that rely on single-user/test-mode shortcuts.
 # Production code no longer assumes a default for SINGLE_USER_TEST_API_KEY.
 os.environ.setdefault("SINGLE_USER_TEST_API_KEY", "test-api-key-12345")
@@ -877,6 +881,17 @@ def healthy_no_override_tts_credential_snapshot():
             healthy=original_healthy,
             ttl_enabled=not original_ttl_disabled,
         )
+
+
+@pytest.fixture()
+def billing_repo_wired(monkeypatch):
+    """Simulate the hosted product: a billing repository is wired into SubscriptionService."""
+    from tldw_Server_API.app.core.Billing import subscription_service
+
+    async def _wired() -> bool:
+        return True
+
+    monkeypatch.setattr(subscription_service, "billing_repo_configured", _wired)
 
 
 class _TestUsageLogger:

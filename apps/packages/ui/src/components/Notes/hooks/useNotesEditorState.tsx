@@ -149,6 +149,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const authorityEpochRef = React.useRef(0)
   const authorityRequestsRef = React.useRef(new Set<AbortController>())
   const noteSelectionEpochRef = React.useRef(0)
+  const pendingSelectionEpochRef = React.useRef<number | null>(null)
   if (!connectionAuthoritiesMatch(connectionConfig, connectionConfigRef.current)) {
     connectionEpochRef.current += 1
     authorityEpochRef.current += 1
@@ -160,6 +161,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   React.useEffect(() => {
     const cancelRequests = () => {
       authorityEpochRef.current += 1
+      pendingSelectionEpochRef.current = null
       for (const controller of authorityRequestsRef.current) controller.abort()
       authorityRequestsRef.current.clear()
       activeSaveRef.current = null
@@ -181,8 +183,16 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   // ---- editor state ----
   const [selectedId, setSelectedId] = React.useState<string | number | null>(null)
+  const selectedIdRef = React.useRef(selectedId)
+  selectedIdRef.current = selectedId
   const [title, setTitle] = React.useState('')
   const [content, setContent] = React.useState('')
+  const setEditorTitle = React.useCallback((value: React.SetStateAction<string>) => {
+    if (pendingSelectionEpochRef.current == null) setTitle(value)
+  }, [])
+  const setEditorContent = React.useCallback((value: React.SetStateAction<string>) => {
+    if (pendingSelectionEpochRef.current == null) setContent(value)
+  }, [])
   const [loadingDetail, setLoadingDetail] = useNotesAuthorityState(authorityScope, false)
   const [saving, setSaving] = React.useState(false)
   const [saveIndicator, setSaveIndicator] = useNotesAuthorityState<SaveIndicatorState>(authorityScope, 'idle')
@@ -466,6 +476,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         provenance?: 'manual' | NotesAssistAction
       }
     ) => {
+      if (pendingSelectionEpochRef.current != null) return
       contentRef.current = nextContent
       setContent(nextContent)
       setIsDirty(true)
@@ -594,6 +605,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     const editRevision = savedEditRevision ?? editRevisionRef.current.revision
     const isCurrent = () => !ownedRequest?.abortSignal.aborted && authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === noteEpoch
     if (requestAuthorityScope === null) return false
+    pendingSelectionEpochRef.current = String(selectedIdRef.current) !== String(id) ? noteEpoch : null
     clearAssistUndoState()
     setLoadingDetail(true)
     try {
@@ -640,7 +652,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     } catch {
       if (isCurrent()) message.error('Failed to load note')
       return false
-    } finally { if (isCurrent()) setLoadingDetail(false) }
+    } finally {
+      if (pendingSelectionEpochRef.current === noteEpoch) pendingSelectionEpochRef.current = null
+      if (isCurrent()) setLoadingDetail(false)
+    }
   }, [applyOfflineDraftToEditor, authorityScope, clearAssistUndoState, clearTaskState, isOnline, message, refreshTaskStateForNote, rememberRecentNote, setEditorKeywords, setIsDirty, setLoadingDetail, setSaveIndicator, setMonitoringNotice])
 
   const dismissTaskActivity = React.useCallback(async (eventId: string) => {
@@ -663,6 +678,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   const resetEditor = React.useCallback(() => {
     noteSelectionEpochRef.current += 1
+    pendingSelectionEpochRef.current = null
     activeSaveRef.current?.abort()
     activeSaveRef.current = null
     savingInFlightRef.current = false
@@ -1089,6 +1105,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   // ---- save note ----
   const saveNote = React.useCallback(
     async ({ showSuccessMessage = true }: SaveNoteOptions = {}) => {
+      if (pendingSelectionEpochRef.current != null) return false
       if (saving || savingInFlightRef.current) return false
       const saveEpoch = ++saveEpochRef.current
       const savedEditRevision = editRevisionRef.current.revision
@@ -2389,9 +2406,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   return {
     // state
     selectedId, setSelectedId,
-    title, setTitle,
-    content, setContent,
+    title, setTitle: setEditorTitle,
+    content, setContent: setEditorContent,
     loadingDetail,
+    loadingSelection: loadingDetail && pendingSelectionEpochRef.current != null,
     saving,
     saveIndicator, setSaveIndicator,
     saveRecoveryNotice,
