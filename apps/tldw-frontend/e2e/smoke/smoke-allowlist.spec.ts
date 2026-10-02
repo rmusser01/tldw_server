@@ -2,6 +2,8 @@ import { test, expect } from '@playwright/test';
 import { classifySmokeIssues, getCriticalIssues } from './smoke.setup';
 
 const missingRouteDocumentUrl = 'http://localhost:8080/__wayfinding-missing-route__';
+const moderationItemsUrl =
+  'http://127.0.0.1:18323/api/v1/moderation/review/items?status=needs_review&sort=newest&limit=50';
 
 for (const scenario of [
   {
@@ -29,9 +31,15 @@ for (const scenario of [
     unexpected: 1,
   },
   {
-    name: 'rejects the retired minimal-backend moderation list miss',
+    name: 'allows the minimal-backend moderation list miss on the moderation page',
     route: '/moderation',
-    url: 'http://127.0.0.1:18323/api/v1/moderation/review/items?status=needs_review&sort=newest&limit=50',
+    url: moderationItemsUrl,
+    unexpected: 0,
+  },
+  {
+    name: 'rejects the moderation list miss on another page',
+    route: '/unrelated-route',
+    url: moderationItemsUrl,
     unexpected: 1,
   },
 ]) {

@@ -535,6 +535,16 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     routes: ["/__wayfinding-missing-route__"]
   },
   {
+    id: "m5-optional-resource-404-noise",
+    scope: "console",
+    pattern: /\/api\/v1\/moderation\/review\/items(?:\?[^ ]*)?\s+Failed to load resource: the server responded with a status of 404\b/i,
+    rationale:
+      "The minimal smoke backend omits moderation review items. /moderation requests it on mount, so a 404 that lands before the console snapshot is expected and the route stays recoverable. TASK-13406 owns adding the endpoint or retiring this rule.",
+    owner: "WebUI",
+    expiresOn: "2026-10-31",
+    routes: ["/moderation"]
+  },
+  {
     id: "m5-route-boundary-forced-react-overlay-warning",
     scope: "console",
     pattern: /The above error occurred in the <ForcedRouteErrorProbe> component/i,
