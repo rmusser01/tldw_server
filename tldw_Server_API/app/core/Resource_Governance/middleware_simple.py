@@ -22,7 +22,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from .deps import derive_client_ip, derive_entity_key
+from .deps import derive_client_ip, derive_entity_key, tenant_claims_from_state
 from .governor import RGRequest
 from .policy_eval import requests_window
 from .tenant import TenantScopeConfig, get_tenant_id, parse_tenant_config
@@ -65,16 +65,16 @@ def _policy_requests_limit(pol: dict) -> int:
 
 
 class _Identity(NamedTuple):
-    """A validated principal: its own entity and the tenants (org ids) it belongs to."""
+    """A validated principal: its entity, the tenants (org ids) it belongs to, its own tenant."""
 
     entity: str
     org_ids: frozenset[str] = frozenset()
-    active_org_id: str | None = None
+    tenant_id: str | None = None
 
 
-def _identity(entity: str, org_ids: object, active_org_id: object) -> _Identity:
+def _identity(entity: str, org_ids: object, tenant_id: object) -> _Identity:
     orgs = frozenset(str(org) for org in org_ids) if isinstance(org_ids, (list, tuple)) else frozenset()
-    return _Identity(entity, orgs, None if active_org_id is None else str(active_org_id))
+    return _Identity(entity, orgs, None if tenant_id is None else str(tenant_id))
 
 
 class RGSimpleMiddleware:
@@ -163,7 +163,8 @@ class RGSimpleMiddleware:
           charged unresolved and nothing is cached. JWTs never spend the budget.
         - With tenant scoping enabled, a validated principal is charged ``tenant:<id>``:
           the org the tenant header names when the principal belongs to it, else its
-          active org, else its own entity (_charge_entity). Only a principal's orgs
+          own tenant in deps.tenant_claims_from_state's order (tenant claim, active org,
+          org), else its own entity (_charge_entity). Only a principal's orgs
           (cached with it) can name a tenant, so anonymous and invalid callers rotating
           the header still share the IP bucket (TASK-13402).
         """
@@ -212,7 +213,7 @@ class RGSimpleMiddleware:
         if identity is None:
             return None
         cfg = self._derive_tenant_config(request)
-        claims = {cfg.jwt_claim: identity.active_org_id} if cfg and identity.active_org_id else None
+        claims = {cfg.jwt_claim: identity.tenant_id} if cfg and identity.tenant_id else None
         tenant = get_tenant_id(request.headers, claims=claims, config=cfg, member_of=identity.org_ids)
         return f"tenant:{tenant}" if tenant else identity.entity
 
@@ -243,7 +244,8 @@ class RGSimpleMiddleware:
                 if not request.headers.get("X-API-KEY"):
                     return None
             else:
-                # Signature-verified org claims; route auth re-checks the memberships.
+                # Signature-verified org claims; route auth re-checks the memberships. Route
+                # JWT auth exposes only the active org, so that is the JWT's own tenant.
                 return _identity(f"user:{sub}", payload.get("org_ids"), payload.get("active_org_id")) if sub else None
         # Only this path costs a DB lookup and a key derivation, so only it spends the budget.
         if not self._spend_resolve_budget(client_ip, now):
@@ -266,7 +268,9 @@ class RGSimpleMiddleware:
             entity = f"api_key:{principal.api_key_id}"
         else:
             return None
-        return _identity(entity, getattr(principal, "org_ids", None), getattr(principal, "active_org_id", None))
+        # get_auth_principal just filled request state; read the tenant as routes will.
+        tenant_id = tenant_claims_from_state(request).get("tenant_id", getattr(principal, "active_org_id", None))
+        return _identity(entity, getattr(principal, "org_ids", None), tenant_id)
 
     def _derive_entity(self, request: Request) -> str:
         """Derive the RG entity key for this request.

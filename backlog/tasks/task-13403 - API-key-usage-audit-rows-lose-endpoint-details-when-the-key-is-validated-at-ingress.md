@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-09-30 09:46'
-updated_date: '2026-10-02 00:56'
+updated_date: '2026-10-02 03:26'
 labels:
   - authnz
 dependencies: []
@@ -35,14 +35,20 @@ R-U implemented: API-key usage is recorded at route time, not at ingress.
 - ADR-056 identity bullet documents the deferral.
 Tests: tests/AuthNZ_Unit/test_api_key_usage_at_route.py (real APIKeyManager recording path, key lookup/storage stubbed): (a) ingress-resolved key + route reached -> one usage update + one 'used' row with endpoint/action/scope, for get_request_user, get_auth_principal and get_current_user; (b) ingress 429 -> zero updates/rows while ingress did validate; (c) RG_ENABLED=false -> one update with details; (d) two requests, second an ingress cache hit -> one update + detailed row each. RED shown for (a) x3, (b), (d) before the fix; (c) is a guard that passes before and after.
 Bandit (uvx bandit -ll) on touched AuthNZ/RG files: no findings. Ruff: only pre-existing I001/TRY203 in auth_deps.py and api_key_manager.py (present on origin/dev).
+
+Review follow-up: approved with no Critical or Important issues; minors folded in.
+- New test test_api_key_usage_at_route.py::test_route_revalidation_after_ingress_records_usage_once: route auth skips its fast path (non-User _auth_user) and re-validates after ingress deferred the usage; usage_updates == [7]. Mutation-checked: removing the pending-clear in authenticate_api_key_user fails the revalidate-then-reuse case ([7, 7]); removing the flag reset in the middleware finally block fails the revalidate case ([]).
+Final summary: ingress validates API keys without recording usage; route auth records it exactly once, with endpoint/action/scope, when it first reuses the cached context; a 429 at ingress records nothing; RG off and ingress cache hits record at route auth as before.
+Verification: RG + AuthNZ_Unit (-n 4, TLDW_TEST_NO_DOCKER=1): 1581 passed, 6 skipped, 2 xfailed. Docs tests: 212 passed. Bandit (uvx bandit -ll) on all touched source: no findings.
+Known skips: Postgres-backed tests skip locally (no reachable Postgres). Unrelated failures seen in the symbol-hit sweep reproduce on an archive of origin/dev (see TASK-13402 notes).
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

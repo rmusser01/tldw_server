@@ -70,8 +70,13 @@ def derive_client_ip(request: Request) -> str:
     return resolved or "unknown"
 
 
-def _tenant_claims_from_state(request: Request) -> dict[str, object]:
-    """Extract tenant-related claims from trusted request state/auth context."""
+def tenant_claims_from_state(request: Request) -> dict[str, object]:
+    """Extract tenant-related claims from trusted request state/auth context.
+
+    ``tenant_id`` is the caller's own tenant: the tenant claim, else the active org,
+    else the org (for an API key, its scoped org or first org). RG ingress calls this
+    too, so ingress and endpoint reservations agree on a caller's tenant (TASK-13402).
+    """
     claims: dict[str, object] = {}
     for attr in ("tenant_id", "active_org_id", "org_id"):
         try:
@@ -89,11 +94,10 @@ def _tenant_claims_from_state(request: Request) -> dict[str, object]:
                 claims.setdefault(attr, value)
     except _RG_DEPS_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug("RG tenant claims: auth principal lookup failed; continuing with request.state claims: {}", exc)
-    if "tenant_id" not in claims:
-        for fallback in ("active_org_id", "org_id"):
-            if fallback in claims:
-                claims["tenant_id"] = claims[fallback]
-                break
+    for attr in ("tenant_id", "active_org_id", "org_id"):
+        if attr in claims:
+            claims["tenant_id"] = claims[attr]
+            break
     return claims
 
 
@@ -128,7 +132,7 @@ def derive_entity_key(request: Request, tenant_config: TenantScopeConfig | None 
         tenant_config = _tenant_config_from_request(request)
     if tenant_config and tenant_config.enabled:
         try:
-            claims = _tenant_claims_from_state(request)
+            claims = tenant_claims_from_state(request)
             tenant_id = get_tenant_id(
                 request.headers, claims=claims, config=tenant_config, member_of=_member_tenant_ids(request, claims)
             )
