@@ -1,5 +1,5 @@
 import React from "react"
-import { act, renderHook } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, expect, it, vi } from "vitest"
 const mocks = vi.hoisted(() => ({
   history: vi.fn(),
@@ -81,6 +81,71 @@ it("does not install an older conversation after a new navigation finishes", asy
     await pending
   })
   expect(result.current.rows).toEqual([{ id: "new" }])
+})
+
+it("does not restart an accepted effect load when its setters render the loaded messages", async () => {
+  mocks.history.mockImplementation(async (id: string) => [{ id }])
+  const attempts = vi.fn()
+  const { result, unmount } = renderHook(() => {
+    const [rows, setRows] = React.useState<unknown[]>([])
+    const load = useLoadLocalConversation(
+      {
+        setServerChatId: () => {},
+        setHistoryId: () => {},
+        setHistory: () => {},
+        setMessages: setRows,
+        setSelectedModel: () => {},
+        setSelectedSystemPrompt: () => {},
+        setSystemPrompt: () => {},
+        setContextFiles: () => {}
+      },
+      { t: (key) => key, errorLogPrefix: "load", errorDefaultMessage: "failed" }
+    )
+    React.useEffect(() => {
+      // Bound the broken implementation so this regression cannot exhaust a worker.
+      if (attempts.mock.calls.length >= 2) return
+      attempts()
+      void load("owned")
+    }, [load])
+    return rows
+  })
+  try {
+    await waitFor(() => expect(result.current).toEqual([{ id: "owned" }]))
+    await act(async () => { await Promise.resolve() })
+    expect(attempts).toHaveBeenCalledTimes(1)
+  } finally {
+    unmount()
+  }
+})
+
+it("uses the current message setter for a deliberate load after rerender", async () => {
+  mocks.history.mockResolvedValue([{ id: "owned" }])
+  const first = vi.fn<(rows: unknown[]) => void>()
+  const second = vi.fn<(rows: unknown[]) => void>()
+  const { result, rerender, unmount } = renderHook(({ sink }) =>
+    useLoadLocalConversation(
+      {
+        setServerChatId: () => {},
+        setHistoryId: () => {},
+        setHistory: () => {},
+        setMessages: sink,
+        setSelectedModel: () => {},
+        setSelectedSystemPrompt: () => {},
+        setSystemPrompt: () => {},
+        setContextFiles: () => {}
+      },
+      { t: (key) => key, errorLogPrefix: "load", errorDefaultMessage: "failed" }
+    ),
+    { initialProps: { sink: first } }
+  )
+  try {
+    rerender({ sink: second })
+    await act(async () => { await result.current("owned") })
+    expect(second).toHaveBeenCalledWith([{ id: "owned" }])
+    expect(first).not.toHaveBeenCalled()
+  } finally {
+    unmount()
+  }
 })
 
 // Delay actual dynamic-module imports while mounting the production controller
