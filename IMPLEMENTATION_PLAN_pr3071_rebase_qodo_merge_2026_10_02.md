@@ -12,17 +12,18 @@ human ownership, and security verification.
 ## Stage 1: Preserve and Rebase
 **Goal**: Rebase on latest fetched dev9958110df2a9011e19f48b0eae821353e19d4af8,
 retaining the qualified8140 integration and the new request-scoped ChaCha reuse fix.
-**Success Criteria**: Backup ref retained; complete result equals expected clean
-integration tree cbf4388b66855d5d255b784b87ae3dae28c04061, except this task/plan.
-The final reviewed-fix rebase produced HEAD0ac9032 with expected integration tree
-05f818713d3d59ff7c48e8d2762c24d14a180523; all upstream AuthNZ/RG paths match dev.
+**Success Criteria**: Backup refs retain published31a and tracking3554. Rebased
+HEAD940fd21b exactly equals clean integration tree4d696befb04ddd3c26fd5307a4ecf54218624713,
+before subsequent task/plan qualification updates. Incoming eight paths match
+dev9958 byte-for-byte; prior reviewed fixes remain intact.
 **Tests**: Git ancestry/tree comparison; original stash inventory unchanged.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 2: Verify and Publish
 **Goal**: Verify the rebased implementation and resolve published-ADR drift.
 **Success Criteria**: Docs refresh and affected owning regressions pass; normal
-hooks pass; publish using a lease bound to original head 0c9d592231dfee52642ce970f9f8cf159ebdfd49.
+hooks pass; publish the9958 integration using an exact lease bound to current
+published head31a94f5dbadf6f7da6e776225f43a6ef88fe02c8.
 **Tests**: Docs refresh suite, changed CI/test-isolation regressions, owning Chat
 Workspace regressions, touched-scope Bandit, and exact production-source binding
 to prior real Chrome desktop/mobile acceptance. Unit doubles are not UAT.
@@ -115,6 +116,35 @@ task metadata. Frontend and both PR-owned runtime paths remain nonoverlapping.
 Preserve31a, rebase, verify exact expected integration and incoming/owning tests,
 then bind a fresh actual backend before UAT. Current imported73ada backend must
 not be claimed as UAT of9958. Companion SDK authorization remains pending.
+
+Rebased9958 head940fd21b matches the complete expected integration tree exactly;
+all68stashes retained. Frontend bytes remain identical to published31a. New API
+PID13156:18096 runs this actual source in the existing real non-test environment,
+with3817 tracked application/config hashes checked before native Chrome acceptance.
+Official incoming regressions107pass, including all57 PostgreSQL HTTP lifecycle
+cases unskipped; owning chat507pass/1skip. Four-production-path Bandit0findings/
+0errors. Both initial test invocations incorrectly placed basetemp beside TMPDIR;
+their path-guard failures are retained. Corrected paths nest beneath TMPDIR,
+without changing application guards or test expectations.
+
+Fresh native Chrome acceptance on9958 captures one retrieval without generation,
+one deliberate durable Gemma send, four live heartbeat frames, canonical protected
+input/result and source metadata, citation expansion, previous history/draft
+reload, and new draft reload. Desktop/mobile fresh reload and native keyboard
+access pass with zero inference requests and zero horizontal overflow. The runner
+initially waited for enabled Send after the composer correctly cleared. A recorded
+zero-send native draft continuation kept its original receipt collector attached;
+the wait is corrected for future runs, with no resend or fabricated receipt.
+An independent incoming9958 scoped review found no actionable issue. Published31a
+CI finished293success/35skip/1neutral; these historical checks do not qualify the
+new head. Fresh published-head Qodo/CI and SDK disposition remain merge gates.
+
+Fresh9958 four settled B/A/B/A Research/Chat transitions also pass with zero
+sends; A restores its exact conversation/draft and B's checkpoint remains
+byte-identical. Read-only preservation against the new API passes original10/eight
+protected rows, served contracts/12negative controls, six current baseline Chrome
+targets and all68stashes. Already-absent historical target IDs are not claimed
+preserved. Original shared services, unrelated files and backup refs remain intact.
 
 ## Stage 4: Merge and Read Back
 **Goal**: Merge the verified PR into dev without bypassing checks.
