@@ -311,7 +311,9 @@ export const WorkspaceSourcePreview = ({
                     }
                   )
                 : null
-          const candidateUrl = safeExternalUrl(previewSource.url)
+          const candidateUrl = safeExternalUrl(
+            previewData ? previewData.url : previewSource.url
+          )
           const previewSafeUrl =
             candidateUrl && /^https?:\/\//i.test(candidateUrl) && parseHttpOrigin(candidateUrl)
               ? candidateUrl
@@ -321,10 +323,10 @@ export const WorkspaceSourcePreview = ({
             <div className="space-y-4">
               <div className="rounded border border-border bg-surface2/40 p-3">
                 <p className="text-sm font-semibold text-text">
-                  {previewSource.title}
+                  {previewData ? previewData.title : previewSource.title}
                 </p>
                 <p className="text-xs capitalize text-text-muted">
-                  {previewSource.type} / {previewStatusLabel}
+                  {previewData ? previewData.source_type : previewSource.type} / {previewStatusLabel}
                 </p>
                 {previewSafeUrl && (
                   <a

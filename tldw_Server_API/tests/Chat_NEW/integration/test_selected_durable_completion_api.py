@@ -452,3 +452,32 @@ def test_mandatory_sse_settlement_fault_is_an_explicit_unknown_terminal(selected
     assert "private metadata failure details" not in response.text
     assert response.text.rstrip().endswith("data: [DONE]")
     assert db.count_messages_for_conversation(cid) == (1 if fault == "metadata" else 2)
+
+
+def test_selected_durable_receipt_wrapper_preserves_sse_control_frames(selected_api, monkeypatch):
+    """Receipt decoration must not discard comment-only keepalive frames."""
+    from starlette.responses import StreamingResponse
+
+    client, db, cid, headers = selected_api
+    body = body_for(client, cid, headers, True)
+    controls = [": heartbeat unchanged\n\n", "event: keepalive\nid: checkpoint\nretry: 1000\n\n"]
+
+    async def stream_response(**kwargs):
+        async def accepted():
+            for control in controls:
+                yield control
+            yield 'data: {"choices":[{"delta":{"content":"Answer"}}]}\n\n'
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(accepted(), media_type="text/event-stream")
+
+    monkeypatch.setattr(endpoint, "execute_streaming_call", stream_response)
+    response = client.post("/api/v1/chat/completions", headers=headers, json=body)
+    assert response.status_code == 200, response.text
+    assert all(control in response.text for control in controls), response.text
+    assert (
+        frames(response, True)[0]["tldw_history_admission_v1"]["input_message_id"]
+        == body["tldw_turn"]["user_message_id"]
+    )
+    assert not any("tldw_history_result_v1" in event for event in frames(response, True))
+    assert db.count_messages_for_conversation(cid) == 1

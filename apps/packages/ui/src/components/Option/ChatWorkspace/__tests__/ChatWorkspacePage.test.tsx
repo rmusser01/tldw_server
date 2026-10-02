@@ -644,16 +644,29 @@ describe("ChatWorkspacePage", () => {
     expect(workspaceActions.initializeWorkspace).not.toHaveBeenCalled()
   })
 
-  it.each([null, { metadata: { id: "different-workspace" } }])(
-    "offers Workspaces instead of chat for local or mismatched provenance (%j)",
+  it.each([null, undefined])(
+    "activates a hydrated local workspace without a server snapshot (%j)",
     (serverWorkspace) => {
       workspaceState.value = { ...workspaceState.value, serverWorkspace }
       render(<ChatWorkspacePage />)
-      expect(screen.getByRole("link", { name: "Open workspaces" })).toHaveAttribute("href", "/workspaces")
-      expect(screen.queryByTestId("workspace-chat-panel")).not.toBeInTheDocument()
-      expect(screen.queryByTestId("workspace-activation")).not.toBeInTheDocument()
+      const activation = screen.queryByTestId("workspace-activation")
+      expect(activation).toHaveAttribute("data-workspace-id", "workspace-1")
+      expect(activation).toContainElement(screen.getByTestId("chat-workspace-console"))
+      expect(screen.queryByRole("link", { name: "Open workspaces" })).not.toBeInTheDocument()
+      expect(workspaceActions.initializeWorkspace).not.toHaveBeenCalled()
     }
   )
+
+  it("offers Workspaces instead of chat for a mismatched server snapshot", () => {
+    workspaceState.value = {
+      ...workspaceState.value,
+      serverWorkspace: { metadata: { id: "different-workspace" } }
+    }
+    render(<ChatWorkspacePage />)
+    expect(screen.getByRole("link", { name: "Open workspaces" })).toHaveAttribute("href", "/workspaces")
+    expect(screen.queryByTestId("workspace-chat-panel")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("workspace-activation")).not.toBeInTheDocument()
+  })
 
   it("places canonical chat behind the existing scoped activation guard", () => {
     render(<ChatWorkspacePage />)

@@ -5924,6 +5924,8 @@ async def create_chat_completion(
                                             result_emitted = result_emitted or "tldw_history_result_v1" in cleaned
                                             prefix = "\n".join(line for line in lines if not line.startswith("data:"))
                                             yield (prefix + "\n" if prefix else "") + sse_data(cleaned)
+                                        else:
+                                            yield frame + "\n\n"
                                 if pending.strip():
                                     raise HTTPException(502, detail="Incomplete selected durable stream payload.")
                             finally:
