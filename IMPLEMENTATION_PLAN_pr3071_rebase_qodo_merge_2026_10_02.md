@@ -10,7 +10,8 @@ change a durable architecture rule. ADR-002, ADR-004, and ADR-006 govern trackin
 human ownership, and security verification.
 
 ## Stage 1: Preserve and Rebase
-**Goal**: Rebase on fetched dev df17c8ac3f987b66ad1f1eb18ccf9d0664aca83d.
+**Goal**: Rebase on fetched dev38b09af8e92b3d9a2a00aced22d6b992dbae9435,
+including its metadata-only advancement from the initial df17 baseline.
 **Success Criteria**: Backup ref retained; complete result equals expected clean
 integration tree cbf4388b66855d5d255b784b87ae3dae28c04061, except this task/plan.
 **Tests**: Git ancestry/tree comparison; original stash inventory unchanged.
@@ -31,6 +32,8 @@ lookup defect is fixed with a red/green regression; no runtime changes. Dev
 advanced to38b09af8e92b3d9a2a00aced22d6b992dbae9435 with only relay task metadata;
 include that final delta before publishing. Retain initial path-guard test
 invocation failures and raw Bandit test-assert diagnostics in the evidence.
+The final rebase completes cleanly and matches expected treea082f5f9. Every
+applicable configured pre-commit check passes; publication remains pending.
 
 ## Stage 3: Qodo and CI
 **Goal**: Mark ready, evaluate every PR finding, and qualify the final head.

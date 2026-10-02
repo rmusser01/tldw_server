@@ -5,7 +5,7 @@ TASK-13408 archived intact;
 historical Chat Workspace TASK-13398 and its children.
 Epic: https://github.com/rmusser01/tldw_server/issues/1239.
 Initial acceptance baseline: dev `ec86ba4e871d844ff4a3a53c607e80eb85bd0e9b`.
-Current integration baseline: dev `df17c8ac3f987b66ad1f1eb18ccf9d0664aca83d`.
+Current integration baseline: dev `38b09af8e92b3d9a2a00aced22d6b992dbae9435`.
 
 ## Current Gate
 
@@ -662,8 +662,8 @@ Historical missing tabs remain absent, not claimed preserved. No provider
 resend, browser-state injection, runtime restart, or mocked UAT is performed.
 
 Dev advances during verification to38b09af8e9; its delta fromdf17 is only a
-completed relay task record, with no runtime/test changes. This final tracking
-delta will be included before publication. Qodo has not yet reviewed the draft;
+completed relay task record, with no runtime/test changes. The second rebase
+includes it cleanly and matches expected treea082f5f9. Qodo has not yet reviewed the draft;
 marking ready and final-head CI/review remain pending, and no merge is claimed.
 ADR required: no new durable decision; ADR-002/004/006 remain governing.
 
