@@ -5,18 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to Some kind of Versioning
 
-
 ## [Unreleased]
 
 ### Added
 
+
 ### Changed
+
 
 ### Fixed
 
+
 ### Removed
 
+## [0.1.46] - 2026-10-01
 
+### Added
+
+- Workspace Persona startup and ambient context, VN command recovery, extraction-failure source hints, and authenticated Email uploads from merged development work (#2817, #3028, #3041, #3050, #3023).
+
+### Changed
+
+- **Python 3.12 or newer is now required.** FastAPI is updated to 0.142.1; upgrade the runtime before installing this release (#3053, #3065).
+- Resource Governance uses a single enable switch and an explicit policy resolver; disabled governance no longer constructs a governor, and auth fallback and safety-net relief follow the same policy (#3066, #3068, #3070).
+
+### Fixed
+
+- Chat account/history ownership, stale requests, temporary-mode reads, mirror deletion, capability disclosure and llama.cpp authentication, including the merged engineering sweep (#2979, #3003, #3008, #3011, #3038, #3039, #3046, #3062, #3064).
+- AuthNZ startup reports preserve useful failure causes and profile-version reasons; Audio status routes enforce their authentication policy (#3047, #3063, #3058).
+- Required CI admission/shard reporting, latent frontend tests, Buddy browser acceptance and macOS guest boot/payload cleanup (#3036, #3044, #3054, #3056, #3022, #3051).
+
+### Removed
 ## [0.1.45] - 2026-09-27
 
 > Patch release. Rolls up the dev changes merged after 0.1.44 (#3029, #3030, #3032).
