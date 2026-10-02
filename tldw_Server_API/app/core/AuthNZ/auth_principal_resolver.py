@@ -326,6 +326,7 @@ async def get_auth_principal(request: Request) -> AuthPrincipal:
     existing = getattr(request.state, "auth", None)
     if isinstance(existing, AuthContext):
         User_DB_Handling.activate_authenticated_content_scope(existing.principal, request=request)
+        await User_DB_Handling.record_pending_api_key_usage(request)
         return existing.principal
     # Prefer Bearer JWT, fall back to X-API-KEY
     has_authorization_header = request.headers.get("Authorization") is not None

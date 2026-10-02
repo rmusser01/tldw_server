@@ -24,7 +24,10 @@ from tldw_Server_API.app.core.DB_Management import sqlite_policy
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
 from tldw_Server_API.app.core.DB_Management.chacha.health import probe_chacha_connection
-from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
+    chacha_operation,
+    current_operation_holds_connection,
+)
 from tldw_Server_API.app.core.DB_Management.chacha.runtime import (
     ChaChaRuntimeManager,
     ChaChaRuntimeUnavailableError,
@@ -634,7 +637,11 @@ async def _get_or_init_db_instance(user_id: int, client_id: str) -> CharactersRA
     with _chacha_db_lock:
         db_instance = _chacha_db_instances.get(cache_key)
     if db_instance:
-        if await _is_instance_healthy(db_instance):
+        # A connection this operation already holds proves the instance usable.
+        # Re-probing could evict it mid-request (the probe has a 1s deadline)
+        # and hand a nested accessor a different instance, splitting one request
+        # across two connections that cannot see each other's pending writes.
+        if current_operation_holds_connection(db_instance) or await _is_instance_healthy(db_instance):
             return db_instance
         logger.warning(f"ChaChaNotes cached instance unhealthy for user {user_id}; evicting and rebuilding.")
         with _chacha_db_lock:
