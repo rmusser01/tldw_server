@@ -9,7 +9,9 @@ import ast
 import atexit
 import builtins
 import faulthandler
+import functools
 import gc
+import hashlib
 import importlib.metadata
 import json
 import os
@@ -28,6 +30,7 @@ ROOT.mkdir(parents=True, exist_ok=True)
 EVENT_PATH = ROOT / "events.jsonl"
 TRACE = (ROOT / "faulthandler.log").open("a", buffering=1)
 GRAPH_ENABLED = False
+IDENTITY_ONLY = os.environ.get("PROMPT_SHUTDOWN_IDENTITY_ONLY") == "1"
 
 
 def record(event: str, **fields) -> None:
@@ -192,9 +195,203 @@ def graph_snapshot(phase: str) -> None:
             return  # Even event allocation failure cannot replace delegated cleanup.
 
 
+def _identity_source(namespace: dict, sources: dict) -> tuple[dict, dict]:
+    """Compile, never execute, exact import-path source; retain only static codes."""
+    name, filename = namespace.get("__name__"), namespace.get("__file__")
+    if type(name) is not str or type(filename) is not str:
+        raise ValueError("source unavailable")
+    if not (name.startswith("fastapi.") or name.startswith("tldw_Server_API.")):
+        raise ValueError("source outside observed packages")
+    if not all(part.isidentifier() for part in name.split(".")) or not filename.endswith(".py"):
+        raise ValueError("source origin unavailable")
+    path = Path(filename).resolve()
+    if not any(path == Path(base or os.getcwd()).resolve().joinpath(*name.split(".")).with_suffix(".py")
+               for base in sys.path if type(base) is str):
+        raise ValueError("source origin mismatch")
+    key = (name, str(path))
+    if key not in sources:
+        with open(path, "rb") as handle:
+            source = handle.read()
+        pending = [compile(source, str(path), "exec", dont_inherit=True, optimize=sys.flags.optimize)]
+        codes = {}
+        while pending:
+            code = pending.pop()
+            codes[(code.co_qualname, code.co_firstlineno)] = code
+            pending.extend(value for value in code.co_consts if type(value) is types.CodeType)
+        sources[key] = ({"module": name, "sha256": hashlib.sha256(source).hexdigest(),
+                         "origin_valid": True}, codes)
+    return sources[key]
+
+
+def _identity_function(function, sources: dict) -> dict | None:
+    """Dynamic or replaced code stays anonymous, even with poisoned metadata."""
+    if type(function) is not types.FunctionType:
+        return None
+    namespace = types.FunctionType.__dict__["__globals__"].__get__(function)
+    code = types.FunctionType.__dict__["__code__"].__get__(function)
+    if any(type(value) is not str for value in (code.co_name, code.co_qualname, code.co_filename)):
+        return None
+    try:
+        proof, codes = _identity_source(namespace, sources)
+    except (OSError, ValueError, TypeError, RuntimeError, MemoryError, SyntaxError):
+        return None
+    expected = codes.get((code.co_qualname, code.co_firstlineno))
+    if expected is None or code != expected or Path(code.co_filename).resolve() != Path(namespace["__file__"]).resolve():
+        return None
+    return {**proof, "qualname": expected.co_qualname, "line": expected.co_firstlineno}
+
+
+def _identity_class(namespace: dict, name: str, methods: tuple, sources: dict):
+    """Attest fixed exported classes using builtin metadata and compiled methods."""
+    candidate = namespace.get(name)
+    if type(candidate) is not type:
+        return None
+    owner = type.__dict__["__module__"].__get__(candidate)
+    qualified = type.__dict__["__qualname__"].__get__(candidate)
+    module_name = namespace.get("__name__")
+    if type(owner) is not str or type(qualified) is not str or type(module_name) is not str:
+        return None
+    if owner != module_name or qualified != name:
+        return None
+    members = type.__dict__["__dict__"].__get__(candidate)
+    for method in methods:
+        proof = _identity_function(members.get(method), sources)
+        if proof is None or proof["qualname"] != name + "." + method:
+            return None
+    return candidate
+
+
+def identity_snapshot(phase: str) -> None:
+    """Observation faults at entry or footer cannot replace original cleanup."""
+    try:
+        _identity_snapshot(phase)
+    except (OSError, ValueError, TypeError, RuntimeError, MemoryError, SyntaxError):
+        return  # Missing output remains unavailable, never an invented success.
+
+
+def _identity_snapshot(phase: str) -> None:
+    """Follow three bounded retaining paths and stop at apps, without a census.
+
+    C referent arrays are inspected without user hooks. IDs in output are dense
+    and snapshot-local. Shared globals are scanned once. This proves directed
+    reachability only, not exclusive ownership, GC cause or complete root coverage.
+    Legacy full graphs are never called by the identity-only hosted workflow.
+    """
+    if type(phase) is not str or phase not in ("pre-unconfigure", "pre-module-clear"):
+        return
+    started = time.monotonic_ns()
+    # Only primitive IDs, static source code and serialized rows survive traversal.
+    sources, identities, globals_apps = {}, {}, {}
+    paths, roots, classes = [], [], []
+    complete = source_complete = False
+    models = applications = namespace = holder_class = app_class = None
+    root = refs = cache = keys = key = holders = holder = functions = function = namespace_refs = app = None
+    try:
+        models = sys.modules.get("fastapi.dependencies.models")
+        applications = sys.modules.get("fastapi.applications")
+        if type(models) is not types.ModuleType or type(applications) is not types.ModuleType:
+            raise ValueError("loaded modules unavailable")
+        namespace = types.ModuleType.__getattribute__(models, "__dict__")
+        holder_class = _identity_class(namespace, "_CallIdentity", ("__init__", "__hash__", "__eq__"), sources)
+        app_class = _identity_class(types.ModuleType.__getattribute__(applications, "__dict__"),
+                                    "FastAPI", ("__init__",), sources)
+        if holder_class is None or app_class is None:
+            raise ValueError("loaded classes unavailable")
+        slots = type.__dict__["__dict__"].__get__(holder_class).get("__slots__")
+        if type(slots) is not tuple or len(slots) != 1 or type(slots[0]) is not str or slots[0] != "call":
+            raise ValueError("holder shape unavailable")
+        classes = ["fastapi.dependencies.models._CallIdentity", "fastapi.applications.FastAPI"]
+        source_complete = True
+        for number, label in enumerate(("_is_gen_callable_cached", "_is_async_gen_callable_cached",
+                                        "_is_coroutine_callable_cached")):
+            root = namespace.get(label)
+            if type(root) is not functools._lru_cache_wrapper:
+                raise ValueError("loaded root unavailable")
+            refs = gc.get_referents(root)
+            attested = any(type(value) is types.FunctionType
+                           and (proof := _identity_function(value, sources)) is not None
+                           and proof["module"] == "fastapi.dependencies.models" and proof["qualname"] == label
+                           for value in refs)
+            if not attested:
+                raise ValueError("root code unavailable")
+            roots.append({"label": "fastapi.dependencies.models." + label, "source_attested": True})
+            # ponytail: only known cache dictionaries/key tuples, no general graph.
+            for cache in refs:
+                if type(cache) is not dict:
+                    continue
+                keys = gc.get_referents(cache)
+                if len(keys) > 20000:
+                    raise ValueError("root referent bound exceeded")
+                for key in keys:
+                    if type(key) is not tuple or len(key) != 1:
+                        continue
+                    holders = gc.get_referents(key)
+                    for holder in holders:
+                        if type(holder) is not holder_class:
+                            continue
+                        functions = gc.get_referents(holder)
+                        for function in functions:
+                            if type(function) is not types.FunctionType:
+                                continue
+                            globals_dict = types.FunctionType.__dict__["__globals__"].__get__(function)
+                            globals_id = identities.setdefault(id(globals_dict), len(identities))
+                            if globals_id not in globals_apps:
+                                namespace_refs = gc.get_referents(globals_dict)
+                                if len(namespace_refs) > 20000:
+                                    raise ValueError("globals referent bound exceeded")
+                                globals_apps[globals_id] = []
+                                for app in namespace_refs:
+                                    if type(app) is app_class:
+                                        app_id = identities.setdefault(id(app), len(identities))
+                                        if app_id not in globals_apps[globals_id]:
+                                            globals_apps[globals_id].append(app_id)
+                                namespace_refs = app = None
+                            if not globals_apps[globals_id]:
+                                continue
+                            proof = _identity_function(function, sources)
+                            if proof is None:
+                                source_complete = False
+                            function_id = identities.setdefault(id(function), len(identities))
+                            module_name = globals_dict.get("__name__")
+                            loaded = sys.modules.get(module_name) if type(module_name) is str else None
+                            current = (type(loaded) is types.ModuleType and
+                                       types.ModuleType.__getattribute__(loaded, "__dict__") is globals_dict)
+                            for app_id in globals_apps[globals_id]:
+                                paths.append({"root": number, "cache": identities.setdefault(id(cache), len(identities)),
+                                              "key": identities.setdefault(id(key), len(identities)),
+                                              "holder": identities.setdefault(id(holder), len(identities)),
+                                              "function": function_id, "globals": globals_id,
+                                              "app": app_id, "function_source": proof,
+                                              "globals_match_loaded_module": current})
+        complete = True
+    except (OSError, ValueError, TypeError, RuntimeError, MemoryError, SyntaxError):
+        complete = False
+        source_complete = False
+    finally:
+        # No referent/module/function/app instance is cached beyond this boundary.
+        models = applications = namespace = holder_class = app_class = None
+        root = refs = cache = keys = key = holders = holder = functions = function = namespace_refs = app = None
+        globals_dict = loaded = None
+        try:
+            proof = {"phase": phase, "scope": "classification-root-to-app", "complete": complete,
+                     "source_complete": source_complete, "classes": classes, "roots": roots, "paths": paths,
+                     "globals_inspected": len(globals_apps), "sources": [value[0] for value in sources.values()],
+                     "elapsed_ns": time.monotonic_ns() - started}
+            (ROOT / ("identity-" + phase + ".json")).write_text(json.dumps(proof))
+        except (OSError, ValueError, TypeError, RuntimeError, MemoryError):
+            complete = False
+        finally:
+            sources = identities = globals_apps = paths = roots = classes = proof = None
+        try:
+            record("identity_capture", phase=phase, complete=complete, source_complete=source_complete,
+                   elapsed_ns=time.monotonic_ns() - started)
+        except (OSError, ValueError, TypeError, RuntimeError, MemoryError):
+            return
+
+
 def _pre_module_clear() -> None:
     """Observe after later ordinary atexit callbacks, before module clearing."""
-    graph_snapshot("pre-module-clear")
+    (identity_snapshot if IDENTITY_ONLY else graph_snapshot)("pre-module-clear")
     snapshot("atexit_early_registration")
 
 
@@ -218,7 +415,7 @@ def pytest_configure(config) -> None:
         nonlocal captured
         if GRAPH_ENABLED and not captured:
             captured = True
-            graph_snapshot("pre-unconfigure")
+            (identity_snapshot if IDENTITY_ONLY else graph_snapshot)("pre-unconfigure")
         snapshot("ensure_unconfigure_enter")
         try:
             return original()

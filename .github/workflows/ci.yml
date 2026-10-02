@@ -10,7 +10,7 @@ env:
   PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
 jobs:
   native-prompt-observation:
-    name: Frozen b38 macOS Prompt Studio diagnostic
+    name: Landed 88f macOS retaining identity diagnostic
     runs-on: macos-latest
     timeout-minutes: 60
     env:
@@ -24,7 +24,8 @@ jobs:
       SHARD_NAME: product-prompt-studio
       TEST_PATHS: tldw_Server_API/tests/prompt_studio
       RESULTS_DIR: test-results-macos-latest-3.12-product-prompt-studio
-      FROZEN_SOURCE: b38c9f725748c5addd5ed44f7526bea55ee7621a
+      PROMPT_SHUTDOWN_IDENTITY_ONLY: '1'
+      FROZEN_SOURCE: 88f8b81f1efe8962e3fbbf6aa2962086fe84b087
     steps:
     - name: Checkout diagnostic observer
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
@@ -36,11 +37,12 @@ jobs:
       run: |
         mkdir -p "$RUNNER_TEMP/pr2979-native-observation"
         cp Helper_Scripts/diagnostics/pr2979_native_shutdown.py "$RUNNER_TEMP/pr2979-native-observation/"
+        cp .github/workflows/ci.yml "$RUNNER_TEMP/pr2979-native-observation/observer-workflow.yml"
         shasum -a 256 "$RUNNER_TEMP/pr2979-native-observation/pr2979_native_shutdown.py"
     - name: Checkout immutable published source
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
       with:
-        ref: b38c9f725748c5addd5ed44f7526bea55ee7621a
+        ref: 88f8b81f1efe8962e3fbbf6aa2962086fe84b087
         persist-credentials: false
     - name: Install FFmpeg (multi-OS)
       uses: ./.github/actions/setup-ffmpeg
@@ -70,9 +72,9 @@ jobs:
         mkdir -p "$PROMPT_SHUTDOWN_PROBE_DIR"
         python - <<'PYCODE'
         import hashlib, json, os, pathlib, subprocess
-        paths = subprocess.check_output(["git", "ls-files", "tldw_Server_API/tests/prompt_studio", "tldw_Server_API/tests/conftest.py", "pyproject.toml", ".github/workflows/ci.yml", ".github/actions/setup-ffmpeg", ".github/actions/setup-python-deps"], text=True).splitlines()
+        paths = subprocess.check_output(["git", "ls-files", "tldw_Server_API/tests/prompt_studio", "tldw_Server_API/tests/conftest.py", "tldw_Server_API/tests/helpers/app_main_state.py", "tldw_Server_API/app/main.py", "pyproject.toml", ".github/workflows/ci.yml", ".github/actions/setup-ffmpeg", ".github/actions/setup-python-deps"], text=True).splitlines()
         records = {path: hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest() for path in paths}
-        proof = {"source_sha": os.environ["FROZEN_SOURCE"], "source_hashes": records, "observer_sha256": hashlib.sha256((pathlib.Path(os.environ["RUNNER_TEMP"]) / "pr2979-native-observation/pr2979_native_shutdown.py").read_bytes()).hexdigest()}
+        proof = {"source_sha": os.environ["FROZEN_SOURCE"], "source_hashes": records, "diagnostic_workflow_sha256": hashlib.sha256((pathlib.Path(os.environ["RUNNER_TEMP"]) / "pr2979-native-observation/observer-workflow.yml").read_bytes()).hexdigest(), "observer_sha256": hashlib.sha256((pathlib.Path(os.environ["RUNNER_TEMP"]) / "pr2979-native-observation/pr2979_native_shutdown.py").read_bytes()).hexdigest()}
         (pathlib.Path(os.environ["PROMPT_SHUTDOWN_PROBE_DIR"]) / "source.json").write_text(json.dumps(proof, indent=2))
         print(json.dumps({"source_sha": proof["source_sha"], "hashed_files": len(records), "observer_sha256": proof["observer_sha256"]}))
         PYCODE
@@ -92,6 +94,20 @@ jobs:
           $TEST_PATHS \
           --durations=50 \
           --junit-xml="$RESULTS_DIR/${{ env.SHARD_NAME }}.xml"
+      env:
+        PROMPT_SHUTDOWN_PROBE_DIR: ${{ runner.temp }}/pr2979-native-observation/results
+    - name: Verify source unchanged after original pytest
+      if: always()
+      shell: bash
+      run: |
+        python - <<'PYCODE'
+        import hashlib, json, os, pathlib
+        root = pathlib.Path(os.environ["PROMPT_SHUTDOWN_PROBE_DIR"])
+        before = json.loads((root / "source.json").read_text())
+        after = {path: hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest() for path in before["source_hashes"]}
+        (root / "source-after.json").write_text(json.dumps({"source_hashes": after, "unchanged": after == before["source_hashes"]}, indent=2))
+        assert after == before["source_hashes"], "frozen source changed"
+        PYCODE
       env:
         PROMPT_SHUTDOWN_PROBE_DIR: ${{ runner.temp }}/pr2979-native-observation/results
     - name: Upload test results

@@ -382,3 +382,167 @@ assert before == (gc.isenabled(), gc.get_debug(), gc.get_threshold(), tuple(gc.c
         assert footer["source_symbols_complete"] is False
         assert footer["module_roots"] == []
     assert PRIVACY_SENTINEL not in result.stdout + result.stderr + (tmp_path / "events.jsonl").read_text()
+
+
+@pytest.mark.parametrize("fault", ["none", "output", "source", "referents", "memory", "event-memory",
+                                  "dynamic-code", "poisoned-metadata", "metaclass", "root-code", "restored-module", "launcher", "class-module-hook", "globals-name-hook", "clock-memory", "code-name-hook", "code-file-hook"])
+def test_bounded_identity_records_actual_cache_function_app_paths(tmp_path, fault):
+    package = tmp_path / "fastapi"
+    (package / "dependencies").mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    (package / "dependencies/__init__.py").write_text("")
+    (package / "applications.py").write_text(
+        ("class Meta(type):\n    def __getattribute__(self, key): raise AssertionError('custom hook')\n"
+         "class FastAPI(metaclass=Meta):\n" if fault == "metaclass" else "class FastAPI:\n")
+        + "    def __init__(self):\n        pass\n"
+    )
+    (package / "dependencies/models.py").write_text(
+        "from functools import lru_cache\n"
+        "class _CallIdentity:\n"
+        "    __slots__ = ('call',)\n"
+        "    def __init__(self, call): self.call = call\n"
+        "    def __hash__(self): return id(self.call)\n"
+        "    def __eq__(self, other): return self.call is other.call\n"
+        + "".join("@lru_cache(maxsize=4096)\ndef " + name + "(holder): return False\n"
+                  for name in ("_is_gen_callable_cached", "_is_async_gen_callable_cached",
+                               "_is_coroutine_callable_cached"))
+    )
+    (tmp_path / "tldw_Server_API").mkdir()
+    (tmp_path / "tldw_Server_API/__init__.py").write_text("")
+    (tmp_path / "tldw_Server_API/callbacks.py").write_text(
+        "from fastapi.applications import FastAPI\napp = FastAPI()\ndef callback(): return None\n"
+    )
+    script = """
+import gc, importlib.util, sys, weakref
+from types import SimpleNamespace
+sys.path.insert(0, sys.argv[3])
+from fastapi.dependencies import models
+from tldw_Server_API import callbacks
+spec = importlib.util.spec_from_file_location('probe', sys.argv[1])
+probe = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(probe)
+callbacks.app.private = sys.argv[2]
+ref = weakref.ref(callbacks.app)
+for name in ('_is_gen_callable_cached', '_is_async_gen_callable_cached', '_is_coroutine_callable_cached'):
+    models.__dict__[name](models._CallIdentity(callbacks.callback))
+# The observer must not invoke callbacks, custom metadata, repr or a census.
+def forbidden(*args): raise AssertionError('unexpected operation')
+probe.gc = SimpleNamespace(get_referents=gc.get_referents, get_objects=forbidden)
+before = (gc.isenabled(), gc.get_debug(), gc.get_threshold(), tuple(gc.callbacks))
+fault = sys.argv[4]
+class Trap:
+    def __hash__(self): raise AssertionError('metadata hash hook')
+    def __eq__(self, other): raise AssertionError('metadata equality hook')
+class CodeString(str):
+    def __hash__(self): raise AssertionError('code hash hook')
+    def __str__(self): raise AssertionError('code string hook')
+if fault == 'code-name-hook':
+    callbacks.callback.__code__ = callbacks.callback.__code__.replace(co_qualname=CodeString('callback'))
+elif fault == 'code-file-hook':
+    callbacks.callback.__code__ = callbacks.callback.__code__.replace(co_filename=CodeString(callbacks.__file__))
+elif fault == 'class-module-hook':
+    callbacks.FastAPI.__module__ = Trap()
+elif fault == 'globals-name-hook':
+    callbacks.__dict__['__name__'] = Trap()
+elif fault == 'clock-memory':
+    original_clock = probe.time.monotonic_ns
+    def clock_fault():
+        probe.time.monotonic_ns = original_clock
+        raise MemoryError(sys.argv[2])
+    probe.time.monotonic_ns = clock_fault
+elif fault == 'restored-module':
+    replacement_spec = importlib.util.spec_from_file_location('tldw_Server_API.callbacks', callbacks.__file__)
+    replacement = importlib.util.module_from_spec(replacement_spec)
+    replacement_spec.loader.exec_module(replacement)
+    sys.modules['tldw_Server_API.callbacks'] = replacement
+elif fault == 'poisoned-metadata':
+    callbacks.callback.__qualname__ = callbacks.callback.__module__ = sys.argv[2]
+elif fault == 'dynamic-code':
+    callbacks.callback.__code__ = compile('def callback(): return 987654', callbacks.__file__, 'exec').co_consts[0]
+elif fault == 'root-code':
+    import functools
+    models._is_gen_callable_cached = functools.lru_cache(maxsize=4096)(lambda arg: False)
+elif fault == 'output':
+    (probe.ROOT / 'identity-pre-unconfigure.json').mkdir()
+elif fault == 'source':
+    def source_fault(*args, **kwargs): raise OSError(sys.argv[2])
+    probe.open = source_fault
+elif fault in {'referents', 'memory'}:
+    ref_calls = [0]
+    def referent_fault(obj):
+        ref_calls[0] += 1
+        if ref_calls[0] == 3:
+            if fault == 'memory': raise MemoryError(sys.argv[2])
+            raise OSError(sys.argv[2])
+        return gc.get_referents(obj)
+    probe.gc.get_referents = referent_fault
+elif fault == 'event-memory':
+    original_record = probe.record
+    def event_fault(event, **fields):
+        if event == 'identity_capture': raise MemoryError(sys.argv[2])
+        return original_record(event, **fields)
+    probe.record = event_fault
+calls = []
+def cleanup():
+    calls.append(1)
+    if len(calls) == 2: raise RuntimeError(sys.argv[2])
+    if len(calls) == 3: raise SystemExit(11)
+    return 7
+probe.IDENTITY_ONLY = probe.GRAPH_ENABLED = True
+config = SimpleNamespace(_ensure_unconfigure=cleanup)
+probe.pytest_configure(config)
+assert config._ensure_unconfigure() == 7
+try: config._ensure_unconfigure()
+except RuntimeError as error: assert str(error) == sys.argv[2]
+else: raise AssertionError('exception lost')
+try: config._ensure_unconfigure()
+except SystemExit as error: assert error.code == 11
+else: raise AssertionError('exit lost')
+assert calls == [1, 1, 1]
+probe._pre_module_clear()
+del callbacks.app
+assert ref() is None, 'capture retained an app'
+assert before == (gc.isenabled(), gc.get_debug(), gc.get_threshold(), tuple(gc.callbacks))
+"""
+    command = [sys.executable, "-c", script, str(OBSERVER), PRIVACY_SENTINEL, str(tmp_path), fault]
+    if fault == "launcher":
+        (tmp_path / "conftest.py").write_text(
+            "from fastapi.dependencies import models\nfrom tldw_Server_API import callbacks\n"
+            "for name in ('_is_gen_callable_cached', '_is_async_gen_callable_cached', '_is_coroutine_callable_cached'):\n"
+            "    models.__dict__[name](models._CallIdentity(callbacks.callback))\n"
+        )
+        case = tmp_path / "test_synthetic.py"
+        case.write_text("def test_synthetic():\n    assert True\n")
+        command = [sys.executable, str(OBSERVER), "-c", "/dev/null", "--confcutdir", str(tmp_path),
+                   "-p", "pytest_timeout", "-q", str(case)]
+    result = subprocess.run(
+        command,
+        cwd=tmp_path, env={**os.environ, "PROMPT_SHUTDOWN_PROBE_DIR": str(tmp_path),
+                          "PROMPT_SHUTDOWN_IDENTITY_ONLY": "1", "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+        capture_output=True, text=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    if fault == "launcher":
+        assert not list(tmp_path.glob("graph-*.jsonl")), "identity mode performed a census"
+        assert json.loads((tmp_path / "result.json").read_text())["child_process_exit"] == 0
+    for phase in ("pre-unconfigure", "pre-module-clear"):
+        if fault in {"output", "clock-memory"} and phase == "pre-unconfigure":
+            continue
+        proof = json.loads((tmp_path / ("identity-" + phase + ".json")).read_text())
+        assert PRIVACY_SENTINEL not in json.dumps(proof) + result.stdout + result.stderr
+        if fault in {"source", "metaclass", "root-code", "class-module-hook"} or (
+                fault in {"referents", "memory"} and phase == "pre-unconfigure"):
+            assert proof["complete"] is False and proof["source_complete"] is False
+            continue
+        assert proof["complete"] is True
+        assert proof["source_complete"] is (fault not in {"dynamic-code", "globals-name-hook", "code-name-hook", "code-file-hook"})
+        assert len(proof["paths"]) == 3 and proof["globals_inspected"] == 1
+        assert len({row["app"] for row in proof["paths"]}) == 1
+        assert {row["root"] for row in proof["paths"]} == set(range(3))
+        if fault in {"dynamic-code", "globals-name-hook", "code-name-hook", "code-file-hook"}:
+            assert all(row["function_source"] is None for row in proof["paths"])
+            continue
+        assert all(row["function_source"]["qualname"] == "callback" for row in proof["paths"])
+        assert all(row["function_source"]["module"] == "tldw_Server_API.callbacks" for row in proof["paths"])
+        assert all(row["globals_match_loaded_module"] is (fault != "restored-module") for row in proof["paths"])
+        assert PRIVACY_SENTINEL not in json.dumps(proof) + result.stdout + result.stderr
