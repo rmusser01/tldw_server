@@ -1,18 +1,18 @@
 # Chat Workspace Latest-Dev Acceptance
 
-Tracking: TASK-13421; previous qualifications TASK-13418 and TASK-13417 and finalization
+Tracking: TASK-13421.1; previous qualifications TASK-13421, TASK-13418 and TASK-13417 and finalization
 TASK-13408 archived intact;
 historical Chat Workspace TASK-13398 and its children.
 Epic: https://github.com/rmusser01/tldw_server/issues/1239.
 Initial acceptance baseline: dev `ec86ba4e871d844ff4a3a53c607e80eb85bd0e9b`.
-Current integration baseline: dev `413c2c9123509f17d96d514a7722e076598ea28f`.
+Current integration baseline: dev `df17c8ac3f987b66ad1f1eb18ccf9d0664aca83d`.
 
 ## Current Gate
 
-The current frozen-dev qualification is recorded in Release And Redis Dev
-Qualification below. Its fresh hosted checks are not inferred from earlier
-heads. The approved fresh mobile viewport check is now complete, as recorded
-in Approved Mobile Closure below; hosted CI remains head-specific.
+The latest rebase and review qualification is recorded below. Fresh hosted CI
+and Qodo review must qualify the final published head before the newly
+authorized merge. Earlier frozen-dev and approved mobile evidence remains
+source-bound and historical; pending checks are not inferred from it.
 
 Historical source integration `5dbf0b076883907dccbb174332d83dae20daf541` on frozen
 dev `3caebcfc` now qualifies the required hosted backend/frontend checks and
@@ -21,8 +21,8 @@ The recorded real Chrome acceptance covers grounded chat, citations, durable
 receipts, cancellation/recovery, owner/workspace return, previews and mobile
 keyboard behavior without mocks. Historical and reused results remain labeled
 with their actual source baselines below.
-[PR #3071](https://github.com/rmusser01/tldw_server/pull/3071) remains draft and
-unmerged as requested. The requester-authored Change summary is published
+[PR #3071](https://github.com/rmusser01/tldw_server/pull/3071) was draft and
+unmerged at the earlier publication. The requester-authored Change summary is published
 verbatim. Evidence-only publication updates reuse the verified application
 source; their own hosted status must not be inferred from an earlier head.
 
@@ -620,3 +620,54 @@ Private evidence remains under the preceding root: `native-reload` and
 `native-mobile-send-focus-qualified` pass; `native-mobile-send-focus` retains
 the quoting failure. `final-mobile-closure-preservation`, exact-head PR/workflow
 readbacks and the inspected mobile PNGs bind this closure to the real runtime.
+
+## Latest Dev Rebase And Review Qualification
+
+TASK-13421.1 records the user's new authorization to rebase, address PR findings,
+and merge only after review and verification. Original head0c9d592231 is retained
+in local backup branch `codex/pr3071-before-rebase-20261002`. Rebase with merge
+topology preservation onto devdf17c8ac3f completes. Restoring the owned13418
+archive move byte-identically makes the complete tracked result equal the clean
+expected integration treecbf4388b, before this corrective task's additions.
+
+Upstream08c9fe0f3d already fixes the stale published ADR056 that caused the two
+docs-refresh CI failures. Fresh docs suite33passed; combined docs/CI/route-auth
+and durable-wire273passed; incoming fixture regressions52passed. Correctly
+isolated durable Chat persistence/completion/API tests180passed/24skipped. Local
+skips are not claimed as PostgreSQL passes; the final hosted owning cases remain
+required. Two earlier test-invocation runs hit the unchanged DB path guard
+because basetemp was outside macOS's default tempfile root. Their failure and
+interrupted-run logs are retained. The corrected invocation sets TMPDIR to its
+isolated test root, without changing application validation.
+
+Independent read-only integration review identifies one actionable incoming
+test-helper defect: parent PATH can find Homebrew timeout while child PATH
+excludes it. A new parent-only availability regression fails before the fix
+with `exec: timeout: not found`. The existing helper now reuses one child_path
+for both executable resolution and subprocess environment;56owningCI tests and
+all5formattedhelper cases pass afterward. Ruff check/format pass. The reviewer
+rechecks the small fix and reports no actionable regressions. This is a unit
+test correction, not mocked UAT or a changed runtime.
+
+Fresh Bandit on14 production/helper paths has zero findings/errors. Raw Bandit
+on the changed test preserves inherited subprocess diagnostics and existing
+pytest assertions, with only two additional intentional pytest B101 assertion
+diagnostics. These are test expectations, not production enforcement; no
+suppression or security guard is added or removed.
+
+All production/frontend/Helper_Scripts bytes remain identical to the prior
+real Chrome desktop/mobile acceptance source0c9. Fresh read-only live API and
+raw-CDP preservation checks verify the actual served contract/twelve negative
+controls, original ten/eight-row hashes, six baseline targets, and all68stashes.
+Historical missing tabs remain absent, not claimed preserved. No provider
+resend, browser-state injection, runtime restart, or mocked UAT is performed.
+
+Dev advances during verification to38b09af8e9; its delta fromdf17 is only a
+completed relay task record, with no runtime/test changes. This final tracking
+delta will be included before publication. Qodo has not yet reviewed the draft;
+marking ready and final-head CI/review remain pending, and no merge is claimed.
+ADR required: no new durable decision; ADR-002/004/006 remain governing.
+
+Private evidence: `/private/tmp/pr3071-rebase-qodo-20261002-hWnKnr`. The preserved
+live check is `rebased-dev-preservation-20261002` under the preceding evidence
+root. Original human Change summary remains unchanged.
