@@ -1,10 +1,11 @@
 # Chat Workspace Latest-Dev Acceptance
 
-Tracking: TASK-13417; previous finalization TASK-13408 archived intact;
+Tracking: TASK-13418; previous qualification TASK-13417 and finalization
+TASK-13408 archived intact;
 historical Chat Workspace TASK-13398 and its children.
 Epic: https://github.com/rmusser01/tldw_server/issues/1239.
 Initial acceptance baseline: dev `ec86ba4e871d844ff4a3a53c607e80eb85bd0e9b`.
-Current integration baseline: dev `dcae0cbd3f3ba6c7cd4287dc443628d93ee2cd64`.
+Current integration baseline: dev `3caebcfc1e16596f4a352744a9f017017d766165`.
 
 ## Current Gate
 
@@ -359,3 +360,69 @@ replacement license audit36960989844 and backend await-license36960906531
 have no assigned runner; backend admission is skipped. The earlier same-head
 license audit was cancelled and is not counted as a code/test failure or pass.
 This publication-record follow-up changes no tested application source.
+
+## Route-Auth Dev Retry
+
+Frozen and finally re-fetched dev `3caebcfc` merges cleanly. Its nine incoming
+paths affect authentication/inspection, not Chat Workspace runtime code. The
+prior TASK-13417 qualification archive remains byte-identical, SHA256
+`546a0220d918a561522667767d85ea78fc1bb25d2d798af999ce1b0ff9dde93a`;
+incoming unrelated route-map TASK-13417 is unchanged. TASK-13418 owns this retry.
+
+Independent review found two real inspection gaps: CSV-only copying corrupted
+JSON route lists, and pinning the temporary config before dotenv selection
+caused the repository config to shadow FILE/PATH/DIR selections. Four real
+subprocess inventory regressions fail before the fix. The shared loader now
+reuses the canonical route-policy parser, early dotenv loading and cache reset
+APIs. All17 owning tests pass; the final lint/benchmark delta has87 passes and
+one inherited skip. Follow-up independent static review has no actionable
+findings; newline lists and dotenv test-mode flags are not newly covered.
+
+Changed Ruff checks pass. Connector I001/SIM114 diagnostics are byte-equivalent
+to the published source; no unrelated cleanup or blanket lint-clean claim.
+Final Bandit on all four incoming production Python modules has zero findings
+and errors. Current Chat source remains unchanged, so the earlier292 regression
+checks and production builds are reused as source-bound historical evidence,
+not reported as fresh runs. All7217 qualified frontend entries match except
+the metadata-only OpenAPI fingerprint updated below.
+
+Fresh actual native Chrome/CDP reload obtains a new document loader and the
+protected history GET200, restores the nonempty draft and remains Ready/loaded.
+At390x844 composer/Send fit with zero overflow;92 native Tabs reach the
+composer without sending. Desktop/mobile captures are inspected; no mocks,
+interception, state injection, focus emulation or completions. The existing
+services were preserved, not restarted to claim browser coverage of unrelated
+incoming admin routes. Original ten/eight-row hashes, actual served contract,
+six baseline tabs and all68 stashes remain intact. Historical missing tabs
+remain missing and are not claimed preserved.
+
+Hosted `backend-required` on head7274 fails its OpenAPI drift gate, not its
+explicitly non-blocking mypy step. An isolated CI-version dependency directory
+(FastAPI0.142.2/Pydantic2.13.5/Starlette1.7) reproduces the exact failed hash;
+the frozen-dev production control reproduces the checked-in old hash. Reviewed
+delta:14 added durable/recovery schemas, three updated models and nine intended
+capability/owner parameter contracts; zero removed paths or schemas. The
+existing exporter/openapi-typescript regenerate the fingerprint/types, and a
+fresh drift check passes with sha256
+`f4609bf67c33c5d62ecc243f98c918836f09181200768dc0c28b615732d5007f`.
+The root virtualenv and live UAT services were not upgraded.
+Fresh CI-version route-auth/route-map rerun passes23 tests with six warnings;
+full frontend TypeScript passes after generated-type refresh using the existing
+8192MB allowance. These are fresh checks, separate from reused historical tests.
+
+Local official PostgreSQL fixtures skip all seven selected cases because the
+service is unavailable. Docker's read-only probe times out and5432 refuses
+connections; no restart, shared-container removal, replacement DB or bypass.
+Direct hosted logs/JUnit on head7274 confirm56 auth-postgres tests and149
+auth-integration-b-z tests actually pass, including all six durable-turn
+PostgreSQL cases without skips. This qualifies that unchanged owning scope;
+the separate image-recovery PG case and next-head hosted CI remain unqualified.
+The head7274 snapshot has211 successes, one backend-required failure,
+17 running and59 queued (plus35 skips/two status successes). These are not
+certification of the next published head.
+
+Private evidence: `/private/tmp/chat-workspace-pr3071-retry-20261002-0552`.
+Native evidence: `native-reload.json` and two inspected PNGs; red/green/final
+delta JUnit, Bandit, schema control/delta, hosted logs/JUnit and source bindings
+are retained there. Original runner failures remain separate. Preservation is
+under the preceding evidence root's `route-auth-retry-preservation-20261002`.

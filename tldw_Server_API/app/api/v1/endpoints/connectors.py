@@ -442,7 +442,9 @@ def _normalize_source_options_for_provider(provider: str, options: dict[str, Any
 
 
 @router.get("/providers", response_model=list[ConnectorProvider])
-async def list_providers() -> list[ConnectorProvider]:
+async def list_providers(
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> list[ConnectorProvider]:
     providers: list[ConnectorProvider] = [
         ConnectorProvider(name="drive", scopes_required=["drive.readonly"], auth_type="oauth2"),
         ConnectorProvider(name="onedrive", scopes_required=["Files.Read"], auth_type="oauth2"),
