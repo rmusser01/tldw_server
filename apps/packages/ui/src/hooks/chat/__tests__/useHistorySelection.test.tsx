@@ -1222,6 +1222,8 @@ it("does not re-commit consumers when a load starts with nothing to clear", () =
 it("inspection completes only its known committed operation and grants no cursor follow lease", async () => {
   const hook = renderHook(() => useHistorySelection())
   await act(async () => { await hook.result.current.loadConversation({ serverChatId: "chat" }) })
+  const originalOwner = hook.result.current.owner
+  expect(originalOwner?.owner_key).toBeUndefined()
   const entry: any = { scope: { profile_id: "profile", client_session_id: "original" }, turn: {
     operation_id: "inspected", persistence: "server", owner_key: "owner", conversation_id: "chat",
     logical_user_message_id: "12409645-7bce-4cba-b03b-bc4b0b27cc68", origin_view: hook.result.current.view,
@@ -1231,9 +1233,34 @@ it("inspection completes only its known committed operation and grants no cursor
   mocks.inspectRecovery.mockResolvedValue({ ...entry.turn, observed_result: { result_message_id: "known" } })
   const view = hook.result.current.view
   await act(async () => { await hook.result.current.inspectRecovery(entry) })
+  expect(mocks.inspectRecovery).toHaveBeenCalledWith(
+    { ...originalOwner, owner_key: "owner" },
+    entry.turn,
+    expect.any(AbortSignal)
+  )
   expect(mocks.saveRecovery).toHaveBeenCalledWith(entry.scope, entry.turn.origin_view, expect.objectContaining({ operation_id: "inspected" }))
   expect(mocks.dismissRecovery).toHaveBeenCalledWith(entry.scope, entry.turn.origin_view, "inspected", "completed")
   expect(hook.result.current.view).toBe(view)
+  expect(hook.result.current.owner).toBe(originalOwner)
+})
+
+it.each(["profile", "owner", "conversation"])("inspection rejects a foreign %s without reading or saving", async field => {
+  const hook = renderHook(() => useHistorySelection())
+  await act(async () => { await hook.result.current.loadConversation({ serverChatId: "chat" }) })
+  const entry = {
+    scope: { profile_id: field === "profile" ? "foreign" : "profile", client_session_id: "original" },
+    turn: {
+      operation_id: "foreign", persistence: "server" as const,
+      owner_key: field === "owner" ? "foreign" : "owner",
+      conversation_id: field === "conversation" ? "foreign" : "chat",
+      origin_view: hook.result.current.view!, input_text: "Question", input_images: [],
+      result_text: "", state: "unknown" as const, created_at: 1,
+      selection_digest: "s", request_context_digest: "r"
+    }
+  }
+  await act(async () => { await hook.result.current.inspectRecovery(entry) })
+  expect(mocks.inspectRecovery).not.toHaveBeenCalled()
+  expect(mocks.saveRecovery).not.toHaveBeenCalled()
 })
 
 it("inspection resolving after account invalidation cannot write or complete recovery", async () => {
