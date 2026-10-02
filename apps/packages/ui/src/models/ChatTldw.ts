@@ -16,6 +16,7 @@ import type { ToolCall } from "@/types/tool-calls"
 import { publishChatLoopEvent } from "@/services/chat-loop/bridge"
 import { extractChatLoopEvent } from "@/services/chat-loop/stream"
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
+import { extractStreamingChunkError } from "@/utils/streaming-chunks"
 import type { ChatRequestDebugMetadata } from "@/services/tldw/chat-request-debug"
 import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
 import type { ChatCompletionRequest } from "@/services/tldw/TldwApiClient"
@@ -387,6 +388,10 @@ export class ChatTldw {
             const observed = observationChunk
             observationChunk = null
             yield observed
+          }
+          if (selectedRequest && extractStreamingChunkError(token)) {
+            yield token
+            return
           }
           if (typeof token !== "string") continue
           fullText += token

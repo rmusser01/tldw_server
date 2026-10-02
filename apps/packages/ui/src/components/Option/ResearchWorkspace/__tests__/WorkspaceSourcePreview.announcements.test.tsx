@@ -27,9 +27,9 @@ const preview: WorkspaceSourcePreviewResponse = {
   content_available: true, preview_mode: "available", unavailable_reason: null,
   text_preview: "Captured report text", text_total_chars: 20, text_truncated: false, snippets: [], generated_at: "2026-09-29T00:00:00Z"
 }
-const renderPreview = () => render(
+const renderPreview = (currentSource: WorkspaceSource = source) => render(
   <ConfigProvider theme={{ token: { motion: false } }}>
-    <WorkspaceSourcePreview workspaceId="ws-a" source={source} onClose={vi.fn()} />
+    <WorkspaceSourcePreview workspaceId="ws-a" source={currentSource} onClose={vi.fn()} />
   </ConfigProvider>
 )
 
@@ -37,6 +37,45 @@ describe("Canonical source preview announcements", () => {
   beforeEach(() => {
     request.mockReset()
     useWorkspaceStore.setState({ workspaceId: "ws-a", sources: [source] })
+  })
+
+  it.each([
+    ["title", "Canonical report", "Report"],
+    ["source type", "html / Ready", "pdf / Ready"]
+  ])("renders the canonical %s instead of staged metadata", async (_, canonical, staged) => {
+    request.mockResolvedValue({ ...preview, title: "Canonical report", source_type: "html" })
+    renderPreview()
+    await screen.findByText("Captured report text")
+    expect(screen.queryByText(canonical)).toBeInTheDocument()
+    expect(screen.queryByText(staged)).not.toBeInTheDocument()
+  })
+
+  it("links the canonical URL instead of the staged URL", async () => {
+    request.mockResolvedValue({ ...preview, url: "https://canonical.test/report" })
+    renderPreview({ ...source, url: "https://staged.test/report" })
+    await screen.findByText("Captured report text")
+    expect(screen.queryByRole("link", { name: "https://canonical.test/report" })).toHaveAttribute(
+      "href", "https://canonical.test/report"
+    )
+    expect(screen.queryByRole("link", { name: "https://staged.test/report" })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    null,
+    "javascript:alert(1)",
+    "java\tscript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "/tmp/report.pdf",
+    "report.pdf",
+    "//source.test/report",
+    "mailto:source@test.example",
+    "https://[invalid"
+  ])("suppresses the staged link when the canonical URL is %s", async (url) => {
+    request.mockResolvedValue({ ...preview, url })
+    renderPreview({ ...source, url: "https://staged.test/report" })
+    expect(screen.getByRole("link")).toHaveAttribute("href", "https://staged.test/report")
+    await screen.findByText("Captured report text")
+    expect(screen.queryByRole("link")).not.toBeInTheDocument()
   })
 
   it("announces pending content without making captured text a live region", async () => {

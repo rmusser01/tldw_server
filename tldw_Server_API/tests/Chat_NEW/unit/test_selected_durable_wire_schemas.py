@@ -1,6 +1,7 @@
 """Approved bounded wire projections, separate from admission authority."""
 
 import json
+from typing import Any, Literal
 
 import pytest
 from pydantic import TypeAdapter, ValidationError
@@ -13,7 +14,8 @@ UID = "f61d4e19-3600-4715-96fd-1f7b45cf8d77"
 DIGEST = "a" * 64
 
 
-def selection():
+def selection() -> dict[str, Any]:
+    """Build a minimal send selection with fixed context and storage fences."""
     return {
         "version": 1,
         "owner_key": "owner",
@@ -30,7 +32,8 @@ def selection():
     }
 
 
-def admission():
+def admission() -> dict[str, Any]:
+    """Build the accepted input reference used by retry and result receipts."""
     return {
         "version": 1,
         "owner_key": "owner",
@@ -41,7 +44,8 @@ def admission():
     }
 
 
-def request_body(kind="selection"):
+def request_body(kind: Literal["selection", "admission"] = "selection") -> dict[str, Any]:
+    """Build an explicit durable request for the selected admission protocol."""
     history = {"version": 1, "kind": kind, kind: selection() if kind == "selection" else admission()}
     if kind == "admission":
         history["request_context_digest"] = DIGEST
@@ -56,7 +60,8 @@ def request_body(kind="selection"):
     }
 
 
-def source(**overrides):
+def source(**overrides: Any) -> dict[str, Any]:
+    """Build a cited source, replacing members for boundary validation tests."""
     return {
         "name": "Document",
         "type": "pdf",
@@ -414,7 +419,8 @@ def test_result_payload_accepts_exact_64k_and_total_scalar_boundaries_but_not_on
         wire.HistoryResultPayloadV1.model_validate(payload)
 
 
-def result():
+def result() -> dict[str, Any]:
+    """Build a result receipt bound to the fixed accepted input reference."""
     return {
         "version": 1,
         "result_message_id": UID,
