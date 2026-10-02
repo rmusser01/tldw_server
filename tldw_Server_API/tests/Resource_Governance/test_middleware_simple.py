@@ -227,7 +227,7 @@ async def test_middleware_fail_closed_on_reserve_error_when_policy_requires_it()
 
 
 @pytest.mark.asyncio
-async def test_middleware_uses_tenant_entity_when_tenant_scope_enabled():
+async def test_middleware_ignores_an_unvalidated_tenant_header():
     app = FastAPI()
     app.add_middleware(RGSimpleMiddleware)
 
@@ -249,7 +249,8 @@ async def test_middleware_uses_tenant_entity_when_tenant_scope_enabled():
 
     assert r.status_code == 200
     assert gov.requests
-    assert gov.requests[0].entity == "tenant:acme"
+    # TASK-13402: an anonymous caller cannot name a tenant bucket; it pays its IP.
+    assert gov.requests[0].entity.startswith("ip:")
 
 
 def _ingress_entity_app(governor):
