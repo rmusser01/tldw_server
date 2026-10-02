@@ -10,14 +10,14 @@ change a durable architecture rule. ADR-002, ADR-004, and ADR-006 govern trackin
 human ownership, and security verification.
 
 ## Stage 1: Preserve and Rebase
-**Goal**: Rebase on fetched dev8140e493f2d0a79e2039084930151eba6565df82,
-including its AuthNZ/resource-governor advancement from the earlier 38b baseline.
+**Goal**: Rebase on latest fetched dev9958110df2a9011e19f48b0eae821353e19d4af8,
+retaining the qualified8140 integration and the new request-scoped ChaCha reuse fix.
 **Success Criteria**: Backup ref retained; complete result equals expected clean
 integration tree cbf4388b66855d5d255b784b87ae3dae28c04061, except this task/plan.
 The final reviewed-fix rebase produced HEAD0ac9032 with expected integration tree
 05f818713d3d59ff7c48e8d2762c24d14a180523; all upstream AuthNZ/RG paths match dev.
 **Tests**: Git ancestry/tree comparison; original stash inventory unchanged.
-**Status**: Complete
+**Status**: In Progress
 
 ## Stage 2: Verify and Publish
 **Goal**: Verify the rebased implementation and resolve published-ADR drift.
@@ -26,7 +26,7 @@ hooks pass; publish using a lease bound to original head 0c9d592231dfee52642ce97
 **Tests**: Docs refresh suite, changed CI/test-isolation regressions, owning Chat
 Workspace regressions, touched-scope Bandit, and exact production-source binding
 to prior real Chrome desktop/mobile acceptance. Unit doubles are not UAT.
-**Status**: Complete
+**Status**: In Progress
 
 Verified: docs33; combined owning273; incoming fixtures52; Chat180passed/24skipped;
 CI helper/workflow56 and formatted helper5. Independent review's child-PATH
@@ -97,6 +97,24 @@ model-picker wording in the guide. TASK-13421.1.7 repairs only documentation and
 tests: expected RED2 then GREEN7; published docs refreshed; docs35pass; production
 Chat Bandit0. Application runtime files are unchanged. The new head still requires
 fresh hosted CI and Qodo disposition; companion SDK scope approval remains pending.
+
+Final31a native acceptance closes bounded prepared-input recovery with a separate
+zero-send protected-row/draft continuation; its original focus-failure artifact
+remains failed. Four settled B/A cross-surface switches pass with zero sends.
+The earlier switch assertion sampled during actual history loading; read-only
+investigation proved natural restoration and preserved checkpoint contents except
+the expected session reference. Independent copy/UAT review finds no issue.
+Hosted31a auth149/0skips includes six durable PostgreSQL passes; chat861passed/
+30skips includes all60 image-recovery passes and its strict PG snapshot unskipped.
+The RAG shard's initial apt-mirror failure occurred before tests; the targeted
+same-head retry passes. These results qualify8140, not the newly advanced base.
+
+Dev advanced during hosted CI to9958110 with eight changed paths: two ChaCha
+request-operation runtime helpers, their regression, RG replay/identity tests and
+task metadata. Frontend and both PR-owned runtime paths remain nonoverlapping.
+Preserve31a, rebase, verify exact expected integration and incoming/owning tests,
+then bind a fresh actual backend before UAT. Current imported73ada backend must
+not be claimed as UAT of9958. Companion SDK authorization remains pending.
 
 ## Stage 4: Merge and Read Back
 **Goal**: Merge the verified PR into dev without bypassing checks.
