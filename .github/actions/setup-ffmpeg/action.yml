@@ -23,22 +23,7 @@ runs:
         if [ -f /etc/apt/sources.list ]; then
           sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
         fi
-        # Acquire timeouts only catch stalled connections; a mirror that trickles data hung
-        # apt-get update for the whole job timeout (TASK-13415). Bound each attempt instead.
-        apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o Acquire::Languages=none)
-        apt_bounded() {
-          local attempt
-          for attempt in 1 2 3; do
-            if sudo timeout --kill-after=15s "${APT_ATTEMPT_SECONDS:-300}" apt-get "$@"; then
-              return 0
-            fi
-            echo "::warning::apt-get $1 attempt ${attempt} failed or timed out; retrying"
-            sudo dpkg --configure -a || true
-            sleep $((attempt * 5))
-          done
-          echo "::error::apt-get $1 failed after 3 bounded attempts (stalled package mirror?)"
-          return 1
-        }
+        source "${{ github.action_path }}/../apt-bounded.sh"
         apt_bounded update "${apt_opts[@]}"
         packages=()
         if [ "${{ inputs.install-ffmpeg }}" = "true" ]; then

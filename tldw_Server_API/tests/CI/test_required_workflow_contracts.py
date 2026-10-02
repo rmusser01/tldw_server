@@ -619,13 +619,16 @@ def test_setup_ffmpeg_action_can_skip_ffmpeg_but_keep_portaudio() -> None:
         "'s|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' || true"
         in linux_script
     )
-    assert "Acquire::http::Timeout=20" in linux_script
+    assert 'source "${{ github.action_path }}/../apt-bounded.sh"' in linux_script
+    assert 'apt_bounded update "${apt_opts[@]}"' in linux_script
+    # PortAudio installs on its own when FFmpeg is skipped.
+    assert 'if [ "${{ inputs.install-ffmpeg }}" = "true" ]; then\n  packages+=(ffmpeg)' in linux_script
     assert (
-        "sudo apt-get install -y --no-install-recommends ffmpeg portaudio19-dev python3-all-dev"
-        in linux_script
-    )
+        'if [ "${{ inputs.install-portaudio }}" = "true" ]; then\n'
+        "  packages+=(portaudio19-dev python3-all-dev)"
+    ) in linux_script
     assert (
-        "sudo apt-get install -y --no-install-recommends portaudio19-dev python3-all-dev"
+        'apt_bounded install -y --no-install-recommends "${apt_opts[@]}" "${packages[@]}"'
         in linux_script
     )
 
@@ -643,9 +646,19 @@ def test_wait_for_postgres_action_bounds_linux_client_install() -> None:
         "'s|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' || true"
         in install_script
     )
-    assert "Acquire::http::Timeout=20" in install_script
-    assert "Acquire::https::Timeout=20" in install_script
-    assert "sudo apt-get install -y --no-install-recommends postgresql-client" in install_script
+    assert 'source "${{ github.action_path }}/../apt-bounded.sh"' in install_script
+    assert 'apt_bounded update "${apt_opts[@]}"' in install_script
+    assert (
+        'apt_bounded install -y --no-install-recommends "${apt_opts[@]}" postgresql-client'
+        in install_script
+    )
+
+
+def test_apt_bounded_helper_sets_timeouts_and_wall_clock_bound() -> None:
+    helper = Path(".github/actions/apt-bounded.sh").read_text(encoding="utf-8")
+    assert "Acquire::http::Timeout=20" in helper
+    assert "Acquire::https::Timeout=20" in helper
+    assert 'sudo timeout --kill-after=15s "${APT_ATTEMPT_SECONDS:-300}" apt-get "$@"' in helper
 
 
 def test_full_suite_ffmpeg_setup_scopes_heavy_install_to_media_runtime_shards() -> None:
