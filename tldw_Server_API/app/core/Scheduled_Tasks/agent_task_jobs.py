@@ -66,6 +66,9 @@ NOTIFICATION_KIND_BY_STATUS = {
     "failed": "automation_run_failed",
     "timed_out": "automation_run_timed_out",
     "skipped": "automation_run_skipped",
+    # ADR-184 2A: terminal outcome for tool-requesting definitions until the
+    # read-only envelope (and later, queued escalation) exists.
+    "approval_required": "automation_run_approval_required",
 }
 
 #: Execution deadline (seconds) for one phase-1 run. Distinct from the
@@ -233,7 +236,13 @@ async def handle_agent_task_job(
             "run_id": None,
             "reason": "definition_missing",
         }
-    if run["status"] in ("succeeded", "skipped", "failed", "timed_out"):
+    if run["status"] in (
+        "succeeded",
+        "skipped",
+        "failed",
+        "timed_out",
+        "approval_required",
+    ):
         return {
             "status": run["status"],
             "definition_id": definition_id,
@@ -253,7 +262,13 @@ async def handle_agent_task_job(
             definition_id=definition_id,
             run_slot_key=run_slot_key,
         )
-        if latest and latest["status"] in ("succeeded", "skipped", "failed", "timed_out"):
+        if latest and latest["status"] in (
+            "succeeded",
+            "skipped",
+            "failed",
+            "timed_out",
+            "approval_required",
+        ):
             return {
                 "status": latest["status"],
                 "definition_id": definition_id,
@@ -331,25 +346,33 @@ async def handle_agent_task_job(
                     "reason": reason,
                 }
 
-        # Phase-1 boundary, enforced by the consumer (not assumed): tools are
-        # out of bounds until the approval-escalation design exists.
+        # ADR-184 2A boundary, enforced by the consumer (not assumed): a
+        # tool-requesting definition terminates approval_required (a terminal
+        # outcome with a pass-back notification), not a phase skip -- the
+        # read-only envelope routes here until it exists, and side-effecting
+        # calls will keep this outcome at runtime.
         if _phase1_tools_requested(definition):
             _finish(
                 sdb,
                 cdb,
                 definition=definition,
                 run_id=run["id"],
-                status="skipped",
-                error="tools_not_executable_in_phase1",
+                status="approval_required",
+                error="tools_require_read_only_envelope",
                 summary=(
-                    "This definition requests tools; server-side tool use is not "
-                    "executable until the approval-escalation design lands."
+                    "This definition requests tools; server-side tool use "
+                    "terminates approval-required until the read-only tool "
+                    "envelope lands (ADR-184 decision 2A)."
                 ),
                 jobs_job_id=str(job.get("id")) if job.get("id") is not None else None,
                 execution_timeout_seconds=execution_timeout_seconds,
                 execution_claim_id=claim_id,
             )
-            return {"status": "skipped", "definition_id": definition_id, "run_id": run["id"]}
+            return {
+                "status": "approval_required",
+                "definition_id": definition_id,
+                "run_id": run["id"],
+            }
 
         if definition.family not in _PHASE1_EXECUTABLE_FAMILIES:
             _finish(
@@ -534,6 +557,12 @@ def _finish(
                 )
             elif status == "skipped":
                 message = summary or f"Skipped: {error or 'unknown reason'}."
+            elif status == "approval_required":
+                message = (
+                    summary
+                    or "This run requests tools and terminated "
+                    "approval-required (ADR-184 decision 2A)."
+                )
             else:
                 message = f"Run failed: {error or 'unknown error'}."
             cdb.create_user_notification(
