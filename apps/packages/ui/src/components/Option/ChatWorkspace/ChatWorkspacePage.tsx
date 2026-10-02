@@ -248,7 +248,7 @@ export const ChatWorkspacePage = () => {
     )
   }
 
-  if (workspaceReady && serverWorkspace?.metadata.id !== workspaceId) {
+  if (workspaceReady && serverWorkspace && serverWorkspace.metadata.id !== workspaceId) {
     return (
       <div data-testid="chat-workspace-page" className="h-full min-w-0 p-4 text-text">
         <h1 className="sr-only">Chat Workspace</h1>

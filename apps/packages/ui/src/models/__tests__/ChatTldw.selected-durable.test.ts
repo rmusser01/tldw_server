@@ -5,6 +5,7 @@ import { prepareHistoryContext } from "@/services/chat-history-selection"
 import { historyDurableRequestDigest } from "@/services/history-durable-turn"
 import { selectionDigest } from "@/utils/history-selection"
 import type { HistorySelectionV1 } from "@/types/history-selection"
+import { consumeStreamingChunk, extractStreamingChunkError } from "@/utils/streaming-chunks"
 
 const calls = vi.hoisted(() => ({ stream: vi.fn() }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: {
@@ -106,6 +107,44 @@ describe("selected durable model transport", () => {
     expect((await stream.next()).value).toMatchObject({ tldw_history_admission_v1: admission(request) })
     expect(released).toBe(false)
     await stream.return()
+  })
+  it("preserves a verified settlement error for existing pipeline recovery without completing or resending", async () => {
+    const chat = model()
+    const request = prepare(chat)
+    const error = { code: "selected_durable_result_unverified", type: "history_result_error",
+      message: "Selected durable result could not be verified." }
+    calls.stream.mockImplementation(async function* () {
+      yield frame(request)
+      yield { choices: [{ delta: { content: "Partial answer" } }] }
+      yield { ...frame(request), error }
+    })
+    const chunks = []
+    for await (const chunk of await chat.stream([], { preparedRequest: request })) chunks.push(chunk)
+    const failed = chunks.find(chunk => extractStreamingChunkError(chunk))
+    expect(failed).toMatchObject({ error })
+    let cause: unknown
+    try {
+      consumeStreamingChunk({ fullText: "Partial answer", contentToSave: "Partial answer", apiReasoning: false }, failed)
+    } catch (caught) { cause = caught }
+    expect(cause).toMatchObject({ code: error.code, message: error.message })
+    expect(chat.historyAdmission).toEqual(admission(request))
+    expect(chat.historyResult).toBeUndefined()
+    expect(chat.serverMessagesAlreadyPersisted).toBe(false)
+    expect(calls.stream).toHaveBeenCalledOnce()
+  })
+  it("validates receipt identity before forwarding a settlement error", async () => {
+    const chat = model()
+    const request = prepare(chat)
+    calls.stream.mockImplementation(async function* () {
+      yield { ...frame(request), tldw_conversation_id: "other", error: {
+        code: "selected_durable_result_unverified", message: "Selected durable result could not be verified." } }
+    })
+    const chunks = []
+    await expect(async () => {
+      for await (const chunk of await chat.stream([], { preparedRequest: request })) chunks.push(chunk)
+    }).rejects.toThrow()
+    expect(chunks).toEqual([])
+    expect(chat.historyAdmission).toBeUndefined()
   })
   it("forwards workspace scope through the real chat service without adding scope to the body", async () => {
     const scope = { type: "workspace" as const, workspaceId: "space" }
