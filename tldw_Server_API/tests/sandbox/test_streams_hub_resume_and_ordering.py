@@ -122,6 +122,37 @@ async def test_hub_multi_subscriber_ordering() -> None:
 
 
 @pytest.mark.asyncio
+async def test_hub_subscriber_attaching_before_dispatch_sees_each_frame_once() -> None:
+    """Frames published but not yet dispatched reach a new subscriber exactly once, in seq order."""
+    from tldw_Server_API.app.core.Sandbox.streams import RunStreamHub
+
+    hub = RunStreamHub()
+    hub.set_loop(asyncio.get_running_loop())
+    run_id = f"run-attach-{uuid.uuid4().hex}"
+
+    early = hub.subscribe_with_buffer(run_id)
+    # Publishing from the loop thread schedules dispatch; it cannot run until we await.
+    hub.publish_event(run_id, "start", {})
+    hub.publish_heartbeat(run_id)
+    hub.publish_stdout(run_id, b"A\n", max_log_bytes=1024)
+    late = hub.subscribe_with_buffer(run_id)
+    resumed = hub.subscribe_with_buffer_from_seq(run_id, 1)
+
+    # Seq follows publish order. Heartbeats are live-only (never buffered), so
+    # only the subscriber attached before it was published sees seq 2.
+    history = [("event", 1), ("stdout", 3)]
+    for q, expected in (
+        (early, [("event", 1), ("heartbeat", 2), ("stdout", 3)]),
+        (late, history),
+        (resumed, history),
+    ):
+        got = [await asyncio.wait_for(q.get(), timeout=1.0) for _ in expected]
+        assert [(f["type"], f["seq"]) for f in got] == expected
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(q.get(), timeout=0.1)
+
+
+@pytest.mark.asyncio
 async def test_hub_redis_no_duplicate_local_origin(monkeypatch: pytest.MonkeyPatch) -> None:
     # Enable fan-out and inject a fake redis that just records publish calls
     chan = f"test:sandbox:dedup:{uuid.uuid4().hex}"
