@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
   initialize: vi.fn(),
   getModels: vi.fn(),
+  getCurrentUserProfile: vi.fn(),
   getRuntimeSingleUserApiKeyOverride: vi.fn(),
   storageGet: vi.fn(async () => null),
   storageSet: vi.fn(async () => undefined),
@@ -13,18 +14,24 @@ const mocks = vi.hoisted(() => ({
   >()
 }))
 
-vi.mock("@/services/tldw/TldwApiClient", () => ({
+vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => ({
+  isActiveCookieSessionConfig: (
+    await importOriginal<typeof import("@/services/tldw/TldwApiClient")>()
+  ).isActiveCookieSessionConfig,
   tldwClient: {
     getConfig: (...args: unknown[]) =>
       (mocks.getConfig as (...args: unknown[]) => unknown)(...args),
     initialize: (...args: unknown[]) =>
       (mocks.initialize as (...args: unknown[]) => unknown)(...args),
     getModels: (...args: unknown[]) =>
-      (mocks.getModels as (...args: unknown[]) => unknown)(...args)
+      (mocks.getModels as (...args: unknown[]) => unknown)(...args),
+    getCurrentUserProfile: (...args: unknown[]) =>
+      (mocks.getCurrentUserProfile as (...args: unknown[]) => unknown)(...args)
   }
 }))
 
-vi.mock("@/utils/safe-storage", () => ({
+vi.mock("@/utils/safe-storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/utils/safe-storage")>()),
   createSafeStorage: () => ({
     get: (...args: unknown[]) =>
       (mocks.storageGet as (...args: unknown[]) => unknown)(...args),
@@ -62,10 +69,12 @@ const deferred = <T>() => {
 describe("TldwModelsService caching", () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
     vi.resetModules()
     mocks.getConfig.mockReset()
     mocks.initialize.mockReset()
     mocks.getModels.mockReset()
+    mocks.getCurrentUserProfile.mockReset()
     mocks.getRuntimeSingleUserApiKeyOverride.mockReset()
     mocks.storageGet.mockReset()
     mocks.storageSet.mockReset()
@@ -78,6 +87,7 @@ describe("TldwModelsService caching", () => {
       apiKey: "test-key"
     })
     mocks.initialize.mockResolvedValue(undefined)
+    mocks.getCurrentUserProfile.mockResolvedValue({})
     mocks.getRuntimeSingleUserApiKeyOverride.mockReturnValue(null)
     mocks.storageGet.mockImplementation(async () => mocks.storageValue)
     mocks.storageSet.mockImplementation(async (_key, value) => {
@@ -114,6 +124,31 @@ describe("TldwModelsService caching", () => {
     )
   })
 
+  it.each([
+    ["quickstart", "http://localhost:3000", "single-user", "cookie-session", true],
+    ["quickstart", "http://127.0.0.1:8000", "single-user", "cookie-session", false],
+    ["advanced", "http://localhost:3000", "single-user", "cookie-session", false],
+    ["quickstart", "http://localhost:3000", "multi-user", "cookie-session", false],
+    ["quickstart", "http://localhost:3000", "single-user", undefined, false]
+  ])(
+    "admits models only for an active cookie session (%s, %s, %s, %s)",
+    async (deploymentMode, serverUrl, authMode, authSource, allowed) => {
+      vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", deploymentMode)
+      vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+      mocks.getConfig.mockResolvedValue({ serverUrl, authMode, authSource })
+      mocks.getModels.mockResolvedValue([
+        { id: "cookie-model", name: "Cookie Model", provider: "llama", type: "chat" }
+      ])
+      const { TldwModelsService } = await importService()
+      const models = await new TldwModelsService().getModels()
+      expect(models.map((model) => model.id)).toEqual(allowed ? ["cookie-model"] : [])
+      expect(mocks.getModels).toHaveBeenCalledTimes(allowed ? 1 : 0)
+      if (allowed) {
+        expect(mocks.storageSet).not.toHaveBeenCalled()
+      }
+    }
+  )
+
   it.each(["CHANGE_ME_TO_SECURE_API_KEY", "   "])(
     "does not treat invalid runtime single-user auth %s as model-ready",
     async (runtimeKey) => {
@@ -137,7 +172,99 @@ describe("TldwModelsService caching", () => {
     }
   )
 
-  it("dedupes concurrent in-flight model fetches", async () => {
+  it.each([
+    [0, false, 401],
+    [16 * 60 * 1000, false, 401],
+    [0, true, 403]
+  ])("withholds cookie catalogs after authentication fails (age=%s, forced=%s, status=%s)", async (age, forced, status) => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://localhost:3000",
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })
+    mocks.storageValue = {
+      version: 4,
+      timestamp: Date.now() - age,
+      scope: "http://localhost:3000|single-user|cookie|none",
+      models: [{ id: "expired-cookie-model", name: "Old Model", provider: "llama", type: "chat" }]
+    }
+    mocks.getModels.mockRejectedValue(Object.assign(new Error("Expired cookie session"), { status }))
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+
+    await expect(service.getModels(forced)).resolves.toEqual([])
+    expect(mocks.getModels).toHaveBeenCalledOnce()
+    expect(mocks.storageSet).not.toHaveBeenCalled()
+    await expect(new TldwModelsService().getCachedChatModels()).resolves.toEqual([])
+  })
+
+  it("revalidates a cookie session instead of returning the forced-refresh cooldown cache", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://localhost:3000",
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })
+    mocks.getModels.mockResolvedValueOnce([
+      { id: "cookie-model", name: "Cookie Model", provider: "llama", type: "chat" }
+    ]).mockRejectedValueOnce(Object.assign(new Error("Expired cookie session"), { status: 401 }))
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    expect(await service.getModels(true)).toHaveLength(1)
+    await expect(service.getModels(true)).resolves.toEqual([])
+    expect(mocks.getModels).toHaveBeenCalledTimes(2)
+  })
+
+  it("requires live cookie authentication even when public model metadata is available", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://localhost:3000",
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })
+    mocks.getCurrentUserProfile.mockRejectedValue(Object.assign(new Error("Expired cookie session"), { status: 401 }))
+    mocks.getModels.mockResolvedValue([
+      { id: "public-model", name: "Public Model", provider: "llama", type: "chat" }
+    ])
+    const { TldwModelsService } = await importService()
+    await expect(new TldwModelsService().getModels()).resolves.toEqual([])
+    expect(mocks.getCurrentUserProfile).toHaveBeenCalledOnce()
+    expect(mocks.getModels).not.toHaveBeenCalled()
+  })
+
+  it("does not hydrate a cookie catalog without a live authenticated request", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://localhost:3000",
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })
+    mocks.storageValue = {
+      version: 4,
+      timestamp: Date.now(),
+      scope: "http://localhost:3000|single-user|cookie|none",
+      models: [{ id: "cookie-model", name: "Cookie Model", provider: "llama", type: "chat" }]
+    }
+    const { TldwModelsService } = await importService()
+    await expect(new TldwModelsService().getCachedChatModels()).resolves.toEqual([])
+    expect(mocks.getModels).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])("dedupes concurrent in-flight model fetches (cookie=%s)", async (cookie) => {
+    if (cookie) {
+      vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+      vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+      mocks.getConfig.mockResolvedValue({
+        serverUrl: "http://localhost:3000",
+        authMode: "single-user",
+        authSource: "cookie-session"
+      })
+    }
     vi.useFakeTimers()
     try {
       mocks.getModels.mockImplementation(async () => {
@@ -164,6 +291,111 @@ describe("TldwModelsService caching", () => {
       vi.useRealTimers()
     }
   }, 10_000)
+
+  it("does not let a late cookie authentication failure clear a newer key catalog", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://localhost:3000",
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })
+    const failure = deferred<Error>()
+    mocks.getModels
+      .mockImplementationOnce(async () => { throw await failure.promise })
+      .mockResolvedValueOnce([
+        { id: "new-key-model", name: "New Model", provider: "llama", type: "chat" }
+      ])
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    const oldCookieFetch = service.getModels()
+    await vi.waitFor(() => expect(mocks.getModels).toHaveBeenCalledOnce())
+
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://key-server:8000",
+      authMode: "single-user",
+      apiKey: "test-key"
+    })
+    await service.getModels()
+    failure.resolve(Object.assign(new Error("Expired cookie session"), { status: 401 }))
+    await expect(oldCookieFetch).resolves.toEqual([])
+    await expect(service.getModels()).resolves.toEqual([
+      expect.objectContaining({ id: "new-key-model" })
+    ])
+    expect(mocks.getModels).toHaveBeenCalledTimes(2)
+    expect(mocks.storageValue).toEqual(expect.objectContaining({
+      scope: "http://key-server:8000|single-user|key|none",
+      models: [expect.objectContaining({ id: "new-key-model" })]
+    }))
+  })
+
+  it("does not let a cookie failure overwrite another instance's persisted key catalog", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({ serverUrl: "http://localhost:3000", authMode: "single-user", authSource: "cookie-session" })
+    const failure = deferred<Error>()
+    mocks.getCurrentUserProfile.mockImplementationOnce(async () => { throw await failure.promise })
+    mocks.getModels.mockResolvedValue([{ id: "key-model", name: "Key Model", provider: "llama", type: "chat" }])
+    const { TldwModelsService } = await importService()
+    const oldCookieFetch = new TldwModelsService().getModels()
+    await vi.waitFor(() => expect(mocks.getCurrentUserProfile).toHaveBeenCalledOnce())
+    mocks.getConfig.mockResolvedValue({ serverUrl: "http://key-server:8000", authMode: "single-user", apiKey: "test-key" })
+    await new TldwModelsService().getModels()
+    const keyRecord = mocks.storageValue
+    failure.resolve(Object.assign(new Error("Expired cookie session"), { status: 401 }))
+    await expect(oldCookieFetch).resolves.toEqual([])
+    expect(mocks.storageValue).toEqual(keyRecord)
+    await expect(new TldwModelsService().getCachedChatModels()).resolves.toEqual([expect.objectContaining({ id: "key-model" })])
+  })
+
+  it.each(["AbortError", "TypeError"])("retains cookie models on a catalog %s only after live authentication", async (name) => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({ serverUrl: "http://localhost:3000", authMode: "single-user", authSource: "cookie-session" })
+    mocks.getModels.mockResolvedValueOnce([{ id: "cookie-model", name: "Cookie Model", provider: "llama", type: "chat" }])
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    await service.getModels()
+    const transient = Object.assign(new Error("Request interrupted"), { name })
+    mocks.getCurrentUserProfile.mockRejectedValueOnce(transient)
+    await expect(service.getModels()).resolves.toEqual([])
+    mocks.getModels.mockRejectedValueOnce(transient)
+    await expect(service.getModels()).resolves.toEqual([expect.objectContaining({ id: "cookie-model" })])
+    expect(mocks.getCurrentUserProfile).toHaveBeenCalledTimes(3)
+    expect(mocks.storageSet).not.toHaveBeenCalled()
+  })
+
+  it.each(["AbortError", "TypeError"])("withholds stale fresh cookie capabilities after a catalog %s without discarding authenticated memory", async (name) => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({ serverUrl: "http://localhost:3000", authMode: "single-user", authSource: "cookie-session" })
+    mocks.getModels.mockResolvedValueOnce([{ id: "cookie-model", name: "Cookie Model", provider: "llama", vision: false }])
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    await service.getModels()
+    const transient = Object.assign(new Error("Request interrupted"), { name })
+    mocks.getModels.mockRejectedValue(transient)
+    await expect(service.getModels(true, { requireFresh: true })).resolves.toEqual([])
+    await expect(service.getModels()).resolves.toEqual([expect.objectContaining({ id: "cookie-model" })])
+    expect(mocks.getCurrentUserProfile).toHaveBeenCalledTimes(3)
+    expect(mocks.storageSet).not.toHaveBeenCalled()
+  })
+
+  it("clears expired cookie memory even when fresh capability discovery was requested", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({ serverUrl: "http://localhost:3000", authMode: "single-user", authSource: "cookie-session" })
+    mocks.getModels.mockResolvedValueOnce([{ id: "cookie-model", name: "Cookie Model", provider: "llama", vision: true }])
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    await service.getModels()
+    mocks.getCurrentUserProfile.mockRejectedValueOnce(Object.assign(new Error("Expired cookie session"), { status: 401 }))
+    await expect(service.getModels(true, { requireFresh: true })).resolves.toEqual([])
+    mocks.getModels.mockRejectedValueOnce(new TypeError("Network unavailable"))
+    await expect(service.getModels()).resolves.toEqual([])
+    expect(mocks.getModels).toHaveBeenCalledTimes(2)
+    expect(mocks.storageSet).not.toHaveBeenCalled()
+  })
 
   it("resets cached models when server scope changes", async () => {
     mocks.getModels
