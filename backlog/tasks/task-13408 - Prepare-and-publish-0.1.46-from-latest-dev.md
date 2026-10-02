@@ -6,15 +6,14 @@ created_date: 2026-10-02 00:22
 labels:
 - release
 priority: high
-updated_date: 2026-10-02 00:26
+updated_date: 2026-10-02 00:32
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Release remote dev 5f3ed81e88ec44750a5baa7838f7c69672e32694 through PR3070 as0.1.46 using existing metadata, protected-source records, CI and publication workflows. No new collectors or broader certification gates; preserve unrelated local work.
+Release remote dev 3304f6cf0c2cab8836c6a73308d7210534a759d9 through PR #3073 as 0.1.46 using existing metadata, protected-source records, CI and publication workflows. No new collectors or broader certification gates; preserve unrelated local work.
 <!-- SECTION:DESCRIPTION:END -->
-
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Version, changelog and protected-source records agree on the frozen source
@@ -34,6 +33,8 @@ Release remote dev 5f3ed81e88ec44750a5baa7838f7c69672e32694 through PR3070 as0.1
 CLI task creation failed with Maximum call stack size exceeded; using official Python MCP with explicit isolated project path.
 Prepared0.1.46 from5f3ed81e88ec44750a5baa7838f7c69672e32694. Protected source: `5f3ed81e88ec44750a5baa7838f7c69672e32694`. Protected manifest SHA-256: `2f10da6c5c91e30356d15568d427e3e8dc2750123ebd48d1e5c2580cf958ab47`.7451files; proposed date2026-10-01/Countdown2028-10-01T12:00:00Z. Existing helper baseline46tests pass. Added only version/changelog/license records, compact merged-change inventory and release plan; existing publication workflows unchanged. No v0.1.46 tag/release exists. Python minimum changed by included dev commits to3.12, documented as upgrade requirement.
 80 existing release/helper/Makefile/docs/licensing tests passed including strict MkDocs and TLDW_VERIFY_RELEASE_SOURCE=1 checkout equality. Touched main.py version change compiles; Bandit0findings/errors. Ruff9baseline findings are unchanged; no unrelated formatting repair. Metadata tests use existingPython3.11venv; runtimePython3.12 validation uses existingCI. Preparing main releasePR; no application features/workflow changes/new certification gates.
+Opened release PR https://github.com/rmusser01/tldw_server/pull/3074; attached to release chat. Latest dev moved to 3304f6cf0c2cab8836c6a73308d7210534a759d9 via backlog-only PR #3073. Incorporate that merge and update frozen source/inventory before final CI. Protected source content remains unchanged.
+Merged latest dev PR #3073 (backlog-only), refreshed protected source revision to 3304f6cf0c2cab8836c6a73308d7210534a759d9 and inventory to 980 commits. Protected manifest unchanged. All 80 existing release/docs/licensing/helper contracts passed again with source verification enabled.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
