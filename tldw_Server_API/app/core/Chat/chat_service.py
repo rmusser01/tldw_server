@@ -6677,10 +6677,9 @@ async def execute_streaming_call(
                             await sse_stream.done()
                             done_seen = True
                         break
-                    if is_trusted_local_stream_frame(ln):
-                        # This marker is created only after raw provider frames pass
-                        # through the adapter sanitizer. Preserve its identity across
-                        # the unified queue; ASGI encoding removes it before delivery.
+                    if is_trusted_local_stream_frame(ln) or ln.startswith(": heartbeat "):
+                        # The pipeline already filters provider comments. Preserve
+                        # its local keepalives and marked local errors across the queue.
                         await sse_stream._enqueue(ln)
                     else:
                         await sse_stream.send_raw_sse_line(ln)

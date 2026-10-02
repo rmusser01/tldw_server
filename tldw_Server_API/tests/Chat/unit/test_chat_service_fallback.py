@@ -4855,6 +4855,51 @@ async def test_execute_streaming_call_sync_close_never_blocks_loop_or_leaks(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("unified", ["0", "1"], ids=["legacy", "unified"])
+async def test_chat_transport_preserves_local_heartbeats_not_provider_comments(
+    monkeypatch,
+    unified: str,
+) -> None:
+    """Local keepalives survive either transport without trusting provider comments."""
+    release_provider = asyncio.Event()
+
+    async def provider_stream():
+        yield ": heartbeat untrusted-provider-comment\n\n"
+        await release_provider.wait()
+        yield 'data: {"choices": [{"delta": {"content": "verified output"}}]}\n\n'
+
+    monkeypatch.setenv("STREAMS_UNIFIED", unified)
+    monkeypatch.setenv("STREAM_HEARTBEAT_INTERVAL_S", "60")
+    monkeypatch.setattr(chat_service, "CHAT_HEARTBEAT_INTERVAL", 0.01)
+    monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
+    kwargs = _streaming_call_kwargs(
+        llm_call_func=provider_stream,
+        provider_manager=_DummyProviderManager(),
+        metrics=_DummyMetrics(),
+        conversation_id="conv-local-heartbeat",
+        save_message_fn=_noop_save_message,
+        audit_service=None,
+    )
+    kwargs.update(should_persist=False, chat_db=None, audit_context=None)
+    response = await execute_streaming_call(**kwargs)
+    frames = []
+    try:
+        async with asyncio.timeout(2):
+            async for frame in response.body_iterator:
+                frames.append(str(frame))
+                if str(frame).startswith(": heartbeat "):
+                    release_provider.set()
+    finally:
+        release_provider.set()
+        await response.body_iterator.aclose()
+    body = "".join(frames)
+    assert ": heartbeat " in body
+    assert "untrusted-provider-comment" not in body
+    assert "verified output" in body
+    assert body.count("data: [DONE]") == 1
+
+
+@pytest.mark.asyncio
 async def test_unified_stream_disconnect_bounds_full_queue_resistant_producer(
     monkeypatch,
 ):
@@ -7218,6 +7263,7 @@ async def test_concurrent_direct_failure_and_queued_success_record_provider_use_
     faulty_task = asyncio.create_task(collect(faulty_response))
     healthy_task = asyncio.create_task(collect(healthy_response))
     try:
+
         await asyncio.wait_for(
             asyncio.gather(faulty_waiting.wait(), healthy_waiting.wait()),
             timeout=1.0,
@@ -7262,7 +7308,6 @@ async def test_concurrent_direct_failure_and_queued_success_record_provider_use_
 
 
 def test_merge_api_keys_prefers_dynamic_over_module():
-
 
     module_keys = {"openai": "module-key", "anthropic": "module-anthropic"}
     dynamic_keys = {"openai": "dynamic-key", "anthropic": ""}
