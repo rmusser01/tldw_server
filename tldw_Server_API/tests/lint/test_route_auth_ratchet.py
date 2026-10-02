@@ -43,6 +43,31 @@ def _run_ratchet() -> subprocess.CompletedProcess[str]:
     )
 
 
+def _load_app_route_paths() -> set[str]:
+    """Build the ratchet's app out-of-process and return every served path.
+
+    Runs in a subprocess for the same reason ``_run_ratchet`` does: ``load_app()``
+    mutates ``os.environ`` (pops the pytest/test-mode markers, sets route
+    policy and config dir), which must not leak into the rest of this test run.
+    """
+    script = (
+        f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r})\n"
+        "from Helper_Scripts.ci.route_auth_ratchet import load_app, iter_routes\n"
+        "app = load_app()\n"
+        "for path, _methods, _dependant in iter_routes(app):\n"
+        "    print(path)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=900,
+    )
+    assert result.returncode == 0, result.stderr
+    return {line.strip() for line in result.stdout.splitlines() if line.strip()}
+
+
 def _baseline_entries() -> list[str]:
     """Return the baseline's route entries, without comments or blank lines."""
     return [
@@ -97,6 +122,24 @@ def _named(qualname: str):
 
     _fn.__qualname__ = qualname
     return _fn
+
+
+@pytest.mark.unit
+def test_force_enabled_routers_are_mounted() -> None:
+    """benchmarks/connectors/personalization must be visible to the ratchet.
+
+    ``ROUTE_POLICY_ENV`` force-enables these route keys, but
+    ``config.py::_route_toggle_policy`` only honors the ``ROUTES_ENABLE`` env
+    var under explicit pytest or server test-mode runtime -- both of which
+    ``load_app()`` deliberately turns off so it measures production wiring.
+    If the force-enable mechanism breaks, these routers (``default_stable =
+    False``) silently drop out of the app the ratchet inspects, and an
+    unauthenticated route added to one of them would pass CI unnoticed.
+    """
+    paths = _load_app_route_paths()
+    assert any(p.startswith("/api/v1/benchmarks") for p in paths), sorted(paths)
+    assert any(p.startswith("/api/v1/connectors") for p in paths), sorted(paths)
+    assert any(p.startswith("/api/v1/personalization") for p in paths), sorted(paths)
 
 
 @pytest.mark.unit
