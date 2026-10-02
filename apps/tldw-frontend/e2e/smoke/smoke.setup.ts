@@ -524,29 +524,22 @@ export const BENIGN_PATTERNS = [
  */
 export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
   {
-    id: "m5-optional-resource-404-noise",
+    id: "m5-wayfinding-missing-route-document-404",
     scope: "console",
-    pattern: /\/api\/v1\/moderation\/review\/items(?:\?[^ ]*)?\s+Failed to load resource: the server responded with a status of 404\b/i,
-    rationale: "The minimal smoke backend omits moderation review items; the route remains recoverable. TASK-13377.9 records the exact endpoint evidence.",
-    owner: "WebUI",
-    expiresOn: "2026-10-08",
-    routes: ["/moderation"]
-  },
-  {
-    id: "m5-drawer-width-deprecation-noise",
-    scope: "console",
-    pattern: /Warning:\s+\[antd:\s*Drawer\]\s+`width` is deprecated\. Please use `size` instead\./i,
+    pattern:
+      /^https?:\/\/[^/\s]+\/__wayfinding-missing-route__\s+Failed to load resource: the server responded with a status of 404\b/i,
     rationale:
-      "TASK-13260.278.18.83.51: current Kanban development fixture emits this Drawer width warning; removal fails its unchanged recovery gate. TASK-13377.9 also records fresh fixture evidence.",
+      "The Wayfinding 404-recovery test requests a deliberately missing route, so its own document 404 is expected. TASK-13414 re-observed it; TASK-13406 owns the policy for deliberate fixture emissions.",
     owner: "WebUI",
     expiresOn: "2026-10-31",
-    routes: ["/kanban"]
+    routes: ["/__wayfinding-missing-route__"]
   },
   {
     id: "m5-route-boundary-forced-react-overlay-warning",
     scope: "console",
     pattern: /The above error occurred in the <ForcedRouteErrorProbe> component/i,
-    rationale: "Expected React error-overlay emission from deliberate route-boundary fixtures; TASK-13377.9 records fresh recovery evidence.",
+    rationale:
+      "Expected React error-overlay emission from deliberate route-boundary fixtures (development runtime only). TASK-13414 re-observed it; TASK-13406 owns the policy for deliberate fixture emissions.",
     owner: "WebUI",
     expiresOn: "2026-10-31",
     routes: [
@@ -572,7 +565,8 @@ export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
     id: "m5-route-boundary-forced-error-log",
     scope: "console",
     pattern: /\[RouteErrorBoundary:[^\]]+\]\s+Error:\s+Forced route boundary error/i,
-    rationale: "Deliberate route-boundary fixture logs confirm the recovery branch; TASK-13377.9 records fresh evidence.",
+    rationale:
+      "Deliberate route-boundary fixture logs confirm the recovery branch (development runtime only). TASK-13414 re-observed it; TASK-13406 owns the policy for deliberate fixture emissions.",
     owner: "WebUI",
     expiresOn: "2026-10-31",
     routes: [
