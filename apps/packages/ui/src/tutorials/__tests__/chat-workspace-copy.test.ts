@@ -27,9 +27,14 @@ describe("Chat Workspace behavior copy", () => {
       expect(guide).not.toContain("without activating that workspace")
     })
 
-    it("documents the failed-turn recovery model picker and durable retry identity", () => {
-      expect(guide).toContain("failed-turn recovery")
-      expect(guide).toContain("same saved user turn")
+    it("documents protected durable recovery without implying a legacy model-switch retry", () => {
+      expect(guide).toContain("**Turn needs review**")
+      expect(guide).toContain("**Verify saved outcome**")
+      expect(guide).toContain("**Reprepare input**")
+      expect(guide).toContain("Unknown outcomes are never resent automatically.")
+      expect(guide).toContain("Legacy **Retry same model** and **Switch model** actions do not recover selected-durable turns.")
+      expect(guide).not.toContain("A failed-turn recovery action can select another model for that retry.")
+      expect(guide).not.toContain("The **Switch model** failed-turn recovery action is the exception:")
     })
 
     it("documents bounded Browse content without claiming an inspector preview", () => {

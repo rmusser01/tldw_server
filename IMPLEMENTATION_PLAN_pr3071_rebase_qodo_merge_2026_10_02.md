@@ -46,7 +46,7 @@ successful. Do not interpret missing Qodo review as approval.
 **Tests**: Per-fix red/green tests, security checks, final GitHub checks/threads.
 **Status**: In Progress
 
-Qodo completed review in comment5958856767: eight findings and nine inline
+Qodo completed review in comment5958856767: eight findings and eight inline
 comments. Bounded fixes cover absent-snapshot activation, canonical preview
 identity (including null URL), SSE control-frame forwarding, streamed error
 propagation through the existing parser, and schema-helper types/docs/unit marker.
@@ -82,6 +82,21 @@ warnings; out-of-base ignored-file invocation is not lint qualification. Expande
 upstream Bandit retains19 low token-type literals in files byte-identical to dev,
 not new findings or a zero-findings expanded scan. Final production build/source
 binding and native desktop/mobile acceptance remain under qualification.
+
+Published e7d0013 native Chrome acceptance captures three real heartbeat frames,
+one retrieval-only request and one protected Gemma input/result pair. Citation
+expansion, qualified draft restoration after fresh reload, mobile keyboard access,
+canonical previews, and real 404 manager navigation pass without inference on reads.
+Native Stop/Verify/Reprepare/explicit Send preserves one canonical logical input;
+unsupported legacy retry controls are absent. Earlier driver failures and the
+accepted result-unknown input remain recorded and are not resent automatically.
+Prepared full-source/preset recovery is still under bounded fresh-conversation UAT.
+
+Exact-head CI found two stale behavior-copy expectations and unqualified legacy
+model-picker wording in the guide. TASK-13421.1.7 repairs only documentation and
+tests: expected RED2 then GREEN7; published docs refreshed; docs35pass; production
+Chat Bandit0. Application runtime files are unchanged. The new head still requires
+fresh hosted CI and Qodo disposition; companion SDK scope approval remains pending.
 
 ## Stage 4: Merge and Read Back
 **Goal**: Merge the verified PR into dev without bypassing checks.

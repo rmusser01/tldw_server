@@ -7,7 +7,7 @@ Chat Workspace (`/chat-workspace`) is a focused conversation view for the active
 | Page | Use it for | Difference from Chat Workspace |
 | --- | --- | --- |
 | Chat (`/chat`) | General conversations, model and assistant selection, history, and the full chat controls. | The place to choose a model or explicit assistant before using the focused workspace view. |
-| Chat Workspace (`/chat-workspace`) | Conversation in the active workspace, with sources staged for the next send. | Shows source staging and runtime information; it has no workspace picker, general model picker, or persona editor. A failed-turn recovery action can select another model for that retry. |
+| Chat Workspace (`/chat-workspace`) | Conversation in the active workspace, with sources staged for the next send. | Shows source staging and runtime information; it has no workspace picker, general model picker, or persona editor. Selected-durable failures use protected outcome inspection and explicit input recovery. |
 | Knowledge QA (`/knowledge`) | Questions over selected knowledge sources, with retrieval results and cited answers. | A dedicated search-and-answer workflow, not this workspace-scoped chat composer. |
 | Research Workspace (`/research-workspace`) | Select a workspace, organize and inspect sources, use its research chat, and create Studio outputs. | The broader research environment. Its chat pane is separate from the Chat Workspace page. |
 | Document Workspace (`/document-workspace`) | Read and analyze a document with document-centered chat. | Focuses on the document being read rather than a staged set of workspace sources. |
@@ -34,7 +34,7 @@ Choose a model using the model control in Chat (`/chat`), then return to Chat Wo
 
 **No model selected** and **Select a model** are status messages, not clickable pickers. Choose a configured, usable model before sending. A visible Send button or a ready connection status does not establish that a model is configured.
 
-The **Switch model** failed-turn recovery action is the exception: it opens a picker for that retry. It does not replace the shared selected-model value shown in the inspector.
+A legacy, non-durable **Switch model** action, when present, opens a picker for that retry without replacing the shared selected-model value shown in the inspector. Selected-durable failures use **Verify saved outcome** and, where available, **Reprepare input** instead; neither action sends a message.
 
 ### Persona And Inheritance
 
