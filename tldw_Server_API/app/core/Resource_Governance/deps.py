@@ -97,6 +97,17 @@ def _tenant_claims_from_state(request: Request) -> dict[str, object]:
     return claims
 
 
+def _member_tenant_ids(request: Request, claims: dict[str, object]) -> set[str]:
+    """Tenants the validated principal on request state belongs to: its org ids and claims."""
+    ids = {str(value) for value in claims.values()}
+    auth = getattr(request.state, "auth", None)
+    for source in (request.state, getattr(auth, "principal", None)):
+        org_ids = getattr(source, "org_ids", None)
+        if isinstance(org_ids, (list, tuple, set)):
+            ids.update(str(org_id) for org_id in org_ids)
+    return ids
+
+
 def _tenant_config_from_request(request: Request) -> TenantScopeConfig | None:
     """Read tenant-scope config from the app's current RG policy snapshot."""
     try:
@@ -117,7 +128,10 @@ def derive_entity_key(request: Request, tenant_config: TenantScopeConfig | None 
         tenant_config = _tenant_config_from_request(request)
     if tenant_config and tenant_config.enabled:
         try:
-            tenant_id = get_tenant_id(request.headers, claims=_tenant_claims_from_state(request), config=tenant_config)
+            claims = _tenant_claims_from_state(request)
+            tenant_id = get_tenant_id(
+                request.headers, claims=claims, config=tenant_config, member_of=_member_tenant_ids(request, claims)
+            )
             if tenant_id:
                 return f"tenant:{tenant_id}"
         except _RG_DEPS_NONCRITICAL_EXCEPTIONS as exc:

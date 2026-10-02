@@ -15,6 +15,7 @@ import re
 import time
 import uuid
 from collections import OrderedDict
+from typing import NamedTuple
 
 from loguru import logger
 from starlette.requests import Request
@@ -24,7 +25,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from .deps import derive_client_ip, derive_entity_key
 from .governor import RGRequest
 from .policy_eval import requests_window
-from .tenant import TenantScopeConfig, parse_tenant_config
+from .tenant import TenantScopeConfig, get_tenant_id, parse_tenant_config
 
 _RG_MIDDLEWARE_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AttributeError,
@@ -63,11 +64,24 @@ def _policy_requests_limit(pol: dict) -> int:
     return requests_window(pol)[0] if float((pol.get("requests") or {}).get("rpm") or 0) > 0 else 0
 
 
+class _Identity(NamedTuple):
+    """A validated principal: its own entity and the tenants (org ids) it belongs to."""
+
+    entity: str
+    org_ids: frozenset[str] = frozenset()
+    active_org_id: str | None = None
+
+
+def _identity(entity: str, org_ids: object, active_org_id: object) -> _Identity:
+    orgs = frozenset(str(org) for org in org_ids) if isinstance(org_ids, (list, tuple)) else frozenset()
+    return _Identity(entity, orgs, None if active_org_id is None else str(active_org_id))
+
+
 class RGSimpleMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
-        # sha256(credentials) -> (expires_at, entity or None for "charge the IP"), LRU order.
-        self._identity_cache: OrderedDict[str, tuple[float, str | None]] = OrderedDict()
+        # sha256(credentials) -> (expires_at, identity or None for "charge the IP"), LRU order.
+        self._identity_cache: OrderedDict[str, tuple[float, _Identity | None]] = OrderedDict()
         # RG client IP -> (window_start, misses resolved in that window), LRU order.
         self._resolve_budget: OrderedDict[str, tuple[float, int]] = OrderedDict()
 
@@ -146,6 +160,11 @@ class RGSimpleMiddleware:
         - API-key and cookie cache misses (the DB-lookup and key-derivation path) are
           budgeted per client IP (_IDENTITY_RESOLVE_BUDGET_PER_MIN); past it the IP is
           charged unresolved and nothing is cached. JWTs never spend the budget.
+        - With tenant scoping enabled, a validated principal is charged ``tenant:<id>``:
+          the org the tenant header names when the principal belongs to it, else its
+          active org, else its own entity (_charge_entity). Only a principal's orgs
+          (cached with it) can name a tenant, so anonymous and invalid callers rotating
+          the header still share the IP bucket (TASK-13402).
         """
         from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
@@ -177,15 +196,24 @@ class RGSimpleMiddleware:
         hit = self._identity_cache.get(key)
         if hit is not None and hit[0] > now:
             self._identity_cache.move_to_end(key)
-            return hit[1]
-        entity = await self._resolve_principal_entity(request, settings, auth_header or "", client_ip, now)
-        if entity is _BUDGET_SPENT:
+            return self._charge_entity(request, hit[1])
+        identity = await self._resolve_principal_entity(request, settings, auth_header or "", client_ip, now)
+        if identity is _BUDGET_SPENT:
             return None  # budget spent: charge the IP and cache nothing
-        self._identity_cache[key] = (now + (_IDENTITY_TTL_SEC if entity else _IDENTITY_NEGATIVE_TTL_SEC), entity)
+        self._identity_cache[key] = (now + (_IDENTITY_TTL_SEC if identity else _IDENTITY_NEGATIVE_TTL_SEC), identity)
         self._identity_cache.move_to_end(key)
         while len(self._identity_cache) > _IDENTITY_CACHE_MAX:
             self._identity_cache.popitem(last=False)
-        return entity
+        return self._charge_entity(request, identity)
+
+    def _charge_entity(self, request: Request, identity: _Identity | None) -> str | None:
+        """The principal's tenant when tenant scoping is enabled and it has one, else its entity."""
+        if identity is None:
+            return None
+        cfg = self._derive_tenant_config(request)
+        claims = {cfg.jwt_claim: identity.active_org_id} if cfg and identity.active_org_id else None
+        tenant = get_tenant_id(request.headers, claims=claims, config=cfg, member_of=identity.org_ids)
+        return f"tenant:{tenant}" if tenant else identity.entity
 
     def _spend_resolve_budget(self, ip: str, now: float) -> bool:
         """Spend one identity resolution from ``ip``'s window; False when it is spent."""
@@ -200,20 +228,22 @@ class RGSimpleMiddleware:
 
     async def _resolve_principal_entity(
         self, request: Request, settings, auth_header: str, client_ip: str, now: float
-    ) -> str | None | object:
+    ) -> _Identity | None | object:
         token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
         if token and token.count(".") == 2 and settings.AUTH_MODE != "single_user":
             from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
 
             try:
-                sub = get_jwt_service().decode_access_token(token).get("sub")
+                payload = get_jwt_service().decode_access_token(token)
+                sub = payload.get("sub")
             except Exception as exc:  # noqa: BLE001 - identity is best-effort; route auth still decides
                 logger.debug("RG ingress JWT identity failed: {}", type(exc).__name__)
                 # get_auth_principal drops a failed JWT for X-API-KEY; charge whom the route will.
                 if not request.headers.get("X-API-KEY"):
                     return None
             else:
-                return f"user:{sub}" if sub else None
+                # Signature-verified org claims; route auth re-checks the memberships.
+                return _identity(f"user:{sub}", payload.get("org_ids"), payload.get("active_org_id")) if sub else None
         # Only this path costs a DB lookup and a key derivation, so only it spends the budget.
         if not self._spend_resolve_budget(client_ip, now):
             return _BUDGET_SPENT
@@ -225,16 +255,20 @@ class RGSimpleMiddleware:
             logger.debug("RG ingress identity fell back to IP: {}", type(exc).__name__)
             return None
         if getattr(principal, "user_id", None) is not None:
-            return f"user:{principal.user_id}"
-        if getattr(principal, "api_key_id", None) is not None:
-            return f"api_key:{principal.api_key_id}"
-        return None
+            entity = f"user:{principal.user_id}"
+        elif getattr(principal, "api_key_id", None) is not None:
+            entity = f"api_key:{principal.api_key_id}"
+        else:
+            return None
+        return _identity(entity, getattr(principal, "org_ids", None), getattr(principal, "active_org_id", None))
 
     def _derive_entity(self, request: Request) -> str:
         """Derive the RG entity key for this request.
 
         Enforcement details:
         - Prefer auth-derived scopes (user/api_key) as implemented in deps.derive_entity_key.
+          Before routing no principal is on request state, so a tenant header alone never
+          yields a tenant entity here; _principal_entity picks the tenant (TASK-13402).
         - Fall back to IP only when safe: derive_client_ip honors RG_TRUSTED_PROXIES (CIDRs)
           and RG_CLIENT_IP_HEADER, otherwise uses request.client.host.
 
@@ -332,8 +366,8 @@ class RGSimpleMiddleware:
         # Build RG request. Always include 'requests'. Specialized categories
         # (tokens/streams/jobs/minutes/etc.) are enforced at endpoint level.
         entity = self._derive_entity(request)
-        if not entity.startswith("tenant:"):
-            entity = await self._principal_entity(request) or entity
+        # The principal (or its tenant) when a credential validates, else the IP (TASK-13402).
+        entity = await self._principal_entity(request) or entity
         # Never derive the op_id from a client header: a repeated op_id replays the
         # cached decision without charging, so a fixed X-Request-ID would bypass limits.
         op_id = str(uuid.uuid4())

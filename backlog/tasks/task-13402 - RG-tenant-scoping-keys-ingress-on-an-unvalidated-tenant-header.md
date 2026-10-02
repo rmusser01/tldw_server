@@ -1,9 +1,10 @@
 ---
 id: TASK-13402
 title: RG tenant scoping keys ingress on an unvalidated tenant header
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30 09:45'
+updated_date: '2026-10-02 00:53'
 labels:
   - rate-limit
   - security
@@ -18,9 +19,22 @@ With tenant scoping enabled, deps.derive_entity_key returns tenant:<X-TLDW-Tenan
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The tenant entity comes only from a validated principal's tenant or org, or an unvalidated header can never mint a new bucket
-- [ ] #2 A test proves that rotating the tenant header on one IP shares one bucket
+- [x] #1 The tenant entity comes only from a validated principal's tenant or org, or an unvalidated header can never mint a new bucket
+- [x] #2 A test proves that rotating the tenant header on one IP shares one bucket
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+R-T implemented: an RG tenant entity now comes only from a validated principal.
+- tenant.get_tenant_id(member_of=...): the tenant header is honored only when it names one of the validated principal's tenants (org ids); otherwise the validated claim is used. An unvalidated header never names a bucket.
+- deps.derive_entity_key passes member_of from request state (org_ids, auth.principal.org_ids, tenant/org claims), so endpoint-level reservations (chat, embeddings, workflows) get the same rule.
+- middleware_simple: ingress always resolves the principal (same cache + per-IP budget), caching an _Identity(entity, org_ids, active_org_id); _charge_entity picks tenant:<header> if the principal belongs to it, else tenant:<active org>, else the principal's own entity. JWTs use signature-verified org_ids/active_org_id claims; API keys/cookie use AuthPrincipal.org_ids/active_org_id. Anonymous/invalid callers ignore the header and pay their IP. rg_ingress_entity and the auth single-charge exact-match skip are unchanged (comment in endpoints/auth.py updated).
+- ADR-056 tenant sentence and bullet rewritten; middleware docstrings updated.
+Tests: test_middleware_identity.py (rotating header anonymous -> one ip bucket; invalid credential + header -> ip; foreign header -> principal's tenant / principal entity; member header -> tenant:<id>; cache hit still validates each header; JWT org claims; tenant scoping disabled unchanged; existing tenant-precedence test now uses member principals), test_deps_trusted_proxy.py (route-time derive_entity_key), test_middleware_simple.py (anonymous header -> ip). RED shown for 9 before the fix; all pass after.
+Bandit (uvx bandit -ll) on touched RG files: no findings.
+Known: AuthPrincipal has no tenant field, so tenant == org id; the TenantScopeConfig.jwt_claim is honored at route time (state claims) but at ingress only org_ids/active_org_id claims are read.
+<!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

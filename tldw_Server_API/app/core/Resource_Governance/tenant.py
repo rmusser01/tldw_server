@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import hmac
 import os
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any
@@ -23,22 +23,23 @@ def get_tenant_id(
     headers: Mapping[str, str],
     claims: Mapping[str, Any] | None = None,
     config: TenantScopeConfig | None = None,
+    member_of: Collection[str] = (),
 ) -> str | None:
     """
-    Extract a tenant identifier from request headers or JWT claims.
+    Pick the caller's tenant from a validated principal.
 
-    This helper performs simple extraction only; caller is responsible for
-    trusting proxy headers and providing validated claims.
+    ``claims`` and ``member_of`` (the principal's tenant/org ids) must come from a
+    validated principal. The header only selects one of ``member_of``; a header naming
+    any other tenant is ignored, so an unvalidated header never names a bucket
+    (TASK-13402). Otherwise the ``config.jwt_claim`` claim is the tenant.
     """
     cfg = config or TenantScopeConfig()
     if not cfg.enabled:
         return None
 
-    # Header takes precedence when present
-    val = headers.get(cfg.header) or headers.get(cfg.header.lower())
-    if val:
-        s = str(val).strip()
-        return s or None
+    val = str(headers.get(cfg.header) or headers.get(cfg.header.lower()) or "").strip()
+    if val and val in member_of:
+        return val
 
     # Fallback to JWT claim when present
     if claims and cfg.jwt_claim in claims:
