@@ -65,3 +65,29 @@ qualified on the resulting source; PR3071 remains draft with truthful CI limits.
 **Tests**: Model discovery/cache and image-retry tests, recovery/history checks,
 full frontend TypeScript, source-bound build and live native Chrome flows.
 **Status**: In Progress
+
+Local cookie-model qualification:292 owning checks, full TypeScript8192MB,
+incoming ESLint0 errors/6 warnings, Bandit0 findings/errors and independent
+review pass. Source-bound production builds/token-sync/budgets pass within
+unchanged600/900KB limits. Actual cookie bootstrap/profile/model discovery and
+fresh settled Healthy/Gemma reload pass with no browser key/token and zero sends.
+Fresh grounded request/canonical source comparison, full memo/draft/reload,
+exact Stop/recovery, six route and eleven workspace checks pass. Owner matrix
+passes nineteen checks with two explicit new Gemma turns and unchanged originals.
+Two previews/staging/external link pass; separate native mobile keyboard proof
+reaches composer/Send at390x844 with draft intact and zero sends. Original fixed
+80-Tab runner failure is retained, alongside context-overflow and cookie-setup
+failures; no failed run is relabeled. Current-head hosted CI and fresh PostgreSQL
+remain unqualified; the PR stays draft and unmerged.
+
+Final292-check rerun and normal applicable pre-commit hooks pass. All7217
+tracked frontend bytes/symlink still bind to the qualified production snapshot.
+Final preservation again confirms original10/eight-row hashes,68stashes and
+six baseline tabs; historical missing tabs remain explicit. Latest fetch still
+points to frozen dcae0cbd. Publish this reviewed integration without merging PR.
+
+Integration1fb829cf25 is published to PR3071; exact head/body and unchanged
+requester Change summary read back with base dev/open draft/unmerged. Head-bound
+hosted license/await-license jobs remain queued with no assigned runner, and
+backend admission is skipped. Current CI qualification remains open; the final
+publication-record follow-up is documentation/tracking only.
