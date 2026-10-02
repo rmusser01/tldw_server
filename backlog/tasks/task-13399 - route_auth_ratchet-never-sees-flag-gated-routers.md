@@ -4,7 +4,7 @@ title: route_auth_ratchet never sees flag-gated routers
 status: Done
 assignee: []
 created_date: '2026-09-30 06:33'
-updated_date: '2026-10-02 01:05'
+updated_date: '2026-10-02 01:44'
 labels:
   - ci
   - security
@@ -45,6 +45,18 @@ Routes newly visible but consistent with existing "public by design" baseline co
 tldw_Server_API/tests/lint/test_route_auth_ratchet.py::test_no_new_unauthenticated_routes now fails (by design -- it reports the above real/undetermined findings) since none were allowlisted per instructions. Full suite: 70 passed, 1 failed, 1 skipped (pre-existing skip, unrelated).
 
 Checked Helper_Scripts/ci/rg_route_map_lint.py / rg_route_map_lint_allowlist.txt per instructions: its three benchmarks/connectors/personalization by_path entries are NOT satisfied despite the fix. Reproduced directly: calling default_policy_loader().load_once() before the first iter_served_routes() call (rg_route_map_lint.py's own call order) leaves ~188 routes (these three families among them) missing from iter_route_contexts()'s result, vs. calling iter_served_routes() first. This is a separate, pre-existing quirk in how rg_route_map_lint.py/fastapi_routes.py interacts with FastAPI's effective-route caching, unrelated to this ratchet fix. Left rg_route_map_lint_allowlist.txt untouched (confirmed via diff against origin/dev) since none of its entries are satisfied; `python Helper_Scripts/ci/rg_route_map_lint.py` exits 0 (clean) with the file as-is.
+
+Follow-up (coordinator rulings R-B etc.), same branch:
+
+(1) R-B: added require_eval_permissions(EVALS_READ) to GET /api/v1/benchmarks/list, /{benchmark_name}/info, /{benchmark_name}/samples, and require_eval_permissions(EVALS_MANAGE) to POST /{benchmark_name}/run and /simpleqa/evaluate (benchmark_api.py), following evaluations_datasets.py's dependencies=[Depends(require_eval_permissions(...))] decorator pattern -- kept get_rate_limiter_dep in place. Using dependencies=[...] (not a function parameter) kept the existing direct-call unit tests in test_benchmark_api_error_mapping.py passing unchanged (verified: 6 passed). Added tldw_Server_API/tests/Evaluations/test_benchmark_api_auth.py: 401 unauthenticated, 403 wrong permission, pass-through with the right permission; verified red against the unfixed router, green after.
+
+(2) Added the other 13 newly-visible routes to Helper_Scripts/ci/route_auth_baseline.txt (discord oauth callback + interactions, slack oauth callback + commands + events, telegram webhook, guardian wizard invites preview + accept/register, meetings health, sandbox health/public, self-monitoring crisis-resources, connectors provider webhook, sandbox runs traversal-guard fallback). The baseline's required global sort order (enforced by test_baseline_is_sorted, comparing the full file top-to-bottom) scatters these 13 across the file by method+path rather than letting them sit under one shared block, so each got its own one-line "# TASK-13399: ..." comment directly above it instead of one block above all 13 -- noting this adaptation since it departs from the literal instruction. No separate "may shrink, never grow" count-check mechanism exists elsewhere (grepped Helper_Scripts/ and .github/workflows/); the rule is enforced structurally by route_auth_ratchet.py's own stale-vs-added diff against the baseline file, which already passes with these additions -- nothing else needed updating.
+
+(3) Filed TASK-13417 (CLI) for the rg_route_map_lint.py call-order quirk (policy loader load_once() before the lint's first iter_served_routes() call loses ~188 routes) -- separate, pre-existing issue, not fixed here.
+
+Final verification: tldw_Server_API/tests/lint -q -p no:cacheprovider -n 4 -> 71 passed, 1 skipped (pre-existing, unrelated), 0 failed -- test_no_new_unauthenticated_routes now passes. tldw_Server_API/tests/Evaluations/test_benchmark_api_auth.py + test_benchmark_api_error_mapping.py -> 11 passed. Helper_Scripts/ci/rg_route_map_lint.py -> exit 0, clean (allowlist unchanged from this task's earlier investigation -- its three benchmarks/connectors/personalization entries are still needed due to the TASK-13417 quirk, independent of the auth fixes here). ruff check clean on every Python file touched.
+
+Commits: f0e59bd0b1 (ratchet mechanism fix + sibling-dependency fixes), 252db8d493 (benchmark_api.py auth + baseline additions + TASK-13417).
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
