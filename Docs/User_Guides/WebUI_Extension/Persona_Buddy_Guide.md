@@ -67,6 +67,10 @@ to move the floating panel; dragging the image is not the documented drag handle
 The shell keeps position preferences for its surface and constrains placement to
 the viewport. Do not apply Chatbook's terminal resize keys to this browser shell.
 
+Closing the controls with **×** or **Escape** keeps unsent text for the current
+Persona while Buddy stays on the page. Changing Persona, leaving a surface that
+removes Buddy, or reloading the page clears that draft.
+
 | Control or feedback | What it does |
 |---|---|
 | **Start** | Starts a text session for the selected Persona. This is not microphone Start. |
