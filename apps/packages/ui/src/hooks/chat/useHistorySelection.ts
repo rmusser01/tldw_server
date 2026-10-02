@@ -1207,7 +1207,9 @@ export function useHistorySelection(
     const stillCurrent = () => mounted.current && token === epoch.current && live.current.owner === owner &&
       sameView(live.current.view, current.view) && live.current.settingsQualified && owner.validate_lease()
     try {
-      const inspected = await inspectHistoryDurableRecovery(owner, entry.turn, request.current?.signal)
+      const inspected = await inspectHistoryDurableRecovery(
+        { ...owner, owner_key: current.view.owner_key }, entry.turn, request.current?.signal
+      )
       if (!stillCurrent()) return
       await saveHistoryTurnRecovery(entry.scope, entry.turn.origin_view, inspected)
       if (!stillCurrent()) return
