@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-10-01 17:54'
-updated_date: '2026-10-02 02:41'
+updated_date: '2026-10-02 07:33'
 labels:
   - bug
   - webui
@@ -31,6 +31,8 @@ apps/tldw-frontend/e2e/smoke/smoke.setup.ts SMOKE_HARD_GATE_ALLOWLIST has 31 ent
 
 <!-- SECTION:NOTES:BEGIN -->
 Premise was stale by pickup time. The 31 expired entries had already been cut to 4 on dev (6b7cee876e for TASK-13377.9 / PR #3023 and 2f05d15913 for TASK-13260.278.18.83.51, merged in 6cd957e612), and the UX Smoke Gate was green again (run 36946184688: 102 passed, no allowlisted hits). Each of the original 31 entries was re-checked anyway against full all-pages runs on dev d81c13fddd. Setup: local copy of the CI job (MINIMAL_TEST_APP single_user backend via server_lifecycle.py on 8777, mock OpenAI on 18777, build:dev standalone bundle staged as in CI on 8788, Node 20.19.5, CI=true), plus a second run on next dev --webpack. An uncommitted recorder in classifySmokeIssues logged every classified issue and every old/current rule match; it was removed before commit. Results: none of the 27 already-removed rules matched anything. Moderation 404 (expiring 10-08): unmatched, because the browser 404 arrives after the gate classifies; removed. Drawer width deprecation: fixed at source (ArchivedItemsDrawer and two WritingPlaygroundShell drawers, width -> size) and removed; with the fix reverted the next dev Kanban recovery fixture fails on the warning. Forced route-boundary pair: still fires on all 16 fixture routes in next dev and cannot fire in production; kept at 2026-10-31, linked to TASK-13406. The deliberate /__wayfinding-missing-route__ document 404 was unallowlisted after the 27-rule cut, so the non-gated Wayfinding 404 test failed on all attempts; re-added as narrow entry m5-wayfinding-missing-route-document-404 (2026-10-31, TASK-13406). Verification: CI gate command 102 passed including the metadata test; Wayfinding 404 test plus smoke-allowlist.spec.ts 6 passed; next dev route boundaries 16/16 and Kanban 3/3 passed; dev's list fails metadata from 2026-10-09, this branch is valid through 2026-10-31; tsc 0 errors; ESLint on the e2e files 0 errors; vitest 12 passed. Bandit skipped: the change is TypeScript-only, with no Python touched. Docs: no allowlist doc lists entries, so none needed updating. Known non-allowlist failures in the full spec: Route Error Boundaries need next dev by design; Wayfinding settings alias/mobile selector filed as TASK-13419; intermittent next dev compile timeouts and ERR_EMPTY_RESPONSE. PR https://github.com/rmusser01/tldw_server/pull/3083
+
+Qodo on #3083: kept a narrow moderation-404 rule (m5-optional-resource-404-noise, /moderation only, expires 2026-10-31, owned by TASK-13406). The page requests moderation review items on mount and the minimal backend lacks the endpoint, so a 404 landing before the console snapshot would fail the gate depending on timing. smoke-allowlist.spec covers allow on /moderation and reject elsewhere (6 passed). TASK-13406's markers, nested by the Node CLI, were repaired with backlog-py.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
