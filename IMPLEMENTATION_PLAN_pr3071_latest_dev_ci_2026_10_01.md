@@ -1,6 +1,8 @@
 # PR3071 Latest-Dev And CI Reconciliation
 
-Tracking: TASK-13408. Requester supplied Change summary on 2026-10-01.
+Tracking: TASK-13417; previous TASK-13408 finalization record is archived intact
+to avoid the incoming cookie-model task ID collision. Requester supplied Change
+summary on 2026-10-01.
 Baseline: PR head 792b6c4a; new dev 5f3ed81e. Preserve existing services,
 credentials, original browser tabs/data, stashes and unrelated working files.
 
@@ -53,3 +55,13 @@ The stale historical-session fixture and original same-URL assertion failures
 remain retained. The final reviewed recovery increment carries the fresh UAT
 and source-bound build evidence. Current remote CI qualification remains open;
 no fresh PostgreSQL pass or merge is authorized.
+
+## Stage 4: Qualify Cookie-Model Dev Advance
+**Goal**: Integrate frozen dev dcae0cbd without losing cookie-session admission,
+fresh capability validation, protected recovery or handled-error logging.
+**Success Criteria**: Both tracker histories retained; affected model/history
+regressions, TypeScript, production gates and native no-mock Chrome checks are
+qualified on the resulting source; PR3071 remains draft with truthful CI limits.
+**Tests**: Model discovery/cache and image-retry tests, recovery/history checks,
+full frontend TypeScript, source-bound build and live native Chrome flows.
+**Status**: In Progress
