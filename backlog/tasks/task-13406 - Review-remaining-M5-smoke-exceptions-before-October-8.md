@@ -1,10 +1,10 @@
 ---
 id: TASK-13406
 title: Review remaining M5 smoke exceptions before October 8
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-10-01 08:02'
-updated_date: '2026-10-02 01:46'
+updated_date: '2026-10-02 01:55'
 labels: []
 dependencies: []
 references:
@@ -42,6 +42,8 @@ Duplicate search completed through official CLI after MCP task_search300s timeou
 TASK13406: all four general exceptions retired. Supported AntD size400 replaces deprecated width; exact GET moderation list stub remains inside the existing minimal-smoke guard and disabled for live-tier UAT; deliberate exact forced-error emissions handled only in their own fixture tests. General allowlist empty; strict ordinary-route classification and UTC metadata enforcement preserved. Policy updated. Local verification completed 2026-10-02 UTC (October 1 local): final production build/token sync/bundle budget passed; relocated standalone includes 324 published server documents, actual manifest/content HTTP200 and traversal/unsupported-source HTTP400. Final strict ordinary smoke105 passed, classifier7 passed and development forced-boundary16 passed; XML has zero failures/errors/skips. Focused unit suite16 passed across5files. Touched-scope ESLint and smoke TypeScript pass; diff check passes. Scopes overlap and are not full repository or hosted CI certification. Production build/ordinary browser runner use local Node26; final development and recovery runner use installed Node20.19.5, unchanged 30-second navigation gates, precompiled admin route and task-local16GB heap. Two prior Node26 development runs each had2 navigation failures/14passes: cold compilation and measured Next memory restart; original logs retained, not green credit. No Python source change; Bandit N/A. Shared installations/Postgres unchanged. Independent source review of immutable patch5cfa514a8f4f7f64b71ca767c7a301fc0ed15890f3c524e40ef5a5737eee122f is clear after actual response-wait RED1/GREEN1; required response assertions remain fail-closed. Original failed/setup/rejected diagnostics retained under /tmp/email_followup_*_20261001. Official CLI interactive editor removed orphaned summary markers without changing historical notes. Local source verified; publication/new PR merge not yet claimed.
 
 Published reviewed fixes as d4693fefe37bc75d9d9b54026c77c12de3200c76 on codex/email-followup-closeout-20261001; normal push verified. Draft PR3077 contains the implementation and this tracking closeout. Repair acceptance is locally complete; this new PR is not merged and its human-written Change summary and hosted CI are pending. Source receipt /tmp/email_followup_closeout_receipt_20261001.json binds ten exact source paths and frozen verification artifacts. Browser coverage checks the AuthNZ manifest entry plus selected-document content/render; the real AuthNZ guide HTTP probe is separate. Task-owned servers stopped after identity verification; shared installations and unrelated resources preserved. Completed owned plan retained at /tmp/email_followup_plan_completed_20261001.md after all stages are complete.
+
+Merge-gate audit correction: implementation and local verification are complete, but the repository-wide Definition of Done requires a human-written Change summary for this new AI-authored PR. PR3077 is draft and awaits that human input plus hosted CI. Restored In Progress with this explicit remaining DoD item; no source changes or repeat tests. The prior completed-plan snapshot is retained as /tmp/email_followup_plan_pre_gate_diagnostic_20261001.md, and the owned plan remains Stage3 In Progress until this requirement is satisfied. TASK13178 remains Done because its implementation PR2887 was already merged.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -58,4 +60,5 @@ Retired all four remaining general smoke exceptions without renewing dates or wi
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
+- [ ] #7 New AI-authored PR has a requester-written Change summary explaining what changed and why these implementation choices were made.
 <!-- DOD:END -->
