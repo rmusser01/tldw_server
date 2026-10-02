@@ -17,7 +17,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.core.Resource_Governance import MemoryResourceGovernor, RedisResourceGovernor
+from tldw_Server_API.app.core.Resource_Governance import (
+    MemoryResourceGovernor,
+    RedisResourceGovernor,
+    ResourceGovernor,
+)
 from tldw_Server_API.app.core.Resource_Governance.middleware_simple import RGSimpleMiddleware
 from tldw_Server_API.app.core.Resource_Governance.policy_loader import PolicyLoader, PolicyReloadConfig
 
@@ -37,7 +41,8 @@ class Clock:
         return self.t
 
 
-def _governor(backend, loader, clock):
+def _governor(backend: str, loader: PolicyLoader, clock: Clock) -> ResourceGovernor:
+    """Build the governor for ``backend``; the Redis path never touches a real Redis server."""
     if backend == "memory":
         return MemoryResourceGovernor(policy_loader=loader, time_source=clock)
 

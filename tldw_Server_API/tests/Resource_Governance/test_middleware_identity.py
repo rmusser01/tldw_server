@@ -103,6 +103,8 @@ def test_invalid_credentials_reach_the_route(monkeypatch):
     monkeypatch.delenv("SINGLE_USER_TEST_API_KEY", raising=False)
 
     async def no_rg_identity(request):
+        """Stand in for RG's own (unrelated) identity resolution: always miss, so RG
+        charges the IP bucket and never blocks the request before it reaches the route."""
         return None
 
     monkeypatch.setattr(auth_principal_resolver, "get_auth_principal", no_rg_identity)
@@ -112,12 +114,16 @@ def test_invalid_credentials_reach_the_route(monkeypatch):
 
     class _GenerousLoader(_Loader):
         def get_policy(self, pid):
+            """Return a high-rpm/burst policy so RG itself never denies here; this test is
+            about the route's own auth dependency, not RG's rate limiting."""
             return {"requests": {"rpm": 1000, "burst": 10.0}, "scopes": ["user", "api_key", "ip"]}
 
     app = FastAPI()
 
     @app.get("/api/v1/thing")
     def thing(user=Depends(get_request_user)) -> dict:
+        """Real route guarded by the same get_request_user dependency production routes
+        use, so an invalid credential is rejected by real auth, not a hand-rolled stub."""
         return {"ok": True}
 
     app.add_middleware(RGSimpleMiddleware)
