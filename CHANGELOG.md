@@ -20,22 +20,34 @@ and this project adheres to Some kind of Versioning
 
 ## [0.1.46] - 2026-10-01
 
+Promotes development changes since 0.1.45 through PR #3073. See the
+[change inventory](Docs/Development/releases/0.1.46-change-inventory.md).
+
 ### Added
 
-- Workspace Persona startup and ambient context, VN command recovery, extraction-failure source hints, and authenticated Email uploads from merged development work (#2817, #3028, #3041, #3050, #3023).
+- **Ambient Persona Buddy:** idle-only companion modes, global and per-Persona preferences, accessible controls, reduced-motion support, and visual-pack review, activation and fork workflows. The companion does not make runtime model calls (#2817, #3056).
+- **Workspace Persona startup:** preserve strict startup receipts and selected Persona context (#3041).
+- **VN recovery and media feedback:** recover VN commands and show source hints when extraction fails (#3028, #3050).
+- **Authenticated Email uploads:** include the merged upload, tenancy, privacy and search work (#3023).
+- **Agent-task message storage:** keep raw messages in a separate encrypted, owner-scoped store while automation tables remain metadata-only. This release includes the storage/authoring slice; executor integration remains separately tracked (#3039).
 
 ### Changed
 
-- **Python 3.12 or newer is now required.** FastAPI is updated to 0.142.1; upgrade the runtime before installing this release (#3053, #3065).
-- Resource Governance uses a single enable switch and an explicit policy resolver; disabled governance no longer constructs a governor, and auth fallback and safety-net relief follow the same policy (#3066, #3068, #3070).
+- **Python 3.12 or newer is required.** FastAPI is updated to 0.142.1; upgrade the runtime before installing (#3053, #3065).
+- **Resource Governance:** use one enable switch and the shared policy resolver. Disabled governance does not construct a governor; authentication fallback and safety-net relief follow that policy (#3066, #3068, #3070).
+- Reuse the shared SSE adapter helpers and move root implementation plans into `Docs/Plans/` (#3040, #2979).
 
 ### Fixed
 
-- Chat account/history ownership, stale requests, temporary-mode reads, mirror deletion, capability disclosure and llama.cpp authentication, including the merged engineering sweep (#2979, #3003, #3008, #3011, #3038, #3039, #3046, #3062, #3064).
-- AuthNZ startup reports preserve useful failure causes and profile-version reasons; Audio status routes enforce their authentication policy (#3047, #3063, #3058).
-- Required CI admission/shard reporting, latent frontend tests, Buddy browser acceptance and macOS guest boot/payload cleanup (#3036, #3044, #3054, #3056, #3022, #3051).
+- **Chat account isolation and persistence:** bind drafts, retries, saved images, Character/Knowledge QA settings and conversations to the correct account across navigation and reconnects; repair stale requests, temporary-mode reads and mirror deletion (#2979, #3038, #3046, #3062, #3064).
+- **PostgreSQL reliability:** repair authentication, Notes/search, profile updates, Sync, Jobs startup, saved-view conflicts and connection handling while preserving existing transaction and write-guard behavior (#2979).
+- **Authentication and diagnostics:** enforce capability-disclosure and llama.cpp authentication, preserve AuthNZ startup causes and profile-version reasons, and protect Audio status routes (#3003, #3008, #3047, #3063, #3058).
+- **Workflow reliability:** repair Study, evaluation, World Book, media/audio and command-palette findings from the merged engineering sweep (#2979, #3011).
+- **CI and platform checks:** repair admission/shard reporting, latent frontend tests, Buddy browser acceptance, and macOS guest boot/payload cleanup (#3036, #3044, #3054, #3056, #3022, #3051).
 
-### Removed
+Broader certification and remaining UAT/native follow-ups stay separately tracked;
+this release does not claim a fresh full certification pass.
+
 ## [0.1.45] - 2026-09-27
 
 > Patch release. Rolls up the dev changes merged after 0.1.44 (#3029, #3030, #3032).
