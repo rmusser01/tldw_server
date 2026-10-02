@@ -1,10 +1,10 @@
 ---
 id: TASK-13405
 title: RG ingress safety net (spec 1 of 2)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-30 01:39'
-updated_date: '2026-10-01 03:03'
+updated_date: '2026-10-02 00:10'
 labels:
   - resource-governance
   - backend
@@ -22,7 +22,7 @@ Implements Docs/Design/2026-09-29-rg-ingress-safety-net-design.md in three PRs (
 <!-- AC:BEGIN -->
 - [x] #1 PR A merged: safety-net defaults and permanent-429 fixes in both backends
 - [x] #2 PR B merged: resolver, route index, principal identity, audits, route-map lints, WebUI replay; TASK-13395 closed
-- [ ] #3 PR C merged: single RG switch, config hygiene, ADR-056, docs
+- [x] #3 PR C merged: single RG switch, config hygiene, ADR-056, docs
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -48,14 +48,37 @@ Also fixed a pre-existing bypass: ingress used the client X-Request-ID as the go
 Renumbered from TASK-13396 on 2026-09-30. dev also gained TASK-13396 (Buddy canonical workspace URL, via #3056) before #3066 brought this one in. Content is unchanged; commit messages up to #3066 still say TASK-13396. PR A (#3066) merged 2026-09-30 22:32Z. The ADR is ADR-057, not ADR-056 as AC #3 says (PR #3041 claims 056).
 
 PR B (#3068) merged 2026-10-01 02:58Z: resolver, principal identity, audits, route-map lint, WebUI replay. TASK-13395 closed. The ADR is ADR-056 after all: #3041 merged its workspace ADR as 057, freeing 056, the number the merged code already cites. This supersedes the earlier ADR-057 note.
+
+PR C (#3070) merged 2026-10-02 00:09Z, completing spec 1 of 2 (Docs/Design/2026-09-29-rg-ingress-safety-net-design.md; ADR-056).
+
+Final summary. Delivered in #3066 (relief), #3068 (coverage) and #3070 (single switch, config hygiene, ADR-056, docs):
+- Generous per-entity safety-net limits, with no permanent 429 on either backend (built-in default, scope fallback, token clamp, fractional rpm).
+- A policy resolver: path, then innermost tag, then default.
+- Ingress charges the validated principal, through a per-IP-budgeted identity cache.
+- Honest audits and a route-map CI lint.
+- WebUI replay with zero 429s.
+- One switch: RG_ENABLED off means no governor anywhere. The one exception is the auth brute-force floor.
+- A troubleshooting page and corrected env docs.
+
+Verification: every task test-first and reviewed for spec and quality. The whole-branch final review and its fix waves were re-reviewed; Qodo waves on all three PRs were fixed or declined with reasons; CI was green at merge. Bandit -ll on the touched code: no medium or high findings.
+
+Known skips and follow-ups:
+- TASK-13399: route-auth ratchet blind to flag-gated routers.
+- TASK-13400: xdist cross-test pollution.
+- TASK-13401: Redis backend parity.
+- TASK-13402: tenant header unvalidated.
+- TASK-13403: API-key usage recorded at ingress.
+- TASK-13404: replay fixture breadth.
+
+Spec 2 (usage-quota posture) is next.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
