@@ -69,6 +69,7 @@ beforeEach(() => {
   state.ownerKey = "native-A"
   state.onSubmit.mockReset().mockResolvedValue({ status: "submitted" })
   state.getMediaDetails.mockReset().mockResolvedValue({ content: { text: "Operator source text" } })
+  recovery.logical_user_message_id = uuid
   recovery.input_text = "Original recovered question"
   useWorkspaceStore.setState({ workspaceId: "workspace-A", workspaceChatReferenceId: "reference-A", storeHydrated: true,
     sources: [], selectedSourceIds: [], selectedSourceFolderIds: [], sourceFolders: [], sourceFolderMemberships: [] })
@@ -132,6 +133,47 @@ it("explicit reprepare retains the durable logical UUID until explicit Send", as
   expect(state.onSubmit.mock.calls[0][0].requestOverrides.tldwTurn).toEqual({ user_message_id: uuid })
 })
 
+it.each([
+  {
+    kind: "response preset", preset: true, fullSource: false,
+    prepared: "Response preference: When answering, lead with what the selected sources support and call out uncertainty.\n\nUser question: New question"
+  },
+  {
+    kind: "full source", preset: false, fullSource: true,
+    prepared: "Use the complete source contents below when answering the user question.\nWhen relevant, cite source titles directly.\n\n<<SOURCE START: Source 1: Selected source>>\nOperator source text\n<<SOURCE END: Source 1: Selected source>>\n\nUser question: New question"
+  },
+  {
+    kind: "preset and full source", preset: true, fullSource: true,
+    prepared: "Use the complete source contents below when answering the user question.\nWhen relevant, cite source titles directly.\nResponse preference: When answering, lead with what the selected sources support and call out uncertainty.\n\n<<SOURCE START: Source 1: Selected source>>\nOperator source text\n<<SOURCE END: Source 1: Selected source>>\n\nUser question: New question"
+  }
+])("reprepares an actual $kind send without preparing its input twice", async ({ preset, fullSource, prepared }) => {
+  if (fullSource) useWorkspaceStore.setState({
+    sources: [{ id: "source", mediaId: 1, title: "Selected source", type: "document", status: "ready", addedAt: new Date(0) }],
+    selectedSourceIds: ["source"]
+  })
+  useStoreMessageOption.setState({ serverChatId: "chat-A" })
+  state.onSubmit.mockResolvedValueOnce({ status: "blocked" })
+  render(<MemoryRouter><ChatPane /></MemoryRouter>)
+  if (preset) fireEvent.change(screen.getByLabelText("Response style"), { target: { value: "source_first" } })
+  if (fullSource) fireEvent.click(screen.getByRole("switch", { name: "Include full source contents" }))
+  submit()
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue("New question"))
+  const firstSend = state.onSubmit.mock.calls[0][0]
+  expect(firstSend.message).toBe(prepared)
+  recovery.input_text = firstSend.message
+  recovery.logical_user_message_id = firstSend.requestOverrides.tldwTurn.user_message_id
+  const prior = structuredClone(recovery)
+  fireEvent.click(screen.getByRole("button", { name: "Explicit reprepare" }))
+  expect(screen.getByRole("textbox", { name: "Chat message" })).toHaveValue(prepared)
+  expect(state.onSubmit).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole("button", { name: "Send" }))
+  await waitFor(() => expect(state.onSubmit).toHaveBeenCalledTimes(2))
+  expect(state.onSubmit.mock.calls[1][0].message).toBe(prepared)
+  expect(state.onSubmit.mock.calls[1][0].requestOverrides.tldwTurn).toEqual(firstSend.requestOverrides.tldwTurn)
+  expect(state.getMediaDetails).toHaveBeenCalledTimes(fullSource ? 1 : 0)
+  expect(recovery).toEqual(prior)
+})
+
 it("does not reprepare a foreign owner's recovery", () => {
   state.ownerKey = "foreign-owner"
   useStoreMessageOption.setState({ serverChatId: "chat-A" })
@@ -171,4 +213,53 @@ it.each(["trim", "response preset", "full source"])("CP-F2 Research %s text cons
   expect(state.onSubmit.mock.calls[0][0].message).not.toBe(recovery.input_text)
   expect(state.onSubmit.mock.calls[0][0].requestOverrides.tldwTurn.user_message_id).not.toBe(uuid)
   expect(recovery).toEqual(prior)
+})
+
+it.each(["typing", "model", "source selection", "source title", "mode", "answer length"])("retires the recovered intent after a genuine %s change", async change => {
+  useWorkspaceStore.setState({
+    sources: [
+      { id: "source", mediaId: 1, title: "Selected source", type: "document", status: "ready", addedAt: new Date(0) },
+      { id: "other", mediaId: 2, title: "Other source", type: "document", status: "ready", addedAt: new Date(0) }
+    ],
+    selectedSourceIds: ["source"]
+  })
+  useStoreMessageOption.setState({ serverChatId: "chat-A" })
+  const prior = structuredClone(recovery)
+  render(<MemoryRouter><ChatPane /></MemoryRouter>)
+  fireEvent.click(screen.getByRole("button", { name: "Explicit reprepare" }))
+  if (change === "typing") fireEvent.change(screen.getByRole("textbox", { name: "Chat message" }), { target: { value: "Edited question" } })
+  if (change === "model") await act(async () => { useStoreMessageOption.setState({ selectedModel: "other-model" }) })
+  if (change === "source selection") await act(async () => { useWorkspaceStore.setState({ selectedSourceIds: ["other"] }) })
+  if (change === "source title") await act(async () => {
+    useWorkspaceStore.setState({
+      sources: useWorkspaceStore.getState().sources.map(source => source.id === "source" ? { ...source, title: "Updated title" } : source)
+    })
+  })
+  if (change === "mode") fireEvent.click(screen.getByRole("button", { name: "General chat", exact: true }))
+  if (change === "answer length") fireEvent.change(screen.getByLabelText("Answer length"), { target: { value: "brief" } })
+  fireEvent.click(screen.getByRole("button", { name: "Send" }))
+  await waitFor(() => expect(state.onSubmit).toHaveBeenCalledTimes(1))
+  expect(state.onSubmit.mock.calls[0][0].requestOverrides.tldwTurn.user_message_id).not.toBe(uuid)
+  expect(recovery).toEqual(prior)
+})
+
+it("keeps the recovered intent when an unselected source changes", async () => {
+  useWorkspaceStore.setState({
+    sources: [
+      { id: "source", mediaId: 1, title: "Selected source", type: "document", status: "ready", addedAt: new Date(0) },
+      { id: "other", mediaId: 2, title: "Other source", type: "document", status: "ready", addedAt: new Date(0) }
+    ],
+    selectedSourceIds: ["source"]
+  })
+  useStoreMessageOption.setState({ serverChatId: "chat-A" })
+  render(<MemoryRouter><ChatPane /></MemoryRouter>)
+  fireEvent.click(screen.getByRole("button", { name: "Explicit reprepare" }))
+  await act(async () => {
+    useWorkspaceStore.setState({
+      sources: useWorkspaceStore.getState().sources.map(source => source.id === "other" ? { ...source, title: "Updated title" } : source)
+    })
+  })
+  fireEvent.click(screen.getByRole("button", { name: "Send" }))
+  await waitFor(() => expect(state.onSubmit).toHaveBeenCalledTimes(1))
+  expect(state.onSubmit.mock.calls[0][0].requestOverrides.tldwTurn).toEqual({ user_message_id: uuid })
 })

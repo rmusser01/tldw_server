@@ -625,7 +625,10 @@ export const WorkspaceChatPanel = ({
     failedTurn.userMessageId === failedUser?.id &&
     failedTurn.assistantMessageId === failedAssistant?.id
   )
-  const recoveryDisabled = !ownsFailedTurn || !chatBackendAvailable || !historyReady || isSending
+  const usesProtectedRecovery = Boolean(
+    checkpoint.controller && !temporaryChat && failedTurn?.request.requestOverrides.tldwTurn
+  )
+  const recoveryDisabled = usesProtectedRecovery || !ownsFailedTurn || !chatBackendAvailable || !historyReady || isSending
 
   const retryFailedTurn = async (model?: RetryModel) => {
     if (!failedTurn || recoveryDisabled || requestInFlight.current) return
@@ -683,7 +686,7 @@ export const WorkspaceChatPanel = ({
     }
   }
 
-  const recoveryActions: MessageRecoveryAction[] = [
+  const recoveryActions: MessageRecoveryAction[] = usesProtectedRecovery ? [] : [
     {
       id: "retry", label: "Retry same model", disabled: recoveryDisabled,
       onClick: () => { void retryFailedTurn() }
@@ -833,7 +836,7 @@ export const WorkspaceChatPanel = ({
       </div>
 
       <div className="flex max-h-[75%] min-h-0 flex-col gap-3 overflow-y-auto border-t border-border bg-surface2/40 px-4 py-3">
-        {modelPickerOpen && ownsFailedTurn ? (
+        {modelPickerOpen && ownsFailedTurn && !usesProtectedRecovery ? (
           <div
             role="group"
             aria-label="Failed request model"
@@ -890,7 +893,7 @@ export const WorkspaceChatPanel = ({
             ) : null}
           </div>
         ) : null}
-        {ownsFailedTurn && !failedAssistant ? (
+        {ownsFailedTurn && !failedAssistant && recoveryActions.length > 0 ? (
           <div className="flex flex-wrap gap-2">
             {recoveryActions.map((action) => (
               <span key={action.id} className="flex max-w-full flex-col gap-1">

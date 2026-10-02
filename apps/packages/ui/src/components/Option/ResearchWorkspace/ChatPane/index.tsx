@@ -1700,9 +1700,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   })
   const { controller: checkpointController, setDraft: setCheckpointDraft } = checkpoint
   const recoveryReference = checkpoint.controller?.getReference()
-  React.useEffect(() => {
-    pendingReprepareUUID.current = null
-  }, [workspaceId, checkpoint.referenceId, recoveryReference?.owner_key, recoveryReference?.conversation_id])
   const reprepareRecovery = React.useCallback((turn: HistoryTurnRecovery) => {
     const current = checkpointController?.getCurrent()
     const reference = checkpointController?.getReference()
@@ -1933,6 +1930,18 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     preferredChatMode ?? (hasQueryableSelectedSources ? "rag" : "normal")
   const effectiveChatMode: ChatModePreference =
     hasQueryableSelectedSources && requestedChatMode === "rag" ? "rag" : "normal"
+  const preparedSourceScope = JSON.stringify(
+    queryableSelectedSources.map(({ id, mediaId, title }) => [id, mediaId, title])
+  )
+
+  React.useEffect(() => {
+    pendingReprepareUUID.current = null
+  }, [
+    workspaceId, checkpoint.referenceId, recoveryReference?.owner_key,
+    recoveryReference?.conversation_id, serverChatId, chat.temporaryChat,
+    selectedModel, effectiveChatMode, preparedSourceScope, responseStyle,
+    responseLength, includeFullSourceContents, ragTopK, ragAdvancedOptions
+  ])
 
   React.useEffect(() => {
     if (hasQueryableSelectedSources || !includeFullSourceContents) return
@@ -2408,10 +2417,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         ? { user_message_id: reprepareUUID ?? crypto.randomUUID() }
         : undefined
       const responsePresetInstruction = buildResponsePresetInstruction()
-      const preparedMessage = await buildFullSourceContextPrompt(
-        message,
-        responsePresetInstruction
-      )
+      // Recovery input already contains its response preset and source context.
+      const preparedMessage = recovery?.input_text === message
+        ? message
+        : await buildFullSourceContextPrompt(message, responsePresetInstruction)
       if (!isCurrent() || !viewIsCurrent()) return false
       if (tldwTurn && reprepareUUID && recovery?.input_text !== preparedMessage) {
         tldwTurn.user_message_id = crypto.randomUUID()
