@@ -1,12 +1,13 @@
 """Ingress charges the validated principal; invalid credentials fall back to the IP bucket."""
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ import auth_principal_resolver, jwt_service
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor
 from tldw_Server_API.app.core.Resource_Governance.middleware_simple import RGSimpleMiddleware
 
@@ -93,9 +94,40 @@ def test_rotating_fake_tokens_share_the_ip_bucket(client):
     assert client.get("/api/v1/thing", headers={"X-API-KEY": "fake-b"}).status_code == 429
 
 
-def test_invalid_credentials_reach_the_route(client):
-    # The middleware never answers 401 itself; the route's auth decides.
-    assert client.get("/api/v1/thing", headers={"X-API-KEY": "fake"}).status_code == 200
+def test_invalid_credentials_reach_the_route(monkeypatch):
+    # The middleware never answers 401 itself; the route's own auth dependency
+    # (get_request_user, same as real app routes) decides. RG's own identity
+    # resolution (for bucket charging) stays faked, as in the other tests here;
+    # only the route's auth is real, and it must be the thing returning 401.
+    monkeypatch.delenv("RG_POLICY_PATH", raising=False)
+    monkeypatch.delenv("SINGLE_USER_TEST_API_KEY", raising=False)
+
+    async def no_rg_identity(request):
+        return None
+
+    monkeypatch.setattr(auth_principal_resolver, "get_auth_principal", no_rg_identity)
+    settings = get_settings()
+    monkeypatch.setattr(settings, "AUTH_MODE", "single_user")
+    monkeypatch.setattr(settings, "SINGLE_USER_API_KEY", "the-configured-real-key")
+
+    class _GenerousLoader(_Loader):
+        def get_policy(self, pid):
+            return {"requests": {"rpm": 1000, "burst": 10.0}, "scopes": ["user", "api_key", "ip"]}
+
+    app = FastAPI()
+
+    @app.get("/api/v1/thing")
+    def thing(user=Depends(get_request_user)) -> dict:
+        return {"ok": True}
+
+    app.add_middleware(RGSimpleMiddleware)
+    app.state.rg_policy_loader = _GenerousLoader()
+    app.state.rg_governor = MemoryResourceGovernor(policy_loader=_GenerousLoader())
+    tc = TestClient(app)
+
+    assert tc.get("/api/v1/thing", headers={"X-API-KEY": "fake"}).status_code == 401
+    # Sanity: the real dependency isn't a blanket 401; a matching key reaches 200.
+    assert tc.get("/api/v1/thing", headers={"X-API-KEY": "the-configured-real-key"}).status_code == 200
 
 
 def test_non_session_cookie_charges_ip_and_reaches_route(client):
