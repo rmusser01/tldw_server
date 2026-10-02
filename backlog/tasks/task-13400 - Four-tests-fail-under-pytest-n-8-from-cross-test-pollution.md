@@ -32,6 +32,8 @@ Each points at shared process state (patched builtins, middleware or env) that a
 More xdist pollution seen in the final-fix run, reproduced at 2d62baa055:
 - test_legacy_openai_transient_failure_retains_retry_policy: the system_log_buffer writer thread's 0.05 s flock poll lands in the test's patched global time.sleep.
 - 3 test_orchestrator_summary nodes: the redis_client fixture runs flushdb on the shared localhost:6379/0 while other workers are mid-test.
+
+Also: the rg-redis variants in Resource_Governance/test_e2e_domains_headers.py talk to an ambient Redis on 127.0.0.1:6379 when one is running. It had ~665 stale rg* keys from other runs, so a colliding policy id starts the test already rate-limited. These tests should inject InMemoryAsyncRedis, as test_governor_safety_net.py does.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

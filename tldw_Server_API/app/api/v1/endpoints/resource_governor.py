@@ -56,7 +56,10 @@ def _get_or_init_governor() -> Any | None:
             loader = getattr(app.state, "rg_policy_loader", None)
             if loader is not None:
                 gov = MemoryResourceGovernor(policy_loader=loader)
-                app.state.rg_governor = gov
+                from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
+
+                if bool(_rg_enabled_flag(True)):
+                    app.state.rg_governor = gov  # diagnostics only when disabled
         except _RG_ENDPOINT_NONCRITICAL_EXCEPTIONS:
             # Keep behavior consistent with previous code path: best-effort only.
             logger.debug("Resource governor lazy-init skipped")
