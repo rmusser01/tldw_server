@@ -43,6 +43,20 @@ vi.mock("@/design-system", async (importActual) => {
 })
 
 describe("ChatQueuePanel", () => {
+  it("keeps queue editing available while conversation readiness disables both run actions", async () => {
+    const user = userEvent.setup()
+    const waiting = "Waiting for conversation details."
+    render(<ChatQueuePanel queue={[buildQueuedRequest({ promptText: "Waiting request" })]}
+      isConnectionReady isStreaming={false} dispatchDisabledReason={waiting}
+      onRunNext={vi.fn()} onRunNow={vi.fn()} onDelete={vi.fn()} onMove={vi.fn()}
+      onUpdate={vi.fn()} onClearAll={vi.fn()} />)
+    expect(screen.getByRole("button", { name: "Run next" })).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: "View queue" }))
+    expect(screen.getByRole("button", { name: "Run now" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Edit" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Run next" })).toHaveAttribute("title", waiting)
+  })
+
   it("shows a queue summary and lets the user edit a queued request", async () => {
     const user = userEvent.setup()
     const queued = buildQueuedRequest({

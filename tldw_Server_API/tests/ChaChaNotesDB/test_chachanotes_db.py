@@ -1420,7 +1420,8 @@ class TestTransactions:
         with TransactionContextManager(db):
             pass
 
-        assert conn.statements == ["BEGIN IMMEDIATE"]
+        # The write lock comes first; then the schema reload guard for other instances' DDL.
+        assert conn.statements == ["BEGIN IMMEDIATE", "SELECT 1 FROM sqlite_master LIMIT 1"]
         assert conn.committed is True
 
 # More tests can be added for:

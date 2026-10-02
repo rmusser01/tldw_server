@@ -31,6 +31,7 @@ from ....Prompt_Management.structured_prompts.single_text_renderer import (
 )
 from ....Utils.prompt_loader import load_prompt
 from ...persona_scope import assert_identifier_in_scope, get_explicit_scope_ids
+from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
 
 LIBRARY_PROMPT_PREFIX = "library:"
 CONFIG_PROMPT_PREFIX = "config:"
@@ -112,8 +113,10 @@ def decode_prompt_cursor(raw_cursor: str | None) -> PromptCatalogCursor:
         raise PromptCatalogError("invalid_cursor", "Invalid prompt cursor.")
 
     try:
-        padding = "=" * (-len(raw_cursor) % 4)
-        raw = base64.urlsafe_b64decode((raw_cursor + padding).encode("ascii"))
+        # Was a bare urlsafe_b64decode, which silently discards out-of-alphabet
+        # characters rather than raising, so a tampered cursor decoded to different
+        # valid bytes. The shared decoder validates and bounds.
+        raw = decode_opaque_cursor_segment(raw_cursor)
         payload = json.loads(raw.decode("utf-8"))
     except (UnicodeEncodeError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
         raise PromptCatalogError("invalid_cursor", "Invalid prompt cursor.") from exc

@@ -1,7 +1,7 @@
 import { HistorySelectionProvider, useHistorySelectionContext, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection";
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview";
 import { formatSelectedHistory } from "@/db/dexie/helpers";
-import { resolveServicePromptScope } from "@/services/service-prompts";
+import { resolveServicePromptScope, loadServicePromptSnapshot } from "@/services/service-prompts";
 import React from "react";
 import { PlaygroundForm } from "./PlaygroundForm";
 import { PlaygroundChat } from "./PlaygroundChat";
@@ -52,6 +52,7 @@ import { ChatErrorBoundary } from "@/components/Common/Playground/ChatErrorBound
 import { hasVisibleAssistantResponse } from "@/components/Common/Playground/message-visibility";
 import { useOptionLayoutShellOverrides } from "@/components/Layouts/Layout";
 import { useMessageOption } from "@/hooks/useMessageOption";
+import { effectiveAssistantStateToSelection } from "@/hooks/chat/effective-assistant-state";
 import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence";
 import { shouldRestorePersistedPlaygroundSession } from "@/hooks/playground-session-restore";
 import { webUIResumeLastChat } from "@/services/app";
@@ -101,7 +102,10 @@ import { useDesktop, useMobile } from "@/hooks/useMediaQuery";
 import { useDarkMode } from "@/hooks/useDarkmode";
 import { useLoadLocalConversation, restoreReadableLocalComparison } from "@/hooks/useLoadLocalConversation";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
-import { resolvePlaygroundShortcutAction } from "./playground-shortcuts";
+import {
+  resolvePlaygroundShortcutAction,
+  shouldOpenShortcutsHelp,
+} from "./playground-shortcuts";
 import {
   EDIT_MESSAGE_EVENT,
   OPEN_HISTORY_EVENT,
@@ -167,6 +171,7 @@ import {
 } from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
 import { getAssistantSelectionMode } from "@/types/assistant-selection";
+import { isEditableTarget } from "@/utils/editable-target"
 
 const readSidepanelChatWebUiHandoffFromLocation = () => {
   if (typeof window === "undefined") return null;
@@ -583,6 +588,7 @@ const PlaygroundContent = () => {
     setFileRetrievalEnabled,
     stopStreamingRequest,
     regenerateLastMessage,
+    effectiveAssistantState,
     selectedAssistant,
     setSelectedAssistant,
     serverChatPersonaMemoryMode,
@@ -710,7 +716,7 @@ const PlaygroundContent = () => {
   );
   const initializePlaygroundRef = React.useRef(false);
   const initializePlaygroundCallbackRef = React.useRef<
-    () => Promise<void>
+    (signal: AbortSignal) => Promise<void>
   >(async () => {});
   const sidepanelHandoffAppliedRef = React.useRef(false);
   const settingsReturnAppliedRef = React.useRef(false);
@@ -822,15 +828,15 @@ const PlaygroundContent = () => {
     [selectedAssistant],
   );
   const hasTrackedCharacterSelection =
-    selectedAssistant?.kind === "character"
-      ? selectedAssistantMode !== "overlay"
-      : selectedAssistant
-        ? false
-        : Boolean(selectedCharacter?.id) && selectedAssistantMode !== "overlay";
+    selectedAssistant?.kind === "character" && selectedAssistantMode === "tracked";
   const activeCharacterSelection = React.useMemo<Character | null>(() => {
+    const ownsSavedCharacter = (id: string | number) => Boolean(
+      serverChatId && serverChatMetaLoaded && serverChatAssistantKind !== "persona" &&
+      serverChatCharacterId != null && String(serverChatCharacterId) === String(id)
+    );
     if (
       selectedAssistant?.kind === "character" &&
-      selectedAssistantMode !== "overlay"
+      (selectedAssistantMode === "tracked" || ownsSavedCharacter(selectedAssistant.id))
     ) {
       return {
         id: selectedAssistant.id,
@@ -842,11 +848,11 @@ const PlaygroundContent = () => {
         extensions: selectedAssistant.extensions ?? null,
       };
     }
-    if (!selectedAssistant && selectedCharacter?.id != null) {
+    if (!selectedAssistant && selectedCharacter?.id != null && ownsSavedCharacter(selectedCharacter.id)) {
       return selectedCharacter;
     }
     return null;
-  }, [selectedAssistant, selectedAssistantMode, selectedCharacter]);
+  }, [selectedAssistant, selectedAssistantMode, selectedCharacter, serverChatId, serverChatMetaLoaded, serverChatAssistantKind, serverChatCharacterId]);
   // An owned saved conversation determines its workflow; the preference is for
   // new chats. Keep explicit new Character entries and unresolved loads intact.
   const hasResolvedSavedChatWorkflow = Boolean(
@@ -976,8 +982,12 @@ const PlaygroundContent = () => {
       if (!detail || detail.href !== window.location.href ||
         detail.serverChatId !== current.serverChatId ||
         detail.historyId !== current.historyId ||
-        detail.restoreRevision !== session.restoreRevision ||
-        !rawRouteCharacterIntent ||
+        detail.restoreRevision !== session.restoreRevision) return;
+      if (detail.characterId === undefined) {
+        setCharacterModeIntentActive(false);
+        void setChatWorkflowMode("standard");
+      }
+      if (!rawRouteCharacterIntent ||
         (rawRouteCharacterIntent.chatId && rawRouteCharacterIntent.chatId !== detail.serverChatId &&
           retiredRouteLocationRef.current !== routeLocationKey)) return;
       retiredRouteLocationRef.current = routeLocationKey;
@@ -1010,7 +1020,7 @@ const PlaygroundContent = () => {
     };
     window.addEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, handleReplacement);
     return () => window.removeEventListener(CHAT_ROUTE_REPLACEMENT_EVENT, handleReplacement);
-  }, [location.hash, location.pathname, location.search, navigate, rawRouteCharacterIntent, routeLocationKey]);
+  }, [location.hash, location.pathname, location.search, navigate, rawRouteCharacterIntent, routeLocationKey, setChatWorkflowMode]);
 
   React.useEffect(() => {
     if (!routeRequestsCharacterMode) return;
@@ -1763,8 +1773,8 @@ const PlaygroundContent = () => {
     persistAttachedResearchContext,
   ]);
 
-  const initializePlayground = React.useCallback(async () => {
-    if (historySelection.canAutomaticallyLoad?.() === false) return;
+  const initializePlayground = React.useCallback(async (signal: AbortSignal) => {
+    if (signal.aborted) return;
     let handoff;
     let handoffInHash = false;
     let storedHistoryReference;
@@ -1774,17 +1784,25 @@ const PlaygroundContent = () => {
         handoff = parseHistorySelectionHandoff(extractHashSearch(location.hash).split("#")[0]);
         handoffInHash = Boolean(handoff);
       }
-      storedHistoryReference = historySelection.getStoredReference();
     }
+    catch { await historySelection.open({ kind: "unavailable", code: "invalid_history_reference" }); return; }
+    // An invalidated lease (e.g. after an account change) stops AUTOMATIC restores
+    // only. A historySelection link is deliberate, as useServerChatLoader treats
+    // deliberate selections, and this runs once per mount, so gating it here would
+    // drop the link for as long as the page stays open (TASK-13390). The stored
+    // reference is only read past the gate: a blocked automatic restore stays silent
+    // rather than surfacing a malformed stored reference as an error.
+    if (!handoff && historySelection.canAutomaticallyLoad?.() === false) return;
+    try { storedHistoryReference = historySelection.getStoredReference(); }
     catch { await historySelection.open({ kind: "unavailable", code: "invalid_history_reference" }); return; }
     if (handoff) {
       const loaded = await historySelection.loadConversation(handoff.owner_kind === "local" ? { historyId: handoff.conversation_id } : { serverChatId: handoff.conversation_id }, handoff);
-      if (loaded && historySelection.getCurrent().capture) {
+      if (loaded && !signal.aborted && historySelection.getCurrent().capture) {
         setHistoryId(handoff.owner_kind === "local" ? handoff.conversation_id : null);
         setServerChatId(handoff.owner_kind === "native" ? handoff.conversation_id : null);
         const handoffCurrent = historySelection.fence();
         await restoreReadableLocalComparison(historySelection, display => { setHistory(display.history); setMessages(display.messages); });
-        if (!handoffCurrent()) return;
+        if (signal.aborted || !handoffCurrent()) return;
         // The frozen address initializes this writer once. Reload then uses its
         // own saved address, including the original pending-confirmation pointer.
         const url = new URL(window.location.href);
@@ -1859,34 +1877,50 @@ const PlaygroundContent = () => {
     }
 
     // 2. Fall back to existing webUIResumeLastChat behavior
+    const revision = usePlaygroundSessionStore.getState().restoreRevision;
+    const isCurrent = () => !signal.aborted &&
+      usePlaygroundSessionStore.getState().restoreRevision === revision;
     const isEnabled = await webUIResumeLastChat();
-    if (!isEnabled) return;
+    if (!isEnabled || !isCurrent()) return;
 
     if (messages.length === 0 && history.length === 0) {
-      const recentChat = await getRecentChatFromWebUI();
-      if (recentChat) {
-        setHistoryId(recentChat.history.id);
-        await historySelection.loadConversation({ historyId: recentChat.history.id });
-        if (historySelection.getCurrent().capture?.status !== "captured") {
-          setHistory(formatToChatHistory(recentChat.messages));
-          setMessages(formatToMessage(recentChat.messages));
-        }
+      const snapshot = await loadServicePromptSnapshot([], { signal }).catch(() => null);
+      if (!snapshot) return;
+      try {
+        let selectionCurrent = () => true;
+        const canPublish = () => isCurrent() && !snapshot.scopeSignal.aborted &&
+          !snapshot.scopeInvalidatedSignal.aborted && selectionCurrent();
+        if (!canPublish()) return;
+        const recentChat = await getRecentChatFromWebUI(snapshot);
+        if (recentChat && canPublish()) {
+          const loaded = await historySelection.loadConversation({ historyId: recentChat.history.id });
+          selectionCurrent = historySelection.fence();
+          if (!loaded || !canPublish() || historySelection.getCurrent().owner?.kind === "unavailable") return;
+          setHistoryId(recentChat.history.id);
+          if (historySelection.getCurrent().capture?.status !== "captured") {
+            setHistory(formatToChatHistory(recentChat.messages));
+            setMessages(formatToMessage(recentChat.messages));
+          }
 
-        const lastUsedPrompt = recentChat?.history?.last_used_prompt;
-        if (lastUsedPrompt) {
-          if (lastUsedPrompt.prompt_id) {
-            const prompt = await getPromptById(lastUsedPrompt.prompt_id);
-            if (prompt) {
-              setSelectedSystemPrompt(lastUsedPrompt.prompt_id);
-              if (!lastUsedPrompt.prompt_content?.trim()) {
-                setSystemPrompt(prompt.content);
+          const lastUsedPrompt = recentChat?.history?.last_used_prompt;
+          if (lastUsedPrompt) {
+            if (lastUsedPrompt.prompt_id) {
+              const prompt = await getPromptById(lastUsedPrompt.prompt_id);
+              if (!canPublish()) return;
+              if (prompt) {
+                setSelectedSystemPrompt(lastUsedPrompt.prompt_id);
+                if (!lastUsedPrompt.prompt_content?.trim()) {
+                  setSystemPrompt(prompt.content);
+                }
               }
             }
-          }
-          if (lastUsedPrompt.prompt_content?.trim()) {
-            setSystemPrompt(lastUsedPrompt.prompt_content);
+            if (lastUsedPrompt.prompt_content?.trim()) {
+              setSystemPrompt(lastUsedPrompt.prompt_content);
+            }
           }
         }
+      } finally {
+        snapshot.release();
       }
     }
   }, [
@@ -1922,11 +1956,12 @@ const PlaygroundContent = () => {
     }
     initializePlaygroundRef.current = true;
     let cancelled = false;
+    const controller = new AbortController();
     const run = async () => {
       // Invoke through a ref so identity churn of the initialization
       // callback (caused by state updates during startup) cannot re-run
       // this one-shot effect and cancel readiness before init resolves.
-      await initializePlaygroundCallbackRef.current();
+      await initializePlaygroundCallbackRef.current(controller.signal);
       if (!cancelled) {
         setPlaygroundReady(true);
       }
@@ -1934,6 +1969,7 @@ const PlaygroundContent = () => {
     void run();
     return () => {
       cancelled = true;
+      controller.abort();
       // Unlatch on teardown: a StrictMode replay or a session-scope change
       // cancels this run's readiness update, so the replacement effect must
       // be allowed to initialize again - otherwise playgroundReady can stay
@@ -1953,18 +1989,24 @@ const PlaygroundContent = () => {
     setHistory,
   });
 
+  const setLocalHistoryId = React.useCallback(
+    (id: string) => setHistoryId(id, { preserveServerChatId: false }),
+    [setHistoryId],
+  );
+  const setLocalSelectedSystemPrompt = React.useCallback(
+    (id: string | null) => {
+      if (id) setSelectedSystemPrompt(id);
+    },
+    [setSelectedSystemPrompt],
+  );
   const loadLocalConversation = useLoadLocalConversation(
     {
       setServerChatId,
-      setHistoryId: (id) => setHistoryId(id, { preserveServerChatId: false }),
+      setHistoryId: setLocalHistoryId,
       setHistory,
       setMessages,
-      setSelectedModel: (id) => setSelectedModel(id),
-      setSelectedSystemPrompt: (id) => {
-        if (id) {
-          setSelectedSystemPrompt(id);
-        }
-      },
+      setSelectedModel,
+      setSelectedSystemPrompt: setLocalSelectedSystemPrompt,
       setSystemPrompt,
       setContextFiles,
     },
@@ -2546,13 +2588,10 @@ const PlaygroundContent = () => {
     if (typeof window === "undefined") return;
 
     const handleShortcut = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null;
-      const isEditableTarget = Boolean(
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable),
-      );
+      // A bare "?" is ordinary typed input, so the shortcut must never fire
+      // while the caret is in the composer or any other editable target.
+      // Modifier chords (Cmd/Ctrl+F) are unreachable by typing and stay active.
+      const editableTarget = isEditableTarget(event.target);
       if (
         (event.metaKey || event.ctrlKey) &&
         !event.altKey &&
@@ -2567,13 +2606,7 @@ const PlaygroundContent = () => {
         });
         return;
       }
-      if (
-        !event.altKey &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        event.shiftKey &&
-        event.key === "?"
-      ) {
+      if (shouldOpenShortcutsHelp(event)) {
         event.preventDefault();
         setShortcutsHelpOpen(true);
         return;
@@ -2594,7 +2627,7 @@ const PlaygroundContent = () => {
 
       const action = resolvePlaygroundShortcutAction(event);
       if (!action) return;
-      if (isEditableTarget) return;
+      if (editableTarget) return;
       event.preventDefault();
 
       if (action === "toggle_artifacts") {
@@ -2891,8 +2924,8 @@ const PlaygroundContent = () => {
     }
   }, [navigate, selectedAssistant, selectedCharacter]);
   const cockpitAssistantSummary = buildCockpitAssistantSummary({
-    selectedAssistant,
-    selectedCharacter,
+    selectedAssistant: effectiveAssistantStateToSelection(effectiveAssistantState),
+    selectedCharacter: null,
     personaMemoryMode: serverChatPersonaMemoryMode,
     copy: {
       assistantFallbackName: toText(

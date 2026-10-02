@@ -111,7 +111,7 @@ async def test_echo_tts_generate_chunked_non_streaming(monkeypatch):
     async def fake_latent_to_audio_np(*args, **kwargs):
         return np.array([0.1, 0.2], dtype=np.float32)
 
-    async def fake_convert_audio_format(audio_data, source_format, target_format, sample_rate):
+    async def fake_convert_audio_format(audio_data, target_format, sample_rate):
         return b"x" * len(audio_data)
 
     monkeypatch.setattr(adapter, "_latent_to_audio_np", fake_latent_to_audio_np)

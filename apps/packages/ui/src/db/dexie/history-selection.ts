@@ -33,6 +33,8 @@ export type LocalHistoryOwnerV1 = {
   readonly profile_id: string
   readonly owner_key: string
   readonly conversation_id: string
+  /** Present only when this local history is bound to a live account. */
+  readonly validate_lease?: () => boolean
 }
 export type HistoryOperationOptions = {
   signal?: AbortSignal

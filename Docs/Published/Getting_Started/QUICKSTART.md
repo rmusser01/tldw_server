@@ -133,7 +133,7 @@ The user must have `CREATE TABLE` permissions.
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - FFmpeg (`ffmpeg -version` to check)
 - Git
 
@@ -155,7 +155,7 @@ The install target creates a `.venv`, installs dependencies, and `make setup-loc
 make verify-local-single
 ```
 
-If your default `python3` is older than 3.11:
+If your default `python3` is older than 3.12:
 
 ```bash
 make install-local PYTHON=python3.12
@@ -298,7 +298,7 @@ Stop the conflicting process, or change the host port mapping in the compose fil
 ### Local install fails on audio dependencies
 
 - Verify FFmpeg: `ffmpeg -version`
-- Verify Python version: `python3 --version` (must be 3.11+)
+- Verify Python version: `python3 --version` (must be 3.12+)
 
 ### Multi-user: cannot connect to Postgres
 

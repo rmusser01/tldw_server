@@ -29,7 +29,8 @@ describe("Playground responsive parity guard", () => {
     expect(source).toContain("playground-shortcuts-help-trigger")
     expect(source).toContain("playground-shortcuts-help-panel")
     expect(source).toContain("tldw:open-playground-shortcuts")
-    expect(source).toContain("event.key === \"?\"")
+    // The "?" check lives in playground-shortcuts.ts, behind the editable-target guard.
+    expect(source).toContain("shouldOpenShortcutsHelp(event)")
     expect(source).toContain("event.key.toLowerCase() === \"f\"")
     expect(source).toContain("searchQuery={threadSearchQuery.trim()}")
     expect(source).toContain("compositionPreviewSummary")

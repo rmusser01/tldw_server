@@ -120,6 +120,9 @@ async def drain():
     await asyncio.sleep(0)
     while deps._chacha_default_char_tasks:
         await asyncio.gather(*tuple(deps._chacha_default_char_tasks))
+        # Awaiting a gather of already-done tasks never yields, so without this
+        # their pending discard callbacks never run and the loop spins forever.
+        await asyncio.sleep(0)
 
 
 def assert_returned(f):

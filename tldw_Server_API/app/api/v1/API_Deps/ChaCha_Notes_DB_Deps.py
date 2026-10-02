@@ -347,8 +347,10 @@ if not SERVER_CLIENT_ID:
 # as each user gets their DB under their own USER_DB_BASE_DIR/user_id/
 
 # +++ Default Character Configuration +++
-DEFAULT_CHARACTER_NAME = "Helpful AI Assistant"
-DEFAULT_CHARACTER_DESCRIPTION = "A default, friendly assistant created automatically by the system."
+from tldw_Server_API.app.core.Character_Chat.constants import (  # noqa: E402 - re-exported
+    DEFAULT_CHARACTER_DESCRIPTION,
+    DEFAULT_CHARACTER_NAME,
+)
 
 # --- Global Cache for ChaChaNotes DB Instances ---
 MAX_CACHED_CHACHA_DB_INSTANCES = int(settings.get("MAX_CACHED_CHACHA_DB_INSTANCES", "20"))
@@ -921,7 +923,21 @@ def close_all_chacha_db_instances():
         init_event.set()
 
 
+def _on_closed_loop(awaitable: asyncio.Future) -> bool:
+    """True when the task/future's event loop is closed, so it can never finish.
+
+    Waiting on one only burns the full drain timeout (and cancelling a task on a
+    closed loop raises), on every shutdown for the rest of the process.
+    """
+    try:
+        return awaitable.get_loop().is_closed()
+    except (AttributeError, RuntimeError):
+        return False
+
+
 async def _drain_default_character_tasks(timeout: float = 5.0) -> None:
+    stale = [task for task in list(_chacha_default_char_tasks) if _on_closed_loop(task)]
+    _chacha_default_char_tasks.difference_update(stale)
     tasks = [task for task in list(_chacha_default_char_tasks) if not task.done()]
     if not tasks:
         return
@@ -940,6 +956,8 @@ async def _drain_default_character_tasks(timeout: float = 5.0) -> None:
 
 async def _drain_default_character_futures(timeout: float = 5.0) -> None:
     with _chacha_default_char_futures_lock:
+        stale = [future for future in list(_chacha_default_char_futures) if _on_closed_loop(future)]
+        _chacha_default_char_futures.difference_update(stale)
         futures = [future for future in list(_chacha_default_char_futures) if not future.done()]
     if not futures:
         return

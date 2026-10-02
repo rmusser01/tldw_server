@@ -118,19 +118,26 @@ async def test_tokens_lua_script_retry_after():
 
 
 @pytest.mark.asyncio
-async def test_tokens_oversized_single_reservation_is_denied():
+async def test_tokens_oversized_single_reservation_is_admitted_clamped_to_capacity():
+    # A reservation larger than bucket capacity is clamped and admitted rather
+    # than denied forever (safety-net rule, spec §4).
     class _Loader:
         def get_policy(self, pid):
             return {"tokens": {"per_min": 2, "burst": 1.0}, "scopes": ["global", "user"]}
 
+    from tldw_Server_API.app.core.Infrastructure.redis_factory import InMemoryAsyncRedis
+
     ft = FakeTime(0.0)
     rg = RedisResourceGovernor(policy_loader=_Loader(), time_source=ft, ns="rg_t_tokens_oversized")
+    # Inject the in-process stub so this test never reaches a real Redis on :6379
+    # (the fixed op_id would otherwise replay a cached decision from a prior run).
+    rg._client = InMemoryAsyncRedis()
     req = RGRequest(entity="user:oversized", categories={"tokens": {"units": 3}}, tags={"policy_id": "ptok_big"})
 
     decision, handle_id = await rg.reserve(req, op_id="oversized-1")
 
-    assert decision.allowed is False
-    assert handle_id is None
+    assert decision.allowed is True
+    assert handle_id is not None
     assert decision.details["categories"]["tokens"]["limit"] == 2
 
 

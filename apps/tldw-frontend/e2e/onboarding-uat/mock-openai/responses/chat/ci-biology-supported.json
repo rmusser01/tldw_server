@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-ci-biology-supported",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "model": "gpt-4.1-mini",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"label\": \"supported\", \"confidence\": 0.99, \"rationale\": \"The exact question-answer relationship is stated in the supplied F-Biology source.\"}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 100,
+    "completion_tokens": 30,
+    "total_tokens": 130
+  }
+}

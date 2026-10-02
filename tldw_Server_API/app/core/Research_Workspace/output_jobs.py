@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
 import json
 import os
 from pathlib import Path
@@ -53,6 +52,7 @@ from tldw_Server_API.app.core.Slides.visual_style_resolver import resolve_builti
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError, is_retryable_error
 from tldw_Server_API.app.core.TTS.tts_request_resolution import resolve_tts_request_defaults
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
+from tldw_Server_API.app.core.Utils.iso_datetime import utc_now_iso as _utc_now_iso
 
 RESEARCH_WORKSPACE_OUTPUT_JOB_DOMAIN = "research_workspace"
 RESEARCH_WORKSPACE_OUTPUT_JOB_QUEUE = "default"
@@ -1415,11 +1415,6 @@ def _mark_workspace_output_artifact_failed(
             },
         },
     )
-
-
-def _utc_now_iso() -> str:
-    """Return the current UTC time as an ISO timestamp."""
-    return datetime.now(UTC).isoformat()
 
 
 def _pending_artifact_payload(

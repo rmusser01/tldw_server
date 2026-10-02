@@ -137,6 +137,7 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     provider_auth_is_resolved,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, get_ps_logger
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry, increment_counter
 from tldw_Server_API.app.core.Metrics.stt_metrics import (
@@ -276,7 +277,26 @@ _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS = (
     *EXPECTED_DB_EXC,
     *EXPECTED_REDIS_EXC,
 )
+
+
 _AUDIO_QUOTA_DB_EXC = (*EXPECTED_DB_EXC, AudioQuotaStoreUnavailable)
+
+
+async def _await_child_task(task: Any) -> None:
+    """Await a child task (typically one we just cancelled) without leaking its cancellation.
+
+    The child's own CancelledError is expected and swallowed; it is re-raised only
+    when the current task is itself being cancelled.
+    """
+    try:
+        await task
+    except asyncio.CancelledError:
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise
+    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("audio child task failed error_type={}", type(exc).__name__)
+
 AUDIO_STREAM_FACTORY_TIMEOUT_SECONDS = 300.0
 AUDIO_STREAM_ITERATOR_TIMEOUT_SECONDS = 5.0
 AUDIO_STREAM_NEXT_TIMEOUT_SECONDS = 300.0
@@ -736,7 +756,7 @@ def _audio_provider_chunk_has_nonempty_content(raw_line: Any) -> bool:
         ).strip()
     except Exception:  # noqa: BLE001 - malformed provider chunks are untrusted
         return False
-    if not line or line.lower() in {"data: [done]", "[done]"}:
+    if not line or line.lower() == "[done]" or is_done_line(line):
         return False
     if line.startswith("data:"):
         line = line[len("data:") :].strip()
@@ -2797,9 +2817,7 @@ async def websocket_audio_chat_stream(
                     if not line_str:
                         continue
                     stripped = line_str.strip()
-                    if stripped.lower() in {"data: [done]", "[done]"}:
-                        break
-                    if stripped.lower().endswith("[done]"):
+                    if stripped.lower() == "[done]" or is_done_line(stripped):
                         break
                     payload_str = stripped
                     if payload_str.startswith("data:"):
@@ -3307,10 +3325,7 @@ async def websocket_audio_chat_stream(
                         ):
                             overlap_sender_task.cancel()
                         if overlap_sender_task is not None:
-                            with contextlib.suppress(
-                                *_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS
-                            ):
-                                await overlap_sender_task
+                            await _await_child_task(overlap_sender_task)
                     finally:
                         await tts_scope_stack.aclose()
 
@@ -3384,8 +3399,7 @@ async def websocket_audio_chat_stream(
                 active_turn_task.cancel()
             if active_tts_sender_task is not None and not active_tts_sender_task.done():
                 active_tts_sender_task.cancel()
-                with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
-                    await active_tts_sender_task
+                await _await_child_task(active_tts_sender_task)
                 active_tts_sender_task = None
             if had_active_turn:
                 with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
@@ -3611,8 +3625,7 @@ async def websocket_audio_chat_stream(
                         paused_audio_chunks.clear()
                         control_session.release_paused_audio()
                         if active_turn_task is not None and not active_turn_task.done():
-                            with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
-                                await active_turn_task
+                            await _await_child_task(active_turn_task)
                         if _outer_stream:
                             await _outer_stream.done()
                         break
@@ -4301,8 +4314,7 @@ async def websocket_tts_realtime(
                     await session.finish()
                 if sender_task and not sender_task.done():
                     sender_task.cancel()
-                    with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
-                        await sender_task
+                    await _await_child_task(sender_task)
 
                 try:
                     handle = await tts_service.open_realtime_session(
@@ -4389,10 +4401,7 @@ async def websocket_tts_realtime(
                         await session.finish()
                 if sender_task and not sender_task.done():
                     sender_task.cancel()
-                    with contextlib.suppress(
-                        *_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS
-                    ):
-                        await sender_task
+                    await _await_child_task(sender_task)
             finally:
                 if credential_scope is not None and credential_scope_entered:
                     await credential_scope.__aexit__(None, None, None)
@@ -4433,6 +4442,7 @@ async def websocket_tts_realtime(
     "/stream/status",
     response_model=StreamingStatusResponse,
     summary="Check streaming transcription availability",
+    dependencies=[Depends(get_request_user)],
 )
 async def streaming_status():
     """

@@ -229,6 +229,13 @@ const seedAndSaveNote = async () => {
   })
 }
 
+// Connections load on demand (bc6c86498e): the collapsed section must be
+// opened before the "Open graph view" entry point renders.
+const openConnections = async () => {
+  fireEvent.click(screen.getByTestId("notes-section-connections-toggle"))
+  await screen.findByTestId("notes-graph-relation-panels")
+}
+
 describe("NotesManagerPage stage 21 accessibility overlay and view focus handoff", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -355,6 +362,7 @@ describe("NotesManagerPage stage 21 accessibility overlay and view focus handoff
     expect(screen.getByTestId("notes-view-mode-graph")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Split" }))
+    await openConnections()
     const openGraphButton = await screen.findByTestId("notes-open-graph-view")
     openGraphButton.focus()
     fireEvent.click(openGraphButton)
@@ -396,6 +404,7 @@ describe("NotesManagerPage stage 21 accessibility overlay and view focus handoff
     })
 
     fireEvent.click(screen.getByRole("button", { name: "Split" }))
+    await openConnections()
     fireEvent.click(await screen.findByTestId("notes-open-graph-view"))
     await screen.findByTestId("notes-graph-canvas")
     const boundaryCallIndex = mockBgRequest.mock.calls.length

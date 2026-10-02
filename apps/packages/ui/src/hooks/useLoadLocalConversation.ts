@@ -12,6 +12,9 @@ import {
 import { lastUsedChatModelEnabled } from "@/services/model-settings"
 import { updatePageTitle } from "@/utils/update-page-title"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 
 interface LoadLocalConversationDeps {
   setServerChatId: (id: string | null) => void
@@ -47,7 +50,8 @@ export function useLoadLocalConversation(
 
   const { t, errorLogPrefix, errorDefaultMessage } = options
 
-  const selection = useHistorySelectionContext()
+  const { beginLoad, fence, loadConversation, getCurrent } =
+    useHistorySelectionContext() ?? {}
   const dbRef = React.useRef<PageAssistDatabase | null>(null)
   const mountedRef = React.useRef(false)
   const loadGenerationRef = React.useRef(0)
@@ -55,11 +59,11 @@ export function useLoadLocalConversation(
   React.useEffect(() => {
     mountedRef.current = true
     const invalidate = () => { loadGenerationRef.current += 1 }
-    window.addEventListener("tldw:auth-principal-changed", invalidate)
+    const stop = watchChatAccountChanges(invalidated => { if (invalidated) invalidate() })
     return () => {
       mountedRef.current = false
       invalidate()
-      window.removeEventListener("tldw:auth-principal-changed", invalidate)
+      stop()
     }
   }, [])
 
@@ -72,28 +76,39 @@ export function useLoadLocalConversation(
       const generation = ++loadGenerationRef.current
       const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision
       if (!mountedRef.current) return false
-      selection?.beginLoad()
-      let selectionCurrent = selection?.fence() || (() => true)
-      const isCurrent = () => mountedRef.current &&
+      beginLoad?.()
+      let selectionCurrent = fence?.() || (() => true)
+      let snapshot: ServicePromptSnapshot | undefined
+      // The controller advances its own fence while opening. This caller lease
+      // must track navigation/account changes independently of that fence.
+      const isCurrentLoad = () => mountedRef.current &&
+        !snapshot?.scopeSignal.aborted && !snapshot?.scopeInvalidatedSignal.aborted &&
         generation === loadGenerationRef.current &&
-        restoreRevision === usePlaygroundSessionStore.getState().restoreRevision &&
-        selectionCurrent()
+        restoreRevision === usePlaygroundSessionStore.getState().restoreRevision
+      const isCurrent = () => isCurrentLoad() && selectionCurrent()
       try {
         const db = dbRef.current!
-        const [history, historyDetails] = await Promise.all([
-          db.getChatHistory(conversationId),
-          db.getHistoryInfo(conversationId)
-        ])
+        const historyDetails = await db.getHistoryInfo(conversationId)
+        if (!isCurrent() || !historyDetails) return false
+        // Profile-owned forks browse independently of the inference account.
+        // The controller still validates the local profile before publishing.
+        const profileOwned = loadConversation && historyDetails.local_owner_key &&
+          !historyDetails.server_scope_key && !historyDetails.server_chat_id &&
+          historyDetails.message_source !== "server"
+        if (!profileOwned) {
+          snapshot = await loadServicePromptSnapshot([])
+          if (!isCurrent() || historyDetails.server_scope_key !== serverChatMirrorOwnerKey(snapshot)) return false
+        }
+        const history = await db.getChatHistory(conversationId)
         if (!isCurrent()) return false
-
-        if (!isCurrent()) return false
-        if (selection) {
-          if (!await selection.loadConversation({ historyId: conversationId })) return false
+        if (loadConversation && fence) {
+          if (!await loadConversation({ historyId: conversationId, isCurrent: isCurrentLoad })) return false
           if (generation !== loadGenerationRef.current) return false
-          selectionCurrent = selection.fence()
+          selectionCurrent = fence()
         }
         if (!isCurrent()) return false
-        const selected = selection?.getCurrent()
+        const selected = getCurrent?.()
+        if (selected?.owner?.kind === "unavailable") return false
         setServerChatId(selected?.owner?.kind === "native" ? selected.owner.conversation_id : null)
         setHistoryId(conversationId)
         if (!selected || selected.capture?.status !== "captured") {
@@ -146,10 +161,15 @@ export function useLoadLocalConversation(
           })
         )
         return false
+      } finally {
+        snapshot?.release()
       }
     },
     [
-      selection,
+      beginLoad,
+      fence,
+      loadConversation,
+      getCurrent,
       errorDefaultMessage,
       errorLogPrefix,
       setContextFiles,

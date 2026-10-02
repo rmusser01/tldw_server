@@ -266,7 +266,8 @@ class TestCustomMetrics:
 
             assert result is not None
             assert "score" in result
-            assert abs(result["score"] - 0.88) < 0.001  # 8.8 / 10 (using abs for floating point comparison)
+            # The prompt declares 1-10, so (8.8 - 1) / 9, not 8.8 / 10 (which floored 1 at 0.1).
+            assert result["score"] == pytest.approx((8.8 - 1) / 9)
             mock_to_thread.assert_called_once()
 
     @pytest.mark.asyncio
@@ -293,9 +294,10 @@ class TestCustomMetrics:
                 results.append(result)
 
             assert len(results) == 3
-            assert results[0]["score"] == 0.85  # 8.5 / 10
-            assert results[1]["score"] == 0.90  # 9.0 / 10
-            assert results[2]["score"] == 0.78  # 7.8 / 10
+            # Affine over the declared 1-10 scale (TASK-13328), not raw / 10.
+            assert results[0]["score"] == pytest.approx((8.5 - 1) / 9)
+            assert results[1]["score"] == pytest.approx((9.0 - 1) / 9)
+            assert results[2]["score"] == pytest.approx((7.8 - 1) / 9)
 
     @pytest.mark.asyncio
     async def test_evaluate_custom_metric_generates_model_response(self, evaluation_manager):
@@ -315,7 +317,7 @@ class TestCustomMetrics:
                 api_name="openai",
             )
 
-            assert abs(result["score"] - 0.75) < 0.001
+            assert result["score"] == pytest.approx((7.5 - 1) / 9)  # declared 1-10 scale
             assert mock_to_thread.call_count == 2
 
             first_call = mock_to_thread.call_args_list[0]

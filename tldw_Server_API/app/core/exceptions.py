@@ -134,6 +134,13 @@ class TransactionPassthroughError(Exception):
     """Sanitized domain failure that may cross a rolled-back DB transaction."""
 
 
+class APIKeyRotationRejected(ValueError, TransactionPassthroughError):
+    """Source-key validation failed without distinguishing absence from ownership."""
+
+    def __init__(self) -> None:
+        super().__init__("API key not found or unauthorized")
+
+
 class BuiltinCharacterSeedError(TransactionPassthroughError):
     """Raised when a bundled character cannot be installed with verified assets."""
 
@@ -802,6 +809,14 @@ class BadRequestError(ValueError):
     """Raised when a caller provides invalid arguments for an operation."""
 
 
+class CompanionBehaviorValidationError(BadRequestError):
+    """Raised when pack-level Persona companion behavior is invalid."""
+
+
+class PersonaBuddyValidationError(BadRequestError):
+    """Raised when Persona Buddy preferences violate the domain contract."""
+
+
 class ChatAPIError(Exception):
     """Base exception for chat API call errors."""
 
@@ -948,6 +963,40 @@ def raise_detached_error(error: BaseException) -> NoReturn:
         detached.__context__ = None
         detached.__suppress_context__ = True
         raise
+
+
+class SchemaReadinessError(RuntimeError):
+    """A schema readiness check failed.
+
+    Messages are fixed operator-facing reasons, never row data, so transaction
+    boundaries that sanitize other failures pass this reason through.
+    """
+
+
+def exception_type_chain(error: BaseException, *, limit: int = 6) -> str:
+    """Return ``Outer <- Inner <- ...`` type names for ``error``'s cause/context chain.
+
+    For server-side logs at ``raise ... from None`` boundaries: suppression hides the
+    chain from display, but ``__context__`` is still set, and the inner type is usually
+    the whole diagnosis. Types only, never messages -- a database error message can
+    carry row values (a unique-violation detail includes the email address).
+
+    Args:
+        error: The exception to describe, outermost first.
+        limit: Maximum number of type names to include; the walk also stops at a cycle.
+
+    Returns:
+        Type names joined by ``" <- "``, e.g. ``"TransactionError <- ProfileUserWriteRejected"``.
+    """
+
+    names: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen and len(names) < limit:
+        seen.add(id(current))
+        names.append(type(current).__name__)
+        current = current.__cause__ or current.__context__
+    return " <- ".join(names)
 
 
 class InvalidMetadataOrderKeyError(ValueError):

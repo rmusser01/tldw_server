@@ -83,6 +83,7 @@ import {
   cloneSavedRecipeSource,
   getRecipePersistenceState
 } from "./prompt-recipe-library"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const PromptDrawer = React.lazy(() =>
   import("./PromptDrawer").then((module) => ({ default: module.PromptDrawer }))
@@ -794,13 +795,6 @@ export const PromptBody = () => {
     .filter(Boolean)
     .join(" ")
 
-  React.useEffect(() => {
-    // Only redirect from copilot/studio tab when offline (trash is local-only so always available)
-    if (!isOnline && (selectedSegment === "copilot" || selectedSegment === "studio")) {
-      setSelectedSegment("custom")
-    }
-  }, [isOnline, selectedSegment])
-
   // Handle ?edit=<id> and ?new=1 URL params for full editor
   const handledEditorIntentRef = React.useRef<string | null>(null)
   useEffect(() => {
@@ -949,8 +943,7 @@ export const PromptBody = () => {
   // Keyboard shortcuts: N = new prompt, / = focus search, Esc = close drawer, ? = open shortcut help
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement
-      const isInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT" || target.isContentEditable
+      const isInput = isEditableTarget(e.target)
       if (e.key === "Escape") {
         if (shortcutsHelpOpen) {
           setShortcutsHelpOpen(false)

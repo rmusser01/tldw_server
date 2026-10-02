@@ -9,6 +9,7 @@ import zipfile
 
 import pytest
 from fastapi.testclient import TestClient
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 
 @pytest.fixture()
@@ -23,7 +24,7 @@ def ingestion_sources_client():
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
     from tldw_Server_API.app.main import app
 
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in iter_served_routes(app.routes)}
     if "/api/v1/ingestion-sources/{source_id}/sync" not in paths:
         app.include_router(ingestion_sources_router.router, prefix="/api/v1", tags=["ingestion-sources"])
 
@@ -46,7 +47,7 @@ def test_mutating_ingestion_source_routes_apply_rate_limit_dependency(ingestion_
     }
     route_dependencies = {
         route.path: {dependency.call for dependency in route.dependant.dependencies}
-        for route in app.routes
+        for route in iter_served_routes(app.routes)
         if getattr(route, "path", None) in expected_paths
     }
 

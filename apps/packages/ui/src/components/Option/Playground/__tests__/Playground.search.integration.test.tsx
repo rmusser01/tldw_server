@@ -15,15 +15,21 @@ import {
   SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE
 } from "@/services/tldw/sidepanel-chat-webui-handoff"
 
-const h1 = vi.hoisted(() => ({ enabled: false, legacyNative: false, controller: null as HistorySelectionController | null, bookmarks: new Map<string, any>(), confirm: vi.fn() }))
+const h1 = vi.hoisted(() => ({ enabled: false, legacyNative: false, controller: null as HistorySelectionController | null, bookmarks: new Map<string, any>(), confirm: vi.fn(), historyInfo: vi.fn() }))
 const timelineReveal = vi.hoisted(() => ({ current: null as null | (() => Promise<boolean>) }))
 const h1Key = (scope: any, owner: any) => JSON.stringify([scope.profile_id, scope.client_session_id, owner.owner_key, owner.conversation_id])
 
-const forkPresentation = vi.hoisted(() => ({controller: null as HistorySelectionController | null, mode: null as "ordinary" | "pending" | "fork" | null, settings: null as {authorNote: string} | null}))
+const forkPresentation = vi.hoisted(() => ({controller: null as HistorySelectionController | null, mode: null as "ordinary" | "pending" | "fork" | null, settings: null as {authorNote: string} | null, blockAutomaticLoad: false, storedReferenceInvalid: false, opened: [] as unknown[]}))
 vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => {
   const actual = await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
   return {...actual, useHistorySelectionContext: () => {
     const controller = actual.useHistorySelectionContext()
+    if (forkPresentation.blockAutomaticLoad) return {
+      ...controller,
+      canAutomaticallyLoad: () => false,
+      ...(forkPresentation.storedReferenceInvalid ? {getStoredReference: () => { throw new Error("invalid_history_reference") }} : {}),
+      open: (...args: Parameters<typeof controller.open>) => { forkPresentation.opened.push(args[0]); return controller.open(...args) },
+    }
     return forkPresentation.controller ?? (forkPresentation.mode ? {...controller, settingsMode: () => forkPresentation.mode!, forkSettings: forkPresentation.settings} : controller)
   }}
 })
@@ -65,6 +71,16 @@ const messageOptionState = vi.hoisted(() => ({
     setContextFiles: vi.fn(),
     createChatBranch: vi.fn(),
     streaming: false,
+    effectiveAssistantState: {
+      mode: "plain",
+      kind: null,
+      id: null,
+      displayName: null,
+      avatarUrl: null,
+      systemPromptSnapshot: null,
+      source: "none"
+    },
+    selectedAssistant: null,
     selectedCharacter: null,
     setSelectedCharacter: vi.fn(),
     compareMode: false,
@@ -363,6 +379,7 @@ describe("Playground thread search integration", () => {
     h1.legacyNative = false
     forkPresentation.mode = null
     forkPresentation.settings = null
+    forkPresentation.blockAutomaticLoad = false
     routerState.hashRouter = false
     storageState.value.clear()
     mobileViewportState.value = false
@@ -817,7 +834,7 @@ vi.mock("@/db/dexie/history-selection", () => ({
 vi.mock("@/db/dexie/fork-operations", () => ({findForkCandidate: async () => null, loadForkOperations: async () => []}))
 vi.mock("@/db/dexie/chat", () => ({
   PageAssistDatabase: class {
-    getHistoryInfo = async () => null
+    getHistoryInfo = h1.historyInfo
   }
 }))
 vi.mock("@/services/chat-history-selection", () => ({
@@ -872,6 +889,11 @@ describe("Playground H1 URL initialization with the mounted session/controller",
     h1.controller = null
     h1.bookmarks.clear()
     h1.confirm.mockClear()
+    h1.historyInfo.mockReset().mockImplementation(async (id: string) =>
+      ["chat-one", "chat-two"].includes(id)
+        ? { id, title: id, createdAt: 1, is_rag: false, message_source: "branch", local_owner_key: "local-owner" }
+        : null
+    )
     localStorage.clear()
     sessionStorage.clear()
     storageState.value.clear()
@@ -925,6 +947,65 @@ describe("Playground H1 URL initialization with the mounted session/controller",
     h1.bookmarks.set(h1Key(reference, view), record)
     return reference
   }
+  it("TASK-13390: a blocked automatic restore stays silent even when the stored reference is malformed", async () => {
+    // Without a link, a blocked restore must return quietly. Reading the stored
+    // reference before the gate turned a malformed stored value into a visible
+    // "unavailable" state after every account change.
+    forkPresentation.blockAutomaticLoad = true
+    forkPresentation.storedReferenceInvalid = true
+    forkPresentation.opened = []
+    try {
+      window.history.replaceState({}, "", "/chat")
+      const page = render(<Playground />)
+      await waitFor(() => expect(screen.getByTestId("playground-chat")).toBeInTheDocument())
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)) })
+      expect(forkPresentation.opened).not.toContainEqual(expect.objectContaining({ code: "invalid_history_reference" }))
+      page.unmount()
+    } finally {
+      forkPresentation.blockAutomaticLoad = false
+      forkPresentation.storedReferenceInvalid = false
+      forkPresentation.opened = []
+    }
+  })
+
+  it("TASK-13390: an explicit history link still opens after an account change invalidates automatic loading", async () => {
+    // After an account/config change the native-history lease is invalid, so
+    // canAutomaticallyLoad() is false. That must stop AUTOMATIC restores only; a
+    // historySelection link the user followed is deliberate, as the loader already
+    // treats deliberate selections. initializePlayground runs once, so an early
+    // return here drops the link for as long as the page stays mounted.
+    forkPresentation.blockAutomaticLoad = true
+    try {
+      const reference = seed()
+      window.history.replaceState({}, "", "/chat?historySelection=" + encodeURIComponent(JSON.stringify(reference)))
+      const page = render(<Playground />)
+      await waitFor(() =>
+        expect(screen.getByTestId("playground-chat")).toHaveAttribute("data-selected-history", "chat-one answer A")
+      )
+      page.unmount()
+    } finally {
+      // This describe's beforeEach does not reset the flag, so reset it here.
+      forkPresentation.blockAutomaticLoad = false
+    }
+  })
+
+  it.each([
+    { name: "missing history", details: null, code: "owner_conversation_mismatch" },
+    { name: "unowned history", details: { id: "chat-one", message_source: "branch" }, code: "owner_conversation_mismatch" },
+    { name: "unbound server mirror", details: { id: "chat-one", message_source: "server", server_chat_id: "foreign-chat" }, code: "unbound_server_mirror" }
+  ])("rejects a bookmarked $name without publishing selected rows", async ({ details, code }) => {
+    const reference = seed()
+    h1.historyInfo.mockResolvedValue(details)
+    window.history.replaceState(null, "", "/chat?historySelection=" + encodeURIComponent(JSON.stringify(reference)))
+    const page = render(<Playground />)
+    await waitFor(() => expect(h1.controller?.error).toBe(code))
+    expect(h1.controller?.capture).toBeNull()
+    expect(h1.controller?.view).toBeNull()
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+    expect(h1.bookmarks.size).toBe(1)
+    expect(window.location.search).toContain("historySelection")
+    page.unmount()
+  })
   it.each(["query", "hash", "hash-router"])(
     "consumes a %s handoff once and restores destination choice, conversation switch and empty reset",
     async (route) => {

@@ -31,7 +31,7 @@ def test_db():
         db_path = tmp.name
 
     # Initialize database
-    db = CharactersRAGDB(db_path, "test_client")
+    db = CharactersRAGDB(db_path, "1", owner_user_id="1")
 
     # Enable WAL mode for better concurrency handling in tests
     conn = db.get_connection()
@@ -274,14 +274,14 @@ class TestChatEndpointIntegration:
             headers=auth_headers,
         )
 
-        if response1.status_code == 503:
-            pytest.skip("LLM service not configured")
-        assert response1.status_code in [200, 503]
+        assert response1.status_code == 200, response1.text
         data1 = response1.json()
 
         # Extract conversation ID from response
         conv_id = data1.get("tldw_conversation_id")
         assert conv_id, "No conversation ID returned in response"
+        conversation = test_db.get_conversation_by_id(conv_id)
+        assert conversation["client_id"] == test_db.owner_user_id == "1"
 
         # Second message in same conversation
         response2 = test_client.post(
@@ -296,7 +296,7 @@ class TestChatEndpointIntegration:
             headers=auth_headers,
         )
 
-        assert response2.status_code in [200, 503]
+        assert response2.status_code == 200, response2.text
 
         # Verify messages are in database
         messages = test_db.get_messages_for_conversation(conv_id)

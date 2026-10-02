@@ -26,7 +26,7 @@ from typing import Any, Optional, Union
 
 from loguru import logger  # noqa: F401 - retained for future use/debug parity
 
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
+from tldw_Server_API.app.core.Character_Chat.constants import DEFAULT_CHARACTER_NAME
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,

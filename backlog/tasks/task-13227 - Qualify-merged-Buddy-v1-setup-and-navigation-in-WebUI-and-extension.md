@@ -3,17 +3,17 @@ id: TASK-13227
 title: Qualify merged Buddy v1 setup and navigation in WebUI and extension
 status: In Progress
 assignee:
-- '@codex'
-created_date: 2026-09-09 04:32
-updated_date: 2026-09-10 14:58
+  - '@codex'
+created_date: '2026-09-09 04:32'
+updated_date: '2026-09-29 18:37'
 labels: []
 dependencies: []
 references:
-- TASK-13226
-- TASK-13211
-- TASK-13202
+  - TASK-13226
+  - TASK-13211
+  - TASK-13202
 documentation:
-- Docs/superpowers/plans/2026-09-09-buddy-v1-live-qualification.md
+  - Docs/superpowers/plans/2026-09-09-buddy-v1-live-qualification.md
 priority: high
 ---
 
@@ -42,6 +42,8 @@ ADR required: no. ADR path: backlog/decisions/005-independent-buddy-bindings-and
 7. Independent review found a second sink for the same saved error: read-aloud queues raw persisted assistant content. Share assistant summary/hint presentation between transcript and speech, preserve the conversation-name prefix and ordinary/user text, and add a failing activity-to-speech regression before rebuilding the corrected Chrome artifact.
 
 PR2934 Qodo findings 1, 3 and 5 follow-up: move optional catalog generation metadata parsing (including blank max_tokens omission) from the route to the existing core provider config resolution seam; preserve missing/blank/valid/invalid behavior and adjacent temperature/streaming metadata. Complete module/helper/test documentation and apply the unit marker to the optional-metadata regression module. Run marker-selected and adjacent catalog tests plus scoped Ruff/Black/Bandit. ADR required: no; this is a behavior-preserving core/endpoint boundary repair within the existing provider catalog and ADR-005 qualification scope. Preserve original receipts and append fresh follow-up evidence.
+
+2026-09-29 current-dev follow-up: pin 0da68530e80c713ed3a323a741998e1fed37e3e9, use owned disposable backend/WebUI profiles and mock-only generation. Trace any reproduced connection failure before editing production. Verify the supported quickstart transport, independent Buddy selection and artwork persistence across navigation through CUA, retain current screenshots and exact limits. No full sweep or uncoordinated physical voice capture. Existing ADR005 applies; no new ADR.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -62,12 +64,17 @@ PR2934 Qodo backend findings 1, 3 and 5 follow-up completed. Catalog generation 
 
 2026-09-10 follow-up published Trenchcoat imported via real authenticated HTTP worker, activated in WebUI, and copied independently by API. This exposed and repaired lost credits in TASK13242. Final HTTP export/reimport and actual Chatbook native importer pass. Native Chrome control blocked by Computer Use permissions; no installed-extension/terminal or physical voice qualification claimed. See Docs/Reviews/2026-09-10-buddy-followup.md; task remains open.
 
+2026-09-29 qualification on dev0da68530: reproduced workspace collection307 causing Buddy management to hide choices; TASK13395 repairs the single shared path and keeps redirect:error. Supported quickstart WebUI with disposable backend and pre-existing browser settings loaded all7 previews, selected independent Pixel Migu with Persona None, attached an API-seeded workspace, retained Static mode and visible Buddy after Chat-to-Watchlists navigation, then persisted Dynamic. Final targeted checks:37 domain contracts,13 redirect security,37 management components and1 route lifecycle passed. Cold compilation caused one5s component timeout; it passed2.2s after runtime stopped and the whole component pair passed. Baseline lint/format debt unchanged. Browser screenshots, source hashes, raw focused logs and precise limits retained in Docs/Reviews/2026-09-29-buddy-current-dev-qualification.md. No native installed-extension, upgraded WebUI, physical voice or live active-run claim; AC1 remains open. TASK13211 historical trigger remains unproven. Owned runtime processes stopped; user main checkouts untouched.
+2026-09-30: The workspace collection repair previously recorded here as TASK13395 is now TASK-13396 after its provisional ID collided with an unrelated RG task merged on dev. Original Buddy task history is retained and the RG record is untouched; current qualification report uses TASK-13396.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 
 <!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed

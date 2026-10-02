@@ -36,11 +36,12 @@ from tldw_Server_API.app.core.AuthNZ.crypto_utils import (
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
-from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, InvalidTokenError, TransactionError
+from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, InvalidTokenError
 from tldw_Server_API.app.core.AuthNZ.api_key_audit import (
     emit_mandatory_api_key_management_audit,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
+from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
@@ -994,9 +995,9 @@ class APIKeyManager:
                 old_key = await repo.fetch_key_for_user(key_id=key_id, user_id=user_id, conn=conn)
 
                 if not old_key:
-                    raise ValueError("API key not found or unauthorized")
+                    raise APIKeyRotationRejected()
                 if str(old_key.get("status") or "").lower() != APIKeyStatus.ACTIVE.value:
-                    raise ValueError("API key not found or unauthorized")
+                    raise APIKeyRotationRejected()
 
                 raw_allowed_ips = old_key.get("allowed_ips")
                 allowed_ips: Optional[list[str]] = None
@@ -1079,17 +1080,6 @@ class APIKeyManager:
             raise
         except MandatoryAuditWriteError:
             raise
-        except TransactionError as exc:
-            message = str(exc)
-            if (
-                "API key not found or inactive" in message
-                or "API key not found or unauthorized" in message
-            ):
-                raise ValueError("API key not found or unauthorized") from exc
-            logger.exception("Failed to rotate API key")
-            raise DatabaseError(
-                f"Failed to rotate API key {self._db_context_hint()}"
-            ) from exc
         except Exception as e:
             logger.exception("Failed to rotate API key")
             raise DatabaseError(

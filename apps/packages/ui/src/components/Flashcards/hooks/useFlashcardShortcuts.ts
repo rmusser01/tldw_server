@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from "react"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const RATING_MAP: Record<string, number> = {
   "1": 0, // Again
@@ -93,12 +94,7 @@ export function useFlashcardShortcuts({
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       // Don't trigger shortcuts when typing in inputs
-      const target = e.target as HTMLElement
-      if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
-      ) {
+      if (isEditableTarget(e.target)) {
         return
       }
 

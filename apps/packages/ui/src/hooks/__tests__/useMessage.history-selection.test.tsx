@@ -1,4 +1,5 @@
 import React from "react"
+import { getLatestChatErrorBannerEntry } from "@/components/Option/Playground/PlaygroundChatErrorBanner"
 import { act, render, renderHook, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -250,9 +251,11 @@ vi.mock("@/services/service-prompts", () => ({
 }))
 
 vi.mock("~/store/option", () => ({
-  useStoreMessageOption: (
-    selector?: (state: Record<string, unknown>) => unknown
-  ) => (selector ? selector(mocks.storeState) : mocks.storeState)
+  useStoreMessageOption: Object.assign(
+    (selector?: (state: Record<string, unknown>) => unknown) =>
+      selector ? selector(mocks.storeState) : mocks.storeState,
+    { getState: () => mocks.storeState, subscribe: () => () => {} }
+  )
 }))
 
 vi.mock("~/store", () => ({
@@ -819,6 +822,63 @@ const nativeAdmission = (request: any) => ({
   originating_selection_revision:
     request.tldw_history_selection_v1.selection_revision
 })
+
+it.each(["http502", "sse-afteradmission"])("native provider recovery for %s retains its receipt and exposes existing model settings", async failure => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  const safeMessage = "The selected provider credentials could not be authenticated."
+  h1.wire.mockImplementation(async function* (request) {
+    if (failure === "http502") throw Object.assign(new Error(safeMessage), {
+      status: 502, details: { detail: { error_code: "provider_authentication_failed", message: safeMessage } }
+    })
+    if (failure !== "sse-beforeadmission") yield { tldw_history_admission_v1: nativeAdmission(request) }
+    if (failure === "sse-afterpartial") yield { choices: [{ delta: { content: "partial result" } }] }
+    yield { error: { code: "provider_authentication_failed", message: safeMessage } }
+  })
+  const { result } = renderHook(() => useMessage())
+  await act(async () => { await result.current.onSubmit({ message: "next", image: "" }) })
+  const shown = mocks.setMessages.mock.lastCall?.[0]
+  const banner = getLatestChatErrorBannerEntry(shown)
+  expect(banner).toMatchObject({ summary: "Character chat model setup needs attention.", recoveryAction: "open-model-settings", category: "character_chat.provider_unconfigured" })
+  expect(banner!.detail).toContain("provider_authentication_failed")
+  expect(banner!.detail).toContain(safeMessage)
+  expect(shown.at(-1).id).toMatch(/^native-draft-/)
+  expect(shown.at(-1).serverMessageId).toBeUndefined()
+  expect(shown.filter((row: { isBot: boolean }) => !row.isBot).map((row: { message: string }) => row.message)).not.toContain("next")
+  const retained = h1.recover.mock.lastCall?.[2]
+  expect(retained).toMatchObject({ persistence: "server", state: failure === "sse-afterpartial" ? "generated_unsaved" : failure === "sse-afteradmission" ? "accepted_unsent" : "unknown", input_text: "next", result_text: failure === "sse-afterpartial" ? "partial result" : "" })
+  expect(retained.assistant_id).toBeUndefined()
+  if (failure === "http502" || failure === "sse-beforeadmission") expect(retained.admission).toBeUndefined()
+  else expect(retained.admission.input_message_id).toBe("native-input")
+  expect(h1.dismiss).not.toHaveBeenCalled()
+  expect(h1.controller.followResult).not.toHaveBeenCalled()
+  await expect(result.current.regenerateLastMessage()).rejects.toThrow("unsupported_history_regeneration")
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.append).not.toHaveBeenCalled()
+  expect(mocks.saveMessageOnSuccess).not.toHaveBeenCalled()
+  expect(mocks.saveMessageOnError).not.toHaveBeenCalled()
+})
+
+it.each(["navigation", "account"])("native provider recovery cannot overwrite a changed %s", async boundary => {
+  h1.native = true
+  mocks.storeState.serverChatCharacterId = "12"
+  mocks.storeState.serverChatAssistantKind = "character"
+  h1.wire.mockImplementation(async function* () {
+    if (boundary === "navigation") h1.controller.navigate()
+    else h1.auth.abort()
+    mocks.setMessages.mockClear()
+    yield { error: { code: "provider_authentication_failed", message: "Safe provider failure" } }
+  })
+  const { result } = renderHook(() => useMessage())
+  await act(async () => { await result.current.onSubmit({ message: "next", image: "" }) })
+  expect(mocks.setMessages).not.toHaveBeenCalled()
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.recover.mock.lastCall?.[2]).toMatchObject({ persistence: "server", state: "unknown", input_text: "next" })
+  expect(h1.recover.mock.lastCall?.[2].assistant_id).toBeUndefined()
+  expect(h1.controller.followResult).not.toHaveBeenCalled()
+})
+
 
 it("native before-first sends no historical content and retains unacknowledged text separately", async () => {
   h1.native = true

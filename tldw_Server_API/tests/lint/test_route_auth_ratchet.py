@@ -61,18 +61,32 @@ class _FakeDependant:
 
 
 @pytest.mark.unit
-def test_included_route_candidates_are_inspected_without_private_fastapi_type() -> None:
-    """Included routes remain visible on FastAPI versions without _IncludedRouter."""
+def test_routes_behind_nested_includes_are_inspected_with_include_time_auth() -> None:
+    """A route two include_router calls deep is seen at its served path, auth included.
 
-    class _Included:
-        def effective_candidates(self):
-            context = type(
-                "Context", (), {"path": "/included", "methods": {"GET"}, "dependant": None}
-            )
-            return [context()]
+    On FastAPI >= 0.137 a nested include is an opaque branch inside the outer one;
+    reading only the outer router's candidates hid every such route from the ratchet.
+    """
+    from fastapi import APIRouter, Depends, FastAPI
 
-    app = type("App", (), {"routes": [_Included()]})()
-    assert list(iter_routes(app)) == [("/included", ["GET"], None)]
+    def get_request_user() -> None:  # named like the real authenticator
+        return None
+
+    inner = APIRouter()
+
+    @inner.get("/leaf")
+    def leaf() -> None:
+        return None
+
+    middle = APIRouter()
+    middle.include_router(inner, prefix="/inner")
+    app = FastAPI()
+    app.include_router(middle, prefix="/api", dependencies=[Depends(get_request_user)])
+
+    routes = {path: dependant for path, _methods, dependant in iter_routes(app)}
+
+    assert "/api/inner/leaf" in routes
+    assert is_authenticated(routes["/api/inner/leaf"])
 
 
 def _named(qualname: str):

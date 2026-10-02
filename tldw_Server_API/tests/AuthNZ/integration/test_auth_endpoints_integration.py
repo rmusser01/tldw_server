@@ -187,34 +187,34 @@ class TestAuthEndpointsIntegration:
         app.dependency_overrides.clear()
 
     @pytest.mark.asyncio
-    async def test_login_inactive_account(self, mock_db_pool, password_service, inactive_user):
+    async def test_login_inactive_account(self, test_db_pool, inactive_user):
         """Test login with inactive account."""
-        inactive_user_copy = inactive_user.copy()
-        # Use a password that meets requirements
-        test_password = "Test@Pass#2024"
-        inactive_user_copy['password_hash'] = password_service.hash_password(test_password)
+        from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_login_db_connection
 
-        mock_db_pool.fetchrow = AsyncMock(return_value=inactive_user_copy)
+        assert test_db_pool.pool is not None
 
-        from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_db_transaction
-        app.dependency_overrides[get_db_transaction] = lambda: mock_db_pool
+        async def login_connection():
+            async with test_db_pool.acquire() as conn:
+                yield conn
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="http://test"
-        ) as client:
-            response = await client.post(
-                "/api/v1/auth/login",
-                data={
-                    "username": "inactiveuser",
-                    "password": test_password
-                }
-            )
+        app.dependency_overrides[get_login_db_connection] = login_connection
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test"
+            ) as client:
+                response = await client.post(
+                    "/api/v1/auth/login",
+                    data={
+                        "username": inactive_user["username"],
+                        "password": inactive_user["password"],
+                    }
+                )
 
-        assert response.status_code == 403
-        assert "Account is inactive" in response.json()["detail"]
-
-        app.dependency_overrides.clear()
+            assert response.status_code == 403
+            assert "Account is inactive" in response.json()["detail"]
+        finally:
+            app.dependency_overrides.clear()
 
     @pytest.mark.asyncio
     async def test_register_success(self, mock_db_pool, registration_service, monkeypatch):

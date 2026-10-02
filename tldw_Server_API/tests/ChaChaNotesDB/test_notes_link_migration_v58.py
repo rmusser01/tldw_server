@@ -5,7 +5,9 @@ from __future__ import annotations
 import inspect
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -57,32 +59,36 @@ OWNER = "owner-notes-link"
 CREATED_AT = "2026-08-10T12:00:00+00:00"
 
 
+@pytest.fixture(autouse=True)
+def _v59_migration_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise the v58 graph contract before unrelated later migrations."""
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 59)
+
+
 def _replace_with_v57_edge_table(
     db_path: Path,
     *,
     edge_rows: list[tuple[object, ...]],
     extra_notes: list[tuple[str, str]] | None = None,
 ) -> None:
-    """Create a genuine legacy edge table while retaining the current base schema."""
+    """Create a genuine v57 legacy edge table."""
 
     source_id = "11111111-1111-4111-8111-111111111111"
     target_id = "22222222-2222-4222-8222-222222222222"
-    db = CharactersRAGDB(str(db_path), client_id=OWNER)
+    with patch.object(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 57):
+        db = CharactersRAGDB(str(db_path), client_id=OWNER)
     try:
-        for note_id, title in [(source_id, "Source"), (target_id, "Target")]:
-            if db.get_note_by_id(note_id) is None:
-                db.add_note(title=title, content="Body", note_id=note_id)
-        for note_id, note_owner in extra_notes or []:
-            if db.get_note_by_id(note_id) is None:
-                db.add_note(title=note_id, content="Body", note_id=note_id)
-            with db.transaction() as conn:
-                conn.execute("UPDATE notes SET client_id = ? WHERE id = ?", (note_owner, note_id))
+        with db.transaction() as conn:
+            conn.executemany(
+                "INSERT INTO notes(id, title, content, client_id) VALUES (?, ?, 'Body', ?)",
+                [(source_id, "Source", OWNER), (target_id, "Target", OWNER)]
+                + [(note_id, note_id, note_owner) for note_id, note_owner in extra_notes or []],
+            )
     finally:
         db.close_connection()
 
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute("DROP TABLE note_attachments")
         conn.execute("DROP TABLE note_edges")
         conn.execute(
             """
@@ -107,10 +113,6 @@ def _replace_with_v57_edge_table(
         conn.executemany(
             "INSERT INTO note_edges VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             edge_rows,
-        )
-        conn.execute(
-            "UPDATE db_schema_version SET version = 57 WHERE schema_name = ?",
-            (CharactersRAGDB._SCHEMA_NAME,),
         )
 
 
@@ -140,7 +142,7 @@ def test_sqlite_v57_to_v58_normalizes_legacy_link_and_installs_graph_state(
     migrated = CharactersRAGDB(str(db_path), client_id=OWNER)
     try:
         with migrated.transaction() as conn:
-            assert migrated._get_db_version(conn) == 59
+            assert migrated._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
             row = conn.execute("SELECT * FROM note_edges").fetchone()
             assert row["label"] == "Related"
             assert json.loads(row["properties"]) == {"context": {"kind": "research"}}
@@ -230,7 +232,7 @@ def test_sqlite_v57_to_v58_normalizes_legacy_link_and_installs_graph_state(
     reopened = CharactersRAGDB(str(db_path), client_id=OWNER)
     try:
         with reopened.transaction() as conn:
-            assert reopened._get_db_version(conn) == 59
+            assert reopened._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
             assert conn.execute("SELECT COUNT(*) FROM note_edges").fetchone()[0] == 1
     finally:
         reopened.close_connection()
@@ -242,45 +244,13 @@ def test_sqlite_v57_to_v58_queues_existing_notes_for_projection_rebuild(
     db_path = tmp_path / "notes-link-v57-existing-notes.sqlite"
     source_id = "11111111-1111-4111-8111-111111111111"
     target_id = "22222222-2222-4222-8222-222222222222"
-    db = CharactersRAGDB(str(db_path), client_id=OWNER)
-    try:
-        db.add_note("Source", f"[[id:{target_id}]]", note_id=source_id)
-        db.add_note("Target", "Body", note_id=target_id)
-    finally:
-        db.close_connection()
-
-    with sqlite3.connect(db_path) as conn:
-        for trigger_name in (
-            "notes_graph_notes_ai",
-            "notes_graph_notes_au",
-            "notes_graph_notes_ad",
-            "notes_graph_edges_ai",
-            "notes_graph_edges_au",
-            "notes_graph_edges_ad",
-            "notes_graph_keywords_ai",
-            "notes_graph_keywords_au",
-            "notes_graph_keywords_ad",
-            "notes_graph_note_keywords_ai",
-            "notes_graph_note_keywords_au",
-            "notes_graph_note_keywords_ad",
-            "notes_graph_conversations_ai",
-            "notes_graph_conversations_au",
-            "notes_graph_conversations_ad",
-        ):
-            conn.execute(f"DROP TRIGGER IF EXISTS {trigger_name}")  # nosec B608
-        for table_name in (
-            "note_attachments",
-            "note_wikilink_edges",
-            "note_graph_note_state",
-            "note_graph_dirty",
-            "note_graph_projection_state",
-            "note_graph_revisions",
-        ):
-            conn.execute(f"DROP TABLE IF EXISTS {table_name}")  # nosec B608
-        conn.execute(
-            "UPDATE db_schema_version SET version = 57 WHERE schema_name = ?",
+    _replace_with_v57_edge_table(db_path, edge_rows=[])
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.execute("UPDATE notes SET content = ? WHERE id = ?", (f"[[id:{target_id}]]", source_id))
+        assert conn.execute(
+            "SELECT version FROM db_schema_version WHERE schema_name = ?",
             (CharactersRAGDB._SCHEMA_NAME,),
-        )
+        ).fetchone()[0] == 57
 
     migrated = CharactersRAGDB(str(db_path), client_id=OWNER)
     try:
@@ -530,7 +500,7 @@ def test_sqlite_fresh_schema_is_current_and_canonical(tmp_path: Path) -> None:
     db = CharactersRAGDB(str(tmp_path / "fresh-current.sqlite"), client_id=OWNER)
     try:
         with db.transaction() as conn:
-            assert db._get_db_version(conn) == 59
+            assert db._get_db_version(conn) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
             columns = {row[1] for row in conn.execute("PRAGMA table_info(note_edges)").fetchall()}
             assert {
                 "label",

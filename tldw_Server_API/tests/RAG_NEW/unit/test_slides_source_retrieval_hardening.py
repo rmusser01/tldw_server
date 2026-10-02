@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
@@ -627,3 +629,32 @@ async def test_direct_locked_retrievers_reject_invalid_budget_before_query(
         )
 
     adapter.execute_query.assert_not_called()
+
+
+@pytest.mark.integration
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_locked_notes_postgres_executes_search_and_bounded_owned_projection(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    """Run the interpolated Notes query and its owner filter on actual PostgreSQL."""
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(db_path=":memory:", client_id="owner-1", backend=backend)
+    try:
+        db.add_note(title="Quarterly report", content="Observatory evidence", note_id="report-1")
+        notes = database_retrievers.NotesDBRetriever(None, chacha_db=db)
+        documents = await notes.retrieve_slides_source_documents_v1(
+            query="quarterly report",
+            owner_user_id="owner-1",
+            max_source_chars=500,
+            top_k=1,
+        )
+        assert [(document.id, document.content) for document in documents] == [
+            ("note_report-1", "# Quarterly report\n\nObservatory evidence")
+        ]
+        assert await notes.retrieve_slides_source_candidates_v1(
+            query="quarterly report", owner_user_id="other-owner", top_k=1
+        ) == []
+    finally:
+        db.close_connection()
+        backend.get_pool().close_all()

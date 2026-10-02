@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+import inspect
 import json
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import BackgroundTasks, HTTPException, Response
 from starlette.responses import JSONResponse
 
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.core.exceptions import ResearchDiscoveryValidationError
 from tldw_Server_API.app.core.Research.discovery.selection import ResolvedDiscoverySelection
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.integration
 
@@ -391,6 +393,7 @@ async def test_media_add_route_branches_before_normal_persistence(monkeypatch):
 
     response = await add_endpoint.add_media(
         request=SimpleNamespace(),
+        response=Response(),
         background_tasks=BackgroundTasks(),
         form_data=_form(),
         files=None,
@@ -418,6 +421,7 @@ async def test_media_add_route_leaves_normal_url_persistence_unchanged(monkeypat
 
     response = await add_endpoint.add_media(
         request=SimpleNamespace(),
+        response=Response(),
         background_tasks=BackgroundTasks(),
         form_data=form,
         files=None,
@@ -435,7 +439,13 @@ def test_media_add_route_preserves_existing_dependency_guards():
 
     route = next(route for route in add_endpoint.router.routes if route.path == "/add")
 
-    assert len(route.dependencies) == 5
+    guards = [dependency.dependency for dependency in route.dependencies]
+    assert len(guards) == 8
+    assert guards[0] is add_endpoint.require_expected_user
+    assert inspect.getclosurevars(guards[1]).nonlocals["perms"] == [add_endpoint.MEDIA_CREATE]
+    assert inspect.getclosurevars(guards[2]).nonlocals["required_scopes"] == frozenset({"write"})
+    assert guards[4] is add_endpoint.select_content_org
+    assert guards[5] is add_endpoint.guard_storage_quota
 
 
 @pytest.mark.asyncio
@@ -450,6 +460,7 @@ async def test_media_add_route_maps_discovery_validation_to_422(monkeypatch):
     with pytest.raises(HTTPException) as exc_info:
         await add_endpoint.add_media(
             request=SimpleNamespace(),
+            response=Response(),
             background_tasks=BackgroundTasks(),
             form_data=_form(),
             files=None,
@@ -465,4 +476,4 @@ async def test_media_add_route_maps_discovery_validation_to_422(monkeypatch):
 def test_no_research_discovery_ingest_route_exists():
     from tldw_Server_API.app.main import app
 
-    assert "/api/v1/research/discovery/ingest" not in {route.path for route in app.routes}
+    assert "/api/v1/research/discovery/ingest" not in {route.path for route in iter_served_routes(app.routes)}

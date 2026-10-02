@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useCallback, useRef } from "react"
+import { isEditableTarget } from "@/utils/editable-target"
 
 /**
  * Platform-aware keyboard shortcut system.
@@ -133,20 +134,6 @@ export function matchesShortcut(
 }
 
 /**
- * Check if event target is an input element
- */
-function isInputElement(target: EventTarget | null): boolean {
-  if (!target || !(target instanceof HTMLElement)) return false
-  const tagName = target.tagName.toLowerCase()
-  return (
-    tagName === "input" ||
-    tagName === "textarea" ||
-    tagName === "select" ||
-    target.isContentEditable
-  )
-}
-
-/**
  * Hook to register a single keyboard shortcut
  */
 export function useShortcut(
@@ -165,7 +152,7 @@ export function useShortcut(
 
     const handler = (event: KeyboardEvent) => {
       // Skip if in input and not allowed
-      if (!shortcut.allowInInput && isInputElement(event.target)) {
+      if (!shortcut.allowInInput && isEditableTarget(event.target)) {
         return
       }
 
@@ -219,7 +206,7 @@ export function useShortcuts(shortcuts: Shortcut[], scope?: string) {
         }
 
         // Skip if in input and not allowed
-        if (!shortcut.allowInInput && isInputElement(event.target)) {
+        if (!shortcut.allowInInput && isEditableTarget(event.target)) {
           continue
         }
 

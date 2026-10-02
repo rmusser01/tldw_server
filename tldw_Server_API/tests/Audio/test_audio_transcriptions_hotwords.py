@@ -155,15 +155,17 @@ def _setup_stubbed_audio_app(
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
 
     from types import SimpleNamespace
+
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio as audio_ep
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter as stt_adapter
     from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
         get_auth_principal,
         get_db_transaction,
     )
+    from tldw_Server_API.app.api.v1.API_Deps.billing_deps import get_billing_org_id
     from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-    import tldw_Server_API.app.api.v1.endpoints.audio.audio as audio_ep
-    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
-    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter as stt_adapter
 
     captured: dict[str, list[str] | None] = {"hotwords": None}
 
@@ -244,6 +246,7 @@ def _setup_stubbed_audio_app(
     app.dependency_overrides[get_request_user] = _fake_get_request_user
     app.dependency_overrides[get_auth_principal] = _fake_get_auth_principal
     app.dependency_overrides[get_db_transaction] = _fake_get_db_transaction
+    app.dependency_overrides[get_billing_org_id] = lambda: None
     app.include_router(audio_router, prefix="/api/v1/audio")
     return app, captured
 
@@ -251,6 +254,7 @@ def _setup_stubbed_audio_app(
 @pytest.mark.unit
 def test_audio_transcriptions_sanitizes_shim_lookup_logs(monkeypatch):
     import builtins
+
     import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
 
     class _KwargLoggerStub:
@@ -284,7 +288,10 @@ def test_audio_transcriptions_sanitizes_shim_lookup_logs(monkeypatch):
         logger_stub = _KwargLoggerStub()
         monkeypatch.setattr(audio_tx, "logger", logger_stub)
 
-        def _raising_import(name, globals=None, locals=None, fromlist=(), level=0):
+        def _raising_import(
+            name, globals=None, locals=None, fromlist=(), level=0,
+            package_error=package_error, module_error=module_error,
+        ):
             if name == "tldw_Server_API.app.api.v1.endpoints" and "audio" in fromlist:
                 raise package_error
             if name == "tldw_Server_API.app.api.v1.endpoints.audio" and "audio" in fromlist:
@@ -390,9 +397,9 @@ def test_audio_transcriptions_sanitizes_billing_recheck_fail_open_log(
     bypass_api_limits,
 ):
     app, _captured = _setup_stubbed_audio_app(monkeypatch)
-    from tldw_Server_API.app.api.v1.API_Deps.billing_deps import get_billing_org_id
     import tldw_Server_API.app.api.v1.endpoints.audio as audio_pkg
     import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
+    from tldw_Server_API.app.api.v1.API_Deps.billing_deps import get_billing_org_id
 
     logger_stub = _LoggerStub()
     app.dependency_overrides[get_billing_org_id] = lambda: 123
@@ -588,14 +595,20 @@ def test_audio_transcriptions_sanitizes_heartbeat_task_start_failure_log(
             return lambda: 10
         return original_shim_attr(name)
 
-    def _raise_create_task(coro):
+    real_create_task = audio_tx.asyncio.create_task
+
+    # audio_tx.asyncio is the global asyncio module, so only fail the heartbeat
+    # loop; other tasks (e.g. the AuthNZ DB pool used by billing deps) must run.
+    def _raise_create_task(coro, *args, **kwargs):
+        if getattr(coro, "__name__", "") != "_hb_loop":
+            return real_create_task(coro, *args, **kwargs)
         coro.close()
         raise RuntimeError("heartbeat task leaked /private/rg-task")
 
     monkeypatch.setattr(audio_tx, "_audio_shim_attr", _shim_attr)
-    monkeypatch.setattr(audio_tx.asyncio, "create_task", _raise_create_task)
 
     with bypass_api_limits(app), TestClient(app) as client:
+        monkeypatch.setattr(audio_tx.asyncio, "create_task", _raise_create_task)
         wav_bytes = _make_wav_bytes()
         headers = {"X-API-KEY": TEST_API_KEY}
         files = {"file": ("sample.wav", io.BytesIO(wav_bytes), "audio/wav")}

@@ -72,6 +72,22 @@ def _file_policy_metadata(action: str) -> dict[str, str]:
     }
 
 
+# Arguments that carry file content verbatim and must never be sanitized: they are
+# written to disk byte-for-byte, or matched against bytes already there. The base
+# sanitizer strips the remaining control characters, and "\x0b"/"\x0c" are legitimate
+# in real source files -- a form feed is the conventional page separator in Python,
+# Lisp and C, and fs.write silently dropped it while fs.edit's strings were exempt.
+# Stripping either corrupts the file and still reports success, because the
+# expected_sha256 receipt hashes the on-disk pre-image rather than what we wrote.
+# fs.patch is handled separately: its "diff" goes through _sanitize_patch_diff.
+_VERBATIM_ARGS: dict[str, frozenset[str]] = {
+    "fs.edit": frozenset({"old_string", "new_string"}),
+    "fs.write": frozenset({"content"}),
+    "fs.write_text": frozenset({"content"}),
+    "notebook.edit_cell": frozenset({"source"}),
+}
+
+
 class FilesystemModule(BaseModule):
     """Workspace-scoped text filesystem primitives."""
 
@@ -604,31 +620,24 @@ class FilesystemModule(BaseModule):
             grep_tool,
         ]
 
+    def verbatim_argument_keys(self, tool_name: str | None) -> frozenset[str]:
+        """File-content arguments the upstream hardening pass must not strip (TASK-13294)."""
+        return _VERBATIM_ARGS.get(tool_name or "", frozenset())
+
     async def execute_tool(self, tool_name: str, arguments: dict[str, Any], context: Any | None = None) -> Any:
-        # The per-key exemptions below do not protect what they name on the production
-        # path: tool_execution/security.py:harden_and_sanitize_tool_arguments already
-        # called self.sanitize_input(arguments) unconditionally before execute_tool was
-        # reached, so old_string/new_string/source/diff arrive already stripped and
-        # exempting them from a second, idempotent pass changes nothing. They cannot be
-        # made to work from here -- sanitize_input receives the whole dict with no tool
-        # name, so the upstream pass has no way to know which keys this tool exempts.
-        # Left in place rather than deleted: the intent (byte-preserve exact-match
-        # strings) is right, and honouring it means threading tool_name through
-        # sanitize_input across all 22 inheriting modules. TASK-13294 AC#6.
+        # The upstream hardening pass honours the same _VERBATIM_ARGS table through
+        # verbatim_argument_keys, so these values arrive byte-exact; this local pass
+        # covers direct callers of execute_tool that skip the protocol.
         raw_args = arguments or {}
-        if tool_name == "fs.edit":
-            args = {
-                key: value if key in {"old_string", "new_string"} else self.sanitize_input(value)
-                for key, value in raw_args.items()
-            }
-        elif tool_name == "notebook.edit_cell":
-            args = {
-                key: value if key == "source" else self.sanitize_input(value)
-                for key, value in raw_args.items()
-            }
-        elif tool_name == "fs.patch":
+        verbatim = _VERBATIM_ARGS.get(tool_name, frozenset())
+        if tool_name == "fs.patch":
             args = {
                 key: self._sanitize_patch_diff(value) if key == "diff" else self.sanitize_input(value)
+                for key, value in raw_args.items()
+            }
+        elif verbatim:
+            args = {
+                key: value if key in verbatim else self.sanitize_input(value)
                 for key, value in raw_args.items()
             }
         else:
@@ -2638,11 +2647,14 @@ class FilesystemModule(BaseModule):
             existing_mode = stat_module.S_IMODE(target.stat(follow_symlinks=False).st_mode)
         fd, tmp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
         tmp_path = Path(tmp_name)
+        fchmod = getattr(os, "fchmod", None)
         try:
             with os.fdopen(fd, "wb") as handle:
-                if existing_mode is not None:
-                    os.fchmod(handle.fileno(), existing_mode)
+                if existing_mode is not None and fchmod is not None:
+                    fchmod(handle.fileno(), existing_mode)
                 handle.write(text.encode("utf-8"))
+            if existing_mode is not None and fchmod is None:
+                os.chmod(tmp_path, existing_mode)
             os.replace(tmp_path, target)
         finally:
             with suppress(OSError):

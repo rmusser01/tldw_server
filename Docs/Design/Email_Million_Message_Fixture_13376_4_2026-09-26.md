@@ -1,0 +1,9 @@
+# Bounded million-message fixture (TASK-13376.4)
+
+Seed fresh synthetic databases through a DB_Management helper with bounded batches. Require tenant `email-benchmark:<scope-user-id>` and an empty Media/email schema. Create deterministic subjects, bodies, sender/recipient pools, labels and attachment metadata; dates span the preceding 365 days. Insert both legacy Media/DocumentVersions and native email source/message/participant/label/attachment records. Keep indexes and canonical full-text maintenance active. Normal production ingestion is verified separately; seed rate is never reported as archive ingestion throughput.
+
+The CLI selects bulk setup explicitly, keeps existing ingestion setup as default, reports loader/seed/duration, and fails closed against nonempty targets. Batches preserve atomicity; interrupted setup requires a new disposable database. Parameterized SQL stays within DB_Management. Validate schema/search/detail parity and tenant isolation on small fixtures before actual scale runs. Record ten operator classes with cold connection reopen and 3 warmups/20 measured runs at limit50. Monitor disk and clean SQLite before PostgreSQL.
+
+## Legacy full-text validation
+
+A real legacy title/body query exposed that SQLite Media FTS is explicitly maintained by the normal API, rather than populated by Media insert triggers. The bulk loader now calls the canonical FTS updater within each bounded batch. PostgreSQL retains its automatic vector trigger. The final security/parity certificate also requires every fixture body to match the legacy full-text token `benchmark`; missing indexes therefore reject the certificate. Native search timings are measured after complete setup. The earlier SQLite native-only certificate is historical and superseded by the final complete-fixture run.

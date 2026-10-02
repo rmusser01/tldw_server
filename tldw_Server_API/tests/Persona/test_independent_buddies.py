@@ -50,6 +50,17 @@ def _create(client, **updates):
     return response.json()
 
 
+def _seed_v65_conversation(database: CharactersRAGDB, title: str) -> str:
+    """Insert a row using only columns that existed in the v65 schema."""
+    conversation_id = "retained-v65"
+    with database.transaction() as conn:
+        conn.execute(
+            "INSERT INTO conversations (id, root_id, title, client_id) VALUES (?, ?, ?, ?)",
+            (conversation_id, conversation_id, title, database.client_id),
+        )
+    return conversation_id
+
+
 def _persona(db, user_id="1", persona_id="source-persona"):
     character_id = db.add_character_card(
         {"name": f"Source {persona_id}", "description": "Test source", "system_prompt": "Be clear."}
@@ -73,7 +84,7 @@ def test_v65_database_upgrade_preserves_conversation_and_adds_independent_storag
     with monkeypatch.context() as patch:
         patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 65)
         database = CharactersRAGDB(path, "1")
-        conversation_id = database.add_conversation({"title": "Keep this", "client_id": "1"})
+        conversation_id = _seed_v65_conversation(database, "Keep this")
         database.close_connection()
     with monkeypatch.context() as patch:
         patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 66)
@@ -190,7 +201,7 @@ def test_postgres_v65_upgrade_installs_buddy_storage_and_forced_tenant_policies(
         patch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 65)
         database = CharactersRAGDB(":memory:", client_id="1", backend=backend)
     try:
-        conversation_id = database.add_conversation({"title": "Retained", "client_id": "1"})
+        conversation_id = _seed_v65_conversation(database, "Retained")
         with monkeypatch.context() as patch:
             patch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 66)
             database._initialize_schema_postgres()

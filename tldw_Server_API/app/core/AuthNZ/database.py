@@ -57,7 +57,11 @@ from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statement
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection_async,
 )
-from tldw_Server_API.app.core.exceptions import TransactionPassthroughError
+from tldw_Server_API.app.core.exceptions import (
+    SchemaReadinessError,
+    TransactionPassthroughError,
+    exception_type_chain,
+)
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime, is_test_mode
 
 _AUTHNZ_DB_NONCRITICAL_EXCEPTIONS = (
@@ -348,7 +352,7 @@ def build_postgres_in_clause(values: list, start_param: int = 1) -> tuple[str, l
 
     Returns:
         Tuple of (placeholders_string, values_list) where:
-        - placeholders_string: e.g., "$1,$2,$3" for 3 values starting at 1
+        - placeholders_string: e.g., "$1, $2, $3" for 3 values starting at 1
         - values_list: list of the values for parameter binding
 
     Raises:
@@ -357,18 +361,20 @@ def build_postgres_in_clause(values: list, start_param: int = 1) -> tuple[str, l
     Example:
         >>> placeholders, params = build_postgres_in_clause(['a', 'b', 'c'])
         >>> query = f"SELECT * FROM table WHERE col IN ({placeholders})"
-        >>> # query = "SELECT * FROM table WHERE col IN ($1,$2,$3)"
+        >>> # query = "SELECT * FROM table WHERE col IN ($1, $2, $3)"
         >>> # params = ['a', 'b', 'c']
         >>> conn.fetch(query, *params)
 
         >>> # With offset for additional parameters
         >>> placeholders, params = build_postgres_in_clause(['x', 'y'], start_param=3)
-        >>> # placeholders = "$3,$4", params = ['x', 'y']
+        >>> # placeholders = "$3, $4", params = ['x', 'y']
     """
     if not values:
         raise ValueError("Cannot build IN clause for empty values list")
     # Generate only '$N' placeholders - never include actual values in SQL string
-    placeholders = ",".join(f"${i}" for i in range(start_param, start_param + len(values)))
+    # Keep the space: sqlglot (used by profile_user_write_guard) cannot tokenize
+    # adjacent "$1,$2", and an unparseable statement is rejected fail-closed.
+    placeholders = ", ".join(f"${i}" for i in range(start_param, start_param + len(values)))
     return placeholders, list(values)
 
 
@@ -1114,7 +1120,10 @@ class DatabasePool:
                 backend="postgres",
                 operation="authnz_schema_readiness",
                 exception_type=type(exc).__name__,
-            ).error("PostgreSQL AuthNZ schema readiness failed")
+            ).error(
+                "PostgreSQL AuthNZ schema readiness failed{}",
+                f": {exc}" if isinstance(exc, SchemaReadinessError) else "",
+            )
             raise DatabaseError(
                 "PostgreSQL AuthNZ schema readiness failed"
             ) from None
@@ -1305,12 +1314,23 @@ class DatabasePool:
             ):
                 raise DatabaseConcurrencyConflict() from None
             if isinstance(primary_failure, Exception):
+                # The TransactionError below is raised outside any except block, so
+                # nothing downstream can recover the cause; this line must carry it.
                 logger.bind(
                     backend="postgresql",
                     operation=failure_operation,
                     error_type=type(primary_failure).__name__,
-                ).error("PostgreSQL transaction failed")
-                raise TransactionError("PostgreSQL transaction") from None
+                ).error(
+                    "PostgreSQL transaction failed: cause={}",
+                    exception_type_chain(primary_failure),
+                )
+                # Readiness reasons are fixed text; any other message may carry row data.
+                reason = (
+                    str(primary_failure)
+                    if isinstance(primary_failure, SchemaReadinessError)
+                    else None
+                )
+                raise TransactionError("PostgreSQL transaction", reason) from None
             raise primary_failure from None
 
         conn = None
@@ -1375,11 +1395,13 @@ class DatabasePool:
         ):
             raise DatabaseLockError() from None
         if isinstance(failure, Exception):
+            # Type chain in the message text: the TransactionError below drops the
+            # cause (`from None`) and bound extras are not printed by the CI log format.
             logger.bind(
                 backend="sqlite",
                 operation=failure_operation,
                 error_type=type(failure).__name__,
-            ).error("SQLite transaction failed")
+            ).error("SQLite transaction failed: cause={}", exception_type_chain(failure))
             raise TransactionError("SQLite transaction") from None
         raise failure from None
 
@@ -1575,6 +1597,12 @@ class DatabasePool:
                 cursor = await conn.execute(q, tuple(params))
                 row = await cursor.fetchone()
                 return row[0] if row else None
+
+    async def sqlite_has_table(self, name: str) -> bool:
+        """Whether a SQLite AuthNZ database has this table (always False on PostgreSQL)."""
+        if self.pool is not None:
+            return False
+        return await self.fetchval("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?", name) is not None
 
     @asynccontextmanager
     async def acquire_openai_credential_lock_connection(

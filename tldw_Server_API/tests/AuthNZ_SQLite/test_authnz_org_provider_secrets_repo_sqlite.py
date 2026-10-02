@@ -402,6 +402,41 @@ async def test_shared_fetch_rejects_conflicting_legacy_aliases(shared_repo_state
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scope_type", ["team", "org"])
+async def test_shared_upsert_rejects_conflicting_legacy_aliases(shared_repo_state, scope_type):
+    """The conflict raised inside the write transaction reaches the caller as itself.
+
+    The AuthNZ transaction wrapper sanitizes ordinary exceptions to TransactionError
+    and drops the cause, so the error must be a TransactionPassthroughError.
+    """
+    from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+        ProviderCredentialAliasConflictError,
+    )
+
+    state, repo = shared_repo_state
+    scope_id = _scope_id(state, scope_type)
+    for provider in ("custom-openai", "openai-compatible"):
+        await _insert_shared_row(
+            state["pool"],
+            scope_type=scope_type,
+            scope_id=scope_id,
+            provider=provider,
+            encrypted_blob=provider,
+        )
+
+    with pytest.raises(ProviderCredentialAliasConflictError):
+        await repo.upsert_secret(
+            scope_type=scope_type,
+            scope_id=scope_id,
+            provider="custom-openai-api",
+            encrypted_blob="write",
+            key_hint="write",
+            metadata=None,
+            updated_at=datetime.now(timezone.utc),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_type", ["team", "org"])
 async def test_revoked_canonical_shared_row_blocks_active_legacy_alias(shared_repo_state, scope_type):
     state, repo = shared_repo_state
     scope_id = _scope_id(state, scope_type)

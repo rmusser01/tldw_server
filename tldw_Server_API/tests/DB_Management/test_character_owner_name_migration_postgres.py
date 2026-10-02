@@ -81,7 +81,8 @@ def test_real_v67_upgrade_preserves_rows_and_scopes_only_the_name_key(real_v67, 
         assert _rows(backend) == before
         assert _version(backend) == 68
         assert _name_constraints(backend) == [{"columns": ["client_id", "name"]}]
-        assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 69  # Independent SQLite history-projection schema.
+        # Independent SQLite ladder (history projection v69, since advanced to 73 by 76c5167b35 and later).
+        assert CharactersRAGDB._CURRENT_SCHEMA_VERSION >= 69
     finally:
         upgraded.close_all_connections()
 

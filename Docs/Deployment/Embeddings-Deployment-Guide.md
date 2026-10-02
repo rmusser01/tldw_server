@@ -96,7 +96,7 @@ export EMBEDDINGS_RATE_LIMIT=on   # Uses built-in limit in the API endpoint
 
 ### Dockerfile (API)
 ```dockerfile
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 

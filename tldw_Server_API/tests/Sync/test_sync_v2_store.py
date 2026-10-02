@@ -278,6 +278,13 @@ class _PostgresPersonalContextReceiptBackend:
                         "profile_id": "profile-1",
                         "integrity_key_id": integrity_key_id,
                         "purge_generation": 0,
+                        # complete_personal_context_link_receipt requires link_state to
+                        # be bootstrap_pending or complete (Sync_DB.py:3972). This row
+                        # predates that requirement and carried no link_state at all,
+                        # so every receipt raised personal_context_link_binding_stale.
+                        # bootstrap_pending is the pre-receipt state; the receipt is
+                        # what advances it.
+                        "link_state": "bootstrap_pending",
                     }
                 }
             ),

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 from pathlib import Path
+from unittest.mock import patch
 from uuid import UUID, uuid1, uuid4
 
 import pytest
@@ -30,18 +31,24 @@ def _replacement_note_id(clip_id: str) -> str:
 
 
 def _build_v55_fixture(db_path: Path) -> tuple[str, str]:
-    db = CharactersRAGDB(str(db_path), client_id="web-clipper-v55-fixture")
+    with patch.object(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 55):
+        db = CharactersRAGDB(str(db_path), client_id="web-clipper-v55-fixture")
     canonical_id = str(uuid4())
     try:
-        db.upsert_workspace("ws-1", "Workspace")
-        for note_id in ("clip-legacy", canonical_id):
-            db.add_note(title=note_id, content="Body", note_id=note_id)
+        with db.transaction() as conn:
+            conn.execute(
+                "INSERT INTO workspaces(id,name,client_id) VALUES ('ws-1','Workspace',?)",
+                ("web-clipper-v55-fixture",),
+            )
+            conn.executemany(
+                "INSERT INTO notes(id,title,content,client_id) VALUES (?,?,'Body',?)",
+                [(note_id, note_id, "web-clipper-v55-fixture") for note_id in ("clip-legacy", canonical_id)],
+            )
     finally:
         db.close_connection()
 
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA foreign_keys = OFF")
-        conn.execute("DROP TABLE note_attachments")
         conn.execute("DROP TABLE note_clipper_workspace_placements")
         conn.execute("DROP TABLE note_clipper_documents")
         conn.execute(
@@ -92,10 +99,6 @@ def _build_v55_fixture(db_path: Path) -> tuple[str, str]:
               clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version
             ) VALUES ('clip-legacy', 'ws-1', 7, 'clip-legacy', 1)
             """
-        )
-        conn.execute(
-            "UPDATE db_schema_version SET version = 55 WHERE schema_name = ?",
-            (CharactersRAGDB._SCHEMA_NAME,),
         )
     return "clip-legacy", canonical_id
 

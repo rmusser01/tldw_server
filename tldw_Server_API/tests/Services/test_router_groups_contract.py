@@ -22,6 +22,7 @@ from tldw_Server_API.app.api.v1.router_groups.core import iter_core_router_specs
 from tldw_Server_API.app.api.v1.router_groups.spec import RouterSpec
 from tldw_Server_API.app.api.v1.router_registry import register_router_specs
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.unit
 
@@ -355,7 +356,7 @@ def _install_fake_router_module(
 def _first_router_path(router: APIRouter | Callable[[], APIRouter]) -> str:
     if not isinstance(router, APIRouter):
         router = router()
-    for route in router.routes:
+    for route in iter_served_routes(router.routes):
         route_path = getattr(route, "path", None)
         if route_path is not None:
             return str(route_path)
@@ -662,7 +663,7 @@ def test_append_imported_router_spec_defers_module_import_until_registration(
     enabled_app = FastAPI()
     assert register_router_specs(enabled_app, specs) == 1
     assert import_count == 1
-    assert "/api/v1/policy-gated" in {route.path for route in enabled_app.routes}
+    assert "/api/v1/policy-gated" in {route.path for route in iter_served_routes(enabled_app.routes)}
 
 
 def test_append_imported_router_spec_skips_optional_import_error_at_registration(
@@ -1415,7 +1416,7 @@ def test_iter_core_router_specs_raises_crashing_chat_import(
     with pytest.raises(RuntimeError, match="chat loop crashed during import"):
         register_router_specs(app, chat_specs)
 
-    chat_paths = {route.path for route in app.routes}
+    chat_paths = {route.path for route in iter_served_routes(app.routes)}
 
     assert "/api/v1/chat/chat/completions" in chat_paths
     assert "/api/v1/chats/conversations" not in chat_paths
@@ -1444,7 +1445,7 @@ def test_register_router_specs_respects_route_policy(monkeypatch: pytest.MonkeyP
     )
 
     assert count == 0
-    assert "/api/v1/health" not in {route.path for route in app.routes}
+    assert "/api/v1/health" not in {route.path for route in iter_served_routes(app.routes)}
 
 
 def test_register_router_specs_resolves_lazy_router_after_route_policy(
@@ -1484,7 +1485,7 @@ def test_register_router_specs_resolves_lazy_router_after_route_policy(
     assert disabled_count == 0
     assert enabled_count == 1
     assert calls == 1
-    assert "/api/v1/lazy" in {route.path for route in app.routes}
+    assert "/api/v1/lazy" in {route.path for route in iter_served_routes(app.routes)}
 
 
 def test_register_router_specs_raises_unexpected_resolution_failures(
@@ -1577,7 +1578,7 @@ def test_register_router_specs_fails_closed_when_route_policy_errors(
     )
 
     assert count == 0
-    assert "/api/v1/guarded" not in {route.path for route in app.routes}
+    assert "/api/v1/guarded" not in {route.path for route in iter_served_routes(app.routes)}
 
 
 def test_register_router_specs_deduplicates_factory_routers_by_stable_identity(
@@ -1604,7 +1605,7 @@ def test_register_router_specs_deduplicates_factory_routers_by_stable_identity(
     assert register_router_specs(app, [spec]) == 1
     assert register_router_specs(app, [spec]) == 0
     assert calls == 1
-    assert [route.path for route in app.routes].count("/api/v1/factory") == 1
+    assert [route.path for route in iter_served_routes(app.routes)].count("/api/v1/factory") == 1
 
 
 def test_iter_core_router_specs_populates_expected_specs(monkeypatch: pytest.MonkeyPatch) -> None:

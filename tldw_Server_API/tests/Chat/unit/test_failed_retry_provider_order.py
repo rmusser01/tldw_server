@@ -29,9 +29,11 @@ class SavedDB(DummyChatDB):
     def get_message_metadata(self, message_id):
         return {"extra": {"client_message_id": "retry-turn"}} if message_id == "failed" else {}
 
-    def get_persona_profile(self, _id, *, user_id):
+    def get_persona_profile(self, _id, *, user_id, include_deleted=False):
+        """Supply the owned active profile required before retry generation."""
         assert user_id == "client"
-        return {"id": "persona", "name": "Persona", "system_prompt": "Be helpful."}
+        return {"id": "persona", "user_id": "client", "is_active": True,
+                "name": "Persona", "system_prompt": "Be helpful."}
 
 
 def records_for_retry():

@@ -28,7 +28,7 @@ import time
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from jose import jwt as jose_jwt
@@ -457,7 +457,29 @@ class SessionManager:
         return key_bytes
 
     def _derive_secret_key_candidates(self) -> list[bytes]:
-        """Derive deterministic Fernet keys from configured secret material."""
+        """Derive deterministic Fernet keys from configured secret material.
+
+        Current keys come from crypto_utils.derive_hmac_key_candidates, the one
+        AuthNZ KDF, so source selection, salting and the production guard cannot
+        drift from JWT/API-key/CSRF. The older session-only derivation (static salt,
+        600k rounds, raw SINGLE_USER_API_KEY) follows as trailing rotation candidates
+        so sessions encrypted before the switch still decrypt.
+        """
+        try:
+            canonical = derive_hmac_key_candidates(self.settings)
+        except ValueError as exc:
+            # No configured secret: the derived keys are only a fallback here, so
+            # defer to the persisted/generated key and the not-configured error.
+            logger.debug(f"Session key: no canonical derived candidates: {exc}")
+            canonical = []
+        derived_keys = [base64.urlsafe_b64encode(key) for key in canonical]
+        for key_material in self._derive_legacy_secret_key_candidates():
+            if key_material not in derived_keys:
+                derived_keys.append(key_material)
+        return derived_keys
+
+    def _derive_legacy_secret_key_candidates(self) -> list[bytes]:
+        """Pre-TASK-13325 session key derivation, kept for decrypting old sessions only."""
         secrets_order: list[Optional[str | bytes]] = []
 
         def _add_secret(value: Optional[str | bytes]) -> None:
@@ -930,7 +952,7 @@ class SessionManager:
         except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Failed to decode stored session token: {e}")
             log_counter("session_token_decode_error")
-            raise InvalidSessionError("Failed to decrypt session token") from e
+            raise InvalidSessionError() from e
 
         last_error: Optional[Exception] = None
         num_candidates = len(self._fernet_candidates or [])
@@ -944,7 +966,7 @@ class SessionManager:
                     log_counter("session_decrypt_secondary_key_used")
                     logger.info(f"Session token decrypted with secondary key candidate {idx}")
                 return decrypted.decode('utf-8')
-            except _SESSION_MANAGER_NONCRITICAL_EXCEPTIONS as exc:
+            except (InvalidToken, *_SESSION_MANAGER_NONCRITICAL_EXCEPTIONS) as exc:
                 last_error = exc
                 errors_by_candidate.append(f"candidate[{idx}]: {type(exc).__name__}")
                 logger.debug(f"Session token decryption failed with candidate {idx}: {exc}")
@@ -956,7 +978,7 @@ class SessionManager:
             f"Failed to decrypt token after examining {num_candidates} key candidates. "
             f"Errors: {', '.join(errors_by_candidate)}"
         )
-        raise InvalidSessionError("Failed to decrypt session token") from last_error
+        raise InvalidSessionError() from last_error
 
     @staticmethod
     def _extract_token_metadata(token: Optional[str]) -> tuple[Optional[str], Optional[datetime]]:

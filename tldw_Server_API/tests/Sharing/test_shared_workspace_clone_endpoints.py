@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.Sharing.shared_workspace_access_service import (
 from tldw_Server_API.app.core.Sharing.shared_workspace_clone_operations import (
     build_clone_admission_command,
 )
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.integration
 
@@ -484,15 +485,15 @@ def test_clone_routes_use_canonical_models_and_recipient_route_contract(clone_ap
 
     routes = {
         route.path: route
-        for route in sharing.router.routes
-        if hasattr(route, "dependant")
+        for route in iter_served_routes(sharing.router.routes)
+        if route.dependant is not None
     }
     assert isinstance(
-        routes["/sharing/shared-with-me/{share_id}/clone"],
+        routes["/sharing/shared-with-me/{share_id}/clone"].route,
         sharing.SharedWorkspaceRecipientRoute,
     )
     assert isinstance(
-        routes["/sharing/shared-with-me/{share_id}/clone/{operation_id}"],
+        routes["/sharing/shared-with-me/{share_id}/clone/{operation_id}"].route,
         sharing.SharedWorkspaceRecipientRoute,
     )
     source = inspect.getsource(sharing)

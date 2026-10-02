@@ -775,9 +775,18 @@ export const useServerChatLoader = ({
           activeController: serverChatLoadRef.current.controller
         })
       const applyOwnedAssistantSelection = async (selection: Parameters<typeof setSelectedAssistant>[0]) => {
+        // setSelectedAssistant persists to extension storage; temporary reads make no
+        // durable writes (H1), so they keep whatever assistant is already selected.
+        if (temporaryChat) return canCommitCurrentLoad()
         const before = ownedSelectionRevision
         if (!canCommitCurrentLoad() || getSelectedAssistantOperationRevision() !== before) return false
-        await setSelectedAssistant(selection, { isCurrent: () => {
+        // Loaded metadata is presentation for this canonical conversation,
+        // not a new tracked selection for other tabs sharing the preference.
+        const mirroredSelection = selection
+          ? { ...selection, metadata: { ...selection.metadata } }
+          : null
+        if (mirroredSelection) delete mirroredSelection.metadata.selectionMode
+        await setSelectedAssistant(mirroredSelection, { isCurrent: () => {
           const revision = getSelectedAssistantOperationRevision()
           // This operation increments the existing revision synchronously. A
           // later picker operation must win even before React rerenders.
@@ -801,6 +810,11 @@ export const useServerChatLoader = ({
           return
         }
         const owner = control.getCurrent().owner
+        if (temporaryChat && owner?.kind === "unavailable") {
+          setServerChatLoadState("failed")
+          setServerChatLoadError(code)
+          return
+        }
         if (owner?.kind !== "native" || owner.conversation_id !== serverChatId) return
         setServerChatLoadState("failed")
         setServerChatLoadError(code)
@@ -834,18 +848,25 @@ export const useServerChatLoader = ({
           stopWatchingAuthority = watchServerChatLoadAuthority(snapshot, controller)
           await waitForChatPromotion(setServerChatId, useStoreMessageOption.getState().historyId, snapshot, { waitUntilSaved: true })
           if (!canCommitCurrentLoad()) return
-          const selectionState = selectionRef.current?.getCurrent()
-          if (selectionState?.error === "unbound_server_mirror" || selectionState?.owner?.kind === "unavailable") {
-            setServerChatLoadState("failed")
-            setServerChatLoadError(selectionState.error || "history_owner_unavailable")
-            return
-          }
           const control = selectionRef.current
-          if (control?.settingsMode?.(serverChatId, scope) === "pending") {
-            if (!await control.loadConversation({serverChatId, scope, temporary: temporaryChat})) return
+          if (temporaryChat && control) {
+            // H1 Decision 24: temporary owners stay unsupported (zero profile/bookmark/
+            // mirror writes) but keep read access; the canonical read below is display-only.
+            if (!await control.loadConversation({serverChatId, scope, temporary: true})) return
             selectionCurrent = control.fence()
+          } else {
+            const selectionState = control?.getCurrent()
+            if (selectionState?.error === "unbound_server_mirror" || selectionState?.owner?.kind === "unavailable") {
+              setServerChatLoadState("failed")
+              setServerChatLoadError(selectionState.error || "history_owner_unavailable")
+              return
+            }
+            if (control?.settingsMode?.(serverChatId, scope) === "pending") {
+              if (!await control.loadConversation({serverChatId, scope, temporary: temporaryChat})) return
+              selectionCurrent = control.fence()
+            }
+            if (control?.settingsMode?.(serverChatId, scope) === "pending") return
           }
-          if (control?.settingsMode?.(serverChatId, scope) === "pending") return
           const forkChild = control?.settingsMode?.(serverChatId, scope) === "fork"
           const forkOwner = forkChild ? control?.getCurrent().owner : null
           if (forkChild && (forkOwner?.kind !== "native" || !forkOwner.validate_lease())) return
@@ -944,7 +965,8 @@ export const useServerChatLoader = ({
             let syncedSettings = null
             if (assistantKind == null && characterId == null) {
               try {
-                syncedSettings = forkChild ? control?.getCurrent().forkSettings ?? null : await syncChatSettingsForServerChat({
+                // The settings sync writes local and server settings; temporary reads skip it.
+                syncedSettings = forkChild ? control?.getCurrent().forkSettings ?? null : temporaryChat ? null : await syncChatSettingsForServerChat({
                   historyId: null,
                   serverChatId,
                   scope,
@@ -1103,7 +1125,7 @@ export const useServerChatLoader = ({
           }
           if (!canCommitCurrentLoad()) return
           const currentSelection = selectionRef.current?.getCurrent()
-          if (selectionRef.current && !(currentSelection?.owner?.kind === "native" && currentSelection.owner.conversation_id === serverChatId && currentSelection.capture)) {
+          if (selectionRef.current && !temporaryChat && !(currentSelection?.owner?.kind === "native" && currentSelection.owner.conversation_id === serverChatId && currentSelection.capture)) {
             if (!await selectionRef.current.loadConversation({ serverChatId, scope, temporary: temporaryChat })) return
             selectionCurrent = selectionRef.current.fence()
             if (!canCommitCurrentLoad()) return

@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import ChatSessionCreate
 from tldw_Server_API.app.api.v1.schemas.workspace_schemas import (
+    WorkspaceAssistantDefaultDegradedReason,
     WorkspaceAssistantDefaults,
     WorkspaceEffectiveAssistantDefault,
 )
@@ -20,6 +21,18 @@ from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, de
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 
 WorkspacePersonaProfileCache = dict[tuple[str, str, bool], dict[str, Any] | None]
+
+
+class WorkspaceDefaultUnavailable(HTTPException):
+    """Preserve legacy HTTP behavior while exposing a bounded typed reason."""
+
+    def __init__(self, reason: WorkspaceAssistantDefaultDegradedReason) -> None:
+        """Retain the original HTTP contract and its typed unavailable reason."""
+        self.reason = reason
+        super().__init__(
+            status_code=503 if reason == "persona_feature_disabled" else 409,
+            detail="Workspace default Persona is unavailable; choose an assistant explicitly",
+        )
 
 
 def project_assistant_startup(
@@ -167,7 +180,7 @@ def require_workspace_for_chat_creation(
 
 
 def resolve_workspace_assistant_startup(
-    db: CharactersRAGDB, *, user_id: str, request: ChatSessionCreate, conn: Any = None,
+    db: CharactersRAGDB, *, user_id: str, request: ChatSessionCreate | Mapping[str, Any], conn: Any = None,
 ) -> ResolvedConversationAssistant:
     """Select once from original omission/null intent and current Workspace state.
 
@@ -176,6 +189,8 @@ def resolve_workspace_assistant_startup(
     Passing an existing transaction locks Workspace then selected Persona reads;
     legacy no-connection callers retain unlocked DB signatures.
     """
+    if isinstance(request, Mapping):
+        request = ChatSessionCreate.model_validate(request)
     if request.scope_type != "workspace":
         return ResolvedConversationAssistant(request, AssistantStartup(), "Assistant")
     workspace = require_workspace_for_chat_creation(db, request.workspace_id, conn=conn)
@@ -197,10 +212,7 @@ def resolve_workspace_assistant_startup(
         return ResolvedConversationAssistant(request, AssistantStartup(source=source), display_name)
     effective = resolve_effective_workspace_assistant_default(db, workspace=workspace, user_id=user_id, conn=conn)
     if effective.status == "unavailable":
-        raise HTTPException(
-            status_code=503 if effective.degraded_reason == "persona_feature_disabled" else 409,
-            detail="Workspace default Persona is unavailable; choose an assistant explicitly",
-        )
+        raise WorkspaceDefaultUnavailable(effective.degraded_reason)
     try:
         startup = AssistantStartup(
             source="workspace_default" if effective.status == "available" else "system_fallback",
@@ -223,6 +235,30 @@ def resolve_new_conversation_assistant(
 ) -> ChatSessionCreate:
     """Compatibility preflight returning only the selected request, not trusted origin."""
     return resolve_workspace_assistant_startup(db, user_id=user_id, request=request).request
+
+
+def insert_resolved_workspace_conversation(
+    db: CharactersRAGDB, *, resolved: ResolvedConversationAssistant,
+    conversation_data: Mapping[str, Any], title_timestamp: str, conn: Any,
+) -> str:
+    """Insert an admitted selection on the caller's transaction without resolving.
+
+    Callers retain ownership, scope and lineage admission and transaction ownership.
+    Only the preflight identity and derived title are replaced in a copied payload.
+    """
+    payload = dict(conversation_data)
+    payload.update(
+        assistant_kind=resolved.request.assistant_kind,
+        assistant_id=resolved.request.assistant_id,
+        character_id=resolved.request.character_id,
+        persona_memory_mode=resolved.request.persona_memory_mode,
+    )
+    payload["title"] = resolved.request.title or (
+        f"{resolved.display_name} Chat ({title_timestamp})"
+        if resolved.request.assistant_kind in {"persona", "character"}
+        else f"Chat ({title_timestamp})"
+    )
+    return db.add_conversation(payload, conn=conn, assistant_startup=resolved.startup)
 
 
 def create_workspace_persona_conversation(
@@ -253,16 +289,6 @@ def create_workspace_persona_conversation(
         raise InputError("Conversation root must match the validated lineage")
     with db.transaction() as conn:
         resolved = resolve_workspace_assistant_startup(db, user_id=user_id, request=request, conn=conn)
-        payload = dict(conversation_data)
-        payload.update(
-            assistant_kind=resolved.request.assistant_kind,
-            assistant_id=resolved.request.assistant_id,
-            character_id=resolved.request.character_id,
-            persona_memory_mode=resolved.request.persona_memory_mode,
+        return insert_resolved_workspace_conversation(
+            db, resolved=resolved, conversation_data=conversation_data, title_timestamp=title_timestamp, conn=conn,
         )
-        payload["title"] = request.title or (
-            f"{resolved.display_name} Chat ({title_timestamp})"
-            if resolved.request.assistant_kind in {"persona", "character"}
-            else f"Chat ({title_timestamp})"
-        )
-        return db.add_conversation(payload, conn=conn, assistant_startup=resolved.startup)

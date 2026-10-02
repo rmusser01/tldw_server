@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.TTS.utils import compute_tts_history_text_hash, parse_bool
+from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
 
 router = APIRouter(
     tags=["Audio"],
@@ -79,9 +80,7 @@ def _encode_cursor(created_at: str, row_id: int) -> str:
 def _decode_cursor(token: str) -> tuple[str, int]:
     if not token:
         raise ValueError("empty cursor")
-    pad = "=" * (-len(token) % 4)
-    raw = base64.urlsafe_b64decode((token + pad).encode("utf-8")).decode("utf-8")
-    payload = json.loads(raw)
+    payload = json.loads(decode_opaque_cursor_segment(token))
     if int(payload.get("v", 0)) != _CURSOR_VERSION:
         raise ValueError("unsupported cursor version")
     created_at = payload.get("created_at")

@@ -149,30 +149,13 @@ export class KnowledgeQAPage {
   // ── Settings Panel ──────────────────────────────────────────────────
 
   async openSettings(): Promise<void> {
-    if (await this.getSettingsDialog().isVisible().catch(() => false)) {
-      return
-    }
-
-    const searchShellSettings = this.searchShell.getByRole("button", {
-      name: "Open settings"
-    })
-    if (await searchShellSettings.isVisible().catch(() => false)) {
-      await searchShellSettings.click()
-      return
-    }
-
-    const enableInSettings = this.page.getByRole("button", {
-      name: /Enable in Settings/i
-    })
-    if (await enableInSettings.isVisible().catch(() => false)) {
-      await enableInSettings.click()
-      return
-    }
-
-    const fallbackSettings = this.page.getByRole("button", {
-      name: "Open settings"
-    })
-    await fallbackSettings.last().click()
+    const dialog = this.getSettingsDialog()
+    if (await dialog.isVisible()) return
+    await this.searchShell.getByRole("button", {
+      name: "Open Knowledge QA settings",
+      exact: true,
+    }).click()
+    await expect(dialog).toBeVisible({ timeout: 20_000 })
   }
 
   async selectPreset(preset: "fast" | "balanced" | "thorough"): Promise<void> {

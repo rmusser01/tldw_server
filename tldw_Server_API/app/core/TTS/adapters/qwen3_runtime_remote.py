@@ -28,6 +28,7 @@ from ..tts_exceptions import (
 )
 from ..tts_resource_manager import get_resource_manager
 from .base import AudioFormat, TTSCapabilities, TTSRequest, TTSResponse
+from tldw_Server_API.app.core.Utils.http_status_extraction import is_http_status_error
 
 if TYPE_CHECKING:
     from .qwen3_tts_adapter import Qwen3TTSAdapter
@@ -128,9 +129,13 @@ class RemoteQwenRuntime:
         return module.startswith("httpx")
 
     def _is_http_status_error(self, exc: Exception) -> bool:
-        if not self._is_httpx_exception(exc):
-            return False
-        return exc.__class__.__name__ == "HTTPStatusError"
+        """Delegate to the shared classifier.
+
+        This copy recognised only httpx; the shared one also recognises
+        requests.HTTPError, so an adapter moved onto a requests-based transport
+        would no longer silently misclassify a status-bearing failure.
+        """
+        return is_http_status_error(exc)
 
     def _is_timeout_error(self, exc: Exception) -> bool:
         if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):

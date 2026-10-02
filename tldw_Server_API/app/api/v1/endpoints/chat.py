@@ -66,6 +66,7 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
     validate_provider_override,
 )
 from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+from tldw_Server_API.app.core.Utils.base64url import SignatureMismatchError, verify_signed_token
 from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
     validate_image_url,
@@ -252,6 +253,7 @@ from tldw_Server_API.app.core.LLM_Calls.routing import (
 from tldw_Server_API.app.core.LLM_Calls.routing.candidate_pool import (
     build_candidate_pool,
 )
+from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line, sse_data, sse_done
 from tldw_Server_API.app.core.Moderation.review_service import (
     capture_moderation_review_item,
     is_moderation_review_capture_enabled,
@@ -265,12 +267,16 @@ from tldw_Server_API.app.core.Notes.organization_capture import (
     replace_keywords,
     stable_note_id,
 )
+from tldw_Server_API.app.core.Persona.conversation_admission import require_current_persona
 from tldw_Server_API.app.core.Skills.context_integration import (
     add_skill_tool_to_tools_list_async,
     build_system_message_with_skills_async,
 )
 from tldw_Server_API.app.core.Utils.chunked_image_processor import get_image_processor
-from tldw_Server_API.app.core.Workspaces.assistant_defaults import project_assistant_startup
+from tldw_Server_API.app.core.Workspaces.assistant_defaults import (
+    project_assistant_startup,
+    require_workspace_for_chat_creation,
+)
 
 _ORIGINAL_PERFORM_CHAT_API_CALL = perform_chat_api_call
 from fastapi.encoders import jsonable_encoder
@@ -1106,7 +1112,7 @@ def _attach_credential_runtime_cleanup(
 def _provider_stream_error_frame_for_code(code: str) -> str:
     """Build a canonical sanitized SSE error frame."""
     payload = provider_stream_error_payload(code)
-    return f"data: {json.dumps(payload)}\n\n"
+    return sse_data(payload)
 
 
 def _provider_stream_frame_count(chunk: Any) -> int:
@@ -1342,7 +1348,7 @@ def _inspect_provider_stream_chunk(chunk: Any) -> tuple[str | None, bool, bool]:
             if not line.startswith("data:"):
                 continue
             payload_text = line[len("data:") :].strip()
-            if payload_text == "[DONE]":
+            if is_done_line(line):
                 is_complete = True
                 continue
             try:
@@ -2183,7 +2189,7 @@ def _chat_macro_completion_response(
     frames = [
         f"data: {json.dumps(first_chunk, separators=(',', ':'))}\n\n",
         f"data: {json.dumps(final_chunk, separators=(',', ':'))}\n\n",
-        "data: [DONE]\n\n",
+        sse_done(),
     ]
     return StreamingResponse(
         iter(frames),
@@ -2520,7 +2526,7 @@ async def _maybe_rg_shadow_chat_decision(
         return
 
     try:
-        if not bool(_rg_enabled_flag(False)):  # type: ignore[arg-type]
+        if not bool(_rg_enabled_flag(True)):  # type: ignore[arg-type]
             return
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001 - defensive
         logger.debug("RG shadow: rg_enabled check failed, skipping shadow comparison: {}", exc)
@@ -3148,6 +3154,12 @@ async def _save_message_turn_to_db(
             serialized_extra = {}
         serialized_extra["client_message_id"] = client_message_id
 
+    system_block_id = message_obj.get("system_instruction_block_id")
+    if role == "system" and isinstance(system_block_id, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", system_block_id):
+        if serialized_extra is None:
+            serialized_extra = {}
+        serialized_extra["system_instruction_block_id"] = system_block_id
+
     if sender_meta:
         if serialized_extra is None:
             serialized_extra = {}
@@ -3474,6 +3486,26 @@ async def create_chat_completion(
     try:
         if request_data.conversation_id:
             request_data.conversation_id = validate_conversation_id(request_data.conversation_id)
+            supplied_scope = (
+                _resolve_conversation_scope(scope_type, workspace_id)
+                if scope_type is not None or workspace_id is not None else None
+            )
+            conversation = await asyncio.to_thread(
+                _verify_conversation_ownership,
+                chat_db, request_data.conversation_id, current_user, supplied_scope,
+                use_stored_scope=supplied_scope is None,
+                conceal_foreign=True,
+            )
+            conversation_scope = _resolve_conversation_scope(**_scoped_conversation_fields(conversation))
+            if conversation_scope.scope_type == "workspace":
+                workspace = await asyncio.to_thread(
+                    require_workspace_for_chat_creation, chat_db, conversation_scope.workspace_id,
+                )
+                if str(workspace.get("client_id") or "") != user_id:
+                    raise HTTPException(status_code=404, detail="Workspace not found")
+            await asyncio.to_thread(
+                require_current_persona, chat_db, owner_id=user_id, conversation=conversation,
+            )
         if request_data.character_id:
             request_data.character_id = validate_character_id(request_data.character_id)
         if request_data.tools:
@@ -3940,7 +3972,7 @@ async def create_chat_completion(
             try:
                 from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
 
-                rg_active = bool(_rg_enabled_flag(False))
+                rg_active = bool(_rg_enabled_flag(True))
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
                 logger.debug(
                     "Chat RG: rg_enabled lookup failed; disabling RG path: {}",
@@ -4545,7 +4577,7 @@ async def create_chat_completion(
                         native_history_owner_key,
                         prepare_native_history_message,
                     )
-                    history_scope = _resolve_conversation_scope(scope_type, workspace_id)
+                    history_scope = conversation_scope
                     _verify_conversation_ownership(chat_db, final_conversation_id, current_user, history_scope)
                     if _active_message_sync_service(current_user, history_scope) is not None:
                         raise HTTPException(409, detail={"code": "sync_owner_unsupported", "status": "unsupported_history_capability"})
@@ -5194,8 +5226,8 @@ async def create_chat_completion(
                                     }
                                 ]
                             }
-                            yield f"data: {json.dumps(data_chunk)}\n\n"
-                            yield "data: [DONE]\n\n"
+                            yield sse_data(data_chunk)
+                            yield sse_done()
 
                         return _stream_generator()
 
@@ -6118,7 +6150,9 @@ async def create_chat_completion(
                         client_detail = "Request failed."
                 else:
                     # Server errors should be generic
-                    if err_status == 502:
+                    if err_status == 502 and error_code == "provider_output_limit":
+                        client_detail = PROVIDER_STREAM_ERROR_MESSAGES[error_code]
+                    elif err_status == 502:
                         client_detail = "The chat service provider is currently unavailable."
                     elif err_status == 503:
                         client_detail = "The chat service is temporarily unavailable."
@@ -6456,21 +6490,32 @@ def _verify_conversation_ownership(
     conversation_id: str,
     current_user: User,
     scope: ConversationScopeParams | None = None,
+    *,
+    use_stored_scope: bool = False,
+    conceal_foreign: bool = False,
 ) -> dict[str, Any]:
+    """Verify ownership and scope, retaining Chat's concealed foreign-target denial."""
     conversation = db.get_conversation_by_id(conversation_id)
     if not conversation or conversation.get("deleted"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
     conv_client_id = conversation.get("client_id")
     user_id = current_user.id
+    ownership_error = HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND if conceal_foreign else status.HTTP_403_FORBIDDEN,
+        detail="Conversation not found" if conceal_foreign else "Forbidden for this conversation",
+    )
     if conv_client_id is None or user_id is None:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden for this conversation")
+        raise ownership_error
     try:
         if int(conv_client_id) != int(user_id):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden for this conversation")
+            raise ownership_error
     except (TypeError, ValueError):
         if str(conv_client_id) != str(user_id):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden for this conversation") from None
-    expected_scope = scope or ConversationScopeParams()
+            raise ownership_error from None
+    expected_scope = scope or (
+        _resolve_conversation_scope(**_scoped_conversation_fields(conversation))
+        if use_stored_scope else ConversationScopeParams()
+    )
     conversation_scope = conversation.get("scope_type") or "global"
     conversation_workspace_id = conversation.get("workspace_id")
     if conversation_scope != expected_scope.scope_type:
@@ -6573,11 +6618,9 @@ def _get_knowledge_qa_share_signing_key() -> bytes:
         # Fall back only to a real deployment secret. This previously ended with
         # `or "knowledge_qa_share_link_default"` -- a constant published in this
         # open-source repository -- so any deployment that reached this branch signed
-        # every share token with a key anybody could read, making share links
-        # forgeable. Fail closed instead: an unsigned-in-practice link is worse than
-        # an error. Note lru_cache does not memoize exceptions, so a transient
-        # derivation failure is retried on the next call rather than pinning a
-        # degraded key for the process lifetime.
+        # every share token with a key anybody could read. Fail closed instead. Note
+        # lru_cache does not memoize exceptions, so a transient derivation failure is
+        # retried on the next call rather than pinned for the process lifetime.
         fallback = (os.getenv("JWT_SECRET_KEY") or "").strip()
         if not fallback:
             raise RuntimeError(
@@ -6587,13 +6630,20 @@ def _get_knowledge_qa_share_signing_key() -> bytes:
         return fallback.encode("utf-8")
 
 
+def _share_signing_key_or_503() -> bytes:
+    """The share-link key, or HTTP 503 when no real secret is configured."""
+    try:
+        return _get_knowledge_qa_share_signing_key()
+    except RuntimeError as exc:
+        logger.error("Knowledge-QA share-link signing key unavailable")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Share links are unavailable: signing key is not configured",
+        ) from exc
+
+
 def _urlsafe_b64encode(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).decode("utf-8").rstrip("=")
-
-
-def _urlsafe_b64decode(value: str) -> bytes:
-    padding = "=" * (-len(value) % 4)
-    return base64.urlsafe_b64decode(f"{value}{padding}")
 
 
 def _build_knowledge_qa_share_token(payload: dict[str, Any]) -> str:
@@ -6601,7 +6651,7 @@ def _build_knowledge_qa_share_token(payload: dict[str, Any]) -> str:
         json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     )
     signature = hmac.new(
-        _get_knowledge_qa_share_signing_key(),
+        _share_signing_key_or_503(),
         encoded_payload.encode("utf-8"),
         hashlib.sha256,
     ).digest()
@@ -6610,33 +6660,22 @@ def _build_knowledge_qa_share_token(payload: dict[str, Any]) -> str:
 
 
 def _decode_knowledge_qa_share_token(token: str) -> dict[str, Any]:
-    token_parts = token.split(".")
-    if len(token_parts) != 2:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed share token")
-
-    encoded_payload, encoded_signature = token_parts
-    expected_signature = hmac.new(
-        _get_knowledge_qa_share_signing_key(),
-        encoded_payload.encode("utf-8"),
-        hashlib.sha256,
-    ).digest()
-    # The signature decode must sit inside a guard: binascii.Error is a ValueError,
-    # but this call used to run *before* the try below, so a malformed signature
-    # segment escaped as an unhandled exception and the public, unauthenticated share
-    # route answered HTTP 500 where 400 is correct. The token is attacker-supplied by
-    # construction -- share links are meant to be pasted by third parties.
+    # 400 for input we cannot decode, 403 for input that decodes but fails the
+    # signature compare. The token MACs the encoded payload segment, not raw bytes.
     try:
-        provided_signature = _urlsafe_b64decode(encoded_signature)
-    except (ValueError, TypeError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed share token"
-        ) from exc
-    if not hmac.compare_digest(expected_signature, provided_signature):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid share token")
+        raw_payload = verify_signed_token(
+            token,
+            _share_signing_key_or_503(),
+            sign_encoded_payload=True,
+        )
+    except SignatureMismatchError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid share token") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed share token") from exc
 
     try:
-        payload = json.loads(_urlsafe_b64decode(encoded_payload).decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        payload = json.loads(raw_payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed share token payload") from exc
 
     if not isinstance(payload, dict):

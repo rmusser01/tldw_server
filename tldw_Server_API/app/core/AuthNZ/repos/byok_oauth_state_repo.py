@@ -7,6 +7,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
 from tldw_Server_API.app.core.AuthNZ.repos.datetime_utils import _strip_tzinfo
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import normalize_provider_name
 
@@ -43,18 +44,7 @@ class AuthnzByokOAuthStateRepo:
             logger.error(f"AuthnzByokOAuthStateRepo.ensure_tables failed: {exc}")
             raise
 
-    @staticmethod
-    def _row_to_dict(row: Any) -> dict[str, Any]:
-        if isinstance(row, dict):
-            return dict(row)
-        try:
-            keys = row.keys()
-            return {key: row[key] for key in keys}
-        except Exception as row_keys_error:
-            logger.bind(error_type=type(row_keys_error).__name__).debug(
-                "BYOK OAuth state row key materialization failed; falling back to dict(row)"
-            )
-        return dict(row)
+    _row_to_dict = staticmethod(row_dict)
 
     @staticmethod
     def _command_touched_rows(result: Any) -> bool:

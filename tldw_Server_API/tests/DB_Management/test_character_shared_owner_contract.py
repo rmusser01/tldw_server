@@ -255,16 +255,29 @@ def test_character_writes_remain_owned_by_the_callers_transaction(owners):
     assert db.list_character_exemplars(character) == []
 
 
-def test_sqlite_shared_file_preserves_sync_client_semantics(tmp_path):
-    """A SQLite client_id identifies the last syncing device, not a separate tenant."""
+@pytest.mark.parametrize("existing_file", [False, True])
+def test_sqlite_shared_file_preserves_sync_client_semantics(tmp_path, existing_file):
+    """A SQLite client_id identifies the last syncing device, not a separate tenant.
+
+    Opening ``second`` issues DDL on the shared file; ``first``'s next write must
+    still see its tables (SQLite otherwise fails it with "no such table").
+    """
     path = tmp_path / "single-owner.db"
+    if existing_file:
+        CharactersRAGDB(path, client_id="device-seed").close_connection()
     first = CharactersRAGDB(path, client_id="device-first")
     second = CharactersRAGDB(path, client_id="device-second")
     try:
         character = first.add_character_card({"name": "Shared per-user file"})
         assert second.get_character_card_by_id(character)["client_id"] == "device-first"
         assert second.update_character_card(character, {"description": "Device edit"}, expected_version=1)
-        assert first.get_character_card_by_id(character)["client_id"] == "device-second"
+        edited = first.get_character_card_by_id(character)
+        assert (edited["client_id"], edited["description"], edited["version"]) == ("device-second", "Device edit", 2)
+        reopened = CharactersRAGDB(path, client_id="device-reopened")
+        try:
+            assert reopened.get_character_card_by_id(character) == edited
+        finally:
+            reopened.close_all_connections()
     finally:
         first.close_all_connections()
         second.close_all_connections()

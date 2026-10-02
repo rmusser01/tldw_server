@@ -1,3 +1,5 @@
+import sqlite3
+from contextlib import closing
 from types import SimpleNamespace
 
 import pytest
@@ -126,38 +128,41 @@ async def test_fetch_active_by_hash_candidates_tolerates_legacy_sqlite_virtual_c
         )
     )
     await pool.initialize()
-    await pool.execute("DROP TABLE IF EXISTS api_keys")
-    await pool.execute(
-        """
-        CREATE TABLE api_keys (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            key_hash TEXT NOT NULL,
-            key_id TEXT,
-            key_prefix TEXT,
-            name TEXT,
-            description TEXT,
-            scope TEXT,
-            status TEXT DEFAULT 'active',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            expires_at TIMESTAMP,
-            last_used_at TIMESTAMP,
-            last_used_ip TEXT,
-            usage_count INTEGER DEFAULT 0,
-            rate_limit INTEGER,
-            allowed_ips TEXT,
-            metadata TEXT
+    # A deliberate legacy schema is test setup; managed connections reject
+    # protected table DDL in application code.
+    with closing(sqlite3.connect(db_path)) as conn, conn:
+        conn.execute("DROP TABLE IF EXISTS api_keys")
+        conn.execute(
+            """
+            CREATE TABLE api_keys (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                key_hash TEXT NOT NULL,
+                key_id TEXT,
+                key_prefix TEXT,
+                name TEXT,
+                description TEXT,
+                scope TEXT,
+                status TEXT DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP,
+                last_used_at TIMESTAMP,
+                last_used_ip TEXT,
+                usage_count INTEGER DEFAULT 0,
+                rate_limit INTEGER,
+                allowed_ips TEXT,
+                metadata TEXT
+            )
+            """
         )
-        """
-    )
-    await pool.execute(
-        """
-        INSERT INTO api_keys (
-            user_id, key_hash, key_id, key_prefix, name, scope, status, usage_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (42, "legacy-hash", "key-id", "prefix", "Legacy", "read", "active", 3),
-    )
+        conn.execute(
+            """
+            INSERT INTO api_keys (
+                user_id, key_hash, key_id, key_prefix, name, scope, status, usage_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (42, "legacy-hash", "key-id", "prefix", "Legacy", "read", "active", 3),
+        )
 
     try:
         row = await AuthnzApiKeysRepo(pool).fetch_active_by_hash_candidates(["legacy-hash"])

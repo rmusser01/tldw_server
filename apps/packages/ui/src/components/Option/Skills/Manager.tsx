@@ -75,6 +75,7 @@ import {
   limitSkillSelection,
   MAX_SKILLS_BULK_SELECTION
 } from "./skill-form-utils"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const SKILLS_SEARCH_DEBOUNCE_MS = 300
 const SKILL_NAME_REGEX = /^[a-z][a-z0-9-]{0,63}$/
@@ -1726,11 +1727,7 @@ export const SkillsManager: React.FC = () => {
       if (activeView !== "library") return
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
       const target = event.target
-      const isEditable = target instanceof HTMLElement
-        && (target.isContentEditable
-          || target.tagName === "INPUT"
-          || target.tagName === "TEXTAREA"
-          || target.tagName === "SELECT")
+      const isEditable = isEditableTarget(target)
       if (isEditable) return
 
       if (event.key === "/") {

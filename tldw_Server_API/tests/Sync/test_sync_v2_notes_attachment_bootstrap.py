@@ -10,7 +10,10 @@ from uuid import UUID
 import pytest
 
 import tldw_Server_API.app.core.DB_Management.Sync_DB as sync_db_module
-from tldw_Server_API.app.core.DB_Management.backends.base import QueryResult
+from tldw_Server_API.app.core.DB_Management.backends.base import (
+    ConstraintViolationError,
+    QueryResult,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import (
     SYNC_POSTGRES_SCHEMA,
@@ -69,6 +72,12 @@ _NOTE_ID = "22222222-2222-4222-8222-222222222222"
 _NOW = "2026-08-11T12:00:00+00:00"
 
 
+@pytest.fixture(autouse=True)
+def _fixed_sync_storage_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep database expiry checks on the service fixture's fixed clock."""
+    monkeypatch.setattr(sync_db_module, "utcnow_iso", lambda: _NOW)
+
+
 def _bootstrap_environment(
     tmp_path: Path,
     *,
@@ -104,6 +113,9 @@ def _bootstrap_environment(
         id_factory=next_id,
         settings=SyncV2Settings(
             supports_attachments=True,
+            # _NOW is fixed in the past while the store enforces deadlines against its
+            # real now, so any TTL would already be expired. Expiry has its own module.
+            blob_upload_session_ttl_seconds=0,
             max_attachment_bytes=2 * 1024 * 1024,
             max_blob_bytes=2 * 1024 * 1024,
             max_chunk_bytes=64 * 1024,
@@ -620,26 +632,42 @@ def test_cleanup_candidate_schema_rejects_path_hash_identity_drift(
         source_key="notes_attachments/note-1/report.pdf",
     )
 
-    with pytest.raises(Exception, match="CHECK constraint failed"):
-        sync_store.db.execute(
-            "INSERT INTO sync_notes_attachment_cleanup_candidates "
-            "(dataset_id, bootstrap_id, source_key_hash, attachment_id, "
-            "source_relative_path, source_path_hash, source_blob_hash, "
-            "source_size_bytes, source_modified_ns, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                "dataset-1",
-                "bootstrap-stable",
-                mapping.source_key_hash,
-                mapping.attachment_id,
-                "notes_attachments/note-1/report.pdf",
-                "sha256:" + "b" * 64,
-                "sha256:" + "a" * 64,
-                7,
-                123,
-                "2026-08-13T00:00:00+00:00",
-            ),
+    insert = (
+        "INSERT INTO sync_notes_attachment_cleanup_candidates "
+        "(dataset_id, bootstrap_id, source_key_hash, attachment_id, "
+        "source_relative_path, source_path_hash, source_blob_hash, "
+        "source_size_bytes, source_modified_ns, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+
+    def _row(source_path_hash: str) -> tuple[object, ...]:
+        return (
+            "dataset-1",
+            "bootstrap-stable",
+            mapping.source_key_hash,
+            mapping.attachment_id,
+            "notes_attachments/note-1/report.pdf",
+            source_path_hash,
+            "sha256:" + "a" * 64,
+            7,
+            123,
+            "2026-08-13T00:00:00+00:00",
         )
+
+    # The backend preserves the constraint-failure class while redacting driver
+    # details. Check that class, the schema, and a matching-row control without
+    # relying on the removed constraint message.
+
+    # 1. The schema really declares the path-hash identity constraint.
+    assert "CHECK (source_path_hash = source_key_hash)" in SYNC_SQLITE_SCHEMA
+
+    # 2. A drifted path hash is rejected.
+    with pytest.raises(ConstraintViolationError):
+        sync_store.db.execute(insert, _row("sha256:" + "b" * 64))
+
+    # 3. And the same row with a MATCHING path hash is accepted -- without this the
+    #    rejection above could have come from anything else in the row.
+    sync_store.db.execute(insert, _row(mapping.source_key_hash))
 
 
 @pytest.mark.unit

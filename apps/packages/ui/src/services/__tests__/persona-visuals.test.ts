@@ -12,9 +12,11 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 import {
   copyPersonaVisualStarterPack,
+  forkPersonaVisualPackRevision,
   getPersonaVisualRendererCapabilities,
   getPersonaVisualStarterPack,
-  listPersonaVisualStarterPacks
+  listPersonaVisualStarterPacks,
+  reviewPersonaVisualPack
 } from "../persona-visuals"
 
 describe("persona visuals service", () => {
@@ -304,5 +306,43 @@ describe("persona visuals service", () => {
       "Starter pack id is required"
     )
     expect(mocks.fetchWithAuth).not.toHaveBeenCalled()
+  })
+
+  it("reviews and forks a same-Persona visual revision with exact versions", async () => {
+    const pack = { id: "pack-1", persona_id: "persona-1", version: 4 }
+    mocks.fetchWithAuth
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pack })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => pack })
+
+    await reviewPersonaVisualPack("persona/one", "pack/one", {
+      expected_version: 3
+    })
+    await forkPersonaVisualPackRevision("persona/one", "pack/one", {
+      expected_version: 3,
+      manifest: {
+        manifest_version: 1,
+        renderer_type: "sprite_frames",
+        states: {},
+        animations: {}
+      },
+      companion_behavior: null
+    })
+
+    expect(mocks.fetchWithAuth).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/persona/profiles/persona%2Fone/visual-packs/pack%2Fone/reviews",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ expected_version: 3 })
+      })
+    )
+    expect(mocks.fetchWithAuth).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/persona/profiles/persona%2Fone/visual-packs/pack%2Fone/fork",
+      expect.objectContaining({
+        method: "POST",
+        body: expect.stringContaining('"expected_version":3')
+      })
+    )
   })
 })

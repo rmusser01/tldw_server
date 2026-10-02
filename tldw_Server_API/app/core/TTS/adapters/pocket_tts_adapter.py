@@ -329,7 +329,6 @@ class PocketTTSOnnxAdapter(TTSAdapter):
 
             audio_bytes = await self.convert_audio_format(
                 audio_i16,
-                source_format=AudioFormat.PCM,
                 target_format=request.format,
                 sample_rate=self.sample_rate,
             )

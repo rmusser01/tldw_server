@@ -33,9 +33,10 @@ from tldw_Server_API.app.core.PrivilegeMaps import (
     get_privilege_snapshot_store,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 router = APIRouter(prefix="/privileges", tags=["privileges"])
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
 def _has_privilege_admin_claim(principal: AuthPrincipal) -> bool:

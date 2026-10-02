@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
 from typing import Any
 
 import yaml
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPO_ROOT / ".github/workflows/license-first-admission.yml"
@@ -86,14 +88,13 @@ ORIGINAL_JOB_NAMES = {
     "ci.yml": (
         "http-client-patch-guard",
         "syntax-check",
-        "preflight-python-311",
+        "preflight-python-312",
         "shard-coverage",
         "quickstart-dry-run",
         "lint",
         "frontend-lint",
         "wizard-tests",
         "changes",
-        "full-suite-linux-311-smoke",
         "full-suite-linux-312-shards",
         "full-suite-linux-312-summary",
         "full-suite-linux-313-shards",
@@ -136,7 +137,6 @@ ORIGINAL_JOB_NAMES = {
 }
 ORIGINAL_DEPENDENCIES = {
     ("backend-required.yml", "backend-required"): ("changes",),
-    ("ci.yml", "full-suite-linux-311-smoke"): ("lint", "syntax-check", "changes"),
     ("ci.yml", "full-suite-linux-312-shards"): ("lint", "syntax-check", "changes"),
     ("ci.yml", "full-suite-linux-312-summary"): ("full-suite-linux-312-shards", "changes"),
     ("ci.yml", "full-suite-linux-313-shards"): ("lint", "syntax-check", "changes"),
@@ -148,7 +148,6 @@ ORIGINAL_DEPENDENCIES = {
     ("ci.yml", "full-suite-os-313-release-shards"): ("lint", "syntax-check"),
     ("ci.yml", "character-chat-rate-limits"): (
         "full-suite-linux-312-summary",
-        "full-suite-linux-313-summary",
         "changes",
     ),
     ("container-build-check.yml", "container-build-check"): ("build",),
@@ -176,10 +175,9 @@ DIRECT_ADMISSION_JOBS = ALWAYS_ROLLUPS | {
     ("security-required.yml", "security-required"),
 }
 NON_ADMITTED_ROOT_JOBS = {
-    ("ci.yml", "preflight-python-311"),
+    ("ci.yml", "preflight-python-312"),
 }
 BACKEND_CHANGED_JOBS = {
-    "full-suite-linux-311-smoke",
     "full-suite-linux-312-shards",
     "full-suite-linux-312-summary",
     "full-suite-linux-313-shards",
@@ -189,6 +187,15 @@ BACKEND_CHANGED_JOBS = {
     "full-suite-windows-312-shards",
     "full-suite-windows-312-summary",
     "character-chat-rate-limits",
+}
+# Too many jobs to run on every PR; main pushes, releases and manual dispatch only.
+NON_PR_FULL_SUITE_JOBS = {
+    "full-suite-linux-313-shards",
+    "full-suite-linux-313-summary",
+    "full-suite-macos-312-shards",
+    "full-suite-macos-312-summary",
+    "full-suite-windows-312-shards",
+    "full-suite-windows-312-summary",
 }
 FETCH_DEPTH_CHECKOUTS = {
     ("backend-required.yml", "changes"),
@@ -327,8 +334,13 @@ def test_ordinary_pr_workflow_inventory_and_direct_triggers_are_frozen() -> None
 
 def test_all_ordinary_workflows_call_exact_inert_admission_gate() -> None:
     for name, (data, _) in _load_ordinary_workflows().items():
-        # PR runs now wait directly; duplicate workflow_run triggers were removed.
-        assert "workflow_run" not in _trigger(data), name  # nosec B101 - regression assertion
+        assert "workflow_run" not in _trigger(data), name
+
+        assert data["jobs"]["await_license"] == {
+            "if": "github.event_name == 'pull_request'",
+            "uses": "./.github/workflows/license-first-await.yml",
+            "permissions": {"contents": "read", "statuses": "read"},
+        }, name
 
         admission = data["jobs"]["admission"]
         await_license = data["jobs"]["await_license"]
@@ -346,6 +358,50 @@ def test_all_ordinary_workflows_call_exact_inert_admission_gate() -> None:
             "uses": "./.github/workflows/license-first-await.yml",
             "permissions": {"contents": "read", "statuses": "read"},
         }), name
+
+
+@pytest.mark.parametrize(
+    ("state", "context", "api_failed", "expected"),
+    [
+        ("success", "frontend-license-policy/trusted/dev", False, "true"),
+        ("failure", "frontend-license-policy/trusted/dev", False, "false"),
+        ("error", "frontend-license-policy/trusted/dev", False, "false"),
+        ("pending", "frontend-license-policy/trusted/dev", False, "false"),
+        ("success", "frontend-license-policy/trusted/main", False, "false"),
+        ("success", "frontend-license-policy/trusted/dev", True, "false"),
+    ],
+)
+def test_pr_await_requires_successful_exact_head_and_base_status(
+    tmp_path: Path, state: str, context: str, api_failed: bool, expected: str,
+) -> None:
+    """Execute the await script: missing, wrong-base and API errors cannot admit PR work."""
+    data = yaml.safe_load((REPO_ROOT / ".github/workflows/license-first-await.yml").read_text())
+    step = data["jobs"]["await"]["steps"][0]
+    assert step["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
+    assert step["env"]["CONTEXT"] == "frontend-license-policy/trusted/${{ github.base_ref }}"
+    output = tmp_path / "github-output"
+    result = subprocess.run(
+        ["bash", "-c", """
+          gh() {
+            [[ "$*" == 'api repos/owner/repo/commits/exact-pr-head/status' ]] || return 2
+            [[ "$API_FAILED" != true ]] || return 1
+            printf '%s' "$STATUS_PAYLOAD"
+          }
+          sleep() { :; }
+        """ + step["run"]],
+        env={
+            **os.environ,
+            "GITHUB_REPOSITORY": "owner/repo",
+            "HEAD_SHA": "exact-pr-head",
+            "CONTEXT": "frontend-license-policy/trusted/dev",
+            "ENABLED": "true",
+            "GITHUB_OUTPUT": str(output),
+            "STATUS_PAYLOAD": json.dumps({"statuses": [{"context": context, "state": state}]}),
+            "API_FAILED": str(api_failed).lower(),
+        },
+        capture_output=True, text=True, timeout=10, check=True,
+    )
+    assert output.read_text().splitlines() == [f"license_passed={expected}"], result.stdout
 
 
 def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> None:
@@ -382,6 +438,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
         "${{ needs.admission.outputs.head_sha || "
         "github.event.workflow_run.pull_requests[0].head.sha || github.sha }}"
     )
+    non_pr = "github.event_name != 'pull_request' && github.event_name != 'workflow_run'"
     backend_changed = (
         "(github.event_name != 'pull_request' && "
         "github.event_name != 'workflow_run') || "
@@ -406,16 +463,19 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
 
     for name, (data, _) in _load_ordinary_workflows().items():
         jobs = data["jobs"]
-        assert tuple(  # nosec B101 - regression assertion
+        assert tuple(
             job_name for job_name in jobs if job_name not in {"admission", "await_license"}
         ) == ORIGINAL_JOB_NAMES[name]
         for job_name in ORIGINAL_JOB_NAMES[name]:
             job = jobs[job_name]
             needs = _needs(job)
             original_needs = ORIGINAL_DEPENDENCIES.get((name, job_name), ())
-            assert tuple(  # nosec B101 - regression assertion
+            assert tuple(
                 dependency for dependency in needs if dependency not in {"admission", "await_license"}
             ) == original_needs
+            # The two gates travel together: a job that honours admission must also
+            # wait for the license verdict, or the pull_request path runs it unordered.
+            assert ("admission" in needs) == ("await_license" in needs), (name, job_name)
 
             root = not original_needs
             directly_guarded = (name, job_name) in DIRECT_ADMISSION_JOBS
@@ -423,12 +483,16 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
             if root or directly_guarded:
                 if non_admitted_root:
                     assert "admission" not in needs, (name, job_name)
+                    assert "await_license" not in needs, (name, job_name)
                     assert job.get("if") is None, (name, job_name)
                     continue
-                assert (needs.count("admission"), needs.count("await_license")) == (1, 1), (name, job_name)  # nosec B101 - regression assertion
+                assert needs.count("admission") == 1, (name, job_name)
+                assert needs.count("await_license") == 1, (name, job_name)
                 extra_condition = None
                 if name == "frontend-e2e-tiers.yml":
                     extra_condition = frontend_conditions[job_name]
+                elif name == "ci.yml" and job_name in NON_PR_FULL_SUITE_JOBS:
+                    extra_condition = non_pr
                 elif name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
                     extra_condition = backend_changed
                 elif (name, job_name) in {
@@ -448,59 +512,55 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 expected_condition = admission_clause
                 if extra_condition:
                     expected_condition += f" && ({extra_condition})"
-                actual_failure_step = expected_failure_step = None
                 if (name, job_name) == ("backend-required.yml", "backend-required"):
-                    # A rejected audit must report failure before checking out PR code.
+                    # The required rollup must report a negative verdict as failure,
+                    # even when the changes job was not admitted.
                     expected_condition = """
-                        always() && !cancelled() &&
-                        (
-                          (
-                            github.event_name == 'workflow_run' &&
-                            needs.admission.result == 'success' &&
-                            needs.admission.outputs.should_run == 'true' &&
-                            needs.changes.result == 'success'
-                          ) ||
-                          (
-                            github.event_name != 'workflow_run' &&
-                            (
-                              needs.await_license.result == 'skipped' ||
-                              needs.await_license.outputs.license_passed == 'true'
-                            ) &&
-                            needs.changes.result == 'success'
-                          ) ||
-                          (
-                            github.event_name != 'workflow_run' &&
-                            needs.await_license.result != 'skipped' &&
-                            needs.await_license.outputs.license_passed != 'true'
-                          )
+                        always() && !cancelled() && (
+                          (github.event_name == 'workflow_run' &&
+                           needs.admission.result == 'success' &&
+                           needs.admission.outputs.should_run == 'true' &&
+                           needs.changes.result == 'success') ||
+                          (github.event_name != 'workflow_run' &&
+                           (needs.await_license.result == 'skipped' ||
+                            needs.await_license.outputs.license_passed == 'true') &&
+                           needs.changes.result == 'success') ||
+                          (github.event_name != 'workflow_run' &&
+                           needs.await_license.result != 'skipped' &&
+                           needs.await_license.outputs.license_passed != 'true')
                         )
                     """
-                    actual_failure_step = job["steps"][0]
-                    expected_failure_step = {
-                        "name": "Require the license audit to have passed",
-                        "if": (
-                            "github.event_name != 'workflow_run' && "
-                            "needs.await_license.result != 'skipped' && "
-                            "needs.await_license.outputs.license_passed != 'true'"
-                        ),
-                        "run": (
-                            'echo "::error::License audit did not pass for this PR head, '
-                            'so the gates were not run. Fix the licence policy failure and re-run."\n'
-                            "exit 1\n"
-                        ),
-                    }
-                assert (_normalized(job.get("if")), actual_failure_step) == (  # nosec B101 - regression assertion
-                    _normalized(expected_condition), expected_failure_step
-                ), (name, job_name)
+                    refusal = job["steps"][0]
+                    assert _normalized(refusal["if"]) == _normalized(
+                        "github.event_name != 'workflow_run' && "
+                        "needs.await_license.result != 'skipped' && "
+                        "needs.await_license.outputs.license_passed != 'true'"
+                    )
+                    assert re.search(r"(?m)^\s*exit 1\s*$", refusal["run"])
+                assert _normalized(job.get("if")) == _normalized(expected_condition), (name, job_name)
             else:
                 assert "admission" not in needs, (name, job_name)
-                if name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
-                    assert _normalized(job.get("if")) == _normalized(backend_changed), (name, job_name)
-                elif (name, job_name) == ("ci.yml", "full-suite-os-313-release-shards"):
+                assert "await_license" not in needs, (name, job_name)
+                # admission is skipped outside workflow_run, and an implicit success()
+                # skips a job with any skipped ancestor. Downstream jobs must opt out with
+                # always() and check each direct dependency themselves, or they silently
+                # never run on pull_request/push (the full-suite shards did exactly that).
+                dependencies_succeeded = "always() && !cancelled() && " + " && ".join(
+                    f"needs.{dependency}.result == 'success'" for dependency in needs
+                )
+                if name == "ci.yml" and (
+                    job_name in NON_PR_FULL_SUITE_JOBS
+                    or job_name == "full-suite-os-313-release-shards"
+                ):
                     assert _normalized(job.get("if")) == _normalized(
-                        "github.event_name != 'pull_request' && "
-                        "github.event_name != 'workflow_run'"
-                    )
+                        f"{dependencies_succeeded} && {non_pr}"
+                    ), (name, job_name)
+                elif name == "ci.yml" and job_name in BACKEND_CHANGED_JOBS:
+                    assert _normalized(job.get("if")) == _normalized(
+                        f"{dependencies_succeeded} && ({backend_changed})"
+                    ), (name, job_name)
+                elif (name, job_name) == ("jobs-suite.yml", "jobs-postgres"):
+                    assert _normalized(job.get("if")) == _normalized(dependencies_succeeded)
                 elif (name, job_name) in {
                     ("coverage-required.yml", "coverage-required"),
                     ("e2e-required.yml", "e2e-required"),
@@ -530,9 +590,17 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 expected_other_inputs = (
                     {"fetch-depth": 0} if (name, job_name) in FETCH_DEPTH_CHECKOUTS else {}
                 )
+                if name == "ci.yml" and job_name in {
+                    "full-suite-linux-312-shards",
+                    "full-suite-linux-313-shards",
+                }:
+                    expected_other_inputs = {
+                        "fetch-depth": "${{ contains(matrix.shard.paths, "
+                        "'tldw_Server_API/tests/Docs') && '0' || '1' }}"
+                    }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 55
+    assert checkout_count == 54
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -572,8 +640,8 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     combined_text = "\n".join(text for _, text in workflows.values())
     assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
     assert combined_text.count("github.event.pull_request.number") == 27
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 55
-    assert combined_text.count("github.event.pull_request.head.sha") == 52
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 54
+    assert combined_text.count("github.event.pull_request.head.sha") == 51
     assert combined_text.count("github.event.pull_request.base.sha") == 5
     assert combined_text.count("needs.admission.outputs.base_sha") == 11
 
@@ -843,7 +911,7 @@ def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
                         save_condition.startswith("github.event_name!='workflow_run'&&")
                     )
 
-    assert setup_helper_count == 24
+    assert setup_helper_count == 23
     assert setup_python_cache_count == 1
     assert cache_save_count == 6
     assert cache_restore_count == 6
@@ -1079,6 +1147,29 @@ def test_helper_is_the_only_checked_out_program_and_owns_all_outputs() -> None:
     assert _unquoted_shell_expansions(script) == []
 
 
+_FULL_SUITE_SUMMARIES = sorted(name for name in BACKEND_CHANGED_JOBS if name.endswith("-summary"))
+
+
+@pytest.mark.unit
+def test_every_full_suite_platform_has_a_summary() -> None:
+    """Linux 3.12/3.13, macOS and Windows each report through one summary job."""
+    assert len(_FULL_SUITE_SUMMARIES) == 4
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("summary", _FULL_SUITE_SUMMARIES, ids=_FULL_SUITE_SUMMARIES)
+def test_full_suite_summaries_fail_closed_on_skipped_shards(summary: str) -> None:
+    """A summary fails unless its shard job succeeded; "skipped" is not a pass.
+
+    A summary only runs when its shards were supposed to run, so a skipped shard
+    job means the suite never executed. Accepting "skipped" hid exactly that for weeks.
+    """
+    jobs = _load_ordinary_workflows()["ci.yml"][0]["jobs"]
+    script = "\n".join(step.get("run", "") for step in jobs[summary]["steps"])
+    assert 'if [ "$r" != "success" ]; then' in script
+    assert '"skipped"' not in script
+
+
 def test_backend_required_enforces_isolation_ratchets():
     workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
     steps = workflow["jobs"]["backend-required"]["steps"]
@@ -1090,3 +1181,100 @@ def test_backend_required_enforces_isolation_ratchets():
         "tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py",
     ):
         assert suite in gate["run"]  # nosec B101 - regression assertion
+
+
+def _without_await_license(
+    workflows: dict[str, tuple[dict[str, Any], str]], *, drop_job: bool
+) -> dict[str, tuple[dict[str, Any], str]]:
+    """Deep-copy the workflows and strip await_license from backend-required.yml."""
+    import copy
+
+    mutated = copy.deepcopy(workflows)
+    data, text = mutated["backend-required.yml"]
+    if drop_job:
+        data["jobs"].pop("await_license")
+    for job in data["jobs"].values():
+        needs = job.get("needs")
+        if isinstance(needs, list) and "await_license" in needs:
+            needs.remove("await_license")
+    return mutated
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("drop_job", [False, True], ids=["gate-job-skips-await", "await-job-removed"])
+def test_a_deliberate_license_bypass_fails_the_contract(monkeypatch: pytest.MonkeyPatch, drop_job: bool) -> None:
+    """TASK-13386 AC2: a gate that stops waiting on the license verdict must fail, not pass.
+
+    #3013 changed this contract and the tests went stale unnoticed, so the tests
+    themselves are checked here: strip await_license from backend-required.yml and the
+    admission contracts must reject it.
+    """
+    import sys
+
+    module = sys.modules[__name__]
+    real = _load_ordinary_workflows()
+    monkeypatch.setattr(module, "_load_ordinary_workflows", lambda: _without_await_license(real, drop_job=drop_job))
+
+    # The dependency-graph contract must catch both shapes of bypass.
+    with pytest.raises((AssertionError, KeyError)):
+        test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable()
+    # Removing the await job itself must also fail the exact-gate contract.
+    if drop_job:
+        with pytest.raises((AssertionError, KeyError)):
+            test_all_ordinary_workflows_call_exact_inert_admission_gate()
+
+
+def test_frontend_critical_journeys_start_real_application_with_declared_provider() -> None:
+    """Critical journeys require a ready real backend and a controlled downstream provider."""
+    data = yaml.safe_load((REPO_ROOT / ".github/workflows/frontend-e2e-tiers.yml").read_text(encoding="utf-8"))
+    for name in ("critical", "features", "admin"):
+        job = data["jobs"][name]
+        assert "TEST_MODE" not in job["env"]
+        start = next(step for step in job["steps"] if step.get("name") == "Start backend server")
+        assert "exit 1" in start["run"], "Readiness exhaustion must fail before Playwright can skip unavailable APIs"
+        assert '-H "X-API-KEY: $SINGLE_USER_API_KEY"' in start["run"], "Readiness must authenticate against the actual protected application health route"
+    critical = data["jobs"]["critical"]
+    assert critical["env"]["TLDW_LIVE_TIER_UAT"] == "1"
+    assert critical["env"]["TLDW_E2E_ALLOW_OFFLINE"] == "0", "Notification journeys require a verified connection, not offline bypass"
+    assert critical["env"]["TLDW_UAT390_MODE"] == "deterministic"
+    assert critical["env"]["TLDW_UAT390_PROVIDER"] == critical["env"]["UAT_STUDY_PROVIDER"] == "openai"
+    assert critical["env"]["TLDW_UAT390_MODEL"] == critical["env"]["UAT_STUDY_MODEL"]
+    assert critical["env"]["OPENAI_API_BASE_URL"].startswith("http://127.0.0.1:")
+    assert any(step.get("name") == "Start deterministic downstream provider" for step in critical["steps"])
+
+
+def test_frontend_critical_serves_a_completed_build_instead_of_compiling_routes() -> None:
+    """Browser timing must not include dev compilation or source watcher updates."""
+    data = yaml.safe_load((REPO_ROOT / ".github/workflows/frontend-e2e-tiers.yml").read_text(encoding="utf-8"))
+    critical = data["jobs"]["critical"]
+    command = critical["env"].get("TLDW_WEB_CMD", "")
+    assert "bun run start" in command
+    assert ".tmp/frontend-e2e/frontend.log" in command
+    steps = critical["steps"]
+    build = next(step for step in steps if step.get("name") == "Build frontend for browser tests")
+    execution = next(step for step in steps if step.get("name") == "Run critical E2E tests")
+    assert steps.index(build) < steps.index(execution)
+    assert "bun run build:dev" in build["run"]
+    assert "frontend-build.log" in build["run"]
+    assert build["shell"] == "bash", "GitHub explicit bash enables pipefail so tee cannot mask build failures"
+    assert not build.get("continue-on-error", False)
+
+
+def test_frontend_critical_keeps_first_attempt_evidence_within_job_deadline() -> None:
+    """A failed first pass must report failure and upload its own retained evidence."""
+    data = yaml.safe_load((REPO_ROOT / ".github/workflows/frontend-e2e-tiers.yml").read_text(encoding="utf-8"))
+    steps = data["jobs"]["critical"]["steps"]
+    executions = [step for step in steps if "bun run e2e:critical" in step.get("run", "")]
+    assert len(executions) == 1, "A second full run overwrites results and exhausts the upload deadline"
+    run = executions[0]
+    assert not run.get("continue-on-error", False)
+    assert run["timeout-minutes"] < data["jobs"]["critical"]["timeout-minutes"] - 5
+    assert "--retries=0" in run["run"]
+    assert "--trace=retain-on-failure" in run["run"]
+    assert "--reporter=list,json" in run["run"]
+    assert run["env"]["PLAYWRIGHT_JSON_OUTPUT_NAME"].endswith("/results.json")
+    upload = next(step for step in steps if step.get("name") == "Upload test artifacts")
+    assert upload["if"] == "always()"
+    assert "test-results/" in upload["with"]["path"]
+    assert ".tmp/frontend-e2e/" in upload["with"]["path"]
+    assert upload["with"]["include-hidden-files"] is True

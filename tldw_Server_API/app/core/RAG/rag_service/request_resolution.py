@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional
 
 from tldw_Server_API.app.core.RAG.rag_service.profiles import get_profile_kwargs
+from tldw_Server_API.app.core.Utils.coercion import parse_bool
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 _DEFAULT_PROFILE_ALIASES: dict[str, str] = {
@@ -44,7 +45,7 @@ def _default_single_user_id_resolver() -> int:
 
 
 def _is_truthy_value(raw_value: Any) -> bool:
-    return str(raw_value).strip().lower() in {"1", "true", "yes", "on"}
+    return parse_bool(str(raw_value), default=False)
 
 
 def _parse_csv_or_json_list(raw_value: Any) -> Optional[list[str]]:

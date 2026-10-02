@@ -172,9 +172,8 @@ async def run():
             try:
                 await admit()
             except HTTPException as exc:
-                assert exc.status_code == 413
-                assert exc.detail == {'error': 'storage_quota_exceeded', 'message': 'Quota check unavailable',
-                    'used_mb': 0.0, 'quota_mb': None, 'remaining_mb': None}
+                assert exc.status_code == 503
+                assert exc.detail == 'Storage quota check unavailable'
             else:
                 raise AssertionError('Unavailable quota backend admitted upload')
         finally:

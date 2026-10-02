@@ -3,10 +3,10 @@ id: TASK-13380
 title: >-
   Worktree test runs silently import the main checkout's mcp_unified, not the
   worktree's
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-23 16:04'
-updated_date: '2026-09-23 16:06'
+updated_date: '2026-09-28 19:48'
 labels:
   - tooling
   - testing
@@ -23,10 +23,10 @@ Editable installs pin absolute paths into the main checkout, so tests run from a
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A worktree test run either imports the worktree's own source, or fails loudly instead of silently using another checkout's
-- [ ] #2 The guard covers every first-party editable install, not just mcp_unified
-- [ ] #3 Worktree setup guidance records that re-running pip install -e from a worktree corrupts the shared venv for every other checkout
-- [ ] #4 Verified by editing a file under apps/mcp-unified/src in a worktree and confirming the test run observes the edit or fails
+- [x] #1 A worktree test run either imports the worktree's own source, or fails loudly instead of silently using another checkout's
+- [x] #2 The guard covers every first-party editable install, not just mcp_unified
+- [x] #3 Worktree setup guidance records that re-running pip install -e from a worktree corrupts the shared venv for every other checkout
+- [x] #4 Verified by editing a file under apps/mcp-unified/src in a worktree and confirming the test run observes the edit or fails
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -73,6 +73,8 @@ unsafe wherever worktrees are documented.
 
 Found while triaging TASK-13358: two of those tests turned out to be environment-dependent,
 which prompted checking where the imports actually resolve.
+
+Closed 2026-09-28. PREMISE CORRECTED: the 2026-09-23 verification used plain 'python -c', not pytest. pytest has pinned both packages to the running checkout since June (mcp_unified) and August (tldw_profile_core) via [tool.pytest.ini_options] pythonpath, so worktree TEST runs were not affected. The hazard is real for non-pytest runs (scripts, the server). AC1/AC2: tests/lint/test_first_party_source_pinning.py asserts pythonpath lists every apps/*/src and packages/*/src dir, so a new first-party package cannot be forgotten, and that each package resolves inside the running checkout. AC4, probed from this worktree: with packages/tldw_profile_core/src removed from pythonpath, both the coverage test and the live tldw_profile_core check fail, the latter because it then imports the main checkout's copy. AC3: CONTRIBUTING.md documents the shared-venv behaviour and warns against re-running pip install -e from a worktree.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done

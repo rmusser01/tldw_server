@@ -1013,7 +1013,8 @@ async def test_notes_studio_derive_retry_repairs_missing_sidecar_after_capture(
             }
         }
 
-    original_create = db.create_note_studio_document
+    # The Sync path writes the sidecar via ensure_note_studio_document since 147ad5fc06.
+    original_create = db.ensure_note_studio_document
     create_calls = 0
 
     def fail_first_sidecar_create(**fields):
@@ -1023,7 +1024,7 @@ async def test_notes_studio_derive_retry_repairs_missing_sidecar_after_capture(
             raise RuntimeError("simulated sidecar write failure")
         return original_create(**fields)
 
-    monkeypatch.setattr(db, "create_note_studio_document", fail_first_sidecar_create)
+    monkeypatch.setattr(db, "ensure_note_studio_document", fail_first_sidecar_create)
     studio = NotesStudioService(db=db, user_id="user-1", generation_adapter=generate)
     arguments = {
         "source_note_id": source_id,
@@ -1155,6 +1156,10 @@ async def test_notes_studio_regeneration_retry_repairs_stale_sidecar_after_captu
 def test_notes_tasks_projection_uses_active_sync_authority(tmp_path, monkeypatch) -> None:
     db, sync_store, service = build_ready_notes_sync_stack(tmp_path)
     _patch_active_service(monkeypatch, service)
+    db.bind_local_task_graph_to_dataset(
+        owner_user_id="user-1",
+        target_dataset_id=sync_store.list_datasets_for_user("user-1")[0].dataset_id,
+    )
     coordinator = NotesOrganizationCoordinator(service=service, note_db=db, user_id="user-1")
     note_id = str(uuid4())
     note = capture_note_upsert(

@@ -1,0 +1,21 @@
+{
+  "id": "chatcmpl-ci-biology-cards",
+  "object": "chat.completion",
+  "created": 1770000000,
+  "model": "gpt-4.1-mini",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "[{\"front\": \"What is the powerhouse of the cell?\", \"back\": \"The mitochondria.\", \"tags\": []}, {\"front\": \"What does DNA stand for?\", \"back\": \"Deoxyribonucleic acid.\", \"tags\": []}, {\"front\": \"What does photosynthesis convert light energy into?\", \"back\": \"Chemical energy.\", \"tags\": []}, {\"front\": \"How many bones does the human body have?\", \"back\": \"206 bones.\", \"tags\": []}, {\"front\": \"At what temperature does water boil at sea level?\", \"back\": \"100 degrees Celsius.\", \"tags\": []}]"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 100,
+    "completion_tokens": 100,
+    "total_tokens": 200
+  }
+}

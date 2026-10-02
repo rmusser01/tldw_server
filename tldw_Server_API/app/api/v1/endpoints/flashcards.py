@@ -145,6 +145,7 @@ from tldw_Server_API.app.core.Utils.image_validation import (
     validate_uploaded_image_bytes,
 )
 from tldw_Server_API.app.core.Workflows.adapters.content import run_flashcard_generate_adapter
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 router = APIRouter(prefix="/flashcards", tags=["flashcards"])
 MAX_STUDY_PACK_JOBS_OFFSET = 10_000
@@ -215,7 +216,7 @@ _FLASHCARDS_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
     json.JSONDecodeError,
 )
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 _STUDY_PACK_JOB_STATUS_MAP = {
     "queued": "queued",
     "processing": "running",
@@ -2559,8 +2560,22 @@ async def respond_flashcard_assistant(
     response_model=FlashcardGenerateResponse,
     dependencies=[Depends(check_rate_limit)],
 )
-async def generate_flashcards(payload: FlashcardGenerateRequest):
-    """Generate flashcards from free text using the workflows flashcard_generate adapter."""
+async def generate_flashcards(
+    payload: FlashcardGenerateRequest,
+    current_user: User = Depends(get_request_user),
+) -> FlashcardGenerateResponse:
+    """Generate flashcards from free text using the workflows flashcard_generate adapter.
+
+    Args:
+        payload: Source text and generation options.
+        current_user: Authenticated caller. Generation is not scoped per user,
+            but it spends the operator's configured LLM provider credits, so it
+            must not be reachable anonymously. Every other route on this router
+            already resolves a user.
+
+    Returns:
+        The generated cards.
+    """
     try:
         provider = _resolve_flashcard_generation_provider(payload.provider)
         result = await run_flashcard_generate_adapter(

@@ -16,6 +16,10 @@ const mocks = vi.hoisted(() => {
   return { noop, message, tabs, background: null as null | { type: string; text: string; payload: Record<string, unknown> }, initialize: vi.fn(), navigate: vi.fn() }
 })
 vi.mock("@/hooks/useBackgroundMessage", () => ({ default: () => mocks.background }))
+// This suite exercises the capture/transfer lease inside an already-open chat.
+// The real outer route owner and account remounts are covered by ownership.test.tsx.
+vi.mock("@/hooks/useSidepanelChatOwner", () => ({ useSidepanelChatOwner: () => openedOwner }))
+const openedOwner = { ownerKey: "opened-owner", revision: 0, snapshot: {}, isCurrent: () => true }
 vi.mock("@/hooks/useMessage", () => ({ useMessage: () => mocks.message }))
 vi.mock("@/hooks/useMigration", () => ({ useMigration: () => {} }))
 vi.mock("@/hooks/useSmartScroll", () => ({ useSmartScroll: () => ({ containerRef: { current: null }, autoScrollToBottom: mocks.noop }) }))

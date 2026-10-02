@@ -395,9 +395,23 @@ async def handle_agent_task_job(
         jobs_job_id = str(job.get("id")) if job.get("id") is not None else None
         try:
             executor_task = asyncio.ensure_future(executor(definition, payload))
-            result_text = await asyncio.wait_for(executor_task, timeout=execution_timeout_seconds)
-        except asyncio.TimeoutError:
-            timed_out = True
+            # Not asyncio.wait_for: since Python 3.12 it loses the handler's
+            # cancellation when the executor swallows it (the handler would then
+            # finish the run on a replaced lease), and a repeated cancel reaches
+            # the executor. asyncio.wait never forwards cancellation.
+            try:
+                await asyncio.wait({executor_task}, timeout=execution_timeout_seconds)
+            except asyncio.CancelledError:
+                executor_task.cancel()
+                # A repeated cancel interrupts this drain; finally retains the claim.
+                await asyncio.wait({executor_task})
+                raise
+            if executor_task.done():
+                result_text = executor_task.result()
+            else:
+                executor_task.cancel()
+                await asyncio.wait({executor_task})
+                timed_out = True
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - one bad run must not kill the worker

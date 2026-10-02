@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     BackendType,
     DatabaseBackend,
     DatabaseConfig,
+    DatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import (
     DatabaseBackendFactory,
@@ -148,13 +149,16 @@ class MediaDbFactory:
         if backend is None:
             return
         self.backend = None
+        # Retirement removes the registry entry while central cleanup owns the pool.
         if (
             getattr(backend, "backend_type", None) == BackendType.SQLITE
-            and is_factory_managed_backend(backend)
+            and (getattr(backend, "_retired", False) or is_factory_managed_backend(backend))
         ):
             release_managed_backend(backend)
             return
         try:
             backend.get_pool().close_all()
-        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+        # DatabaseError: a registry reset already retired this backend and owns
+        # closing its pool; there is nothing left for the factory to close.
+        except (AttributeError, DatabaseError, OSError, RuntimeError, TypeError, ValueError):
             return

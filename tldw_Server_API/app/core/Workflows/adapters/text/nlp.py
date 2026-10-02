@@ -17,6 +17,9 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
+    resolve_tiktoken_encoding_or_default,
+)
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.text._config import (
@@ -476,11 +479,9 @@ async def run_token_count_adapter(config: dict[str, Any], context: dict[str, Any
     word_count = len(text.split())
 
     try:
-        import tiktoken
-        try:
-            encoding = tiktoken.encoding_for_model(model)
-        except KeyError:
-            encoding = tiktoken.get_encoding("cl100k_base")
+        import tiktoken  # noqa: F401 - probe so a missing dep still hits except ImportError
+
+        encoding = resolve_tiktoken_encoding_or_default(model)
         token_count = len(encoding.encode(text))
         return {"token_count": token_count, "char_count": char_count, "word_count": word_count, "model": model}
     except ImportError:

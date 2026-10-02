@@ -92,6 +92,35 @@ _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS = (
 )
 
 
+async def org_requires_include_default() -> bool:
+    """Whether the active org requires include rules by default; else the env default.
+
+    Read from the org's metadata (nested ``watchlists.require_include_default`` or flat
+    ``watchlists_require_include_default``), falling back to
+    WATCHLISTS_REQUIRE_INCLUDE_DEFAULT.
+    """
+    try:
+        scope = get_scope()
+        org_id = getattr(scope, "effective_org_id", None) if scope else None
+        if org_id is not None:
+            from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
+
+            meta = await AuthnzOrgsTeamsRepo(db_pool=await get_db_pool()).get_organization_metadata(int(org_id))
+            if meta:
+                nested = meta.get("watchlists")
+                if isinstance(nested, dict) and isinstance(nested.get("require_include_default"), bool):
+                    return bool(nested["require_include_default"])
+                flat = meta.get("watchlists_require_include_default")
+                if isinstance(flat, bool):
+                    return flat
+    except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS:
+        pass
+    try:
+        return env_flag_enabled("WATCHLISTS_REQUIRE_INCLUDE_DEFAULT")
+    except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS:
+        return False
+
+
 def _utcnow_iso() -> str:
     return datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
 
@@ -688,44 +717,8 @@ async def run_watchlist_job(
             job_filters = []
             job_require_include = None
 
-        async def _org_require_include_default() -> bool:
-            # Read from active org metadata when available; fallback to env var
-            try:
-                scope = get_scope()
-                org_id = getattr(scope, "effective_org_id", None) if scope else None
-                if org_id is not None:
-                    pool = await get_db_pool()
-                    row = await pool.fetchone("SELECT metadata FROM organizations WHERE id = ?", int(org_id))
-                    if row is not None:
-                        meta = row.get("metadata")
-                        try:
-                            import json as _json
-                            if isinstance(meta, str):
-                                meta_dict = _json.loads(meta)
-                            elif isinstance(meta, (dict,)):
-                                meta_dict = meta
-                            else:
-                                meta_dict = None
-                            if isinstance(meta_dict, dict):
-                                # Accept either nested or flat key
-                                if isinstance(meta_dict.get("watchlists"), dict):
-                                    val = meta_dict.get("watchlists", {}).get("require_include_default")
-                                    if isinstance(val, bool):
-                                        return val
-                                flat = meta_dict.get("watchlists_require_include_default")
-                                if isinstance(flat, bool):
-                                    return flat
-                        except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS:
-                            pass
-            except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS:
-                pass
-            try:
-                return env_flag_enabled("WATCHLISTS_REQUIRE_INCLUDE_DEFAULT")
-            except _WATCHLISTS_PIPELINE_NONCRITICAL_EXCEPTIONS:
-                return False
-
         include_rules_exist = any((str(f.get("action")) == "include") for f in job_filters)
-        org_default = await _org_require_include_default()
+        org_default = await org_requires_include_default()
         effective_require_include = job_require_include if (job_require_include is not None) else org_default
         include_gating_active = bool(effective_require_include and include_rules_exist)
 

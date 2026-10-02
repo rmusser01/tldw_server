@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-09-22 04:51'
-updated_date: '2026-09-23 00:12'
+updated_date: '2026-09-23 19:34'
 labels:
   - bug
   - evaluations
@@ -54,26 +54,32 @@ Found by the comprehensive core-module review; independently reproduced by the o
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] #1 A failing test under a non-UTC TZ asserts the Unix timestamp matches true UTC
-- [x] #2 All four conversion sites treat naive stored timestamps as UTC
-- [x] #3 The except fallback no longer uses naive datetime.now()
-- [x] #4 The PostgreSQL datasets path no longer falls through to now() for an unmatched type
-- [x] #5 One CI shard runs under a non-UTC TZ so this class of defect is visible -- this is the durable fix
-- [x] #6 Conformance with ADR-014's Unix created convention is asserted by test
+- [ ] #1 A failing test under a non-UTC TZ asserts the Unix timestamp matches true UTC
+- [ ] #2 All four conversion sites treat naive stored timestamps as UTC
+- [ ] #3 The except fallback no longer uses naive datetime.now()
+- [ ] #4 The PostgreSQL datasets path no longer falls through to now() for an unmatched type
+- [ ] #5 One CI shard runs under a non-UTC TZ so this class of defect is visible -- this is the durable fix
+- [ ] #6 Conformance with ADR-014's Unix created convention is asserted by test
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Duplicate of TASK-13302 (filed twice during the 2026-09-22 review). Work and status are tracked there.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Fixed test-first and merged to dev in PR #2980 (merge commit 8045fa2956). A failing test reproduced the defect before any code changed, with controls pinning the behaviour that had to stay unchanged. Qodo review then found follow-on defects in three of this batch's fixes; those were corrected in the same PR before merge.
+Closed as duplicate of TASK-13302.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
