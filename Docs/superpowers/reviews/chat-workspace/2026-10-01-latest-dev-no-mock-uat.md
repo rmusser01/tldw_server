@@ -9,14 +9,17 @@ Current integration baseline: dev `3caebcfc1e16596f4a352744a9f017017d766165`.
 
 ## Current Gate
 
-The initial acceptance matrix below passed on ec86ba4. A subsequent latest-dev
-integration is published in `5f52dde95936030353581ecaa1f8d7cf2efd9bfc`;
-its fresh grounded, route, cancellation/recovery, workspace, preview/mobile and
-owner-return requalification now pass. The follow-up keyless-owner recovery fix
-is covered by 207 owning-package checks and the exact protected native GET.
+Source integration `5dbf0b076883907dccbb174332d83dae20daf541` on frozen
+dev `3caebcfc` now qualifies the required hosted backend/frontend checks and
+all seven owning PostgreSQL cases, including the image-recovery snapshot.
+The recorded real Chrome acceptance covers grounded chat, citations, durable
+receipts, cancellation/recovery, owner/workspace return, previews and mobile
+keyboard behavior without mocks. Historical and reused results remain labeled
+with their actual source baselines below.
 [PR #3071](https://github.com/rmusser01/tldw_server/pull/3071) remains draft and
-unmerged pending current gates. The requester-authored Change summary is
-published verbatim and is no longer an outstanding requirement.
+unmerged as requested. The requester-authored Change summary is published
+verbatim. Evidence-only publication updates reuse the verified application
+source; their own hosted status must not be inferred from an earlier head.
 
 ## Initial Acceptance Recorded
 
@@ -413,10 +416,11 @@ full frontend TypeScript passes after generated-type refresh using the existing
 Local official PostgreSQL fixtures skip all seven selected cases because the
 service is unavailable. Docker's read-only probe times out and5432 refuses
 connections; no restart, shared-container removal, replacement DB or bypass.
-Direct hosted logs/JUnit on head7274 confirm56 auth-postgres tests and149
-auth-integration-b-z tests actually pass, including all six durable-turn
-PostgreSQL cases without skips. This qualifies that unchanged owning scope;
-the separate image-recovery PG case and next-head hosted CI remain unqualified.
+Before publication, direct hosted logs/JUnit on head7274 confirm56 auth-postgres
+tests and149 auth-integration-b-z tests actually pass, including all six
+durable-turn PostgreSQL cases without skips. This qualified that unchanged
+owning scope; the separate image-recovery PG case and next-head hosted CI were
+still unqualified at that snapshot.
 The head7274 snapshot has211 successes, one backend-required failure,
 17 running and59 queued (plus35 skips/two status successes). These are not
 certification of the next published head.
@@ -426,3 +430,37 @@ Native evidence: `native-reload.json` and two inspected PNGs; red/green/final
 delta JUnit, Bandit, schema control/delta, hosted logs/JUnit and source bindings
 are retained there. Original runner failures remain separate. Preservation is
 under the preceding evidence root's `route-auth-retry-preservation-20261002`.
+
+## Published Source Qualification
+
+The exact published source head `5dbf0b076883907dccbb174332d83dae20daf541`
+has 293 successful checks, 35 skipped checks and one cancelled superseded license
+audit; zero failed, queued or running checks. The replacement license audit and
+trusted license status succeed. Both [backend-required](https://github.com/rmusser01/tldw_server/actions/runs/36974608567/job/110738851124)
+and [frontend-required](https://github.com/rmusser01/tldw_server/actions/runs/36974608496/job/110742239202)
+succeed, closing the earlier OpenAPI drift failure. Skipped checks are not
+counted as tests passed, and the cancelled earlier audit is not a test failure.
+
+Actual downloaded JUnit from run36974608504 closes the remaining PG gate; both
+artifact inventories identify the exact source head above:
+
+- [Auth integration B-Z](https://github.com/rmusser01/tldw_server/actions/runs/36974608504/job/110741695710): 149 passed, zero skips/failures/errors; all six durable-user-turn PostgreSQL cases actually ran.
+- [Chat integration](https://github.com/rmusser01/tldw_server/actions/runs/36974608504/job/110741703457): 861 passed, 30 skipped, zero failures/errors. All 60 image-recovery cases pass, including `test_postgres_strict_image_snapshot` in 3.175s with no skip.
+
+The local seven unavailable-service skips remain skips. Hosted PostgreSQL
+qualification does not claim a local Docker repair or a no-mock hosted LLM
+session; the separate native Chrome/Gemma/embedding UAT supplies that evidence.
+No unresolved review threads or reviews were returned by the final PR readback.
+No application changes, inference resends, service restarts, tab closures or
+stash changes were needed to close these gates. Only the owned completed retry
+plan is retired; other plans and historical evidence are preserved.
+The final read-only preservation check again verifies the original10/eight-row
+hashes, actual served contract, six baseline tabs and all68 stashes. Historical
+missing target IDs/same-URL tabs remain absent, not claimed preserved.
+
+Private evidence: `/private/tmp/chat-workspace-pr3071-continue-20261002-oxxtxz`.
+`pr-current.json`, `review-current.json` and the two downloaded JUnit/log
+artifacts bind this conclusion to 5dbf. Final documentation/task publication
+does not certify its next-head hosted checks before they actually finish.
+Final preservation evidence is under the preceding cookie-dev evidence root's
+`final-ci-closure-preservation-20261002` directory.
