@@ -2767,7 +2767,10 @@ def _seed_sqlite_tool_use_events(
     asyncio.run(_seed())
 
 
-@pytest.mark.parametrize("token_id", ["plain-token", "-leading-token", "--leading-token"])
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "token_id", ["plain-token", "-leading-token", "--leading-token"]
+)
 def test_gateway_cli_approval_grant_lifecycle(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -2822,7 +2825,9 @@ def test_gateway_cli_approval_grant_lifecycle(
     grant_id = grant_payload["grant_id"]
     assert grant_id == token_id
 
-    listed = _run_cli_json(capsys, ["list-approval-grants", "--config", str(config_path)])
+    listed = _run_cli_json(
+        capsys, ["list-approval-grants", "--config", str(config_path)]
+    )
     assert [grant["grant_id"] for grant in listed["grants"]] == [grant_id]
 
     revoked = _run_cli_json(
@@ -2831,7 +2836,9 @@ def test_gateway_cli_approval_grant_lifecycle(
     )
     assert revoked["grant"]["grant_id"] == grant_id
 
-    listed = _run_cli_json(capsys, ["list-approval-grants", "--config", str(config_path)])
+    listed = _run_cli_json(
+        capsys, ["list-approval-grants", "--config", str(config_path)]
+    )
     assert listed["grants"] == []
 
 
@@ -2937,7 +2944,10 @@ def test_gateway_cli_approval_grant_requires_persistent_store(
     assert payload["reason_code"] == "policy_grant_store_unavailable"
 
 
-@pytest.mark.parametrize("token_id", ["plain-token", "-leading-token", "--leading-token"])
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "token_id", ["plain-token", "-leading-token", "--leading-token"]
+)
 def test_gateway_cli_path_grant_lifecycle(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
