@@ -1,9 +1,10 @@
 # Chat Workspace Latest-Dev Acceptance
 
-Tracking: TASK-13408; historical Chat Workspace TASK-13398 and its children.
+Tracking: TASK-13417; previous finalization TASK-13408 archived intact;
+historical Chat Workspace TASK-13398 and its children.
 Epic: https://github.com/rmusser01/tldw_server/issues/1239.
 Initial acceptance baseline: dev `ec86ba4e871d844ff4a3a53c607e80eb85bd0e9b`.
-Current integration baseline: dev `d81c13fddd1dac1948b30401af0388932a0af8f2`.
+Current integration baseline: dev `dcae0cbd3f3ba6c7cd4287dc443628d93ee2cd64`.
 
 ## Current Gate
 
@@ -271,7 +272,81 @@ earlier symlink-verification and mismatched external-root failures are retained.
 Three existing documentation-pattern tracing warnings and stale Browserslist
 data remain; no warning-free build claim is made.
 
-The latest inspected upstream remains `d81c13f`. Current remote CI is pending,
+At the preceding publication the latest inspected upstream was `d81c13f`. Its
+remote CI was pending,
 not certified green; fresh PostgreSQL is unavailable and the broader local
 Hypothesis timing failure remains recorded above. These are explicit remaining
 qualification limits, not fabricated UAT successes.
+
+## Cookie-Model Dev Requalification
+
+Frozen dev `dcae0cbd` merges cleanly. Its two model-discovery services retain
+live authenticated cookie-profile admission, cookie/key in-flight separation,
+fresh capability checks and cache invalidation. The earlier handled-error
+`console.warn` remains intact. Independent source review found no actionable
+regressions. Both task histories are preserved: the previous finalization
+TASK-13408 archive has identical SHA256
+`f6b0da4206b72589bbdff853a1ca158f7312df96d47d7e9b976d48d2fe4cbd89`;
+incoming cookie TASK-13408 is untouched and continuation uses TASK-13417.
+
+Fresh owning-package model/recovery scope: 292 passed, no failures. Full frontend
+TypeScript passes with the existing 8192MB allowance. Six incoming frontend
+files have zero ESLint errors and six warnings. Bandit on the four final touched
+Python production modules has zero findings/errors; this dev advance changes no
+backend source. Final affected regression rerun again passes292 checks; normal
+applicable pre-commit hooks pass without bypass. Existing deprecated hook-stage
+warnings remain. All7217 tracked frontend files/symlink bytes still match the
+qualified build snapshot immediately before publication. Final actual read-only
+preservation again passes the original ten/eight-row hashes, served contract,
+68stashes and six follow-up tabs; historical missing tabs remain unavailable.
+Latest fetched `dev` is still `dcae0cbd`.
+
+Private evidence: `/private/tmp/chat-workspace-pr3071-cookie-dev-20261001`.
+Actual Chrome raw CDP and native input use live auth, SQLite/IndexedDB, Gemma and
+embeddings. No interception, mocks, state injection, focus emulation or install.
+
+| Fresh dcae check | Result | Evidence |
+| --- | --- | --- |
+| Grounded turn, canonical sources, draft/reload | PASS combined evidence: one generation-disabled retrieval and one completionHTTP200, captured four-source payload matches two canonical rows; independent native post-send/full fact-bearing excerpt and draft/reload pass with zero additional sends | `combined-grounded-verification.json`, `main-uat/postsend.json`, `main-uat/fullsource.json` |
+| Exact Stop/recovery/explicit reprepare | PASS: admission then Stop, exact logical-input GET200, no reload/Verify autosend, two deliberate dispatches with one canonical input/result; original unknown ledger retained | `native-dcae-stop.json` |
+| Route/history/invalid/mobile | PASS six checks, zero completions | `native-dcae-route.json` |
+| Workspace A/B/A, Research handoff, New Chat | PASS eleven checks, zero completions and inactive checkpoints retained | `native-dcae-workspace.json` |
+| Browse/staging/Clear/external link and mobile keyboard | PASS combined evidence: both HTTP200 previews, actual memo facts and external Example Domain load; nonempty draft retained. Separate native mobile continuation reaches composer then Send at390x844 with zero overflow and zero completions | `native-dcae-preview.json` (two completed steps; overall runner FAIL retained), `mobile-keyboard-continuation.json`; three fresh inspected PNGs |
+| Real owner baseline and account/backend return | PASS original rows/draft plus full inactive checkpoint hashes; nineteen checks, two explicit new Gemma turns/four canonical rows, foreign404 controls and no switch/reload autosends | `owner-uat/fresh-negative-owner-baseline.json`, `owner-uat/positive-owner-controls-1790910636302.json` |
+| Fresh restored owner visual | PASS loaded original A transcript/draft before and after actual capture, zero sends | `owner-uat/fresh-visual-final.json` |
+| Real cookie model discovery and reload | PASS existing bootstrap200, authenticated profile200 before model metadata200, no browser API key/token; fresh reload revalidates profile, zero sends. Separate settled Healthy/Gemma fresh capture excludes the transitional reload frame | `cookie-uat/catalog-final.json`, `cookie-uat/fresh-ready.json` |
+
+Retained failures are not relabeled. The heavily reused conversation's next
+input `4364266d...` received provider502: actual Gemma rejected an8612-token
+request against8192-token context. That canonical input remains; native New Chat
+created a bounded new conversation rather than resending it or raising limits.
+Its first driver waited for a network-finish event and timed out after one
+retrieval/completion despite a settled saved answer. Combined verification uses
+the captured actual HTTP200/request payload and independent canonical/native
+checks, while `native-dcae-fresh-grounded.json` still reports its original FAIL.
+Full fact-bearing source proof selects the memo chunk, not only its title chunk.
+
+The preview runner completed both real preview/staging flows but its fixed
+80-Tab mobile traversal stopped on an older message action, so its overall FAIL
+is retained. A separate continuation records the actual visible tab order and
+uses native Tab input only: four observations reach the composer, followed by
+Send, without activating Send. Both controls fit390x844 with zero overflow,
+the nonempty draft is unchanged and no completion is dispatched. No application
+change or injected focus/state was needed. Fresh memo/web/mobile images and the
+full-source, Stop, route and workspace screenshots were inspected.
+
+The isolated cookie production frontend initially inherited the build-only
+`app:8000` proxy origin. Its private build was corrected to the real loopback API,
+without changing repository configuration, auth policy or existing services.
+The first launcher lacked the existing Next binary PATH; its failure is retained.
+The first cookie driver read manual config rather than the real cookie binding;
+its stopped progress is retained. A second asserted metadata before its response;
+that FAIL is retained. Final mounted checks wait for real metadata200 and use
+the canonical cookie binding. The initial reload frame was transitional, not a
+settled-readiness claim; the separate fresh Healthy/Gemma image was inspected.
+
+Both byte-bound production builds, token sync and unchanged budgets pass. The
+standard build is540.5/844.1KB; the real-loopback cookie build is540.3/842.7KB,
+under600/900KB. Existing dependencies are reused; only external tracing roots
+include their sibling clone. Original limits (fresh PostgreSQL, historical tabs,
+broader Hypothesis timing failure and current-head hosted CI) remain explicit.
