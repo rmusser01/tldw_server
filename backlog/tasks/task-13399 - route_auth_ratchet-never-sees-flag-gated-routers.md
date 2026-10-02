@@ -4,7 +4,7 @@ title: route_auth_ratchet never sees flag-gated routers
 status: Done
 assignee: []
 created_date: '2026-09-30 06:33'
-updated_date: '2026-10-02 01:44'
+updated_date: '2026-10-02 01:56'
 labels:
   - ci
   - security
@@ -57,14 +57,16 @@ Follow-up (coordinator rulings R-B etc.), same branch:
 Final verification: tldw_Server_API/tests/lint -q -p no:cacheprovider -n 4 -> 71 passed, 1 skipped (pre-existing, unrelated), 0 failed -- test_no_new_unauthenticated_routes now passes. tldw_Server_API/tests/Evaluations/test_benchmark_api_auth.py + test_benchmark_api_error_mapping.py -> 11 passed. Helper_Scripts/ci/rg_route_map_lint.py -> exit 0, clean (allowlist unchanged from this task's earlier investigation -- its three benchmarks/connectors/personalization entries are still needed due to the TASK-13417 quirk, independent of the auth fixes here). ruff check clean on every Python file touched.
 
 Commits: f0e59bd0b1 (ratchet mechanism fix + sibling-dependency fixes), 252db8d493 (benchmark_api.py auth + baseline additions + TASK-13417).
+
+Bandit -ll on changed files: No issues identified (35 low-severity findings exist in the files but are below the -ll medium+ threshold; 0 medium, 0 high). Final: lint 71 passed; benchmark auth 11 passed; rg_route_map_lint exit 0.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
