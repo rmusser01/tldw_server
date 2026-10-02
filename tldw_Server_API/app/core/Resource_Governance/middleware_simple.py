@@ -151,7 +151,8 @@ class RGSimpleMiddleware:
         - API keys, non-JWT bearers and the single-user session cookie go through
           ``get_auth_principal``. On a cache miss it stores its AuthContext on
           request state, so endpoint auth reuses this validation. The route
-          re-checks a failure and returns its own 401.
+          re-checks a failure and returns its own 401. API-key usage is not
+          recorded here; route auth records it when it reuses the context.
         - Other cookies (CSRF, theme, analytics) are not credentials, so they are
           never resolved.
         - The outcome is cached per credential (60 s; 30 s for a failure) so a 429
@@ -247,13 +248,18 @@ class RGSimpleMiddleware:
         # Only this path costs a DB lookup and a key derivation, so only it spends the budget.
         if not self._spend_resolve_budget(client_ip, now):
             return _BUDGET_SPENT
-        from tldw_Server_API.app.core.AuthNZ import auth_principal_resolver
+        from tldw_Server_API.app.core.AuthNZ import User_DB_Handling, auth_principal_resolver
 
+        # Validate only: route auth records API-key usage once, with the endpoint details,
+        # and a request denied here records none (TASK-13403).
+        setattr(request.state, User_DB_Handling.API_KEY_USAGE_DEFERRED, True)
         try:
             principal = await auth_principal_resolver.get_auth_principal(request)
         except Exception as exc:  # noqa: BLE001 - identity is best-effort; route auth still decides
             logger.debug("RG ingress identity fell back to IP: {}", type(exc).__name__)
             return None
+        finally:
+            setattr(request.state, User_DB_Handling.API_KEY_USAGE_DEFERRED, False)
         if getattr(principal, "user_id", None) is not None:
             entity = f"user:{principal.user_id}"
         elif getattr(principal, "api_key_id", None) is not None:

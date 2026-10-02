@@ -959,6 +959,57 @@ async def verify_jwt_and_fetch_user(request: Request, token: str = Depends(oauth
 # --- Combined Primary Authentication Dependency ---
 
 
+# request.state flag: validate API keys without recording usage. RG ingress sets it while
+# it resolves identity, before routing, when the endpoint details are unknown and the
+# request may still be denied (TASK-13403).
+API_KEY_USAGE_DEFERRED = "_api_key_usage_deferred"
+
+
+def _api_key_usage_details(request: Request) -> Optional[dict[str, Any]]:
+    """Endpoint, action and scope that require_token_scope left on request state, if any."""
+    try:
+        endpoint_id = getattr(request.state, "_auth_endpoint_id", None)
+        action = getattr(request.state, "_auth_action", None)
+        scope_name = getattr(request.state, "_auth_scope_name", None)
+        if endpoint_id is None and action is None and scope_name is None:
+            return None
+        usage_details: dict[str, Any] = {}
+        if endpoint_id is not None:
+            usage_details["endpoint_id"] = str(endpoint_id)
+        if action is not None:
+            usage_details["action"] = str(action)
+        if scope_name is not None:
+            usage_details["scope"] = str(scope_name)
+        path = getattr(getattr(request, "url", None), "path", None) or getattr(request, "scope", {}).get("path")
+        if path:
+            usage_details["path"] = str(path)
+        method = getattr(request, "method", None)
+        if method:
+            usage_details["method"] = str(method).upper()
+        return usage_details
+    except _USER_DB_NONCRITICAL_EXCEPTIONS:
+        return None
+
+
+async def record_pending_api_key_usage(request: Request) -> None:
+    """Record the API-key usage RG ingress deferred, once, when route auth reuses its context.
+
+    By then require_token_scope has usually set the endpoint, action and scope, so the
+    "used" audit row carries them; a request ingress denied never gets here.
+    """
+    state = getattr(request, "state", None)
+    pending = getattr(state, "_api_key_usage_pending", None)
+    if not pending:
+        return
+    state._api_key_usage_pending = None
+    key_id, user_id, client_ip = pending
+    try:
+        api_mgr = await get_api_key_manager()
+        await api_mgr.record_key_usage(key_id, user_id, client_ip, _api_key_usage_details(request))
+    except _USER_DB_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Deferred API key usage was not recorded: {}", type(exc).__name__)
+
+
 async def authenticate_api_key_user(request: Request, api_key: str) -> User:
     """
     Validate an API key and return the associated User.
@@ -1079,30 +1130,13 @@ async def authenticate_api_key_user(request: Request, api_key: str) -> User:
     try:
         api_mgr = await get_api_key_manager()
         client_ip = resolve_client_ip(request, settings)
+        # RG ingress validates before routing; route auth records usage (TASK-13403).
+        defer_usage = bool(getattr(getattr(request, "state", None), API_KEY_USAGE_DEFERRED, False))
+        usage_details = _api_key_usage_details(request)
 
-        usage_details: dict[str, Any] | None = None
-        try:
-            endpoint_id = getattr(request.state, "_auth_endpoint_id", None)
-            action = getattr(request.state, "_auth_action", None)
-            scope_name = getattr(request.state, "_auth_scope_name", None)
-            if endpoint_id is not None or action is not None or scope_name is not None:
-                usage_details = {}
-                if endpoint_id is not None:
-                    usage_details["endpoint_id"] = str(endpoint_id)
-                if action is not None:
-                    usage_details["action"] = str(action)
-                if scope_name is not None:
-                    usage_details["scope"] = str(scope_name)
-                path = getattr(getattr(request, "url", None), "path", None) or getattr(request, "scope", {}).get("path")
-                if path:
-                    usage_details["path"] = str(path)
-                method = getattr(request, "method", None)
-                if method:
-                    usage_details["method"] = str(method).upper()
-        except _USER_DB_NONCRITICAL_EXCEPTIONS:
-            usage_details = None
-
-        if usage_details is None:
+        if defer_usage:
+            key_info = await api_mgr.validate_api_key(api_key=api_key, ip_address=client_ip, record_usage=False)
+        elif usage_details is None:
             key_info = await api_mgr.validate_api_key(api_key=api_key, ip_address=client_ip)
         else:
             try:
@@ -1401,6 +1435,9 @@ async def authenticate_api_key_user(request: Request, api_key: str) -> User:
                 f"Unable to populate AuthContext in authenticate_api_key_user: {ctx_exc}"
             )
 
+        # Usage this call deferred is owed once by route auth; a recorded call owes nothing.
+        with contextlib.suppress(_USER_DB_NONCRITICAL_EXCEPTIONS):
+            request.state._api_key_usage_pending = (key_info.get("id"), user_id, client_ip) if defer_usage else None
         return user_obj
     except HTTPException:
         raise
@@ -1576,6 +1613,7 @@ async def get_request_user(
         if isinstance(existing_ctx, AuthContext) and isinstance(cached_user, User):
             logger.debug("get_request_user: Reusing cached AuthPrincipal/_auth_user from request.state.")
             activate_authenticated_content_scope(existing_ctx.principal, request=request)
+            await record_pending_api_key_usage(request)
             return cached_user
     except _USER_DB_NONCRITICAL_EXCEPTIONS as fastpath_exc:
         # Fall through to normal auth paths on any issues, but make failures observable.
