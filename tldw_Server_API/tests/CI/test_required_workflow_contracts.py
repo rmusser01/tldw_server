@@ -658,7 +658,9 @@ def test_apt_bounded_helper_sets_timeouts_and_wall_clock_bound() -> None:
     helper = Path(".github/actions/apt-bounded.sh").read_text(encoding="utf-8")
     assert "Acquire::http::Timeout=20" in helper
     assert "Acquire::https::Timeout=20" in helper
-    assert 'sudo timeout --kill-after=15s "${APT_ATTEMPT_SECONDS:-300}" apt-get "$@"' in helper
+    assert 'apt_deadline=$((SECONDS + ${APT_TOTAL_SECONDS:-600}))' in helper
+    assert 'sudo timeout --kill-after=15s "$limit" apt-get "$@"' in helper
+    assert 'sudo timeout --kill-after=10s "$limit" dpkg --configure -a' in helper
 
 
 def test_full_suite_ffmpeg_setup_scopes_heavy_install_to_media_runtime_shards() -> None:

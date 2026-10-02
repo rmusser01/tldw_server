@@ -2,6 +2,7 @@
 
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 HELPER = Path(".github/actions/apt-bounded.sh").resolve()
@@ -18,24 +19,28 @@ except subprocess.TimeoutExpired:
     sys.exit(124)
 """
 
-# Hangs on the first call, then succeeds; or always fails.
+# Hangs on the first call, then succeeds; always fails; or always hangs. Stubs exec
+# their sleep so the timeout kills the process holding the output pipe, like apt-get.
 _APT_GET_STUB = """#!/bin/bash
 case "$APT_STUB_MODE" in
   hang-once)
-    if [ ! -f "$APT_STUB_STATE" ]; then touch "$APT_STUB_STATE"; sleep 30; fi
+    if [ ! -f "$APT_STUB_STATE" ]; then touch "$APT_STUB_STATE"; exec sleep 30; fi
     echo "apt-get ok: $*" ;;
   fail) exit 100 ;;
+  hang) exec sleep 30 ;;
 esac
 """
 
 
-def _run_helper(tmp_path: Path, mode: str) -> subprocess.CompletedProcess[str]:
+def _run_helper(
+    tmp_path: Path, mode: str, *, total_seconds: str = "600", dpkg_body: str = "exit 0"
+) -> subprocess.CompletedProcess[str]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     stubs = {
         "apt-get": _APT_GET_STUB,
         "sudo": '#!/bin/bash\nexec "$@"\n',
-        "dpkg": "#!/bin/bash\nexit 0\n",
+        "dpkg": f"#!/bin/bash\n{dpkg_body}\n",
     }
     if shutil.which("timeout") is None:  # macOS has no coreutils timeout
         stubs["timeout"] = _TIMEOUT_SHIM
@@ -47,6 +52,7 @@ def _run_helper(tmp_path: Path, mode: str) -> subprocess.CompletedProcess[str]:
     env = {
         "PATH": f"{bin_dir}:/usr/bin:/bin",
         "APT_ATTEMPT_SECONDS": "2",
+        "APT_TOTAL_SECONDS": total_seconds,
         "APT_RETRY_BASE_SECONDS": "0",
         "APT_STUB_MODE": mode,
         "APT_STUB_STATE": str(tmp_path / "seen"),
@@ -69,4 +75,22 @@ def test_persistent_failure_stops_after_three_attempts(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert result.stdout.count("::warning::apt-get update attempt") == 3
-    assert "::error::apt-get update failed after 3 bounded attempts" in result.stdout
+    assert "::error::apt-get update failed within the apt time budget" in result.stdout
+
+
+def test_shared_deadline_stops_retries_before_three_attempts(tmp_path: Path) -> None:
+    start = time.monotonic()
+    result = _run_helper(tmp_path, "hang", total_seconds="3")
+
+    assert result.returncode == 1
+    assert time.monotonic() - start < 20
+    assert result.stdout.count("::warning::apt-get update attempt") < 3
+    assert "::error::apt-get update failed within the apt time budget" in result.stdout
+
+
+def test_hanging_dpkg_recovery_is_bounded(tmp_path: Path) -> None:
+    start = time.monotonic()
+    result = _run_helper(tmp_path, "fail", total_seconds="4", dpkg_body="exec sleep 30")
+
+    assert result.returncode == 1
+    assert time.monotonic() - start < 25
