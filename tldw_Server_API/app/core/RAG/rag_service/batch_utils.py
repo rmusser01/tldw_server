@@ -184,5 +184,3 @@ async def run_batch(
         completed=completed_count,
         cancelled=cancel_event.is_set(),
     )
-
-

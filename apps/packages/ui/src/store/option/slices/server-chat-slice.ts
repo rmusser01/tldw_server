@@ -39,6 +39,8 @@ export const createServerChatSlice: StoreSlice<
   setServerChatId: (id) =>
     set(() => ({
       serverChatId: id,
+      // A saved target replaces the current temporary draft in the same update.
+      ...(id?.trim() ? { temporaryChat: false } : {}),
       serverChatState: id ? "in-progress" : null,
       serverChatVersion: null,
       serverChatTitle: null,
