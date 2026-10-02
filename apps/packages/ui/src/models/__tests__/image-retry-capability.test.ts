@@ -8,7 +8,10 @@ const io = vi.hoisted(() => ({
   stored: null as unknown,
   service: null as TldwModelsService | null,
 }))
-vi.mock("@/services/tldw/TldwApiClient", () => ({
+vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => ({
+  isActiveCookieSessionConfig: (
+    await importOriginal<typeof import("@/services/tldw/TldwApiClient")>()
+  ).isActiveCookieSessionConfig,
   tldwClient: {
     getConfig: async () => ({
       serverUrl: "http://test.invalid",
@@ -28,7 +31,8 @@ vi.mock("@/services/tldw", async () => ({
   },
   tldwChat: { sendMessage: io.send, streamMessage: io.stream },
 }))
-vi.mock("@/utils/safe-storage", () => ({
+vi.mock("@/utils/safe-storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/utils/safe-storage")>()),
   createSafeStorage: () => ({
     get: async () => io.stored,
     set: async (_key: string, value: unknown) => {
