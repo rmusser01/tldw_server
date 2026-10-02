@@ -4,7 +4,7 @@ title: Four tests fail under pytest -n 8 from cross-test pollution
 status: Done
 assignee: []
 created_date: '2026-09-30 07:02'
-updated_date: '2026-10-02 02:50'
+updated_date: '2026-10-02 03:14'
 labels:
   - tests
 dependencies: []
@@ -59,14 +59,16 @@ Additional xdist pollution from the task notes, fixed in the same commit:
 Test-only changes across 7 files (tests/AuthNZ/conftest.py, tests/Embeddings/conftest.py, test_embeddings_create_credential_policy.py, test_embeddings_v5_unit.py, test_trace_headers.py, tests/Resource_Governance/test_e2e_domains_headers.py, test_utils_general.py); no app code touched. ruff check: zero new findings introduced (verified file-by-file against origin/dev; test_trace_headers.py's rewrite incidentally fixed 2 pre-existing findings).
 
 Both required `-n 8` runs and the changed-files-alone run are in the implementer's final report. Known out-of-scope flake found during verification: tests/Embeddings/test_backpressure_and_quotas.py::test_tenant_quota_429 fails standalone on this checkout (pre-existing, unrelated to xdist pollution) -- not part of this task's AC, not fixed here.
+
+DoD: test-only change, so Bandit doesn't apply (no app code touched). Known limits: the per-worker Redis DB index wraps at 16 workers, and an explicit TEST_REDIS_URL/EMBEDDINGS_REDIS_URL/REDIS_URL bypasses it (pre-existing precedence).
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
