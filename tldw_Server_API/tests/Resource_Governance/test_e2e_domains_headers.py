@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -8,7 +10,7 @@ pytestmark = pytest.mark.rate_limit
 
 
 @pytest.fixture(params=["memory", "redis"], ids=["rg-memory", "rg-redis"])
-def rg_backend(request, monkeypatch) -> str:
+def rg_backend(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
     backend = str(request.param)
     if backend == "redis":
         # RGSimpleMiddleware lazily builds a RedisResourceGovernor (connecting to
@@ -24,7 +26,18 @@ def rg_backend(request, monkeypatch) -> str:
         _RealRedisGovernor = _governor_redis_mod.RedisResourceGovernor
 
         class _InMemoryRedisGovernor(_RealRedisGovernor):
-            def __init__(self, *args, **kwargs):
+            """Redis test double: a real `RedisResourceGovernor` wired to an
+            in-process stub client instead of a real Redis connection.
+
+            Subclassing (rather than monkeypatching an instance after the
+            fact) is necessary because `RGSimpleMiddleware` constructs the
+            governor itself, lazily, on first request; this class is what
+            gets built in its place once patched onto `governor_redis.
+            RedisResourceGovernor` below, so the real governor logic runs
+            unchanged against `InMemoryAsyncRedis` instead of a live server.
+            """
+
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
                 super().__init__(*args, **kwargs)
                 self._client = InMemoryAsyncRedis()
 

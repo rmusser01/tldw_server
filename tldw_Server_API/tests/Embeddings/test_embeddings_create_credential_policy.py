@@ -5,6 +5,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from loguru import logger
@@ -740,10 +741,17 @@ def test_legacy_openai_transient_failure_retains_retry_policy(monkeypatch, tmp_p
     # *name* inside `ec`'s own module namespace instead, so only code that calls
     # bare `time.sleep(...)` from within `ec` is affected.
     class _ScopedTime:
-        def __getattr__(self, name):
+        """Proxy for the `time` module, scoped to `ec`'s own globals.
+
+        Delegates every attribute except `sleep` to the real `time` module, so
+        patching this onto `ec.time` only intercepts `ec`'s own bare
+        `time.sleep(...)` calls (see the comment above `monkeypatch.setattr`).
+        """
+
+        def __getattr__(self, name: str) -> Any:
             return getattr(time, name)
 
-        def sleep(self, seconds):
+        def sleep(self, seconds: float) -> None:
             sleeps.append(seconds)
 
     monkeypatch.setattr(ec, "time", _ScopedTime())

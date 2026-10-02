@@ -1,10 +1,12 @@
 import contextlib
+from collections.abc import Iterator
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
 @contextlib.contextmanager
-def _with_request_id_middleware(app):
+def _with_request_id_middleware(app: FastAPI) -> Iterator[None]:
     """Guarantee RequestIDMiddleware is active on the shared app for this test.
 
     `app` is the process-wide FastAPI singleton. Other autouse test fixtures

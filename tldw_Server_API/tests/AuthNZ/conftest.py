@@ -466,9 +466,15 @@ def event_loop():
 async def reset_singletons(request):
     """Auto-reset all singletons before and after each test for clean state."""
     # No session-wide default DB. Tests must use isolated DB fixtures or mocks.
-    # Set below (and restored after `yield`) only if the middleware-stripping
-    # block further down actually removes anything from app.user_middleware.
-    _stripped_user_middleware = None
+    # Set below (and restored in the `finally` after `yield`) only if the
+    # middleware-stripping block further down actually removes anything from
+    # app.user_middleware. `_stripped_app` pins the exact app *object* we
+    # stripped: auth tests can reload `tldw_Server_API.app.main` during this
+    # fixture, so teardown must restore onto that same object rather than
+    # re-importing `app.main.app`, which could resolve to a newer instance
+    # with its own (unstripped) middleware stack.
+    _stripped_user_middleware: list | None = None
+    _stripped_app: object | None = None
     # Reset before test
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
@@ -571,6 +577,7 @@ async def reset_singletons(request):
                 kept.append(m)
             if len(kept) != len(original_user_middleware):
                 _stripped_user_middleware = original_user_middleware
+                _stripped_app = _app
                 _app.user_middleware = kept
                 # Rebuild the Starlette middleware stack
                 _app.middleware_stack = _app.build_middleware_stack()
@@ -579,43 +586,54 @@ async def reset_singletons(request):
     except Exception:
         _ = None
 
-    yield
-
-    # Reset after test
-    await reset_db_pool()
-    await reset_session_manager()
-    await reset_token_blacklist()
-    await reset_security_alert_dispatcher()
-    await reset_authnz_scheduler()
-    await reset_rate_limiter()
-    await reset_lockout_tracker()
-    reset_settings()
-    reset_jwt_service()
-    await reset_registration_service()
-    await reset_invite_service()
-    await reset_subscription_service()
-    reset_billing_enforcer()
-    await shutdown_audit_service()
-    await reset_api_key_manager()
-    await reset_users_db()
     try:
-        close_all_chacha_db_instances()
-    except Exception:
-        _ = None
-    try:
-        from tldw_Server_API.app.main import app as _app
-        _app.dependency_overrides.clear()
-        if _stripped_user_middleware is not None:
-            _app.user_middleware = _stripped_user_middleware
-            _app.middleware_stack = _app.build_middleware_stack()
-    except Exception:
-        _ = None
+        yield
+    finally:
+        # Restore first, in `finally`, so it runs even if `yield` raised (the
+        # test failed) or one of the unguarded reset calls below raises:
+        # otherwise a single failing teardown call would permanently leave
+        # RequestIDMiddleware/etc. stripped from the shared app for every
+        # later test in this worker (TASK-13400). Restore onto the exact
+        # object we stripped, not a freshly re-imported `app.main.app`.
+        if _stripped_app is not None:
+            try:
+                _stripped_app.user_middleware = _stripped_user_middleware
+                _stripped_app.middleware_stack = _stripped_app.build_middleware_stack()
+            except Exception:
+                _ = None
 
-    # Restore original CSRF setting
-    if original_csrf_setting is not None:
-        settings['CSRF_ENABLED'] = original_csrf_setting
-    else:
-        settings.pop('CSRF_ENABLED', None)
+        # Reset after test
+        await reset_db_pool()
+        await reset_session_manager()
+        await reset_token_blacklist()
+        await reset_security_alert_dispatcher()
+        await reset_authnz_scheduler()
+        await reset_rate_limiter()
+        await reset_lockout_tracker()
+        reset_settings()
+        reset_jwt_service()
+        await reset_registration_service()
+        await reset_invite_service()
+        await reset_subscription_service()
+        reset_billing_enforcer()
+        await shutdown_audit_service()
+        await reset_api_key_manager()
+        await reset_users_db()
+        try:
+            close_all_chacha_db_instances()
+        except Exception:
+            _ = None
+        try:
+            from tldw_Server_API.app.main import app as _app
+            _app.dependency_overrides.clear()
+        except Exception:
+            _ = None
+
+        # Restore original CSRF setting
+        if original_csrf_setting is not None:
+            settings['CSRF_ENABLED'] = original_csrf_setting
+        else:
+            settings.pop('CSRF_ENABLED', None)
 
 
 @pytest_asyncio.fixture
