@@ -10,10 +10,12 @@ change a durable architecture rule. ADR-002, ADR-004, and ADR-006 govern trackin
 human ownership, and security verification.
 
 ## Stage 1: Preserve and Rebase
-**Goal**: Rebase on fetched dev38b09af8e92b3d9a2a00aced22d6b992dbae9435,
-including its metadata-only advancement from the initial df17 baseline.
+**Goal**: Rebase on fetched dev8140e493f2d0a79e2039084930151eba6565df82,
+including its AuthNZ/resource-governor advancement from the earlier 38b baseline.
 **Success Criteria**: Backup ref retained; complete result equals expected clean
 integration tree cbf4388b66855d5d255b784b87ae3dae28c04061, except this task/plan.
+The final reviewed-fix rebase produced HEAD0ac9032 with expected integration tree
+05f818713d3d59ff7c48e8d2762c24d14a180523; all upstream AuthNZ/RG paths match dev.
 **Tests**: Git ancestry/tree comparison; original stash inventory unchanged.
 **Status**: Complete
 
@@ -59,6 +61,27 @@ AuthNZ/resource-governor changes. Integrate and qualify that actual backend base
 before publication. The new frontend build/token/budget checks pass; preliminary
 38b backend availability is not UAT of8140. Final no-mock Chrome UAT, Qodo
 disposition and exact final-head hosted CI remain required before merge.
+
+Fresh rebased8140 owning/incoming regressions266pass. Live Chrome proved one
+retrieval without generation and one verified Gemma input/result pair, but dropped
+heartbeats; that failed acceptance is retained, not called passing. Config enables
+the unified transport, which re-filtered pipeline-generated heartbeats. The minimal
+existing-queue preservation fix has expected RED then GREEN3; full owning507pass,
+1skip, runtime Bandit0. Independent scoped review found no actionable regression.
+Do not resend the completed original turn.
+
+Final independent review found three further bounded recovery defects, tracked as
+TASK-13421.1.5/.6/.7: suppress unsupported selected-durable legacy regeneration,
+preserve prepared recovery text exactly once, and provide router-aware manager
+navigation after failed activation. Tests100/97/101 pass respectively; docs33pass.
+F1/F2 scoped independent reviews pass. F3's raw-link extension defect was
+confirmed RED through real hash/memory navigation and corrected with existing Link.
+Frontend TypeScript8GB passes; the initial default-heap OOM is retained. Actual
+ESLint analyzes all touched shared files with zero errors and11 inherited ChatPane
+warnings; out-of-base ignored-file invocation is not lint qualification. Expanded
+upstream Bandit retains19 low token-type literals in files byte-identical to dev,
+not new findings or a zero-findings expanded scan. Final production build/source
+binding and native desktop/mobile acceptance remain under qualification.
 
 ## Stage 4: Merge and Read Back
 **Goal**: Merge the verified PR into dev without bypassing checks.

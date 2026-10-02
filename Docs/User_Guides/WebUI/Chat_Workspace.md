@@ -16,7 +16,7 @@ See [Chat, characters, and assistants](Chat_Characters_Assistants.md), [Knowledg
 
 ## Choose Workspace, Model, And Persona
 
-Set these up before composing an unsent message in Chat Workspace. Leaving the page to change settings can discard that message and its staged sources.
+Set these up before composing an unsent message in Chat Workspace. Qualified drafts are saved locally, but staged sources are not restored after leaving the page.
 
 ### Workspace
 
@@ -24,7 +24,7 @@ Set these up before composing an unsent message in Chat Workspace. Leaving the p
 2. Add or organize the sources you need in Research Workspace.
 3. Open Chat Workspace and confirm the same name in the Sources pane and the inspector's **Scope** section.
 
-Chat Workspace reads the active workspace from the shared workspace store. After successful hydration, it initializes an empty local workspace only when no active workspace identity exists. It does not select an existing server workspace for you. Local-only state shows **Workspace not connected** with **Open workspaces**; create or choose a server workspace there and use **Open**. Before mounting the chat, the existing activation guard verifies the current account and loads the canonical workspace, sources, artifacts, and native notes. A non-empty local identity alone is not sufficient to send. A storage-loading failure shows **Retry workspace recovery** and does not initialize over the stored data.
+Chat Workspace reads the active workspace from the shared workspace store. After successful hydration, it initializes an empty local workspace only when no active workspace identity exists. It does not select an existing server workspace for you. A missing or local-only server workspace shows **This workspace isn't available** with **Retry workspace** and **Open workspaces**; create or choose a server workspace there and use **Open**. A mismatched cached identity shows **Workspace not connected** with the same manager link. Before mounting the chat, the existing activation guard verifies the current account and loads the canonical workspace, sources, artifacts, and native notes. A non-empty local identity alone is not sufficient to send. A storage-loading failure shows **Retry workspace recovery** and does not initialize over the stored data.
 
 **Workspaces manager:** **Open** on a Research Workspace uses the canonical `?workspace=<id>` route. The route verifies the current account and loads the target workspace, sources, artifacts, and native notes before activating it. An unavailable, unauthorized, or incompletely loaded target is not silently activated. Other workspace profiles can use a provenance link rather than Research Workspace activation. Confirm the intended workspace name after opening it.
 
@@ -97,18 +97,18 @@ After insertion, the list is ordinary editable draft text. Sending that text alo
 
 Sending is also disabled while the server is unavailable, while workspace identity is loading, or when there is neither a typed message nor staged context. The composer remains editable while disconnected, but there is no offline send queue or automatic resend on reconnect.
 
-When the send operation reports success, the draft and staging are cleared. A failed or skipped send preserves them while this page stays open in the same workspace. On failure, the composer displays an error and the inspector/status strip reports **Send failed**. Resolve the reported connection, model, authorization, or request problem. **Retry same model** and **Switch model** retry the captured failed turn: after durable admission they retain the same saved user turn and create a new assistant attempt. Typing and sending a new message is a separate turn. Inspect the transcript if an earlier attempt received a partial response.
+When the send operation reports success, the draft and staging are cleared. A failed or skipped send preserves them while this page stays open in the same workspace. On failure, the composer displays an error and the inspector/status strip reports **Send failed**. Resolve the reported connection, model, authorization, or request problem. For a durable send, **Turn needs review** retains the original outcome separately from history. Use **Verify saved outcome** to check protected server history. Where available, **Reprepare input** restores the retained input to the composer; it does not send it. Review the warning and explicitly send only when another answer is intended. Unknown outcomes are never resent automatically. Legacy **Retry same model** and **Switch model** actions do not recover selected-durable turns. Typing and sending a new message is a separate turn; inspect any partial response first.
 
 ## Local State And Lifetime
 
 | State | Lifetime in this view |
 | --- | --- |
-| Typed draft and inserted source-list text | Local to the mounted chat panel. Preserved on failed/skipped sends and disconnection; cleared on successful send, workspace change, page unmount, or reload. Not an autosaved draft. |
+| Typed draft and inserted source-list text | Saved in local browser storage after the workspace/account checkpoint is qualified. Restored across reloads, page navigation, and workspace switches for the same qualified owner and workspace. Cleared on successful send. Not a server-synchronized draft or an offline send queue. |
 | Staged sources | Local to the mounted Chat Workspace page and current workspace identity. Preserved on failed/skipped sends and disconnection; cleared by successful send, Insert context summary, Clear staged context, workspace change, page unmount, or reload. |
 | Browsing marker | Local to this page and workspace identity. Browsing also updates the shared source-focus target, but does not create durable staged context. |
-| Workspace identity, sources, and conversation history | Managed separately by the shared workspace/chat stores and their persistence. Saved workspace or chat state does not restore this page's unsent draft or staging. |
+| Workspace identity, sources, and conversation history | Managed by the shared workspace/chat stores. A qualified local checkpoint bookmarks the native conversation; its history and selected-history authority are verified through protected server reads before use. It does not restore staged sources. |
 
-Switching the narrow-screen **Chat**, **Sources**, and **Inspector** tabs only hides or shows panes; it does not unmount the chat panel or clear the draft and staging. Navigating to another page is different: do not rely on returning to restore unsent work.
+Switching the narrow-screen **Chat**, **Sources**, and **Inspector** tabs only hides or shows panes; it does not unmount the chat panel or clear the draft and staging. Local draft restoration requires the same qualified account, workspace, and conversation binding. Account changes invalidate the active view rather than showing another owner's checkpoint. Browser storage can retain private draft text and conversation bookmarks; clearing storage or using another browser/device does not preserve them. Keep a separate copy of important unsent work. Staging remains ephemeral.
 
 ## Inspector, Status, And Narrow Screens
 

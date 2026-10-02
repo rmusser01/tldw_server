@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render as renderUI, screen, waitFor } from "@testing-library/react"
+import { HashRouter, MemoryRouter, Route, Routes } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useWorkspaceStore } from "@/store/workspace"
 import { hydrateWorkspaceFromServer } from "@/store/workspace-api"
@@ -13,7 +14,10 @@ const boundary = vi.hoisted(() => ({
   changed: null as null | ((invalidated: boolean) => void),
   getWorkspace: vi.fn(), getWorkspaceSources: vi.fn(), getWorkspaceArtifacts: vi.fn(), getWorkspaceNotes: vi.fn()
 }))
-vi.mock("react-router-dom", () => ({ useLocation: () => boundary.location }))
+vi.mock("react-router-dom", async importOriginal => ({
+  ...await importOriginal<typeof import("react-router-dom")>(),
+  useLocation: () => boundary.location
+}))
 vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: boundary }))
 vi.mock("@/services/service-prompts", () => ({ resolveServicePromptScope: boundary.resolve }))
 vi.mock("@/services/chat-account-boundary", () => ({
@@ -30,6 +34,8 @@ const deferred = <T,>() => {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
   return { promise, resolve, reject }
 }
+
+const render = (ui: React.ReactNode) => renderUI(ui, { wrapper: MemoryRouter })
 
 describe("canonical route activation (unit regression doubles)", () => {
   afterEach(() => vi.restoreAllMocks())
@@ -93,6 +99,44 @@ describe("canonical route activation (unit regression doubles)", () => {
     expect(screen.queryByTestId("activated-body")).toBeNull()
     expect(useWorkspaceStore.getState().workspaceId).toBe(outgoing)
     expect(useWorkspaceStore.getState().currentNote.content).toBe("Dirty draft")
+  })
+
+  it.each(["fresh", "persisted-local"])("offers manager navigation after missing %s canonical activation without changing local data", async kind => {
+    if (kind === "fresh") {
+      useWorkspaceStore.getState().reset()
+      useWorkspaceStore.setState({ storeHydrated: true, savedWorkspaces: [], workspaceSnapshots: {} })
+      useWorkspaceStore.getState().initializeWorkspace("Fresh local")
+    }
+    const before = useWorkspaceStore.getState()
+    boundary.getWorkspace.mockRejectedValue(Object.assign(new Error("Workspace not found"), { status: 404 }))
+    render(<ActivatedLocalWorkspace workspaceId={before.workspaceId!} webClip={false}>
+      <div data-testid="chat-content" />
+    </ActivatedLocalWorkspace>)
+    expect(await screen.findByRole("alert")).toBeVisible()
+    expect(screen.getByRole("link", { name: "Open workspaces" })).toHaveAttribute("href", "/workspaces")
+    expect(screen.getByRole("button", { name: "Retry workspace" })).toBeEnabled()
+    expect(screen.queryByTestId("chat-content")).toBeNull()
+    expect(useWorkspaceStore.getState().workspaceId).toBe(before.workspaceId)
+    expect(useWorkspaceStore.getState().currentNote).toEqual(before.currentNote)
+    expect(useWorkspaceStore.getState().workspaceSnapshots).toEqual(before.workspaceSnapshots)
+  })
+
+  it.each(["hash", "memory"])("navigates to the manager through the real %s router after failed activation", async kind => {
+    const before = useWorkspaceStore.getState()
+    boundary.getWorkspace.mockRejectedValue(new Error("Workspace not found"))
+    const routes = <Routes>
+      <Route path="/chat-workspace" element={<ActivatedLocalWorkspace workspaceId={before.workspaceId!} webClip={false} />} />
+      <Route path="/workspaces" element={<div data-testid="workspace-manager" />} />
+    </Routes>
+    if (kind === "hash") {
+      window.location.hash = "/chat-workspace"
+      renderUI(<HashRouter>{routes}</HashRouter>)
+    } else renderUI(<MemoryRouter initialEntries={["/chat-workspace"]}>{routes}</MemoryRouter>)
+    expect(await screen.findByRole("alert")).toBeVisible()
+    fireEvent.click(screen.getByRole("link", { name: "Open workspaces" }))
+    expect(await screen.findByTestId("workspace-manager")).toBeVisible()
+    expect(useWorkspaceStore.getState().workspaceId).toBe(before.workspaceId)
+    expect(useWorkspaceStore.getState().currentNote).toEqual(before.currentNote)
   })
 
   it.each(["unmount", "account-aba", "workspace-aba", "route-replacement"])("ignores late responses after %s", async change => {

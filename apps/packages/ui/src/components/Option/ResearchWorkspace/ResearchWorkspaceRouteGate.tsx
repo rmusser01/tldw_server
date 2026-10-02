@@ -1,6 +1,6 @@
 import React, { Suspense } from "react";
-import { useLocation } from "react-router-dom";
-import { RefreshCw } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
+import { FolderOpen, RefreshCw } from "lucide-react";
 import { Button } from "@/components/Common/Button";
 import { parseSharedWorkspaceRoute } from "./shared-workspace-route-state";
 import { getResearchWorkspaceSearchFromLocation } from "./research-workspace-route-state";
@@ -35,6 +35,11 @@ const ActivationError: React.FC<{ onRetry?: () => void }> = ({ onRetry }) => (
         <RefreshCw className="h-4 w-4" />
       </Button>
     )}
+    <Link to="/workspaces"
+      className="mt-3 flex min-h-11 w-fit max-w-full items-center gap-2 rounded-md border border-border px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+      <FolderOpen className="h-4 w-4 shrink-0" aria-hidden="true" />
+      Open workspaces
+    </Link>
   </div>
 );
 
