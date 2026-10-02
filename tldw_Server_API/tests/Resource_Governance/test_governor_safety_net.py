@@ -173,20 +173,48 @@ async def test_policy_store_failure_is_logged_once_and_default_applies(backend, 
     assert len([m for m in seen if "'p'" in m and "PolicyLoader not initialized" in m]) == 1, seen
 
 
-async def test_fractional_rpm_admits_then_refills(backend):
-    # The shipped authnz.magic_link.email policy. Redis once used int(rpm) == 0 here.
+async def test_fractional_rpm_admits_burst_then_refills_after_window(backend):
+    # The shipped authnz.magic_link.email policy: 3 up front and 0.3/min long-run on
+    # both backends. Redis holds ceil(rpm * burst) = 3 per 60 * burst = 600 s; the
+    # memory bucket refills one unit per 200 s and is full again at 600 s.
     clock = FakeTime()
     gov, _ = _gov(backend, {"p": {"requests": {"rpm": 0.3, "burst": 10.0}, "scopes": ["user"]}}, clock)
-    first = await _admits(gov, _req("user:1", "p"), 5)
-    assert first[0] and not first[-1], first
-    clock.advance(201)  # one unit refills in 60 / 0.3 = 200 s
-    assert await _admits(gov, _req("user:1", "p"), 1) == [True]
+    assert await _admits(gov, _req("user:1", "p"), 4) == [True, True, True, False]
+    clock.advance(600)
+    assert await _admits(gov, _req("user:1", "p"), 4) == [True, True, True, False]
 
 
-async def test_fractional_rpm_bucket_holds_at_least_one_unit(backend):
+async def test_fractional_rpm_bucket_holds_one_unit_per_window(backend):
     # rpm * burst < 1 used to be a bucket that could never hold one request.
-    gov, _ = _gov(backend, {"p": {"requests": {"rpm": 0.5, "burst": 1.0}, "scopes": ["user"]}}, FakeTime())
-    assert (await _admits(gov, _req("user:1", "p"), 3))[0] is True
+    # effective_policy raises burst to 2: one request per 120 s on both backends.
+    clock = FakeTime()
+    gov, _ = _gov(backend, {"p": {"requests": {"rpm": 0.5, "burst": 1.0}, "scopes": ["user"]}}, clock)
+    assert await _admits(gov, _req("user:1", "p"), 2) == [True, False]
+    clock.advance(119)
+    assert await _admits(gov, _req("user:1", "p"), 1) == [False]
+    clock.advance(1)
+    assert await _admits(gov, _req("user:1", "p"), 2) == [True, False]
+
+
+async def test_fractional_rpm_decision_reports_a_limit_of_at_least_one(backend):
+    # Rate-limit headers come from this limit; int(0.3) == 0 used to be reported.
+    policies = {
+        "burst10": {"requests": {"rpm": 0.3, "burst": 10.0}, "scopes": ["user"]},
+        "noburst": {"requests": {"rpm": 0.3}, "scopes": ["user"]},
+    }
+    gov, _ = _gov(backend, policies, FakeTime())
+    limits = [(await gov.check(_req("user:1", pid))).details["categories"]["requests"]["limit"] for pid in policies]
+    assert limits == [3, 1]
+
+
+async def test_redis_fractional_rpm_peek_and_retry_after_use_the_same_window():
+    clock = FakeTime()
+    gov, _ = _gov("redis", {"p": {"requests": {"rpm": 0.3, "burst": 10.0}, "scopes": ["user"]}}, clock)
+    assert await _admits(gov, _req("user:1", "p"), 3) == [True, True, True]
+    clock.advance(100)
+    dec = await gov.check(_req("user:1", "p"))
+    assert (dec.allowed, dec.retry_after) == (False, 500)
+    assert await gov.peek_with_policy("user:1", ["requests"], "p") == {"requests": {"remaining": 0, "reset": 500}}
 
 
 async def test_fractional_rpm_float_rounding_still_holds_one_unit(backend):
@@ -258,6 +286,70 @@ async def test_memory_eviction_batch_scales_with_a_flood(monkeypatch):
     clock.advance(601)
     gov._maybe_evict_idle(clock())
     assert (len(gov._buckets), len(gov._leases)) == (90, 90)
+
+
+def _redis_maps(gov):
+    return {
+        "accept_window": gov._requests_accept_window,
+        "deny_until": gov._requests_deny_until,
+        "backoff_until": gov._stub_backoff_until,
+        "leases": gov._stub_leases,
+    }
+
+
+async def test_redis_in_process_maps_drop_expired_entries(monkeypatch):
+    clock = FakeTime()
+    policy = {"requests": {"rpm": 1, "burst": 1.0}, "streams": {"max_concurrent": 1, "ttl_sec": 30}, "scopes": ["user"]}
+    gov, _ = _gov("redis", {"p": policy}, clock)
+
+    async def _no_stub_lease_purge(**_kw):  # real Redis never runs the stub-only purge
+        return None
+
+    monkeypatch.setattr(gov, "_maybe_test_purge_leases", _no_stub_lease_purge)
+    for user in range(50):
+        assert await _admits(gov, _req(f"user:{user}", "p"), 2) == [True, False]
+        await gov.reserve(_req(f"user:{user}", "p", streams={"units": 1}), op_id=f"lease-{next(_ns)}")
+    assert {name: len(m) >= 50 for name, m in _redis_maps(gov).items()} == dict.fromkeys(_redis_maps(gov), True)
+    clock.advance(61)
+    assert await _admits(gov, _req("user:new", "p"), 1) == [True]  # triggers the sweep
+    assert {name: len(m) <= 1 for name, m in _redis_maps(gov).items()} == dict.fromkeys(_redis_maps(gov), True)
+    # An evicted entity behaves exactly like a fresh one.
+    assert await _admits(gov, _req("user:0", "p"), 2) == [True, False]
+
+
+async def test_redis_eviction_sweeps_rotate_through_every_entry(monkeypatch):
+    from tldw_Server_API.app.core.Resource_Governance import governor_redis
+
+    monkeypatch.setattr(governor_redis, "_EVICT_BATCH", 2)
+    clock = FakeTime()
+    policies = {
+        "fast": {"requests": {"rpm": 10, "burst": 1.0}, "scopes": ["user"]},  # 60 s window
+        "slow": {"requests": {"rpm": 0.01, "burst": 100.0}, "scopes": ["user"]},  # 6000 s window
+    }
+    gov, _ = _gov("redis", policies, clock)
+    # Insertion order: kept, evictable, evictable, kept. Batch size 2, so two sweeps
+    # cover 4 slots; every entry must be visited even as evictions shrink the dict.
+    for user, pid in ((1, "slow"), (2, "fast"), (3, "fast"), (4, "slow")):
+        await _admits(gov, _req(f"user:{user}", pid), 1)
+    clock.advance(61)
+    gov._maybe_evict_idle(clock())
+    clock.advance(61)
+    gov._maybe_evict_idle(clock())
+    assert {k[2] for k in gov._requests_accept_window} == {"user:1", "user:4"}
+
+
+async def test_redis_eviction_batch_scales_with_a_flood(monkeypatch):
+    # A fixed batch falls behind a flood of one-shot entities; a sweep covers >= 1/10 of the map.
+    from tldw_Server_API.app.core.Resource_Governance import governor_redis
+
+    monkeypatch.setattr(governor_redis, "_EVICT_BATCH", 2)
+    clock = FakeTime()
+    gov, _ = _gov("redis", {"p": {"requests": {"rpm": 10, "burst": 1.0}, "scopes": ["user"]}}, clock)
+    for user in range(100):
+        await _admits(gov, _req(f"user:{user}", "p"), 1)
+    clock.advance(61)
+    gov._maybe_evict_idle(clock())
+    assert len(gov._requests_accept_window) == 90
 
 
 async def test_memory_expired_op_id_is_not_replayed_before_the_purge_runs(monkeypatch):

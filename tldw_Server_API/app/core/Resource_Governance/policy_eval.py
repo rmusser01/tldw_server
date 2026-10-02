@@ -82,6 +82,24 @@ def effective_policy(get_policy: Callable[[str], Mapping[str, Any] | None], poli
     return policy
 
 
+def requests_window(policy: Mapping[str, Any]) -> tuple[int, int]:
+    """Return the requests category's ``(limit, window_seconds)``.
+
+    This is the Redis sliding window, and ``limit`` is what rate-limit headers report
+    on both backends. From 1 rpm up it is ``max(1, ceil(rpm))`` per 60 s; Redis does
+    not apply ``burst`` there. Below 1 rpm it is ``ceil(rpm * burst)`` per
+    ``60 * burst`` s: the memory bucket's immediate burst and its long-run average.
+    Pass ``effective_policy`` output, whose ``burst`` keeps ``rpm * burst >= 1``.
+    """
+    cfg = policy.get("requests") or {}
+    rpm = float(cfg.get("rpm") or 0)
+    if 0 < rpm < 1:
+        burst = max(1.0, float(cfg.get("burst") or 1.0))
+        # round(): float noise such as 0.07 * 100 == 7.000000000000001 must not ceil to 8.
+        return max(1, math.ceil(round(rpm * burst, 6))), math.ceil(round(60 * burst, 6))
+    return max(1, math.ceil(rpm)), 60
+
+
 def scope_pairs(policy: Mapping[str, Any], entity_scope: str, entity_value: str) -> list[tuple[str, str]]:
     """Return the (scope, value) buckets a request charges.
 
