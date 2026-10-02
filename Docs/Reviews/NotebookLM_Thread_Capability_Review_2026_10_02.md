@@ -125,7 +125,7 @@ Future designs must assess the [ADR index][adr], including ADR-007 for the canon
 
 ## Review validation
 
-Documentation verification checked all 33 immutable source paths and line anchors against the reviewed Git revision, the relative task link, the five proposed discussion areas, and the scope qualifications. All checks passed. Staged diff scope and whitespace are checked before commit.
+Documentation verification checked all 33 immutable source paths and line anchors against the reviewed Git revision, the relative task link, the five proposed discussion areas, and the scope qualifications. All checks passed. The staged diff contained exactly this review and its tracking record; `git diff --cached --check` passed.
 
 Application tests, builds, audible output verification, and live-provider certification were not run. Bandit is inapplicable to this Markdown-only change; no Python or application code is touched.
 
