@@ -315,3 +315,160 @@ On previous published head 3f2625f4c04d9565dc0e40081b560669a7c6b1dd, all seven a
   ]
 }
 ```
+
+## October 1 later-dev capability and authentication integration
+
+Actual dev 5f3ed81e88ec44750a5baa7838f7c69672e32694 brings FastAPI 0.142.1, cookie-account admission, the single RG switch, audio authentication fixes and fresh image-capability Retry. The two shared catalog patches needed context/guard reconciliation; the other three prior patches remained identical. The existing fresh-read generation and concurrency controls are retained. Authenticated cookie discovery now also honors requireFresh: transient metadata failure returns no stale capability while ordinary authenticated refresh may reuse current-generation memory. Cookie 401/403 still clears memory first. Two regressions failed before the one-line guard; the incoming caller mock needed the real canonical cookie helper and storage serializer exports. All 13 real image-retry caller cases pass in the final 223-case scope.
+
+At tested source 0b41be14d71d77e831e1b1f4a19d3df59f9f3c3c, 223 frontend cases pass in 4.21s, and 150 backend cases pass in 102.23s with 32 unreachable-PostgreSQL variants skipped and 25 warnings. Six-file ESLint reports zero errors and 12 existing warnings; diff checks pass. Incoming dev already retired 31 expired UX exceptions with owner evidence. Its four remaining records validate at the real clock, and expired/invalid calendar negatives still reject; four existing classification tests pass in 0.897s. This does not claim an all-pages browser run. Failed mock/config/empty-profile setup attempts remain private and excluded. No full suite, provider request, microphone or guard relaxation occurred.
+
+A fresh copy of the populated schema-73 UAT profile migrated to74 during startup using existing FastAPI0.142.1 bytes. The protected opaque-cookie profile returned200→401→200 after exact expiry restoration; public metadata stayed200. The chat read returned200 and hashes of its one conversation and three stored messages remain unchanged. The original profile remains73 with unchanged hashes. Only the owned API was stopped; ports18280/18281 are closed and private builds remain preserved. Earlier mounted-browser, artwork/drag, provider-reply and voice observations keep their original tested sources.
+
+Dev then advanced to 3304f6cf0c2cab8836c6a73308d7210534a759d9 through documentation-only PR#3073: only unrelated TASK-13405 changed. All seven preceding branch patches remain identical after that rebase, and runtime/tests/dependencies/workflows are byte-identical to the tested source; no redundant rerun was needed. Incoming FastAPI independently owns TASK-13398. The cookie task is now unique TASK-13408; only its filename/frontmatter identity was mechanically repaired because the Python CLI has no renumber operation. All subsequent sections use that CLI; canonical-marker/parser/append/summary roundtrip retains four AC and six DoD items, status In Progress. Historical TASK-13398 mentions keep their original cookie attribution. The incoming FastAPI task is byte-identical to dev.
+
+All seven required gates and Qodo zero findings/eight resolved threads on72623044 retain old-head attribution. New-head hosted gates/review remain pending. Human speech/audibility, physical native interaction and the historical reload initiating trigger remain open.
+
+Before publication, dev advanced once more to d81c13fddd1dac1948b30401af0388932a0af8f2 via documentation-only PR#3072, adding seven unrelated Backlog records. All eight branch patches remain identical after this second documentation rebase; runtime, tests, dependencies and workflows remain byte-identical to the tested source.
+
+```json
+{
+  "tested_source": "0b41be14d71d77e831e1b1f4a19d3df59f9f3c3c",
+  "tested_base": "5f3ed81e88ec44750a5baa7838f7c69672e32694",
+  "publication_base": "d81c13fddd1dac1948b30401af0388932a0af8f2",
+  "previous_published_head": "72623044da3e2e14453f440e3b64d700a853b8cd",
+  "initial_rebase": {
+    "prior_commits": 5,
+    "patches_identical": 3,
+    "two_catalog_patches_adjusted_for_incoming_fresh_controls": true
+  },
+  "documentation_only_rebase": {
+    "all_seven_patches_identical": true,
+    "source_tests_dependencies_workflows_byte_identical": true,
+    "incoming_change": "backlog/tasks/task-13405 - RG-ingress-safety-net-spec-1-of-2.md"
+  },
+  "file_sha256": {
+    "apps/packages/ui/src/services/tldw/TldwModels.ts": "36cb2954e38538bfc441452b08c46539af19b188dd9aea3d8df89448793ddf94",
+    "apps/packages/ui/src/services/tldw/__tests__/TldwModels.test.ts": "0fd8f01cc6f8864ffd73f3b3848c9c69c1f8669db0059722aa55296ba7a972a1",
+    "apps/packages/ui/src/services/tldw-server.ts": "4f4f52ee8aafec54cb5d42f1b188afa6804f1ebfb5e0701acbe6514c60de91d5",
+    "apps/packages/ui/src/services/__tests__/tldw-server.fetch-chat-models.test.ts": "c915ed0fd338cbbdc53d32ae3eceeaa2a46b282aecffa8608d6cead510432d03",
+    "apps/packages/ui/src/services/__tests__/tldw-server.chat-models.test.ts": "f9de4d245b781b8e3c005edb98996f5711ff7aae094740578b573c61addc7486",
+    "apps/packages/ui/src/models/__tests__/image-retry-capability.test.ts": "bac8a10adf8b18835c0c8ea0ac63514853d5a1b7f73a2c709500a8c9dbabd271"
+  },
+  "red": {
+    "fresh_cookie_transient_failures": 2,
+    "caller_mock_missing_export_failures": 13,
+    "setup_attempts_excluded": true
+  },
+  "frontend_tests": {
+    "passed": 223,
+    "files": 9,
+    "duration_seconds": 4.21,
+    "node": "26.0.0",
+    "vitest": "4.0.18"
+  },
+  "backend_tests": {
+    "passed": 150,
+    "skipped": 32,
+    "warnings_reported": 25,
+    "duration_seconds": 102.23,
+    "skip_scope": "PostgreSQL not reachable; no PostgreSQL acceptance claimed",
+    "fastapi": "0.142.1",
+    "starlette": "1.2.1",
+    "pydantic": "2.11.7",
+    "scope": "cookie auth/RG owner/replay/single-charge/single-switch, audio health auth, Buddy handoff, strict Workspace startup/migration"
+  },
+  "lint": {
+    "files": 6,
+    "errors": 0,
+    "pre_existing_warnings": 12,
+    "initial_missing_config_attempt_excluded": true
+  },
+  "incoming_smoke_repair": {
+    "current_rules": 4,
+    "validation_errors": [],
+    "real_clock_used": true,
+    "expired_date_rejected": true,
+    "invalid_calendar_rejected": true,
+    "full_pages_run": false
+  },
+  "smoke_classification_tests": {
+    "passed": 4,
+    "duration_seconds": 0.897,
+    "all_pages_navigation": false
+  },
+  "real_api_probe": {
+    "tested_source": "0b41be14d71d77e831e1b1f4a19d3df59f9f3c3c",
+    "base": "5f3ed81e88ec44750a5baa7838f7c69672e32694",
+    "mint_status": 200,
+    "public_catalog_live_status": 200,
+    "public_catalog_expired_status": 200,
+    "authenticated_profile_live_status": 200,
+    "authenticated_profile_expired_status": 401,
+    "authenticated_profile_recovered_status": 200,
+    "exact_owned_session_expiry_restored": true,
+    "opaque_cookie_retained": true,
+    "static_key_used_only_to_mint": true,
+    "chat_read_status": 200,
+    "sqlite_schema_before": 74,
+    "sqlite_schema_after": 74,
+    "conversation_rows_retained": 1,
+    "message_rows_retained": 3,
+    "visible_messages_retained": 3,
+    "chat_row_hashes_unchanged": true,
+    "original_private_profile_untouched": true,
+    "provider_requests": 0,
+    "microphone_capture": false,
+    "browser_observation": false,
+    "credentials_recorded": false,
+    "original_and_initial_clone_schema": 73,
+    "migration_at_startup_before_api_probe": true,
+    "original_profile_row_hashes_unchanged": true,
+    "initial_empty_profile_excluded": true,
+    "python39_readonly_probe_excluded": true
+  },
+  "backlog_roundtrip": {
+    "task": "TASK-13408",
+    "canonical_markers_retained": true,
+    "ac_unchanged": 4,
+    "dod_unchanged": 6,
+    "append_notes_and_summary_roundtrip": true,
+    "incoming_fastapi_task_unchanged": true,
+    "status": "In Progress"
+  },
+  "cleanup": {
+    "owned_api_pid": 28665,
+    "signal": "SIGTERM",
+    "exit_code": 143,
+    "ports_closed": [
+      18280,
+      18281
+    ],
+    "private_profiles_builds_preserved": true
+  },
+  "hosted_evidence": {
+    "head": "72623044da3e2e14453f440e3b64d700a853b8cd",
+    "required_gates_passed": 7,
+    "qodo_findings": 0,
+    "review_threads_resolved": 8,
+    "auxiliary_ux_failure": "Old expired exceptions; incoming dev retires31 with owner evidence and keeps4 validated narrow records",
+    "new_head_checks_and_review": "Pending publication and matching-head results"
+  },
+  "canonical_cookie_task": "TASK-13408",
+  "full_suite": false,
+  "paid_provider_requests": 0,
+  "microphone_capture": false,
+  "raw_logs_published": false,
+  "adr_required": false,
+  "bandit": "Inapplicable to TypeScript/test/docs-only changes; no backend source changed",
+  "remaining_acceptance": [
+    "intentional human speech and heard audio with correlated floating states",
+    "physical native desktop interaction",
+    "historical reload initiating trigger"
+  ],
+  "second_documentation_only_rebase": {
+    "all_eight_patches_identical": true,
+    "incoming_backlog_records": 7,
+    "runtime_tests_dependencies_workflows_byte_identical": true
+  }
+}
+```
