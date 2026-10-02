@@ -365,6 +365,38 @@ describe("TldwModelsService caching", () => {
     expect(mocks.storageSet).not.toHaveBeenCalled()
   })
 
+  it.each(["AbortError", "TypeError"])("withholds stale fresh cookie capabilities after a catalog %s without discarding authenticated memory", async (name) => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({ serverUrl: "http://localhost:3000", authMode: "single-user", authSource: "cookie-session" })
+    mocks.getModels.mockResolvedValueOnce([{ id: "cookie-model", name: "Cookie Model", provider: "llama", vision: false }])
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    await service.getModels()
+    const transient = Object.assign(new Error("Request interrupted"), { name })
+    mocks.getModels.mockRejectedValue(transient)
+    await expect(service.getModels(true, { requireFresh: true })).resolves.toEqual([])
+    await expect(service.getModels()).resolves.toEqual([expect.objectContaining({ id: "cookie-model" })])
+    expect(mocks.getCurrentUserProfile).toHaveBeenCalledTimes(3)
+    expect(mocks.storageSet).not.toHaveBeenCalled()
+  })
+
+  it("clears expired cookie memory even when fresh capability discovery was requested", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({ serverUrl: "http://localhost:3000", authMode: "single-user", authSource: "cookie-session" })
+    mocks.getModels.mockResolvedValueOnce([{ id: "cookie-model", name: "Cookie Model", provider: "llama", vision: true }])
+    const { TldwModelsService } = await importService()
+    const service = new TldwModelsService()
+    await service.getModels()
+    mocks.getCurrentUserProfile.mockRejectedValueOnce(Object.assign(new Error("Expired cookie session"), { status: 401 }))
+    await expect(service.getModels(true, { requireFresh: true })).resolves.toEqual([])
+    mocks.getModels.mockRejectedValueOnce(new TypeError("Network unavailable"))
+    await expect(service.getModels()).resolves.toEqual([])
+    expect(mocks.getModels).toHaveBeenCalledTimes(2)
+    expect(mocks.storageSet).not.toHaveBeenCalled()
+  })
+
   it("resets cached models when server scope changes", async () => {
     mocks.getModels
       .mockResolvedValueOnce([

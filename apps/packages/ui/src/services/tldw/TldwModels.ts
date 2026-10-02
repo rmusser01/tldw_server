@@ -431,7 +431,7 @@ export class TldwModelsService {
         if (fetchGeneration === this.invalidationGeneration) {
           if (status === 401 || status === 403) {
             this.invalidateCacheState()
-          } else if (cookieAuthenticated) {
+          } else if (cookieAuthenticated && !requireFresh) {
             return this.cachedModels || []
           }
         }
