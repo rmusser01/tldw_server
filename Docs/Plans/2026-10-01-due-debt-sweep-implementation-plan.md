@@ -14,7 +14,7 @@
 
 - `source .venv/bin/activate` before any `python` / `pip` / `pytest` command.
 - Backend scope only — do not modify `apps/**` (console-UX / performance workstreams own it).
-- One Backlog.md task per stage before file edits; note: `backlog task create` CLI was crashing 2026-10-01 ("Maximum call stack size exceeded") — retry first, else get explicit user approval before manual task-file creation.
+- One Backlog.md task per stage before file edits — stage tasks already exist: TASK-13399 (Stage 1), TASK-13400 (Stage 2), TASK-13401 (Stage 3), TASK-13402 (Stage 4); Stage 5 uses existing TASK-12113/TASK-13100. Use `backlog-py` (tools/backlog-py) for Backlog CLI operations; the bun `backlog` CLI's `task create` still crashes.
 - Run `python -m bandit -r <touched_paths> -f json -o /tmp/bandit_<stage>.json` before finishing each stage; fix new findings in changed code.
 - Line numbers below verified 2026-10-01; re-verify with grep before editing (branch drifts daily).
 - Never delete other agents' plan files at repo root.
@@ -28,7 +28,7 @@
 **Tests:** Extended deprecation-registry tests asserting expired keys are gone/raising; endpoint tests for removed `/me` routes assert 404.
 **Status:** Not Started
 
-Proposed Backlog task: "Remove expired compat paths past sunset (web_scraping_legacy_fallback, llm_chat_legacy_session, auth_db_execute_compat)".
+Backlog task: TASK-13399.
 
 - [ ] **Step 1: Inventory.** Read `tldw_Server_API/app/core/deprecations/runtime_registry.py`. Three entries are past sunset as of 2026-10-01: `web_scraping_legacy_fallback` (sunset 2026-06-30, line ~12), `llm_chat_legacy_session` (2026-07-15, ~17), `auth_db_execute_compat` (2026-08-01, ~22).
 - [ ] **Step 2: Find all call sites.** `grep -rn "web_scraping_legacy_fallback\|llm_chat_legacy_session\|auth_db_execute_compat" tldw_Server_API/app tldw_Server_API/tests`. Known: `LLM_Calls/chat_calls.py:79,128`; `services/auth_service.py:65,80`; `services/web_scraping_service.py:364`.
@@ -47,7 +47,7 @@ Proposed Backlog task: "Remove expired compat paths past sunset (web_scraping_le
 **Tests:** Existing `tldw_Server_API/tests/Utils/test_quick_launch_scripts.py:300` (enforces no gradio regression); `python -c "import tomllib; tomllib.load(open('pyproject.toml','rb'))"`.
 **Status:** Not Started
 
-Proposed Backlog task: "Remove gradio extras and verified dead code".
+Backlog task: TASK-13400.
 
 - [ ] **Step 1:** `pyproject.toml` — delete the `gradio = [...]` group (lines ~470-471) and remove `gradio` from the `all` extras list (line ~480).
 - [ ] **Step 2:** Validate parse + install: `python -c "import tomllib; ..."` then `pip install -e . --dry-run` (or full install in the venv).
@@ -64,7 +64,7 @@ Proposed Backlog task: "Remove gradio extras and verified dead code".
 **Tests:** New unit tests for the Google arg-formatting fix; moved smoke functions become skipped/marked tests or are deleted if redundant.
 **Status:** Not Started
 
-Proposed Backlog task: "WebSearch_APIs hygiene: evict inline smoke tests, fix Google args, remove Bing remnants".
+Backlog task: TASK-13401.
 
 - [ ] **Step 1:** Read `tldw_Server_API/app/core/Web_Scraping/WebSearch_APIs.py` lines ~1547-1820: ~8 inline `test_perform_websearch_*` functions live in production code, several self-flagged FIXME.
 - [ ] **Step 2:** Move any still-valuable ones to `tldw_Server_API/tests/Web_Scraping/test_websearch_smoke.py` with `@pytest.mark.external_api`; delete redundant ones.
@@ -79,7 +79,7 @@ Proposed Backlog task: "WebSearch_APIs hygiene: evict inline smoke tests, fix Go
 **Tests:** This stage *is* tests — integration tests under `tldw_Server_API/tests/`, mirroring the existing `tests/Storage/` patterns where present.
 **Status:** Not Started
 
-Proposed Backlog task: "Add tests for uncovered storage/oauth/OSCE endpoints and cookie_cloner crypto".
+Backlog task: TASK-13402.
 
 - [ ] **Step 1: Verify the gap.** For each of `storage_trash.py`, `storage_user_files.py`, `storage_user_folders.py`, `quizzes_osce.py`, `discord_oauth_admin.py`, `slack_oauth_admin.py` in `app/api/v1/endpoints/`, run `grep -rln "<module_name>" tldw_Server_API/tests`. Only write tests for files with zero references (the `tests/Storage/` dir may already cover some).
 - [ ] **Step 2:** Data-deletion first: `storage_trash`, `storage_user_files`, `storage_user_folders` — test delete/restore/list happy paths plus authz denial (wrong user) using the existing httpx/pytest fixtures pattern from neighboring storage tests. Deletion logic is the highest-risk untested area.

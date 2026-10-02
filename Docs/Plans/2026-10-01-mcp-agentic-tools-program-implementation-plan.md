@@ -15,7 +15,7 @@
 - `source .venv/bin/activate` before `python`/`pytest`.
 - **Design first:** every wave opens with a design doc in `Docs/Design/` before code (repo rule).
 - Every new tool must be capability-gated (RBAC), observable via `tool_observability.py`, and covered by tests in `tldw_Server_API/tests/MCP_unified/`.
-- Existing backlog tasks already cover each tool — update them (status/notes/verification) instead of creating duplicates. `backlog task edit` worked when `task create` was crashing; verify.
+- Existing backlog tasks already cover each tool — update them (status/notes/verification) instead of creating duplicates. Use `backlog-py` (tools/backlog-py) for Backlog CLI operations.
 - Template rule: before writing a new module, read the smallest existing module in `app/core/MCP_unified/modules/` and copy its structure, registration, and test layout.
 - Backend scope; WebUI surfaces for new tools are out of scope for this program (console-UX workstream owns `apps/**`).
 - Bandit per wave on touched paths.

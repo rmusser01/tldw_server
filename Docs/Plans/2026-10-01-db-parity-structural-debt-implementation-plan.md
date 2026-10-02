@@ -8,7 +8,7 @@
 
 **Tech Stack:** SQLite + PostgreSQL (psycopg/asyncpg per existing patterns), pytest (Postgres fixture via `tldw_Server_API/tests/AuthNZ/conftest.py` isolated environment), ChromaDB.
 
-**Spec:** This plan; verified code state 2026-10-01. No existing Backlog parent covers the parity gap — create one task per stage (proposed titles below).
+**Spec:** This plan; verified code state 2026-10-01. Stage tasks: TASK-13403 (Stages 1-2, ChaChaNotes parity), TASK-13404 (Stage 3, Scheduler stubs), TASK-13405 (Stage 4, Evaluations adapter), TASK-13406 (Stage 5, ChromaDB TODOs).
 
 ## Global Constraints
 
@@ -27,7 +27,7 @@
 **Tests:** N/A (audit); output feeds Stage 2 tests.
 **Status:** Not Started
 
-Proposed Backlog task: "Close ChaChaNotes SQLite/Postgres schema parity gap (v68 vs v72)".
+Backlog task: TASK-13403.
 
 - [ ] Diff both migration ladders in `ChaChaNotes_DB.py` (SQLite ladder vs Postgres ladder, versions 63-72).
 - [ ] For each PG-only migration: identify the feature it enables, its endpoint/feature-flag consumers (`grep -rn` the new columns/tables), and whether SQLite users currently hit silent feature loss or errors.

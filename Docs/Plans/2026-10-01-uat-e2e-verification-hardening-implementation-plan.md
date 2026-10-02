@@ -63,7 +63,7 @@
 **Tests:** The ratchet script itself tested with a synthetic offense fixture.
 **Status:** Not Started
 
-Proposed Backlog task: "Promote test-quality ratchet to CI gate" (check for an existing one first — the 2026-07-04 audit may have a follow-up task).
+Backlog task: TASK-13407 (duplicate search 2026-10-01: none existing).
 
 - [ ] Read `audits/2026-07-04-test-quality-triage-report.md` (745 enforceable offenses; baseline in `Helper_Scripts/ci/test_quality_baseline.txt`) and the ratchet script in `Helper_Scripts/ci/`.
 - [ ] Fix 3-5 exemplar files (one per offense class: tautology_suspect, stub_injection, status_only) so the fix pattern is documented.

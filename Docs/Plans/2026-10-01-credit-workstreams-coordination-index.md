@@ -4,10 +4,10 @@ Umbrella index for the four credit-funded execution plans drafted 2026-10-01. Co
 
 | # | Plan | Scope flavor | Size | Backlog coverage |
 |---|------|--------------|------|------------------|
-| 1 | [Due-debt sweep](2026-10-01-due-debt-sweep-implementation-plan.md) | Backend cleanup, security smalls, test debt | ~1 week | Mostly new tasks needed (titles proposed per stage); TASK-12113, TASK-13100 exist |
+| 1 | [Due-debt sweep](2026-10-01-due-debt-sweep-implementation-plan.md) | Backend cleanup, security smalls, test debt | ~1 week | TASK-13399-13402; TASK-12113, TASK-13100 exist |
 | 2 | [MCP agentic tools program](2026-10-01-mcp-agentic-tools-program-implementation-plan.md) | Greenfield backend features | Multi-week program | TASK-2281…2294, 12118, 12119, 2341 all exist |
-| 3 | [DB parity & structural debt](2026-10-01-db-parity-structural-debt-implementation-plan.md) | Data layer correctness | ~1-2 weeks | New tasks needed (titles proposed per stage) |
-| 4 | [UAT/E2E verification hardening](2026-10-01-uat-e2e-verification-hardening-implementation-plan.md) | Test infrastructure | ~1 week | TASK-13260.278.2-.5 exist; ratchet task to check/create |
+| 3 | [DB parity & structural debt](2026-10-01-db-parity-structural-debt-implementation-plan.md) | Data layer correctness | ~1-2 weeks | TASK-13403-13406 |
+| 4 | [UAT/E2E verification hardening](2026-10-01-uat-e2e-verification-hardening-implementation-plan.md) | Test infrastructure | ~1 week | TASK-13260.278.2-.5 + TASK-13407, TASK-13408 |
 
 ## Recommended sequencing for credit spend
 
@@ -23,8 +23,6 @@ Umbrella index for the four credit-funded execution plans drafted 2026-10-01. Co
 - Backend edits in Batches 1-3 should avoid files currently modified in the working tree (check `git status` per stage start).
 - One Backlog task per stage before edits (repo rule §0).
 
-## Known blocker (2026-10-01)
+## Task tracking (resolved 2026-10-01)
 
-`backlog task create` crashes in CLI v1.44.0 with "Maximum call stack size exceeded" (4 attempts: full flags / simple / title-only / raised stack limit). `backlog search`, `task edit`, and `task list` work. Until fixed: retry `task create` once per session; if it still fails, get the user's explicit approval before creating task files manually (repo rule). Proposed umbrella task text is in the conversation record for retro-creation:
-
-> Title: "Draft staged execution plans for credit-funded work batches 1-4" — Done once plans verified; links: the four plan files above.
+Umbrella task TASK-13398 (Done) and stage tasks TASK-13399-13408 created via `backlog-py` — the repo's Python Backlog.md clone at `tools/backlog-py` (if the venv entry point goes stale: `pip install -e tools/backlog-py --no-deps`). Avoid the bun `backlog` CLI for task creation: v1.44.0 `task create` crashes with "Maximum call stack size exceeded".
