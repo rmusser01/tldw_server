@@ -461,3 +461,113 @@ artifacts bind this conclusion to 5dbf. Final documentation/task publication
 does not certify its next-head hosted checks before they actually finish.
 Final preservation evidence is under the preceding cookie-dev evidence root's
 `final-ci-closure-preservation-20261002` directory.
+
+## Release And Redis Dev Qualification
+
+TASK-13421 freezes dev `413c2c9123509f17d96d514a7722e076598ea28f` after
+one fresh fetch. It integrates release0.1.46, Redis request-window semantics,
+relay recovery budgets, startup-secret output, Drawer props and scoped smoke
+exceptions. Clean preview tree `69ab09f175fea8bad4c3225787abbb7dfceda29b`
+and the actual merge agree. No additional application changes were needed.
+The completed own TASK-13418 is archived byte-identically (SHA256
+`dad9f464d19c86e97666c71cb90eb809c222b57719651fe815d873ac5f80e55a`);
+both unrelated incoming same-ID records retain their upstream bytes.
+
+Fresh verification:
+
+- Incoming governor, policy, middleware, relay/recovery and startup-secret
+  checks: 296 passed, two expected xfails. Both inherited xfails concern Redis
+  burst/retry-after determinism; neither is relabeled as passing. Unit Redis
+  isolation/doubles are not no-mock browser evidence.
+- Official real-Redis Lua/TTL integration: nine passed, zero skips, unique
+  fixture namespaces; no shared key flush. Independent incoming-module review
+  found no actionable introduced issue. Existing window-key expiration work
+  remains separately tracked upstream, not silently folded into this PR.
+- Seven touched production files: Bandit has zero new findings/errors versus
+  frozen3cae. Its one unchanged B113 warning mistakes a local policy dictionary
+  named `requests` for an HTTP client. Ruff has nine inherited findings versus
+  ten in the baseline, zero new findings. No suppressions or guards were added.
+- Full TypeScript, production build, token sync and unchanged bundle budgets
+  pass: shared540.3KB/heaviest842.7KB gzip against600/900KB. Owning ESLint passes
+  for both changed UI files and smoke files. One owning Drawer test and six
+  directly executed existing smoke-classifier scenarios pass. An initial
+  root-level lint invocation selected an incompatible cached ESLint; its
+  failure is retained, and the actual installed frontend runner passes.
+- Canonical CI-version schema export/check passes: 2105 paths, 3259 schemas,
+  unchanged fingerprint `f4609bf67c33c5d62ecc243f98c918836f09181200768dc0c28b615732d5007f`.
+  No generated contract/type churn is necessary.
+
+Fresh no-mock acceptance uses new loopback API18094 and production frontend18095,
+leaving existing services, ports, Chrome tabs/profiles and drafts untouched.
+The API advertises0.1.46, native protected profile authentication succeeds and
+governor diagnostics report `real_redis=true`, `multi_lua_loaded=true` and
+`last_used_multi_lua=true`, with fail-closed Redis configured on isolatedDB14.
+The frontend build is byte-bound to all merged application files; the only
+external-clone config adjustment includes already installed sibling dependency
+paths, without changing repository configuration or budgets.
+
+Actual Chrome target `8B93C54868C475C7D9A2E213EF98C613` loads and connects the
+real workspace through its normal route. A first explicit Send with no model
+performs generation-disabled retrieval but admits no completion. Allowing the
+normal Chat route/provider initialization to settle selects the real Gemma;
+the draft survives, and a second explicit Send stages the real memo and produces
+one HTTP200 completion. Across those two explicit clicks, both retrieval
+requests specify `enable_generation=false`; they are not automatic resends.
+The original driver wrongly expected one retrieval across both clicks and
+failed; that run remains failed. Its closed CDP session no longer exposes the
+response bodies, so no missing response body is inferred or fabricated.
+
+Separate no-send continuation verifies protected canonical rows: exactly one
+`input_verified` user and one matching `result_verified` assistant, with all
+source metadata equal to the captured real completion request. Gemma answers
+18 November2026 and Mira Chen. Native citation expansion exposes the captured
+source, native input writes a nonempty IndexedDB checkpoint, and a fresh-loader
+reload restores the same draft, verified answer and citations through actual
+HTTP200 history reads. Request counts remain one completion/two explicit-click
+retrievals: reload triggers neither. The final desktop screenshot was inspected.
+Conversation: `0ff15c7a-9a06-40de-aa88-1085df6dc042`.
+
+The new API's actual served contract passes the existing production capability
+predicates and twelve negative controls. Original conversation projections
+remain byte-identical at ten/eight rows, six follow-up baseline targets remain
+open and all68 stashes remain retained. Historical missing target IDs/same-URL
+tabs remain missing and are not claimed preserved. Current mobile viewport
+UAT is blocked by auto-review pending explicit viewport-only approval; earlier
+390x844 native mobile/recovery/keyboard results above remain historical, not a
+fresh413 pass. No alternate emulation or focus/visibility workaround is used.
+
+Owning source binding verifies394 unchanged backend/API-dependency/DB/chat and
+fixture files against qualified source5dbf, including both owning PostgreSQL
+test files. Its seven actual hosted PostgreSQL passes remain reusable historical
+owning evidence, not a fresh whole-runtime CI result. Incoming shared runtime
+changes have the fresh focused checks and live Redis/Gemma acceptance above.
+
+Private evidence: `/private/tmp/chat-workspace-pr3071-head8757-20261002-w0zazO`.
+The `native-grounded-413` failure, `native-verify-reload-413` pass, source bindings,
+real Redis JUnit, security/lint comparisons, build/schema logs and
+`latest-api-actual-preservation` are separate records. PR3071 stays draft and
+unmerged; requester Change summary must remain byte-identical. New-head queued,
+skipped and completed hosted checks must be reported distinctly.
+
+Source publication `93780ae94b8e7d37e5dfe9c6e8fe8109a575beb3` is normally
+pushed to the existing draft PR. All applicable configured pre-commit checks
+pass over35 integration/evidence files; scoped Ruff/Black hooks correctly skip
+non-wizard paths, with the separate incoming lint comparison above retained.
+Exact PR readback verifies source head, dev base, OPEN/draft state and unchanged
+requester summary bytes. Subsequent source-head CI snapshot has57 successful,
+28 skipped,22 running and7 queued checks, zero failures; backend-required is
+still running. No new reviews or unresolved review threads are returned.
+This is not a completed hosted CI claim, nor does it qualify a later metadata
+head before that head's own checks finish.
+
+Independent full fact-bearing memo citation expansion also passes with native
+Tab/Enter and the existing complete CDP key payload: rendered source contains
+18 November2026 and Mira Chen, actual document visibility is `visible` and the
+nonempty draft is unchanged. Its fresh screenshot was inspected. Three earlier
+driver attempts remain failed: pointer hit testing checked viewport bounds but
+missed transcript clipping, then incomplete Enter lacked native key codes/text.
+Read-only hit testing showed the composer at the pointer position; source review
+confirmed ordinary native details/summary behavior. After stopping/reassessing,
+the already-working complete-key helper supplies the successful alternate
+approach without application edits, emulation or another send. Evidence:
+`native-full-memo-keyboard` (FAIL), `native-full-memo-complete-key` (PASS).
