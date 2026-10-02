@@ -2,6 +2,9 @@
 Unit tests for MCP secret generation during AuthNZ initialization.
 """
 
+import asyncio
+import runpy
+import sys
 from pathlib import Path
 
 import pytest
@@ -35,6 +38,41 @@ def test_generate_secure_keys_includes_mcp_secrets():
         key in keys and len(keys[key]) >= 32
         for key in ("MCP_JWT_SECRET", "MCP_API_KEY_SALT")
     )
+
+
+def test_generate_secure_keys_does_not_print_secret_values_by_default(capsys):
+    keys = generate_secure_keys()
+    output = capsys.readouterr().out
+    assert all(value not in output for value in keys.values())
+
+
+def test_generate_secure_keys_allows_explicit_manual_key_display(capsys):
+    keys = generate_secure_keys(requested_keys={"MCP_JWT_SECRET"}, show_values=True)
+    output = capsys.readouterr().out
+    assert all(value in output for value in keys.values())
+
+
+def test_initialize_cli_failure_does_not_disclose_secret_text_or_traceback(monkeypatch, capsys):
+    secret = "private-generated-key-sentinel"
+    records = []
+
+    def fail_initialization(coroutine):
+        coroutine.close()
+        raise OSError(secret)
+
+    monkeypatch.setattr(asyncio, "run", fail_initialization)
+    monkeypatch.setattr(sys, "argv", ["initialize", "--non-interactive"])
+    monkeypatch.setattr(sys, "path", list(sys.path))
+    sink = initialize_module.logger.add(records.append, format="{message}")
+    try:
+        with pytest.raises(SystemExit, match="1"):
+            runpy.run_path(initialize_module.__file__, run_name="__main__")
+    finally:
+        initialize_module.logger.remove(sink)
+
+    output = capsys.readouterr()
+    assert secret not in output.out + output.err + "".join(str(record) for record in records)
+    assert all(record.record["exception"] is None for record in records)
 
 
 def test_detect_env_issues_allows_quickstart_default_single_user_key(monkeypatch):

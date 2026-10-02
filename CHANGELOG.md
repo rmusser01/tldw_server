@@ -42,6 +42,7 @@ Promotes development changes since 0.1.45 through PR #3073. See the
 - **Chat account isolation and persistence:** bind drafts, retries, saved images, Character/Knowledge QA settings and conversations to the correct account across navigation and reconnects; repair stale requests, temporary-mode reads and mirror deletion (#2979, #3038, #3046, #3062, #3064).
 - **PostgreSQL reliability:** repair authentication, Notes/search, profile updates, Sync, Jobs startup, saved-view conflicts and connection handling while preserving existing transaction and write-guard behavior (#2979).
 - **Authentication and diagnostics:** enforce capability-disclosure and llama.cpp authentication, preserve AuthNZ startup causes and profile-version reasons, and protect Audio status routes (#3003, #3008, #3047, #3063, #3058).
+- **AuthNZ setup privacy:** automatic key generation no longer prints secret values; explicitly requested interactive generation retains manual-copy output.
 - **Workflow reliability:** repair Study, evaluation, World Book, media/audio and command-palette findings from the merged engineering sweep (#2979, #3011).
 - **CI and platform checks:** repair admission/shard reporting, latent frontend tests, Buddy browser acceptance, and macOS guest boot/payload cleanup (#3036, #3044, #3054, #3056, #3022, #3051).
 
