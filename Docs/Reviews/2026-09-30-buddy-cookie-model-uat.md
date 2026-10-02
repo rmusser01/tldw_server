@@ -472,3 +472,7 @@ Before publication, dev advanced once more to d81c13fddd1dac1948b30401af0388932a
   }
 }
 ```
+
+## Scoped task closure before protected merge
+
+TASK-13408 is Done for its cookie-model implementation and four verified acceptance outcomes. Qodo reviewed exact cbf16dcffc685ea701cfd7e63b9dfc2b079fa9a3 with zero bugs, rule violations and cross-repo conflicts; all eight threads are resolved. Backend, coverage, security and trusted-license gates pass on that head; remaining hosted integration gates are running/queued. This final documentation-only closure commit preserves all six source/test hashes and must receive its own matching-head review and required CI before normal merge. Python Backlog CLI status/notes/summary edit and disposable canonical-marker roundtrip preserve four AC and six DoD items. Earlier In Progress receipts retain their historical attribution. The cookie-model task closure does not close physical speech/audibility, native interaction or historical reload-trigger UAT, which remain separate work items.
