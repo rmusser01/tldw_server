@@ -591,11 +591,13 @@ class TestModuleFunctions:
         monkeypatch.setenv("BILLING_ENABLED", "true")
         assert billing_enabled() is False
 
-    def test_enforcement_enabled_true_by_default(self, monkeypatch):
+    def test_enforcement_enabled_off_by_default(self, monkeypatch):
 
-        """enforcement_enabled should be True by default."""
+        """enforcement_enabled should be False by default (spec 2 §1: quotas off by default)."""
+        monkeypatch.delenv("USAGE_QUOTAS_ENABLED", raising=False)
         monkeypatch.delenv("LIMIT_ENFORCEMENT_ENABLED", raising=False)
-        assert enforcement_enabled() is True
+        monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: None)
+        assert enforcement_enabled() is False
 
     def test_enforcement_enabled_false(self, monkeypatch):
 

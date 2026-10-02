@@ -6353,10 +6353,19 @@ class ChatbookService:
                 if not char:
                     continue
 
+                char = self._convert_datetimes(char)
+                image = char.get("image")
+                if image is not None:
+                    if not isinstance(image, (bytes, bytearray, memoryview)):
+                        raise ExportError("Unsupported character image representation")
+                    char["image"] = base64.b64encode(bytes(image)).decode("ascii")
+                    char["image_encoding"] = "base64"
+                serialized = json.dumps(char, indent=2, ensure_ascii=False)
+
                 # Write character file
                 char_file = chars_dir / f"character_{char_id}.json"
                 with open(char_file, 'w', encoding='utf-8') as f:
-                    json.dump(char, f, indent=2, ensure_ascii=False)
+                    f.write(serialized)
 
                 # Add to content
                 content.characters[char_id] = char
@@ -6370,7 +6379,7 @@ class ChatbookService:
                 ))
 
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Error collecting character {char_id}: {e}")
+                raise ExportError(f"Error collecting character {char_id}: {e}") from e
 
     def _collect_world_books(
         self,
@@ -7544,6 +7553,11 @@ class ChatbookService:
 
                 with open(char_file, encoding='utf-8') as f:
                     char_data = json.load(f)
+
+                if "image_encoding" in char_data:
+                    if char_data.pop("image_encoding") != "base64" or not isinstance(char_data.get("image"), str):
+                        raise ValidationError("Unsupported character image encoding")
+                    char_data["image"] = base64.b64decode(char_data["image"], validate=True)
 
                 # Check for existing character
                 char_name = char_data.get('name', 'Unnamed')

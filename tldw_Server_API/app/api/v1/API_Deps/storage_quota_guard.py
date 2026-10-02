@@ -22,6 +22,7 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_profile_mode
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.config import usage_quotas_enabled
 from tldw_Server_API.app.core.Storage.quota_enforcement import check_storage_quota, quota_fail_open_enabled
 
 _NONCRITICAL = (
@@ -37,7 +38,9 @@ _NONCRITICAL = (
 
 
 def _is_enabled() -> bool:
-    """Return True unless storage quota enforcement is explicitly disabled."""
+    """True when usage quotas are on and storage quota enforcement isn't explicitly disabled."""
+    if not usage_quotas_enabled():
+        return False
     val = os.getenv("STORAGE_QUOTA_ENFORCEMENT", "1").strip().lower()
     return val not in ("0", "false", "no", "off")
 

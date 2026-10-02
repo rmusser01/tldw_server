@@ -4,10 +4,12 @@ These tests run against every backend listed in BACKENDS.
 """
 
 import itertools
+from typing import Any
 
 import pytest
 
 from tldw_Server_API.app.core.Resource_Governance import MemoryResourceGovernor, RGRequest
+from tldw_Server_API.app.core.Resource_Governance.policy_eval import effective_policy, requests_window
 
 pytestmark = [pytest.mark.unit, pytest.mark.rate_limit, pytest.mark.asyncio]
 
@@ -173,20 +175,119 @@ async def test_policy_store_failure_is_logged_once_and_default_applies(backend, 
     assert len([m for m in seen if "'p'" in m and "PolicyLoader not initialized" in m]) == 1, seen
 
 
-async def test_fractional_rpm_admits_then_refills(backend):
-    # The shipped authnz.magic_link.email policy. Redis once used int(rpm) == 0 here.
+async def test_fractional_rpm_admits_burst_then_refills_after_window(backend: str) -> None:
+    # The shipped authnz.magic_link.email policy: 3 up front and 0.3/min long-run on
+    # both backends. Redis holds floor(rpm * burst) = 3 per 60 * 3 / rpm = 600 s; the
+    # memory bucket refills one unit per 200 s and is full again at 600 s.
     clock = FakeTime()
     gov, _ = _gov(backend, {"p": {"requests": {"rpm": 0.3, "burst": 10.0}, "scopes": ["user"]}}, clock)
-    first = await _admits(gov, _req("user:1", "p"), 5)
-    assert first[0] and not first[-1], first
-    clock.advance(201)  # one unit refills in 60 / 0.3 = 200 s
+    assert await _admits(gov, _req("user:1", "p"), 4) == [True, True, True, False]
+    clock.advance(600)
+    assert await _admits(gov, _req("user:1", "p"), 4) == [True, True, True, False]
+
+
+async def test_fractional_rpm_bucket_holds_one_unit_per_window(backend: str) -> None:
+    # rpm * burst < 1 used to be a bucket that could never hold one request.
+    # effective_policy raises burst to 2: one request per 120 s on both backends.
+    clock = FakeTime()
+    gov, _ = _gov(backend, {"p": {"requests": {"rpm": 0.5, "burst": 1.0}, "scopes": ["user"]}}, clock)
+    assert await _admits(gov, _req("user:1", "p"), 2) == [True, False]
+    clock.advance(119)
+    assert await _admits(gov, _req("user:1", "p"), 1) == [False]
+    clock.advance(1)
+    assert await _admits(gov, _req("user:1", "p"), 2) == [True, False]
+
+
+@pytest.mark.parametrize("burst", [3.0, 2.2])
+async def test_fractional_rpm_non_integer_capacity_keeps_burst_and_average(backend: str, burst: float) -> None:
+    # rpm * burst = 1.5 / 1.1: the memory bucket admits 1 up front and refills 0.5/min.
+    # Redis holds floor(rpm * burst) = 1 per 60 * 1 / rpm = 120 s: the same burst and average.
+    clock = FakeTime()
+    gov, _ = _gov(backend, {"p": {"requests": {"rpm": 0.5, "burst": burst}, "scopes": ["user"]}}, clock)
+    assert await _admits(gov, _req("user:1", "p"), 2) == [True, False]
+    clock.advance(119)
+    if backend == "redis":  # the slot frees only when the first request leaves the window
+        assert await _admits(gov, _req("user:1", "p"), 1) == [False]
+    clock.advance(1)
+    assert await _admits(gov, _req("user:1", "p"), 2) == [True, False]
+
+
+async def test_fractional_rpm_near_integer_capacity_floors_like_memory(backend: str) -> None:
+    # rpm * burst = 1.9999996: the memory bucket admits 1; rounding before the floor gave Redis 2.
+    gov, _ = _gov(backend, {"p": {"requests": {"rpm": 0.5, "burst": 3.9999992}, "scopes": ["user"]}}, FakeTime())
+    assert await _admits(gov, _req("user:1", "p"), 2) == [True, False]
+
+
+async def test_policy_reload_that_shortens_the_window_applies_mid_window(backend: str) -> None:
+    # {0.25, 1} and {0.5, 1} both hold one request; the window shrinks from 240 s to 120 s.
+    clock = FakeTime()
+    gov, loader = _gov(backend, {"p": {"requests": {"rpm": 0.25, "burst": 1.0}, "scopes": ["user"]}}, clock)
+    assert await _admits(gov, _req("user:1", "p"), 1) == [True]
+    clock.advance(10)
+    loader.policies["p"] = {"requests": {"rpm": 0.5, "burst": 1.0}, "scopes": ["user"]}
+    assert await _admits(gov, _req("user:1", "p"), 1) == [False]
+    clock.advance(120)  # past the new 120 s window, still inside the old 240 s one
     assert await _admits(gov, _req("user:1", "p"), 1) == [True]
 
 
-async def test_fractional_rpm_bucket_holds_at_least_one_unit(backend):
-    # rpm * burst < 1 used to be a bucket that could never hold one request.
-    gov, _ = _gov(backend, {"p": {"requests": {"rpm": 0.5, "burst": 1.0}, "scopes": ["user"]}}, FakeTime())
-    assert (await _admits(gov, _req("user:1", "p"), 3))[0] is True
+async def test_redis_retry_in_the_last_second_of_a_window_is_one_second() -> None:
+    # A slot frees within the second: report 1, not the 600 s window, and admit right after.
+    clock = FakeTime()
+    policies = {"p": {"requests": {"rpm": 0.3, "burst": 10.0}, "scopes": ["user"]}}
+    worker_a, _ = _gov("redis", policies, clock)
+    worker_b, _ = _gov("redis", policies, clock)
+    worker_b._keys, worker_b._client = worker_a._keys, worker_a._client  # two workers, one Redis
+    req = _req("user:1", "p")
+    assert await _admits(worker_b, req, 1) == [True]
+    clock.advance(1)
+    assert await _admits(worker_a, req, 2) == [True, True]  # the shared window is now full
+    clock.advance(598.5)  # the first request leaves the 600 s window in 0.5 s
+    assert (await worker_a.check(req)).retry_after == 1  # acceptance-window path
+    # Worker B's tracker counts only its own admit, so its denial comes from the ZSET.
+    dec, _h = await worker_b.reserve(req, op_id=f"late-{next(_ns)}")
+    assert (dec.allowed, dec.retry_after) == (False, 1)
+    clock.advance(1)
+    assert await _admits(worker_b, req, 1) == [True]
+
+
+@pytest.mark.parametrize(
+    ("requests", "expected"),
+    [
+        ({"rpm": 600, "burst": 2.0}, (600, 60)),  # integer rpm: Redis does not apply burst
+        ({"rpm": 1}, (1, 60)),
+        ({"rpm": 1.5}, (2, 60)),  # non-integer rpm >= 1 rounds up
+        ({"rpm": 0.3, "burst": 10.0}, (3, 600)),  # rpm < 1, whole capacity
+        ({"rpm": 0.5, "burst": 3.0}, (1, 120)),  # rpm < 1, fractional capacity floors
+        ({"rpm": 0.5, "burst": 3.9999992}, (1, 120)),  # near-integer capacity floors like memory
+        ({"rpm": 0.29, "burst": 100.0}, (28, 5794)),  # 28.999999999999996 floors to 28, as in memory
+        ({"rpm": 0.5, "burst": 1.0}, (1, 120)),  # effective_policy raises burst to 2
+        ({"rpm": 0.41}, (1, 147)),  # raised burst 2.439...; the window rounds up
+    ],
+)
+async def test_requests_window_boundaries(requests: dict[str, float], expected: tuple[int, int]) -> None:
+    # async only because the module-wide asyncio mark warns on sync tests.
+    assert requests_window(effective_policy({"p": {"requests": requests}}.get, "p")) == expected
+
+
+async def test_fractional_rpm_decision_reports_a_limit_of_at_least_one(backend: str) -> None:
+    # Rate-limit headers come from this limit; int(0.3) == 0 used to be reported.
+    policies = {
+        "burst10": {"requests": {"rpm": 0.3, "burst": 10.0}, "scopes": ["user"]},
+        "noburst": {"requests": {"rpm": 0.3}, "scopes": ["user"]},
+    }
+    gov, _ = _gov(backend, policies, FakeTime())
+    limits = [(await gov.check(_req("user:1", pid))).details["categories"]["requests"]["limit"] for pid in policies]
+    assert limits == [3, 1]
+
+
+async def test_redis_fractional_rpm_peek_and_retry_after_use_the_same_window() -> None:
+    clock = FakeTime()
+    gov, _ = _gov("redis", {"p": {"requests": {"rpm": 0.3, "burst": 10.0}, "scopes": ["user"]}}, clock)
+    assert await _admits(gov, _req("user:1", "p"), 3) == [True, True, True]
+    clock.advance(100)
+    dec = await gov.check(_req("user:1", "p"))
+    assert (dec.allowed, dec.retry_after) == (False, 500)
+    assert await gov.peek_with_policy("user:1", ["requests"], "p") == {"requests": {"remaining": 0, "reset": 500}}
 
 
 async def test_fractional_rpm_float_rounding_still_holds_one_unit(backend):
@@ -234,15 +335,15 @@ async def test_memory_eviction_sweeps_rotate_through_every_bucket(monkeypatch):
         "slow": {"requests": {"rpm": 0.01, "burst": 100.0}, "scopes": ["user"]},
     }
     gov, _ = _gov("memory", policies, clock)
-    # Insertion order: kept, evictable, evictable, kept. Batch size 2, so two sweeps
-    # cover 4 slots; every bucket must be visited even as evictions shrink the dict.
-    for user, pid in ((1, "slow"), (2, "fast"), (3, "fast"), (4, "slow")):
+    # Insertion order: kept, kept, evictable, evictable. Batch size 2: without rotation
+    # both sweeps would revisit the two kept buckets and never reach the evictable ones.
+    for user, pid in ((1, "slow"), (2, "slow"), (3, "fast"), (4, "fast")):
         await _admits(gov, _req(f"user:{user}", pid), 1)
     clock.advance(601)
     gov._maybe_evict_idle(clock())
     clock.advance(61)
     gov._maybe_evict_idle(clock())
-    assert {k[3] for k in gov._buckets} == {"1", "4"}
+    assert {k[3] for k in gov._buckets} == {"1", "2"}
 
 
 async def test_memory_eviction_batch_scales_with_a_flood(monkeypatch):
@@ -258,6 +359,94 @@ async def test_memory_eviction_batch_scales_with_a_flood(monkeypatch):
     clock.advance(601)
     gov._maybe_evict_idle(clock())
     assert (len(gov._buckets), len(gov._leases)) == (90, 90)
+
+
+def _redis_maps(gov: Any) -> dict[str, dict]:
+    """The Redis governor's in-process maps that the eviction sweep bounds, by name."""
+    return {
+        "accept_window": gov._requests_accept_window,
+        "deny_until": gov._requests_deny_until,
+        "backoff_until": gov._stub_backoff_until,
+        "leases": gov._stub_leases,
+    }
+
+
+async def test_redis_in_process_maps_drop_expired_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = FakeTime()
+    policy = {"requests": {"rpm": 1, "burst": 1.0}, "streams": {"max_concurrent": 1, "ttl_sec": 30}, "scopes": ["user"]}
+    gov, _ = _gov("redis", {"p": policy}, clock)
+
+    async def _no_stub_lease_purge(**_kw: Any) -> None:
+        """Real Redis never runs the stub-only lease purge."""
+
+    monkeypatch.setattr(gov, "_maybe_test_purge_leases", _no_stub_lease_purge)
+    for user in range(50):
+        assert await _admits(gov, _req(f"user:{user}", "p"), 2) == [True, False]
+        await gov.reserve(_req(f"user:{user}", "p", streams={"units": 1}), op_id=f"lease-{next(_ns)}")
+    assert {name: len(m) >= 50 for name, m in _redis_maps(gov).items()} == dict.fromkeys(_redis_maps(gov), True)
+    clock.advance(61)
+    assert await _admits(gov, _req("user:new", "p"), 1) == [True]  # triggers the sweep
+    assert {name: len(m) <= 1 for name, m in _redis_maps(gov).items()} == dict.fromkeys(_redis_maps(gov), True)
+    # An evicted entity behaves exactly like a fresh one.
+    assert await _admits(gov, _req("user:0", "p"), 2) == [True, False]
+
+
+async def test_redis_sweep_keeps_live_deny_floors_and_leases(monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = FakeTime()
+    policy = {"requests": {"rpm": 0.01, "burst": 100.0}, "streams": {"max_concurrent": 2, "ttl_sec": 100}, "scopes": ["user"]}
+    gov, _ = _gov("redis", {"p": policy}, clock)
+
+    async def _no_stub_lease_purge(**_kw: Any) -> None:
+        """Real Redis never runs the stub-only lease purge."""
+
+    monkeypatch.setattr(gov, "_maybe_test_purge_leases", _no_stub_lease_purge)
+    assert await _admits(gov, _req("user:floor", "p"), 1) == [True]  # deny floor until +6000 s
+    lease = _req("user:lease", "p", streams={"units": 1})
+    await gov.reserve(lease, op_id=f"lease-{next(_ns)}")  # expires at +100 s
+    clock.advance(50)
+    await gov.reserve(lease, op_id=f"lease-{next(_ns)}")  # expires at +150 s
+    clock.advance(60)  # first lease lapsed, second live
+    # A floor that ends exactly now has expired: reads deny only while now < until.
+    gov._requests_deny_until[(gov._keys.ns, "p", "user:edge", 1, 6000)] = clock()
+    gov._maybe_evict_idle(clock())
+    assert {k[2] for k in gov._requests_deny_until} == {"user:floor"}
+    assert gov._stub_lease_purge_and_count(key=gov._keys.lease("p", "streams", "user", "lease"), now=clock()) == 1
+    assert await _admits(gov, _req("user:floor", "p"), 1) == [False]
+
+
+async def test_redis_eviction_sweeps_rotate_through_every_entry(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.Resource_Governance import governor_redis
+
+    monkeypatch.setattr(governor_redis, "_EVICT_BATCH", 2)
+    clock = FakeTime()
+    policies = {
+        "fast": {"requests": {"rpm": 10, "burst": 1.0}, "scopes": ["user"]},  # 60 s window
+        "slow": {"requests": {"rpm": 0.01, "burst": 100.0}, "scopes": ["user"]},  # 6000 s window
+    }
+    gov, _ = _gov("redis", policies, clock)
+    # Insertion order: kept, kept, evictable, evictable. Batch size 2: without rotation
+    # both sweeps would revisit the two kept entries and never reach the evictable ones.
+    for user, pid in ((1, "slow"), (2, "slow"), (3, "fast"), (4, "fast")):
+        await _admits(gov, _req(f"user:{user}", pid), 1)
+    clock.advance(61)
+    gov._maybe_evict_idle(clock())
+    clock.advance(61)
+    gov._maybe_evict_idle(clock())
+    assert {k[2] for k in gov._requests_accept_window} == {"user:1", "user:2"}
+
+
+async def test_redis_eviction_batch_scales_with_a_flood(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A fixed batch falls behind a flood of one-shot entities; a sweep covers >= 1/10 of the map.
+    from tldw_Server_API.app.core.Resource_Governance import governor_redis
+
+    monkeypatch.setattr(governor_redis, "_EVICT_BATCH", 2)
+    clock = FakeTime()
+    gov, _ = _gov("redis", {"p": {"requests": {"rpm": 10, "burst": 1.0}, "scopes": ["user"]}}, clock)
+    for user in range(100):
+        await _admits(gov, _req(f"user:{user}", "p"), 1)
+    clock.advance(61)
+    gov._maybe_evict_idle(clock())
+    assert len(gov._requests_accept_window) == 90
 
 
 async def test_memory_expired_op_id_is_not_replayed_before_the_purge_runs(monkeypatch):
@@ -334,7 +523,7 @@ async def test_redis_tokens_window_holds_one_member_per_quantum(add_path, monkey
 
     assert allowed and handle
     if add_path == "lua":
-        limit, _window, units, csv = lua_argv[0][-4:]
+        limit, _window, units, _ttl, csv = lua_argv[0][-5:]
         assert (limit, units, len(csv.split(","))) == (1000, 50, 50)
     else:
         assert await _token_members(gov) == 50

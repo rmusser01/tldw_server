@@ -575,6 +575,52 @@ def test_http_caller_keeps_pending_write_until_explicit_decision(pg_http, owner,
     asyncio.run(_run(f, operation))
 
 
+def test_nested_accessor_keeps_request_instance_when_reprobe_would_evict(
+    pg_http: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A mid-request health re-probe must not split the request across two instances.
+
+    The cached-instance probe has a 1s deadline. When it expired for the nested
+    accessor in CI, the cache evicted the instance the request was using and
+    rebuilt it, so the nested lookup got a separate connection and could not see
+    the caller's pending write (TASK-13412).
+    """
+    f = pg_http
+    real_probe = deps.probe_chacha_connection
+    probed: list[CharactersRAGDB] = []
+
+    def fail_after_first_probe(database: CharactersRAGDB) -> None:
+        """Stand in for the deadline expiring on any probe after the dependency's."""
+        probed.append(database)
+        if len(probed) > 1:
+            raise RuntimeError("Emulate an expired mid-request health probe")
+        return real_probe(database)
+
+    monkeypatch.setattr(deps, "probe_chacha_connection", fail_after_first_probe)
+
+    @f.app.post("/probe/nested-reprobe")
+    async def nested_reprobe(
+        db: CharactersRAGDB = Depends(deps.get_chacha_db_for_user),
+    ) -> dict[str, object]:
+        """Write without committing, then resolve the DB again mid-request and read back."""
+        raw = db._get_thread_connection()
+        db.execute_query("UPDATE notes SET title=? WHERE id=?", ("Pending title", f.note))
+        nested = await deps.get_chacha_db_for_user_id(1)
+        title = nested.get_note_by_id(f.note)["title"]
+        raw.rollback()
+        return {"same_instance": nested is db, "title": title}
+
+    async def operation(client: httpx.AsyncClient) -> None:
+        """Run the nested lookup and check it shared the request's instance and connection."""
+        response = await client.post("/probe/nested-reprobe")
+        assert response.json() == {"same_instance": True, "title": "Pending title"}
+        assert probed == [f.db], "Only the request's first resolution should probe"
+        assert f.backend.execute("SELECT title FROM notes WHERE id=%s", (f.note,)).scalar == "Committed title"
+        _assert_finished(f, "/probe/nested-reprobe")
+
+    asyncio.run(_run(f, operation))
+
+
 @pytest.mark.parametrize("settle_check", [False, True], ids=["no-auto-commit-control", "owned-teardown"])
 def test_http_success_does_not_commit_an_undecided_write(pg_http, settle_check):
     f = pg_http

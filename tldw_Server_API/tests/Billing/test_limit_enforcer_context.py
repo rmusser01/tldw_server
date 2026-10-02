@@ -40,14 +40,18 @@ async def test_limit_enforcer_applies_usage_delta_on_success(monkeypatch):
     )
     mock_enforcer.apply_usage_delta = MagicMock()
 
-    # Ensure the API deps LimitEnforcer uses our mock enforcer and has enforcement enabled
+    # Ensure the API deps LimitEnforcer uses our mock enforcer and has billing checks active
     monkeypatch.setattr(
         "tldw_Server_API.app.api.v1.API_Deps.billing_deps.get_billing_enforcer",
         lambda: mock_enforcer,
     )
+
+    async def _active() -> bool:
+        return True
+
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.API_Deps.billing_deps.enforcement_enabled",
-        lambda: True,
+        "tldw_Server_API.app.api.v1.API_Deps.billing_deps.billing_checks_active",
+        _active,
     )
 
     async with APILimitEnforcer(
@@ -85,9 +89,13 @@ async def test_limit_enforcer_preserves_cache_on_delta(monkeypatch):
         "tldw_Server_API.app.api.v1.API_Deps.billing_deps.get_billing_enforcer",
         lambda: mock_enforcer,
     )
+
+    async def _active() -> bool:
+        return True
+
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.API_Deps.billing_deps.enforcement_enabled",
-        lambda: True,
+        "tldw_Server_API.app.api.v1.API_Deps.billing_deps.billing_checks_active",
+        _active,
     )
 
     async with APILimitEnforcer(
@@ -120,9 +128,13 @@ async def test_limit_enforcer_records_cost_units_for_llm_tokens(monkeypatch):
         "tldw_Server_API.app.api.v1.API_Deps.billing_deps.get_billing_enforcer",
         lambda: mock_enforcer,
     )
+
+    async def _active() -> bool:
+        return True
+
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.API_Deps.billing_deps.enforcement_enabled",
-        lambda: True,
+        "tldw_Server_API.app.api.v1.API_Deps.billing_deps.billing_checks_active",
+        _active,
     )
 
     from tldw_Server_API.app.core.Resource_Governance import cost_units as cost_units_mod
@@ -200,8 +212,11 @@ async def test_limit_enforcer_usage_delta_failure_log_omits_backend_details(monk
     async def fake_record_cost_units_for_entity(**_kwargs):
         return 1
 
+    async def _active() -> bool:
+        return True
+
     monkeypatch.setattr(billing_deps, "get_billing_enforcer", lambda: mock_enforcer)
-    monkeypatch.setattr(billing_deps, "enforcement_enabled", lambda: True)
+    monkeypatch.setattr(billing_deps, "billing_checks_active", _active)
     monkeypatch.setattr(billing_deps.cost_units, "record_cost_units_for_entity", fake_record_cost_units_for_entity)
     monkeypatch.setattr(billing_deps.logger, "debug", messages.append)
 
@@ -243,8 +258,11 @@ async def test_limit_enforcer_cost_units_failure_log_omits_backend_details(monke
     async def fail_record_cost_units_for_entity(**_kwargs):
         raise RuntimeError(f"ledger failed token={leaked_secret} path={leaked_path}")
 
+    async def _active() -> bool:
+        return True
+
     monkeypatch.setattr(billing_deps, "get_billing_enforcer", lambda: mock_enforcer)
-    monkeypatch.setattr(billing_deps, "enforcement_enabled", lambda: True)
+    monkeypatch.setattr(billing_deps, "billing_checks_active", _active)
     monkeypatch.setattr(billing_deps.cost_units, "record_cost_units_for_entity", fail_record_cost_units_for_entity)
     monkeypatch.setattr(billing_deps.logger, "debug", messages.append)
 
@@ -281,9 +299,13 @@ async def test_limit_enforcer_hard_block_returns_429(monkeypatch):
         "tldw_Server_API.app.api.v1.API_Deps.billing_deps.get_billing_enforcer",
         lambda: mock_enforcer,
     )
+
+    async def _active() -> bool:
+        return True
+
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.API_Deps.billing_deps.enforcement_enabled",
-        lambda: True,
+        "tldw_Server_API.app.api.v1.API_Deps.billing_deps.billing_checks_active",
+        _active,
     )
 
     with pytest.raises(HTTPException) as exc_info:
@@ -315,9 +337,13 @@ async def test_limit_enforcer_soft_block_returns_402(monkeypatch):
         "tldw_Server_API.app.api.v1.API_Deps.billing_deps.get_billing_enforcer",
         lambda: mock_enforcer,
     )
+
+    async def _active() -> bool:
+        return True
+
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.API_Deps.billing_deps.enforcement_enabled",
-        lambda: True,
+        "tldw_Server_API.app.api.v1.API_Deps.billing_deps.billing_checks_active",
+        _active,
     )
 
     with pytest.raises(HTTPException) as exc_info:

@@ -14,8 +14,10 @@ const {
   mockConfirmDanger,
   mockGetSetting,
   mockSetSetting,
-  mockClearSetting
+  mockClearSetting,
+  canonicalConfig
 } = vi.hoisted(() => ({
+  canonicalConfig: { serverUrl: "https://notes.test", authMode: "single-user", authSource: "manual", apiKey: "synthetic-notes-key" },
   mockBgRequest: vi.fn(),
   mockMessageSuccess: vi.fn(),
   mockMessageError: vi.fn(),
@@ -115,10 +117,22 @@ vi.mock("@/services/settings/registry", async (importOriginal) => {
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
+    getConfig: vi.fn(async () => canonicalConfig),
     getChat: vi.fn(async () => null),
     listChatMessages: vi.fn(async () => []),
     getCharacter: vi.fn(async () => null)
   }
+}))
+
+// Hold I/O while keeping the real canonical config and verified Notes owner hooks.
+vi.mock("@plasmohq/storage/hook", () => ({
+  useStorage: (key: string, fallback: unknown) => [
+    key === "tldwConfig" ? canonicalConfig : canonicalConfig[key] ?? fallback,
+    vi.fn()
+  ]
+}))
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: vi.fn(async () => ({ id: 7, is_active: true })) }
 }))
 
 vi.mock("@/components/Notes/NotesListPanel", () => ({

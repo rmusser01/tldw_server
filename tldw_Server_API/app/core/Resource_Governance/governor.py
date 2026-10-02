@@ -29,7 +29,7 @@ from loguru import logger
 
 from .daily_caps import check_daily_cap, consume_daily_cap
 from .metrics_rg import _labels, ensure_rg_metrics_registered, rg_metrics_entity_label_enabled
-from .policy_eval import clamp_token_units, effective_policy, log_lookup_failure, scope_pairs
+from .policy_eval import clamp_token_units, effective_policy, log_lookup_failure, requests_window, scope_pairs
 from .tenant import hash_entity
 
 try:
@@ -346,7 +346,7 @@ class MemoryResourceGovernor(ResourceGovernor):
             burst = float(cfg.get("burst") or 1.0)
             refill_per_sec = rpm / 60.0
             capacity = rpm * max(1.0, burst)
-            effective_limit = int(rpm)
+            effective_limit = requests_window(policy)[0]  # what headers report; never 0
         else:  # tokens
             per_min = float(cfg.get("per_min") or 0)
             burst = float(cfg.get("burst") or 1.0)

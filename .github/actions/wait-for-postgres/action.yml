@@ -32,8 +32,9 @@ runs:
         if [ -f /etc/apt/sources.list ]; then
           sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
         fi
-        sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20
-        sudo apt-get install -y --no-install-recommends postgresql-client
+        source "${{ github.action_path }}/../apt-bounded.sh"
+        apt_bounded update "${apt_opts[@]}"
+        apt_bounded install -y --no-install-recommends "${apt_opts[@]}" postgresql-client
 
     - name: Wait for Postgres
       shell: bash

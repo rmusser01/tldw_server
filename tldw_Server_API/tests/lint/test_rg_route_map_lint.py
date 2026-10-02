@@ -1,5 +1,6 @@
 """route_map entries must be reachable and used; the real app is checked in a subprocess."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -54,9 +55,45 @@ def test_allowlisted_problem_is_suppressed():
     assert lint({"by_path": {}, "by_tag": {"ghost": "p"}}, _served(), {problem}) == []
 
 
+# Run subprocesses the way a shell does. PYTEST_CURRENT_TEST makes config.py defer
+# reading config.txt, which hid TASK-13417's import-order bug from this suite.
+_SHELL_ENV = {
+    k: v for k, v in os.environ.items()
+    if k not in {"MINIMAL_TEST_APP", "PYTEST_CURRENT_TEST", "TEST_MODE", "TLDW_TEST_MODE"}
+}
+
+
+def _printed_routes(script: str) -> set[str]:
+    """Run ``script`` in a clean interpreter and return its ``ROUTE ...`` lines."""
+    result = subprocess.run(
+        [sys.executable, "-c", f"import sys; sys.path.insert(0, {str(REPO_ROOT)!r})\n{script}"],
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=900, env=_SHELL_ENV,
+    )
+    assert result.returncode == 0, result.stderr
+    return {line for line in result.stdout.splitlines() if line.startswith("ROUTE ")}
+
+
+def test_lint_sees_the_routes_a_fresh_app_serves():
+    # TASK-13417: the lint imported the policy loader before load_app(), which read
+    # config.txt early and hid every force-enabled router (benchmarks, connectors, ...).
+    dump = "for r in served: print('ROUTE', r.path, sorted(r.methods))\n"
+    fresh = _printed_routes(
+        "from Helper_Scripts.ci.route_auth_ratchet import load_app\n"
+        "app = load_app()\n"
+        "from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes\n"
+        "served = list(iter_served_routes(app.routes))\n" + dump
+    )
+    linted = _printed_routes(
+        "from Helper_Scripts.ci.rg_route_map_lint import load_inputs\n"
+        "_route_map, served = load_inputs()\n" + dump
+    )
+    assert any(" /api/v1/connectors" in line for line in fresh)
+    assert linted == fresh, sorted(fresh ^ linted)[:40]
+
+
 def test_shipped_route_map_is_clean():
     result = subprocess.run(
         [sys.executable, str(REPO_ROOT / "Helper_Scripts" / "ci" / "rg_route_map_lint.py")],
-        cwd=REPO_ROOT, capture_output=True, text=True, timeout=900,
+        cwd=REPO_ROOT, capture_output=True, text=True, timeout=900, env=_SHELL_ENV,
     )
     assert result.returncode == 0, result.stdout + result.stderr

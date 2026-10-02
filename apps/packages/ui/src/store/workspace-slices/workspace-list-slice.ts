@@ -71,6 +71,7 @@ type WorkspaceListSliceActions = Pick<
   WorkspaceState,
   // Workspace Identity Actions
   | 'initializeWorkspace'
+  | 'restoreServerWorkspace'
   | 'setWorkspaceName'
   | 'loadWorkspace'
   // Audio Settings Actions
@@ -194,6 +195,15 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
     }))
 
     return id
+  },
+
+  restoreServerWorkspace: (snapshot) => {
+    set((state) => ({
+      ...applyWorkspaceSnapshot(snapshot),
+      savedWorkspaces: upsertSavedWorkspace(state.savedWorkspaces, createSavedWorkspaceEntry(snapshot, new Date())),
+      archivedWorkspaces: state.archivedWorkspaces.filter(workspace => workspace.id !== snapshot.workspaceId),
+      workspaceSnapshots: { ...state.workspaceSnapshots, [snapshot.workspaceId]: snapshot }
+    }))
   },
 
   setWorkspaceName: (name) => {

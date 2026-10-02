@@ -26,6 +26,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
+from tldw_Server_API.app.core.config import usage_quotas_enabled
 from tldw_Server_API.app.core.exceptions import AudioQuotaStoreUnavailable
 
 try:
@@ -565,7 +566,18 @@ async def set_user_tier(user_id: int, tier: str) -> None:
         raise
 
 
+# Every audio limit when usage quotas are off: no tier applies (spec 2).
+_UNLIMITED_AUDIO_LIMITS: dict[str, float | None] = {
+    "daily_minutes": None,
+    "concurrent_streams": None,
+    "concurrent_jobs": None,
+    "max_file_size_mb": None,
+}
+
+
 async def get_limits_for_user(user_id: int) -> dict[str, float | None]:
+    if not usage_quotas_enabled():
+        return dict(_UNLIMITED_AUDIO_LIMITS)
     tier = await get_user_tier(user_id)
     limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"]).copy()
     overrides = await _get_user_override_limits(user_id)
@@ -1020,6 +1032,9 @@ async def can_start_job(user_id: int) -> tuple[bool, str]:
     Returns:
         (bool, str): `True` and `"OK"` if the job may start and the active-job counter was incremented; `False` and an explanatory message like `"Concurrent job limit reached (<max>)"` if starting the job would exceed the user's concurrency limit.
     """
+    if not usage_quotas_enabled():
+        return True, "OK"
+
     # When RG audio integration is enabled and available, enforce streams/jobs
     # concurrency via the shared governor. Legacy Redis/in-process counters are
     # retired.
@@ -1114,6 +1129,9 @@ async def can_start_stream(user_id: int) -> tuple[bool, str]:
     Returns:
         (bool, str): `True` and `"OK"` if a slot was reserved and the stream may start, `False` and a human-readable reason (e.g., "Concurrent streams limit reached (<n>)") otherwise.
     """
+    if not usage_quotas_enabled():
+        return True, "OK"
+
     # Prefer ResourceGovernor-based concurrency when enabled for audio.
     gov = await _get_audio_rg_governor()
     if gov is not None and RGRequest is not None:

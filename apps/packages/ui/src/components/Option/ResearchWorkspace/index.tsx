@@ -135,6 +135,7 @@ import {
 } from "@/services/web-clipper/agent-task-handoff"
 import type { WorkspaceAgentTaskPrefill } from "./WorkspaceAgentTaskHandoffModal"
 import { isEditableTarget } from "@/utils/editable-target"
+import { restoreMigratedResearchWorkspace } from "./workspace-server-restore"
 
 const SourcesPane = React.lazy(() =>
   import("./SourcesPane").then((module) => ({ default: module.SourcesPane }))
@@ -1242,6 +1243,9 @@ const ResearchWorkspaceBody: React.FC = () => {
     image: null
   }
   const initializeWorkspace = useWorkspaceStore((s) => s.initializeWorkspace)
+  const restoreServerWorkspace = useWorkspaceStore((s) => s.restoreServerWorkspace)
+  const [workspaceRestoreError, setWorkspaceRestoreError] = React.useState(false)
+  const [workspaceRestoreAttempt, setWorkspaceRestoreAttempt] = React.useState(0)
   const createNewWorkspace = useWorkspaceStore((s) => s.createNewWorkspace)
   const addSources = useWorkspaceStore((s) => s.addSources)
   const workspaceTag = useWorkspaceStore((s) => s.workspaceTag)
@@ -2728,8 +2732,22 @@ const ResearchWorkspaceBody: React.FC = () => {
     if (workspaceId) return
 
     let cancelled = false
-    void Promise.resolve().then(() => {
+    const restoration = new AbortController()
+    void Promise.resolve().then(async () => {
       if (!cancelled && !currentWorkspaceIdRef.current) {
+        setWorkspaceRestoreError(false)
+        try {
+          const restored = await restoreMigratedResearchWorkspace({
+            signal: restoration.signal,
+            apply: snapshot => {
+              if (!cancelled && !currentWorkspaceIdRef.current) restoreServerWorkspace(snapshot)
+            }
+          })
+          if (restored || cancelled || currentWorkspaceIdRef.current) return
+        } catch {
+          if (!cancelled) setWorkspaceRestoreError(true)
+          return
+        }
         const initialStorageKeys =
           initialWorkspaceMigrationLocalStorageKeysRef.current ?? []
         const hadWorkspaceContentBeforeInitialization = initialStorageKeys.some(
@@ -2748,8 +2766,9 @@ const ResearchWorkspaceBody: React.FC = () => {
 
     return () => {
       cancelled = true
+      restoration.abort()
     }
-  }, [isStoreHydrated, workspaceId])
+  }, [isStoreHydrated, workspaceId, restoreServerWorkspace, workspaceRestoreAttempt])
 
   useEffect(() => {
     if (!statusGuardrailsEnabled) return
@@ -3440,6 +3459,21 @@ const ResearchWorkspaceBody: React.FC = () => {
 
   if (!isStoreHydrated) {
     return <ResearchWorkspaceSkeleton isMobile={isMobile} />
+  }
+
+  if (!workspaceId && workspaceRestoreError) {
+    return <div role="alert" className="m-4 rounded-lg border border-warning/30 p-4">
+      <p>{t("playground:workspace.restoreFailed", "Unable to restore your Research Workspace. Check your connection and retry.")}</p>
+      <Button className="mt-2" onClick={() => setWorkspaceRestoreAttempt(attempt => attempt + 1)}>
+        {t("common:retry", "Retry")}
+      </Button>
+      <Button className="ml-2 mt-2" onClick={() => createNewWorkspace()}>
+        {t("playground:workspace.startNewAfterRestoreFailure", "Start new workspace")}
+      </Button>
+      <p className="mt-2 text-sm text-text-muted">
+        {t("playground:workspace.restoreRecoveryChoices", "You can retry restoring your saved workspace or start a separate workspace.")}
+      </p>
+    </div>
   }
 
   const tutorialPromptBanner = showTutorialPrompt ? (

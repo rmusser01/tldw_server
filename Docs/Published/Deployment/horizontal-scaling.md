@@ -99,8 +99,8 @@ that queue.
 
 | Data | Redis key pattern | Notes |
 |------|-------------------|-------|
-| Sliding-window request counts | `rg:win:{policy}:{category}:{scope}:{entity}` | ZSET with timestamps |
-| Token counters | `rg:win:{policy}:tokens:{scope}:{entity}` | Fixed-window INCRBY with TTL |
+| Sliding-window request counts | `rg:win:{policy}:requests:{scope}:{entity}` | ZSET with timestamps; expires `ceil(window) + 5` s after its last write |
+| Sliding-window token counts | `rg:win:{policy}:tokens:{scope}:{entity}` | ZSET with timestamps; expires 65 s after its last write |
 | Concurrency leases | `rg:lease:{policy}:{category}:{scope}:{entity}` | ZSET with expiry scores |
 | Reservation handles | `rg:handle:{handle_id}` | JSON blob with TTL |
 | Idempotency records | `rg:op:{op_id}` | JSON blob with TTL |

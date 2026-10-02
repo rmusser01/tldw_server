@@ -39,6 +39,10 @@ ENV NEXT_PUBLIC_X_API_KEY=${NEXT_PUBLIC_X_API_KEY}
 ENV NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=${NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE}
 ENV TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN}
 
+# Documentation must exist before Next traces it into the standalone artifact.
+# The optional extension documentation root is absent from this checkout.
+COPY Docs/Published /app/Docs/Published
+
 WORKDIR /app/apps/tldw-frontend
 
 RUN bun /app/apps/tldw-frontend/scripts/validate-networking-config.mjs \

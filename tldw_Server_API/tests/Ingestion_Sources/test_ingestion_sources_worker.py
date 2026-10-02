@@ -414,7 +414,7 @@ async def test_process_sync_job_archive_snapshot_notes_source_consumes_staged_sn
         note = notes_db.get_note_by_id(note_id=binding["note_id"])
         assert note is not None
         assert note["title"] == "Alpha"
-        assert note["content"] == archive_text.rstrip("\n")
+        assert note["content"] == archive_text
 
 
 @pytest.mark.asyncio

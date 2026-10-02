@@ -1298,7 +1298,8 @@ export const useChatActions = ({
 
   const buildChatModeParams = async (
     overrides: ChatModeOverrides = {},
-    snapshot?: ServicePromptSnapshot
+    snapshot?: ServicePromptSnapshot,
+    selectionSource?: Parameters<typeof normalChatMode>[6]["selectionSource"]
   ) => {
     const hasHistoryOverride = Object.prototype.hasOwnProperty.call(
       overrides,
@@ -1347,6 +1348,17 @@ export const useChatActions = ({
 
     const params = {
       selectedModel: effectiveSelectedModel || "",
+      selectionSource: selectionSource ?? {
+        model: normalizeSelectedModel(overrides.selectedModel)
+          ? "explicit" as const
+          : "global" as const,
+        toolChoice:
+          overrides.toolChoice === "auto" ||
+          overrides.toolChoice === "required" ||
+          overrides.toolChoice === "none"
+            ? "explicit" as const
+            : "global" as const
+      },
       useOCR: resolvedUseOCR,
       selectedSystemPrompt: resolvedSelectedSystemPrompt,
       selectedKnowledge,
@@ -3587,7 +3599,18 @@ export const useChatActions = ({
           dynamicUIRequest: turnDynamicUIRequest,
           userMetadataExtra: turnUserMetadataExtra
         },
-        turnServicePromptSnapshot ?? compareServicePromptSnapshot
+        turnServicePromptSnapshot ?? compareServicePromptSnapshot,
+        {
+          model: normalizeSelectedModel(requestOverrides?.selectedModel)
+            ? "explicit"
+            : "global",
+          toolChoice:
+            requestOverrides?.toolChoice === "auto" ||
+            requestOverrides?.toolChoice === "required" ||
+            requestOverrides?.toolChoice === "none"
+              ? "explicit"
+              : "global"
+        }
       )
       const baseMessages = chatHistory || messages
       const baseHistory = memory || history
