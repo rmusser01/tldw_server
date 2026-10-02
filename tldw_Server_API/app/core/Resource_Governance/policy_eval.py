@@ -87,16 +87,18 @@ def requests_window(policy: Mapping[str, Any]) -> tuple[int, int]:
 
     This is the Redis sliding window, and ``limit`` is what rate-limit headers report
     on both backends. From 1 rpm up it is ``max(1, ceil(rpm))`` per 60 s; Redis does
-    not apply ``burst`` there. Below 1 rpm it is ``ceil(rpm * burst)`` per
-    ``60 * burst`` s: the memory bucket's immediate burst and its long-run average.
-    Pass ``effective_policy`` output, whose ``burst`` keeps ``rpm * burst >= 1``.
+    not apply ``burst`` there. Below 1 rpm it is ``floor(rpm * burst)`` per
+    ``60 * limit / rpm`` s: the whole requests the memory bucket admits up front, and
+    its long-run average. Pass ``effective_policy`` output, whose ``burst`` keeps
+    ``rpm * burst >= 1``.
     """
     cfg = policy.get("requests") or {}
     rpm = float(cfg.get("rpm") or 0)
     if 0 < rpm < 1:
         burst = max(1.0, float(cfg.get("burst") or 1.0))
-        # round(): float noise such as 0.07 * 100 == 7.000000000000001 must not ceil to 8.
-        return max(1, math.ceil(round(rpm * burst, 6))), math.ceil(round(60 * burst, 6))
+        # round(): float noise such as 0.29 * 100 == 28.999999999999996 must not floor to 28.
+        limit = max(1, math.floor(round(rpm * burst, 6)))
+        return limit, math.ceil(round(60 * limit / rpm, 6))
     return max(1, math.ceil(rpm)), 60
 
 

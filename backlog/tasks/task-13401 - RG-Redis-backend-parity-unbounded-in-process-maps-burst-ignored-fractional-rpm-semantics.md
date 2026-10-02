@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-09-30 09:45'
-updated_date: '2026-10-02 01:30'
+updated_date: '2026-10-02 02:01'
 labels:
   - rate-limit
 dependencies: []
@@ -88,6 +88,27 @@ Final run (`tldw_Server_API/tests/Resource_Governance tldw_Server_API/tests/Auth
 Each one hangs in the Docker Postgres fixture until the 300 s timeout kills its xdist worker. They fail the same way on an archived origin/dev snapshot (5 failed in 320 s), so they predate this change. The cause is the environment: stale `docker rm -f tldw_postgres_test` processes and no Postgres on :5432.
 
 Known skips / follow-up: the Redis server-side window ZSET keys (`rg:win:*`) get no EXPIRE, so a key per (policy, entity) stays after it empties. That is Redis-server growth, not an in-process map, so it is outside AC1.
+
+### Review follow-up (three Minors)
+
+1. **Fractional rpm where rpm*burst is not a whole number.** `policy_eval.requests_window` for rpm < 1 now returns `limit = max(1, floor(round(rpm*burst, 6)))` per `window = ceil(round(60*limit/rpm, 6))` s. Before, it was `ceil(rpm*burst)` per `ceil(60*burst)`.
+   - Every whole-number rpm*burst gives the same result as before: (3, 600) for {0.3, 10}, (1, 120) for {0.5, 1}, (1, 147) for {0.41, 1}, (1, 200) for {0.3}.
+   - For a non-whole capacity, the limit is now the whole requests the memory bucket admits up front, and the long-run average stays rpm: {0.5, 3} and {0.5, 2.2} both give 1 per 120 s, where before they gave 2 per 180 s and 2 per 132 s.
+   - New test `test_fractional_rpm_non_integer_capacity_keeps_burst_and_average[{memory,redis}-{3.0,2.2}]`:
+     - Both backends admit exactly 1 up front, and admit 1 again (then deny) at +120 s.
+     - Redis also denies at +119 s.
+     - It failed on Redis before the fix (2 failed).
+   - Docstring, ADR-056 and `Rate_Limits_Troubleshooting.md` updated to the `floor(rpm*burst)` per `60*floor(rpm*burst)/rpm` wording.
+
+2. **Rotation tests.** The memory and Redis rotation tests now insert in the order (slow, slow, fast, fast) and expect {1, 2} to survive. Without rotation, both sweeps revisit the two slow entries.
+   - I ran both tests against a sweep that deletes in place without rotating: both fail. Then I restored the code.
+
+3. **Live entries survive a sweep.** New test `test_redis_sweep_keeps_live_deny_floors_and_leases`:
+   - A live deny floor (user:floor, 6000 s window) survives the sweep, and the entity is still denied.
+   - A floor that ends exactly at sweep time is evicted, because reads deny only while now < until.
+   - A lease bucket holding one lapsed lease and one live lease survives and still counts 1. The stub-only lease purge is disabled, as real Redis never runs it.
+   - I checked it against three mutations, restoring the code after each; it fails on all three: lease predicate `any(...)`, deny-floor predicate `until < now`, and deny-floor predicate flipped to evict live floors (`now <= until`).
+4. **RG suite** (`TLDW_TEST_NO_DOCKER=1`, `-n 4`): 377 passed, 5 skipped (the Postgres-fixture tests, with Docker disabled), 2 xfailed, 0 failed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

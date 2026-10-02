@@ -175,7 +175,7 @@ async def test_policy_store_failure_is_logged_once_and_default_applies(backend, 
 
 async def test_fractional_rpm_admits_burst_then_refills_after_window(backend):
     # The shipped authnz.magic_link.email policy: 3 up front and 0.3/min long-run on
-    # both backends. Redis holds ceil(rpm * burst) = 3 per 60 * burst = 600 s; the
+    # both backends. Redis holds floor(rpm * burst) = 3 per 60 * 3 / rpm = 600 s; the
     # memory bucket refills one unit per 200 s and is full again at 600 s.
     clock = FakeTime()
     gov, _ = _gov(backend, {"p": {"requests": {"rpm": 0.3, "burst": 10.0}, "scopes": ["user"]}}, clock)
@@ -192,6 +192,20 @@ async def test_fractional_rpm_bucket_holds_one_unit_per_window(backend):
     assert await _admits(gov, _req("user:1", "p"), 2) == [True, False]
     clock.advance(119)
     assert await _admits(gov, _req("user:1", "p"), 1) == [False]
+    clock.advance(1)
+    assert await _admits(gov, _req("user:1", "p"), 2) == [True, False]
+
+
+@pytest.mark.parametrize("burst", [3.0, 2.2])
+async def test_fractional_rpm_non_integer_capacity_keeps_burst_and_average(backend, burst):
+    # rpm * burst = 1.5 / 1.1: the memory bucket admits 1 up front and refills 0.5/min.
+    # Redis holds floor(rpm * burst) = 1 per 60 * 1 / rpm = 120 s: the same burst and average.
+    clock = FakeTime()
+    gov, _ = _gov(backend, {"p": {"requests": {"rpm": 0.5, "burst": burst}, "scopes": ["user"]}}, clock)
+    assert await _admits(gov, _req("user:1", "p"), 2) == [True, False]
+    clock.advance(119)
+    if backend == "redis":  # the slot frees only when the first request leaves the window
+        assert await _admits(gov, _req("user:1", "p"), 1) == [False]
     clock.advance(1)
     assert await _admits(gov, _req("user:1", "p"), 2) == [True, False]
 
@@ -262,15 +276,15 @@ async def test_memory_eviction_sweeps_rotate_through_every_bucket(monkeypatch):
         "slow": {"requests": {"rpm": 0.01, "burst": 100.0}, "scopes": ["user"]},
     }
     gov, _ = _gov("memory", policies, clock)
-    # Insertion order: kept, evictable, evictable, kept. Batch size 2, so two sweeps
-    # cover 4 slots; every bucket must be visited even as evictions shrink the dict.
-    for user, pid in ((1, "slow"), (2, "fast"), (3, "fast"), (4, "slow")):
+    # Insertion order: kept, kept, evictable, evictable. Batch size 2: without rotation
+    # both sweeps would revisit the two kept buckets and never reach the evictable ones.
+    for user, pid in ((1, "slow"), (2, "slow"), (3, "fast"), (4, "fast")):
         await _admits(gov, _req(f"user:{user}", pid), 1)
     clock.advance(601)
     gov._maybe_evict_idle(clock())
     clock.advance(61)
     gov._maybe_evict_idle(clock())
-    assert {k[3] for k in gov._buckets} == {"1", "4"}
+    assert {k[3] for k in gov._buckets} == {"1", "2"}
 
 
 async def test_memory_eviction_batch_scales_with_a_flood(monkeypatch):
@@ -317,6 +331,29 @@ async def test_redis_in_process_maps_drop_expired_entries(monkeypatch):
     assert await _admits(gov, _req("user:0", "p"), 2) == [True, False]
 
 
+async def test_redis_sweep_keeps_live_deny_floors_and_leases(monkeypatch):
+    clock = FakeTime()
+    policy = {"requests": {"rpm": 0.01, "burst": 100.0}, "streams": {"max_concurrent": 2, "ttl_sec": 100}, "scopes": ["user"]}
+    gov, _ = _gov("redis", {"p": policy}, clock)
+
+    async def _no_stub_lease_purge(**_kw):  # real Redis never runs the stub-only purge
+        return None
+
+    monkeypatch.setattr(gov, "_maybe_test_purge_leases", _no_stub_lease_purge)
+    assert await _admits(gov, _req("user:floor", "p"), 1) == [True]  # deny floor until +6000 s
+    lease = _req("user:lease", "p", streams={"units": 1})
+    await gov.reserve(lease, op_id=f"lease-{next(_ns)}")  # expires at +100 s
+    clock.advance(50)
+    await gov.reserve(lease, op_id=f"lease-{next(_ns)}")  # expires at +150 s
+    clock.advance(60)  # first lease lapsed, second live
+    # A floor that ends exactly now has expired: reads deny only while now < until.
+    gov._requests_deny_until[(gov._keys.ns, "p", "user:edge", 1)] = clock()
+    gov._maybe_evict_idle(clock())
+    assert {k[2] for k in gov._requests_deny_until} == {"user:floor"}
+    assert gov._stub_lease_purge_and_count(key=gov._keys.lease("p", "streams", "user", "lease"), now=clock()) == 1
+    assert await _admits(gov, _req("user:floor", "p"), 1) == [False]
+
+
 async def test_redis_eviction_sweeps_rotate_through_every_entry(monkeypatch):
     from tldw_Server_API.app.core.Resource_Governance import governor_redis
 
@@ -327,15 +364,15 @@ async def test_redis_eviction_sweeps_rotate_through_every_entry(monkeypatch):
         "slow": {"requests": {"rpm": 0.01, "burst": 100.0}, "scopes": ["user"]},  # 6000 s window
     }
     gov, _ = _gov("redis", policies, clock)
-    # Insertion order: kept, evictable, evictable, kept. Batch size 2, so two sweeps
-    # cover 4 slots; every entry must be visited even as evictions shrink the dict.
-    for user, pid in ((1, "slow"), (2, "fast"), (3, "fast"), (4, "slow")):
+    # Insertion order: kept, kept, evictable, evictable. Batch size 2: without rotation
+    # both sweeps would revisit the two kept entries and never reach the evictable ones.
+    for user, pid in ((1, "slow"), (2, "slow"), (3, "fast"), (4, "fast")):
         await _admits(gov, _req(f"user:{user}", pid), 1)
     clock.advance(61)
     gov._maybe_evict_idle(clock())
     clock.advance(61)
     gov._maybe_evict_idle(clock())
-    assert {k[2] for k in gov._requests_accept_window} == {"user:1", "user:4"}
+    assert {k[2] for k in gov._requests_accept_window} == {"user:1", "user:2"}
 
 
 async def test_redis_eviction_batch_scales_with_a_flood(monkeypatch):
