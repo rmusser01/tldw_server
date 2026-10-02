@@ -1,16 +1,17 @@
 ---
 id: TASK-13408
 title: Finalize Chat Workspace live UAT and latest-dev PR gates
-status: Done
+status: In Progress
 assignee: []
 created_date: '2026-10-01 18:39'
-updated_date: '2026-10-01 19:12'
+updated_date: '2026-10-02 00:26'
 labels: []
 dependencies: []
 references:
   - 'https://github.com/rmusser01/tldw_server/pull/3071'
 documentation:
   - Docs/superpowers/reviews/chat-workspace/2026-10-01-latest-dev-no-mock-uat.md
+  - IMPLEMENTATION_PLAN_pr3071_latest_dev_ci_2026_10_01.md
 priority: high
 ---
 
@@ -24,8 +25,14 @@ Continue reviewed TASK-13398 Chat Workspace fixes and PR3071. Latest upstream ec
 <!-- AC:BEGIN -->
 - [x] #1 Complete live Browse/staging/external-link and mobile recovery/composer keyboard UAT plus fresh owner-target visual proof without mocks.
 - [x] #2 Integrate latest dev FastAPI0.142.1 and verify backend contracts and original data/tab/stash preservation.
-- [x] #3 Verify production Turbopack token-sync and unchanged bundle budgets, scoped tests/security; push reviewed fixes to PR3071 without merging or inventing the human Change summary.
+- [ ] #3 Verify production Turbopack token-sync and unchanged bundle budgets, scoped tests/security; push reviewed fixes to PR3071 without merging or inventing the human Change summary.
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Stage1: investigate exact CI causes and latest-dev semantic overlaps; preserve originals/runtimeenvs and resolve only owned merge overlaps. Stage2: reproduce each remaining failure, minimal root repairs with red/green regression, scoped upstream+owned tests and security/review. Stage3: restore actual services, rawChromeCDP no-mock UAT/preservation, update evidence and push; verify remote checks and requester summary without merging.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
@@ -37,6 +44,10 @@ Final no-mock native acceptance is complete: real Chrome raw CDP with actual aut
 Official completed-history archive finished: 32 exact-content records moved via backlog task archive; upstream Pin-FastAPI record SHA unchanged. Catalog/result retained externally. Removed only the completed owner-checkpoint plan, preserving unrelated plans. Final acceptance doc and PR body include verified old remote bundle failures and new-head CI limits.
 
 Publication verified using gh pr view: PR3071 OPEN DRAFT, base dev, branch codex/chat-workspace-a11y, head b9b6571e8fdd30005d2d62a410f2f528cd6219e5; final PR body successfully updated and artifact attachment confirmed. Latest remote dev still ec86ba4. Final task-status commit follows; no production bytes change.
+
+Requester supplied Change summary on2026-10-01; add verbatim to PR3071. Completed head792b6CI has281passing/36skipped checks; Onboarding andUXSmoke bothPASS. Three failing backend shards: selected-durable transformative moderation fixture returns mandatory_audit_unavailable503 instead409; SourceV1 malformed locator metadata9 unexpectedlyvalid; Streaming expectedno-cache but nowcorrectno-cache,no-transform. Actual failed joblogs saved externally. Latestdev5f3ed81e88ec44750a5baa7838f7c69672e32694 includes1060changedpaths; immutable mergepreview shows7conflicts in useChatActions/useHistorySelection/service-prompt-scope-error+test/character_messages/chat_service/raw-contenttest. Reopening finalization for root-cause repairs and conservative latest-dev reconciliation, followed by scoped tests/Bandit/review and actual no-mock runtime UAT. Do notmergeGitHubPR.
+
+Human Change summary was published verbatim in PR3071 and readback will verify exact prose. No merge authorization inferred. New plan records3stages. Schema and moderation fixture root diagnoses delegated read-only with no source/tests/services writes while parent reconciles7mergeconflicts. Parent owns runtime preservation and all merge operations.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
@@ -51,7 +62,7 @@ Completed all approved no-mock native acceptance and scoped verification gates o
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
+- [ ] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
