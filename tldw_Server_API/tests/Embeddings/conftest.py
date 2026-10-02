@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import os
+import re
 from collections.abc import Iterable
 from typing import Final
 
@@ -139,6 +140,34 @@ class _RedisHarness:
         return getattr(self.client, item)
 
 
+def _xdist_worker_db_index() -> int:
+    """Map the current pytest-xdist worker to a dedicated, non-zero Redis DB index.
+
+    Redis exposes 16 logical DBs (0-15) by default, and DB 0 is the default
+    DB the app (and any test that isn't xdist-worker-aware) uses -- so it
+    must never be handed out here, or a worker would share it with that
+    default traffic. Without a dedicated index per worker, every xdist
+    worker's `redis_client` fixture would flushdb the same shared DB, wiping
+    out streams/keys another worker's test is mid-assertion on (TASK-13400).
+
+    Workers map to DB 1..15 (`1 + worker_number`). A 16th+ worker (gw15+)
+    would need DB >= 16, which doesn't exist, so tests needing this index
+    are skipped there with a clear reason rather than silently sharing a DB
+    with another worker. Outside xdist (plain `pytest`), still avoid DB 0.
+    """
+    worker_id = os.getenv("PYTEST_XDIST_WORKER", "")
+    match = re.search(r"(\d+)", worker_id)
+    if not match:
+        return 1
+    db_index = 1 + int(match.group(1))
+    if db_index > 15:
+        pytest.skip(
+            "redis_client needs a dedicated Redis DB per xdist worker (max 15 "
+            f"workers, DB 1-15); worker {worker_id!r} would need DB {db_index}"
+        )
+    return db_index
+
+
 @pytest.fixture
 def redis_client():
     """Provide a real Redis client when available; skip otherwise."""
@@ -152,7 +181,7 @@ def redis_client():
         os.getenv("TEST_REDIS_URL")
         or os.getenv("EMBEDDINGS_REDIS_URL")
         or os.getenv("REDIS_URL")
-        or "redis://localhost:6379/0"
+        or f"redis://localhost:6379/{_xdist_worker_db_index()}"
     )
 
     sync_client = redis.Redis.from_url(url, decode_responses=True)
