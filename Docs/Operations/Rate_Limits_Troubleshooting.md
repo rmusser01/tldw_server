@@ -29,7 +29,9 @@ If you need an exact, worker-independent limit, set `RG_BACKEND=redis` (with `RE
 
 ## Redis ignores `burst` on the requests category
 
-The memory backend's requests capacity is `rpm * burst`, so the safety-net `default` policy (`rpm: 600, burst: 2.0`) admits up to 1,200 requests/minute per worker. The Redis backend enforces `max(1, ceil(rpm))` per rolling minute and does not apply `burst` to requests at all, so the same policy admits only 600/minute on Redis — moving from memory to Redis roughly halves headroom on any policy that relies on `burst` for its slack. This also means a fractional `rpm` (below 1) behaves slightly differently between backends: `policy_eval.effective_policy` raises `burst` on the memory backend so the bucket can hold one request, while Redis's `ceil(rpm)` already rounds a fractional rate up to 1/minute on its own.
+The memory backend's requests capacity is `rpm * burst`, so the safety-net `default` policy (`rpm: 600, burst: 2.0`) admits up to 1,200 requests/minute per worker. From 1 rpm up, the Redis backend enforces `max(1, ceil(rpm))` per rolling minute and does not apply `burst` to requests, so the same policy admits only 600/minute on Redis — moving from memory to Redis roughly halves headroom on any policy that relies on `burst` for its slack.
+
+A fractional `rpm` (below 1) is the exception: Redis then holds `floor(rpm * burst)` requests (the whole requests the memory bucket admits up front) per rolling `60 * floor(rpm * burst) / rpm` seconds (`policy_eval.requests_window`, with `burst` first raised by `policy_eval.effective_policy` so `rpm * burst >= 1`). That gives the same immediate burst and the same long-run average as the memory bucket: `authnz.magic_link.email` (`rpm: 0.3, burst: 10`) admits 3 at once and 3 per 10 minutes on both backends. Within the window the two differ: the memory bucket refills one request every `60 / rpm` seconds (200 s here), while Redis frees a slot only when the oldest request leaves the 600 s window, so `Retry-After` can be longer on Redis. `X-RateLimit-Limit` reports this same `requests_window` limit on both backends (3 here), never 0.
 
 ## Still stuck?
 
