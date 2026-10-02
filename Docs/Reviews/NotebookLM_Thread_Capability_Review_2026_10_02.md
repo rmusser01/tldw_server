@@ -64,6 +64,10 @@ The answer-quality recipe supports comparison work, but its default grounding ru
 
 UAT390 records bounded native single-user acceptance on SQLite and restricted PostgreSQL, including exact source identity, cited QA, persistence/reload, provider dispatch, and absent-price refusal. The record also separates that pass from later integrated controlled-provider qualification. Studio generation qualification has a separate open record. Neither an open task nor a historical pass certifies every current deployment. [Recorded UAT390 evidence][uat] [Studio qualification][studio_uat]
 
+## Claims confirmation follow-up
+
+The [server, WebUI, and extension confirmation](Claims_Integrity_Confirmation_2026_10_02.md) adds focused runtime probes, existing-test results, current-dev comparison, and corrected scope qualifications. It confirms evidence-integrity gaps while recording the safeguards already implemented. These checks supplement the original static review; they do not certify live providers or browser behavior.
+
 ## Proposed brainstorming sequence
 
 ### 1 Evidence integrity
