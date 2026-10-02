@@ -16,22 +16,23 @@ from tldw_Server_API.app.core.testing import is_truthy
 class TenantScopeConfig:
     enabled: bool = False
     header: str = "X-TLDW-Tenant"
+    # Parsed for config compatibility only: the tenant is the principal's own org (TASK-13402).
     jwt_claim: str = "tenant_id"
 
 
 def get_tenant_id(
     headers: Mapping[str, str],
-    claims: Mapping[str, Any] | None = None,
+    own_tenant: str | None = None,
     config: TenantScopeConfig | None = None,
     member_of: Collection[str] = (),
 ) -> str | None:
     """
-    Pick the caller's tenant from a validated principal.
+    Pick the caller's tenant from a validated principal (TASK-13402).
 
-    ``claims`` and ``member_of`` (the principal's tenant/org ids) must come from a
-    validated principal. The header only selects one of ``member_of``; a header naming
-    any other tenant is ignored, so an unvalidated header never names a bucket
-    (TASK-13402). Otherwise the ``config.jwt_claim`` claim is the tenant.
+    ``own_tenant`` (the principal's own org, in deps.tenant_claims_from_state's order) and
+    ``member_of`` (the principal's org ids) must come from a validated principal. The
+    header only selects one of ``member_of``; a header naming any other tenant is ignored,
+    so an unvalidated header never names a bucket. Otherwise the tenant is ``own_tenant``.
     """
     cfg = config or TenantScopeConfig()
     if not cfg.enabled:
@@ -40,15 +41,7 @@ def get_tenant_id(
     val = str(headers.get(cfg.header) or headers.get(cfg.header.lower()) or "").strip()
     if val and val in member_of:
         return val
-
-    # Fallback to JWT claim when present
-    if claims and cfg.jwt_claim in claims:
-        v = claims.get(cfg.jwt_claim)
-        if v is None:
-            return None
-        return str(v).strip() or None
-
-    return None
+    return (str(own_tenant).strip() or None) if own_tenant is not None else None
 
 
 _LOG_HASH_SECRET_WARNED = False

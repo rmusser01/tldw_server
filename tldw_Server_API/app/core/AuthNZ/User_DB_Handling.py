@@ -1006,8 +1006,8 @@ async def record_pending_api_key_usage(request: Request) -> None:
     try:
         api_mgr = await get_api_key_manager()
         await api_mgr.record_key_usage(key_id, user_id, client_ip, _api_key_usage_details(request))
-    except _USER_DB_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Deferred API key usage was not recorded: {}", type(exc).__name__)
+    except _USER_DB_NONCRITICAL_EXCEPTIONS:
+        logger.opt(exception=True).warning("Deferred API key usage was not recorded (key_id={})", key_id)
 
 
 async def authenticate_api_key_user(request: Request, api_key: str) -> User:

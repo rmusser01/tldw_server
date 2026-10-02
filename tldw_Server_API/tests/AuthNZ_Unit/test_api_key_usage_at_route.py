@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_token_scope
@@ -198,20 +199,49 @@ def test_route_revalidation_after_ingress_records_usage_once(manager, then_reuse
     assert manager.usage_updates == [7]
 
 
-class _TenantSnap(_Snap):
-    tenant = {"enabled": True, "header": "X-TLDW-Tenant"}
+def test_failed_deferred_usage_write_keeps_the_request_and_logs_the_traceback(manager, monkeypatch):
+    # Qodo #3086: a usage write that raises must not fail the request or stay pending, and
+    # its traceback must reach the logs at WARNING.
+    attempts, warnings = [], []
+
+    async def broken_record(*args, **kwargs):
+        attempts.append(args)
+        raise RuntimeError("usage store down")
+
+    monkeypatch.setattr(manager, "record_key_usage", broken_record)
+    sink = logger.add(lambda message: warnings.append(message.record), level="WARNING")
+    app = FastAPI()
+
+    @app.get("/api/v1/thing", dependencies=[Depends(user_mod.get_request_user), Depends(auth_deps.get_auth_principal)])
+    async def thing(request: Request):
+        return {"pending": request.state._api_key_usage_pending}
+
+    app.add_middleware(RGSimpleMiddleware)
+    app.state.rg_policy_loader = _Loader()
+    app.state.rg_governor = MemoryResourceGovernor(policy_loader=_Loader())
+    try:
+        response = TestClient(app).get("/api/v1/thing", headers={"X-API-KEY": KEY})
+    finally:
+        logger.remove(sink)
+
+    assert response.status_code == 200
+    assert response.json() == {"pending": None}
+    assert len(attempts) == 1  # the second context reuse found nothing pending
+    logged = [r for r in warnings if "Deferred API key usage was not recorded" in r["message"]]
+    assert [r["message"] for r in logged] == ["Deferred API key usage was not recorded (key_id=7)"]
+    assert logged[0]["exception"] is not None
 
 
 class _TenantLoader(_Loader):
+    def __init__(self, **tenant):
+        self.tenant = {"enabled": True, "header": "X-TLDW-Tenant", **tenant}
+
     def get_snapshot(self):
-        return _TenantSnap()
+        return SimpleNamespace(route_map=_Snap.route_map, tenant=self.tenant, policies={})
 
 
-def test_multi_org_key_without_active_org_gets_the_same_tenant_at_ingress_and_route(manager):
-    # TASK-13402 review: ingress and route-level reservations must pick the caller's own
-    # tenant in the same order (tenant claim, active org, then the key's first org).
-    manager.key_info["org_id"] = None
-    manager.memberships = [{"org_id": 1, "team_id": None}, {"org_id": 2, "team_id": None}]
+def _tenant_parity_client(**tenant):
+    """Ingress charges rg_ingress_entity; the route returns it and its own derive_entity_key."""
     app = FastAPI()
 
     @app.get("/api/v1/thing")
@@ -219,10 +249,29 @@ def test_multi_org_key_without_active_org_gets_the_same_tenant_at_ingress_and_ro
         return {"ingress": request.state.rg_ingress_entity, "route": derive_entity_key(request)}
 
     app.add_middleware(RGSimpleMiddleware)
-    app.state.rg_policy_loader = _TenantLoader()
-    app.state.rg_governor = MemoryResourceGovernor(policy_loader=_TenantLoader())
-    client = TestClient(app)
+    app.state.rg_policy_loader = _TenantLoader(**tenant)
+    app.state.rg_governor = MemoryResourceGovernor(policy_loader=_TenantLoader(**tenant))
+    return TestClient(app)
+
+
+def test_multi_org_key_without_active_org_gets_the_same_tenant_at_ingress_and_route(manager):
+    # TASK-13402 review: ingress and route-level reservations must pick the caller's own
+    # tenant in the same order (tenant claim, active org, then the key's first org).
+    manager.key_info["org_id"] = None
+    manager.memberships = [{"org_id": 1, "team_id": None}, {"org_id": 2, "team_id": None}]
+    client = _tenant_parity_client()
 
     for _ in range(2):  # the second request is an ingress identity-cache hit
         body = client.get("/api/v1/thing", headers={"X-API-KEY": KEY}).json()
         assert body == {"ingress": "tenant:1", "route": "tenant:1"}
+
+
+def test_custom_jwt_claim_setting_does_not_split_ingress_and_route_tenants(manager):
+    # Qodo #3086: the tenant is the principal's own org (R-T), so a custom tenant.jwt_claim
+    # name must not send endpoint reservations to user:<id> while ingress charges tenant:7.
+    manager.key_info["org_id"] = 7
+    manager.memberships = [{"org_id": 7, "team_id": None}]
+    client = _tenant_parity_client(jwt_claim="company")
+
+    body = client.get("/api/v1/thing", headers={"X-API-KEY": KEY}).json()
+    assert body == {"ingress": "tenant:7", "route": "tenant:7"}

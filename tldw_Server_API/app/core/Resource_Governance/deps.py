@@ -73,9 +73,10 @@ def derive_client_ip(request: Request) -> str:
 def tenant_claims_from_state(request: Request) -> dict[str, object]:
     """Extract tenant-related claims from trusted request state/auth context.
 
-    ``tenant_id`` is the caller's own tenant: the tenant claim, else the active org,
-    else the org (for an API key, its scoped org or first org). RG ingress calls this
-    too, so ingress and endpoint reservations agree on a caller's tenant (TASK-13402).
+    ``tenant_id`` is the caller's own tenant: ``tenant_id`` on request state, else the
+    active org, else the org (for an API key, its scoped org or first org). RG ingress
+    calls this too, so ingress and endpoint reservations agree on a caller's tenant
+    (TASK-13402); the ``tenant.jwt_claim`` setting does not change it.
     """
     claims: dict[str, object] = {}
     for attr in ("tenant_id", "active_org_id", "org_id"):
@@ -134,7 +135,10 @@ def derive_entity_key(request: Request, tenant_config: TenantScopeConfig | None 
         try:
             claims = tenant_claims_from_state(request)
             tenant_id = get_tenant_id(
-                request.headers, claims=claims, config=tenant_config, member_of=_member_tenant_ids(request, claims)
+                request.headers,
+                own_tenant=claims.get("tenant_id"),
+                config=tenant_config,
+                member_of=_member_tenant_ids(request, claims),
             )
             if tenant_id:
                 return f"tenant:{tenant_id}"

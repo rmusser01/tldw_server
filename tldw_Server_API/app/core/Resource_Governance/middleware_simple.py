@@ -163,7 +163,7 @@ class RGSimpleMiddleware:
           charged unresolved and nothing is cached. JWTs never spend the budget.
         - With tenant scoping enabled, a validated principal is charged ``tenant:<id>``:
           the org the tenant header names when the principal belongs to it, else its
-          own tenant in deps.tenant_claims_from_state's order (tenant claim, active org,
+          own tenant in deps.tenant_claims_from_state's order (state tenant_id, active org,
           org), else its own entity (_charge_entity). Only a principal's orgs
           (cached with it) can name a tenant, so anonymous and invalid callers rotating
           the header still share the IP bucket (TASK-13402).
@@ -213,8 +213,7 @@ class RGSimpleMiddleware:
         if identity is None:
             return None
         cfg = self._derive_tenant_config(request)
-        claims = {cfg.jwt_claim: identity.tenant_id} if cfg and identity.tenant_id else None
-        tenant = get_tenant_id(request.headers, claims=claims, config=cfg, member_of=identity.org_ids)
+        tenant = get_tenant_id(request.headers, own_tenant=identity.tenant_id, config=cfg, member_of=identity.org_ids)
         return f"tenant:{tenant}" if tenant else identity.entity
 
     def _spend_resolve_budget(self, ip: str, now: float) -> bool:
