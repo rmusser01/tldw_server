@@ -342,3 +342,18 @@ the actual Chatbook importer accepted the same HTTP-exported archive with all
 of cross-host portability. The same task's PostgreSQL run first exposed datetime
 export serialization and then the explicit SQLite-only import-job boundary;
 qualify supported storage paths separately instead of claiming backend parity.
+
+## Public model catalogs do not validate cookie sessions
+
+**Incident (TASK-13398, PR #3069, 2026-09-30):** Cookie cache tests passed while
+the real metadata endpoint stayed HTTP 200 after session expiry. The protected
+profile returned HTTP 401. A full browser reload then minted a fresh cookie,
+masking expiry; mounted-page Refresh reproduced zero usable models. Cubic also
+found that one instance's generation guard did not protect another instance's
+persistent key catalog, and two outer requests could share different auth modes.
+
+**Evidence and rule:** Validate cookies through the existing profile request,
+exercise expiry without renewing the session, and test independent cache
+instances and both auth-mode transitions. Cookie catalogs need no persistent
+cache when offline hydration is forbidden; retain transient metadata fallback
+only after the current request's profile check succeeds.
