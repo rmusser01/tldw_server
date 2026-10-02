@@ -21,7 +21,7 @@ During physical Migu voice UAT, the floating Buddy lost its image after repeated
 <!-- AC:BEGIN -->
 - [ ] #1 The initiating trigger is identified with reproducible evidence.
 - [x] #2 A regression check verifies bounded visual-pack loading through live state updates.
-- [ ] #3 Real browser validation confirms the Buddy image remains available without repeated pack-load failures.
+- [x] #3 Real browser validation confirms the Buddy image remains available without repeated pack-load failures.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -45,6 +45,7 @@ Voice follow-up PR created against dev: https://github.com/rmusser01/tldw_server
 2026-09-10 controlled browser diagnostics: 1280px mount, 1023px cleanup, 1024px remount with two development pack-list calls and one session-list call. Confirms breakpoint source of paired reloads, not original rapid loop. No initiating trigger or 429 reproduced; all original AC remain open. Source-bound details/timestamps in Docs/Reviews/2026-09-10-buddy-followup.md. Temporary probes not shipped; viewport restored.
 Recovered incident frontend73640bbb89aed7d878d254bd622ca68f79923ad8 from the separate local tldw_server checkout. The real route/context/host/live-control integration kept exactly one pack-list, detail and session-list across24 simulated voice/tool transitions at250ms; deliberately taking the route offline and back creates exactly one additional request set. Replaying the four historical source files also stayed stable. This is a bounded lifecycle regression, not an established initiating cause or physical voice acceptance. No production behavior was changed; AC1/AC3 remain open. Details and executable check in Docs/Reviews/2026-09-10-buddy-lifecycle-regression.md.
 PR #2941 Qodo review: replace the 24 real-time waits with a fixed Vitest clock and explicit 250 ms advancement, assert exactly 6000 ms elapsed, and restore real timers before reconnect checks plus failure cleanup. The focused test passes in 0.97 seconds; this is deterministic bounded-load coverage, with no new claim about the historical trigger.
+September 30 UAT on reviewed server source eaebb194b717d3adc335dbca8961bc9ef5884ac5 plus the two-file catalog repair: the actual legacy Research Assistant Persona Buddy was exposed by temporarily detaching the independent test Buddy, and its reviewed Pixel Migu pack was activated. The rendered image completed at 128x128. Actual browser pointer dragging moved the shell from 1044,96 to 829,247; the implemented Home control reset it. Across a 6 minute 25 second window, legacy loading made two pack-list, two pack-detail and one live-session-list requests, with zero failures/429. Original workspace attachment restored. Private receipt: /private/tmp/buddy-all-uat-20260930/legacy-persona-visual-uat.json and legacy-persona-buddy-dragged.jpg. This qualifies AC3 real-browser artwork availability; AC1 stays open because the historical 250ms initiating trigger remains unreproduced. No human voice states, speculative production repair or Done status claimed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
