@@ -463,6 +463,10 @@ export async function seedAuth(
   )
   if (shouldInstallSmokeApiStubs()) {
     await stubCompletedFirstRunSetup(page)
+    await page.route(/\/api\/v1\/moderation\/review\/items(?:\?.*)?$/, async (route) => {
+      if (route.request().method() !== "GET") return route.fallback()
+      await fulfillSmokeJson(route, 200, { items: [], next_cursor: null, total: 0 })
+    })
   }
 }
 
@@ -522,79 +526,7 @@ export const BENIGN_PATTERNS = [
  * Temporary allowlist for non-fatal console/request noise observed in full all-pages smoke.
  * These entries are intentionally narrow and route-scoped where possible.
  */
-export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
-  {
-    id: "m5-optional-resource-404-noise",
-    scope: "console",
-    pattern: /\/api\/v1\/moderation\/review\/items(?:\?[^ ]*)?\s+Failed to load resource: the server responded with a status of 404\b/i,
-    rationale: "The minimal smoke backend omits moderation review items; the route remains recoverable. TASK-13377.9 records the exact endpoint evidence.",
-    owner: "WebUI",
-    expiresOn: "2026-10-08",
-    routes: ["/moderation"]
-  },
-  {
-    id: "m5-drawer-width-deprecation-noise",
-    scope: "console",
-    pattern: /Warning:\s+\[antd:\s*Drawer\]\s+`width` is deprecated\. Please use `size` instead\./i,
-    rationale:
-      "TASK-13260.278.18.83.51: current Kanban development fixture emits this Drawer width warning; removal fails its unchanged recovery gate. TASK-13377.9 also records fresh fixture evidence.",
-    owner: "WebUI",
-    expiresOn: "2026-10-31",
-    routes: ["/kanban"]
-  },
-  {
-    id: "m5-route-boundary-forced-react-overlay-warning",
-    scope: "console",
-    pattern: /The above error occurred in the <ForcedRouteErrorProbe> component/i,
-    rationale: "Expected React error-overlay emission from deliberate route-boundary fixtures; TASK-13377.9 records fresh recovery evidence.",
-    owner: "WebUI",
-    expiresOn: "2026-10-31",
-    routes: [
-      "/admin/server",
-      "/admin/llamacpp",
-      "/admin/mlx",
-      "/content-review",
-      "/data-tables",
-      "/kanban",
-      "/chunking-playground",
-      "/moderation",
-      "/moderation/rules",
-      "/collections",
-      "/world-books",
-      "/dictionaries",
-      "/characters",
-      "/items",
-      "/document-workspace",
-      "/speech"
-    ]
-  },
-  {
-    id: "m5-route-boundary-forced-error-log",
-    scope: "console",
-    pattern: /\[RouteErrorBoundary:[^\]]+\]\s+Error:\s+Forced route boundary error/i,
-    rationale: "Deliberate route-boundary fixture logs confirm the recovery branch; TASK-13377.9 records fresh evidence.",
-    owner: "WebUI",
-    expiresOn: "2026-10-31",
-    routes: [
-      "/admin/server",
-      "/admin/llamacpp",
-      "/admin/mlx",
-      "/content-review",
-      "/data-tables",
-      "/kanban",
-      "/chunking-playground",
-      "/moderation",
-      "/moderation/rules",
-      "/collections",
-      "/world-books",
-      "/dictionaries",
-      "/characters",
-      "/items",
-      "/document-workspace",
-      "/speech"
-    ]
-  }
-]
+export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = []
 
 const ALLOWLIST_GLOBAL_RATIONALE_PATTERN =
   /\b(all-pages|all routes|cross-route|dense|dev runtime|global|parallel|route boundary|runtime)\b/i

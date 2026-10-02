@@ -6,10 +6,10 @@ const optionalListUrl =
 
 for (const scenario of [
   {
-    name: 'allows the minimal-backend moderation list miss',
+    name: 'rejects an unstubbed moderation list miss',
     route: '/moderation',
     url: optionalListUrl,
-    unexpected: 0,
+    unexpected: 1,
   },
   {
     name: 'rejects another resource miss on the moderation page',
@@ -46,5 +46,18 @@ for (const scenario of [
     expect(classifySmokeIssues(scenario.route, issues).unexpectedConsoleErrors).toHaveLength(
       scenario.unexpected
     );
+  });
+}
+
+for (const text of [
+  'Warning: [antd: Drawer] `width` is deprecated. Please use `size` instead.',
+  'The above error occurred in the <ForcedRouteErrorProbe> component',
+  '[RouteErrorBoundary:kanban] Error: Forced route boundary error for kanban',
+]) {
+  test(`ordinary route rejects ${text}`, () => {
+    const issues = getCriticalIssues({
+      console: [{ type: 'error', text }], pageErrors: [], requestFailures: [],
+    });
+    expect(classifySmokeIssues('/kanban', issues).unexpectedConsoleErrors).toHaveLength(1);
   });
 }

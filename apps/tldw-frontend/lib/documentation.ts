@@ -38,15 +38,14 @@ const fileTitleFromPath = (relativePath: string) => {
 const toPosixPath = (value: string) => value.split(path.sep).join("/")
 
 const resolveRepoRoot = () => {
-  const candidates = [
-    process.cwd(),
-    path.resolve(process.cwd(), "../.."),
-  ]
-
-  for (const candidate of candidates) {
+  let candidate = process.cwd()
+  while (true) {
     if (fs.existsSync(path.join(candidate, SOURCE_ROOTS.server))) {
       return candidate
     }
+    const parent = path.dirname(candidate)
+    if (parent === candidate) break
+    candidate = parent
   }
 
   throw new Error("Unable to resolve repository root for documentation sources.")
