@@ -4,7 +4,7 @@ title: Prepare and publish 0.1.46 from latest dev
 status: In Progress
 assignee: []
 created_date: '2026-10-02 00:22'
-updated_date: '2026-10-02 01:37'
+updated_date: '2026-10-02 04:05'
 labels:
   - release
 dependencies: []
@@ -53,6 +53,18 @@ Minimal CodeQL2700 fix hides values for default/automatic generated keys and pre
 Independent reviewer demonstrated a surviving secret leak on automatic .env write failure: outer CLI logger.exception attaches generated-key frame locals, while str(exception) can also carry sensitive text. Address the same secret-output invariant by logging/printing only exception class without traceback; exercise the actual CLI handler with a failing initialization control before final commit.
 
 Final focused verification: 18 initializer tests pass, including three output regressions; 80 metadata/docs/licensing/helper checks pass again. Single independent review reproduced CLI failure traceback disclosure; bounded exception-class console/log diagnostics close the confirmed sibling path, exit1 preserved. No reproduced generated-key leak from the separate Postgres handler, so left unchanged. Final production initializer Ruff and Bandit clean; new test assertions are expected B101, inherited test I001 unchanged. Push final candidate and await normal six gates, trusted license and CodeQL result before merge/publication.
+
+Final-head backend, coverage, E2E, security and container gates pass; frontend eight shards pass, reporter pending. CodeQL dynamic/default replacement2702 points only to explicit guarded manual-copy output and is mitigated with 18 output controls; both PR-head/merge refs have no open findings. Full-CI sync-pc-rest has one failed concurrency handshake among447passed: installer committed.wait(5) unset. Exact test passes locally (1passed24deselected); owning-file reproduction in progress. Direct job retry is blocked by GitHub HTTP403 until enclosing run finishes, so do not repeat request before state changes. No Sync source or tests edited; investigate/confirm before any repair.
+
+Sync concurrency investigation: isolated test1passed; initial owning-file run stopped on Docker container cleanup timeout rather than a Sync assertion. Supported TLDW_TEST_NO_DOCKER=1 fixture mode completed owning file with19passed6fixture-reportedPostgreSQLskips. No source/test edits and no guessed timeout increase. Await enclosing CI completion to perform one targeted Linux3.12 failed-job retry; preserve source and investigate if repeat fails. Container gate nowgreen, frontendreporter running sharedUIchecks; other required gates green.
+
+Verified all223 full-CI jobs via all REST pages: only queued FullSuiteLinux3.12 summary remained; all test jobs complete, sole failure sync-pc-rest. Canceled that summary-only attempt (no tests running/queued) to unlock native failed-job rerun, preserving completed results. Requested one specific Sync job retry with debug logging and dependent summary; immutable candidate b5c50a9b7ce16665b94c5f5e57be89783479f151 unchanged.
+
+All six normal release gates and both CodeQL refs pass on b5. Found existing PR3078/TASK-13410 relay liveness repair while retry remained runner-queued. Temporary /tmp test plugin injects60ms before authority staging without repo edits: release failing installer-handshake test reproduced exactly, committed.wait(5) false; observed push envelope apply_status pending. This establishes related relay deadline/predecessor path rather than test-timeout repair. Reuse and verify existing narrow relay fix/tests from PR3078 in release; no new infrastructure or timing increase. Controlled failing log /tmp/release046-slow-relay-repro.log.
+
+Reuse of PR3078 minimal two-file relay repair verified: new fake-clock regression failed before source fix (stage-only vs record/ack/finalize); same60ms-controlled installer test passes afterward. Existing relay/recovery/activation suites207passed6fixture-reportedPostgresunavailable skips; initial custom /tmp basetemp rejected trusted database roots, rerun using pytest default native temp passed. Release/docs/licensing/helper80passed again. Production/test Ruff clean; scoped production Bandit0findings0errors, diffcheckclean. Changelog includes this exact CI root fix. Independent review requested via requesting-code-review skill before pushing.
+
+Independent read-only relay review: no actionable findings; only successfully staged current-attempt row finishes after deadline, while lease/receipt/purge/current-row guards remain and next row/batch completion retain deadline. Canceled obsolete runner-queued old-head retry after concrete root repair; updated PR3074 body and changelog. Await normal CI on new committed candidate before main merge/tag/publication.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
