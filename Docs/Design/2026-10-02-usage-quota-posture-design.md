@@ -197,7 +197,7 @@ Months are calendar months in UTC.
 ### 8. Upgrading existing installs
 
 - **Self-hosters have nothing to do.** Quotas they never configured stop applying.
-- **Hosted deploys must set `USAGE_QUOTAS_ENABLED=true` before PR A ships.** `LIMIT_ENFORCEMENT_ENABLED=true` also works, with a warning. The commercial-mode warning in §1 catches a missed setting.
+- **A future hosted deploy turns quotas on with `USAGE_QUOTAS_ENABLED=true`.** `LIMIT_ENFORCEMENT_ENABLED=true` also works, with a warning. No hosted deployments exist today, and the commercial-mode warning in §1 catches a missed setting.
 - **Storage migration.** An AuthNZ migration (a numbered SQLite migration in `migrations.py` and a Postgres entry in `pg_migrations_extra.py`) runs in this order:
   1. It ensures the override table exists.
   2. It copies every `users.storage_quota_mb` value into a user-scope `limits.storage_quota_mb` override, **except** values equal to 5120 or to the `DEFAULT_STORAGE_QUOTA_MB` configured at migration time. Those can't be told apart from "never set", so they are dropped.
@@ -265,7 +265,6 @@ Four PRs against `dev`:
 - **PR A (relief).** Adds `usage_quotas_enabled()` and the commercial-mode warning, and gates every quota *check* (never a counter write) on the switch. It also adds the no-billing-repo short-circuit.
   - Self-hosters are relieved at once.
   - With the switch on, behavior is unchanged from today.
-  - **It ships only after the hosted deploy sets `USAGE_QUOTAS_ENABLED=true`.**
 - **PR B (per-user values).**
   - The resolver and the precedence rule.
   - The generic `limits.*` write path with null-as-delete, and the team/org override routes.

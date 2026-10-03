@@ -27,7 +27,7 @@
 - Postgres fixture tests: run with `TLDW_TEST_NO_DOCKER=1` locally. Only failures that also occur on `origin/dev` count as environmental.
 - Any edit to a doc mirrored under `Docs/Published` needs `bash Helper_Scripts/refresh_docs_published.sh`, and the Published diff goes in the same commit.
 - **Merge coordination.** Another session (`tldw-server-03`) merges into `dev` in alternation with this one. Push and run CI freely, but merge only after messaging that session and getting its go-ahead, and message it again when the merge lands.
-- **Owner prerequisite before merging PR A:** the hosted deploy must set `USAGE_QUOTAS_ENABLED=true` (spec §8). Ask the owner to confirm before the merge.
+- **No hosted deployments exist,** so there is no deploy prerequisite and no owner sign-off before merging.
 - **The switch's default is off in production but on in the test suite.** The root `tests/conftest.py` sets `LIMIT_ENFORCEMENT_ENABLED=true` (Task 1), so existing quota suites keep testing enforcement. New stock-default tests must clear both `USAGE_QUOTAS_ENABLED` and `LIMIT_ENFORCEMENT_ENABLED`.
 
 ## Review Focus
@@ -1027,8 +1027,7 @@ Expected: no new findings.
 
 - [ ] **Step 3: Get the owner's confirmation, then coordinate and open the PR**
 
-1. **The owner.** Ask them to confirm that the hosted deploy sets `USAGE_QUOTAS_ENABLED=true`; this is spec §8 and blocks the merge.
-2. **The peer session.** Message `tldw-server-03` with the branch, the touched areas (billing deps, audio quota, storage, workflows, chatbooks, RG policy YAML, Env_Vars and its mirror), and a request for a merge slot. Wait for its go-ahead before merging; pushing and CI may start earlier.
+1. **The peer session.** Message `tldw-server-03` with the branch, the touched areas (billing deps, audio quota, storage, workflows, chatbooks, RG policy YAML, Env_Vars and its mirror), and a request for a merge slot. Wait for its go-ahead before merging; pushing and CI may start earlier.
 3. **Open the PR.**
 
 ```bash
@@ -1041,7 +1040,6 @@ The body lists:
 - each gated site;
 - the billing-repo requirement;
 - the evals daily-cap removal;
-- the owner prerequisite;
 - the verification counts.
 
 It ends with the waiver line and the Claude Code footer.
