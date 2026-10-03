@@ -64,7 +64,7 @@ class HierarchyService:
         # Build blocks from spans
         spans = compute_paragraph_spans(text, template)
         root = build_hierarchy_tree(self._context, text_views, spans, resolved_options)
-        tree = {
+        return {
             "type": "hierarchical",
             "schema_version": 1,
             "method": method,
@@ -73,7 +73,3 @@ class HierarchyService:
             "overlap": overlap,
             "root": root,
         }
-        hierarchy = (template or {}).get("hierarchy") or {}
-        if "grouping" in hierarchy:
-            tree["grouping"] = hierarchy["grouping"]
-        return tree
