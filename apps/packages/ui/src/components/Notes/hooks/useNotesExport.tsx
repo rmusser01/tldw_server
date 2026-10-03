@@ -140,7 +140,7 @@ export function useNotesExport(deps: UseNotesExportDeps) {
         let res: any
         try {
           res = await bgRequest<any>({
-            path: `/api/v1/notes/?page=${p}&results_per_page=${ps}` as any,
+            path: `/api/v1/notes/?page=${p}&results_per_page=${ps}&include_keywords=true` as any,
             method: 'GET' as any
           })
         } catch {

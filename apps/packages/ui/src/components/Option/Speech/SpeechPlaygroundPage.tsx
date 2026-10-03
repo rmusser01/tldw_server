@@ -1722,7 +1722,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
 
   const handlePlay = async () => {
     const effectiveText = useDraftEditor ? transcriptDraft : ttsText
-    if (!effectiveText.trim() || isTtsDisabled) return
+    if (!effectiveText.trim() || isTtsDisabled || isPlayDisabled) return
     if (useDraftEditor) {
       const nextErrors: { outline?: string; transcript?: string } = {}
       if (!outlineDraft.trim()) nextErrors.outline = "Outline is required."
@@ -2244,8 +2244,6 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
   const selectedTldwProviderMissing =
     isTldw &&
     hasAudio &&
-    Boolean(providersInfo) &&
-    Boolean(selectedTldwBackend || inferredProviderKey) &&
     !activeProviderCaps
   const selectedTldwVoiceCatalogMissing =
     isTldw &&
@@ -2257,20 +2255,17 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
     !!elevenLabsData &&
     (!elevenLabsData.voices?.length || !elevenLabsData.models?.length)
 
-  const playDisabledReason = (() => {
-    if (isTtsDisabled) {
-      return t(
-        "playground:tts.playDisabledTtsOff",
-        "Enable text-to-speech above to play audio."
-      )
-    }
-    if (!(useDraftEditor ? transcriptDraft : ttsText).trim()) {
-      return t("playground:tts.playDisabledNoText", "Enter text to enable Play.")
-    }
+  const serverTtsDisabledReason = (() => {
     if (provider !== "browser" && provider !== "elevenlabs" && !hasAudio) {
       return t(
         "playground:tts.playDisabledServerAudioUnavailable",
         "Open Settings -> Speech to connect the tldw audio/speech API before generating server TTS."
+      )
+    }
+    if (isTldw && providersInfo === undefined) {
+      return t(
+        "playground:tts.playDisabledProviderLoading",
+        "Loading server TTS providers before generating."
       )
     }
     if (selectedTldwProviderMissing) {
@@ -2289,6 +2284,20 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
         `No voices reported for ${selectedTldwProviderLabel}. Configure voices in Settings -> Speech before generating.`
       )
     }
+    return null
+  })()
+
+  const playDisabledReason = (() => {
+    if (isTtsDisabled) {
+      return t(
+        "playground:tts.playDisabledTtsOff",
+        "Enable text-to-speech above to play audio."
+      )
+    }
+    if (!(useDraftEditor ? transcriptDraft : ttsText).trim()) {
+      return t("playground:tts.playDisabledNoText", "Enter text to enable Play.")
+    }
+    if (serverTtsDisabledReason) return serverTtsDisabledReason
     if (provider === "elevenlabs" && !hasElevenLabsKey) {
       return t(
         "playground:tts.playDisabledElevenLabsKeyMissing",
@@ -3528,6 +3537,7 @@ export const SpeechPlaygroundPage: React.FC<SpeechPlaygroundPageProps> = ({
                   voiceTab={
                     <TtsVoiceTab
                       provider={provider}
+                      previewDisabledReason={serverTtsDisabledReason}
                       model={currentTtsSelection.model}
                       voice={currentTtsSelection.voice}
                       onProviderChange={(val) => {

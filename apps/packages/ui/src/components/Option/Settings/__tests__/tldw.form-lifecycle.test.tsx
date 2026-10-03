@@ -4,6 +4,9 @@ import { App, ConfigProvider } from "antd"
 import { Storage } from "@plasmohq/storage"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import { tldwClient } from '@/services/tldw/TldwApiClient'
+import { createMemoryRouter, RouterProvider } from "react-router-dom"
+import { requestSettingsNavigation } from '@/utils/settings-return'
 
 // Match the WebUI storage boundary, including same-tab and cross-tab watches.
 vi.mock("@plasmohq/storage", async () =>
@@ -27,10 +30,7 @@ vi.mock("../server-health-probe", () => ({ probeServerHealth: vi.fn() }))
 vi.mock("react-i18next", () => ({ useTranslation: () => ({
   t: (key: string, fallback: unknown) => typeof fallback === "string" ? fallback : key
 }) }))
-vi.mock("react-router-dom", () => ({
-  Link: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  useNavigate: () => vi.fn()
-}))
+
 
 import { TldwSettings } from "../tldw"
 
@@ -52,7 +52,17 @@ beforeEach(async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ paths: {} }), { status: 200 })))
 })
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
-const mount = () => render(<ConfigProvider theme={{ token: { motion: false } }}><App><TldwSettings /></App></ConfigProvider>)
+let router: ReturnType<typeof createMemoryRouter>
+const mount = () => {
+  router = createMemoryRouter([
+    { path: "/", element: <TldwSettings /> },
+    { path: "/settings/*", element: <div>Settings destination</div> }
+  ], { initialEntries: ["/settings/prior", "/"], initialIndex: 1 })
+  return render(<ConfigProvider theme={{ token: { motion: false } }}><App><RouterProvider router={router} /></App></ConfigProvider>)
+}
+const navigateSettings = async (destination: string) => {
+  if (requestSettingsNavigation(destination)) await act(async () => { await router.navigate(destination) })
+}
 const formErrors = (errors: ReturnType<typeof vi.spyOn>) => errors.mock.calls.flat().map(String).filter(line => line.includes("not connected to any Form"))
 
 it("discovers optional billing through the shared transport at the server root", async () => {
@@ -147,6 +157,69 @@ it("preserves the mounted server draft across storage account transitions", asyn
   expect(screen.getByText("Login Required", { exact: true })).toBeInTheDocument()
 })
 
+it('warns and keeps an unsaved Server URL when leaving Settings is cancelled', async () => {
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+  mount()
+  await screen.findByText('Logged In', { exact: true })
+  const input = screen.getByRole('textbox', { name: 'Server URL' })
+  fireEvent.change(input, { target: { value: 'https://unsaved.example.test' } })
+  expect(screen.getByText(/unsaved connection settings/i)).toBeInTheDocument()
+  await navigateSettings('/settings/preferences')
+  await waitFor(() => expect(confirm).toHaveBeenCalled())
+  expect(input).toHaveValue('https://unsaved.example.test')
+  expect(await storage.get('tldwConfig')).toEqual(signedIn)
+})
+
+it('warns on unload only while the connection settings contain unsaved changes', async () => {
+  mount()
+  await screen.findByText('Logged In', { exact: true })
+  const input = screen.getByRole('textbox', { name: 'Server URL' })
+  fireEvent.change(input, { target: { value: 'https://unsaved.example.test' } })
+  const pending = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(pending)
+  expect(pending.defaultPrevented).toBe(true)
+  fireEvent.change(input, { target: { value: target.serverUrl } })
+  const clean = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(clean)
+  expect(clean.defaultPrevented).toBe(false)
+  expect(requestSettingsNavigation('/settings/preferences')).toBe(true)
+})
+
+it('keeps an unsaved connection draft when an ordinary settings link is cancelled', async () => {
+  vi.spyOn(window, 'confirm').mockReturnValue(false)
+  mount()
+  await screen.findByText('Logged In', { exact: true })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Server URL' }), { target: { value: 'https://unsaved.example.test' } })
+  fireEvent.click(screen.getByRole('link', { name: 'Health' }))
+  await waitFor(() => expect(window.confirm).toHaveBeenCalled())
+  expect(screen.getByRole('textbox', { name: 'Server URL' })).toHaveValue('https://unsaved.example.test')
+})
+
+it('clears the unsaved navigation guard after connection settings save succeeds', async () => {
+  mount()
+  await screen.findByText('Logged In', { exact: true })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Server URL' }), { target: { value: 'https://saved.example.test' } })
+  await screen.findByText('Login Required', { exact: true })
+  fireEvent.click(screen.getByRole('button', { name: 'common:save', exact: true }))
+  await waitFor(() => expect(screen.queryByText(/unsaved connection settings/i)).not.toBeInTheDocument())
+  expect(requestSettingsNavigation('/settings/preferences')).toBe(true)
+})
+
+it('retains the draft and its navigation guard after connection save fails', async () => {
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  vi.spyOn(window, 'confirm').mockReturnValue(false)
+  vi.mocked(tldwClient.updateConfig).mockRejectedValueOnce(new Error('Storage unavailable'))
+  mount()
+  await screen.findByText('Logged In', { exact: true })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Server URL' }), { target: { value: 'https://unsaved.example.test' } })
+  fireEvent.click(screen.getByRole('button', { name: 'common:save', exact: true }))
+  await screen.findByText('settings:saveFailed')
+  expect(screen.getByText(/unsaved connection settings/i)).toBeInTheDocument()
+  await navigateSettings('/settings/preferences')
+  await waitFor(() => expect(window.confirm).toHaveBeenCalled())
+  expect(screen.getByRole('textbox', { name: 'Server URL' })).toHaveValue('https://unsaved.example.test')
+})
+
 it("rejects an old account's delayed initial load after the Settings owner is replaced", async () => {
   const errors = vi.spyOn(console, "error").mockImplementation(() => {})
   let resolveOld!: (config: TldwConfig) => void
@@ -179,4 +252,17 @@ it("keeps the current form available when logout fails before credentials are cl
   expect(screen.getByText("Logged In", { exact: true })).toBeInTheDocument()
   expect(screen.getByRole("textbox", { name: "Server URL" })).toHaveValue(target.serverUrl)
   expect(formErrors(errors)).toEqual([])
+})
+
+
+it.each([-1, '/settings/health'])('preserves an unsaved connection draft when navigation %s is cancelled', async (destination) => {
+  vi.spyOn(window, 'confirm').mockReturnValue(false)
+  mount()
+  await screen.findByText('Logged In', { exact: true })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Server URL' }), { target: { value: 'https://unsaved.example.test' } })
+  await act(async () => { if (typeof destination === "number") await router.navigate(destination)
+    else await router.navigate(destination) })
+  await waitFor(() => expect(window.confirm).toHaveBeenCalled())
+  expect(router.state.location.pathname).toBe('/')
+  expect(screen.getByRole('textbox', { name: 'Server URL' })).toHaveValue('https://unsaved.example.test')
 })
