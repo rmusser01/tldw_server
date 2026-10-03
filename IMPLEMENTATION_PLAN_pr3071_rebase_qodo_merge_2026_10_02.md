@@ -9,6 +9,51 @@ ADR check: No new ADR required; integration and corrective review work do not
 change a durable architecture rule. ADR-002, ADR-004, and ADR-006 govern tracking,
 human ownership, and security verification.
 
+## Current Continuation: 2026-10-03
+
+The requester approved cleanup and continuation. Chatbook companion PR2968 is
+merged at efea5e45cf2348dd0da50fedac215cd849143822. Its exact final head passed all
+four hosted gates and Qodo with no active findings; actual authenticated GET-only
+scope/history verification passed without mocks. No client release is claimed.
+The server PR remains published at5b6258f909 and current dev is4c4f197f68481664c58d4553bbfbb45dae157e28.
+Use the clean attached isolated worktree; preserve the original live UAT checkout,
+all protected services/data, historical evidence and the human Change summary.
+
+### Stage A: Preserve and Reconcile
+**Goal**: Integrate current dev without losing either side's qualified behavior.
+**Success Criteria**: Preserve the published head and original stash inventory;
+inspect all overlapping upstream paths; retain topology and compare the rebased
+tree with an independently reconciled expected integration tree.
+**Tests**: Ancestry, tree/range comparisons and focused conflict regressions.
+**Status**: In Progress
+
+### Stage B: Fresh Qualification
+**Goal**: Qualify changed runtime and incoming integration on the new source.
+**Success Criteria**: Owning/incoming tests, TypeScript/lint/build and touched-scope
+Bandit pass; actual Chrome raw-CDP acceptance uses live authenticated services,
+databases, Gemma and embeddings without mocks or automatic resends.
+**Tests**: Durable chat, RAG/history/prompt recovery, Research hydration and
+workspace switching, desktop/mobile send/stream/stop/reload/source handling.
+**Status**: Not Started
+
+### Stage C: Review and Hosted CI
+**Goal**: Publish only a verified integration and address actual final-head review.
+**Success Criteria**: Preserve the human summary; use an exact publication lease;
+document merged companion disposition; fresh exact-head Qodo/CI and all review
+threads are qualified, with no hidden or bypassed failures.
+**Tests**: Per-finding regression/security checks and actual hosted readback.
+**Status**: Not Started
+
+### Stage D: Protected Merge and Tracker Reconciliation
+**Goal**: Land the qualified server work before starting another workstream.
+**Success Criteria**: Latest head/base and human summary are rechecked; normal
+protected merge is verified by commit parents/tree; Backlog and epic statuses
+reflect actual completed criteria, leaving any genuine residual work open.
+**Tests**: Fresh GitHub/repository readback and evidence-linked issue review.
+**Status**: Not Started
+
+## Historical Qualification Before This Continuation
+
 ## Stage 1: Preserve and Rebase
 **Goal**: Rebase on latest fetched dev9958110df2a9011e19f48b0eae821353e19d4af8,
 retaining the qualified8140 integration and the new request-scoped ChaCha reuse fix.
