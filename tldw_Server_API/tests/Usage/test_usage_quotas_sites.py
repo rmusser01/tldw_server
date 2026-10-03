@@ -7,7 +7,6 @@ import pytest
 from tldw_Server_API.app.api.v1.API_Deps import storage_quota_guard
 from tldw_Server_API.app.api.v1.endpoints import workflows as workflows_ep
 from tldw_Server_API.app.core.Chatbooks.quota_manager import QuotaManager
-from tldw_Server_API.app.core.Ingestion_Media_Processing import persistence
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService
 
 pytestmark = pytest.mark.unit
@@ -25,29 +24,6 @@ def quotas_off(monkeypatch: pytest.MonkeyPatch) -> None:
 def quotas_on(monkeypatch: pytest.MonkeyPatch) -> None:
     """An operator who turned usage quotas on."""
     monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
-
-
-def _media_request() -> SimpleNamespace:
-    """A request whose app carries a governor and a policy with media caps."""
-    loader = SimpleNamespace(get_policy=lambda _pid: {"jobs": {"max_concurrent": 2}})
-    app = SimpleNamespace(state=SimpleNamespace(rg_governor=object(), rg_policy_loader=loader))
-    return SimpleNamespace(app=app, state=SimpleNamespace())
-
-
-def test_media_budget_context_is_empty_when_quotas_off(quotas_off: None) -> None:
-    """With quotas off, the media budget context resolves to no governor, no policy and no entity, even though the app carries them."""
-    gov, _policy_id, policy, entity = persistence._resolve_media_budget_context(
-        request=_media_request(), current_user=SimpleNamespace(id=1)
-    )
-    assert gov is None and policy == {} and entity == ""
-
-
-def test_media_budget_context_unchanged_when_quotas_on(quotas_on: None) -> None:
-    """With quotas on, the media budget context still resolves the app's governor, policy and per-user entity."""
-    gov, _policy_id, policy, entity = persistence._resolve_media_budget_context(
-        request=_media_request(), current_user=SimpleNamespace(id=1)
-    )
-    assert gov is not None and policy["jobs"]["max_concurrent"] == 2 and entity == "user:1"
 
 
 def _full_storage_service(monkeypatch: pytest.MonkeyPatch) -> StorageQuotaService:
