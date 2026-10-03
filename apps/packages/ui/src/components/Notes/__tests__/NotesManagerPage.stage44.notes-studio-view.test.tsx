@@ -28,6 +28,12 @@ const {
   mockClearSetting: vi.fn()
 }))
 
+// WYSIWYG input is hidden by default (D5, #3102); this suite exercises it.
+vi.mock("@/components/Notes/notes-manager-utils", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/notes-manager-utils")>()
+  return { ...actual, NOTES_WYSIWYG_INPUT_ENABLED: true }
+})
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (

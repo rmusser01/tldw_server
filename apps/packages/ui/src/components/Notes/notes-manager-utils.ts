@@ -395,6 +395,13 @@ export type SaveRecoveryNotice = {
 }
 export type NotesEditorMode = 'edit' | 'split' | 'preview'
 export type NotesInputMode = 'markdown' | 'wysiwyg'
+
+/**
+ * The WYSIWYG input mode is hidden until NE-01 is fixed: its contentEditable is
+ * re-rendered from state on every input, so typed text lands at the start of the
+ * document and autosave persists it reversed (decision D5, issue #3102).
+ */
+export const NOTES_WYSIWYG_INPUT_ENABLED = false
 export type NotesSortOption = 'modified_desc' | 'created_desc' | 'title_asc' | 'title_desc'
 export type KeywordPickerSortMode = 'frequency_desc' | 'alpha_asc' | 'alpha_desc'
 export type KeywordFrequencyTone = 'none' | 'low' | 'medium' | 'high'
