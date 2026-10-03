@@ -871,6 +871,8 @@ def test_admin_profile_update_audio_limits(auth_headers) -> None:
 
 
 def test_admin_profile_update_evaluations_limits(auth_headers) -> None:
+    """limits.evaluations_* are plain platform-admin overrides; the write no longer
+    flips the user to the Evaluations rate limiter's CUSTOM tier (spec 2 §3)."""
     with TestClient(app) as client:
         user_id = _get_user_id(client, auth_headers)
         resp = client.patch(
@@ -890,15 +892,23 @@ def test_admin_profile_update_evaluations_limits(auth_headers) -> None:
 
         profile_resp = client.get(
             f"/api/v1/admin/users/{user_id}/profile",
-            params={"sections": "quotas"},
+            params={"sections": "effective_config"},
             headers=auth_headers,
         )
         assert profile_resp.status_code == 200
-        quotas = profile_resp.json().get("quotas", {})
-        evaluations = quotas.get("evaluations", {})
-        limits = evaluations.get("limits", {})
-        assert limits.get("per_minute", {}).get("evaluations") == 42
-        assert limits.get("daily", {}).get("evaluations") == 900
+        effective = profile_resp.json().get("effective_config", {})
+        assert effective.get("limits.evaluations_per_minute") == 42
+        assert effective.get("limits.evaluations_per_day") == 900
+
+        # The Evaluations rate limiter's own tier/limits are untouched by this write.
+        quotas_resp = client.get(
+            f"/api/v1/admin/users/{user_id}/profile",
+            params={"sections": "quotas"},
+            headers=auth_headers,
+        )
+        assert quotas_resp.status_code == 200
+        evaluations = quotas_resp.json().get("quotas", {}).get("evaluations", {})
+        assert evaluations.get("tier") != "custom"
 
 
 def test_admin_profile_update_identity_locked(auth_headers) -> None:

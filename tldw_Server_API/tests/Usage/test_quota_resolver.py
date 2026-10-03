@@ -1,7 +1,6 @@
 """Usage-quota precedence, resolver and checks (spec 2 §2, §4)."""
 
 from datetime import datetime
-from types import SimpleNamespace
 
 import pytest
 
