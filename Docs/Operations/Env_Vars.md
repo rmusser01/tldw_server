@@ -313,6 +313,14 @@ Pytest markers
 - `-m pg_jobs_stress`: Run heavier multi-process concurrency tests for PG (opt-in only).
   - Also set `RUN_PG_JOBS_STRESS=1` to enable these tests during runs.
 
+## Usage Quotas
+
+Usage quotas are per-user budgets: audio minutes, storage, chatbook exports and imports, media ingest bytes and concurrency, workflow runs, evaluation caps, and billing-plan limits. They are **off by default**: a stock install, single-user or multi-user, applies none of them. Request rate limits are separate (Resource Governor, below). Design: `Docs/Design/2026-10-02-usage-quota-posture-design.md`.
+
+- `USAGE_QUOTAS_ENABLED`: master switch for every usage quota (`true|1|false|0`). Resolution: this env var > `LIMIT_ENFORCEMENT_ENABLED` (legacy, when set) > `config.txt` `[Usage-Quotas] enabled` > default `false`. With it off, quota checks never block, and usage is still recorded, so turning it on mid-day counts correctly.
+- `LIMIT_ENFORCEMENT_ENABLED`: **deprecated** spelling of `USAGE_QUOTAS_ENABLED`. It is honored only when `USAGE_QUOTAS_ENABLED` is unset, and logs a one-time warning. Its old default was `true`. A deploy that relied on that default must now set `USAGE_QUOTAS_ENABLED=true`.
+- Billing-plan limits additionally need a billing repository, which only the hosted product wires in. Without one, billing checks never run, even with quotas on, and accounts without an organization are never refused. If a billing repository is wired while quotas are off, the server logs a warning at startup and on the first billing check.
+
 ## Resource Governor (Unified Rate Limiting)
 
 The Resource Governor (RG) is the **primary enforcement path** for all rate limiting. Some deprecated module-local compatibility knobs remain during cutover and will be removed once shadow-mode exit criteria are met (see `Docs/Product/Completed/AuthNZ-Refactor/Resource_Governor_PRD.md`). AuthNZ dependency shims (`check_rate_limit`, `check_auth_rate_limit`) apply a **local fallback limit only to requests RG ingress did not govern** (no `request.state.rg_policy_id`). They skip enforcement only when the request already resolved an authenticated single-user principal, or in test mode (`_enforce_auth_deps_ingress_guard` in `auth_deps.py`) — an *anonymous* single-user-mode request (for example `POST /auth/login` before the API key is checked) is not skipped and is floored like any multi-user request. `check_rate_limit` is the general 120/min fallback (`AUTH_DEPS_FALLBACK_RATE_LIMIT`) and honors `RG_ENABLED`: with RG disabled it does not enforce either. `check_auth_rate_limit` is a 30/min auth-endpoint brute-force floor (`AUTH_DEPS_AUTH_FALLBACK_RATE_LIMIT`) and keeps enforcing regardless of `RG_ENABLED` — it is not RG enforcement. See ADR-056 (`Docs/ADR/056-resource-governor-safety-net.md`).
