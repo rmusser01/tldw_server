@@ -12,6 +12,10 @@
 
 **Design source:** `Docs/superpowers/specs/2026-07-23-mcp-skills-model-only-runner-design.md`
 
+**ADR check (2026-10-02):** ADR required: yes. [ADR-058](../../ADR/058-authoritative-provider-credential-scope.md) records exact authenticated scope and absence-only credential fallback. ADR-025 remains the governing provider-routing decision; the bounded adapter's stricter mode disables credential endpoint overrides.
+
+**Rebase (2026-10-02):** Stage 1 commits rebased cleanly onto `origin/dev` at `9958110df2` before Stage 2 implementation.
+
 ## Revalidation Decisions
 
 The implementation must account for four gaps found against the current `dev` runtime contracts:
@@ -100,18 +104,21 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 **Tests:** Unit plus SQLite/PostgreSQL resolution matrices, concurrent revocation checks, precedence, absence versus unauthorized state, fixed endpoint, snapshot immutability, legacy caller compatibility.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 2.1: Add an exact shared-scope authorization query
 
 **Files:**
 - Modify: `tldw_Server_API/app/core/AuthNZ/repos/user_provider_secrets_repo.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/repos/org_provider_secrets_repo.py`
-- Modify: `tldw_Server_API/tests/AuthNZ/unit/test_user_provider_secrets_repo_row_normalization.py`
-- Modify: `tldw_Server_API/tests/AuthNZ/unit/test_org_provider_secrets_repo_row_normalization.py`
-- Modify: `tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_user_provider_secrets_repo_sqlite.py`
-- Modify: `tldw_Server_API/tests/AuthNZ_SQLite/test_authnz_org_provider_secrets_repo_sqlite.py`
-- Add matching PostgreSQL integration cases under `tldw_Server_API/tests/AuthNZ/integration/`
+- Create: `tldw_Server_API/app/core/AuthNZ/repos/provider_scope_result.py`
+- Create: `tldw_Server_API/tests/AuthNZ/unit/test_provider_scope_result.py`
+- Create: `tldw_Server_API/tests/AuthNZ/unit/test_provider_scope_repositories.py`
+- Create: `tldw_Server_API/tests/AuthNZ_SQLite/test_provider_scope_resolution_sqlite.py`
+- Create: `tldw_Server_API/tests/AuthNZ/integration/test_provider_scope_resolution_postgres.py`
+- Retain existing user/org provider-secret row-normalization and SQLite repository suites as regression gates.
+
+**Implementation adjustment (2026-10-02):** Keep the new exact-scope matrix in focused test files and reuse its cases across SQLite and PostgreSQL, rather than duplicating the matrix in older repository suites. Existing legacy suites remain unchanged and are included in verification.
 
 1. Write a table-driven failure matrix for active/inactive user, membership, team, and organization; missing secret; revoked secret; wrong organization relationship; and repository error.
 2. Add a typed result with states `resolved`, `authorized_absent`, `unauthorized`, and `unavailable`. Do not overload `None`, because absence is the only state allowed to advance precedence.
@@ -142,6 +149,8 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
      tldw_Server_API/tests/AuthNZ_SQLite/test_byok_runtime_sqlite.py
    ```
 7. Commit: `feat(authnz): enforce authoritative BYOK scope precedence`
+
+**Stage 2 review decisions (2026-10-02):** Every strict resolution owns a fresh authority read; it cannot reuse either cached credentials or an older in-flight lookup. All supplied active scope relationships are checked even when a user key wins. Disabling BYOK or its provider allowlist cannot replace an existing exact-scope key with a broader server key; verified absence still allows the frozen server fallback. Legacy resolution retains its existing defaults.
 
 ## Stage 3: Durable Admission And Accounting
 
