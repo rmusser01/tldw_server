@@ -1,5 +1,21 @@
 # Testing Evidence Lessons
 
+## Check event-loop progress while blocking work is held
+
+**Incident (TASK-13424, PR #3091, 2026-10-03):** The VN recipe-capture
+responsiveness test failed CI after request startup took 1.001778 seconds against
+a one-second limit. The endpoint already ran in a worker thread. A controlled
+nonblocking 1.1-second startup delay reproduced the failure without blocking
+the event loop.
+
+**Evidence and rule:** A thread-safe capture notification now lets the test
+assert that capture and the request remain pending before it releases the gate.
+The delayed startup passes; forcing the real endpoint inline fails that progress
+check. The complete generation-jobs file passes all 128 tests. Verify progress
+while the blocking operation is held, rather than measuring aggregate request
+startup. Keep bounded failure cleanup and an inline negative control so removing
+a timing assertion does not weaken responsiveness coverage.
+
 ## Route continuity needs the real application layout
 
 **Incident (TASK-13226.4, 2026-09-08):** Buddy component tests passed with drafts
