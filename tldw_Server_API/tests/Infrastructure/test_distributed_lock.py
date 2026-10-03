@@ -113,6 +113,9 @@ class TestFileLockAcquireRelease:
             first.release()
             assert reacquired == [True]
             assert lock_path.exists()
+            if contended_first_attempt:
+                # The contended path ran: one refused attempt, then the successful one.
+                assert lock_calls == 2
         finally:
             second.release()
 
