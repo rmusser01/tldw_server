@@ -178,3 +178,8 @@ async def test_llm_tokens_month_query_passes_naive_utc_on_postgres(monkeypatch: 
 def test_seconds_until_utc_midnight_is_positive() -> None:
     """Retry-After is always at least one second."""
     assert 1 <= quota_checks.seconds_until_utc_midnight() <= 86400
+
+
+def test_seconds_until_utc_month_start_is_positive() -> None:
+    """Retry-After for the monthly LLM-token quota is at least one second, at most a month."""
+    assert 1 <= quota_checks.seconds_until_utc_month_start() <= 31 * 86400

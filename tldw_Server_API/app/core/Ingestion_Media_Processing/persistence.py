@@ -283,17 +283,24 @@ async def _record_media_ingestion_bytes_ledger_entry(
         return False
 
 
-async def _enforce_and_record_media_bytes(user_id: int | None, total_uploaded_bytes: int) -> None:
-    """Refuse an upload past the user's daily MB (429); otherwise count it (spec 2 §4)."""
-    if user_id is None or total_uploaded_bytes <= 0:
+async def _enforce_and_record_media_bytes(user_id: Any, total_uploaded_bytes: int) -> None:
+    """Refuse an upload past the user's daily MB (429); otherwise count it (spec 2 §4).
+
+    A non-numeric ``user_id`` skips the check and records nothing per-user
+    (matching the other quota_checks sites, e.g. rag_queries_decision).
+    """
+    if total_uploaded_bytes <= 0:
         return
-    uid = str(int(user_id))
+    quota_uid = quota_checks.as_quota_user_id(user_id)
+    if quota_uid is None:
+        return
+    uid = str(quota_uid)
 
     async def _used_mb() -> float:
         return (await quota_checks.ledger_used_today(uid, _MEDIA_INGESTION_BYTES_CATEGORY)) / (1024 * 1024)
 
     decision = await quota_checks.check_usage(
-        int(uid), "limits.media_ingest_mb_per_day", total_uploaded_bytes / (1024 * 1024), _used_mb
+        quota_uid, "limits.media_ingest_mb_per_day", total_uploaded_bytes / (1024 * 1024), _used_mb
     )
     if not decision.allowed:
         raise HTTPException(

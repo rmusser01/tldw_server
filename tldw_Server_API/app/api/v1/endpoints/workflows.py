@@ -91,7 +91,6 @@ from tldw_Server_API.app.core.Security.egress import (
 )
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import (
-    env_flag_enabled,
     is_explicit_pytest_runtime,
     is_test_mode,
     is_truthy,
@@ -1240,11 +1239,8 @@ async def _enforce_workflows_daily_cap(
     """Enforce the user's daily workflow-run allowance (spec 2 §4); 429 when spent."""
     if not usage_quotas_enabled():
         return
-    try:
-        if env_flag_enabled("WORKFLOWS_DISABLE_QUOTAS"):
-            return
-    except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Workflows quota: WORKFLOWS_DISABLE_QUOTAS check failed: {}", exc)
+    # WORKFLOWS_DISABLE_QUOTAS is checked inside workflows_runs_decision itself,
+    # so the scheduler's direct call (scheduled runs) honors it too.
     decision = await workflows_runs_decision(as_quota_user_id(getattr(current_user, "id", None)))
     if decision.allowed:
         return

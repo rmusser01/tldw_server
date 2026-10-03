@@ -66,6 +66,16 @@ def seconds_until_utc_midnight() -> int:
     return max(1, int((tomorrow - now).total_seconds()))
 
 
+def seconds_until_utc_month_start() -> int:
+    """Seconds until the monthly counters reset (UTC), at least 1."""
+    now = datetime.now(timezone.utc)
+    if now.month == 12:
+        next_month_start = now.replace(year=now.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    else:
+        next_month_start = now.replace(month=now.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    return max(1, int((next_month_start - now).total_seconds()))
+
+
 def _utc_today() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
@@ -147,9 +157,17 @@ async def rag_queries_decision(user_id: Any, units: int) -> QuotaDecision:
 
 
 async def workflows_runs_decision(user_id: Any) -> QuotaDecision:
-    """The user's daily workflow-run allowance (``limits.workflows_runs_per_day``)."""
+    """The user's daily workflow-run allowance (``limits.workflows_runs_per_day``).
+
+    UNLIMITED when ``WORKFLOWS_DISABLE_QUOTAS`` is set, so every caller (the
+    endpoint and the scheduler's direct call for scheduled runs) honors the
+    same escape hatch.
+    """
+    from tldw_Server_API.app.core.testing import env_flag_enabled
     from tldw_Server_API.app.core.Workflows.daily_ledger import workflows_ledger_category
 
+    if env_flag_enabled("WORKFLOWS_DISABLE_QUOTAS"):
+        return UNLIMITED
     uid = as_quota_user_id(user_id)
     return await check_usage(
         uid,
