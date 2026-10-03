@@ -536,6 +536,11 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   const [visualPackLoadError, setVisualPackLoadError] =
     React.useState<unknown>(null)
   const [visualPackRefreshNonce, setVisualPackRefreshNonce] = React.useState(0)
+  const visualPackRequestRef = React.useRef<{
+    personaId: string
+    refreshNonce: number
+    promise: Promise<PersonaVisualPack | null>
+  } | null>(null)
   const [visualRenderError, setVisualRenderError] =
     React.useState<PersonaVisualRenderErrorState | null>(null)
   const runtimeOverride = usePersonaVisualRuntimeStore(
@@ -588,41 +593,61 @@ const BuddyShellHostInner: React.FC<BuddyShellHostInnerProps> = ({
   React.useEffect(() => {
     const activePersonaId = String(resolvedPersona.activePersonaId || "").trim()
     if (!resolvedPersona.hasTargetPersona || !activePersonaId) {
+      visualPackRequestRef.current = null
       setVisualPack(null)
       setVisualPackLoadStatus("idle")
       setVisualPackLoadError(null)
       return undefined
     }
 
+    let request = visualPackRequestRef.current
+    if (
+      !request ||
+      request.personaId !== activePersonaId ||
+      request.refreshNonce !== visualPackRefreshNonce
+    ) {
+      setVisualPack(null)
+      setVisualPackLoadStatus("loading")
+      setVisualPackLoadError(null)
+      request = {
+        personaId: activePersonaId,
+        refreshNonce: visualPackRefreshNonce,
+        promise: (async () => {
+          const response = await listPersonaVisualPacks(activePersonaId)
+          let activePack =
+            response.active_pack ??
+            response.packs.find((pack) => pack.status === "active") ??
+            null
+          if (activePack && !hasVisualPackAssetMap(activePack)) {
+            activePack = await getPersonaVisualPack(
+              activePersonaId,
+              activePack.id
+            )
+          }
+          return activePack
+        })()
+      }
+      visualPackRequestRef.current = request
+    }
+
+    // Keep this lifetime's request through Strict Mode/Fast Refresh replay.
+    // Cleanup cancels only the consumer; identity/activation creates new work.
     let cancelled = false
-    setVisualPack(null)
-    setVisualPackLoadStatus("loading")
-    setVisualPackLoadError(null)
-    ;(async () => {
-      try {
-        const response = await listPersonaVisualPacks(activePersonaId)
-        let activePack =
-          response.active_pack ??
-          response.packs.find((pack) => pack.status === "active") ??
-          null
-        if (activePack && !hasVisualPackAssetMap(activePack)) {
-          activePack = await getPersonaVisualPack(
-            activePersonaId,
-            activePack.id
-          )
-        }
+    void request.promise.then(
+      (activePack) => {
         if (!cancelled) {
           setVisualPack(activePack)
           setVisualPackLoadStatus("loaded")
         }
-      } catch (error) {
+      },
+      (error) => {
         if (!cancelled) {
           setVisualPack(null)
           setVisualPackLoadStatus("error")
           setVisualPackLoadError(error)
         }
       }
-    })()
+    )
 
     return () => {
       cancelled = true
