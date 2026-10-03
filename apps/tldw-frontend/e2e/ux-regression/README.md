@@ -65,8 +65,15 @@ guards the fix as an ordinary regression test.
 |---|---|---|
 | NL-01 notes list capped at 100 | #3103 | `notes-p0.spec.ts` |
 | NS-01 edits lost on in-app navigation | #3102 | `notes-p0.spec.ts` |
+| NS-N1 "Reload notes" after a save conflict overwrites the other tab | #3102 | `notes-p0.spec.ts` |
+| NE-04 Print / Save as PDF always fails with a pop-up error | #3117 | `notes-p0.spec.ts` |
+| CS-02 chat history search ignores message content | #3108 | `chat-p0.spec.ts` |
 
-Chat reproductions (CS-01, CS-03 and others) live in the Playground
-integration harness instead: on current dev the first send in a fresh
-browser is not reliably delivered (#3106, #3111, #3135), so a browser-level
-chat reproduction cannot be deterministic yet.
+Chat reproductions here seed saved chats through the API
+(`createCharacter`, `createChatWithMessages`) and never send from the
+composer. On current dev the first send in a fresh browser is not reliably
+delivered (#3106, #3111, #3135), so defects that need a browser send cannot
+be reproduced deterministically here yet. CS-01, CS-03 and others live in
+the Playground integration harness instead. CS-04 (reply lost on reload
+mid-stream, #3104) is left out of this harness: it needs a reply in flight,
+which only a send can start.
