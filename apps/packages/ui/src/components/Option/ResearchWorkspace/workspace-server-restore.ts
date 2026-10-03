@@ -8,17 +8,10 @@ import type {
   WorkspaceNoteApiResponse,
 } from "@/services/tldw/domains/workspace-api";
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error";
-import {
-  createEmptyWorkspaceSnapshot,
-  createSlug,
-  type WorkspaceState,
-} from "@/store/workspace";
-import { hydrateWorkspaceFromServer } from "@/store/workspace-api";
+import { hydrateWorkspaceFromServer, type LocalWorkspaceState } from "@/store/workspace-api";
 import { RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX } from "@/store/workspace-migration";
-import { normalizeWorkspaceAssistantDefaults } from "@/types/workspace-assistant-defaults";
 import type { WorkspaceSourceStatus } from "@/types/workspace";
 
-type WorkspaceSnapshot = WorkspaceState["workspaceSnapshots"][string];
 const INFORMATIONAL_CONTEXT_ERRORS = new Set([
   "jobs_unavailable",
   "media_db_unavailable",
@@ -77,7 +70,7 @@ export const readMigratedResearchWorkspaceId = (
 /** Restore one migrated workspace atomically while its captured account lease remains live. */
 export const restoreMigratedResearchWorkspace = async (options: {
   signal: AbortSignal;
-  apply: (snapshot: WorkspaceSnapshot) => void;
+  apply: (workspace: LocalWorkspaceState, scopeKey: string) => boolean;
   storage?: Storage;
 }): Promise<boolean> => {
   const storage = options.storage ?? window.localStorage;
@@ -179,26 +172,17 @@ export const restoreMigratedResearchWorkspace = async (options: {
       throw new Error("Workspace restoration returned a different workspace");
     }
     const local = await hydrateWorkspaceFromServer(workspaceId, {
+      requireComplete: true,
       fetch: async () => ({
         ...context.workspace,
+        metadata: context.workspace,
         sources: context.sources.items,
         artifacts,
         notes,
       }),
     });
     assertCurrent();
-    const workspace = context.workspace;
-    const snapshot = createEmptyWorkspaceSnapshot({
-      id: workspaceId,
-      name: local.name || "Research Workspace",
-      tag: `workspace:${createSlug(local.name) || workspaceId.slice(0, 8)}`,
-      createdAt: new Date(workspace.created_at),
-      studyMaterialsPolicy: workspace.study_materials_policy,
-      assistantDefaults: normalizeWorkspaceAssistantDefaults(
-        workspace.assistant_defaults,
-      ),
-    });
-    snapshot.sources = local.sources.map((source, index) => {
+    local.sources = local.sources.map((source, index) => {
       const authoritative = context.sources.items[index];
       const status: WorkspaceSourceStatus =
         authoritative.state === "queryable" ||
@@ -211,41 +195,13 @@ export const restoreMigratedResearchWorkspace = async (options: {
             : "processing";
       return { ...source, status, readiness: authoritative.readiness };
     });
-    snapshot.selectedSourceIds = local.selectedSourceIds;
-    snapshot.generatedArtifacts = local.artifacts;
-    snapshot.workspaceBanner = {
-      ...snapshot.workspaceBanner,
-      title: workspace.banner_title || "",
-      subtitle: workspace.banner_subtitle || "",
-    };
-    const note = notes[0];
-    if (note) {
-      let keywords: unknown = [];
-      try {
-        keywords = JSON.parse(note.keywords_json || "[]");
-      } catch {
-        // Keywords are optional metadata; retain the note's title and content.
-      }
-      snapshot.currentNote = {
-        id: note.id,
-        title: note.title,
-        content: note.content,
-        keywords: Array.isArray(keywords)
-          ? keywords.filter(
-              (keyword): keyword is string => typeof keyword === "string",
-            )
-          : [],
-        isDirty: false,
-        version: note.version,
-      };
-      snapshot.notes = note.content;
-    }
     assertCurrent();
+    if (!options.apply(local, scope.scopeKey))
+      throw new Error("Workspace restoration could not be installed without replacing retained content");
     storage.setItem(
       receipt.key,
       JSON.stringify({ ...receipt.value, serverScopeKey: scope.scopeKey }),
     );
-    options.apply(snapshot);
     return true;
   } finally {
     scope.release();

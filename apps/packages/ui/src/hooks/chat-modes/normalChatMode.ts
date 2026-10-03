@@ -645,7 +645,9 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
 
 /** Establish one operation-lived adapter; display leases never authorize its later writes. */
 export const captureNormalHistoryTurn = async (
-  params: Pick<NormalChatModeParams, "historySelection" | "historyId" | "serverChatId" | "setHistoryId" | "tldwTurn" | "scope">,
+  params: Pick<NormalChatModeParams,
+    "historySelection" | "historyId" | "serverChatId" | "setHistoryId" |
+    "tldwTurn" | "scope" | "selectionSource" | "toolChoice" | "selectedModel">,
   message: string,
   snapshot: ServicePromptSnapshot,
   signal: AbortSignal
