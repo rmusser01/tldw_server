@@ -37,7 +37,7 @@ import {
 const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 const frontendRootDefault = path.resolve(moduleDir, "../..")
 const repoRootDefault = path.resolve(frontendRootDefault, "../..")
-const validProjects = new Set(["tier-1", "tier-2", "tier-3"])
+const validProjects = new Set(["tier-1", "tier-2", "tier-3", "ux-regression"])
 
 function runIdNow() {
   return new Date().toISOString().replace(/[:.]/g, "-")
@@ -79,7 +79,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
   }
 
   if (!options.projects.length || options.projects.some((project) => !validProjects.has(project))) {
-    throw new Error("--projects entries must be tier-1, tier-2, or tier-3")
+    throw new Error("--projects entries must be tier-1, tier-2, tier-3, or ux-regression")
   }
   if (options.runId && !/^[A-Za-z0-9._-]+$/.test(options.runId)) {
     throw new Error("--run-id may contain only letters, numbers, dots, underscores, and hyphens")
@@ -91,7 +91,7 @@ export function formatUsage() {
   return [
     "Usage: bun run uat:live-tiers -- [options]",
     "",
-    "  --projects=tier-1,tier-2,tier-3  Complete projects to list and run.",
+    "  --projects=tier-1,tier-2,tier-3  Complete projects to list and run (also: ux-regression).",
     "  --workers=1                       Playwright worker count.",
     "  --list-only                       List and inventory without executing tests.",
     "  --grep=<pattern>                  Non-certifying bounded smoke selection.",
@@ -487,7 +487,10 @@ export function assertNoMutableRepoDatabasePaths(logText, repoRoot) {
 }
 
 export function assertOnlyLoopbackHttpRequests(logText) {
-  const allowedHosts = new Set(["127.0.0.1", "::1", "localhost"])
+  // sensitive-endpoint.invalid is the unresolvable placeholder the backend logs
+  // in place of a sensitive request's real URL (tldw_Server_API/app/core/http_client.py);
+  // it is never a real outbound request.
+  const allowedHosts = new Set(["127.0.0.1", "::1", "localhost", "sensitive-endpoint.invalid"])
   for (const line of String(logText).split(/\r?\n/)) {
     if (!/(?:url\.full|HTTP Request:)/.test(line)) continue
     for (const match of line.matchAll(/https?:\/\/[^\s"'<>]+/g)) {
