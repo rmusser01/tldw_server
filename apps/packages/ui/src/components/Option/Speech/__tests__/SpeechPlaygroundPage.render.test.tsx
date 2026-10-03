@@ -289,7 +289,12 @@ vi.mock("@/components/Option/Speech/TtsInspectorPanel", () => ({
 }))
 
 vi.mock("@/components/Option/Speech/TtsVoiceTab", () => ({
-  TtsVoiceTab: () => <div data-testid="tts-voice-tab">tts-voice-tab</div>,
+  TtsVoiceTab: ({ previewDisabledReason }: { previewDisabledReason?: string | null }) => (
+    <div data-testid="tts-voice-tab">
+      tts-voice-tab
+      <button data-testid="tts-preview-button" disabled={Boolean(previewDisabledReason)}>Preview</button>
+    </div>
+  ),
 }))
 
 vi.mock("@/components/Option/Speech/TtsOutputTab", () => ({
@@ -847,6 +852,37 @@ describe("SpeechPlaygroundPage", () => {
     expect(screen.getByTestId("tts-play-button")).toBeDisabled()
     expect(container.querySelectorAll('[data-ds-component="Alert"]')).toHaveLength(0)
   })
+
+  it.each([null, undefined])(
+    "blocks server synthesis when provider data is unavailable (%s)",
+    (providersInfo) => {
+      inferTldwProviderFromModelMock.mockReturnValue("kitten_tts")
+      ttsSettingsRef.current = {
+        ...ttsSettingsRef.current,
+        ttsProvider: "tldw",
+        tldwTtsModel: "KittenML/kitten-tts-nano-0.8",
+        tldwTtsVoice: "Bella"
+      }
+      ttsProviderDataRef.current = {
+        ...ttsProviderDataRef.current,
+        hasAudio: true,
+        providersInfo
+      }
+      render(<SpeechPlaygroundPage lockedMode="listen" hideModeSwitcher />)
+      fireEvent.change(
+        screen.getByLabelText("Enter some text to hear it spoken."),
+        { target: { value: "Retain this narration." } }
+      )
+      expect(screen.getByTestId("tts-play-button")).toBeDisabled()
+      expect(screen.getByTestId("tts-preview-button")).toBeDisabled()
+      expect(screen.getByTestId("tts-play-disabled-reason")).toHaveTextContent(
+        /provider/i
+      )
+      expect(
+        screen.getByDisplayValue("Retain this narration.")
+      ).toBeInTheDocument()
+    }
+  )
 
   it("disables server TTS generation when the selected provider is not reported", (): void => {
     inferTldwProviderFromModelMock.mockReturnValue("kitten_tts")
