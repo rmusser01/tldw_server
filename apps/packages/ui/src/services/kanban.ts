@@ -27,7 +27,8 @@ import type {
   Checklist,
   ChecklistItem,
   ChecklistWithItems,
-  Comment
+  Comment,
+  PaginationInfo
 } from "@/types/kanban"
 
 // Re-export types that consumers import from this module
@@ -560,11 +561,27 @@ export async function deleteChecklistItem(itemId: number): Promise<void> {
 // =============================================================================
 
 export async function listComments(cardId: number): Promise<Comment[]> {
-  const response = await bgRequest<{ comments: Comment[] }>({
-    path: `/api/v1/kanban/cards/${cardId}/comments`,
-    method: "GET"
-  })
-  return response.comments
+  const comments: Comment[] = []
+  let offset = 0
+
+  while (true) {
+    const response = await bgRequest<{
+      comments: Comment[]
+      pagination: PaginationInfo
+    }>({
+      path: `/api/v1/kanban/cards/${cardId}/comments?limit=100&offset=${offset}`,
+      method: "GET"
+    })
+    comments.push(...response.comments)
+    if (!response.pagination.has_more) return comments
+    if (
+      response.comments.length === 0 ||
+      response.pagination.offset !== offset
+    ) {
+      throw new Error("Comment pagination did not advance")
+    }
+    offset += response.comments.length
+  }
 }
 
 export async function createComment(

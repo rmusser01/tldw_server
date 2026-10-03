@@ -160,6 +160,11 @@ type NormalChatModeParams = {
   historyTurn?: HistorySendTurn
 
   selectedModel: string
+  /** Resolved selector values still follow their global source unless explicitly overridden. */
+  selectionSource?: {
+    model: "global" | "explicit"
+    toolChoice: "global" | "explicit"
+  }
   useOCR: boolean
   selectedSystemPrompt: string
   currentChatModelSettings: any
@@ -715,17 +720,22 @@ const captureNormalHistoryTurn = async (
     const settings = useStoreChatModelSettings.getState()
     const selection = useStoreMessageOption.getState()
     const tools = useMcpToolsStore.getState()
+    const effectiveToolChoice = params.selectionSource?.toolChoice === "global"
+      ? selection.toolChoice
+      : params.toolChoice ?? selection.toolChoice
     const toolRequest = resolveChatToolRequest({
       tools: tools.chatTools ?? tools.tools,
-      toolChoice: params.toolChoice ?? selection.toolChoice,
+      toolChoice: effectiveToolChoice,
       mcpHealthState: tools.healthState,
       hasMcp: tools.healthState !== "unavailable"
     })
     return JSON.stringify({
       settings: settings.getEffectiveSettings(),
       settingsScope: settings.activeSettingsScope,
-      model: selection.selectedModel,
-      toolChoice: selection.toolChoice,
+      model: params.selectionSource?.model === "global"
+        ? selection.selectedModel
+        : params.selectedModel,
+      toolChoice: effectiveToolChoice,
       tools: toolRequest.tools,
       requestToolChoice: toolRequest.toolChoice
     })

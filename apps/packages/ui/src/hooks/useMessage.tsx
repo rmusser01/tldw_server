@@ -2558,6 +2558,19 @@ export const useMessage = () => {
       requestOverrides?.toolChoice === "none"
         ? requestOverrides.toolChoice
         : toolChoice;
+    const selectionSource = {
+      model:
+        typeof requestOverrides?.selectedModel === "string" &&
+        requestOverrides.selectedModel.trim().length > 0
+          ? "explicit" as const
+          : "global" as const,
+      toolChoice:
+        requestOverrides?.toolChoice === "auto" ||
+        requestOverrides?.toolChoice === "required" ||
+        requestOverrides?.toolChoice === "none"
+          ? "explicit" as const
+          : "global" as const,
+    };
     const resolvedUseOCR =
       typeof requestOverrides?.useOCR === "boolean"
         ? requestOverrides.useOCR
@@ -2942,6 +2955,7 @@ export const useMessage = () => {
                     }
                   : undefined,
                 serverChatId,
+                selectionSource,
                 toolChoice: resolvedToolChoice,
                 selectedModel: model,
                 useOCR: resolvedUseOCR,
@@ -2995,6 +3009,7 @@ export const useMessage = () => {
                     }
                   : undefined,
                 serverChatId,
+                selectionSource,
                 toolChoice: resolvedToolChoice,
                 selectedModel: model,
                 useOCR: resolvedUseOCR,

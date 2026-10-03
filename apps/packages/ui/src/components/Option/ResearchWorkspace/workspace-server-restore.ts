@@ -19,6 +19,11 @@ import { normalizeWorkspaceAssistantDefaults } from "@/types/workspace-assistant
 import type { WorkspaceSourceStatus } from "@/types/workspace";
 
 type WorkspaceSnapshot = WorkspaceState["workspaceSnapshots"][string];
+const INFORMATIONAL_CONTEXT_ERRORS = new Set([
+  "jobs_unavailable",
+  "media_db_unavailable",
+  "membership_summary_unavailable",
+]);
 
 type MigrationReceipt = {
   id: string;
@@ -38,6 +43,7 @@ const readMigrationReceipts = (storage: Storage): MigrationReceipt[] => {
       const receipt = JSON.parse(storage.getItem(key) || "null");
       if (
         receipt?.contentRetained !== false ||
+        receipt.restoreInvalidated === true ||
         typeof receipt.serverWorkspaceId !== "string" ||
         !receipt.serverWorkspaceId.trim() ||
         typeof receipt.migrationId !== "string" ||
@@ -113,19 +119,41 @@ export const restoreMigratedResearchWorkspace = async (options: {
       if (!receipt) return false;
     }
     const workspaceId = receipt.id;
+    const invalidateReceipt = () => {
+      // Retain the migration tombstone so deleted legacy content cannot reappear.
+      storage.setItem(
+        receipt.key,
+        JSON.stringify({ ...receipt.value, restoreInvalidated: true }),
+      );
+      return false;
+    };
     const path =
       `/api/v1/workspaces/${encodeURIComponent(workspaceId)}` as const;
-    const context = await bgRequest<WorkspaceContextResponse>({
-      ...request,
-      path: `${path}/context`,
-    });
+    let context: WorkspaceContextResponse;
+    try {
+      context = await bgRequest<WorkspaceContextResponse>({
+        ...request,
+        path: `${path}/context`,
+      });
+    } catch (error) {
+      assertCurrent();
+      if ((error as { status?: number } | null)?.status === 404)
+        return invalidateReceipt();
+      throw error;
+    }
     assertCurrent();
     if (
       context.workspace_id !== workspaceId ||
-      context.workspace.id !== workspaceId ||
-      context.workspace.deleted ||
-      context.workspace.archived ||
-      context.partial_errors?.length ||
+      context.workspace.id !== workspaceId
+    ) {
+      throw new Error("Workspace restoration returned a different workspace");
+    }
+    if (context.workspace.deleted || context.workspace.archived)
+      return invalidateReceipt();
+    if (
+      context.partial_errors?.some(
+        (error) => !INFORMATIONAL_CONTEXT_ERRORS.has(error.code),
+      ) ||
       !Array.isArray(context.sources?.items) ||
       context.sources.items.some(
         (source) => source.workspace_id !== workspaceId,
@@ -192,7 +220,12 @@ export const restoreMigratedResearchWorkspace = async (options: {
     };
     const note = notes[0];
     if (note) {
-      const keywords = JSON.parse(note.keywords_json || "[]");
+      let keywords: unknown = [];
+      try {
+        keywords = JSON.parse(note.keywords_json || "[]");
+      } catch {
+        // Keywords are optional metadata; retain the note's title and content.
+      }
       snapshot.currentNote = {
         id: note.id,
         title: note.title,

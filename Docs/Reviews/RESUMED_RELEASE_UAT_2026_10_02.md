@@ -1,6 +1,6 @@
 # Resumed release UAT — 2026-10-02
 
-Tracking: TASK13260, In Progress. UAT261 and its original acceptance criteria remain open. Live UAT remains on hold pending corrected-runtime readiness and the outstanding browser recovery direction. Reviewed source fixes are published in draft PR3096. Its scope remains all43 families (A12/B9/C12/X4/S6), applicable database/auth cells, Web/extension surfaces, fresh state, clean installation, supported upgrades and D/L/U modes. No full-run or human acceptance is claimed.
+Tracking: TASK13260, In Progress. UAT261 and its original acceptance criteria remain open. Live UAT remains on hold pending corrected-runtime readiness and the outstanding browser recovery direction. Reviewed source fixes are in PR3096, which is ready for review. Its scope remains all43 families (A12/B9/C12/X4/S6), applicable database/auth cells, Web/extension surfaces, fresh state, clean installation, supported upgrades and D/L/U modes. No full-run or human acceptance is claimed.
 
 ## Open bugs
 
@@ -22,7 +22,7 @@ Tracking: TASK13260, In Progress. UAT261 and its original acceptance criteria re
 | C07 Repository output | Generate repository text in dark mode. Output textarea has pale text on white, contrast about1.18. | Legible themed output. |
 | S03 Kanban detail | Create one board/two lists/three cards and open SELENE card2. Checklist200 response is a wrapper; frontend treats it as an array and crashes at .map. | Open the card detail with empty checklist/comments. |
 
-All 15 original UAT failures remain open for corrected-runtime qualification. Their source corrections are independently reviewed in draft [PR3096](https://github.com/rmusser01/tldw_server/pull/3096). Source regression results do not replace live UAT or human acceptance.
+All 15 original UAT failures remain open for corrected-runtime qualification. Their source corrections are independently reviewed in [PR3096](https://github.com/rmusser01/tldw_server/pull/3096). Source regression results do not replace live UAT or human acceptance.
 
 ## Reviewed source corrections
 
@@ -32,11 +32,19 @@ All 15 original UAT failures remain open for corrected-runtime qualification. Th
 | TASK13260.281.2 | A08 selection/export, A05 Media, A12 unsaved edits | Fence the previous Notes editor during detail selection, request export keywords on every page, retain the incoming Media URL during hydration, and use the existing route-leave guard for unsaved connection edits. |
 | TASK13260.281.3 | A12 dispatch, S04 query/reload | Compare effective dispatch inputs instead of store object identity, retrieve evidence without generating an unused answer, and restore migrated workspace identity and sources under the current account lease before fresh initialization. |
 | TASK13260.281.4 | B01, B04, C07 | Normalize one Character envelope for JSON/PNG, gate Play and Preview on actual provider/voice readiness with guidance, and apply existing foreground/background theme colors to repository output. |
-| TASK13260.280 | S03 | Unpack checklist/comment response envelopes, hydrate checklist items, map canonical mutation fields, and block button/Enter submission after load failure. |
+| TASK13260.280 | S03 | Unpack checklist/comment response envelopes, hydrate checklist items, map canonical mutations, block submission after load failure, and fetch all comment pages. |
 
-Final affected checks: 353 backend cases on the integrated dev7117 source (12 suites, no failures/skips) and 241 frontend cases across 22 suites passed. Independent actual-source review has no unresolved Critical/Important findings. Bandit on all six touched Python production files has 0 findings/0 errors. Touched frontend lint has 0 errors; inherited warnings remain. The full frontend typecheck completes with existing unrelated dependency/React diagnostics and no touched-path diagnostics, so it is not a project-wide typecheck pass. Existing Python lint findings remain outside the changed lines.
+Original repair qualification: 353 backend cases on the integrated dev7117 source (12 suites, no failures/skips) and 241 frontend cases across 22 suites passed. Independent actual-source review has no unresolved Critical/Important findings. Bandit on all six touched Python production files has 0 findings/0 errors. Touched frontend lint has 0 errors; inherited warnings remain. The full frontend typecheck completes with existing unrelated dependency/React diagnostics and no touched-path diagnostics, so it is not a project-wide typecheck pass. Existing Python lint findings remain outside the changed lines.
 
-The dark-mode color correction uses the original observed readability failure and source inspection plus existing repository component checks; no mirrored CSS-class test or new live visual pass is claimed. All corrections still need fresh, separately authorized corrected-runtime UAT. The inherited first50-comment pagination limit remains unqualified.
+The dark-mode color correction uses the original observed readability failure and source inspection plus existing repository component checks; no mirrored CSS-class test or new live visual pass is claimed. All corrections still need fresh, separately authorized corrected-runtime UAT. Qodo pagination coverage now verifies all 151 comments across pages; live runtime qualification remains pending.
+
+## Qodo follow-up
+
+Reviewed corrections distinguish informational Research warnings from source failures, invalidate stale restoration hints while retaining tombstones, offer a separate workspace explicitly, and preserve note content with malformed optional keywords. Both Chat entry points carry the provenance of model/tool choices so ordinary selector changes invalidate preparation while explicit overrides remain fixed. Ignored Chat/Studio generation controls and the dead ungrounded-answer branch are removed; standalone RAG generation remains available. Markers/helper documentation and public Character export/import regressions address the remaining server comments.
+
+Affected checks: 54 backend cases, 17 Kanban cases and a final 19-case Chat caller/owner subset passed. Restoration/Research/RAG/Parameters suites passed; two stale Studio voice-catalog expectations were corrected and passed on focused rerun. Independent final source review is clear. Touched lint adds no errors; inherited findings remain. Final reviewed-source typecheck exited 2 with 23 inherited React/dependency diagnostics and 0 touched-path diagnostics; no global pass. No live UAT is accepted.
+
+The consumer-side portrait/version fix is reviewed in local Chatbook commit 20948093434ac9af6a0c6c055586840baa4b651d, with 39 public portrait/manifest cases passing. Automatic approval review rejected its separate-repository push before execution; companion PR publication was asked once and is pending. PR3096 also awaits final-head required checks, Qodo acceptance and the human-written Change summary already requested once.
 
 ## Partial results and limits
 
@@ -50,7 +58,7 @@ The dark-mode color correction uses the original observed readability failure an
 
 ## Repair PR continuation
 
-The human requested all recorded root causes be addressed in one PR before further UAT. TASK13260.281 and its four repair children own this work in PR3096, with dev7117efa8 preserved through a conflict-free normal merge. Reviewed fixes are published; UAT execution remains on hold for runtime readiness and browser direction. Source tests and UAT acceptance remain separate.
+The human requested all recorded root causes be addressed in one PR before further UAT. TASK13260.281 and its four repair children own this work in PR3096, rebased without conflicts onto dev7117efa8. Reviewed fixes are published; UAT execution remains on hold for runtime readiness and browser direction. Source tests and UAT acceptance remain separate.
 
 ## Current continuation
 

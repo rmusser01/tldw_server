@@ -462,7 +462,7 @@ describe("ragMode sanitizer", () => {
     }))
   })
 
-  it("handles selected-source RAG with no evidence without continuing as general chat", async () => {
+  it("does not display a stray generated answer when selected-source retrieval has no evidence", async () => {
     mocks.ragSearch.mockResolvedValue({
       documents: [],
       generated_answer:
@@ -482,9 +482,10 @@ describe("ragMode sanitizer", () => {
 
     expect(response).toMatchObject({
       handled: true,
-      fullText: expect.stringContaining("Could you clarify")
+      fullText: expect.stringContaining("couldn't find supporting evidence")
     })
     expect(response?.fullText).toContain("did not send this as general chat")
+    expect(response?.fullText).not.toContain("Could you clarify")
   })
 
   it("does not convert a selected-source scope rejection into a handled response", async () => {

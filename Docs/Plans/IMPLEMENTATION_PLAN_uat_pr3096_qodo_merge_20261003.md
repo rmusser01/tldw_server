@@ -21,3 +21,5 @@ Owner: TASK13260.281. PR: https://github.com/rmusser01/tldw_server/pull/3096
 **Status**: Not Started
 
 Live UAT remains held. Existing bug notes and runtime data remain; no evidence bundles or failed-case replay.
+
+Server Qodo source corrections have independent review and affected regressions complete; see the concise resumed-UAT review for results. The related Chatbook compatibility commit is reviewed locally, with companion publication approval pending after automatic approval review rejected its push. Final-head checks/Qodo acceptance and the human-written PR3096 Change summary remain open.

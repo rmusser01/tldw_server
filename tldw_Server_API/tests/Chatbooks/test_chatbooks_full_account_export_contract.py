@@ -23,7 +23,6 @@ from tldw_Server_API.app.core.Chat.document_generator import (
 from tldw_Server_API.app.core.Chatbooks.chatbook_account_inventory import ACCOUNT_DATA_INVENTORY
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     FULL_ACCOUNT_EXPORT_MODE,
-    ChatbookContent,
     ChatbookManifest,
     ChatbookVersion,
     ConflictResolution,
@@ -31,11 +30,8 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ContentType,
     ExportJob,
     ExportStatus,
-    ImportJob,
-    ImportStatus,
 )
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
-from tldw_Server_API.app.core.Chatbooks.exceptions import ExportError
 from tldw_Server_API.app.core.Chatbooks.services.jobs_worker import ChatbooksJobError, _handle_export
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -333,28 +329,27 @@ async def test_full_account_character_image_round_trips_with_complete_manifest(
     )
 
     assert success is True, message
-    restore_dir = tmp_path / "restore"
     with zipfile.ZipFile(archive_path) as archive:
         manifest = ChatbookManifest.from_dict(json.loads(archive.read("manifest.json")))
         character_path = f"content/characters/character_{character_id}.json"
         payload = json.loads(archive.read(character_path))
-        restore_dir.mkdir()
-        destination = restore_dir / character_path
-        destination.parent.mkdir(parents=True)
-        destination.write_bytes(archive.read(character_path))
     assert manifest.total_characters == 2  # Account export also includes the seeded default character.
     assert any(item.file_path == character_path for item in manifest.content_items)
     assert payload["image_encoding"] == "base64"
     restored_db = CharactersRAGDB(db_path=str(tmp_path / "destination.db"), client_id="image-destination")
-    restored_service = ChatbookService(user_id="2", db=restored_db, user_id_int=2)
-    status = ImportJob("image-restore", "2", ImportStatus.IN_PROGRESS, str(archive_path))
+    restored_service = ChatbookService(user_id="1", db=restored_db, user_id_int=1)
+    import_path = restored_service.import_dir / "image-restore.chatbook"
+    import_path.write_bytes(Path(archive_path).read_bytes())
 
-    restored_service._import_characters(
-        restore_dir, manifest, [str(character_id)], ConflictResolution.SKIP, False, status
+    success, message, result = await restored_service.import_chatbook(
+        str(import_path),
+        content_selections={ContentType.CHARACTER: [str(character_id)]},
+        conflict_resolution=ConflictResolution.SKIP,
+        async_mode=False,
     )
 
-    assert status.failed_items == 0
-    assert status.successful_items == 1
+    assert success is True, message
+    assert result["imported_items"]["character"] == 1
     assert restored_db.get_character_card_by_name("Image character")["image"] == image
 
 
@@ -395,7 +390,8 @@ async def test_character_serialization_failure_marks_job_failed_without_archive(
     assert not list(service.export_dir.glob("*.chatbook"))
 
 
-def test_failed_character_collection_does_not_create_partial_json(tmp_path, monkeypatch):
+@pytest.mark.asyncio
+async def test_failed_character_export_does_not_leave_partial_files(tmp_path, monkeypatch):
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
     db = CharactersRAGDB(db_path=str(tmp_path / "source.db"), client_id="unsupported-source")
     character_id = db.add_character_card({"name": "Unsupported character"})
@@ -408,13 +404,20 @@ def test_failed_character_collection_does_not_create_partial_json(tmp_path, monk
 
     monkeypatch.setattr(db, "get_character_card_by_id", unsupported_character)
     service = ChatbookService(user_id="1", db=db, user_id_int=1)
-    work_dir = tmp_path / "collection"
-    manifest = ChatbookManifest(ChatbookVersion.V1_1, "unsupported", "unsupported")
 
-    with pytest.raises(ExportError, match="collecting character"):
-        service._collect_characters([str(character_id)], work_dir, manifest, ChatbookContent())
+    success, message, output_path = await service.create_chatbook(
+        name="unsupported",
+        description="unsupported",
+        content_selections={ContentType.CHARACTER: [str(character_id)]},
+        format_version=ChatbookVersion.V1_1,
+        async_mode=False,
+    )
 
-    assert not list(work_dir.rglob("*.json"))
+    assert success is False
+    assert "collecting character" in message
+    assert output_path is None
+    assert not list(service.temp_dir.rglob("*.json"))
+    assert not list(service.export_dir.glob("*.chatbook"))
 
 
 @pytest.mark.parametrize(
@@ -425,21 +428,30 @@ def test_failed_character_collection_does_not_create_partial_json(tmp_path, monk
         {"image_encoding": "base64", "image": None},
     ],
 )
-def test_character_import_rejects_invalid_binary_encoding_before_insert(tmp_path, monkeypatch, image_payload):
+@pytest.mark.asyncio
+async def test_character_import_rejects_invalid_binary_encoding_before_insert(tmp_path, monkeypatch, image_payload):
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
     db = CharactersRAGDB(db_path=str(tmp_path / "destination.db"), client_id="invalid-image-destination")
     service = ChatbookService(user_id="1", db=db, user_id_int=1)
     character_path = "content/characters/character_1.json"
-    source = tmp_path / character_path
-    source.parent.mkdir(parents=True)
-    source.write_text(json.dumps({"name": "Invalid image", **image_payload}), encoding="utf-8")
-    manifest = ChatbookManifest(ChatbookVersion.V1_1, "invalid", "invalid")
+    manifest = ChatbookManifest(ChatbookVersion.V1, "invalid", "invalid")
+    manifest.total_characters = 1
     manifest.content_items = [ContentItem("1", ContentType.CHARACTER, "Invalid image", file_path=character_path)]
-    status = ImportJob("invalid-image", "1", ImportStatus.IN_PROGRESS, "invalid.chatbook")
+    archive_path = service.import_dir / "invalid-image.chatbook"
+    with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("manifest.json", json.dumps(manifest.to_dict()))
+        archive.writestr(character_path, json.dumps({"name": "Invalid image", **image_payload}))
 
-    service._import_characters(tmp_path, manifest, ["1"], ConflictResolution.SKIP, False, status)
+    success, _message, result = await service.import_chatbook(
+        str(archive_path),
+        content_selections={ContentType.CHARACTER: ["1"]},
+        conflict_resolution=ConflictResolution.SKIP,
+        async_mode=False,
+    )
 
-    assert status.failed_items == 1
+    assert success is False
+    assert result["imported_items"] == {}
+    assert any("Error importing character" in warning for warning in result["warnings"])
     assert db.get_character_card_by_name("Invalid image") is None
 
 

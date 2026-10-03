@@ -18,6 +18,16 @@ def supports_saved_character_extensions(extensions: Any) -> bool:
 
     Generation values are carried for provenance; normalized snapshot sampling
     remains authoritative and is never recomputed from this metadata.
+
+    Args:
+        extensions: Saved character extension dictionary. Top-level prompt
+            presets and a ``tldw`` dictionary containing prompt presets or a
+            generation dictionary with recognized sampling keys are supported.
+
+    Returns:
+        True when all extension carriers and keys are supported; False for
+        unknown keys or invalid carrier types. Generation values are not
+        normalized or used to replace authoritative snapshot sampling.
     """
     if not isinstance(extensions, dict) or set(extensions) - {"prompt_preset", "promptPreset", "tldw"}:
         return False

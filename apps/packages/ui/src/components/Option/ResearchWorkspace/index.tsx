@@ -3485,6 +3485,12 @@ const ResearchWorkspaceBody: React.FC = () => {
       <Button className="mt-2" onClick={() => setWorkspaceRestoreAttempt(attempt => attempt + 1)}>
         {t("common:retry", "Retry")}
       </Button>
+      <Button className="ml-2 mt-2" onClick={() => createNewWorkspace()}>
+        {t("playground:workspace.startNewAfterRestoreFailure", "Start new workspace")}
+      </Button>
+      <p className="mt-2 text-sm text-text-muted">
+        {t("playground:workspace.restoreRecoveryChoices", "You can retry restoring your saved workspace or start a separate workspace.")}
+      </p>
     </div>
   }
 

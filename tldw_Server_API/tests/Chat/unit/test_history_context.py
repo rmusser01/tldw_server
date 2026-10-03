@@ -84,6 +84,7 @@ def test_saved_materialized_custom_preset_and_sampling_supersede_base():
     assert context["history_sampling"] == {"temperature": 0.2}
 
 
+@pytest.mark.unit
 def test_saved_generation_extensions_use_authoritative_snapshot_sampling():
     from tldw_Server_API.app.core.Chat.history_context import project_history_context
 
@@ -99,6 +100,7 @@ def test_saved_generation_extensions_use_authoritative_snapshot_sampling():
     assert context["history_sampling"] == {"temperature": 0.25, "stop": ["SAVED"]}
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("generation", [{"future_effect": True}, "not a mapping", None])
 def test_saved_generation_extensions_reject_unknown_or_invalid_carriers(generation):
     from tldw_Server_API.app.core.Chat.history_context import project_history_context

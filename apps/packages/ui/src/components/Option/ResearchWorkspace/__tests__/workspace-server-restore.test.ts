@@ -36,6 +36,8 @@ const context = () => ({
     name: "Saved Research",
     created_at: "2026-10-01T00:00:00Z",
     version: 1,
+    deleted: false,
+    archived: false,
     study_materials_policy: "workspace",
     banner_title: "Research",
     banner_subtitle: "Two sources",
@@ -55,7 +57,7 @@ const context = () => ({
       },
     ],
   },
-  partial_errors: [],
+  partial_errors: [] as Array<{ scope: string; code: string; message: string }>,
 });
 const restore = (apply = useWorkspaceStore.getState().restoreServerWorkspace) =>
   restoreMigratedResearchWorkspace({
@@ -104,6 +106,98 @@ beforeEach(() => {
 });
 
 describe("migrated Research Workspace restoration", () => {
+  it.each([
+    "jobs_unavailable",
+    "media_db_unavailable",
+    "membership_summary_unavailable",
+  ])("restores retained sources despite informational %s", async (code) => {
+    const retained = context();
+    retained.partial_errors = [
+      { scope: "sources", code, message: "Optional service is unavailable" },
+    ];
+    boundary.request.mockImplementation(async ({ path }: { path: string }) =>
+      path.endsWith("/context") ? retained : [],
+    );
+    await expect(restore()).resolves.toBe(true);
+    expect(
+      useWorkspaceStore.getState().sources.map((source) => source.id),
+    ).toEqual(["source-1"]);
+  });
+
+  it.each(["deleted", "archived"] as const)(
+    "invalidates a %s receipt without installing or deleting server state",
+    async (state) => {
+      const retained = context();
+      retained.workspace[state] = true;
+      retained.partial_errors = [
+        {
+          scope: "sources",
+          code: "sources_unavailable",
+          message: "Retired workspace sources unavailable",
+        },
+      ];
+      boundary.request.mockResolvedValue(retained);
+      const apply = vi.fn();
+      await expect(restore(apply)).resolves.toBe(false);
+      expect(readMigratedResearchWorkspaceId(localStorage)).toBeNull();
+      expect(apply).not.toHaveBeenCalled();
+    },
+  );
+
+  it("invalidates a receipt for a server workspace that is no longer found", async () => {
+    boundary.request.mockRejectedValue(
+      Object.assign(new Error("Workspace not found"), { status: 404 }),
+    );
+    await expect(restore()).resolves.toBe(false);
+    expect(readMigratedResearchWorkspaceId(localStorage)).toBeNull();
+  });
+
+  it("retains a valid identity on a transient context failure", async () => {
+    boundary.request.mockRejectedValue(
+      Object.assign(new Error("Temporary outage"), { status: 503 }),
+    );
+    await expect(restore()).rejects.toMatchObject({ status: 503 });
+    expect(readMigratedResearchWorkspaceId(localStorage)).toBe("original");
+  });
+
+  it("retains a valid identity when a source-level context error prevents complete restoration", async () => {
+    const retained = context();
+    retained.partial_errors = [
+      {
+        scope: "sources",
+        code: "sources_unavailable",
+        message: "Source rows unavailable",
+      },
+    ];
+    boundary.request.mockResolvedValue(retained);
+    await expect(restore()).rejects.toThrow("restored completely");
+    expect(readMigratedResearchWorkspaceId(localStorage)).toBe("original");
+  });
+
+  it("restores note content with empty keywords when legacy keywords JSON is malformed", async () => {
+    boundary.request.mockImplementation(async ({ path }: { path: string }) =>
+      path.endsWith("/context")
+        ? context()
+        : path.endsWith("/notes")
+          ? [
+              {
+                id: 1,
+                workspace_id: "original",
+                title: "Saved note",
+                content: "Keep this note",
+                keywords_json: "bad JSON",
+                version: 1,
+              },
+            ]
+          : [],
+    );
+    await expect(restore()).resolves.toBe(true);
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+      content: "Keep this note",
+      keywords: [],
+    });
+  });
+
   it("confirms an unbound legacy identity in the scoped server list before binding and restoring it", async () => {
     const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
     delete receipt.serverScopeKey;

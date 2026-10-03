@@ -136,6 +136,55 @@ describe("Kanban card-detail API contract", () => {
     expect(await listComments(7)).toEqual([comment])
   })
 
+  it("loads all comment pages in newest-first order", async () => {
+    const comments = Array.from({ length: 151 }, (_, index) => ({
+      ...comment,
+      id: 151 - index,
+      uuid: `comment-${151 - index}`,
+      content: `Comment ${151 - index}`
+    }))
+    transport.request
+      .mockResolvedValueOnce({
+        comments: comments.slice(0, 100),
+        pagination: { total: 151, limit: 100, offset: 0, has_more: true }
+      })
+      .mockResolvedValueOnce({
+        comments: comments.slice(100),
+        pagination: { total: 151, limit: 100, offset: 100, has_more: false }
+      })
+
+    expect(await listComments(7)).toEqual(comments)
+    expect(
+      transport.request.mock.calls.map(([request]) => request.path)
+    ).toEqual([
+      "/api/v1/kanban/cards/7/comments?limit=100&offset=0",
+      "/api/v1/kanban/cards/7/comments?limit=100&offset=100"
+    ])
+  })
+
+  it("propagates a later comment page failure instead of displaying an incomplete list", async () => {
+    transport.request
+      .mockResolvedValueOnce({
+        comments: [comment],
+        pagination: { total: 2, limit: 100, offset: 0, has_more: true }
+      })
+      .mockRejectedValueOnce(new Error("Comments unavailable"))
+
+    await expect(listComments(7)).rejects.toThrow("Comments unavailable")
+  })
+
+  it("rejects a non-advancing comment page instead of requesting it forever", async () => {
+    transport.request.mockResolvedValue({
+      comments: [],
+      pagination: { total: 1, limit: 100, offset: 0, has_more: true }
+    })
+
+    await expect(listComments(7)).rejects.toThrow(
+      "Comment pagination did not advance"
+    )
+    expect(transport.request).toHaveBeenCalledTimes(1)
+  })
+
   it("creates a checklist using API name and returns the UI title", async () => {
     transport.request.mockResolvedValue(checklist)
     const result = await createChecklist(7, {

@@ -420,6 +420,19 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
     expect(testState.restoreServerWorkspace).not.toHaveBeenCalled()
   })
 
+  it("starts a separate workspace only on explicit recovery action and retains the saved receipt", async () => {
+    migrationReceipt()
+    const key = "tldw:research-workspace:migration:tombstone:workspace-original"
+    const savedReceipt = localStorage.getItem(key)
+    mockBgRequest.mockRejectedValue(new Error("Temporary outage"))
+    render(<ResearchWorkspace />)
+    await screen.findByRole("alert")
+    expect(testState.createNewWorkspace).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Start new workspace" }))
+    expect(testState.createNewWorkspace).toHaveBeenCalledOnce()
+    expect(localStorage.getItem(key)).toBe(savedReceipt)
+  })
+
   it("initializes normally when an unbound receipt is absent from the current account's server list", async () => {
     migrationReceipt()
     const key = "tldw:research-workspace:migration:tombstone:workspace-original"

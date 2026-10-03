@@ -114,17 +114,27 @@ const send = (controller: HistorySelectionController, options: {
   snapshot?: ServicePromptSnapshot
   originIsCurrent?: () => boolean
   setHistoryId?: (id: string) => void
-} = {}) => normalChatMode("First question", "", false, [], [], new AbortController().signal, {
-  selectedModel: "test", selectedSystemPrompt: "", useOCR: false,
-  currentChatModelSettings: {}, servicePromptSnapshot: options.snapshot ?? snapshot(),
-  historySelection: { controller, originIsCurrent: options.originIsCurrent ?? (() => true) },
-  historyId: options.historyId ?? null,
-  setHistoryId: options.setHistoryId ?? (() => {}),
-  setMessages: () => {}, setHistory: () => {}, setIsProcessing: () => {},
-  setStreaming: () => {}, setAbortController: () => {},
-  saveMessageOnSuccess, saveMessageOnError,
-  userMessageId: "first-user", assistantMessageId: "first-answer"
-})
+  toolChoice?: Parameters<typeof normalChatMode>[6]["toolChoice"]
+  fixedOverrides?: boolean
+} = {}) => {
+  const params: Parameters<typeof normalChatMode>[6] = {
+    selectedModel: "test", selectedSystemPrompt: "", useOCR: false,
+    currentChatModelSettings: {}, servicePromptSnapshot: options.snapshot ?? snapshot(),
+    toolChoice: options.toolChoice ?? useStoreMessageOption.getState().toolChoice,
+    selectionSource: {
+      model: options.fixedOverrides ? "explicit" : "global",
+      toolChoice: options.fixedOverrides ? "explicit" : "global"
+    },
+    historySelection: { controller, originIsCurrent: options.originIsCurrent ?? (() => true) },
+    historyId: options.historyId ?? null,
+    setHistoryId: options.setHistoryId ?? (() => {}),
+    setMessages: () => {}, setHistory: () => {}, setIsProcessing: () => {},
+    setStreaming: () => {}, setAbortController: () => {},
+    saveMessageOnSuccess, saveMessageOnError,
+    userMessageId: "first-user", assistantMessageId: "first-answer"
+  }
+  return normalChatMode("First question", "", false, [], [], new AbortController().signal, params)
+}
 const publicHistory = (id: string): HistoryInfo => ({ id, title: "Imported", createdAt: 1, is_rag: false, message_source: "web-ui" })
 const savedMessages = async (): Promise<Message[]> => await storage.tables.messages.toArray() as Message[]
 
@@ -140,6 +150,22 @@ beforeEach(() => {
 })
 
 describe("normal Chat owned history creation and H1 admission", () => {
+  it("dispatches explicit model and tool overrides despite unrelated global selector changes", async () => {
+    const mounted = renderHook(() => useHistorySelection())
+    const created = await saveHistory("Saved", false, "web-ui", undefined, undefined, snapshot().requestScope)
+    await act(async () => { await mounted.result.current.loadConversation({ historyId: created.id }) })
+    preparation.beforeModel.mockImplementation(() => {
+      useStoreMessageOption.setState({ selectedModel: "unrelated-model", toolChoice: "auto" })
+    })
+    await act(async () => {
+      expect(await send(mounted.result.current, { historyId: created.id, toolChoice: "none", fixedOverrides: true })).toEqual({ status: "submitted" })
+    })
+    expect(vi.mocked(tldwChat.streamMessage).mock.calls[0][1]?.preparedRequest).toMatchObject({ model: "test" })
+    expect(vi.mocked(tldwChat.streamMessage).mock.calls[0][1]?.preparedRequest).not.toHaveProperty("tools")
+    expect((await savedMessages()).map(row => row.role)).toEqual(["user", "assistant"])
+    mounted.unmount()
+  })
+
   it.each(["loading", "inactive settings", "MCP health"])("allows a saved send after unrelated %s publication", async publication => {
     const mounted = renderHook(() => useHistorySelection())
     const created = await saveHistory("Saved", false, "web-ui", undefined, undefined, snapshot().requestScope)
