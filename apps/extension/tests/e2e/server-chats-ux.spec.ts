@@ -91,10 +91,10 @@ test.describe('Server-backed chats UX', () => {
     const assistantLabel = await page.getByText(/Test Character/).first()
     await expect(assistantLabel).toBeVisible()
 
-    // Persistence helper text and header pill should make it clear that this
-    // chat is saved both locally and on the server.
+    // A chat opened from the server is reported as saved on the server
+    // (CS-03 / XS-05: labels come from acknowledged state, not connectivity).
     await expect(
-      page.getByText(/Saved Locally\+Server/i)
+      page.getByText(/Saved on server/i).first()
     ).toBeVisible()
     await expect(
       page.getByText(/Server-backed chat/i)
