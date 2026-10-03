@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from pathlib import Path
 
-from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookJobLimits, ChatbookService
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ChatbookManifest,
     ChatbookContent,
@@ -864,6 +864,12 @@ class TestChatbookService:
         db = CharactersRAGDB(db_path=str(tmp_path / "quota.db"), client_id="quota-test")
         service = ChatbookService(user_id="123", db=db, user_tier="free")
 
+        async def _fixed_limits() -> ChatbookJobLimits:
+            """This user's resolved concurrency cap (spec 2 §4), fixed for the test."""
+            return ChatbookJobLimits(concurrent_jobs=2)
+
+        monkeypatch.setattr(service, "_resolve_job_limits", _fixed_limits)
+
         for index in range(2):
             service._save_export_job(
                 ExportJob(
@@ -899,6 +905,12 @@ class TestChatbookService:
 
         db = CharactersRAGDB(db_path=str(tmp_path / "sync-quota.db"), client_id="sync-quota-test")
         service = ChatbookService(user_id="123", db=db, user_tier="free")
+
+        async def _fixed_limits() -> ChatbookJobLimits:
+            """This user's resolved concurrency cap (spec 2 §4), fixed for the test."""
+            return ChatbookJobLimits(concurrent_jobs=2)
+
+        monkeypatch.setattr(service, "_resolve_job_limits", _fixed_limits)
 
         for index in range(2):
             service._save_export_job(
@@ -964,7 +976,8 @@ class TestChatbookService:
                 status=ExportStatus.PENDING,
                 chatbook_name="New export",
                 created_at=datetime.now(timezone.utc),
-            )
+            ),
+            ChatbookJobLimits(),
         )
 
         queries = [call[0] for call in db.calls]
@@ -1177,7 +1190,7 @@ class TestChatbookService:
         sample_path = service.import_dir / "openwebui.json"
         sample_path.write_text("[]", encoding="utf-8")
         saved_jobs = []
-        service._save_import_job_with_quota = saved_jobs.append
+        service._save_import_job_with_quota = lambda job, _limits=None: saved_jobs.append(job)
         service._core_jobs = MagicMock()
         service._core_jobs.create_job.return_value = {"id": 1}
 
@@ -1204,7 +1217,7 @@ class TestChatbookService:
 
         service._core_jobs = _CoreJobs()
 
-        def _capture_job(job: ImportJob) -> None:
+        def _capture_job(job: ImportJob, _limits: ChatbookJobLimits | None = None) -> None:
             captured["job"] = job
 
         with patch.object(service, "_save_import_job_with_quota", side_effect=_capture_job):
