@@ -4,6 +4,7 @@ title: Design Embeddings Stage 3 durable workflow store and Jobs runner
 status: In Progress
 assignee: []
 created_date: '2026-10-03 00:32'
+updated_date: '2026-10-03 01:00'
 labels:
   - embeddings
   - workflow
@@ -43,8 +44,8 @@ Design the dormant Stage 3 Embeddings durability foundation after merged Stage 2
 
 <!-- SECTION:PLAN:BEGIN -->
 1. Explore merged Jobs/Embeddings and governing ADRs; clarify scope and compare approaches (complete).
-2. Review design sections: architecture and revised persistence (approved); execution/recovery and verification (remaining).
-3. Write fully approved spec and Proposed ADR, then self-review.
+2. Review design sections: architecture, revised persistence, and execution/recovery (approved); verification, retention safeguards, and dormant rollout boundaries (next).
+3. Write the fully approved spec and Proposed ADR, then self-review.
 4. Commit artifacts and request written-spec approval.
 5. After written-spec approval, hand off to writing-plans; no implementation in this design task.
 <!-- SECTION:PLAN:END -->
@@ -58,6 +59,9 @@ Approved tables: embedding_workflows, embedding_workflow_items, embedding_workfl
 Verified existing prepared Jobs APIs enforce canonical Admin Webhook identity: require an additive domain-neutral capability while preserving existing behavior. Successful batch continuation must not consume failure retries. Execution/recovery and testing sections remain to be approved; no production code changes.
 ADR check: ADR required: yes. This creates durable persistence and Jobs/domain ownership rules. Link ADR-003, ADR-022, ADR-051; draft a new Proposed ADR with the next free number when writing the fully reviewed spec. ADR-022 remains governing for unchanged legacy paths.
 Bandit not applicable to tracking-only Markdown changes. MCP cannot resolve TASK-12973 (including as dependency); official CLI fallback used after confirming the failed MCP create produced no task.
+
+2026-10-02: Requester approved the execution/recovery section. Admission persists the immutable manifest and enqueue operation together; provider execution waits for exact Jobs UUID binding. Validate owner, Jobs identity, live lease, generation, and workflow version; reject stale checkpoints. Recover acknowledged generation/item sink receipts and pending accounting before another paid call. Resolve source revisions, acknowledge accounting reservation, and invoke only the pinned provider/model. Shared caching is disabled unless the adapter certifies the generation embedding-space fingerprint. Atomically checkpoint valid sink receipts, cursor, accounting settlement, and Jobs disposition operations. Required acknowledgements gate subsequent execution. Successful batches yield without failure-retry consumption. Only provider-origin failures can select fallback; changed embedding space creates a new generation starting at item zero. Cancellation prevents the next batch while in-flight work settles; completion requires all current-generation outputs and accounting acknowledgements. Operation reconciliation never calls a provider. Ambiguous dispatched attempts settle conservatively; superseded outputs remain non-authoritative with bounded cleanup.
+Verification-section investigation: Jobs conftest disables lease enforcement and PostgreSQL RLS by default; durable workflow tests must explicitly enable both and exercise PostgreSQL under a non-superuser/non-BYPASSRLS role. Reuse existing jobs_pg_dsn/pg_temp_db fixtures and backend parity patterns. Proposed retention safeguard for review: unresolved accounting/cleanup/disposition operations pin minimal owner-scoped recovery state beyond Jobs expiry, with finite automatic retry budgets and explicit exhausted status; never silently discard obligations or delete completed current-generation sink outputs merely because Jobs history is pruned. This safeguard and the test/rollout section are not yet approved. No code changed.
 <!-- SECTION:NOTES:END -->
 
 ## Definition of Done
