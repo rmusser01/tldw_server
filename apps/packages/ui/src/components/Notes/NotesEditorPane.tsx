@@ -44,6 +44,7 @@ import type { NotesTitleSuggestStrategy } from '@/services/settings/ui-settings'
 import {
   NOTES_EDITOR_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
+  NOTES_WYSIWYG_INPUT_ENABLED,
   NOTE_TEMPLATES,
   normalizeNotesTitleStrategy,
   toSafeTestId,
@@ -1299,37 +1300,39 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         )}
         {editorMode !== 'preview' && (
           <div className="mt-3 flex items-center flex-wrap gap-1 rounded-lg border border-border bg-surface2 p-2">
-            <div
-              className="mr-2 inline-flex items-center gap-1 rounded-md border border-border bg-surface px-1 py-0.5"
-              role="group"
-              aria-label={t('option:notesSearch.inputModeGroup', {
-                defaultValue: 'Input mode'
-              })}
-              data-testid="notes-input-mode-toggle"
-            >
-              <Button
-                size="small"
-                type={editorInputMode === 'markdown' ? 'primary' : 'text'}
-                onClick={() => handleEditorInputModeChange('markdown')}
-                disabled={editorDisabled}
-                data-testid="notes-input-mode-markdown"
-              >
-                {t('option:notesSearch.inputModeMarkdown', {
-                  defaultValue: 'Markdown'
+            {NOTES_WYSIWYG_INPUT_ENABLED && (
+              <div
+                className="mr-2 inline-flex items-center gap-1 rounded-md border border-border bg-surface px-1 py-0.5"
+                role="group"
+                aria-label={t('option:notesSearch.inputModeGroup', {
+                  defaultValue: 'Input mode'
                 })}
-              </Button>
-              <Button
-                size="small"
-                type={editorInputMode === 'wysiwyg' ? 'primary' : 'text'}
-                onClick={() => handleEditorInputModeChange('wysiwyg')}
-                disabled={editorDisabled}
-                data-testid="notes-input-mode-wysiwyg"
+                data-testid="notes-input-mode-toggle"
               >
-                {t('option:notesSearch.inputModeWysiwyg', {
-                  defaultValue: 'WYSIWYG'
-                })}
-              </Button>
-            </div>
+                <Button
+                  size="small"
+                  type={editorInputMode === 'markdown' ? 'primary' : 'text'}
+                  onClick={() => handleEditorInputModeChange('markdown')}
+                  disabled={editorDisabled}
+                  data-testid="notes-input-mode-markdown"
+                >
+                  {t('option:notesSearch.inputModeMarkdown', {
+                    defaultValue: 'Markdown'
+                  })}
+                </Button>
+                <Button
+                  size="small"
+                  type={editorInputMode === 'wysiwyg' ? 'primary' : 'text'}
+                  onClick={() => handleEditorInputModeChange('wysiwyg')}
+                  disabled={editorDisabled}
+                  data-testid="notes-input-mode-wysiwyg"
+                >
+                  {t('option:notesSearch.inputModeWysiwyg', {
+                    defaultValue: 'WYSIWYG'
+                  })}
+                </Button>
+              </div>
+            )}
             <Typography.Text
               type="secondary"
               className="text-[11px] mr-1 uppercase tracking-[0.08em]"

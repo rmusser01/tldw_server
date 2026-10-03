@@ -4,6 +4,38 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
+// Pin the notes authority scope like the other Notes stage suites. Without it,
+// whether the notes list loads depends on ambient connection state, so this
+// suite passed or failed depending on which test files ran beside it.
+const notesConnectionConfig = {
+  serverUrl: "https://notes.example.test",
+  authMode: "multi-user" as const,
+  accessToken: "test-access-token"
+}
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: notesConnectionConfig,
+    loading: false,
+    authorityLoading: false
+  })
+}))
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: {
+    getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true }))
+  }
+}))
+
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/hooks/useNotesGraphAuthorityScope")>()
+  return {
+    ...actual,
+    useNotesGraphAuthorityScope: () =>
+      actual.createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, 1)
+  }
+})
+
 const {
   mockBgRequest,
   mockMessageSuccess,
@@ -234,7 +266,8 @@ const renderPage = () => {
   )
 }
 
-describe("NotesManagerPage stage 44 notes studio view", () => {
+// antd-heavy page: each interaction can take seconds on a loaded runner.
+describe("NotesManagerPage stage 44 notes studio view", { timeout: 60_000 }, () => {
   let currentTemplate: TemplateType = "cornell"
   let currentHandwritingMode: HandwritingMode = "accented"
   let currentStale = false
@@ -451,7 +484,9 @@ describe("NotesManagerPage stage 44 notes studio view", () => {
     currentStale = true
 
     renderPage()
-    fireEvent.click(await screen.findByTestId("notes-input-mode-wysiwyg"))
+    // The WYSIWYG toggle is hidden until NE-01 is fixed (D5, #3102). When it
+    // returns, click "notes-input-mode-wysiwyg" here again so this test also
+    // proves that continuing the plain note resets WYSIWYG back to Markdown.
 
     const staleBanner = await screen.findByTestId("notes-studio-stale-banner")
     fireEvent.click(

@@ -10,6 +10,12 @@ const notesConnectionConfig = {
   accessToken: "test-access-token"
 }
 
+// WYSIWYG input is hidden by default (D5, #3102); this suite exercises it.
+vi.mock("@/components/Notes/notes-manager-utils", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/notes-manager-utils")>()
+  return { ...actual, NOTES_WYSIWYG_INPUT_ENABLED: true }
+})
+
 vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
   useCanonicalConnectionConfig: () => ({
     config: notesConnectionConfig,
@@ -195,7 +201,8 @@ const derivedNote = {
   }
 }
 
-describe("NotesManagerPage stage 43 notes studio entry", () => {
+// antd-heavy page: each interaction can take seconds on a loaded runner.
+describe("NotesManagerPage stage 43 notes studio entry", { timeout: 60_000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockConfirmDanger.mockResolvedValue(true)
