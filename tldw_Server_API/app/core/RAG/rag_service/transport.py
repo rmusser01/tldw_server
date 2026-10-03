@@ -390,11 +390,11 @@ async def enforce_rag_query_limit_for_org_context(
 
     from tldw_Server_API.app.core.Billing.enforcement import (
         LimitCategory,
-        enforcement_enabled,
+        billing_checks_active,
         get_billing_enforcer,
     )
 
-    if not enforcement_enabled():
+    if not await billing_checks_active():
         return
 
     org_id = await resolve_org_id_for_rag_context(request_like=request_like, current_user=current_user)

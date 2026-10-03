@@ -70,6 +70,7 @@ from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
     cookie_websocket_rejection_code,
     resolve_single_user_cookie_websocket,
 )
+from tldw_Server_API.app.core.config import usage_quotas_enabled
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.DB_Manager import (
     create_workflows_database,
@@ -1266,6 +1267,10 @@ async def _enforce_workflows_daily_cap(
 
     Raises HTTPException(429) with legacy-compatible headers on denial.
     """
+    # Usage quotas off (spec 2). Runs are still recorded by _record_workflow_run_usage.
+    if not usage_quotas_enabled():
+        return
+
     try:
         if env_flag_enabled("WORKFLOWS_DISABLE_QUOTAS"):
             return

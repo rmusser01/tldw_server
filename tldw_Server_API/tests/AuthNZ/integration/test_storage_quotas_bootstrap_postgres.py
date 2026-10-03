@@ -207,6 +207,9 @@ def test_normal_fresh_and_repeated_bootstrap_creates_storage_quotas(restricted_d
 def test_restricted_storage_quota_crud_constraints_and_admission(restricted_database, tmp_path, scenario):
     """Actual restricted login/repository/guard, with no mocked quota responses."""
     env = _runtime_env(tmp_path, restricted_database, backend='postgresql', mode='multi_user')
+    # This test exercises storage-quota enforcement (guard_storage_quota) directly;
+    # the private runtime env has no inherited test flags, so opt back in explicitly.
+    env['USAGE_QUOTAS_ENABLED'] = '1'
     env['QUOTA_SCENARIO'] = scenario
     result = _run_runtime(tmp_path, env, RUNTIME_SCRIPT)
     assert result.get('ok') is True, result

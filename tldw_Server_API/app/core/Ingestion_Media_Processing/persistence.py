@@ -28,7 +28,7 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_utils import (
     extract_claims_if_requested,
     persist_claims_if_applicable,
 )
-from tldw_Server_API.app.core.config import loaded_config_data, settings
+from tldw_Server_API.app.core.config import loaded_config_data, settings, usage_quotas_enabled
 from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     create_media_database,
@@ -248,7 +248,8 @@ def _resolve_media_budget_context(
     current_user: Any,
 ) -> tuple[Any | None, str, dict[str, Any], str]:
     """Return (governor, policy_id, policy, entity) for media budget checks."""
-    if request is None:
+    # Usage quotas off (spec 2): no media concurrency or daily-bytes budget applies.
+    if request is None or not usage_quotas_enabled():
         return None, _MEDIA_INGESTION_POLICY_ID, {}, ""
     try:
         app_state = getattr(request.app, "state", None)
