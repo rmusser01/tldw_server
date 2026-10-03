@@ -7873,7 +7873,13 @@ async def delete_chat_session(
     current_user: User = Depends(get_request_user)
 ) -> Response:
     """
-    Soft delete a chat session.
+    Soft delete a chat session (move it to Trash), or permanently delete a trashed one.
+
+    Moving a chat to Trash only marks the conversation row deleted. Its messages
+    are left untouched: every message read joins on the conversation's
+    ``deleted`` flag, so they are hidden while the chat is in Trash, and
+    ``POST /{chat_id}/restore`` brings the transcript back exactly as it was.
+    Messages the user deleted individually before trashing stay deleted.
 
     Args:
         chat_id: Chat session ID
@@ -7980,60 +7986,11 @@ async def delete_chat_session(
             logger.info(f"Soft deleted chat session {chat_id} by user {current_user.id}")
             return Response(status_code=status.HTTP_204_NO_CONTENT)
 
-        # Delete messages in batches using offset-based pagination to avoid unbounded memory
-        # Track failed message IDs to prevent infinite loops when deletions fail
-        batch_size = 100
-        max_batches = 1000  # Safety limit: max 100,000 messages per conversation
-        total_deleted = 0
-        consecutive_empty_batches = 0
-        max_empty_batches = 3  # Stop after consecutive empty batches (indicates completion)
-        failed_message_ids: set = set()  # Track messages that failed to delete
-
-        for _batch_num in range(max_batches):
-            # Fetch non-deleted messages only (include_deleted=False is default)
-            batch = db.get_messages_for_conversation(chat_id, limit=batch_size, offset=0)
-
-            # Filter out messages that previously failed to delete to prevent infinite loops
-            batch = [m for m in batch if m.get("id") not in failed_message_ids]
-
-            if not batch:
-                consecutive_empty_batches += 1
-                if consecutive_empty_batches >= max_empty_batches:
-                    break
-                continue
-
-            consecutive_empty_batches = 0  # Reset counter on successful batch
-
-            # Delete messages in this batch
-            batch_deleted = 0
-            for msg in batch:
-                msg_id = msg.get("id")
-                if not msg_id:
-                    continue
-                try:
-                    db.soft_delete_message(msg_id, msg.get("version", 1))
-                    batch_deleted += 1
-                except _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS:
-                    logger.warning("Failed to soft-delete message {} during conversation delete.", msg_id)
-                    failed_message_ids.add(msg_id)  # Track failed deletions
-
-            total_deleted += batch_deleted
-
-            # If we couldn't delete any messages in this batch, we might be stuck
-            if batch_deleted == 0:
-                consecutive_empty_batches += 1
-                if consecutive_empty_batches >= max_empty_batches:
-                    logger.warning(f"Stopping message deletion for {chat_id} after {total_deleted} messages - possible stuck state")
-                    break
-
-        if failed_message_ids:
-            logger.warning(f"Failed to delete {len(failed_message_ids)} messages from conversation {chat_id}: {failed_message_ids}")
-
-        logger.debug(f"Deleted {total_deleted} messages from conversation {chat_id}")
-
-        # Soft delete conversation via DB abstraction (optimistic locking)
+        # Trash only the conversation row. Its messages stay as they are, hidden by
+        # the conversation's deleted flag, so restore returns the same transcript
+        # and never resurrects messages that were deleted individually beforehand
+        # (CS-N2, #3104).
         exp_ver = expected_version if expected_version is not None else conversation.get('version', 1)
-        # Finally soft delete the conversation
         db.soft_delete_conversation(chat_id, exp_ver)
 
         logger.info(f"Soft deleted chat session {chat_id} by user {current_user.id}")

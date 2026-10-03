@@ -4503,7 +4503,7 @@ class CharacterCardsRetriever(BaseRetriever):
                 FROM messages m
                 JOIN conversations conv ON m.conversation_id = conv.id
                 LEFT JOIN character_cards cc ON conv.character_id = cc.id
-                WHERE m.deleted = 0 AND m.content LIKE ?
+                WHERE m.deleted = 0 AND conv.deleted = 0 AND m.content LIKE ?
                 ORDER BY m.timestamp DESC
                 LIMIT ?
             """
