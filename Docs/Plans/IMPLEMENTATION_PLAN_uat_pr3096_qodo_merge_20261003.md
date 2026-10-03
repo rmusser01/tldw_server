@@ -23,3 +23,5 @@ Owner: TASK13260.281. PR: https://github.com/rmusser01/tldw_server/pull/3096
 Live UAT remains held. Existing bug notes and runtime data remain; no evidence bundles or failed-case replay.
 
 Server Qodo source corrections have independent review and affected regressions complete; see the concise resumed-UAT review for results. The related Chatbook compatibility commit is reviewed locally, with companion publication approval pending after automatic approval review rejected its push. Final-head checks/Qodo acceptance and the human-written PR3096 Change summary remain open.
+
+Latest base: dev6c5da178 (PR3092 Jobs row-identity completion). Conflict-free rebase preserves all eleven repair commits exactly; 41 affected Jobs/Chatbook checks passed, nine PostgreSQL cases deselected. Existing repair source/review/Bandit remains unchanged; current-head hosted gates are pending.
