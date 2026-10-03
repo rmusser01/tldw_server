@@ -53,6 +53,17 @@ the existing no-`.env` fallback to `config.txt`, legacy single-user API-key
 warning, isolated test database fallback, and emitted OpenTelemetry spans. The
 second reconciliation run completed in 1.86 seconds.
 
+Baseline reconciliation on 2026-10-02 (America/Los_Angeles), before Task 5:
+refreshed `origin/dev` is
+`86e287fee7bfa1a1588639232e35db3666851ded`. The intervening scoped diff
+from the Task 4 base `6cd2745f696af04668a61c20b84ab8a9e69ca5e4` changes
+only template-owner tests; no Chunking source or hierarchy/process_text contract
+changed. The isolated branch rebased without conflicts, preserving all 13
+workstream commits and leaving the main checkout untouched. The expanded
+ten-file characterization suite passed with 210 passed, 1 existing PyThaiNLP
+skip, 0 failures, and 435 warnings in 3.91 seconds. This is the current pinned
+implementation baseline; the earlier reconciliation records remain provenance.
+
 ## Goals
 
 - Move hierarchy-specific behavior out of `chunker.py` into small modules with
