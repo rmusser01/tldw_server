@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
-from typing import Any
 
 import yaml
 from loguru import logger
@@ -118,12 +117,6 @@ def empty_trash(db_instance: MediaDbLike, days_threshold: int) -> tuple[int, int
         return 0, -1
     else:
         return processed_count, remaining_count
-
-
-def check_media_and_whisper_model(*args: Any, **kwargs: Any) -> tuple[bool, str]:
-    del args, kwargs
-    logger.warning("check_media_and_whisper_model is deprecated.")
-    return True, "Deprecated"
 
 
 def permanently_delete_item(db_instance: MediaDbLike, media_id: int) -> bool:

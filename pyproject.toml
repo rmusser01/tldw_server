@@ -465,18 +465,13 @@ db_opensearch = [
   "elasticsearch>=8.0.0"
 ]
 
-# Gradio tooling
-gradio = [
-  "gradio>=4.0.0"
-]
-
 gpu_monitoring = [
   "pynvml>=11.5.0; platform_system == \"Linux\""
 ]
 
 # All optional dependencies
 all = [
-  "tldw-server[dev,evaluation,data-tools,chunking_multilingual,gradio,ingestion_email,media_wiki,web_research,STT_All,TTS_All,TTS_higgs,TTS_vibevoice,backend_onnx,db_postgres,ocr_points_sglang,gpu_monitoring]"
+  "tldw-server[dev,evaluation,data-tools,chunking_multilingual,ingestion_email,media_wiki,web_research,STT_All,TTS_All,TTS_higgs,TTS_vibevoice,backend_onnx,db_postgres,ocr_points_sglang,gpu_monitoring]"
 ]
 
 ###########################
