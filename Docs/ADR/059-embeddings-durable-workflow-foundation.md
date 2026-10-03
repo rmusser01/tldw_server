@@ -1,7 +1,8 @@
-# ADR-058: Dormant Jobs-Rooted Embeddings Durability
+# ADR-059: Dormant Jobs-Rooted Embeddings Durability
 
 **Status:** Proposed
 **Date:** 2026-10-02
+**Revised:** 2026-10-03
 **Backfilled from:** not backfilled
 **Decision owner:** repository requester; consolidated record awaiting written review
 **Related task:** TASK-13421
@@ -58,11 +59,18 @@ must establish stronger contracts before real adapters or entrypoints are migrat
   Receipt-only recovery can settle existing effects after revocation but cannot
   call providers, reopen generations, or revive terminal Jobs roots.
 - Sink certification requires atomic first-accepted writes, immutable receipts,
-  expiring permits, generation closure, and scoped cleanup. No existing production
-  vector-store helper is automatically certified by this ADR.
+  writer-authoritative absence, expiring permits, generation closure, and scoped
+  cleanup. Lagging lookup returns unavailable, never absence that authorizes new
+  paid work. No production vector-store helper is automatically certified here.
+- Accounting certification requires atomic per-attempt ordering and absorbing
+  terminal records. Late reservations cannot recreate holds after release or
+  settlement; proof retention covers all previously issued delivery authority.
 - Explicit limits and deadlines bound manifests, calls, attempts, operations, and
   retained recovery state. Unsettled obligations consume capacity after Jobs expiry;
   deleting history does not implicitly delete completed sink outputs.
+- Resolver and sink ports operate on bounded batches under a certified progress
+  budget. Serial per-item deadline compliance alone does not certify a 64-item
+  acquisition; the complete normal call plan must fit the 300-second quantum.
 - Imports/startup stay inert. Production adapters, billing hookup, entrypoint
   migration, and worker/lifecycle registration remain separately approved work.
 - ADR-051's existing retry helpers remain authoritative; the foundation does not
@@ -74,3 +82,6 @@ Obtain approval of the consolidated written spec and this Proposed record before
 implementation planning. Deliver separate reviewable Jobs capability, repository,
 coordinator/adapter, and certification units. Real adapters and production migration
 remain later workstream stages; acceptance of this record is not activation approval.
+This proposal was renumbered from ADR-058 after that number was accepted for Jobs
+completion row identity on `dev`. Recheck the next free number before integration;
+do not replace or rewrite that accepted record.

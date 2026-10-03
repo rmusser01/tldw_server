@@ -4,7 +4,7 @@ title: Design Embeddings Stage 3 durable workflow store and Jobs runner
 status: In Progress
 assignee: []
 created_date: 2026-10-03 00:32
-updated_date: 2026-10-03 01:57
+updated_date: 2026-10-03 21:49
 labels:
 - embeddings
 - workflow
@@ -22,11 +22,11 @@ documentation:
 - Docs/ADR/022-embeddings-api-and-media-pipeline.md
 - Docs/ADR/051-retry-backoff-schedules.md
 - Docs/superpowers/specs/2026-10-02-embeddings-workflow-stage3-durable-store-jobs-runner-design.md
-- Docs/ADR/058-embeddings-durable-workflow-foundation.md
+- Docs/ADR/059-embeddings-durable-workflow-foundation.md
 priority: high
 modified_files:
 - Docs/superpowers/specs/2026-10-02-embeddings-workflow-stage3-durable-store-jobs-runner-design.md
-- Docs/ADR/058-embeddings-durable-workflow-foundation.md
+- Docs/ADR/059-embeddings-durable-workflow-foundation.md
 - Docs/ADR/README.md
 - backlog/tasks/task-13421 - Design-Embeddings-Stage-3-durable-workflow-store-and-Jobs-runner.md
 ---
@@ -50,9 +50,9 @@ Design the dormant Stage 3 Embeddings durability foundation after merged Stage 2
 
 <!-- SECTION:PLAN:BEGIN -->
 1. Explore merged Jobs/Embeddings, clarify scope, and compare approaches (complete).
-2. Review design sections and incorporate the four validated corrections (complete).
-3. Write the consolidated design spec and Proposed ADR; self-review for consistency, completeness, and executable verification requirements (complete).
-4. Written-review gate: commit verified documentation and request approval (ready for commit; requester approval outstanding).
+2. Review design sections and incorporate both approved sets of review corrections (complete).
+3. Write and self-review the consolidated spec and Proposed ADR, including explicit acceptance cases (complete; revised 2026-10-03).
+4. Written-review gate: commit verified revised documentation and request approval (ready for commit; requester approval of revised written spec outstanding).
 5. Only after written-spec approval, hand off to writing-plans; no implementation in this task.
 <!-- SECTION:PLAN:END -->
 
@@ -85,4 +85,6 @@ Verification-section investigation: Jobs conftest disables lease enforcement and
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-10-02: Requester approved incorporating all four validated design-review corrections before continuing. Corrections: separate lease-fenced execution authority from receipt-only recovery settlement after cancellation; define lease-independent logical Jobs intents with explicit applied/rebind/superseded/exhausted resolution and retained exact acknowledgement proof; require atomic first-accepted-write sink receipts and irreversible generation closure before cleanup; specify enforceable byte/dimension/row limits and adapter/handler deadlines. Verification section and dormant rollout boundaries are approved subject to these corrections. Review validation: 79 existing SQLite Jobs prepared-disposition/cancellation tests passed (7 PostgreSQL cases deselected, 171 warnings, 2.74s); direct temporary-DB probes confirmed cancellation clears all lease fields, late canonical completion is rejected, old unapplied lease commands reject as stale, and a later transition replaces the prior root marker. The first probe's expected rejection category was corrected after diagnostics: canonical late completion returned backend_conflict, not no_transition. No production change is claimed. Consolidated written spec is being drafted; final written-spec approval remains outstanding. Bandit is not applicable to documentation-only changes.
 2026-10-02: Consolidated the section-approved Stage 3 design into the written spec and Proposed ADR-058; registered the ADR without changing accepted ADR-022. All four validated corrections are incorporated. Inline spec self-review additionally made state vocabularies/monotonic phases explicit, distinguished definitive admission rejection from unknown admission evidence, preserved the first valid same-identity sink winner despite differing recomputed vectors, clamped each adapter deadline to the remaining batch quantum, covered native/postprocessed materialization bounds, and preserved existing Jobs pause/drain semantics. The acceptance matrix covers each clarification. Fresh validation: five local document links, six unique domain tables, limit arithmetic, ADR index/status, review gate and placeholder checks passed; git diff --check passed. Existing Embeddings runner/types: 48 passed, 108 warnings, 1.36s. Existing focused SQLite Jobs disposition/cancellation: 79 passed, 7 PostgreSQL cases deselected, 171 warnings, 2.53s. These baseline tests do not certify unimplemented Stage 3 behavior or PostgreSQL/RLS; both backends remain explicit implementation gates. No production/test code, entrypoint wiring, migration execution, PR, or implementation plan was created. Bandit is not applicable to this Markdown-only scope. AC5 and task completion remain pending requester review of the consolidated written spec.
+2026-10-03: Requester approved incorporating the second written-spec review's four corrections before implementation planning. Documentation-only scope: atomically ordered per-attempt accounting with terminal-state protection against delayed reservations; a certified batch-resolution/write timing contract that avoids 64 serial calls exhausting the acquisition quantum before progress; authoritative sink absence versus unavailable/lagging lookup; and renumbering the proposal because origin/dev owns accepted ADR-058 for Jobs completion row identity. Add explicit acceptance cases and verify the revised documents. No production code or implementation plan is authorized by this approval; consolidated written-spec review remains the gate.
+2026-10-03: Incorporated the four approved second-review corrections in the spec and Proposed ADR. Accounting now requires atomic per-attempt ordering, absorbing terminal proof/tombstones, rejection of late reserve/replay, and bounded reservation delivery authority through proof retention/pruning. Resolver/receipt lookup/write are whole-batch ports, not 64 serial per-item calls; the conservative timing plan is 60s preflight + 20s local/DB + 9x10s non-provider calls + 120s provider + 5s teardown = 295s, with 5s scheduling margin. Full dispatch budget is reserved before paid work; serial/undersized contracts are rejected and repeated no-progress exhaustion is a typed failure. Sink lookup requires writer-authoritative accepted/absent decisions; lagging/uncertain visibility is unavailable and cannot authorize another paid call. Updated explicit required acceptance cases for each. Renamed our proposal from ADR-058 to ADR-059 and updated active spec/index/task references; accepted upstream ADR-058 was not modified. Local origin/dev ADR inventory still ends at 058; numbering must be rechecked at later integration. Self-review and 65 local links, six-table/scope gates, placeholder scan, limit/timing arithmetic, absorbing-ledger orderings/expired delivery and authoritative lookup contract probes passed; git diff --check passed. Fresh existing Embeddings runner/types: 48 passed, 108 warnings, 1.20s; focused SQLite Jobs: 79 passed, 7 PostgreSQL cases deselected, 171 warnings, 1.90s. Read-only contract models and baseline tests are not runtime certification of unimplemented Stage 3 behavior; new runtime acceptance tests and PostgreSQL/RLS certification remain required future implementation work. Bandit N/A for Markdown-only changes. No production/test code, migration execution, rebase, PR or implementation plan was created. AC5 and final task completion still await review of the revised written spec.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
