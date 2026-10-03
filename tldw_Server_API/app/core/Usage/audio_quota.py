@@ -28,6 +28,8 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.config import usage_quotas_enabled
 from tldw_Server_API.app.core.exceptions import AudioQuotaStoreUnavailable
+from tldw_Server_API.app.core.Usage.quota_checks import ledger_used_this_month
+from tldw_Server_API.app.core.Usage.quota_resolver import user_quota
 
 try:
     from tldw_Server_API.app.core.Metrics.metrics_manager import MetricDefinition, MetricType, get_metrics_registry
@@ -569,6 +571,7 @@ async def set_user_tier(user_id: int, tier: str) -> None:
 # Every audio limit when usage quotas are off: no tier applies (spec 2).
 _UNLIMITED_AUDIO_LIMITS: dict[str, float | None] = {
     "daily_minutes": None,
+    "monthly_minutes": None,
     "concurrent_streams": None,
     "concurrent_jobs": None,
     "max_file_size_mb": None,
@@ -576,39 +579,23 @@ _UNLIMITED_AUDIO_LIMITS: dict[str, float | None] = {
 
 
 async def get_limits_for_user(user_id: int) -> dict[str, float | None]:
+    """The user's audio limits (spec 2): their limits.* values; None is unlimited."""
+    limits = dict(_UNLIMITED_AUDIO_LIMITS)
     if not usage_quotas_enabled():
-        return dict(_UNLIMITED_AUDIO_LIMITS)
-    tier = await get_user_tier(user_id)
-    limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"]).copy()
-    overrides = await _get_user_override_limits(user_id)
-    for key, value in overrides.items():
-        if value is not None:
-            limits[key] = value
+        return limits
+    uid = int(user_id)
+    limits["daily_minutes"] = await user_quota(uid, "limits.audio_daily_minutes")
+    limits["monthly_minutes"] = await user_quota(uid, "limits.transcription_minutes_per_month")
+    limits["concurrent_jobs"] = await user_quota(uid, "limits.audio_concurrent_jobs")
     return limits
 
 
-async def _get_user_override_limits(user_id: int) -> dict[str, float | None]:
-    try:
-        from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
-
-        pool = await get_db_pool()
-        repo = UserProfileOverridesRepo(pool)
-        await repo.ensure_tables()
-        rows = await repo.list_overrides_for_user(int(user_id))
-        overrides: dict[str, float | None] = {}
-        for row in rows:
-            key = str(row.get("key") or "")
-            value = row.get("value")
-            if value is None:
-                continue
-            if key == "limits.audio_daily_minutes":
-                overrides["daily_minutes"] = float(value)
-            elif key == "limits.audio_concurrent_jobs":
-                overrides["concurrent_jobs"] = int(value)
-        return overrides
-    except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
-        logger.debug("Audio quota overrides unavailable")
-        return {}
+async def _monthly_minutes_exhausted(user_id: int, monthly_limit: float | None, minutes_requested: float) -> bool:
+    """True when this request would take the user past their calendar-month (UTC) minutes."""
+    if monthly_limit is None:
+        return False
+    used_seconds = await ledger_used_this_month(str(int(user_id)), "minutes")
+    return used_seconds + _audio_minutes_units(minutes_requested) > _audio_minutes_units(float(monthly_limit))
 
 
 async def get_daily_minutes_used(user_id: int) -> float:
@@ -840,6 +827,9 @@ async def consume_daily_minutes(
 
     limits = await get_limits_for_user(user_id)
     limit = limits.get("daily_minutes")
+    if await _monthly_minutes_exhausted(user_id, limits.get("monthly_minutes"), minutes_requested):
+        _metrics_increment("audio_quota_violations_total", {"type": "monthly_minutes"})
+        return False, 0.0
     ledger = await _require_daily_ledger()
     entry = _build_audio_minutes_entry(user_id=int(user_id), units=units, operation_id=operation_id or op_id)
 
@@ -1021,58 +1011,7 @@ async def increment_jobs_started(user_id: int) -> None:
 
 
 async def can_start_job(user_id: int) -> tuple[bool, str]:
-    """
-    Determine whether a new concurrent audio job may be started for the given user and, if allowed, increment the active-job counter.
-
-    If RG-based concurrency is available, the function enforces it and updates metrics. When RG is
-    enabled but unavailable or reserve fails, the function logs a fallback and allows the job
-    (fail-open, no concurrency tracking). When the limit is exceeded the function reports a
-    descriptive message.
-
-    Returns:
-        (bool, str): `True` and `"OK"` if the job may start and the active-job counter was incremented; `False` and an explanatory message like `"Concurrent job limit reached (<max>)"` if starting the job would exceed the user's concurrency limit.
-    """
-    if not usage_quotas_enabled():
-        return True, "OK"
-
-    # When RG audio integration is enabled and available, enforce streams/jobs
-    # concurrency via the shared governor. Legacy Redis/in-process counters are
-    # retired.
-    gov = await _get_audio_rg_governor()
-    if gov is not None and RGRequest is not None:
-        try:
-            user_key = int(user_id)
-            entity = f"user:{user_key}"
-            policy_id = "audio.default"
-            req = RGRequest(
-                entity=entity,
-                categories={"jobs": {"units": 1}},  # type: ignore[call-arg]
-                tags={"policy_id": policy_id, "endpoint": "audio.jobs"},
-            )
-            dec, handle_id = await gov.reserve(req, op_id=f"audio-job:{entity}:{uuid.uuid4().hex}")
-            if not dec.allowed or not handle_id:
-                _metrics_increment("audio_quota_violations_total", {"type": "concurrent_jobs"})
-                return False, "Concurrent job limit reached"
-            # Track handle for explicit release in finish_job
-            job_lock = await _get_job_handle_lock(user_key)
-            async with job_lock:
-                handles = _rg_job_handles.setdefault(user_key, [])
-                handles.append(handle_id)
-                # Approximate active count via local handles for metrics
-                _metrics_set_gauge("audio_jobs_active", float(len(handles)), {"user_id": str(user_key)})
-            return True, "OK"
-        # Fail-open is intentional: if RG is temporarily unavailable, don't deny audio jobs.
-        # Operators control overall service availability via infrastructure decisions, not exceptions here.
-        except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
-            logger.debug("RG reserve failed for jobs, failing open")
-            await _log_rg_audio_fallback("rg_reserve_failed_jobs")
-            return True, "OK"
-
-    if _rg_audio_enabled():
-        await _log_rg_audio_fallback("rg_governor_unavailable_jobs")
-        return True, "OK"
-
-    # RG disabled → treat as unlimited.
+    """Per-user synchronous concurrency is deferred (spec 2 Non-goals); always admits."""
     return True, "OK"
 
 
@@ -1119,48 +1058,7 @@ async def finish_job(user_id: int) -> None:
 
 
 async def can_start_stream(user_id: int) -> tuple[bool, str]:
-    """
-    Determines whether the user may start a new concurrent audio stream and reserves a slot if allowed.
-
-    Attempts to allocate a concurrent-stream slot for the given user; if a slot is available the
-    function records the reservation and returns success, otherwise it reports the denial reason.
-    When RG is enabled but unavailable or reserve fails, the function allows the stream (fail-open).
-
-    Returns:
-        (bool, str): `True` and `"OK"` if a slot was reserved and the stream may start, `False` and a human-readable reason (e.g., "Concurrent streams limit reached (<n>)") otherwise.
-    """
-    if not usage_quotas_enabled():
-        return True, "OK"
-
-    # Prefer ResourceGovernor-based concurrency when enabled for audio.
-    gov = await _get_audio_rg_governor()
-    if gov is not None and RGRequest is not None:
-        try:
-            entity = f"user:{int(user_id)}"
-            policy_id = "audio.default"
-            req = RGRequest(
-                entity=entity,
-                categories={"streams": {"units": 1}},  # type: ignore[call-arg]
-                tags={"policy_id": policy_id, "endpoint": "audio.stream"},
-            )
-            dec, handle_id = await gov.reserve(req, op_id=f"audio-stream:{entity}:{uuid.uuid4().hex}")
-            if not dec.allowed or not handle_id:
-                _metrics_increment("audio_quota_violations_total", {"type": "concurrent_streams"})
-                return False, "Concurrent streams limit reached"
-            handles = _rg_stream_handles.setdefault(int(user_id), [])
-            handles.append(handle_id)
-            _metrics_set_gauge("audio_streaming_active", float(len(handles)), {"user_id": str(int(user_id))})
-            return True, "OK"
-        except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
-            logger.debug("RG reserve failed for streams, failing open")
-            await _log_rg_audio_fallback("rg_reserve_failed_streams")
-            return True, "OK"
-
-    if _rg_audio_enabled():
-        await _log_rg_audio_fallback("rg_governor_unavailable_streams")
-        return True, "OK"
-
-    # RG disabled → treat as unlimited.
+    """Per-user synchronous concurrency is deferred (spec 2 Non-goals); always admits."""
     return True, "OK"
 
 
@@ -1210,6 +1108,9 @@ async def check_daily_minutes_allow(user_id: int, minutes_requested: float) -> t
         When the request is denied due to insufficient remaining minutes, a quota violation metric is recorded.
     """
     limits = await get_limits_for_user(user_id)
+    if await _monthly_minutes_exhausted(user_id, limits.get("monthly_minutes"), minutes_requested):
+        _metrics_increment("audio_quota_violations_total", {"type": "monthly_minutes"})
+        return False, 0.0
     limit = limits.get("daily_minutes")
     if limit is None:
         return True, None
@@ -1349,6 +1250,9 @@ async def active_streams_count(user_id: int) -> int:
     return 0
 
 
+_tier_overrides_deprecation_warned = False
+
+
 def _apply_tier_overrides_from_config(base: dict[str, dict[str, float | None]]) -> dict[str, dict[str, float | None]]:
     """
     Merge a base per-tier limits mapping with overrides from the environment and configuration.
@@ -1400,6 +1304,14 @@ def _apply_tier_overrides_from_config(base: dict[str, dict[str, float | None]]) 
                                 logger.debug("Audio-Quota override parse failed")
     except _AUDIO_QUOTA_NONCRITICAL_EXCEPTIONS:
         logger.debug("Audio-Quota config overrides failed")
+
+    global _tier_overrides_deprecation_warned
+    if not _tier_overrides_deprecation_warned and merged != base:
+        _tier_overrides_deprecation_warned = True
+        logger.warning(
+            "AUDIO_TIER_LIMITS_JSON / [Audio-Quota] {tier}_* no longer set limits; "
+            "use the limits.audio_* UserProfiles values (spec 2)"
+        )
     return merged
 
 
