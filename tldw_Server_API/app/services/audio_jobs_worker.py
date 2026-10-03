@@ -136,9 +136,9 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                             limits = await get_limits_for_user(int(cand))
                         except (OSError, RuntimeError, TypeError, ValueError) as e:
                             logger.warning(
-                                f"Failed to get limits for owner candidate {cand}; assuming unlimited concurrent_jobs: {e}"
+                                f"Failed to get limits for owner candidate {cand}; assuming unlimited: {e}"
                             )
-                            limits = {"daily_minutes": 30.0, "concurrent_streams": 1, "concurrent_jobs": 0, "max_file_size_mb": 25}
+                            limits = {}
                         try:
                             max_jobs = int(limits.get("concurrent_jobs") or 0)
                         except (ValueError, TypeError) as e:
@@ -197,9 +197,9 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                 limits_owner = await get_limits_for_user(int(owner))
             except (OSError, RuntimeError, TypeError, ValueError) as e:
                 logger.warning(
-                    f"Failed to get limits for owner {owner}; assuming unlimited concurrent_jobs: {e}"
+                    f"Failed to get limits for owner {owner}; assuming unlimited: {e}"
                 )
-                limits_owner = {"daily_minutes": 30.0, "concurrent_streams": 1, "concurrent_jobs": 0, "max_file_size_mb": 25}
+                limits_owner = {}
             try:
                 max_jobs = int(limits_owner.get("concurrent_jobs") or 0)
             except (ValueError, TypeError) as e:
