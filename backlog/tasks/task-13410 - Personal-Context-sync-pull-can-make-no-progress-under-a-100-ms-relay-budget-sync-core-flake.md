@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-10-01 17:53'
-updated_date: '2026-10-02 18:33'
+updated_date: '2026-10-03 01:51'
 labels:
   - bug
   - sync
@@ -38,9 +38,7 @@ Tests: added test_relay_finishes_a_row_whose_staging_crossed_the_deadline in tes
 
 Known gap, not changed: failure paths (acknowledge_row/finalize_authority raising, or uncertain record after the deadline) can still leave a staged row hidden and unfinalized. A later relay retries it unless an activation covers the batch first; covered_by_activation batches have no orphan cleanup (only purge_terminal batches do). Docs: no documentation change needed (DoD #3 not applicable).
 
-Landing: the relay fix itself reached dev through the release-0.1.46 sync PR #3088 (commit 3b5051d9fb), which reused #3078's repair after hitting the same handshake failure. #3078 then merged with only this task's close-out. Qodo's docstring findings on #3078 (the deadline_open helper and the regression test's stage/finalize callbacks) were addressed in the follow-up PR chore/followups-13410-13416. The remaining gap is tracked separately (staged rows orphaned when acknowledge_row/finalize_authority raise and an activation covers the batch).
-
-Follow-up for the orphaned staged-row gap: TASK-13422.
+Landing: the relay fix itself reached dev through the release-0.1.46 sync PR #3088 (commit 3b5051d9fb), which reused #3078's repair after hitting the same handshake failure. #3078 then merged with only this task's close-out. Qodo's docstring findings on #3078 (the deadline_open helper and the regression test's stage/finalize callbacks) were addressed in the follow-up PR chore/followups-13410-13416. The remaining gap (a staged row orphaned when acknowledge_row/finalize_authority raises and an activation covers its batch) is TASK-13431.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

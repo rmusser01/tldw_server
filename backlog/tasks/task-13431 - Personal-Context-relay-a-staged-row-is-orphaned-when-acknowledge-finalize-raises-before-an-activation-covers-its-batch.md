@@ -1,16 +1,8 @@
 ---
-id: TASK-13422
-title: >-
-  Personal Context relay: a staged row is orphaned when acknowledge/finalize
-  raises before an activation covers its batch
+id: TASK-13431
+title: 'Personal Context relay: a staged row is orphaned when acknowledge/finalize
+  raises before an activation covers its batch'
 status: To Do
-assignee: []
-created_date: '2026-10-02 18:33'
-labels:
-  - bug
-  - sync
-  - personal-context
-dependencies: []
 ---
 
 ## Description
@@ -24,6 +16,16 @@ Follow-up from TASK-13410 (#3078, landed via #3088). PersonalContextRelay._relay
 - [ ] #1 A relay or activation path finishes or compensates a staged-but-unfinished row even after its batch is covered by an activation, or activation refuses to cover a batch with a staged-unfinished row
 - [ ] #2 A regression test injects an acknowledge_row/finalize_authority failure after staging and shows later projections in the dataset still apply
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
