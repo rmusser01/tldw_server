@@ -328,9 +328,10 @@ def _reset_usage_quota_resolver_cache():
     directly may still keep their own local reset for clarity.
     """
     try:
-        from tldw_Server_API.app.core.Usage import quota_resolver
+        from tldw_Server_API.app.core.Usage import quota_checks, quota_resolver
 
         quota_resolver.invalidate_all()
+        quota_checks.reset_ledger_cache()
     except Exception:
         _ = None
     yield
