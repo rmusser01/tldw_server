@@ -14,6 +14,10 @@
 
 **Spec:** `Docs/Design/2026-10-02-usage-quota-posture-design.md` (PR A of four). PRs B, C and D get their own plans, written against the code once A lands.
 
+**As built:**
+- Tasks 3/4's raise-on-access test fakes were replaced with call-recording fakes, because the audio and workflows modules swallow `AssertionError` in their noncritical-exception tuples.
+- The commercial-mode warning fires once, at startup (one shared latch).
+
 ## Global Constraints
 
 - All PRs target `dev`. Never `main`.

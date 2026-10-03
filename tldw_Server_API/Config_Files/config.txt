@@ -824,7 +824,7 @@ search_video_search = false
 
 [Usage-Quotas]
 # Master switch for usage quotas: audio minutes, storage, chatbooks, media, workflows,
-# evaluations, and billing-plan limits (env: USAGE_QUOTAS_ENABLED; legacy env:
+# and billing-plan limits (env: USAGE_QUOTAS_ENABLED; legacy env:
 # LIMIT_ENFORCEMENT_ENABLED). Off by default: no quota applies until an operator turns
 # this on. Request rate limits are separate ([ResourceGovernor]).
 enabled = false

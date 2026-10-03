@@ -315,11 +315,12 @@ Pytest markers
 
 ## Usage Quotas
 
-Usage quotas are per-user budgets: audio minutes, storage, chatbook exports and imports, media ingest bytes and concurrency, workflow runs, evaluation caps, and billing-plan limits. They are **off by default**: a stock install, single-user or multi-user, applies none of them. Request rate limits are separate (Resource Governor, below). Design: `Docs/Design/2026-10-02-usage-quota-posture-design.md`.
+Usage quotas are per-user budgets: audio minutes, storage, chatbook exports and imports, media ingest bytes and concurrency, workflow runs, and billing-plan limits. They are **off by default**: a stock install, single-user or multi-user, applies none of them. Request rate limits are separate (Resource Governor, below). Design: `Docs/Design/2026-10-02-usage-quota-posture-design.md`.
 
-- `USAGE_QUOTAS_ENABLED`: master switch for every usage quota (`true|1|false|0`). Resolution: this env var > `LIMIT_ENFORCEMENT_ENABLED` (legacy, when set) > `config.txt` `[Usage-Quotas] enabled` > default `false`. With it off, quota checks never block, and usage is still recorded, so turning it on mid-day counts correctly.
+- `USAGE_QUOTAS_ENABLED`: master switch for every usage quota (`true|1|false|0`). Resolution: this env var > `LIMIT_ENFORCEMENT_ENABLED` (legacy, when set) > `config.txt` `[Usage-Quotas] enabled` > default `false`. With it off, quota checks never block, and usage is still recorded, so turning it on mid-day counts correctly — except media ingest bytes, which are not counted while quotas are off until a later PR.
 - `LIMIT_ENFORCEMENT_ENABLED`: **deprecated** spelling of `USAGE_QUOTAS_ENABLED`. It is honored only when `USAGE_QUOTAS_ENABLED` is unset, and logs a one-time warning. Its old default was `true`. A deploy that relied on that default must now set `USAGE_QUOTAS_ENABLED=true`.
-- Billing-plan limits additionally need a billing repository, which only the hosted product wires in. Without one, billing checks never run, even with quotas on, and accounts without an organization are never refused. If a billing repository is wired while quotas are off, the server logs a warning at startup and on the first billing check.
+- Billing-plan limits additionally need a billing repository, which only the hosted product wires in. Without one, billing checks never run, even with quotas on, and accounts without an organization are never refused. If a billing repository is wired while quotas are off, the server logs a warning once, at startup.
+- This switch does not gate evaluations. In this PR the stock Resource Governor policy simply no longer has evaluation daily caps; evaluations return to gated status in a later PR.
 
 ## Resource Governor (Unified Rate Limiting)
 

@@ -181,6 +181,7 @@ Months are calendar months in UTC.
   - the RAG transport check.
 - **Effects in OSS.** Org resolution and usage aggregation never run; orgless users never get 403; the per-user `limits.*` checks do the work. `DEFAULT_LIMITS` and the fallbacks are unchanged.
 - **With a repo wired (hosted).** Enforcement runs as today under the master switch, with the same merge base and the same plans.
+- **Nothing in this repository wires a billing repository**; a hosted deployment must add that wiring, after which the switch alone controls enforcement.
 
 ### 7. Removals
 
@@ -264,7 +265,7 @@ Four PRs against `dev`:
 
 - **PR A (relief).** Adds `usage_quotas_enabled()` and the commercial-mode warning, and gates every quota *check* (never a counter write) on the switch. It also adds the no-billing-repo short-circuit.
   - Self-hosters are relieved at once.
-  - With the switch on, behavior is unchanged from today.
+  - With the switch on and a billing repository wired, billing behavior is unchanged; evaluations daily caps return in PR B.
 - **PR B (per-user values).**
   - The resolver and the precedence rule.
   - The generic `limits.*` write path with null-as-delete, and the team/org override routes.
