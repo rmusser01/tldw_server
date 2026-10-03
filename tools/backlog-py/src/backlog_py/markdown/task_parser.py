@@ -63,6 +63,8 @@ def render_task_markdown(parsed: ParsedTaskMarkdown) -> str:
 
 @dataclass
 class _Block:
+    """One top-level SECTION being rebuilt: a segment per occurrence, merged on render."""
+
     name: str
     segments: list[list[str]]
     touched: bool = False
@@ -132,6 +134,7 @@ def normalize_task_markdown(source: str) -> str:
 
 
 def _match_section_marker(line: str) -> tuple[str, str] | None:
+    """Return (section name, "BEGIN" or "END") for a SECTION marker line, else None."""
     begin = _SECTION_BEGIN_RE.match(line)
     if begin:
         return begin.group("name"), "BEGIN"
@@ -142,6 +145,7 @@ def _match_section_marker(line: str) -> tuple[str, str] | None:
 
 
 def _drop_trailing_heading(items: list[str | _Block], name: str) -> None:
+    """Remove a repeated section's own heading (and blank lines after it) before merging."""
     for index in range(len(items) - 1, -1, -1):
         item = items[index]
         if not isinstance(item, str):
@@ -153,6 +157,7 @@ def _drop_trailing_heading(items: list[str | _Block], name: str) -> None:
 
 
 def _render_body(items: list[str | _Block], newline: str) -> str:
+    """Render text lines and blocks, collapsing blank-line runs left by removed markers."""
     out: list[str] = []
     for item in items:
         if isinstance(item, _Block):
@@ -165,6 +170,7 @@ def _render_body(items: list[str | _Block], newline: str) -> str:
 
 
 def _block_content(block: _Block, newline: str) -> str:
+    """Return untouched content verbatim; join flattened or merged segments with a blank line."""
     if not block.touched:
         return "".join(block.segments[0])
     parts = ["".join(_trim_blank_lines(segment)) for segment in block.segments]
@@ -172,6 +178,7 @@ def _block_content(block: _Block, newline: str) -> str:
 
 
 def _trim_blank_lines(lines: list[str]) -> list[str]:
+    """Drop leading and trailing blank lines from a segment."""
     start, end = 0, len(lines)
     while start < end and not lines[start].strip():
         start += 1

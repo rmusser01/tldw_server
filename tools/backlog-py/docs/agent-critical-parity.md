@@ -61,6 +61,7 @@ rows cover these agent-used options (TASK-13440):
 | remove criterion | `--remove-ac N` (repeatable) | `acceptanceCriteriaRemove` | 1-based; out of range is rejected before any write. |
 | retitle | `-t/--title` | `title` | Updates frontmatter and renames the task file. |
 | replace notes | `--notes` | `notesSet` | On create, sets the initial notes. |
+| append notes | `--append-notes` (repeatable, in order) | `notesAppend` | A list appends each item on its own line. |
 | dependencies | `--dep/--depends-on a,b` (repeatable) | `dependencies` | Missing or circular ids are rejected. |
 
 `task normalize [--check] [path...]` is a backlog-py maintenance command with no

@@ -150,7 +150,7 @@ class MutableRepository(ReadOnlyRepository):
         title: str | None = None,
         description: str | None = None,
         notes: str | None = None,
-        append_notes: str | None = None,
+        append_notes: str | Sequence[str] | None = None,
         final_summary: str | None = None,
         add_ac: Sequence[str] | None = None,
         remove_ac: Sequence[int] | None = None,
@@ -163,7 +163,11 @@ class MutableRepository(ReadOnlyRepository):
         status: str | None = None,
         on_status_change: bool | None = None,
     ) -> TaskRecord:
-        """Edit a task; indexes in check/uncheck refer to criteria after removals and additions."""
+        """Edit a task in place, normalizing the file first.
+
+        ``append_notes`` may be one text or several, appended in order. Indexes in
+        check/uncheck refer to criteria after removals and additions.
+        """
         _reject_on_status_change(on_status_change)
         if title is not None and not title.strip():
             raise TaskMutationError("Task title must not be empty")
@@ -175,7 +179,10 @@ class MutableRepository(ReadOnlyRepository):
             _reject_missing_dependencies(normalized_dependencies, tasks)
             _reject_circular_dependencies(task.id, normalized_dependencies, tasks)
         # Edits always leave the file canonical, so backlog-py never writes a second notes block.
-        source = normalize_task_markdown(task.raw_source)
+        try:
+            source = normalize_task_markdown(task.raw_source)
+        except ValueError as exc:
+            raise TaskMutationError(f"{task.path.name}: {exc}") from exc
         parsed = parse_task_markdown(source)
         if description is not None:
             source = _replace_section(source, parsed, "DESCRIPTION", _normalize_block(description))
@@ -183,10 +190,11 @@ class MutableRepository(ReadOnlyRepository):
         if notes is not None:
             source = _replace_section(source, parsed, "IMPLEMENTATION_NOTES", _normalize_block(notes))
             parsed = parse_task_markdown(source)
-        if append_notes is not None:
+        appends = [append_notes] if isinstance(append_notes, str) else list(append_notes or ())
+        for append in appends:
             existing_notes = parsed.sections.get("IMPLEMENTATION_NOTES")
             existing_content = "" if existing_notes is None else existing_notes.content.rstrip()
-            appended = _normalize_block(append_notes)
+            appended = _normalize_block(append)
             notes_content = appended if not existing_content else f"{existing_content}\n{appended}"
             source = _replace_section(source, parsed, "IMPLEMENTATION_NOTES", notes_content)
             parsed = parse_task_markdown(source)
@@ -233,9 +241,14 @@ class MutableRepository(ReadOnlyRepository):
         return _load_task(target)
 
     def normalize_tasks(self, paths: Sequence[Path] | None = None, *, check: bool = False) -> list[Path]:
-        """Rewrite task files into canonical form; return the files that changed (or would)."""
+        """Rewrite task files into canonical form; return the files that changed (or would).
+
+        Relative paths are relative to the project root, the form ``--check`` prints.
+        """
         if paths:
-            targets = [_mutation_path(self.project.backlog_dir, Path(path)) for path in paths]
+            targets = [
+                _mutation_path(self.project.backlog_dir, self.project.root / Path(path)) for path in paths
+            ]
         else:
             targets = sorted((self.project.backlog_dir / "tasks").glob("*.md"))
         changed: list[Path] = []
@@ -403,6 +416,7 @@ def _edit_checklist(
     remove: Sequence[int],
     add: Sequence[str],
 ) -> str:
+    """Remove items by 1-based index (with their wrapped lines), append new ones, renumber."""
     item_count = len(parsed.checklists.get(marker, []))
     for index in remove:
         if index < 1 or index > item_count:
@@ -413,13 +427,17 @@ def _edit_checklist(
     newline = begin[len(begin.rstrip("\r\n")):]
     kept: list[str] = []
     item_number = 0
+    removing = False
     for line in lines:
         if _CHECKLIST_LINE_RE.match(line.rstrip("\r\n")):
             item_number += 1
-            if item_number in remove:
-                continue
-        kept.append(line)
-    kept.extend(f"- [ ] #0 {item.strip()}{newline}" for item in add)
+            removing = item_number in remove
+        elif not _is_continuation(line):
+            removing = False
+        if not removing:
+            kept.append(line)
+    for item in add:
+        kept.extend(_render_criterion(0, item, newline).splitlines(keepends=True))
     rendered: list[str] = []
     item_number = 0
     for line in kept:
@@ -464,7 +482,19 @@ def _set_checklist_line(line: str, *, checked: bool) -> str:
 
 
 def _render_checklist(items: Sequence[str]) -> str:
-    return "".join(f"- [ ] #{index} {item}\n" for index, item in enumerate(items, start=1))
+    """Render a new checklist block body, numbering items from 1."""
+    return "".join(_render_criterion(index, item, "\n") for index, item in enumerate(items, start=1))
+
+
+def _render_criterion(number: int, text: str, newline: str) -> str:
+    """Render one unchecked item; extra lines of a multi-line item become indented continuations."""
+    first, *rest = [line.strip() for line in text.strip().splitlines() if line.strip()] or [""]
+    return f"- [ ] #{number} {first}{newline}" + "".join(f"  {line}{newline}" for line in rest)
+
+
+def _is_continuation(line: str) -> bool:
+    """A non-blank indented line inside a checklist block continues the item above it."""
+    return bool(line.strip()) and line[:1] in (" ", "\t")
 
 
 def _definition_of_done_for_create(
@@ -486,6 +516,7 @@ def _normalize_block(content: str) -> str:
 
 
 def _render_block(content: str) -> str:
+    """Render section content for a new task: stripped text plus newline, or nothing."""
     block = _normalize_block(content)
     return f"{block}\n" if block else ""
 

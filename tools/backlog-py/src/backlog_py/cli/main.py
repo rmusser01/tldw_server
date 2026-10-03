@@ -36,7 +36,7 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.option("--ac", "add_ac", multiple=True, help="Add an acceptance criterion (repeatable).")
 @click.option("--remove-ac", multiple=True, type=int, help="Remove acceptance criterion by 1-based index (edit).")
 @click.option("--notes", default=None, help="Implementation notes; on edit, replaces them.")
-@click.option("--append-notes", default=None, help="Append text to implementation notes.")
+@click.option("--append-notes", multiple=True, help="Append text to implementation notes (repeatable, in order).")
 @click.option(
     "--check-ac", multiple=True, type=int, help="Mark acceptance criteria index complete (after --remove-ac/--ac)."
 )
@@ -59,7 +59,7 @@ def task_command(
     add_ac: tuple[str, ...],
     remove_ac: tuple[int, ...],
     notes: str | None,
-    append_notes: str | None,
+    append_notes: tuple[str, ...],
     check_ac: tuple[int, ...],
     check_dod: tuple[int, ...],
     uncheck_ac: tuple[int, ...],
@@ -324,10 +324,12 @@ def _milestone_service(ctx: click.Context) -> MilestoneService:
 
 
 def _split_csv(values: tuple[str, ...]) -> list[str]:
+    """Flatten repeated, comma-separated option values into trimmed, non-empty items."""
     return [part.strip() for value in values for part in value.split(",") if part.strip()]
 
 
 def _display_path(project: BacklogProject, path: Path) -> str:
+    """Show a path relative to the project root when it is inside it."""
     resolved = path.resolve()
     root = project.root.resolve()
     return resolved.relative_to(root).as_posix() if resolved.is_relative_to(root) else str(path)

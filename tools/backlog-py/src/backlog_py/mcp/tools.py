@@ -58,11 +58,11 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
     repository = MutableRepository(project)
     task = repository.edit_task(
         task_id,
-        title=_optional_string(kwargs.get("title")),
-        description=_optional_string(kwargs.get("description")),
-        notes=_optional_string(_get_alias(kwargs, "notesSet", "notes")),
-        append_notes=_optional_string(_get_alias(kwargs, "notesAppend", "appendNotes", "append_notes")),
-        final_summary=_optional_string(_get_alias(kwargs, "finalSummary", "final_summary")),
+        title=_optional_string(kwargs.get("title"), "title"),
+        description=_optional_string(kwargs.get("description"), "description"),
+        notes=_optional_text(_get_alias(kwargs, "notesSet", "notes"), "notesSet"),
+        append_notes=_optional_text(_get_alias(kwargs, "notesAppend", "appendNotes", "append_notes"), "notesAppend"),
+        final_summary=_optional_text(_get_alias(kwargs, "finalSummary", "final_summary"), "finalSummary"),
         add_ac=_string_list(_get_alias(kwargs, "acceptanceCriteriaAdd", "addAc", "add_ac")),
         remove_ac=_int_list(_get_alias(kwargs, "acceptanceCriteriaRemove", "removeAc", "remove_ac")),
         check_ac=_int_list(_get_alias(kwargs, "acceptanceCriteriaCheck", "checkAc", "check_ac")),
@@ -71,7 +71,7 @@ def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str,
         uncheck_dod=_int_list(_get_alias(kwargs, "uncheckDod", "uncheck_dod")),
         dependencies=_string_list(kwargs.get("dependencies")) if "dependencies" in kwargs else None,
         labels=_string_list(kwargs.get("labels")) if "labels" in kwargs else None,
-        status=_optional_string(kwargs.get("status")),
+        status=_optional_string(kwargs.get("status"), "status"),
         on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
     )
     return _task_detail(project, task)
@@ -206,10 +206,20 @@ def _fresh_project(project: BacklogProject) -> BacklogProject:
     )
 
 
-def _optional_string(value: Any) -> str | None:
+def _optional_string(value: Any, field: str = "value") -> str | None:
+    """Return a scalar as text; reject containers rather than writing their repr to disk."""
     if value is None:
         return None
+    if isinstance(value, (list, tuple, set, dict)):
+        raise TypeError(f"{field} must be text, not {type(value).__name__}")
     return str(value)
+
+
+def _optional_text(value: Any, field: str) -> str | None:
+    """Accept text or a list of texts, one per line, for notes and summaries."""
+    if isinstance(value, (list, tuple)):
+        return "\n".join(_optional_string(item, field) or "" for item in value)
+    return _optional_string(value, field)
 
 
 def _optional_bool(value: Any) -> bool | None:

@@ -17,12 +17,14 @@ import pytest
 from backlog_py.cli.main import main
 from backlog_py.core.repository import MutableRepository, TaskMutationError
 from backlog_py.markdown.task_parser import normalize_task_markdown, parse_task_markdown
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
 FIXTURES = Path(__file__).parent / "fixtures" / "repos"
 MIXED_REPO = FIXTURES / "mixed"
 MIXED_TASKS = sorted((MIXED_REPO / "backlog" / "tasks").glob("*.md"))
 CANONICAL_TASK = FIXTURES / "basic" / "backlog" / "tasks" / "task-1 - Example-task.md"
+
+pytestmark = pytest.mark.unit
 
 _SECTION_MARKER = re.compile(r"^<!-- SECTION:(?P<name>[A-Z0-9_ -]+):(?P<edge>BEGIN|END) -->\s*$")
 # Headings of a repeated notes block disappear when the block merges into the first one.
@@ -48,11 +50,11 @@ def _copy_mixed(tmp_path: Path) -> Path:
     return repo
 
 
-def _invoke(repo: Path, *args: str):
+def _invoke(repo: Path, *args: str) -> Result:
     return CliRunner().invoke(main, ["--cwd", str(repo), *args])
 
 
-def test_every_mixed_fixture_needs_normalization():
+def test_every_mixed_fixture_needs_normalization() -> None:
     assert len(MIXED_TASKS) == 7
     for path in MIXED_TASKS:
         source = _read(path)
@@ -60,7 +62,7 @@ def test_every_mixed_fixture_needs_normalization():
 
 
 @pytest.mark.parametrize("path", MIXED_TASKS, ids=lambda path: path.name.split(" - ")[0])
-def test_normalized_task_has_one_canonical_block_per_section(path: Path):
+def test_normalized_task_has_one_canonical_block_per_section(path: Path) -> None:
     normalized = normalize_task_markdown(_read(path))
 
     assert "SECTION:NOTES:" not in normalized
@@ -78,7 +80,7 @@ def test_normalized_task_has_one_canonical_block_per_section(path: Path):
 
 
 @pytest.mark.parametrize("path", MIXED_TASKS, ids=lambda path: path.name.split(" - ")[0])
-def test_normalize_is_lossless_and_keeps_frontmatter_bytes(path: Path):
+def test_normalize_is_lossless_and_keeps_frontmatter_bytes(path: Path) -> None:
     source = _read(path)
     normalized = normalize_task_markdown(source)
 
@@ -94,19 +96,19 @@ def test_normalize_is_lossless_and_keeps_frontmatter_bytes(path: Path):
 
 
 @pytest.mark.parametrize("path", MIXED_TASKS, ids=lambda path: path.name.split(" - ")[0])
-def test_normalize_is_idempotent(path: Path):
+def test_normalize_is_idempotent(path: Path) -> None:
     once = normalize_task_markdown(_read(path))
 
     assert normalize_task_markdown(once) == once
 
 
-def test_canonical_task_is_returned_unchanged():
+def test_canonical_task_is_returned_unchanged() -> None:
     source = _read(CANONICAL_TASK)
 
     assert normalize_task_markdown(source) == source
 
 
-def test_nested_notes_keep_inner_text_before_outer_text():
+def test_nested_notes_keep_inner_text_before_outer_text() -> None:
     path = next(path for path in MIXED_TASKS if path.name.startswith("task-12849 "))
     notes = parse_task_markdown(normalize_task_markdown(_read(path))).sections["IMPLEMENTATION_NOTES"].content
 
@@ -114,7 +116,7 @@ def test_nested_notes_keep_inner_text_before_outer_text():
     assert notes.index("- Follow-up verification recorded") < notes.index("Quality review follow-up:")
 
 
-def test_repeated_notes_block_merges_into_the_first_in_document_order():
+def test_repeated_notes_block_merges_into_the_first_in_document_order() -> None:
     path = next(path for path in MIXED_TASKS if path.name.startswith("task-10003 "))
     normalized = normalize_task_markdown(_read(path))
     notes = parse_task_markdown(normalized).sections["IMPLEMENTATION_NOTES"].content
@@ -123,7 +125,7 @@ def test_repeated_notes_block_merges_into_the_first_in_document_order():
     assert normalized.index("SECTION:IMPLEMENTATION_NOTES:END") < normalized.index("## Final Summary")
 
 
-def test_duplicated_final_summary_markers_collapse_and_keep_text():
+def test_duplicated_final_summary_markers_collapse_and_keep_text() -> None:
     path = next(path for path in MIXED_TASKS if path.name.startswith("task-12049 "))
     source = _read(path)
     normalized = normalize_task_markdown(source)
@@ -134,7 +136,7 @@ def test_duplicated_final_summary_markers_collapse_and_keep_text():
     assert normalized.count("<!-- SECTION:FINAL_SUMMARY:END -->") == 1
 
 
-def test_crossed_section_markers_are_rejected():
+def test_crossed_section_markers_are_rejected() -> None:
     source = (
         "---\nid: TASK-9\n---\n\n"
         "<!-- SECTION:NOTES:BEGIN -->\n"
@@ -148,7 +150,7 @@ def test_crossed_section_markers_are_rejected():
         normalize_task_markdown(source)
 
 
-def test_cli_check_lists_files_without_writing(tmp_path):
+def test_cli_check_lists_files_without_writing(tmp_path: Path) -> None:
     repo = _copy_mixed(tmp_path)
     before = {path.name: _read(path) for path in (repo / "backlog" / "tasks").glob("*.md")}
 
@@ -160,7 +162,7 @@ def test_cli_check_lists_files_without_writing(tmp_path):
     assert {path.name: _read(path) for path in (repo / "backlog" / "tasks").glob("*.md")} == before
 
 
-def test_cli_normalize_rewrites_then_check_is_clean(tmp_path):
+def test_cli_normalize_rewrites_then_check_is_clean(tmp_path: Path) -> None:
     repo = _copy_mixed(tmp_path)
 
     rewrite = _invoke(repo, "task", "normalize")
@@ -174,7 +176,7 @@ def test_cli_normalize_rewrites_then_check_is_clean(tmp_path):
         assert "SECTION:NOTES:" not in _read(path)
 
 
-def test_cli_normalize_accepts_explicit_paths(tmp_path):
+def test_cli_normalize_accepts_explicit_paths(tmp_path: Path) -> None:
     repo = _copy_mixed(tmp_path)
     target = next((repo / "backlog" / "tasks").glob("task-12049 *.md"))
 
@@ -184,7 +186,7 @@ def test_cli_normalize_accepts_explicit_paths(tmp_path):
     assert result.output.splitlines() == [f"backlog/tasks/{target.name}"]
 
 
-def test_normalize_rejects_paths_outside_the_backlog(tmp_path):
+def test_normalize_rejects_paths_outside_the_backlog(tmp_path: Path) -> None:
     repo = _copy_mixed(tmp_path)
     outside = tmp_path / "outside.md"
     outside.write_text(_read(MIXED_TASKS[0]), encoding="utf-8")
@@ -195,7 +197,7 @@ def test_normalize_rejects_paths_outside_the_backlog(tmp_path):
     assert outside.read_text(encoding="utf-8") == _read(MIXED_TASKS[0])
 
 
-def test_edit_normalizes_node_notes_before_appending(tmp_path):
+def test_edit_normalizes_node_notes_before_appending(tmp_path: Path) -> None:
     repo = _copy_mixed(tmp_path)
 
     MutableRepository.from_path(repo).edit_task("TASK-10003", append_notes="Appended by backlog-py.")
@@ -205,3 +207,13 @@ def test_edit_normalizes_node_notes_before_appending(tmp_path):
     assert written.count("<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->") == 1
     notes = parse_task_markdown(written).sections["IMPLEMENTATION_NOTES"].content
     assert notes.index("Touched files:") < notes.index("PR #2459") < notes.index("Appended by backlog-py.")
+
+
+def test_cli_normalize_resolves_relative_paths_against_the_project(tmp_path: Path) -> None:
+    repo = _copy_mixed(tmp_path)
+    name = next((repo / "backlog" / "tasks").glob("task-12049 *.md")).name
+
+    result = _invoke(repo, "task", "normalize", "--check", f"backlog/tasks/{name}")
+
+    assert result.exit_code == 1, result.output
+    assert result.output.splitlines() == [f"backlog/tasks/{name}"]
