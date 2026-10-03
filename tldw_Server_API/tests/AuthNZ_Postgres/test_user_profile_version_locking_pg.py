@@ -275,8 +275,12 @@ async def test_reciprocal_admin_bulk_membership_updates_lock_users_without_deadl
         pool = test_db_pool.pool
 
         @asynccontextmanager
-        async def transaction(self):
-            async with test_db_pool.transaction(acquire_timeout_seconds=5.0) as conn:
+        async def transaction(self, *, acquire_timeout_seconds: float | None = None):
+            async with test_db_pool.transaction(
+                acquire_timeout_seconds=(
+                    5.0 if acquire_timeout_seconds is None else acquire_timeout_seconds
+                ),
+            ) as conn:
                 await conn.execute("SET LOCAL lock_timeout = '5s'")
                 yield conn
 

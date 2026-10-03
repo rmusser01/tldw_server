@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.core.exceptions import BadRequestError
 from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import McpHubRepo
+from tldw_Server_API.app.core.exceptions import BadRequestError
 
 pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
@@ -698,9 +698,11 @@ async def test_service_audits_slot_binding_with_privilege_metadata(tmp_path, mon
 async def test_service_rejects_binding_managed_secret_ref_from_different_scope(tmp_path, monkeypatch) -> None:
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
     from tldw_Server_API.app.core.AuthNZ.secret_backends.local_encrypted import LocalEncryptedSecretBackend
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_hub_service import McpHubService
+    from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
     db_path = tmp_path / "users.db"
     monkeypatch.setenv("AUTH_MODE", "multi_user")
@@ -712,6 +714,10 @@ async def test_service_rejects_binding_managed_secret_ref_from_different_scope(t
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
+    actor_id = await ensure_test_user(pool, "scope-admin", role="admin")
+    orgs = AuthnzOrgsTeamsRepo(pool)
+    profile_org = await orgs.create_organization(name="Profile org", slug="profile-org")
+    secret_org = await orgs.create_organization(name="Secret org", slug="secret-org")
     repo = McpHubRepo(pool)
     await repo.ensure_tables()
     svc = McpHubService(repo=repo)
@@ -719,10 +725,10 @@ async def test_service_rejects_binding_managed_secret_ref_from_different_scope(t
     profile = await repo.create_permission_profile(
         name="External Docs",
         owner_scope_type="org",
-        owner_scope_id=7,
+        owner_scope_id=int(profile_org["id"]),
         mode="custom",
         policy_document={"capabilities": ["network.external"]},
-        actor_id=7,
+        actor_id=actor_id,
     )
     await svc.create_external_server(
         server_id="docs",
@@ -732,15 +738,15 @@ async def test_service_rejects_binding_managed_secret_ref_from_different_scope(t
         owner_scope_type="global",
         owner_scope_id=None,
         enabled=True,
-        actor_id=7,
+        actor_id=actor_id,
     )
     managed_ref = await LocalEncryptedSecretBackend(db_pool=pool).store_ref(
         owner_scope_type="org",
-        owner_scope_id=42,
+        owner_scope_id=int(secret_org["id"]),
         provider_key="docs-token",
         payload={"api_key": "secret-token"},
-        created_by=7,
-        updated_by=7,
+        created_by=actor_id,
+        updated_by=actor_id,
     )
 
     with pytest.raises(BadRequestError, match="different owner scope"):
@@ -748,5 +754,5 @@ async def test_service_rejects_binding_managed_secret_ref_from_different_scope(t
             profile_id=int(profile["id"]),
             external_server_id="docs",
             managed_secret_ref_id=int(managed_ref["id"]),
-            actor_id=7,
+            actor_id=actor_id,
         )
