@@ -509,6 +509,8 @@ export type ExportProgressState = {
   fetchedNotes: number
   fetchedPages: number
   failedBatches: number
+  /** Matching notes the server reported, once the first page has arrived. */
+  totalNotes?: number | null
 }
 export type NotesListViewMode = 'list' | 'timeline' | 'inbox' | 'moodboard' | 'graph'
 export const resolveNotesGraphFocusNoteId = <
