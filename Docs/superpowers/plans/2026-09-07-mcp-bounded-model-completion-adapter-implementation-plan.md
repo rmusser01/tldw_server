@@ -170,7 +170,15 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 **Tests:** SQLite/PostgreSQL migration and repository tests, concurrent reservation races, integer overflow, pre/post-dispatch cancellation, idempotent transitions, monthly quota with outstanding reservations, Resource Governor release parity.
 
-**Status:** Not Started
+**Status:** In Progress
+
+**ADR check (2026-10-02):** ADR required: yes. [ADR-059](../../ADR/059-mcp-durable-provider-accounting.md) records durable conservative admission/dispatch/settlement. ADR-018 and ADR-056 continue to govern the existing Resource Governor policy.
+
+**Revalidation adjustment (2026-10-02):** Acquire the durable scope lock before reading uncached canonical actual usage, not only before summing reservations. The repository accepts a required snapshot-reader callback on the transaction connection, preventing stale snapshots from missing a just-reconciled MCP call. Settlement takes the same lock. All unresolved reservations remain chargeable regardless of age; billing-period reset cannot erase an ambiguous dispatch. Legacy Chat is not coordinated by this lock.
+
+**Precision adjustment (2026-10-02):** Keep `llm_usage_log` as the canonical completed-call/period record, but join its MCP execution ID to the atomically reconciled reservation for exact integer cost actuals. Tests at the signed-integer ceiling showed that reconstructing those units from legacy floating-point USD can overflow or lose units. Missing/inconsistent MCP settlement fails closed.
+
+**Specification-review adjustments (2026-10-02):** Use the existing `jobs` governor concurrency category with one unit; `provider_calls` is not a supported lease category. Read DB-backed subscription limits through the supplied transaction connection to avoid nested-pool starvation. Attempt known pre-dispatch governor cleanup independently of durable-release availability. Local release/dispatch markers make those boundaries mutually exclusive, and the durable transition fence prevents post-dispatch refunds. A failed release cannot later dispatch using a refunded governor handle.
 
 ### Task 3.1: Add the provider usage reservation state machine
 
@@ -183,8 +191,8 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 1. Write migration and repository tests before adding the table. The row key is the opaque `execution_id`; stored fields are authenticated user ID, optional active team/organization IDs, explicit billing scope, provider/model identifiers, reserved/actual input and output token ceilings, reserved/actual integer cost units, timestamps, and state. Never store prompt, completion, credentials, headers, raw provider usage, or request metadata. In the same migration, add nullable `llm_usage_log.billing_org_id` and a partial unique index for non-null execution IDs where `operation = 'mcp_model_completion'`.
 2. Implement monotonic compare-and-set transitions: `reserved -> released`, `reserved -> dispatched`, `dispatched -> reconciled`, and `dispatched -> ambiguous`. Allow idempotent replay of the same transition, but reject rollback and conflicting actual values.
-3. Keep `reserved`, `dispatched`, and `ambiguous` rows in the outstanding total. Reconciled rows are audit/recovery records; the normal `llm_usage_log` remains the canonical actual-usage record. Add indexes for billing scope/time/state and a uniqueness constraint on execution ID.
-4. Implement one transaction that serializes MCP admissions for a billing scope, adds current outstanding reservations to a caller-supplied fail-closed Billing snapshot, checks integer overflow, and inserts the worst-case reservation. User-scoped calls without an organization use the authenticated user scope. Document that this closes races among MCP completions but cannot make legacy Chat calls transactional until those calls adopt the same reservation API.
+3. Keep `reserved`, `dispatched`, and `ambiguous` rows in the outstanding total. Reconciled rows are audit/recovery records; the normal `llm_usage_log` remains the canonical actual-usage record. Add an index for exact billing scope/state and a uniqueness constraint on execution ID. Canonical usage already indexes time for monthly checks; unresolved reservations must not be filtered by age. Add a reservation-time index only when a concrete time-filtered audit/recovery query requires one.
+4. Implement one transaction that serializes MCP admissions for a billing scope, obtains a caller-supplied fail-closed Billing snapshot reader on that locked connection, adds current outstanding reservations, checks integer overflow, and inserts the worst-case reservation. Calls without an organization use the exact active team when supplied, otherwise the authenticated user scope. Document that this closes races among MCP completions but cannot make legacy Chat calls transactional until those calls adopt the same reservation API.
 5. Prove two concurrent requests cannot both pass the final unit of quota. Prove a restart can find and conservatively retain dispatched/ambiguous rows.
 6. Commit: `feat(mcp): add durable provider usage reservations`
 
@@ -210,18 +218,19 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_accounting.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/repos/usage_repo.py`
 - Modify: `tldw_Server_API/app/core/Billing/enforcement.py`
+- Modify: `tldw_Server_API/app/core/Billing/subscription_service.py` and `tldw_Server_API/app/core/AuthNZ/repos/billing_repo.py` for strict connection-bound limits
 - Modify: `tldw_Server_API/tests/Billing/test_billing_enforcer_org_usage.py`
 - Modify focused usage-repository tests under `tldw_Server_API/tests/AuthNZ_Unit/` and `tldw_Server_API/tests/AuthNZ/integration/`
 
 1. Write failing tests around a `ModelCompletionAccounting` service with explicit `reserve`, `mark_dispatched`, `release_before_dispatch`, `reconcile`, and `retain_ambiguous` operations.
 2. Calculate worst-case tokens with checked integer arithmetic from conservative prompt UTF-8 bytes plus configured maximum output tokens. Calculate integer cost units using cost-unit weights and provider/model pricing captured by value at factory construction; never re-read mutable environment pricing or trust provider-returned prices during reconciliation.
-3. Obtain a fail-closed, non-stale Billing snapshot for an explicit active organization when present; otherwise use the exact active team or authenticated user as the durable quota scope. Then require both the durable repository reservation and Resource Governor rate/concurrency admission before dispatch. If any required service is unavailable or denies admission, unwind only the pre-dispatch work already acquired and return a sanitized failure with trusted provenance.
+3. Obtain a fail-closed, non-stale Billing snapshot on the supplied transaction connection for an explicit active organization when present; otherwise use the exact active team or authenticated user as the durable quota scope. Then require both the durable repository reservation and Resource Governor rate/concurrency admission before dispatch, using the supported `jobs` lease category and matching policy. If any required service is unavailable or denies admission, unwind only the pre-dispatch work already acquired and return a sanitized failure with trusted provenance.
 4. On pre-dispatch cancellation/error, explicitly reconcile governor actuals to zero and transition the durable row to `released`. Once dispatch is marked, cancellation, timeout, transport uncertainty, or a failed accounting write keeps the durable row conservative.
 5. Extend `llm_usage_log` with nullable explicit `billing_org_id` attribution and preserve `None` for legacy callers. Update Billing aggregation to prefer that explicit scope and use existing primary-organization/API-key attribution only when it is absent.
 6. On a valid response, use one strict transaction that locks/rechecks a `dispatched` reservation, idempotently inserts the normal `llm_usage_log` record under operation `mcp_model_completion` and server execution ID, then transitions the reservation to `reconciled`. Add a partial uniqueness rule for that operation/execution pair as defense in depth. The transaction must refuse reconciliation after an `ambiguous` transition, preventing a contained late child from publishing usage. Use bounded trusted provider counts when available and conservative estimated ceilings otherwise; do not retain raw usage metadata.
 7. Return the valid normalized result even if strict post-call usage persistence, reservation transition, governor commit, or credential `mark_used` fails. Leave the reservation active/ambiguous, which may conservatively double-count an already-written usage row, and emit only bounded operational logging.
 8. Include outstanding MCP reservations in Billing enforcement in addition to canonical `llm_usage_log` actuals. Reconciled reservation rows are excluded, preventing normal success from double counting. Do not claim atomic coordination with unrelated legacy Chat calls.
-7. Commit: `feat(mcp): enforce conservative completion accounting`
+9. Commit: `feat(mcp): enforce conservative completion accounting`
 
 ## Stage 4: Certified Async Transport And Adapter Lifecycle
 

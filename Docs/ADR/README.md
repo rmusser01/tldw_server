@@ -113,5 +113,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-085](085-authnz-membership-writer-transaction-and-version-ownership.md) | Accepted | Centralize runtime organization/team membership writes behind ordered locks, transaction-local authorization, and explicit profile-version ownership. |
 
 | [ADR-058](058-authoritative-provider-credential-scope.md) | Proposed | Resolve bounded MCP provider credentials from exact authenticated scope, advance only on authoritative absence, and freeze endpoint settings. |
+| [ADR-059](059-mcp-durable-provider-accounting.md) | Proposed | Reserve MCP provider exposure durably before dispatch and serialize conservative admission and settlement on explicit billing scope. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.
