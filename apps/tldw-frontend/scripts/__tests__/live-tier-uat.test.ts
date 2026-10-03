@@ -253,8 +253,25 @@ describe("live Tier UAT reporting", () => {
     })
 
     expect(summary).toEqual({
-      "tier-1": { passed: 1, failed: 1, skipped: 0, interrupted: 0, elapsedMs: 23 },
-      "tier-2": { passed: 0, failed: 0, skipped: 1, interrupted: 1, elapsedMs: 3 },
+      "tier-1": { passed: 1, failed: 1, skipped: 0, interrupted: 0, expectedFailures: 0, elapsedMs: 23 },
+      "tier-2": { passed: 0, failed: 0, skipped: 1, interrupted: 1, expectedFailures: 0, elapsedMs: 3 },
+    })
+  })
+
+  it("counts test.fail() expected failures separately and an unexpected pass as a failure", () => {
+    const summary = summarizePlaywrightReport({
+      suites: [{
+        title: "suite",
+        specs: [
+          { title: "known defect", tests: [{ projectName: "ux-regression", status: "expected", expectedStatus: "failed", results: [{ status: "failed", duration: 7 }] }] },
+          { title: "fixed defect", tests: [{ projectName: "ux-regression", status: "unexpected", expectedStatus: "failed", results: [{ status: "passed", duration: 5 }] }] },
+          { title: "harness", tests: [{ projectName: "ux-regression", status: "expected", expectedStatus: "passed", results: [{ status: "passed", duration: 3 }] }] },
+        ],
+      }],
+    })
+
+    expect(summary).toEqual({
+      "ux-regression": { passed: 1, failed: 1, skipped: 0, interrupted: 0, expectedFailures: 1, elapsedMs: 15 },
     })
   })
 
@@ -284,14 +301,14 @@ describe("live Tier UAT reporting", () => {
       runId: "run-1",
       commit: "abc123",
       listed: { "tier-1": 2 },
-      results: { "tier-1": { passed: 2, failed: 0, skipped: 0, interrupted: 0, elapsedMs: 45 } },
+      results: { "tier-1": { passed: 2, failed: 0, skipped: 0, interrupted: 0, expectedFailures: 0, elapsedMs: 45 } },
       inventory: [{ project: "tier-1", kind: "intercepted", file: "one.spec.ts", line: 3, matcher: "**/api/v1/x", test: "mocked" }],
       health: { before: true, after: true },
       artifacts: { root: "/tmp/run-1" },
       skippedTests: [{ project: "tier-2", title: "skipped flow", reason: "no fixture" }],
     })
 
-    expect(markdown).toContain("| tier-1 | 2 | 2 | 0 | 0 | 1 | 1 |")
+    expect(markdown).toContain("| tier-1 | 2 | 2 | 0 | 0 | 0 | 1 | 1 |")
     expect(markdown).toContain("Health before tests: healthy")
     expect(markdown).toContain("`/tmp/run-1`")
     expect(markdown).toContain("skipped flow")
@@ -309,7 +326,8 @@ describe("live Tier UAT runner contract", () => {
       failOnSkip: true,
     })
     expect(parseArgs(["--allow-skips"]).failOnSkip).toBe(false)
-    expect(() => parseArgs(["--projects=tier-4"])).toThrow(/tier-1, tier-2, or tier-3/)
+    expect(() => parseArgs(["--projects=tier-4"])).toThrow(/tier-1, tier-2, tier-3, or ux-regression/)
+    expect(parseArgs(["--projects=ux-regression"]).projects).toEqual(["ux-regression"])
   })
 
   it("builds retry-free Playwright commands with offline fallback disabled", () => {
@@ -543,6 +561,14 @@ describe("live Tier UAT runner contract", () => {
         "tier-1": { passed: 0, failed: 1, skipped: 0, interrupted: 0, elapsedMs: 10 },
       },
     })).toThrow(/tier-1.*failed 1/i)
+
+    expect(() => assertProjectAccounting({
+      projects: ["ux-regression"],
+      listed: { "ux-regression": 2 },
+      results: {
+        "ux-regression": { passed: 1, failed: 0, skipped: 0, interrupted: 0, expectedFailures: 1, elapsedMs: 10 },
+      },
+    })).not.toThrow()
   })
 
   it("never labels development-server diagnostic runs as release certification", () => {
@@ -623,6 +649,18 @@ describe("live Tier UAT runner contract", () => {
     expect(() => assertOnlyLoopbackHttpRequests(
       '"url.full": "http://192.168.2.235:5000/v1/models"'
     )).toThrow(/non-loopback HTTP request.*192\.168\.2\.235/i)
+  })
+
+  it("accepts the backend's redacted observability placeholder but no other .invalid host", () => {
+    // tldw_Server_API/app/core/http_client.py logs sensitive requests under this
+    // unresolvable placeholder instead of their real (loopback) URL.
+    expect(() => assertOnlyLoopbackHttpRequests(
+      '"url.full": "https://sensitive-endpoint.invalid"'
+    )).not.toThrow()
+
+    expect(() => assertOnlyLoopbackHttpRequests(
+      '"url.full": "https://exfil.invalid/v1/models"'
+    )).toThrow(/non-loopback HTTP request.*exfil\.invalid/i)
   })
 
   it("exposes the package command documented by the certification plan", () => {
