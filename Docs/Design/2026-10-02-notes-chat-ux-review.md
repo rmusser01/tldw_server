@@ -2,6 +2,8 @@
 
 **dev @ 86e287fee7 · 2026-10-02 · Sr. Design / HCI expert review**
 
+**Tracking:** epic #3101 · defect groups #3102–#3124 · enhancement groups #3125–#3132 · plan: `Docs/superpowers/plans/2026-10-03-notes-chat-ux-remediation-plan.md`
+
 ## Table of contents
 
 - [1. Executive summary](#1-executive-summary)

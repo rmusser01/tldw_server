@@ -29,7 +29,13 @@
     "CS-05",
     "CC-04",
     "CM-01"
-   ]
+   ],
+   "group": {
+    "key": "G05",
+    "number": 3106,
+    "title": "Chat: conversation reset, regenerate/continue/edit and branching",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3106"
+   }
   },
   {
    "id": "CS-02",
@@ -61,7 +67,13 @@
     "XP-05",
     "XP-06",
     "XS-06"
-   ]
+   ],
+   "group": {
+    "key": "G07",
+    "number": 3108,
+    "title": "Chat: finding and managing past chats",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3108"
+   }
   },
   {
    "id": "NE-01",
@@ -88,7 +100,13 @@
    "related": [
     "NE-06",
     "AX-15"
-   ]
+   ],
+   "group": {
+    "key": "G01",
+    "number": 3102,
+    "title": "Notes: editor and save-pipeline data integrity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3102"
+   }
   },
   {
    "id": "NL-01",
@@ -122,7 +140,13 @@
     "NL-11",
     "NE-02",
     "AX-03"
-   ]
+   ],
+   "group": {
+    "key": "G02",
+    "number": 3103,
+    "title": "Notes: list API contract, export and bulk tagging",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3103"
+   }
   },
   {
    "id": "NL-02",
@@ -149,7 +173,13 @@
    ],
    "related": [
     "NL-01"
-   ]
+   ],
+   "group": {
+    "key": "G02",
+    "number": 3103,
+    "title": "Notes: list API contract, export and bulk tagging",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3103"
+   }
   },
   {
    "id": "NS-01",
@@ -177,7 +207,13 @@
     "NS-05",
     "NE-08",
     "CS-04"
-   ]
+   ],
+   "group": {
+    "key": "G01",
+    "number": 3102,
+    "title": "Notes: editor and save-pipeline data integrity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3102"
+   }
   },
   {
    "id": "CC-04",
@@ -208,7 +244,13 @@
     "CS-01",
     "CS-05",
     "CM-14"
-   ]
+   ],
+   "group": {
+    "key": "G05",
+    "number": 3106,
+    "title": "Chat: conversation reset, regenerate/continue/edit and branching",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3106"
+   }
   },
   {
    "id": "CC-05",
@@ -235,7 +277,13 @@
    "related": [
     "CC-11",
     "XP-06"
-   ]
+   ],
+   "group": {
+    "key": "G11",
+    "number": 3112,
+    "title": "Chat: composer commands, prompts and controls",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3112"
+   }
   },
   {
    "id": "CM-01",
@@ -266,7 +314,13 @@
     "CS-01",
     "CM-12",
     "CO-04"
-   ]
+   ],
+   "group": {
+    "key": "G05",
+    "number": 3106,
+    "title": "Chat: conversation reset, regenerate/continue/edit and branching",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3106"
+   }
   },
   {
    "id": "CM-N1",
@@ -294,7 +348,13 @@
    "related": [
     "CM-06",
     "CM-02"
-   ]
+   ],
+   "group": {
+    "key": "G06",
+    "number": 3107,
+    "title": "Chat: failure, stop and timeout recovery",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3107"
+   }
   },
   {
    "id": "CS-03",
@@ -323,7 +383,13 @@
     "XP-01",
     "CS-02",
     "XP-13"
-   ]
+   ],
+   "group": {
+    "key": "G03",
+    "number": 3104,
+    "title": "Chat: truthful persistence and interrupted replies",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3104"
+   }
   },
   {
    "id": "CS-04",
@@ -353,7 +419,13 @@
     "CM-02",
     "CM-03",
     "NS-01"
-   ]
+   ],
+   "group": {
+    "key": "G03",
+    "number": 3104,
+    "title": "Chat: truthful persistence and interrupted replies",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3104"
+   }
   },
   {
    "id": "CS-05",
@@ -380,7 +452,13 @@
    "related": [
     "CS-01",
     "CC-04"
-   ]
+   ],
+   "group": {
+    "key": "G05",
+    "number": 3106,
+    "title": "Chat: conversation reset, regenerate/continue/edit and branching",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3106"
+   }
   },
   {
    "id": "CS-N2",
@@ -407,7 +485,13 @@
    "related": [
     "CS-10",
     "CS-N1"
-   ]
+   ],
+   "group": {
+    "key": "G03",
+    "number": 3104,
+    "title": "Chat: truthful persistence and interrupted replies",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3104"
+   }
   },
   {
    "id": "NE-02",
@@ -437,7 +521,13 @@
     "NL-11",
     "AX-12",
     "NL-01"
-   ]
+   ],
+   "group": {
+    "key": "G09",
+    "number": 3110,
+    "title": "Notes: wikilinks, connections and graph",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3110"
+   }
   },
   {
    "id": "NE-04",
@@ -462,7 +552,13 @@
     "pu-notes#13",
     "pu-ext#6"
    ],
-   "related": []
+   "related": [],
+   "group": {
+    "key": "G16",
+    "number": 3117,
+    "title": "Notes: editor and preview quality",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3117"
+   }
   },
   {
    "id": "NL-03",
@@ -489,7 +585,13 @@
    "related": [
     "NL-05",
     "XP-17"
-   ]
+   ],
+   "group": {
+    "key": "G02",
+    "number": 3103,
+    "title": "Notes: list API contract, export and bulk tagging",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3103"
+   }
   },
   {
    "id": "NS-N1",
@@ -516,7 +618,13 @@
    "related": [
     "NS-03",
     "NS-N2"
-   ]
+   ],
+   "group": {
+    "key": "G01",
+    "number": 3102,
+    "title": "Notes: editor and save-pipeline data integrity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3102"
+   }
   },
   {
    "id": "XP-02",
@@ -545,7 +653,13 @@
     "XP-01",
     "XP-03",
     "CC-04"
-   ]
+   ],
+   "group": {
+    "key": "G08",
+    "number": 3109,
+    "title": "Chat ↔ Notes: save to notes, provenance and \"chat about this note\"",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3109"
+   }
   },
   {
    "id": "XP-08",
@@ -573,7 +687,13 @@
     "XP-09",
     "XS-01",
     "CM-12"
-   ]
+   ],
+   "group": {
+    "key": "G04",
+    "number": 3105,
+    "title": "Extension: side-panel conversation integrity and sync",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3105"
+   }
   },
   {
    "id": "XS-01",
@@ -600,7 +720,13 @@
     "XS-05",
     "XS-06",
     "XP-08"
-   ]
+   ],
+   "group": {
+    "key": "G04",
+    "number": 3105,
+    "title": "Extension: side-panel conversation integrity and sync",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3105"
+   }
   },
   {
    "id": "XS-07",
@@ -627,7 +753,13 @@
     "XP-17",
     "CS-09",
     "XP-18"
-   ]
+   ],
+   "group": {
+    "key": "G04",
+    "number": 3105,
+    "title": "Extension: side-panel conversation integrity and sync",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3105"
+   }
   },
   {
    "id": "AX-03",
@@ -655,7 +787,13 @@
     "NL-01",
     "AX-05",
     "AX-12"
-   ]
+   ],
+   "group": {
+    "key": "G21",
+    "number": 3122,
+    "title": "Accessibility: keyboard access and focus management",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3122"
+   }
   },
   {
    "id": "AX-04",
@@ -682,7 +820,13 @@
    "related": [
     "CO-01",
     "CO-06"
-   ]
+   ],
+   "group": {
+    "key": "G23",
+    "number": 3124,
+    "title": "Accessibility: contrast, focus visibility, zoom, targets and motion",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3124"
+   }
   },
   {
    "id": "AX-05",
@@ -710,7 +854,13 @@
     "AX-03",
     "NO-03",
     "AX-15"
-   ]
+   ],
+   "group": {
+    "key": "G21",
+    "number": 3122,
+    "title": "Accessibility: keyboard access and focus management",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3122"
+   }
   },
   {
    "id": "CC-01",
@@ -738,7 +888,13 @@
     "CC-02",
     "XS-02",
     "CC-06"
-   ]
+   ],
+   "group": {
+    "key": "G10",
+    "number": 3111,
+    "title": "Chat: first send and model selection",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3111"
+   }
   },
   {
    "id": "CC-02",
@@ -770,7 +926,13 @@
     "CS-04",
     "CM-06",
     "XS-02"
-   ]
+   ],
+   "group": {
+    "key": "G06",
+    "number": 3107,
+    "title": "Chat: failure, stop and timeout recovery",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3107"
+   }
   },
   {
    "id": "CC-N1",
@@ -798,7 +960,13 @@
     "AX-01",
     "AX-09",
     "AX-12"
-   ]
+   ],
+   "group": {
+    "key": "G11",
+    "number": 3112,
+    "title": "Chat: composer commands, prompts and controls",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3112"
+   }
   },
   {
    "id": "CM-02",
@@ -827,7 +995,13 @@
     "XS-10",
     "AX-13",
     "CS-04"
-   ]
+   ],
+   "group": {
+    "key": "G06",
+    "number": 3107,
+    "title": "Chat: failure, stop and timeout recovery",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3107"
+   }
   },
   {
    "id": "CS-N1",
@@ -854,7 +1028,13 @@
    "related": [
     "CS-10",
     "CS-02"
-   ]
+   ],
+   "group": {
+    "key": "G07",
+    "number": 3108,
+    "title": "Chat: finding and managing past chats",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3108"
+   }
   },
   {
    "id": "XS-08",
@@ -880,7 +1060,13 @@
    "related": [
     "XP-07",
     "XP-10"
-   ]
+   ],
+   "group": {
+    "key": "G11",
+    "number": 3112,
+    "title": "Chat: composer commands, prompts and controls",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3112"
+   }
   },
   {
    "id": "AX-01",
@@ -909,7 +1095,13 @@
     "CC-06",
     "XS-02",
     "AX-12"
-   ]
+   ],
+   "group": {
+    "key": "G21",
+    "number": 3122,
+    "title": "Accessibility: keyboard access and focus management",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3122"
+   }
   },
   {
    "id": "AX-02",
@@ -937,7 +1129,13 @@
    "related": [
     "CM-09",
     "AX-12"
-   ]
+   ],
+   "group": {
+    "key": "G21",
+    "number": 3122,
+    "title": "Accessibility: keyboard access and focus management",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3122"
+   }
   },
   {
    "id": "AX-06",
@@ -966,7 +1164,13 @@
     "AX-09",
     "XP-17",
     "NS-06"
-   ]
+   ],
+   "group": {
+    "key": "G22",
+    "number": 3123,
+    "title": "Accessibility: screen-reader semantics and announcements",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3123"
+   }
   },
   {
    "id": "AX-07",
@@ -999,7 +1203,13 @@
     "AX-08",
     "CC-07",
     "XP-15"
-   ]
+   ],
+   "group": {
+    "key": "G23",
+    "number": 3124,
+    "title": "Accessibility: contrast, focus visibility, zoom, targets and motion",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3124"
+   }
   },
   {
    "id": "AX-08",
@@ -1026,7 +1236,13 @@
    ],
    "related": [
     "AX-07"
-   ]
+   ],
+   "group": {
+    "key": "G23",
+    "number": 3124,
+    "title": "Accessibility: contrast, focus visibility, zoom, targets and motion",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3124"
+   }
   },
   {
    "id": "AX-09",
@@ -1054,7 +1270,13 @@
     "AX-06",
     "CS-11",
     "AX-18"
-   ]
+   ],
+   "group": {
+    "key": "G21",
+    "number": 3122,
+    "title": "Accessibility: keyboard access and focus management",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3122"
+   }
   },
   {
    "id": "AX-10",
@@ -1081,7 +1303,13 @@
    ],
    "related": [
     "XS-14"
-   ]
+   ],
+   "group": {
+    "key": "G22",
+    "number": 3123,
+    "title": "Accessibility: screen-reader semantics and announcements",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3123"
+   }
   },
   {
    "id": "AX-11",
@@ -1109,7 +1337,13 @@
    "related": [
     "CM-06",
     "AX-06"
-   ]
+   ],
+   "group": {
+    "key": "G22",
+    "number": 3123,
+    "title": "Accessibility: screen-reader semantics and announcements",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3123"
+   }
   },
   {
    "id": "AX-12",
@@ -1138,7 +1372,13 @@
     "AX-13",
     "NE-02",
     "AX-01"
-   ]
+   ],
+   "group": {
+    "key": "G22",
+    "number": 3123,
+    "title": "Accessibility: screen-reader semantics and announcements",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3123"
+   }
   },
   {
    "id": "AX-14",
@@ -1166,7 +1406,13 @@
    "related": [
     "XP-11",
     "AX-15"
-   ]
+   ],
+   "group": {
+    "key": "G22",
+    "number": 3123,
+    "title": "Accessibility: screen-reader semantics and announcements",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3123"
+   }
   },
   {
    "id": "AX-15",
@@ -1194,7 +1440,13 @@
     "NL-12",
     "AX-05",
     "AX-07"
-   ]
+   ],
+   "group": {
+    "key": "G23",
+    "number": 3124,
+    "title": "Accessibility: contrast, focus visibility, zoom, targets and motion",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3124"
+   }
   },
   {
    "id": "AX-16",
@@ -1224,7 +1476,13 @@
     "AX-13",
     "NO-03",
     "CM-09"
-   ]
+   ],
+   "group": {
+    "key": "G23",
+    "number": 3124,
+    "title": "Accessibility: contrast, focus visibility, zoom, targets and motion",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3124"
+   }
   },
   {
    "id": "AX-18",
@@ -1251,7 +1509,13 @@
    "related": [
     "XP-07",
     "AX-09"
-   ]
+   ],
+   "group": {
+    "key": "G21",
+    "number": 3122,
+    "title": "Accessibility: keyboard access and focus management",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3122"
+   }
   },
   {
    "id": "CC-03",
@@ -1279,7 +1543,13 @@
     "XS-11",
     "XP-16",
     "NS-05"
-   ]
+   ],
+   "group": {
+    "key": "G10",
+    "number": 3111,
+    "title": "Chat: first send and model selection",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3111"
+   }
   },
   {
    "id": "CC-06",
@@ -1308,7 +1578,13 @@
     "CC-01",
     "CO-04",
     "XS-02"
-   ]
+   ],
+   "group": {
+    "key": "G10",
+    "number": 3111,
+    "title": "Chat: first send and model selection",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3111"
+   }
   },
   {
    "id": "CC-08",
@@ -1338,7 +1614,13 @@
     "CO-03",
     "CM-05",
     "XP-11"
-   ]
+   ],
+   "group": {
+    "key": "G11",
+    "number": 3112,
+    "title": "Chat: composer commands, prompts and controls",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3112"
+   }
   },
   {
    "id": "CC-10",
@@ -1366,7 +1648,13 @@
     "XP-04",
     "XS-15",
     "CO-04"
-   ]
+   ],
+   "group": {
+    "key": "G11",
+    "number": 3112,
+    "title": "Chat: composer commands, prompts and controls",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3112"
+   }
   },
   {
    "id": "CC-11",
@@ -1394,7 +1682,13 @@
     "XP-04",
     "CC-05",
     "XP-12"
-   ]
+   ],
+   "group": {
+    "key": "G11",
+    "number": 3112,
+    "title": "Chat: composer commands, prompts and controls",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3112"
+   }
   },
   {
    "id": "CC-12",
@@ -1421,7 +1715,13 @@
    ],
    "related": [
     "CC-07"
-   ]
+   ],
+   "group": {
+    "key": "G11",
+    "number": 3112,
+    "title": "Chat: composer commands, prompts and controls",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3112"
+   }
   },
   {
    "id": "CC-N2",
@@ -1448,7 +1748,13 @@
    "related": [
     "CC-01",
     "CC-02"
-   ]
+   ],
+   "group": {
+    "key": "G06",
+    "number": 3107,
+    "title": "Chat: failure, stop and timeout recovery",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3107"
+   }
   },
   {
    "id": "CM-03",
@@ -1477,7 +1783,13 @@
     "CM-02",
     "CS-04",
     "CM-06"
-   ]
+   ],
+   "group": {
+    "key": "G06",
+    "number": 3107,
+    "title": "Chat: failure, stop and timeout recovery",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3107"
+   }
   },
   {
    "id": "CM-04",
@@ -1504,7 +1816,13 @@
    "related": [
     "CC-06",
     "CM-10"
-   ]
+   ],
+   "group": {
+    "key": "G17",
+    "number": 3118,
+    "title": "Chat: message presentation and actions",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3118"
+   }
   },
   {
    "id": "CM-05",
@@ -1531,7 +1849,13 @@
    "related": [
     "CC-08",
     "XP-07"
-   ]
+   ],
+   "group": {
+    "key": "G11",
+    "number": 3112,
+    "title": "Chat: composer commands, prompts and controls",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3112"
+   }
   },
   {
    "id": "CM-06",
@@ -1559,7 +1883,13 @@
     "CC-02",
     "XS-10",
     "CM-03"
-   ]
+   ],
+   "group": {
+    "key": "G06",
+    "number": 3107,
+    "title": "Chat: failure, stop and timeout recovery",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3107"
+   }
   },
   {
    "id": "CM-07",
@@ -1586,7 +1916,13 @@
    "related": [
     "NE-07",
     "CM-08"
-   ]
+   ],
+   "group": {
+    "key": "G17",
+    "number": 3118,
+    "title": "Chat: message presentation and actions",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3118"
+   }
   },
   {
    "id": "CM-09",
@@ -1616,7 +1952,13 @@
     "CM-10",
     "XP-12",
     "AX-16"
-   ]
+   ],
+   "group": {
+    "key": "G17",
+    "number": 3118,
+    "title": "Chat: message presentation and actions",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3118"
+   }
   },
   {
    "id": "CM-11",
@@ -1643,7 +1985,13 @@
    "related": [
     "CO-07",
     "XS-09"
-   ]
+   ],
+   "group": {
+    "key": "G17",
+    "number": 3118,
+    "title": "Chat: message presentation and actions",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3118"
+   }
   },
   {
    "id": "CM-12",
@@ -1670,7 +2018,13 @@
    "related": [
     "CM-01",
     "XP-08"
-   ]
+   ],
+   "group": {
+    "key": "G05",
+    "number": 3106,
+    "title": "Chat: conversation reset, regenerate/continue/edit and branching",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3106"
+   }
   },
   {
    "id": "CM-13",
@@ -1696,7 +2050,13 @@
    ],
    "related": [
     "CM-09"
-   ]
+   ],
+   "group": {
+    "key": "G17",
+    "number": 3118,
+    "title": "Chat: message presentation and actions",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3118"
+   }
   },
   {
    "id": "CM-N2",
@@ -1723,7 +2083,13 @@
    "related": [
     "CM-01",
     "CM-12"
-   ]
+   ],
+   "group": {
+    "key": "G05",
+    "number": 3106,
+    "title": "Chat: conversation reset, regenerate/continue/edit and branching",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3106"
+   }
   },
   {
    "id": "CO-01",
@@ -1752,7 +2118,13 @@
     "CO-06",
     "CO-05",
     "XP-09"
-   ]
+   ],
+   "group": {
+    "key": "G12",
+    "number": 3113,
+    "title": "Chat: page chrome, onboarding and responsive layout",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3113"
+   }
   },
   {
    "id": "CO-02",
@@ -1778,7 +2150,13 @@
    "related": [
     "NO-02",
     "CO-03"
-   ]
+   ],
+   "group": {
+    "key": "G12",
+    "number": 3113,
+    "title": "Chat: page chrome, onboarding and responsive layout",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3113"
+   }
   },
   {
    "id": "CO-03",
@@ -1808,7 +2186,13 @@
     "XP-12",
     "XP-13",
     "AX-17"
-   ]
+   ],
+   "group": {
+    "key": "G12",
+    "number": 3113,
+    "title": "Chat: page chrome, onboarding and responsive layout",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3113"
+   }
   },
   {
    "id": "CO-04",
@@ -1837,7 +2221,13 @@
     "CO-03",
     "CM-01",
     "AX-17"
-   ]
+   ],
+   "group": {
+    "key": "G12",
+    "number": 3113,
+    "title": "Chat: page chrome, onboarding and responsive layout",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3113"
+   }
   },
   {
    "id": "CO-05",
@@ -1865,7 +2255,13 @@
     "CO-04",
     "CO-06",
     "AX-17"
-   ]
+   ],
+   "group": {
+    "key": "G12",
+    "number": 3113,
+    "title": "Chat: page chrome, onboarding and responsive layout",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3113"
+   }
   },
   {
    "id": "CO-06",
@@ -1893,7 +2289,13 @@
     "CO-01",
     "CO-04",
     "CO-03"
-   ]
+   ],
+   "group": {
+    "key": "G12",
+    "number": 3113,
+    "title": "Chat: page chrome, onboarding and responsive layout",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3113"
+   }
   },
   {
    "id": "CS-06",
@@ -1919,7 +2321,13 @@
    ],
    "related": [
     "CS-07"
-   ]
+   ],
+   "group": {
+    "key": "G07",
+    "number": 3108,
+    "title": "Chat: finding and managing past chats",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3108"
+   }
   },
   {
    "id": "CS-07",
@@ -1946,7 +2354,13 @@
    "related": [
     "CS-02",
     "CS-06"
-   ]
+   ],
+   "group": {
+    "key": "G07",
+    "number": 3108,
+    "title": "Chat: finding and managing past chats",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3108"
+   }
   },
   {
    "id": "CS-08",
@@ -1974,7 +2388,13 @@
    "related": [
     "CS-02",
     "XP-18"
-   ]
+   ],
+   "group": {
+    "key": "G07",
+    "number": 3108,
+    "title": "Chat: finding and managing past chats",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3108"
+   }
   },
   {
    "id": "CS-09",
@@ -2003,7 +2423,13 @@
    "related": [
     "XS-07",
     "CS-08"
-   ]
+   ],
+   "group": {
+    "key": "G07",
+    "number": 3108,
+    "title": "Chat: finding and managing past chats",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3108"
+   }
   },
   {
    "id": "CS-10",
@@ -2029,7 +2455,13 @@
    ],
    "related": [
     "XP-17"
-   ]
+   ],
+   "group": {
+    "key": "G07",
+    "number": 3108,
+    "title": "Chat: finding and managing past chats",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3108"
+   }
   },
   {
    "id": "CS-N3",
@@ -2056,7 +2488,13 @@
    "related": [
     "CS-03",
     "CS-04"
-   ]
+   ],
+   "group": {
+    "key": "G03",
+    "number": 3104,
+    "title": "Chat: truthful persistence and interrupted replies",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3104"
+   }
   },
   {
    "id": "NE-03",
@@ -2084,7 +2522,13 @@
    "related": [
     "NO-01",
     "NO-03"
-   ]
+   ],
+   "group": {
+    "key": "G16",
+    "number": 3117,
+    "title": "Notes: editor and preview quality",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3117"
+   }
   },
   {
    "id": "NE-05",
@@ -2111,7 +2555,13 @@
    "related": [
     "NE-07",
     "CM-08"
-   ]
+   ],
+   "group": {
+    "key": "G16",
+    "number": 3117,
+    "title": "Notes: editor and preview quality",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3117"
+   }
   },
   {
    "id": "NE-06",
@@ -2138,7 +2588,13 @@
    "related": [
     "NE-01",
     "XP-07"
-   ]
+   ],
+   "group": {
+    "key": "G16",
+    "number": 3117,
+    "title": "Notes: editor and preview quality",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3117"
+   }
   },
   {
    "id": "NE-07",
@@ -2166,7 +2622,13 @@
    "related": [
     "NE-05",
     "CM-07"
-   ]
+   ],
+   "group": {
+    "key": "G16",
+    "number": 3117,
+    "title": "Notes: editor and preview quality",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3117"
+   }
   },
   {
    "id": "NE-N1",
@@ -2193,7 +2655,13 @@
    "related": [
     "NE-07",
     "CM-07"
-   ]
+   ],
+   "group": {
+    "key": "G16",
+    "number": 3117,
+    "title": "Notes: editor and preview quality",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3117"
+   }
   },
   {
    "id": "NL-04",
@@ -2223,7 +2691,13 @@
     "NO-03",
     "XP-14",
     "NL-01"
-   ]
+   ],
+   "group": {
+    "key": "G15",
+    "number": 3116,
+    "title": "Notes: search, organization and trash at scale",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3116"
+   }
   },
   {
    "id": "NL-05",
@@ -2252,7 +2726,13 @@
     "NL-15",
     "NL-03",
     "XP-17"
-   ]
+   ],
+   "group": {
+    "key": "G15",
+    "number": 3116,
+    "title": "Notes: search, organization and trash at scale",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3116"
+   }
   },
   {
    "id": "NL-06",
@@ -2279,7 +2759,13 @@
    "related": [
     "NL-05",
     "NL-15"
-   ]
+   ],
+   "group": {
+    "key": "G15",
+    "number": 3116,
+    "title": "Notes: search, organization and trash at scale",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3116"
+   }
   },
   {
    "id": "NL-07",
@@ -2305,7 +2791,13 @@
    ],
    "related": [
     "NL-04"
-   ]
+   ],
+   "group": {
+    "key": "G15",
+    "number": 3116,
+    "title": "Notes: search, organization and trash at scale",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3116"
+   }
   },
   {
    "id": "NL-09",
@@ -2331,7 +2823,13 @@
    ],
    "related": [
     "NL-01"
-   ]
+   ],
+   "group": {
+    "key": "G15",
+    "number": 3116,
+    "title": "Notes: search, organization and trash at scale",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3116"
+   }
   },
   {
    "id": "NL-10",
@@ -2358,7 +2856,13 @@
    "related": [
     "NL-13",
     "XP-18"
-   ]
+   ],
+   "group": {
+    "key": "G15",
+    "number": 3116,
+    "title": "Notes: search, organization and trash at scale",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3116"
+   }
   },
   {
    "id": "NL-11",
@@ -2386,7 +2890,13 @@
     "NL-14",
     "NE-02",
     "NL-01"
-   ]
+   ],
+   "group": {
+    "key": "G09",
+    "number": 3110,
+    "title": "Notes: wikilinks, connections and graph",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3110"
+   }
   },
   {
    "id": "NL-12",
@@ -2414,7 +2924,13 @@
     "AX-15",
     "NL-13",
     "NO-01"
-   ]
+   ],
+   "group": {
+    "key": "G13",
+    "number": 3114,
+    "title": "Notes: onboarding, page layout and views",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3114"
+   }
   },
   {
    "id": "NL-13",
@@ -2441,7 +2957,13 @@
    "related": [
     "NL-10",
     "NL-12"
-   ]
+   ],
+   "group": {
+    "key": "G13",
+    "number": 3114,
+    "title": "Notes: onboarding, page layout and views",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3114"
+   }
   },
   {
    "id": "NL-N1",
@@ -2469,7 +2991,13 @@
     "NL-08",
     "NL-12",
     "NL-10"
-   ]
+   ],
+   "group": {
+    "key": "G15",
+    "number": 3116,
+    "title": "Notes: search, organization and trash at scale",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3116"
+   }
   },
   {
    "id": "NO-01",
@@ -2498,7 +3026,13 @@
     "NO-03",
     "NE-03",
     "NL-04"
-   ]
+   ],
+   "group": {
+    "key": "G13",
+    "number": 3114,
+    "title": "Notes: onboarding, page layout and views",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3114"
+   }
   },
   {
    "id": "NO-02",
@@ -2526,7 +3060,13 @@
    "related": [
     "NO-01",
     "CO-02"
-   ]
+   ],
+   "group": {
+    "key": "G13",
+    "number": 3114,
+    "title": "Notes: onboarding, page layout and views",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3114"
+   }
   },
   {
    "id": "NO-03",
@@ -2556,7 +3096,13 @@
     "NL-04",
     "AX-16",
     "AX-05"
-   ]
+   ],
+   "group": {
+    "key": "G13",
+    "number": 3114,
+    "title": "Notes: onboarding, page layout and views",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3114"
+   }
   },
   {
    "id": "NO-04",
@@ -2583,7 +3129,13 @@
    "related": [
     "NS-02",
     "XP-05"
-   ]
+   ],
+   "group": {
+    "key": "G13",
+    "number": 3114,
+    "title": "Notes: onboarding, page layout and views",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3114"
+   }
   },
   {
    "id": "NO-N1",
@@ -2610,7 +3162,13 @@
    "related": [
     "NO-02",
     "CO-02"
-   ]
+   ],
+   "group": {
+    "key": "G13",
+    "number": 3114,
+    "title": "Notes: onboarding, page layout and views",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3114"
+   }
   },
   {
    "id": "NS-02",
@@ -2637,7 +3195,13 @@
    "related": [
     "NS-03",
     "NS-06"
-   ]
+   ],
+   "group": {
+    "key": "G01",
+    "number": 3102,
+    "title": "Notes: editor and save-pipeline data integrity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3102"
+   }
   },
   {
    "id": "NS-03",
@@ -2665,7 +3229,13 @@
    "related": [
     "NS-06",
     "XP-17"
-   ]
+   ],
+   "group": {
+    "key": "G01",
+    "number": 3102,
+    "title": "Notes: editor and save-pipeline data integrity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3102"
+   }
   },
   {
    "id": "NS-04",
@@ -2693,7 +3263,13 @@
    "related": [
     "XP-16",
     "NS-06"
-   ]
+   ],
+   "group": {
+    "key": "G02",
+    "number": 3103,
+    "title": "Notes: list API contract, export and bulk tagging",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3103"
+   }
   },
   {
    "id": "NS-05",
@@ -2721,7 +3297,13 @@
     "NS-01",
     "NL-16",
     "CC-03"
-   ]
+   ],
+   "group": {
+    "key": "G01",
+    "number": 3102,
+    "title": "Notes: editor and save-pipeline data integrity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3102"
+   }
   },
   {
    "id": "NS-06",
@@ -2750,7 +3332,13 @@
     "NS-03",
     "NS-04",
     "AX-06"
-   ]
+   ],
+   "group": {
+    "key": "G01",
+    "number": 3102,
+    "title": "Notes: editor and save-pipeline data integrity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3102"
+   }
   },
   {
    "id": "NS-N2",
@@ -2779,7 +3367,13 @@
     "NS-03",
     "NS-05",
     "NS-06"
-   ]
+   ],
+   "group": {
+    "key": "G01",
+    "number": 3102,
+    "title": "Notes: editor and save-pipeline data integrity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3102"
+   }
   },
   {
    "id": "XP-01",
@@ -2811,7 +3405,13 @@
     "CS-03",
     "XS-05",
     "XS-13"
-   ]
+   ],
+   "group": {
+    "key": "G08",
+    "number": 3109,
+    "title": "Chat ↔ Notes: save to notes, provenance and \"chat about this note\"",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3109"
+   }
   },
   {
    "id": "XP-03",
@@ -2841,7 +3441,13 @@
     "XP-14",
     "NL-04",
     "XS-13"
-   ]
+   ],
+   "group": {
+    "key": "G08",
+    "number": 3109,
+    "title": "Chat ↔ Notes: save to notes, provenance and \"chat about this note\"",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3109"
+   }
   },
   {
    "id": "XP-04",
@@ -2869,7 +3475,13 @@
     "CC-10",
     "CC-11",
     "XP-03"
-   ]
+   ],
+   "group": {
+    "key": "G08",
+    "number": 3109,
+    "title": "Chat ↔ Notes: save to notes, provenance and \"chat about this note\"",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3109"
+   }
   },
   {
    "id": "XP-05",
@@ -2899,7 +3511,13 @@
     "XP-06",
     "XP-19",
     "NO-04"
-   ]
+   ],
+   "group": {
+    "key": "G18",
+    "number": 3119,
+    "title": "Navigation, deep links and keyboard shortcuts",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3119"
+   }
   },
   {
    "id": "XP-06",
@@ -2929,7 +3547,13 @@
     "XP-05",
     "XP-07",
     "XP-11"
-   ]
+   ],
+   "group": {
+    "key": "G18",
+    "number": 3119,
+    "title": "Navigation, deep links and keyboard shortcuts",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3119"
+   }
   },
   {
    "id": "XP-07",
@@ -2961,7 +3585,13 @@
     "XS-08",
     "AX-18",
     "CM-05"
-   ]
+   ],
+   "group": {
+    "key": "G18",
+    "number": 3119,
+    "title": "Navigation, deep links and keyboard shortcuts",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3119"
+   }
   },
   {
    "id": "XP-09",
@@ -2990,7 +3620,13 @@
     "XP-08",
     "XP-12",
     "CO-01"
-   ]
+   ],
+   "group": {
+    "key": "G19",
+    "number": 3120,
+    "title": "Extension: side-panel layout and webui parity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3120"
+   }
   },
   {
    "id": "XP-10",
@@ -3017,7 +3653,13 @@
    "related": [
     "XP-07",
     "XS-08"
-   ]
+   ],
+   "group": {
+    "key": "G18",
+    "number": 3119,
+    "title": "Navigation, deep links and keyboard shortcuts",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3119"
+   }
   },
   {
    "id": "XP-11",
@@ -3047,7 +3689,13 @@
     "CC-08",
     "XP-06",
     "AX-14"
-   ]
+   ],
+   "group": {
+    "key": "G14",
+    "number": 3115,
+    "title": "Cross-surface terminology, copy and visual system",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3115"
+   }
   },
   {
    "id": "XP-12",
@@ -3078,7 +3726,13 @@
     "CM-09",
     "XS-12",
     "XP-09"
-   ]
+   ],
+   "group": {
+    "key": "G19",
+    "number": 3120,
+    "title": "Extension: side-panel layout and webui parity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3120"
+   }
   },
   {
    "id": "XP-13",
@@ -3109,7 +3763,13 @@
     "CO-03",
     "XS-12",
     "XP-14"
-   ]
+   ],
+   "group": {
+    "key": "G14",
+    "number": 3115,
+    "title": "Cross-surface terminology, copy and visual system",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3115"
+   }
   },
   {
    "id": "XP-14",
@@ -3139,7 +3799,13 @@
     "CS-08",
     "NE-08",
     "XP-13"
-   ]
+   ],
+   "group": {
+    "key": "G14",
+    "number": 3115,
+    "title": "Cross-surface terminology, copy and visual system",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3115"
+   }
   },
   {
    "id": "XP-15",
@@ -3167,7 +3833,13 @@
    "related": [
     "XP-20",
     "AX-07"
-   ]
+   ],
+   "group": {
+    "key": "G14",
+    "number": 3115,
+    "title": "Cross-surface terminology, copy and visual system",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3115"
+   }
   },
   {
    "id": "XP-16",
@@ -3195,7 +3867,13 @@
    "related": [
     "CC-03",
     "NS-04"
-   ]
+   ],
+   "group": {
+    "key": "G20",
+    "number": 3121,
+    "title": "Performance: background polling and duplicate fetches",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3121"
+   }
   },
   {
    "id": "XP-17",
@@ -3228,7 +3906,13 @@
     "XS-07",
     "AX-06",
     "NL-03"
-   ]
+   ],
+   "group": {
+    "key": "G14",
+    "number": 3115,
+    "title": "Cross-surface terminology, copy and visual system",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3115"
+   }
   },
   {
    "id": "XP-18",
@@ -3257,7 +3941,13 @@
     "NL-10",
     "CS-08",
     "XS-07"
-   ]
+   ],
+   "group": {
+    "key": "G19",
+    "number": 3120,
+    "title": "Extension: side-panel layout and webui parity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3120"
+   }
   },
   {
    "id": "XS-02",
@@ -3286,7 +3976,13 @@
     "CC-02",
     "CC-06",
     "XS-04"
-   ]
+   ],
+   "group": {
+    "key": "G10",
+    "number": 3111,
+    "title": "Chat: first send and model selection",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3111"
+   }
   },
   {
    "id": "XS-03",
@@ -3312,7 +4008,13 @@
    "related": [
     "XS-04",
     "XS-06"
-   ]
+   ],
+   "group": {
+    "key": "G19",
+    "number": 3120,
+    "title": "Extension: side-panel layout and webui parity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3120"
+   }
   },
   {
    "id": "XS-04",
@@ -3339,7 +4041,13 @@
     "XS-03",
     "XS-15",
     "XS-02"
-   ]
+   ],
+   "group": {
+    "key": "G19",
+    "number": 3120,
+    "title": "Extension: side-panel layout and webui parity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3120"
+   }
   },
   {
    "id": "XS-05",
@@ -3368,7 +4076,13 @@
     "XP-01",
     "XS-01",
     "XS-06"
-   ]
+   ],
+   "group": {
+    "key": "G03",
+    "number": 3104,
+    "title": "Chat: truthful persistence and interrupted replies",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3104"
+   }
   },
   {
    "id": "XS-06",
@@ -3396,7 +4110,13 @@
     "CS-02",
     "XS-05",
     "XS-03"
-   ]
+   ],
+   "group": {
+    "key": "G04",
+    "number": 3105,
+    "title": "Extension: side-panel conversation integrity and sync",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3105"
+   }
   },
   {
    "id": "XS-09",
@@ -3423,7 +4143,13 @@
     "CO-07",
     "XS-15",
     "CM-11"
-   ]
+   ],
+   "group": {
+    "key": "G19",
+    "number": 3120,
+    "title": "Extension: side-panel layout and webui parity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3120"
+   }
   },
   {
    "id": "XS-10",
@@ -3450,7 +4176,13 @@
     "CM-02",
     "CM-06",
     "XS-11"
-   ]
+   ],
+   "group": {
+    "key": "G19",
+    "number": 3120,
+    "title": "Extension: side-panel layout and webui parity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3120"
+   }
   },
   {
    "id": "XS-12",
@@ -3476,7 +4208,13 @@
    "related": [
     "XP-12",
     "XP-13"
-   ]
+   ],
+   "group": {
+    "key": "G14",
+    "number": 3115,
+    "title": "Cross-surface terminology, copy and visual system",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3115"
+   }
   },
   {
    "id": "XS-13",
@@ -3503,7 +4241,13 @@
    "related": [
     "XP-01",
     "XP-03"
-   ]
+   ],
+   "group": {
+    "key": "G08",
+    "number": 3109,
+    "title": "Chat ↔ Notes: save to notes, provenance and \"chat about this note\"",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3109"
+   }
   },
   {
    "id": "XS-14",
@@ -3530,7 +4274,13 @@
     "AX-10",
     "XS-09",
     "XS-18"
-   ]
+   ],
+   "group": {
+    "key": "G19",
+    "number": 3120,
+    "title": "Extension: side-panel layout and webui parity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3120"
+   }
   },
   {
    "id": "XS-15",
@@ -3559,7 +4309,13 @@
     "XS-16",
     "CC-10",
     "CO-06"
-   ]
+   ],
+   "group": {
+    "key": "G19",
+    "number": 3120,
+    "title": "Extension: side-panel layout and webui parity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3120"
+   }
   },
   {
    "id": "XS-16",
@@ -3585,7 +4341,13 @@
    "related": [
     "XS-15",
     "CC-09"
-   ]
+   ],
+   "group": {
+    "key": "G19",
+    "number": 3120,
+    "title": "Extension: side-panel layout and webui parity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3120"
+   }
   },
   {
    "id": "XS-17",
@@ -3610,7 +4372,13 @@
    ],
    "related": [
     "XS-02"
-   ]
+   ],
+   "group": {
+    "key": "G10",
+    "number": 3111,
+    "title": "Chat: first send and model selection",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3111"
+   }
   },
   {
    "id": "AX-13",
@@ -3639,7 +4407,13 @@
     "AX-16",
     "CM-02",
     "CC-02"
-   ]
+   ],
+   "group": {
+    "key": "G22",
+    "number": 3123,
+    "title": "Accessibility: screen-reader semantics and announcements",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3123"
+   }
   },
   {
    "id": "AX-17",
@@ -3667,7 +4441,13 @@
     "CO-04",
     "CO-05",
     "CO-03"
-   ]
+   ],
+   "group": {
+    "key": "G22",
+    "number": 3123,
+    "title": "Accessibility: screen-reader semantics and announcements",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3123"
+   }
   },
   {
    "id": "AX-19",
@@ -3692,7 +4472,13 @@
    "sources": [
     "lens-a11y#19"
    ],
-   "related": []
+   "related": [],
+   "group": {
+    "key": "G23",
+    "number": 3124,
+    "title": "Accessibility: contrast, focus visibility, zoom, targets and motion",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3124"
+   }
   },
   {
    "id": "CC-07",
@@ -3721,7 +4507,13 @@
     "AX-07",
     "CO-03",
     "XP-20"
-   ]
+   ],
+   "group": {
+    "key": "G11",
+    "number": 3112,
+    "title": "Chat: composer commands, prompts and controls",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3112"
+   }
   },
   {
    "id": "CC-09",
@@ -3748,7 +4540,13 @@
    "related": [
     "CC-07",
     "XS-16"
-   ]
+   ],
+   "group": {
+    "key": "G11",
+    "number": 3112,
+    "title": "Chat: composer commands, prompts and controls",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3112"
+   }
   },
   {
    "id": "CM-08",
@@ -3776,7 +4574,13 @@
    "related": [
     "NE-05",
     "CM-07"
-   ]
+   ],
+   "group": {
+    "key": "G17",
+    "number": 3118,
+    "title": "Chat: message presentation and actions",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3118"
+   }
   },
   {
    "id": "CM-10",
@@ -3804,7 +4608,13 @@
    "related": [
     "CM-04",
     "CM-09"
-   ]
+   ],
+   "group": {
+    "key": "G17",
+    "number": 3118,
+    "title": "Chat: message presentation and actions",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3118"
+   }
   },
   {
    "id": "CM-14",
@@ -3831,7 +4641,13 @@
    "related": [
     "CC-04",
     "CC-03"
-   ]
+   ],
+   "group": {
+    "key": "G05",
+    "number": 3106,
+    "title": "Chat: conversation reset, regenerate/continue/edit and branching",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3106"
+   }
   },
   {
    "id": "CO-07",
@@ -3858,7 +4674,13 @@
    "related": [
     "XS-09",
     "CM-11"
-   ]
+   ],
+   "group": {
+    "key": "G12",
+    "number": 3113,
+    "title": "Chat: page chrome, onboarding and responsive layout",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3113"
+   }
   },
   {
    "id": "CO-N1",
@@ -3885,7 +4707,13 @@
    "related": [
     "CO-01",
     "CO-07"
-   ]
+   ],
+   "group": {
+    "key": "G12",
+    "number": 3113,
+    "title": "Chat: page chrome, onboarding and responsive layout",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3113"
+   }
   },
   {
    "id": "CS-11",
@@ -3911,7 +4739,13 @@
    ],
    "related": [
     "AX-09"
-   ]
+   ],
+   "group": {
+    "key": "G07",
+    "number": 3108,
+    "title": "Chat: finding and managing past chats",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3108"
+   }
   },
   {
    "id": "NE-08",
@@ -3939,7 +4773,13 @@
     "NS-01",
     "XP-14",
     "NO-03"
-   ]
+   ],
+   "group": {
+    "key": "G13",
+    "number": 3114,
+    "title": "Notes: onboarding, page layout and views",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3114"
+   }
   },
   {
    "id": "NE-09",
@@ -3965,7 +4805,13 @@
    ],
    "related": [
     "NE-06"
-   ]
+   ],
+   "group": {
+    "key": "G13",
+    "number": 3114,
+    "title": "Notes: onboarding, page layout and views",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3114"
+   }
   },
   {
    "id": "NE-10",
@@ -3991,7 +4837,13 @@
    ],
    "related": [
     "NE-02"
-   ]
+   ],
+   "group": {
+    "key": "G09",
+    "number": 3110,
+    "title": "Notes: wikilinks, connections and graph",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3110"
+   }
   },
   {
    "id": "NL-08",
@@ -4017,7 +4869,13 @@
    ],
    "related": [
     "NL-17"
-   ]
+   ],
+   "group": {
+    "key": "G15",
+    "number": 3116,
+    "title": "Notes: search, organization and trash at scale",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3116"
+   }
   },
   {
    "id": "NL-14",
@@ -4044,7 +4902,13 @@
    "related": [
     "NL-11",
     "NO-01"
-   ]
+   ],
+   "group": {
+    "key": "G13",
+    "number": 3114,
+    "title": "Notes: onboarding, page layout and views",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3114"
+   }
   },
   {
    "id": "NL-15",
@@ -4072,7 +4936,13 @@
     "NL-05",
     "NL-06",
     "XP-17"
-   ]
+   ],
+   "group": {
+    "key": "G15",
+    "number": 3116,
+    "title": "Notes: search, organization and trash at scale",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3116"
+   }
   },
   {
    "id": "NL-16",
@@ -4099,7 +4969,13 @@
    "related": [
     "NS-05",
     "NS-02"
-   ]
+   ],
+   "group": {
+    "key": "G15",
+    "number": 3116,
+    "title": "Notes: search, organization and trash at scale",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3116"
+   }
   },
   {
    "id": "NL-17",
@@ -4125,7 +5001,13 @@
    ],
    "related": [
     "NL-08"
-   ]
+   ],
+   "group": {
+    "key": "G15",
+    "number": 3116,
+    "title": "Notes: search, organization and trash at scale",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3116"
+   }
   },
   {
    "id": "XP-19",
@@ -4153,7 +5035,13 @@
    ],
    "related": [
     "XP-05"
-   ]
+   ],
+   "group": {
+    "key": "G14",
+    "number": 3115,
+    "title": "Cross-surface terminology, copy and visual system",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3115"
+   }
   },
   {
    "id": "XP-20",
@@ -4182,7 +5070,13 @@
     "AX-07",
     "XP-15",
     "CC-07"
-   ]
+   ],
+   "group": {
+    "key": "G14",
+    "number": 3115,
+    "title": "Cross-surface terminology, copy and visual system",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3115"
+   }
   },
   {
    "id": "XS-11",
@@ -4209,7 +5103,13 @@
    "related": [
     "CC-03",
     "XS-10"
-   ]
+   ],
+   "group": {
+    "key": "G19",
+    "number": 3120,
+    "title": "Extension: side-panel layout and webui parity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3120"
+   }
   },
   {
    "id": "XS-18",
@@ -4235,7 +5135,13 @@
    "related": [
     "XS-14",
     "NE-07"
-   ]
+   ],
+   "group": {
+    "key": "G19",
+    "number": 3120,
+    "title": "Extension: side-panel layout and webui parity",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3120"
+   }
   }
  ],
  "ideas": [
@@ -4252,7 +5158,13 @@
     "pu-notes",
     "pu-cross",
     "pu-chat"
-   ]
+   ],
+   "group": {
+    "key": "E4",
+    "number": 3128,
+    "title": "Power-user navigation and keyboard workflows",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3128"
+   }
   },
   {
    "id": "IDEA-02",
@@ -4265,7 +5177,13 @@
     "ft-chat",
     "pu-cross",
     "pu-chat"
-   ]
+   ],
+   "group": {
+    "key": "E3",
+    "number": 3127,
+    "title": "Capture ↔ converse knowledge loop between chat and notes",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3127"
+   }
   },
   {
    "id": "IDEA-03",
@@ -4276,7 +5194,13 @@
    "sketch": "Chat header shows 'Notes (3)' popover listing notes derived from or attached to the chat. Note header shows 'From chat: <title> · <message excerpt>' linking to /chat/<id>#msg-<id> with highlight. Notes Connections lists source chats next to backlinks.",
    "sources": [
     "pu-cross"
-   ]
+   ],
+   "group": {
+    "key": "E3",
+    "number": 3127,
+    "title": "Capture ↔ converse knowledge loop between chat and notes",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3127"
+   }
   },
   {
    "id": "IDEA-04",
@@ -4287,7 +5211,13 @@
    "sketch": "'Pin note beside chat' docks Notes Dock as a resizable right split on /chat; drag a message or selection into the note; 'Ask about selection' from the note sends the selection plus a link into the composer as a context chip; pairing remembered per chat.",
    "sources": [
     "pu-cross"
-   ]
+   ],
+   "group": {
+    "key": "E3",
+    "number": 3127,
+    "title": "Capture ↔ converse knowledge loop between chat and notes",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3127"
+   }
   },
   {
    "id": "IDEA-05",
@@ -4299,7 +5229,13 @@
    "sources": [
     "pu-cross",
     "pu-chat"
-   ]
+   ],
+   "group": {
+    "key": "E4",
+    "number": 3128,
+    "title": "Power-user navigation and keyboard workflows",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3128"
+   }
   },
   {
    "id": "IDEA-06",
@@ -4312,7 +5248,13 @@
     "ft-ext",
     "ft-chat",
     "pu-ext"
-   ]
+   ],
+   "group": {
+    "key": "E2",
+    "number": 3126,
+    "title": "One conversation model and history across webui, extension and devices",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3126"
+   }
   },
   {
    "id": "IDEA-07",
@@ -4323,7 +5265,13 @@
    "sketch": "Compact/Comfortable toggle; Today/Yesterday/This week/Older groups; server-synced pins; filters by status, topic or keyword from existing metadata (state, topic_label, keywords).",
    "sources": [
     "pu-chat"
-   ]
+   ],
+   "group": {
+    "key": "E5",
+    "number": 3129,
+    "title": "Chat composer, message states and branching",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3129"
+   }
   },
   {
    "id": "IDEA-08",
@@ -4334,7 +5282,13 @@
    "sketch": "Each sidepanel tab is a lightweight view onto a serverChatId or a local draft chat. On focus reconcile with the server version/leaf ('n new messages from another window' banner). Server-backed rename, pin and trash apply everywhere. Local-only chats show 'Not synced' with one-click 'Save to server'.",
    "sources": [
     "pu-ext"
-   ]
+   ],
+   "group": {
+    "key": "E2",
+    "number": 3126,
+    "title": "One conversation model and history across webui, extension and devices",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3126"
+   }
   },
   {
    "id": "IDEA-09",
@@ -4345,7 +5299,13 @@
    "sketch": "⌘⇧O opens the exact conversation with draft, attachments and page context in the full page; the full page offers 'Continue in side panel' (focus the panel tab via runtime messaging); the panel header shows 'Open in full page ↗' with the current title.",
    "sources": [
     "pu-ext"
-   ]
+   ],
+   "group": {
+    "key": "E2",
+    "number": 3126,
+    "title": "One conversation model and history across webui, extension and devices",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3126"
+   }
   },
   {
    "id": "IDEA-10",
@@ -4356,7 +5316,13 @@
    "sketch": "Select the server's default_provider/default_model on first load; probe local providers in the background; group the picker 'Ready', 'Not reachable', 'Needs API key' with a dot per model; if the first send fails show 'Ollama isn't running — Switch to mock-gpt-4o?' [Switch & resend].",
    "sources": [
     "ft-chat"
-   ]
+   ],
+   "group": {
+    "key": "E6",
+    "number": 3130,
+    "title": "First-run experience for notes, chat and the side panel",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3130"
+   }
   },
   {
    "id": "IDEA-11",
@@ -4368,7 +5334,13 @@
    "sources": [
     "ft-chat",
     "lens-visual"
-   ]
+   ],
+   "group": {
+    "key": "E5",
+    "number": 3129,
+    "title": "Chat composer, message states and branching",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3129"
+   }
   },
   {
    "id": "IDEA-12",
@@ -4379,7 +5351,13 @@
    "sketch": "Single-row composer (+, input, send); + opens a sheet with Model, Modes, Sources, Tools, Settings; header keeps ☰ history, title and + new chat; toolbar auto-hides while scrolling the thread.",
    "sources": [
     "ft-chat"
-   ]
+   ],
+   "group": {
+    "key": "E5",
+    "number": 3129,
+    "title": "Chat composer, message states and branching",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3129"
+   }
   },
   {
    "id": "IDEA-13",
@@ -4390,7 +5368,13 @@
    "sketch": "Stopping keeps partial text with a 'Stopped' tag and Continue/Regenerate; truncated replies get 'Incomplete'; Regenerate creates variants with '‹ 2/3 ›' (Alt+Shift+←/→); Edit & resend branches and marks old answers 'outdated'.",
    "sources": [
     "ft-chat"
-   ]
+   ],
+   "group": {
+    "key": "E5",
+    "number": 3129,
+    "title": "Chat composer, message states and branching",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3129"
+   }
   },
   {
    "id": "IDEA-14",
@@ -4401,7 +5385,13 @@
    "sketch": "Regenerate split-button dropdown lists recent/favourite models; variants keep their model chip; pager shows 'mock-gpt-4o · 2/3'.",
    "sources": [
     "pu-chat"
-   ]
+   ],
+   "group": {
+    "key": "E5",
+    "number": 3129,
+    "title": "Chat composer, message states and branching",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3129"
+   }
   },
   {
    "id": "IDEA-15",
@@ -4412,7 +5402,13 @@
    "sketch": "A 'Branches (n)' chip on the parent message opens a tree popover: parent → children titled '<title> — from msg N' with last-updated times; one click switches branch.",
    "sources": [
     "pu-chat"
-   ]
+   ],
+   "group": {
+    "key": "E5",
+    "number": 3129,
+    "title": "Chat composer, message states and branching",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3129"
+   }
   },
   {
    "id": "IDEA-16",
@@ -4423,7 +5419,13 @@
    "sketch": "Client posts the turn; the server persists the user message and runs generation keyed by operation_id, writing deltas to history; the UI re-attaches via SSE resume (Last-Event-ID) on return. Existing 'retained send outcome' plumbing could back it.",
    "sources": [
     "lens-states"
-   ]
+   ],
+   "group": {
+    "key": "E2",
+    "number": 3126,
+    "title": "One conversation model and history across webui, extension and devices",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3126"
+   }
   },
   {
    "id": "IDEA-17",
@@ -4434,7 +5436,13 @@
    "sketch": "Users can type and send while offline/connecting; the message appears as a dimmed bubble 'Waiting for connection' with Cancel and Edit, auto-sent when connected; queue persisted per chat.",
    "sources": [
     "lens-states"
-   ]
+   ],
+   "group": {
+    "key": "E2",
+    "number": 3126,
+    "title": "One conversation model and history across webui, extension and devices",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3126"
+   }
   },
   {
    "id": "IDEA-18",
@@ -4446,7 +5454,13 @@
    "sources": [
     "lens-states",
     "ft-notes"
-   ]
+   ],
+   "group": {
+    "key": "E2",
+    "number": 3126,
+    "title": "One conversation model and history across webui, extension and devices",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3126"
+   }
   },
   {
    "id": "IDEA-19",
@@ -4458,7 +5472,13 @@
    "sources": [
     "pu-notes",
     "lens-states"
-   ]
+   ],
+   "group": {
+    "key": "E7",
+    "number": 3131,
+    "title": "Notes at scale: browsing, organization, linking and long-form editing",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3131"
+   }
   },
   {
    "id": "IDEA-20",
@@ -4469,7 +5489,13 @@
    "sketch": "Write {noteId, title, content, ts} to IndexedDB on every change; on load, if the draft is newer than the server version show 'Unsaved changes from 7:52 PM were recovered — Keep / Discard'.",
    "sources": [
     "ft-notes"
-   ]
+   ],
+   "group": {
+    "key": "E7",
+    "number": 3131,
+    "title": "Notes at scale: browsing, organization, linking and long-form editing",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3131"
+   }
   },
   {
    "id": "IDEA-21",
@@ -4480,7 +5506,13 @@
    "sketch": "Replace the Markdown/WYSIWYG toggle with a TipTap/Milkdown editor that stores Markdown; '# ', '- ', '[] ', '1. ' auto-format; '/' opens Heading 1-3, Checklist, Quote, Code, Link to note, Table; 'View source' for power users.",
    "sources": [
     "ft-notes"
-   ]
+   ],
+   "group": {
+    "key": "E7",
+    "number": 3131,
+    "title": "Notes at scale: browsing, organization, linking and long-form editing",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3131"
+   }
   },
   {
    "id": "IDEA-22",
@@ -4492,7 +5524,13 @@
    "sources": [
     "ft-notes",
     "pu-notes"
-   ]
+   ],
+   "group": {
+    "key": "E7",
+    "number": 3131,
+    "title": "Notes at scale: browsing, organization, linking and long-form editing",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3131"
+   }
   },
   {
    "id": "IDEA-23",
@@ -4504,7 +5542,13 @@
    "sources": [
     "pu-notes",
     "pu-cross"
-   ]
+   ],
+   "group": {
+    "key": "E7",
+    "number": 3131,
+    "title": "Notes at scale: browsing, organization, linking and long-form editing",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3131"
+   }
   },
   {
    "id": "IDEA-24",
@@ -4515,7 +5559,13 @@
    "sketch": "offset/limit with a virtualized list and true total; sticky month headers and 'Jump to month' in Timeline; selection kept across pages for bulk actions.",
    "sources": [
     "pu-ext"
-   ]
+   ],
+   "group": {
+    "key": "E7",
+    "number": 3131,
+    "title": "Notes at scale: browsing, organization, linking and long-form editing",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3131"
+   }
   },
   {
    "id": "IDEA-25",
@@ -4526,7 +5576,13 @@
    "sketch": "Right-click or hover kebab (and Shift+F10/menu key on the focused row): Open in Dock, Rename, Duplicate, Add tags…, Move to folder…, Copy [[link]], Export, Delete.",
    "sources": [
     "pu-notes"
-   ]
+   ],
+   "group": {
+    "key": "E7",
+    "number": 3131,
+    "title": "Notes at scale: browsing, organization, linking and long-form editing",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3131"
+   }
   },
   {
    "id": "IDEA-26",
@@ -4537,7 +5593,13 @@
    "sketch": "Support tag:rag -tag:archive \"exact phrase\" in:title updated:<30d has:links; save query + sort + view as a named smart view under Views with a live count.",
    "sources": [
     "pu-notes"
-   ]
+   ],
+   "group": {
+    "key": "E7",
+    "number": 3131,
+    "title": "Notes at scale: browsing, organization, linking and long-form editing",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3131"
+   }
   },
   {
    "id": "IDEA-27",
@@ -4548,7 +5610,13 @@
    "sketch": "Folders section with counts; drag notes onto folders; bulk 'Move to…'; breadcrumbs in the editor header ('Research / Papers').",
    "sources": [
     "pu-notes"
-   ]
+   ],
+   "group": {
+    "key": "E7",
+    "number": 3131,
+    "title": "Notes at scale: browsing, organization, linking and long-form editing",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3131"
+   }
   },
   {
    "id": "IDEA-28",
@@ -4559,7 +5627,13 @@
    "sketch": "With fewer than 3 notes show only search + list + New note; reveal Timeline/Graph/Collections once notes or links exist ('New: see how your notes connect → Graph'); group AI actions under one 'Assist ▾'.",
    "sources": [
     "ft-notes"
-   ]
+   ],
+   "group": {
+    "key": "E6",
+    "number": 3130,
+    "title": "First-run experience for notes, chat and the side panel",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3130"
+   }
   },
   {
    "id": "IDEA-29",
@@ -4570,7 +5644,13 @@
    "sketch": "Dismissible card in the empty editor: ☐ Write your first note ☐ Add a tag ☐ Link two notes with [[ ☐ Find it with search; items tick themselves; optional sample 'Welcome to Notes' note showing headings, a checklist and a link.",
    "sources": [
     "ft-notes"
-   ]
+   ],
+   "group": {
+    "key": "E6",
+    "number": 3130,
+    "title": "First-run experience for notes, chat and the side panel",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3130"
+   }
   },
   {
    "id": "IDEA-30",
@@ -4581,7 +5661,13 @@
    "sketch": "Inline cards above the composer: (1) 'Your model: mock-gpt-4o ▾', (2) 'Ask about this page or anything', (3) 'Save any answer to Notes via ⋯'; dismissed forever after the first successful send.",
    "sources": [
     "ft-ext"
-   ]
+   ],
+   "group": {
+    "key": "E6",
+    "number": 3130,
+    "title": "First-run experience for notes, chat and the side panel",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3130"
+   }
   },
   {
    "id": "IDEA-31",
@@ -4592,7 +5678,13 @@
    "sketch": "Replace Start chatting with 3-4 clickable chips tied to tldw strengths ('Summarize a video URL', 'Ask about my notes', 'Compare two models on a question'); clicking fills the composer and highlights the relevant control.",
    "sources": [
     "ft-chat"
-   ]
+   ],
+   "group": {
+    "key": "E6",
+    "number": 3130,
+    "title": "First-run experience for notes, chat and the side panel",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3130"
+   }
   },
   {
    "id": "IDEA-32",
@@ -4603,7 +5695,13 @@
    "sketch": "On selection show a floating pill: Save to Notes · Quote in reply · Copy · Explain; Save to Notes opens the existing NoteQuickSaveModal with the selection, chat title and model as source.",
    "sources": [
     "ft-ext"
-   ]
+   ],
+   "group": {
+    "key": "E3",
+    "number": 3127,
+    "title": "Capture ↔ converse knowledge loop between chat and notes",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3127"
+   }
   },
   {
    "id": "IDEA-33",
@@ -4615,7 +5713,13 @@
    "sources": [
     "ft-ext",
     "pu-chat"
-   ]
+   ],
+   "group": {
+    "key": "E3",
+    "number": 3127,
+    "title": "Capture ↔ converse knowledge loop between chat and notes",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3127"
+   }
   },
   {
    "id": "IDEA-34",
@@ -4626,7 +5730,13 @@
    "sketch": "Slim header on every fenced block: language · Copy · Wrap · Save to note · (optional) Open in Document Workspace / run in sandbox.",
    "sources": [
     "ft-chat"
-   ]
+   ],
+   "group": {
+    "key": "E3",
+    "number": 3127,
+    "title": "Capture ↔ converse knowledge loop between chat and notes",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3127"
+   }
   },
   {
    "id": "IDEA-35",
@@ -4637,7 +5747,13 @@
    "sketch": "A /notes sidepanel route with recent captures, search and 'Open in full page'; 'Save answer to Notes' in the message overflow defaulting to title = chat title and tags = from-chat; toast with 'Open note'.",
    "sources": [
     "pu-ext"
-   ]
+   ],
+   "group": {
+    "key": "E3",
+    "number": 3127,
+    "title": "Capture ↔ converse knowledge loop between chat and notes",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3127"
+   }
   },
   {
    "id": "IDEA-36",
@@ -4648,7 +5764,13 @@
    "sketch": "Probe server capability (embeddings and reranker loaded) and default to Fast when unavailable; on timeout offer 'Retry with Fast (keyword) search' as the primary action.",
    "sources": [
     "pu-ext"
-   ]
+   ],
+   "group": {
+    "key": "E3",
+    "number": 3127,
+    "title": "Capture ↔ converse knowledge loop between chat and notes",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3127"
+   }
   },
   {
    "id": "IDEA-37",
@@ -4661,7 +5783,13 @@
     "ft-ext",
     "lens-a11y",
     "pu-ext"
-   ]
+   ],
+   "group": {
+    "key": "E4",
+    "number": 3128,
+    "title": "Power-user navigation and keyboard workflows",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3128"
+   }
   },
   {
    "id": "IDEA-38",
@@ -4672,7 +5800,13 @@
    "sketch": "Alt+↑/↓ (or j/k with an empty composer) moves focus between messages; on a focused message: c copy, e edit, r regenerate, b branch, n save to notes; ↑ in an empty composer edits the last user message; all listed in the shortcuts sheet.",
    "sources": [
     "pu-chat"
-   ]
+   ],
+   "group": {
+    "key": "E4",
+    "number": 3128,
+    "title": "Power-user navigation and keyboard workflows",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3128"
+   }
   },
   {
    "id": "IDEA-39",
@@ -4683,7 +5817,13 @@
    "sketch": "sr-only h2 per turn ('You, 8:48 PM' / 'mock-gpt-4o reply'); demote markdown headings inside messages to h3+; Alt+Up/Down moves between messages; focused article announces role, position and model.",
    "sources": [
     "lens-a11y"
-   ]
+   ],
+   "group": {
+    "key": "E8",
+    "number": 3132,
+    "title": "Design-system and accessibility foundations",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3132"
+   }
   },
   {
    "id": "IDEA-40",
@@ -4694,7 +5834,13 @@
    "sketch": "Single Tab stop with roving focus; Space toggles selection, P pins, Enter opens, Shift+Arrow extends selection; aria-describedby on rows for preview, date and tags.",
    "sources": [
     "lens-a11y"
-   ]
+   ],
+   "group": {
+    "key": "E4",
+    "number": 3128,
+    "title": "Power-user navigation and keyboard workflows",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3128"
+   }
   },
   {
    "id": "IDEA-41",
@@ -4705,7 +5851,13 @@
    "sketch": "packages/ui/src/components/a11y/: <MenuButton> wrapping antd Dropdown with aria-haspopup and focus return; useComboboxTextarea() for slash, @mention and [[wikilink]] menus; useAnnounce() + <LiveAnnouncer/> in AppShell with an announcing wrapper around antd message.",
    "sources": [
     "lens-a11y"
-   ]
+   ],
+   "group": {
+    "key": "E8",
+    "number": 3132,
+    "title": "Design-system and accessibility foundations",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3132"
+   }
   },
   {
    "id": "IDEA-42",
@@ -4716,7 +5868,13 @@
    "sketch": "Default theme to 'system' and animation to the reduced-motion media query; add 'Increase contrast' and 'Reduce motion' switches in Settings → Appearance.",
    "sources": [
     "lens-a11y"
-   ]
+   ],
+   "group": {
+    "key": "E6",
+    "number": 3130,
+    "title": "First-run experience for notes, chat and the side panel",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3130"
+   }
   },
   {
    "id": "IDEA-43",
@@ -4728,7 +5886,13 @@
    "sources": [
     "ft-ext",
     "lens-visual"
-   ]
+   ],
+   "group": {
+    "key": "E8",
+    "number": 3132,
+    "title": "Design-system and accessibility foundations",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3132"
+   }
   },
   {
    "id": "IDEA-44",
@@ -4739,7 +5903,13 @@
    "sketch": "Type scale 12/13/14/16/20 (11 only for uppercase section labels); control heights 28/32/40; one 8px radius (pills only for status chips); ESLint/Tailwind rule forbidding arbitrary text-[Npx]; ConfigProvider tokens for fontSize, colorPrimary, colorTextSecondary.",
    "sources": [
     "lens-visual"
-   ]
+   ],
+   "group": {
+    "key": "E8",
+    "number": 3132,
+    "title": "Design-system and accessibility foundations",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3132"
+   }
   },
   {
    "id": "IDEA-45",
@@ -4750,7 +5920,13 @@
    "sketch": "[App rail: labelled nav, context-aware 'New…'] | [Object list: search on top, filter chips, compact rows, density toggle] | [Workspace header: editable title · status chip · primary action · ⋯] | [Content] | [Optional right panel: Outline/Connections (notes) or Context/Model settings (chat)].",
    "sources": [
     "lens-visual"
-   ]
+   ],
+   "group": {
+    "key": "E8",
+    "number": 3132,
+    "title": "Design-system and accessibility foundations",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3132"
+   }
   },
   {
    "id": "IDEA-46",
@@ -4761,7 +5937,13 @@
    "sketch": "One <Markdown> with variants (message, document, compact), shared code/inline-code/table styles, and toPlainPreview(md) used by notes rows, chat search results and Notes Dock; snapshot tests with a fixture containing a table, code, inline code, a checklist and LaTeX.",
    "sources": [
     "lens-visual"
-   ]
+   ],
+   "group": {
+    "key": "E8",
+    "number": 3132,
+    "title": "Design-system and accessibility foundations",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3132"
+   }
   },
   {
    "id": "IDEA-47",
@@ -4773,7 +5955,13 @@
    "sources": [
     "lens-visual",
     "lens-a11y"
-   ]
+   ],
+   "group": {
+    "key": "E1",
+    "number": 3125,
+    "title": "Quality gates: contract tests, UX regression harness and CI budgets",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3125"
+   }
   },
   {
    "id": "IDEA-48",
@@ -4784,7 +5972,13 @@
    "sketch": "Generate a TypeScript client from FastAPI's OpenAPI for notes and chats; CI Playwright smoke against a seeded backend with >100 notes checking page 2 differs from page 1 and export count equals total.",
    "sources": [
     "lens-states"
-   ]
+   ],
+   "group": {
+    "key": "E1",
+    "number": 3125,
+    "title": "Quality gates: contract tests, UX regression harness and CI budgets",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3125"
+   }
   },
   {
    "id": "IDEA-49",
@@ -4795,7 +5989,13 @@
    "sketch": "Playwright check failing on >N API calls in the first 10s, duplicate GETs within 2s, or >1 request per 10s idle on /notes and /chat; log autosave request count and payload size.",
    "sources": [
     "lens-states"
-   ]
+   ],
+   "group": {
+    "key": "E1",
+    "number": 3125,
+    "title": "Quality gates: contract tests, UX regression harness and CI budgets",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3125"
+   }
   }
  ],
  "strengths": [
@@ -4826,5 +6026,10 @@
   "Extension options Notes matches the webui feature for feature; webui and options share one app shell with coherent light and dark themes; webui tab titles follow the route.",
   "No horizontal overflow at 320, 390, 640, 768, 1024 or 1920px on either page; chat has dedicated mobile-composer viewport handling.",
   "Clean runtime: no console errors, page errors or failed API calls across ~80 scripted sessions on webui, options and sidepanel outside the specific broken actions reported."
- ]
+ ],
+ "tracking_issue": {
+  "number": 3101,
+  "url": "https://github.com/rmusser01/tldw_server/issues/3101"
+ },
+ "plan": "Docs/superpowers/plans/2026-10-03-notes-chat-ux-remediation-plan.md"
 }
