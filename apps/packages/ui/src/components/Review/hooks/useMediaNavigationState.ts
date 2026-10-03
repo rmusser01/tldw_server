@@ -455,7 +455,6 @@ export function useMediaNavigationState(deps: UseMediaNavigationStateDeps) {
   useEffect(() => {
     if (permalinkNeedsHydration) return
     if (
-      selectedMediaPermalinkId == null &&
       pendingInitialMediaIdSource === 'url' &&
       pendingInitialMediaId
     ) {
