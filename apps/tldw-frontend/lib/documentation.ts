@@ -38,15 +38,14 @@ const fileTitleFromPath = (relativePath: string) => {
 const toPosixPath = (value: string) => value.split(path.sep).join("/")
 
 const resolveRepoRoot = () => {
-  const candidates = [
-    process.cwd(),
-    path.resolve(process.cwd(), "../.."),
-  ]
-
-  for (const candidate of candidates) {
+  let candidate = process.cwd()
+  // Both the checkout and standalone runtime live at <root>/apps/tldw-frontend.
+  // Do not fall back to documentation outside that root when packaging is incomplete.
+  for (let depth = 0; depth <= 2; depth += 1) {
     if (fs.existsSync(path.join(candidate, SOURCE_ROOTS.server))) {
       return candidate
     }
+    candidate = path.dirname(candidate)
   }
 
   throw new Error("Unable to resolve repository root for documentation sources.")
