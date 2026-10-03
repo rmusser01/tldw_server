@@ -280,6 +280,11 @@ async def _enforce_and_record_media_bytes(user_id: Any, total_uploaded_bytes: in
 
     A non-numeric ``user_id`` skips the check and records nothing per-user
     (matching the other quota_checks sites, e.g. rag_queries_decision).
+
+    When the user has a limit, the admission check and the ledger write are
+    one atomic operation (``ResourceDailyLedger.add_if_within_daily_cap``), so
+    two concurrent uploads cannot both pass against the same remaining daily
+    allowance (Qodo Q16).
     """
     if total_uploaded_bytes <= 0:
         return
@@ -287,25 +292,47 @@ async def _enforce_and_record_media_bytes(user_id: Any, total_uploaded_bytes: in
     if quota_uid is None:
         return
     uid = str(quota_uid)
+    op_id = f"media-ingestion-bytes:user:{uid}:{uuid4().hex}"
 
-    async def _used_mb() -> float:
-        return (await quota_checks.ledger_used_today(uid, _MEDIA_INGESTION_BYTES_CATEGORY)) / (1024 * 1024)
+    limit_mb = await quota_checks.user_quota(quota_uid, "limits.media_ingest_mb_per_day")
+    if limit_mb is None:
+        # Gate the check, never the record: still count unlimited uploads.
+        await _record_media_ingestion_bytes_ledger_entry(
+            entity_scope="user",
+            entity_value=uid,
+            units=int(total_uploaded_bytes),
+            op_id=op_id,
+        )
+        return
 
-    decision = await quota_checks.check_usage(
-        quota_uid, "limits.media_ingest_mb_per_day", total_uploaded_bytes / (1024 * 1024), _used_mb
+    daily_cap_bytes = max(0, int(round(float(limit_mb) * 1024 * 1024)))
+    ledger = await _get_media_ingestion_daily_ledger()
+    if ledger is None:
+        # Ledger unavailable: fail open on the check, matching check_usage's
+        # own fail-open on counter errors; there is nothing to write.
+        return
+
+    from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import LedgerEntry
+
+    entry = LedgerEntry(
+        entity_scope="user",
+        entity_value=uid,
+        category=_MEDIA_INGESTION_BYTES_CATEGORY,
+        units=int(total_uploaded_bytes),
+        op_id=op_id,
+        occurred_at=datetime.now(timezone.utc),
     )
-    if not decision.allowed:
+    try:
+        allowed, _remaining = await ledger.add_if_within_daily_cap(entry, daily_cap_bytes)
+    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Media ingestion budget: atomic ledger check failed; failing open: {}", exc)
+        return
+    if not allowed:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Daily ingestion size budget exceeded.",
             headers={"Retry-After": str(quota_checks.seconds_until_utc_midnight())},
         )
-    await _record_media_ingestion_bytes_ledger_entry(
-        entity_scope="user",
-        entity_value=uid,
-        units=int(total_uploaded_bytes),
-        op_id=f"media-ingestion-bytes:user:{uid}:{uuid4().hex}",
-    )
 
 
 def _ensure_warnings_list(result: dict[str, Any]) -> list[str]:

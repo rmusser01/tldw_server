@@ -128,21 +128,11 @@ async def ledger_used_this_month(entity_value: str, category: str) -> float:
 async def llm_tokens_this_month(user_id: int) -> float:
     """This calendar month's (UTC) ``llm_usage_log`` token total for the user."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 
     pool = await get_db_pool()
     month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    # llm_usage_log.ts is TIMESTAMP without time zone on Postgres: bind naive UTC there.
-    bound: Any = (
-        month_start.replace(tzinfo=None)
-        if getattr(pool, "pool", None) is not None
-        else month_start.strftime("%Y-%m-%d %H:%M:%S")
-    )
-    value = await pool.fetchval(
-        "SELECT COALESCE(SUM(total_tokens), 0) FROM llm_usage_log WHERE user_id = ? AND ts >= ?",
-        int(user_id),
-        bound,
-    )
-    return float(value or 0)
+    return await AuthnzUsageRepo(pool).sum_user_llm_tokens_since(user_id=user_id, since=month_start)
 
 
 async def rag_queries_decision(user_id: Any, units: int) -> QuotaDecision:
@@ -175,3 +165,39 @@ async def workflows_runs_decision(user_id: Any) -> QuotaDecision:
         1,
         lambda: ledger_used_today(str(uid), workflows_ledger_category()),
     )
+
+
+async def workflows_runs_consume(user_id: Any, run_id: str) -> QuotaDecision:
+    """Atomically admit and record one workflow run (Qodo Q17).
+
+    Unlike ``workflows_runs_decision`` (read-only), this performs the
+    admission check and the ledger write as one atomic operation
+    (``ResourceDailyLedger.add_if_within_daily_cap``), keyed by ``run_id``, so
+    two concurrent runs cannot both pass against the same remaining slot.
+
+    ``WORKFLOWS_DISABLE_QUOTAS`` and an unset ``limits.workflows_runs_per_day``
+    both mean unlimited: the run is admitted and still shadow-recorded (gate
+    the check, never the record).
+    """
+    from tldw_Server_API.app.core.testing import env_flag_enabled
+    from tldw_Server_API.app.core.Workflows.daily_ledger import consume_workflow_run_if_within_cap
+
+    uid = as_quota_user_id(user_id)
+    if env_flag_enabled("WORKFLOWS_DISABLE_QUOTAS"):
+        await consume_workflow_run_if_within_cap(
+            entity_scope="user", entity_value=str(uid), run_id=run_id, daily_cap=None
+        )
+        return UNLIMITED
+
+    limit = await user_quota(uid, "limits.workflows_runs_per_day")
+    if limit is None:
+        await consume_workflow_run_if_within_cap(
+            entity_scope="user", entity_value=str(uid), run_id=run_id, daily_cap=None
+        )
+        return UNLIMITED
+
+    allowed, remaining = await consume_workflow_run_if_within_cap(
+        entity_scope="user", entity_value=str(uid), run_id=run_id, daily_cap=int(limit)
+    )
+    used = max(0, int(limit) - int(remaining))
+    return QuotaDecision(allowed=allowed, limit=limit, used=used)

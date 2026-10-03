@@ -10,6 +10,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.Scheduler.handlers import workflows as workflow_handler_mod
+from tldw_Server_API.app.core.Usage import quota_checks
 
 
 pytestmark = pytest.mark.unit
@@ -179,13 +180,15 @@ async def test_workflow_run_handler_persists_payload_metadata_without_mutating_d
         def set_run_secrets(run_id: str, secrets: dict[str, str]) -> None:  # pragma: no cover - not used
             raise AssertionError("secrets should not be set in this test")
 
-    async def fake_record_workflow_run(*, entity_scope: str, entity_value: str, run_id: str, units: int) -> None:
-        ledger_records.append((entity_value, run_id))
+    async def fake_workflows_runs_consume(user_id: Any, run_id: str) -> quota_checks.QuotaDecision:
+        """The scheduler's quota check+record call, now one atomic operation (Qodo Q17)."""
+        ledger_records.append((str(user_id), run_id))
+        return quota_checks.UNLIMITED
 
     fake_db = FakeWorkflowsDB()
     monkeypatch.setattr(workflow_handler_mod, "_get_wf_db", lambda: fake_db)
     monkeypatch.setattr(workflow_handler_mod, "WorkflowEngine", FakeWorkflowEngine)
-    monkeypatch.setattr(workflow_handler_mod, "record_workflow_run", fake_record_workflow_run)
+    monkeypatch.setattr(quota_checks, "workflows_runs_consume", fake_workflows_runs_consume)
 
     definition_snapshot = {
         "name": "audio_briefing",
@@ -264,7 +267,7 @@ async def test_watchlist_workflow_failure_is_recorded_and_fails_scheduler_task(m
 
     monkeypatch.setattr(workflow_handler_mod, "_get_wf_db", lambda: FakeWorkflowsDB())
     monkeypatch.setattr(workflow_handler_mod, "WorkflowEngine", FakeWorkflowEngine)
-    monkeypatch.setattr(workflow_handler_mod, "record_workflow_run", AsyncMock())
+    monkeypatch.setattr(quota_checks, "workflows_runs_consume", AsyncMock(return_value=quota_checks.UNLIMITED))
     monkeypatch.setattr(workflow_handler_mod, "record_audio_workflow_terminal", record_terminal)
 
     with pytest.raises(RuntimeError, match="workflow_run_failed"):
@@ -307,7 +310,7 @@ async def test_generic_sync_workflow_failure_returns_structured_result(monkeypat
 
     monkeypatch.setattr(workflow_handler_mod, "_get_wf_db", lambda: FakeWorkflowsDB())
     monkeypatch.setattr(workflow_handler_mod, "WorkflowEngine", FakeWorkflowEngine)
-    monkeypatch.setattr(workflow_handler_mod, "record_workflow_run", AsyncMock())
+    monkeypatch.setattr(quota_checks, "workflows_runs_consume", AsyncMock(return_value=quota_checks.UNLIMITED))
 
     result = await workflow_handler_mod.workflow_run(
         {

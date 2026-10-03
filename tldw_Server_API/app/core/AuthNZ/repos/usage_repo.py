@@ -247,6 +247,21 @@ class AuthnzUsageRepo:
             logger.error(f"AuthnzUsageRepo.summarize_user_day failed: {exc}")
             raise
 
+    async def sum_user_llm_tokens_since(self, *, user_id: int, since: datetime) -> float:
+        """Sum ``llm_usage_log.total_tokens`` for a user from ``since`` (inclusive) onward.
+
+        Used for the per-user monthly LLM-token quota (spec 2 §4). ``since`` is
+        bound naive on Postgres: ``llm_usage_log.ts`` is TIMESTAMP without time
+        zone there, so an aware bound would never match.
+        """
+        bound: Any = _strip_tzinfo(since) if self._is_postgres_backend() else since.strftime("%Y-%m-%d %H:%M:%S")
+        value = await self.db_pool.fetchval(
+            "SELECT COALESCE(SUM(total_tokens), 0) FROM llm_usage_log WHERE user_id = ? AND ts >= ?",
+            int(user_id),
+            bound,
+        )
+        return float(value or 0)
+
     async def summarize_key_rolling_window(
         self,
         *,
