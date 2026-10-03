@@ -1,7 +1,7 @@
 ---
 id: TASK-13202
 title: Qualify an actual voice-capable Persona Buddy session
-status: In Progress
+status: Done
 created_date: 2026-09-06 02:07
 updated_date: 2026-09-06 17:05
 labels:
@@ -25,7 +25,7 @@ Post-merge Migu UAT on dev 220bf544b7 confirms the real live-control session adv
 <!-- AC:BEGIN -->
 - [x] #1 Voice capability becomes available only when the supported end-to-end voice runtime is ready; absent credentials or unsupported backends retain actionable unavailable state.
 - [x] #2 Microphone startup is explicitly user initiated and Stop/session changes release recording and playback ownership.
-- [ ] #3 An intentional human speech test produces a provider reply and actual audio output with request-correlated Buddy listening/thinking/speaking/idle states.
+- [x] #3 An intentional human speech test produces a provider reply and actual audio output with request-correlated Buddy listening/thinking/speaking/idle states.
 - [x] #4 Targeted lifecycle regressions and sanitized live evidence verify no audio capture before the explicit start and no residual capture after Stop.
 <!-- AC:END -->
 
@@ -70,19 +70,23 @@ September 30 UAT follow-up: existing local Kokoro ONNX/voices assets are availab
 October 3 UTC UAT preparation on published backend dd049f947f8d6a105c312f54e422b26f4b9ac558: the supported disposable setup dry-run completed without executing its confirmation-required command; the exact owned session connected and disconnected successfully, and the normal Live view exposes Parakeet ONNX voice controls. No microphone or conversational provider turn was started. The real local Kokoro model HTTP path returned 200 with a 67,628-byte mono 24 kHz WAV (1.408 s, peak PCM16 22,290), with copied configuration restricting priority to Kokoro and fallback disabled; audio was not played. The initial HTTP probe mistakenly used the explicit gateway selector for a legacy adapter; the corrected normal model request succeeds. The existing copied YAML was also placed at the supported legacy lookup path. These are disposable harness corrections, not production repairs. No ONNX weights were found in the checked local caches; prior no-download instructions remain in force and a requester model-provisioning choice is pending. AC3 stays open for requester-controlled intentional speech, audible playback and correlated floating sprite transitions. Private sanitized receipts: /private/tmp/buddy-replay-fix-uat-20261003/voice-handoff-preparation.json and local-speech-output-check.json. Existing ADR046 applies; no source or architecture change in this update.
 October 3 UTC approved UAT provisioning: requester approved downloading the normal public Parakeet ONNX bundle into the disposable profile and preparing the DeepSeek/Kokoro human test. Pinned repository istupakov/parakeet-tdt-0.6b-v3-onnx revision 8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce; eight selected files, 3,220,331,722 bytes, verified complete. On unchanged production source 67e8d07c6ee2f6936e1b0da6f6edd229f71aaafc, the production Persona factory selected parakeet-onnx on CPU and recognized synthetic local Kokoro speech as The blue notebook is ready. in a 5.259-second cold-load/recognition check. Recognition ran offline, opened no microphone, and retired its transcriber. The ordinary provider resolver selected deepseek / deepseek-chat after normal private credential-store initialization; no provider request occurred. The initial standalone configuration probe omitted that startup initialization and was corrected; it was not a production credential failure. The exact owned browser session reconnected after the private API restart, with Auto-commit and Auto-resume off. The floating idle image is loaded, and Start listening / Send now are visible for requester control. Nineteen Persona HTTP requests on this restart all returned 200; the pack/session load loop did not recur during preparation. No normal profile was modified. AC3 remains open for the intentional human turn, audible reply and correlated floating transitions. Private receipts: /private/tmp/buddy-replay-fix-uat-20261003/parakeet-onnx-provision-result.json, parakeet-onnx-recognition-result.json and approved-voice-readiness.json. Existing ADR046 applies; this update changes UAT evidence only.
 October 3 UTC human UAT: requester reported that the voice turn worked. The visible owned live transcript contains one user turn, Say the Blue Notebook is ready., one assistant reply, The Blue Notebook is ready., and three TTS audio-chunk notices; Last heard and Last sent match. Buddy was absent because the natural pane was 858×981 and the legacy web host suppressed itself below 1024. TASK-13423 repairs this cutoff. After live refresh, the actual loaded sprite is visible in that same connected session and compact-browser continuity checks pass. No agent microphone capture occurred. The requester has been asked to repeat the turn with Buddy visible for correlated listening/thinking/speaking and audible-output confirmation; AC3 remains open until that evidence arrives. Private receipts: /private/tmp/buddy-replay-fix-uat-20261003/human-turn-missing-buddy.png, responsive-browser-receipts.json and buddy-visible-natural-pane.png. Existing ADR046 applies.
+October 3 PDT live follow-up on source e74d3df255159f088da6e3a4047248348fb26d16: requester confirmed Buddy is now showing. Their notebook speech was heard and sent as Say the blue notebook is ready. exactly once; the assistant replied The blue notebook is ready. with a notebook emoji and five TTS audio-chunk notices. Direct browser sampling captured loaded floating requested/rendered states thinking → speaking → idle at 07:50:36–39 PDT; screenshot receipts show the changing sprite. Start listening became available again and Send now was disabled at final idle. Observation began after the listening phase; fresh audible-output and listening confirmation is pending, so AC3 remains unchecked. Agent did not start the microphone or submit the speech. Requester changed Auto-commit to on during this turn; the agent preserved that choice. Runtime BuddyShellHost, BuddyShellDock and usePersonaLiveControl files are byte-identical to the published source. Private sanitized receipt: /private/tmp/buddy-replay-fix-uat-20261003/human-voice-buddy-turn-20261003.json; state log: human-voice-buddy-observations-20261003.json; screenshots: human-voice-buddy-1-20261003.png and human-voice-buddy-2-20261003.png. Existing ADR046 applies; evidence update only.
+October 3 PDT requester confirmation: in response to Did you also see its listening animation and hear the reply clearly?, requester answered Yes, both worked. Together with the source-bound exact notebook transcript and directly sampled loaded floating thinking → speaking → idle states, this completes AC3. Listening and clear audibility are requester observations; the agent did not directly sample the listening phase or inspect raw MediaStream handles. Auto-commit was observed on at completion; the actor changing that setting was not directly observed, correcting the attribution in the preceding note. The agent preserved the current setting. No new production voice code was required. Final source-bound receipt remains /private/tmp/buddy-replay-fix-uat-20261003/human-voice-buddy-turn-20261003.json. The 128 targeted frontend tests at the same production source and prior lifecycle/STT/backend evidence cover the unchanged voice logic; current hosted frontend shards, lint/type, onboarding and critical E2E checks pass. Existing ADR046 applies. The remaining unrelated failed docs parity check is being repaired under TASK-13423 before publication of these final notes.
+Final sanitized human acceptance is now retained in Docs/Reviews/assets/buddy-voice-uat-2026-10-03/human-acceptance.json, with source hashes, exact transcript/reply, direct browser states, and the requester listening/audibility confirmation. It preserves the distinction between browser-observed and requester-observed evidence and retains no raw audio or credentials. No production voice implementation changed in this final qualification update; Bandit is inapplicable to Markdown/JSON evidence.
+The source and published Persona Buddy user guide now reflect this completed qualification and link the sanitized acceptance receipt. The targeted documentation refresh suite passes all 33 checks; follow-up review found no actionable findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Supported Persona voice UAT passed with Parakeet ONNX CPU, configured DeepSeek and local Kokoro on source e74d3df255159f088da6e3a4047248348fb26d16. The notebook phrase was transcribed and committed once, the matching assistant reply produced five TTS chunks, and the requester confirmed the listening animation and clear audible reply. Direct observation captured loaded floating thinking/speaking/idle states. Existing targeted lifecycle evidence covers explicit capture ownership and cleanup; raw live MediaStream inspection is not claimed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
