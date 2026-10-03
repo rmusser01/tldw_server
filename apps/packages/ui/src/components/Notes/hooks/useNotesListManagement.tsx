@@ -391,18 +391,28 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       setTotal(totalVal)
       return items.map(mapNoteListItem)
     }
-    const browsePath =
-      (`/api/v1/notes/?page=${page}&results_per_page=${pageSize}` +
-        `&sort_by=${NOTE_SORT_API_PARAMS[sortOption].sortBy}` +
-        `&sort_order=${NOTE_SORT_API_PARAMS[sortOption].sortOrder}`) as `/${string}`
+    // GET /api/v1/notes/ pages with limit/offset and sorts the whole library
+    // server-side; it ignores page/results_per_page.
+    const params = new URLSearchParams()
+    params.set('limit', String(pageSize))
+    params.set('offset', String((page - 1) * pageSize))
+    params.set('include_keywords', 'true')
+    params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
+    params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
     const res = await bgRequest<any>({
-      path: browsePath,
+      path: `/api/v1/notes/?${params.toString()}` as `/${string}`,
       method: 'GET' as any
     })
     if (!isCurrentAuthority(requestOwner)) return []
     const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : [])
-    const pagination = res?.pagination
-    setTotal(Number(pagination?.total_items || items.length || 0))
+    const totalItems =
+      Number(
+        res?.pagination?.total ??
+          res?.total ??
+          res?.pagination?.total_items ??
+          items.length
+      ) || 0
+    setTotal(totalItems)
     return sortNoteRows(items, sortOption).map(mapNoteListItem)
   }, [authorityOwner, effectiveKeywordTokens, fetchFilteredNotesRaw, isCurrentAuthority, listMode, listViewMode, page, pageSize, query, selectedMoodboardId, setTotal, sortOption])
 
@@ -498,6 +508,15 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     if (page <= moodboardTotalPages) return
     setPage(moodboardTotalPages)
   }, [listMode, listViewMode, moodboardTotalPages, page])
+
+  // Step back when the current page has emptied past the end of the list,
+  // e.g. after deleting the only note on the last page. Waiting for an empty,
+  // settled page means a stale or missing total never moves the reader.
+  React.useEffect(() => {
+    if (isFetching || isPlaceholderData || rawNotes.length > 0) return
+    if (page <= moodboardTotalPages) return
+    setPage(moodboardTotalPages)
+  }, [isFetching, isPlaceholderData, moodboardTotalPages, page, rawNotes.length])
 
   // ---- moodboard fetch ----
   const fetchMoodboards = React.useCallback(async (): Promise<MoodboardSummary[]> => {
