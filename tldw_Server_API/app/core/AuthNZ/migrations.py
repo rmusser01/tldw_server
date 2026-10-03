@@ -6564,12 +6564,21 @@ def migration_099_add_llm_usage_log_user_ts_index(conn: sqlite3.Connection) -> N
     Migration 015 (already applied on existing databases) only indexed
     user_id and ts separately; per-user monthly token lookups need the
     composite index too.
+
+    Some synthetic/legacy databases reach this migration without ever having
+    run migration 015 (fixtures that seed ``schema_migrations`` starting at a
+    later version carry no llm_usage_log table at all); skip rather than
+    error for those, instead of suppressing a real failure.
     """
-    with contextlib.suppress(_AUTHNZ_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)"
-        )
-    conn.commit()
+    table_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='llm_usage_log'"
+    ).fetchone()
+    if table_exists is None:
+        logger.info("Migration 099: llm_usage_log table not present; skipping index")
+        return
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)"
+    )
     logger.info("Migration 099: Added llm_usage_log user_id + ts index")
 
 
