@@ -31,11 +31,15 @@ Reservations move monotonically from reserved to released or dispatched, then fr
 
 Resource Governor release and bounded actual reconciliation reduce the associated daily-ledger operation rather than treating omitted actuals as fully consumed. Existing global governor policy remains governed by ADR-018 and ADR-056; the separate MCP reservation is the fail-closed authority.
 
+Only the handle that inserted a durable daily-ledger row owns its downward settlement. Same-operation governor admission serializes through handle publication; durable replay after cache expiry or in another governor cannot acquire refund ownership over an earlier charge. Operation locks are removed after their final owner or waiter exits.
+
 Completion concurrency uses the governor's existing `jobs` lease category. DB-backed Billing limit reads use the admission transaction connection, never a nested pool acquisition. Pre-dispatch cleanup attempts governor release even if durable storage is unavailable. Local release/dispatch markers make those boundaries mutually exclusive, and the durable state fence prevents refunds after dispatch begins. Failed release cannot authorize later dispatch on a refunded governor handle.
 
 The per-scope lock coordinates MCP admission and settlement, not legacy Chat calls that do not adopt this protocol. Operator pricing is captured by value; stored accounting excludes prompt, output, credentials, arbitrary metadata, and raw provider usage.
 
 The canonical usage row determines which completed calls and billing period are counted. Its legacy floating-point USD columns remain compatible, but strict MCP cost enforcement reads the exact integer actual cost from the reservation audit row committed in the same transaction. A missing or inconsistent settlement fails closed instead of reconstructing MCP costs from lossy floats.
+
+Canonical MCP timestamps are bound as UTC values independently of the database session timezone. PostgreSQL's exact numeric token aggregates are accepted only when finite, integral, non-negative, and within the signed-integer accounting bound; malformed values are never treated as zero exposure.
 
 ## Follow-Up
 

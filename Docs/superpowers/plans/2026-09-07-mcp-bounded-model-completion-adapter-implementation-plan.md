@@ -170,7 +170,7 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 
 **Tests:** SQLite/PostgreSQL migration and repository tests, concurrent reservation races, integer overflow, pre/post-dispatch cancellation, idempotent transitions, monthly quota with outstanding reservations, Resource Governor release parity.
 
-**Status:** In Progress
+**Status:** Complete
 
 **ADR check (2026-10-02):** ADR required: yes. [ADR-059](../../ADR/059-mcp-durable-provider-accounting.md) records durable conservative admission/dispatch/settlement. ADR-018 and ADR-056 continue to govern the existing Resource Governor policy.
 
@@ -179,6 +179,10 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 **Precision adjustment (2026-10-02):** Keep `llm_usage_log` as the canonical completed-call/period record, but join its MCP execution ID to the atomically reconciled reservation for exact integer cost actuals. Tests at the signed-integer ceiling showed that reconstructing those units from legacy floating-point USD can overflow or lose units. Missing/inconsistent MCP settlement fails closed.
 
 **Specification-review adjustments (2026-10-02):** Use the existing `jobs` governor concurrency category with one unit; `provider_calls` is not a supported lease category. Read DB-backed subscription limits through the supplied transaction connection to avoid nested-pool starvation. Attempt known pre-dispatch governor cleanup independently of durable-release availability. Local release/dispatch markers make those boundaries mutually exclusive, and the durable transition fence prevents post-dispatch refunds. A failed release cannot later dispatch using a refunded governor handle.
+
+**Duplicate-operation adjustment (2026-10-02):** Serialize same-operation governor reservations through cached-result publication, with the operation lock retained for queued callers and removed after the final participant exits. Start cache/handle lifetimes after daily-ledger I/O. Only a reservation that inserted a durable daily row owns downward settlement; replay after cache expiry or from another governor cannot refund an earlier operation's charge.
+
+**Backend-parity adjustment (2026-10-02):** Bind explicit UTC timestamps for MCP canonical usage instead of relying on PostgreSQL session-local `CURRENT_TIMESTAMP` conversion into the legacy naive timestamp column. Normalize PostgreSQL `SUM(BIGINT)` results only when their `Decimal` value is finite, integral, non-negative, and within the signed-integer bound. Invalid aggregates remain errors rather than being coerced to zero.
 
 ### Task 3.1: Add the provider usage reservation state machine
 
@@ -208,12 +212,16 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 2. Retain each daily-cap operation identity on the in-memory reservation handle. Extend the daily-cap helper and durable ledger with an idempotent downward adjustment keyed by that identity. Reject increases during reconciliation and keep conservative durable values when the ledger is unavailable.
 3. Make `MemoryResourceGovernor.release()` construct explicit zero actuals for every reserved category, and make `commit()` reconcile any consumed daily-cap rows to the bounded actuals. Keep current public method signatures compatible and preserve the existing global fail-open daily-cap policy; the MCP adapter's separate durable reservation is its fail-closed quota authority.
 4. If a later category is denied after an earlier daily-cap category was consumed, roll back the earlier entries before returning denial. Add property tests for repeated release/commit, partial actuals, multi-category partial denial, duplicate callbacks, unknown handles, and values near the integer ceiling.
+   Same-operation reservations must publish one cached handle/decision while callers overlap. Durable insertion ownership, not cached operation identity alone, determines which daily entries may be reconciled downward after cache expiry or across governor instances.
 5. Run all Resource Governance tests touched by these changes.
 6. Commit: `fix(governance): reconcile released reservations explicitly`
+
+**Task 3.2 verification (2026-10-02):** Independent specification and code-quality re-reviews approved the duplicate-operation repair. Parent reconciliation gate passed `47 passed`, including four real PostgreSQL cache-expiry/cross-instance ownership cases and PostgreSQL downward-adjustment parity, with zero skips. Parent full governance/Billing/accounting regression passed `899 passed, 2 xfailed`; both expected failures are existing Redis retry-after determinism cases. Same-op publication, cancellation/error lock cleanup, insertion-only settlement ownership, and mixed-ownership partial rollback were independently probed.
 
 ### Task 3.3: Compose MCP completion accounting
 
 **Files:**
+- Create: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/__init__.py`
 - Create: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/accounting.py`
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_accounting.py`
 - Modify: `tldw_Server_API/app/core/AuthNZ/repos/usage_repo.py`
@@ -231,6 +239,16 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 7. Return the valid normalized result even if strict post-call usage persistence, reservation transition, governor commit, or credential `mark_used` fails. Leave the reservation active/ambiguous, which may conservatively double-count an already-written usage row, and emit only bounded operational logging.
 8. Include outstanding MCP reservations in Billing enforcement in addition to canonical `llm_usage_log` actuals. Reconciled reservation rows are excluded, preventing normal success from double counting. Do not claim atomic coordination with unrelated legacy Chat calls.
 9. Commit: `feat(mcp): enforce conservative completion accounting`
+
+**Stage 3 verification (2026-10-02):**
+- Independent specification and code-quality reviews approved all three implementation tasks after validated findings were reproduced and repaired. Final repairs cover duplicate daily-charge ownership, exact integer MCP cost actuals, required transaction-bound Billing reads, release/dispatch mutual exclusion, UTC canonical timestamps, and PostgreSQL integral numeric aggregates.
+- Final combined governance/Billing/accounting and legacy usage/migration gate passed `899 passed, 2 xfailed`, with zero skips. The expected failures are existing Redis retry-after determinism cases.
+- Final canonical AuthNZ PostgreSQL reservation/composition/strict Billing/legacy usage matrix passed `87 passed`, with zero skips. It includes the 71-case reservation matrix and 14 composed accounting lifecycle cases.
+- Expanded governor reconciliation gate passed `47 passed`, with zero skips, including PostgreSQL daily-settlement ownership across cache expiry and governor instances.
+- Final full MCP Unified module gate passed `3,535 passed, 3 skipped`. Skips are unavailable optional tree-sitter C/C++, Java/Kotlin, and C# parsers.
+- Ruff and `compileall` passed on the touched scope. Black passed on 12 new files; existing-file edits were formatted in changed ranges. Bandit reported zero findings and zero scan errors across the touched production scope in `/tmp/bandit_task_2294_3_2_stage3_checkpoint.json`.
+- A fresh fetch confirmed `origin/dev` remains `86e287fee7`; no additional rebase was needed. Task 3.1 is committed as `b8c289659c` and Task 3.2 as `95bede87c5`.
+- This completes the accounting foundation, not the production completion adapter. Stages 4 and 5 remain unstarted, and the overall Backlog task remains In Progress. No adapter PR has been created or pushed.
 
 ## Stage 4: Certified Async Transport And Adapter Lifecycle
 
@@ -260,7 +278,7 @@ This task does **not** add `skills.run`, Skills YAML configuration, a Skills mod
 ### Task 4.2: Implement strict response normalization
 
 **Files:**
-- Create: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/__init__.py`
+- Modify: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/__init__.py`
 - Create: `tldw_Server_API/app/core/MCP_unified/adapters/model_completion/normalization.py`
 - Create: `tldw_Server_API/app/core/MCP_unified/tests/test_model_completion_normalization.py`
 

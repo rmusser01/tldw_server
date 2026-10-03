@@ -288,6 +288,24 @@ class BillingEnforcer:
             )
             return self._permissive_limit_fallbacks()
 
+    async def get_mcp_token_limit(self, scope: Any, *, operator_limit: int | None, conn: Any) -> int | None:
+        """Read fresh MCP limits on the supplied transaction, with no fallback."""
+        if conn is None:
+            raise ValueError("MCP billing limits require a supplied connection")
+        if operator_limit is not None and (type(operator_limit) is not int or not 0 <= operator_limit < (1 << 63)):
+            raise ValueError("Invalid MCP operator quota")
+        if scope.kind != "org":
+            return operator_limit
+        from tldw_Server_API.app.core.Billing.subscription_service import get_subscription_service
+
+        limits = await (await get_subscription_service()).get_org_limits(scope.value, conn=conn)
+        value = limits["llm_tokens_month"]
+        if type(value) is not int or not -1 <= value < (1 << 63):
+            raise ValueError("Invalid MCP subscription quota")
+        if value == -1:
+            return operator_limit
+        return value if operator_limit is None else min(value, operator_limit)
+
     async def get_org_usage(self, org_id: int) -> UsageSummary:
         """
         Get current usage summary for an organization.
@@ -374,9 +392,9 @@ class BillingEnforcer:
         This aggregates usage from both user-scoped and API-key scoped calls.
         Each llm_usage_log row is counted at most once per org.
 
-        User-scoped calls are attributed to a user's primary org (earliest
-        org_members.added_at, tie-broken by lowest org_id) to avoid
-        double-counting when a user belongs to multiple orgs.
+        Explicit request-time organization attribution takes precedence. Legacy
+        calls without it use the primary org or API-key org. Unresolved MCP
+        exposure is added without age filtering; reconciled rows are excluded.
         """
         try:
             from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
@@ -387,6 +405,18 @@ class BillingEnforcer:
             is_postgres = self._is_postgres_pool(pool)
 
             async with pool.acquire() as conn:
+                from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
+
+                missing_schema_errors = (sqlite3.OperationalError,)
+                if asyncpg is not None:
+                    missing_schema_errors += (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError)
+                try:
+                    return await AuthnzUsageRepo(pool).read_org_token_exposure(conn, org_id, month_start)
+                except missing_schema_errors as exc:
+                    if not any(name in str(exc) for name in ("billing_org_id", "provider_usage_reservations")):
+                        raise
+                    # Legacy pre-migration callers retain their existing attribution.
+                    # The strict MCP admission reader never uses this fallback.
                 if is_postgres:
                     # PostgreSQL: single-pass attribution, no UNION path.
                     result = await conn.fetchval(
