@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -35,7 +35,7 @@ def compute_paragraph_spans(
 
         for rule in boundaries[:MAX_RULES]:
             try:
-                kind = str(rule.get("kind") or "template")
+                template_kind = str(rule.get("kind") or "template")
                 pattern = str(rule.get("pattern") or "")
                 if not pattern:
                     continue
@@ -50,7 +50,7 @@ def compute_paragraph_spans(
                 flags_val, ferr = compile_flags(str(rule.get("flags") or ""))
                 flags = flags_val if ferr is None else 0
                 compiled = re.compile(pattern, flags)
-                template_patterns.append((kind, compiled))
+                template_patterns.append((template_kind, compiled))
             except _CHUNKER_NONCRITICAL_EXCEPTIONS as e:
                 logger.warning(f"Ignoring invalid boundary rule: {e}")
     except _CHUNKER_NONCRITICAL_EXCEPTIONS:
@@ -119,7 +119,7 @@ def compute_paragraph_spans(
                         code_fence_marker = None
                 continue
             except _CHUNKER_NONCRITICAL_EXCEPTIONS:
-                spans.append((code_fence_start, end, "code_fence"))
+                spans.append((cast(int, code_fence_start), end, "code_fence"))
                 code_fence_start = None
                 code_fence_marker = None
                 continue

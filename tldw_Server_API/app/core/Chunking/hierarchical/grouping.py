@@ -121,7 +121,7 @@ def group_items_by_elements(
         starts: list[int] = []
         ends: list[int] = []
         for it in group:
-            t = it.get("text") if isinstance(it, dict) else str(it)
+            t: Any = it.get("text") if isinstance(it, dict) else str(it)
             md = it.get("metadata") if isinstance(it, dict) else {}
             md_dict = dict(md) if isinstance(md, dict) else {}
             parts.append((t, md_dict))
@@ -209,7 +209,7 @@ def group_section_by_kind_weight(
             if w > budget and count > 0:
                 break
             # Take this item
-            t = it.get("text") if isinstance(it, dict) else str(it)
+            t: Any = it.get("text") if isinstance(it, dict) else str(it)
             md_dict = dict(md) if isinstance(md, dict) else {}
             parts.append((t, md_dict))
             try:
