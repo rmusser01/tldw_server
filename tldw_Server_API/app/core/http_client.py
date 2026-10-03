@@ -898,6 +898,7 @@ class TransportAdapter(Protocol):
         retry: RetryPolicy | None = None,
         chunk_size: int = 65536,
         cert_pinning: dict[str, set[str]] | None = None,
+        configured_endpoint: ConfiguredEndpointScope | None = None,
         sensitive_observability: bool = False,
         on_response: ResponseHeadersCallback | None = None,
         raise_for_status: bool = True,
@@ -1026,6 +1027,7 @@ class HttpxAdapter:
         retry: RetryPolicy | None = None,
         chunk_size: int = 65536,
         cert_pinning: dict[str, set[str]] | None = None,
+        configured_endpoint: ConfiguredEndpointScope | None = None,
         sensitive_observability: bool = False,
         on_response: ResponseHeadersCallback | None = None,
         raise_for_status: bool = True,
@@ -1050,6 +1052,7 @@ class HttpxAdapter:
             on_response=on_response,
             raise_for_status=raise_for_status,
             verify=verify,
+            **({"configured_endpoint": configured_endpoint} if configured_endpoint is not None else {}),
         )
         scoped_stream = _iterate_sensitive_http_items(
             stream,
@@ -1169,6 +1172,7 @@ class AiohttpAdapter:
         retry: RetryPolicy | None = None,
         chunk_size: int = 65536,
         cert_pinning: dict[str, set[str]] | None = None,
+        configured_endpoint: ConfiguredEndpointScope | None = None,
         sensitive_observability: bool = False,
         on_response: ResponseHeadersCallback | None = None,
         raise_for_status: bool = True,
@@ -1193,6 +1197,7 @@ class AiohttpAdapter:
             on_response=on_response,
             raise_for_status=raise_for_status,
             verify=verify,
+            **({"configured_endpoint": configured_endpoint} if configured_endpoint is not None else {}),
         )
         scoped_stream = _iterate_sensitive_http_items(
             stream,
@@ -4993,6 +4998,7 @@ async def _afetch_json_bounded(
     **kwargs: Any,
 ) -> Any:
     allow_redirects = bool(kwargs.pop("allow_redirects", True))
+    kwargs["max_response_bytes"] = max_bytes
     hop_headers = dict(kwargs.pop("headers", None) or {})
     hop_cookies = kwargs.pop("cookies", None)
     current_url = url
@@ -5218,6 +5224,7 @@ async def _astream_bytes_httpx(
     retry: RetryPolicy | None = None,
     chunk_size: int = 65536,
     cert_pinning: dict[str, set[str]] | None = None,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
     sensitive_observability: bool = False,
     on_response: ResponseHeadersCallback | None = None,
     raise_for_status: bool = True,
@@ -5231,10 +5238,12 @@ async def _astream_bytes_httpx(
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
+    scope_kwargs = {"configured_endpoint": configured_endpoint} if configured_endpoint is not None else {}
     await _avalidate_egress_or_raise(
         url,
         dns_pin_cache=dns_pin_cache,
         sensitive_observability=sensitive_observability,
+        **scope_kwargs,
     )
     _validate_proxies_or_raise(proxies)
     observability_url = _SENSITIVE_OBSERVABILITY_URL if sensitive_observability else url
@@ -5257,6 +5266,7 @@ async def _astream_bytes_httpx(
                 url,
                 dns_pin_cache=dns_pin_cache,
                 sensitive_observability=sensitive_observability,
+                **scope_kwargs,
             )
             yielded_any = False
             callback_error: BaseException | None = None
@@ -5281,6 +5291,7 @@ async def _astream_bytes_httpx(
                                         url,
                                     ),
                                     sensitive_observability=sensitive_observability,
+                                    **scope_kwargs,
                                 )
                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                     raise NetworkError(e.__class__.__name__) from e
@@ -5503,6 +5514,7 @@ async def _astream_bytes_aiohttp(
     retry: RetryPolicy | None = None,
     chunk_size: int = 65536,
     cert_pinning: dict[str, set[str]] | None = None,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
     sensitive_observability: bool = False,
     on_response: ResponseHeadersCallback | None = None,
     raise_for_status: bool = True,
@@ -5516,10 +5528,12 @@ async def _astream_bytes_aiohttp(
     retry = retry or RetryPolicy()
     _validate_retry_files_seekable(files, retry)
     dns_pin_cache: dict[str, tuple[str, ...]] = {}
+    scope_kwargs = {"configured_endpoint": configured_endpoint} if configured_endpoint is not None else {}
     await _avalidate_egress_or_raise(
         url,
         dns_pin_cache=dns_pin_cache,
         sensitive_observability=sensitive_observability,
+        **scope_kwargs,
     )
     _validate_proxies_or_raise(proxies)
     observability_url = _SENSITIVE_OBSERVABILITY_URL if sensitive_observability else url
@@ -5537,6 +5551,7 @@ async def _astream_bytes_aiohttp(
                 url,
                 dns_pin_cache=dns_pin_cache,
                 sensitive_observability=sensitive_observability,
+                **scope_kwargs,
             )
             yielded_any = False
             callback_error: BaseException | None = None
@@ -5567,6 +5582,7 @@ async def _astream_bytes_aiohttp(
                                     url,
                                 ),
                                 sensitive_observability=sensitive_observability,
+                                **scope_kwargs,
                             )
                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS as e:
                     raise NetworkError(e.__class__.__name__) from e
@@ -5781,11 +5797,16 @@ async def astream_bytes(
     retry: RetryPolicy | None = None,
     chunk_size: int = 65536,
     cert_pinning: dict[str, set[str]] | None = None,
+    configured_endpoint: ConfiguredEndpointScope | None = None,
+    max_response_bytes: int | None = None,
     sensitive_observability: bool = False,
     on_response: ResponseHeadersCallback | None = None,
     raise_for_status: bool = True,
     verify: bool | str | ssl.SSLContext | None = None,
 ) -> AsyncIterator[bytes]:
+    """Stream decoded bytes, optionally stopping after the first overflow byte."""
+    if max_response_bytes is not None and (type(max_response_bytes) is not int or max_response_bytes < 0):
+        raise ValueError("max_response_bytes must be a non-negative integer")
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
     )
@@ -5813,10 +5834,20 @@ async def astream_bytes(
         on_response=on_response,
         raise_for_status=raise_for_status,
         verify=verify,
+        **({"configured_endpoint": configured_endpoint} if configured_endpoint is not None else {}),
     )
+    consumed = 0
     try:
         async for chunk in stream:
-            yield chunk
+            if max_response_bytes is None:
+                yield chunk
+                continue
+            remaining = max_response_bytes + 1 - consumed
+            bounded_chunk = chunk[:remaining]
+            consumed += len(bounded_chunk)
+            yield bounded_chunk
+            if consumed > max_response_bytes:
+                raise NetworkError("Response exceeds max_response_bytes limit")
     finally:
         close = getattr(stream, "aclose", None)
         if close is not None:
