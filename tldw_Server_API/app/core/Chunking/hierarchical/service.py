@@ -7,6 +7,7 @@ from typing import Any
 from ..error_policy import CHUNKER_NONCRITICAL_EXCEPTIONS as _CHUNKER_NONCRITICAL_EXCEPTIONS
 from ..exceptions import InvalidInputError
 from .builder import build_hierarchy_tree
+from .flatten import flatten_tree
 from .models import HierarchyContext, HierarchyTextViews, ResolvedHierarchyOptions
 from .spans import compute_paragraph_spans
 
@@ -16,6 +17,12 @@ class HierarchyService:
 
     def __init__(self, context: HierarchyContext) -> None:
         self._context = context
+
+    def flatten(self, tree: dict[str, Any]) -> list[dict[str, Any]]:
+        """Validate the public input before looking up the live normalizer."""
+        if not isinstance(tree, dict):
+            return []
+        return flatten_tree(tree, self._context.normalize_chunk_type)
 
     def build_tree(
         self,

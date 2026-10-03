@@ -127,7 +127,9 @@ def test_invalid_structure_aware_weight_public_raises_and_package_suppresses() -
     assert package_flatten(tree) == []
 
 
-def test_flatten_preserves_input_and_metadata_aliasing_contracts() -> None:
+def test_flatten_preserves_input_and_metadata_aliasing_contracts(
+    flatten: Callable[[dict[str, Any]], list[dict[str, Any]]],
+) -> None:
     nested = {"values": []}
     first_metadata = {
         "paragraph_kind": "paragraph",
@@ -150,7 +152,7 @@ def test_flatten_preserves_input_and_metadata_aliasing_contracts() -> None:
     }
     original_tree = copy.deepcopy(tree)
 
-    rows = Chunker().flatten_hierarchical(tree)
+    rows = flatten(tree)
 
     assert tree == original_tree
     assert first_metadata == original_tree["root"]["chunks"][0]["metadata"]
@@ -164,3 +166,8 @@ def test_flatten_preserves_input_and_metadata_aliasing_contracts() -> None:
     assert rows[0]["metadata"]["total_chunks"] == 99
     assert rows[1]["metadata"]["chunk_index"] == 2
     assert rows[1]["metadata"]["total_chunks"] == 2
+
+
+@pytest.mark.parametrize("tree", [None, "invalid", []])
+def test_public_and_package_non_dictionary_input_returns_empty(flatten, tree) -> None:
+    assert flatten(tree) == []
