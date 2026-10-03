@@ -1968,6 +1968,66 @@ _CREATE_USAGE_TABLES = [
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS prompt_fingerprint_version TEXT", ()),
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS world_book_fingerprint TEXT", ()),
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS raw_usage_metadata_json TEXT", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS billing_org_id BIGINT", ()),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_usage_mcp_execution "
+        "ON llm_usage_log(request_id) "
+        "WHERE operation = 'mcp_model_completion' AND request_id IS NOT NULL",
+        (),
+    ),
+    (
+        """
+        CREATE TABLE IF NOT EXISTS provider_usage_scope_locks (
+            billing_scope_type TEXT NOT NULL CHECK (billing_scope_type IN ('user', 'team', 'org')),
+            billing_scope_id BIGINT NOT NULL CHECK (billing_scope_id > 0),
+            PRIMARY KEY (billing_scope_type, billing_scope_id)
+        )
+        """,
+        (),
+    ),
+    (
+        """
+        CREATE TABLE IF NOT EXISTS provider_usage_reservations (
+            execution_id TEXT PRIMARY KEY CHECK (execution_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'),
+            user_id BIGINT NOT NULL CHECK (user_id > 0),
+            active_team_id BIGINT CHECK (active_team_id IS NULL OR active_team_id > 0),
+            active_organization_id BIGINT CHECK (active_organization_id IS NULL OR active_organization_id > 0),
+            billing_scope_type TEXT NOT NULL CHECK (billing_scope_type IN ('user', 'team', 'org')),
+            billing_scope_id BIGINT NOT NULL CHECK (billing_scope_id > 0),
+            provider TEXT NOT NULL CHECK (length(trim(provider)) > 0),
+            model TEXT NOT NULL CHECK (length(trim(model)) > 0),
+            reserved_input_tokens BIGINT NOT NULL CHECK (reserved_input_tokens >= 0),
+            reserved_output_tokens BIGINT NOT NULL CHECK (reserved_output_tokens >= 0),
+            reserved_cost_units BIGINT NOT NULL CHECK (reserved_cost_units >= 0),
+            actual_input_tokens BIGINT CHECK (actual_input_tokens IS NULL OR actual_input_tokens BETWEEN 0 AND reserved_input_tokens),
+            actual_output_tokens BIGINT CHECK (actual_output_tokens IS NULL OR actual_output_tokens BETWEEN 0 AND reserved_output_tokens),
+            actual_cost_units BIGINT CHECK (actual_cost_units IS NULL OR actual_cost_units BETWEEN 0 AND reserved_cost_units),
+            state TEXT NOT NULL CHECK (state IN ('reserved', 'dispatched', 'ambiguous', 'reconciled', 'released')),
+            created_at TIMESTAMPTZ NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL,
+            dispatched_at TIMESTAMPTZ,
+            resolved_at TIMESTAMPTZ,
+            CHECK (reserved_input_tokens <= 9223372036854775807 - reserved_output_tokens),
+            CHECK (
+                (active_organization_id IS NOT NULL AND billing_scope_type = 'org' AND billing_scope_id = active_organization_id)
+                OR (active_organization_id IS NULL AND active_team_id IS NOT NULL AND billing_scope_type = 'team' AND billing_scope_id = active_team_id)
+                OR (active_organization_id IS NULL AND active_team_id IS NULL AND billing_scope_type = 'user' AND billing_scope_id = user_id)
+            ),
+            CHECK (
+                (state = 'reconciled' AND actual_input_tokens IS NOT NULL AND actual_output_tokens IS NOT NULL AND actual_cost_units IS NOT NULL)
+                OR (state != 'reconciled' AND actual_input_tokens IS NULL AND actual_output_tokens IS NULL AND actual_cost_units IS NULL)
+            ),
+            CHECK ((state IN ('released', 'reconciled') AND resolved_at IS NOT NULL) OR (state NOT IN ('released', 'reconciled') AND resolved_at IS NULL)),
+            CHECK ((state IN ('reserved', 'released') AND dispatched_at IS NULL) OR (state NOT IN ('reserved', 'released') AND dispatched_at IS NOT NULL))
+        )
+        """,
+        (),
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_provider_usage_reservations_scope "
+        "ON provider_usage_reservations(billing_scope_type, billing_scope_id, state)",
+        (),
+    ),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_ts ON llm_usage_log(ts)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user ON llm_usage_log(user_id)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)", ()),
@@ -4121,20 +4181,15 @@ async def ensure_usage_tables_pg(pool: DatabasePool | None = None) -> bool:
     but uses Postgres types and indexes. Intended as bootstrap guardrails when running
     against Postgres without having executed dedicated migrations.
     """
-    try:
-        db_pool = pool or await get_db_pool()
-        if getattr(db_pool, "pool", None) is None:
-            return False
-        for sql, params in _CREATE_USAGE_TABLES:
-            try:
-                await db_pool.execute(sql, *params)
-            except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"PG ensure usage tables DDL failed: {exc}")
-        logger.info("Ensured PostgreSQL usage tables (usage_log, usage_daily, llm_usage_log, llm_usage_daily)")
-        return True
-    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(f"Failed to ensure PostgreSQL usage tables: {exc}")
+    db_pool = pool or await get_db_pool()
+    if getattr(db_pool, "pool", None) is None:
         return False
+    # Readiness is atomic: never swallow a failed accounting DDL statement.
+    async with db_pool.transaction() as conn:
+        for sql, params in _CREATE_USAGE_TABLES:
+            await conn.execute(sql, *params)
+    logger.info("Ensured PostgreSQL usage tables and durable provider reservations")
+    return True
 
 
 async def ensure_generated_files_table_pg(pool: DatabasePool | None = None) -> bool:

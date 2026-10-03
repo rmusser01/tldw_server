@@ -92,5 +92,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-058](058-jobs-completion-row-identity.md) | Accepted | Bind Jobs completion and bookkeeping to locked row identity with optional caller UUID preconditions. |
 | [ADR-059](059-backlog-py-task-editor-cutover.md) | Accepted | Create and edit backlog task files only with backlog-py, not the Node Backlog.md CLI or MCP; ADR-002's task requirement is unchanged. |
 | [ADR-058](058-authoritative-provider-credential-scope.md) | Proposed | Resolve bounded MCP provider credentials from exact authenticated scope, advance only on authoritative absence, and freeze endpoint settings. |
+| [ADR-059](059-mcp-durable-provider-accounting.md) | Proposed | Reserve MCP provider exposure durably before dispatch and serialize conservative admission and settlement on explicit billing scope. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.
