@@ -3,26 +3,32 @@ id: TASK-13421
 title: Design Embeddings Stage 3 durable workflow store and Jobs runner
 status: In Progress
 assignee: []
-created_date: '2026-10-03 00:32'
-updated_date: '2026-10-03 01:00'
+created_date: 2026-10-03 00:32
+updated_date: 2026-10-03 01:57
 labels:
-  - embeddings
-  - workflow
-  - architecture
-  - stage-3
-  - design
+- embeddings
+- workflow
+- architecture
+- stage-3
+- design
 dependencies:
-  - TASK-12973
+- TASK-12973
 references:
-  - 'https://github.com/rmusser01/tldw_server/pull/2790'
+- https://github.com/rmusser01/tldw_server/pull/2790
 documentation:
-  - Docs/superpowers/specs/2026-07-03-embeddings-workflow-architecture-design.md
-  - >-
-    Docs/superpowers/specs/2026-07-18-embeddings-workflow-stage2-concrete-api-steps-design.md
-  - Docs/ADR/003-jobs-vs-scheduler-default.md
-  - Docs/ADR/022-embeddings-api-and-media-pipeline.md
-  - Docs/ADR/051-retry-backoff-schedules.md
+- Docs/superpowers/specs/2026-07-03-embeddings-workflow-architecture-design.md
+- Docs/superpowers/specs/2026-07-18-embeddings-workflow-stage2-concrete-api-steps-design.md
+- Docs/ADR/003-jobs-vs-scheduler-default.md
+- Docs/ADR/022-embeddings-api-and-media-pipeline.md
+- Docs/ADR/051-retry-backoff-schedules.md
+- Docs/superpowers/specs/2026-10-02-embeddings-workflow-stage3-durable-store-jobs-runner-design.md
+- Docs/ADR/058-embeddings-durable-workflow-foundation.md
 priority: high
+modified_files:
+- Docs/superpowers/specs/2026-10-02-embeddings-workflow-stage3-durable-store-jobs-runner-design.md
+- Docs/ADR/058-embeddings-durable-workflow-foundation.md
+- Docs/ADR/README.md
+- backlog/tasks/task-13421 - Design-Embeddings-Stage-3-durable-workflow-store-and-Jobs-runner.md
 ---
 
 ## Description
@@ -33,21 +39,21 @@ Design the dormant Stage 3 Embeddings durability foundation after merged Stage 2
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Document the approved six-table owner-scoped persistence model, immutable manifests, pinned embedding-space generations, and named CAS repository transitions.
-- [ ] #2 Review and approve admission, execution, lease fencing, normal batch continuation, retry/fallback, cancellation, reconciliation, accounting, and retention.
-- [ ] #3 Specify backend security/concurrency, migration capability gates, crash-window tests, bounded resources, and unchanged-production-path verification.
-- [ ] #4 Write and self-review the complete spec and required Proposed ADR; resolve placeholders, contradictions, and ambiguous guarantees.
+- [x] #1 Document the approved six-table owner-scoped persistence model, immutable manifests, pinned embedding-space generations, and named CAS repository transitions.
+- [x] #2 Review and approve admission, execution, lease fencing, normal batch continuation, retry/fallback, cancellation, reconciliation, accounting, and retention.
+- [x] #3 Specify backend security/concurrency, migration capability gates, crash-window tests, bounded resources, and unchanged-production-path verification.
+- [x] #4 Write and self-review the complete spec and required Proposed ADR; resolve placeholders, contradictions, and ambiguous guarantees.
 - [ ] #5 Obtain requester approval of the written spec before implementation planning.
 <!-- AC:END -->
 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-1. Explore merged Jobs/Embeddings and governing ADRs; clarify scope and compare approaches (complete).
-2. Review design sections: architecture, revised persistence, and execution/recovery (approved); verification, retention safeguards, and dormant rollout boundaries (next).
-3. Write the fully approved spec and Proposed ADR, then self-review.
-4. Commit artifacts and request written-spec approval.
-5. After written-spec approval, hand off to writing-plans; no implementation in this design task.
+1. Explore merged Jobs/Embeddings, clarify scope, and compare approaches (complete).
+2. Review design sections and incorporate the four validated corrections (complete).
+3. Write the consolidated design spec and Proposed ADR; self-review for consistency, completeness, and executable verification requirements (complete).
+4. Written-review gate: commit verified documentation and request approval (ready for commit; requester approval outstanding).
+5. Only after written-spec approval, hand off to writing-plans; no implementation in this task.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -67,9 +73,16 @@ Verification-section investigation: Jobs conftest disables lease enforcement and
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-10-02: Requester approved incorporating all four validated design-review corrections before continuing. Corrections: separate lease-fenced execution authority from receipt-only recovery settlement after cancellation; define lease-independent logical Jobs intents with explicit applied/rebind/superseded/exhausted resolution and retained exact acknowledgement proof; require atomic first-accepted-write sink receipts and irreversible generation closure before cleanup; specify enforceable byte/dimension/row limits and adapter/handler deadlines. Verification section and dormant rollout boundaries are approved subject to these corrections. Review validation: 79 existing SQLite Jobs prepared-disposition/cancellation tests passed (7 PostgreSQL cases deselected, 171 warnings, 2.74s); direct temporary-DB probes confirmed cancellation clears all lease fields, late canonical completion is rejected, old unapplied lease commands reject as stale, and a later transition replaces the prior root marker. The first probe's expected rejection category was corrected after diagnostics: canonical late completion returned backend_conflict, not no_transition. No production change is claimed. Consolidated written spec is being drafted; final written-spec approval remains outstanding. Bandit is not applicable to documentation-only changes.
+2026-10-02: Consolidated the section-approved Stage 3 design into the written spec and Proposed ADR-058; registered the ADR without changing accepted ADR-022. All four validated corrections are incorporated. Inline spec self-review additionally made state vocabularies/monotonic phases explicit, distinguished definitive admission rejection from unknown admission evidence, preserved the first valid same-identity sink winner despite differing recomputed vectors, clamped each adapter deadline to the remaining batch quantum, covered native/postprocessed materialization bounds, and preserved existing Jobs pause/drain semantics. The acceptance matrix covers each clarification. Fresh validation: five local document links, six unique domain tables, limit arithmetic, ADR index/status, review gate and placeholder checks passed; git diff --check passed. Existing Embeddings runner/types: 48 passed, 108 warnings, 1.36s. Existing focused SQLite Jobs disposition/cancellation: 79 passed, 7 PostgreSQL cases deselected, 171 warnings, 2.53s. These baseline tests do not certify unimplemented Stage 3 behavior or PostgreSQL/RLS; both backends remain explicit implementation gates. No production/test code, entrypoint wiring, migration execution, PR, or implementation plan was created. Bandit is not applicable to this Markdown-only scope. AC5 and task completion remain pending requester review of the consolidated written spec.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
