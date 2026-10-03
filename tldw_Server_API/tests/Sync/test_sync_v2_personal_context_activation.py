@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -675,7 +676,9 @@ def test_push_after_commit_relay_does_not_wait_for_installers_profile_lease(
 
 @pytest.mark.parametrize("failing_step", ["acknowledge", "finalize"])
 def test_activation_cannot_strand_a_staged_authority_row_left_unfinished(
-    linked_activation_on_each_store, monkeypatch: pytest.MonkeyPatch, failing_step: str
+    linked_activation_on_each_store: tuple[PersonalContextService, SyncV2Service],
+    monkeypatch: pytest.MonkeyPatch,
+    failing_step: str,
 ) -> None:
     """A relay failure after staging must not outlive the batch's activation coverage.
 
@@ -702,8 +705,11 @@ def test_activation_cannot_strand_a_staged_authority_row_left_unfinished(
     monkeypatch.setattr(relay, "clock_ns", lambda: 0)
     injected: list[str] = []
 
-    def fail_once(original):
-        def step(*args, **kwargs):
+    def fail_once(original: Callable[..., Any]) -> Callable[..., Any]:
+        """Wrap one relay step so its first call fails after the row was staged."""
+
+        def step(*args: Any, **kwargs: Any) -> Any:
+            """Raise once, then delegate to the real step."""
             if not injected:
                 injected.append(failing_step)
                 raise RuntimeError(f"injected {failing_step} failure")
@@ -767,13 +773,22 @@ def test_activation_cannot_strand_a_staged_authority_row_left_unfinished(
     assert canonical.get_record(payload["record_id"]).payload == preference_record().payload
 
 
-def test_install_refuses_coverage_when_a_racing_relay_left_a_row_unfinished(
-    linked_activation_on_each_store, monkeypatch: pytest.MonkeyPatch
+def test_racing_relay_failure_lets_an_immediate_activation_retry_succeed(
+    linked_activation_on_each_store: tuple[PersonalContextService, SyncV2Service],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The lease-held install check catches a relay failure that lands after the first check."""
+    """A relay failure racing activation's lease must not fence the relay on retry.
+
+    The racing relay strands a staged row just before preparation takes the
+    profile lease. Activation refuses, and an immediate retry, with no wait for
+    a prepared activation to go stale, lets the relay finish and succeeds.
+    """
     from tldw_Server_API.app.core.Personalization.personal_context_activation import PersonalContextActivationService
     from tldw_Server_API.app.core.Personalization.personal_context_publication import (
         PersonalContextPublicationRelayStore,
+    )
+    from tldw_Server_API.app.core.Personalization.personal_context_repository_models import (
+        PreparedPersonalContextActivation,
     )
     from tldw_Server_API.tests.Personalization.personal_context_test_support import preference_record
 
@@ -785,22 +800,29 @@ def test_install_refuses_coverage_when_a_racing_relay_left_a_row_unfinished(
     acknowledge = PersonalContextPublicationRelayStore.acknowledge_row
     prepare = PersonalContextActivationService.prepare
     racing: list[bool] = []
+    raced: list[bool] = []
 
-    def acknowledge_unless_racing(self, *args, **kwargs):
+    def acknowledge_unless_racing(self: PersonalContextPublicationRelayStore, *args: Any, **kwargs: Any) -> None:
+        """Fail every source acknowledgment while the racing relay runs."""
         if racing:
             raise RuntimeError("injected acknowledge failure")
         return acknowledge(self, *args, **kwargs)
 
-    def racing_relay_then_prepare(self, *args, **kwargs):
-        racing.append(True)
-        try:
-            record = preference_record(profile_id, record_id="racing-record")
-            canonical.create_record(record.model_copy(update={"scope_id": canonical.list_scopes()[0].scope_id}))
-            relay.relay_profile(
-                user_id=_USER_ID, profile_id=profile_id, dataset_id=dataset.dataset_id, after_server_cursor=None
-            )
-        finally:
-            racing.clear()
+    def racing_relay_then_prepare(
+        self: PersonalContextActivationService, *args: Any, **kwargs: Any
+    ) -> PreparedPersonalContextActivation:
+        """Before the first preparation only, publish a record and half-relay it."""
+        if not raced:
+            raced.append(True)
+            racing.append(True)
+            try:
+                record = preference_record(profile_id, record_id="racing-record")
+                canonical.create_record(record.model_copy(update={"scope_id": canonical.list_scopes()[0].scope_id}))
+                relay.relay_profile(
+                    user_id=_USER_ID, profile_id=profile_id, dataset_id=dataset.dataset_id, after_server_cursor=None
+                )
+            finally:
+                racing.clear()
         return prepare(self, *args, **kwargs)
 
     monkeypatch.setattr(PersonalContextPublicationRelayStore, "acknowledge_row", acknowledge_unless_racing)
@@ -808,11 +830,9 @@ def test_install_refuses_coverage_when_a_racing_relay_left_a_row_unfinished(
 
     with pytest.raises(SyncStoreError, match="personal_context_activation_required"):
         service.prepare_personal_context_activation(user_id=_USER_ID, device_id=_DEVICE_ID)
-
     assert service.store.has_pending_personal_context_authority(dataset.dataset_id, profile_id=profile_id)
-    assert service.store.db.execute("SELECT * FROM sync_personal_context_activations").rows == []
-    with canonical._repository.database.transaction() as connection:
-        covered = connection.execute(
-            "SELECT COUNT(*) FROM personal_context_publication_batches WHERE status = 'covered_by_activation'"
-        ).fetchone()[0]
-    assert covered == 0
+
+    retried = service.prepare_personal_context_activation(user_id=_USER_ID, device_id=_DEVICE_ID)
+
+    assert retried.activation.state == "installed"
+    assert not service.store.has_pending_personal_context_authority(dataset.dataset_id, profile_id=profile_id)

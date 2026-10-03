@@ -402,7 +402,9 @@ Server preparation progresses independently:
    retryably, while Sync holds a staged home-authority row of the profile that
    relay has not finalized: no relay revisits a covered batch, so that hidden
    pending row would block every later projection in the dataset. It checks
-   before preparing, and again under the lease just before coverage commits.
+   under the profile lease immediately before preparing, so no relay can stage
+   in between, and a refusal leaves no prepared baseline fencing the relay that
+   must finish the row.
 3. `active_for_device`: Sync holds the ordinary device's activation
    acknowledgment, and the server journal has verified that exact receipt.
 

@@ -14,6 +14,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from functools import partial
 from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_URL, uuid5
 
@@ -161,11 +162,13 @@ def _verify_install(
 
 
 def _require_finished_relay(store: Any, dataset_id: str, profile_id: str) -> None:
-    """Refuse coverage while the relay has left a staged authority row unfinished.
+    """Refuse to prepare while the relay has left a staged authority row unfinished.
 
     Coverage ends relay for its batches, so that row would stay hidden and
     pending in Sync for good and block every later projection in the dataset.
-    The client restarts activation, and the relay that runs first finishes it.
+    It runs under the profile lease right before preparing, so no relay can
+    stage in between, and refusing leaves no prepared activation to fence the
+    relay: the client's immediate retry lets the relay finish the row first.
     """
 
     if store.has_pending_personal_context_authority(dataset_id, profile_id=profile_id):
@@ -258,10 +261,8 @@ def prepare_activation(
             dataset_id=dataset.dataset_id,
             after_server_cursor=None,
         )
-    # Checked before preparing: a prepared activation fences the relay that
-    # would finish the row. install() checks again under the lease.
-    _require_finished_relay(service.store, dataset.dataset_id, manifest.profile_id)
-    prepared = activations.prepare(manifest.profile_id, device_id=device_id)
+    relay_finished = partial(_require_finished_relay, service.store, dataset.dataset_id, manifest.profile_id)
+    prepared = activations.prepare(manifest.profile_id, device_id=device_id, precondition=relay_finished)
     identity = _identity(prepared, dataset, user_id)
     cipher = _cipher(service, dataset)
     with (
@@ -283,8 +284,7 @@ def prepare_activation(
             service.personal_context_relay.relay_profile(
                 user_id=user_id, profile_id=manifest.profile_id, dataset_id=dataset.dataset_id, after_server_cursor=None
             )
-        _require_finished_relay(service.store, dataset.dataset_id, manifest.profile_id)
-        prepared = activations.prepare(manifest.profile_id, device_id=device_id)
+        prepared = activations.prepare(manifest.profile_id, device_id=device_id, precondition=relay_finished)
         identity = _identity(prepared, dataset, user_id)
     with (
         activations.publications.profile_lease(prepared.profile_id) as lease,
@@ -298,10 +298,6 @@ def prepare_activation(
 
             if expected_purge_generation is not None and expected_purge_generation != current.purge_generation:
                 raise SyncStoreError("personal_context_purge_generation_stale")
-            if current.state == "prepared":
-                # No relay can stage while this lease is held, so nothing can
-                # slip in between this check and the coverage commit.
-                _require_finished_relay(guarded, dataset.dataset_id, current.profile_id)
             if not guarded.has_personal_context_link_receipt(
                 user_id=user_id,
                 dataset_id=dataset.dataset_id,
