@@ -1,9 +1,10 @@
 ---
 id: TASK-13420
 title: Embeddings test_tenant_quota_429 fails standalone (pre-existing)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-02 03:14'
+updated_date: '2026-10-03 01:10'
 labels:
   - tests
   - embeddings
@@ -20,15 +21,27 @@ Observed cause: the test does monkeypatch.setenv('AUTH_MODE', 'multi_user') and 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 test_tenant_quota_429 passes, or is rewritten to assert the current tenant-quota contract
+- [x] #1 test_tenant_quota_429 passes, or is rewritten to assert the current tenant-quota contract
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Root cause confirmed as described: _is_single_user_profile() reads the cached AuthNZ settings singleton, so monkeypatching AUTH_MODE alone left the test in single-user mode and the tenant-RPS check never ran. Fix (test-only): reset_settings() after the setenv, and again in a finally so later tests rebuild settings from the restored env. Verified: test file 7 passed; tests/Embeddings -n 4: 682 passed, 18 skipped. Bandit: not applicable (test-only change). No docs affected.
+<!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+test_tenant_quota_429 now exercises the real multi-user path: it resets the AuthNZ settings singleton after setting AUTH_MODE=multi_user and restores it afterwards. The test passes alone and in the parallel Embeddings suite; no production code changed.
+<!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
