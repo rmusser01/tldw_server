@@ -1030,29 +1030,6 @@ async def test_add_media_orchestrate_records_ingestion_bytes_in_shared_ledger(mo
     monkeypatch.setattr(ingestion_persistence, "process_document_like_item", fake_process_doc_item_fn)
     monkeypatch.setattr(storage_quota_service, "get_storage_quota_service", lambda: _FakeUploadQuotaService())
 
-    class _AllowGov:
-        async def reserve(self, _req, op_id=None):
-            _ = op_id
-            return SimpleNamespace(allowed=True, retry_after=None, details={}), "media-handle-2"
-
-        async def check(self, _req):
-            return SimpleNamespace(
-                allowed=True,
-                retry_after=None,
-                details={
-                    "categories": {
-                        "ingestion_bytes": {
-                            "daily_cap": 1000000,
-                            "daily_used": 0,
-                            "daily_remaining": 1000000,
-                        }
-                    }
-                },
-            )
-
-        async def release(self, _handle_id):
-            return None
-
     recorded: dict[str, Any] = {}
 
     async def _fake_record(
@@ -1074,23 +1051,6 @@ async def test_add_media_orchestrate_records_ingestion_bytes_in_shared_ledger(mo
         _fake_record,
     )
 
-    request = SimpleNamespace(
-        app=SimpleNamespace(
-            state=SimpleNamespace(
-                rg_governor=_AllowGov(),
-                rg_policy_loader=SimpleNamespace(
-                    get_policy=lambda _pid: {
-                        "jobs": {"max_concurrent": 2},
-                        "ingestion_bytes": {"daily_cap": 1000000},
-                    }
-                ),
-            )
-        ),
-        state=SimpleNamespace(rg_policy_id="media.default"),
-        url=SimpleNamespace(path="/api/v1/media/add"),
-        headers={"X-Request-ID": "req-abc"},
-    )
-
     form_data = SimpleNamespace(
         media_type="document",
         urls=[],
@@ -1100,6 +1060,9 @@ async def test_add_media_orchestrate_records_ingestion_bytes_in_shared_ledger(mo
         generate_embeddings=False,
     )
 
+    # add_media_orchestrate accepts `request` but never reads it (no rg_governor /
+    # rg_policy_loader lookups remain); omit it rather than faking fields production
+    # doesn't consult.
     response = await ingestion_persistence.add_media_orchestrate(
         background_tasks=BackgroundTasks(),
         form_data=form_data,
@@ -1107,7 +1070,6 @@ async def test_add_media_orchestrate_records_ingestion_bytes_in_shared_ledger(mo
         db=fake_db,
         current_user=SimpleNamespace(id=42),
         usage_log=SimpleNamespace(log_event=lambda *_args, **_kwargs: None),
-        request=request,
     )
 
     assert response.status_code == status.HTTP_200_OK
