@@ -44,7 +44,7 @@ Reviewed corrections distinguish informational Research warnings from source fai
 
 Affected checks: 54 backend cases, 17 Kanban cases and a final 19-case Chat caller/owner subset passed. Restoration/Research/RAG/Parameters suites passed; two stale Studio voice-catalog expectations were corrected and passed on focused rerun. Independent final source review is clear. Touched lint adds no errors; inherited findings remain. Final reviewed-source typecheck exited 2 with 23 inherited React/dependency diagnostics and 0 touched-path diagnostics; no global pass. No live UAT is accepted.
 
-The consumer-side portrait/version fix is reviewed in local Chatbook commit 20948093434ac9af6a0c6c055586840baa4b651d, with 39 public portrait/manifest cases passing. Automatic approval review rejected its separate-repository push before execution; companion PR publication was asked once and is pending. PR3096 also awaits final-head required checks, Qodo acceptance and the human-written Change summary already requested once.
+The consumer-side portrait/version fix is reviewed in local Chatbook commit 20948093434ac9af6a0c6c055586840baa4b651d, with 39 public portrait/manifest cases passing. Automatic approval review rejected its separate-repository push before execution; companion PR publication was asked once and is pending. Server corrections are published in 07df134ed3, with all inline replies and the summary-only reply posted. Six server threads are resolved; the Chatbook compatibility thread remains open. PR3096 awaits final-head required checks, fresh Qodo acceptance and the human-written Change summary already requested once.
 
 ## Partial results and limits
 

@@ -18,7 +18,7 @@ Owner: TASK13260.281. PR: https://github.com/rmusser01/tldw_server/pull/3096
 **Goal**: Merge the reviewed final head normally.
 **Success Criteria**: Seven required contexts pass on the final head; human-written Change summary is present; exact-head merge is confirmed on dev.
 **Tests**: Current PR review/check readback and merged commit ancestry.
-**Status**: Not Started
+**Status**: In Progress
 
 Live UAT remains held. Existing bug notes and runtime data remain; no evidence bundles or failed-case replay.
 
