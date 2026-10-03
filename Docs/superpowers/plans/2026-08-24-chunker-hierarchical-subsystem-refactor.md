@@ -960,8 +960,9 @@ remains In Progress. Commit subject: `refactor: extract hierarchical grouping`.
 - Modify `tldw_Server_API/app/core/Chunking/chunker.py`
 - Modify `tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py`
 - Modify `tldw_Server_API/tests/Chunking/test_hierarchy_malformed_contracts.py`
+- Modify `tldw_Server_API/tests/Chunking/test_hierarchical_grouping.py` only for the approved active lookup migration, preserving all frozen call/expected assertions.
 
-- [ ] **Step 1: Add failing direct flatten tests**
+- [x] **Step 1: Add failing direct flatten tests**
 
 Move the malformed matrix and identity assertions into parameterized direct tests for `flatten_tree(...)`, while retaining public/package integration assertions in `test_hierarchy_malformed_contracts.py`. Add direct tests for:
 
@@ -977,7 +978,7 @@ Move the malformed matrix and identity assertions into parameterized direct test
 
 Run the new file and expect the missing `flatten_tree` failure.
 
-- [ ] **Step 2: Move traversal and output assembly into `flatten.py`**
+- [x] **Step 2: Move traversal and output assembly into `flatten.py`**
 
 Implement `flatten_tree(...)` with the required signature. Move `_append_with_titles`, `_gather_section_items`, header buffering, recursive walk, and final index normalization from `chunker.py`. Import only grouping helpers plus standard/shared low-level dependencies.
 
@@ -995,7 +996,7 @@ md.setdefault("total_chunks", len(out))
 
 Do not add schema validation, deep copies, child normalization, or broad catches. Pass only the supplied normalizer callback, never the full hierarchy context.
 
-- [ ] **Step 3: Add flatten coordination to the service**
+- [x] **Step 3: Add flatten coordination to the service**
 
 Add:
 
@@ -1008,7 +1009,7 @@ def flatten(self, tree: dict[str, Any]) -> list[dict[str, Any]]:
 
 The non-dict check belongs here because `flatten_tree(...)` accepts the already public-validated dictionary and must preserve malformed dictionary behavior.
 
-- [ ] **Step 4: Replace the public flatten body and preserve flat composition**
+- [x] **Step 4: Replace the public flatten body and preserve flat composition**
 
 Keep the public flatten signature/docstring and replace its body with:
 
@@ -1033,7 +1034,7 @@ return self.flatten_hierarchical(tree)
 
 Do not add a service-level `build_flat` method. Leave the package-level `Chunking.flatten_hierarchical(tree)` helper and its explicit exception tuple unchanged.
 
-- [ ] **Step 5: Run all hierarchy and process integration tests**
+- [x] **Step 5: Run all hierarchy and process integration tests**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -1057,12 +1058,62 @@ python -m pytest \
 
 Expected: all pass with the established skips only.
 
-- [ ] **Step 6: Commit the flatten extraction**
+- [x] **Step 6: Commit the flatten extraction**
 
 ```bash
-git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical/flatten.py tldw_Server_API/app/core/Chunking/hierarchical/service.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_hierarchical_flatten.py tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py tldw_Server_API/tests/Chunking/test_hierarchy_malformed_contracts.py "backlog/tasks/task-13422 - Implement-Chunker-hierarchical-subsystem-refactor.md"
+git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical/flatten.py tldw_Server_API/app/core/Chunking/hierarchical/service.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_hierarchical_flatten.py tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py tldw_Server_API/tests/Chunking/test_hierarchy_malformed_contracts.py tldw_Server_API/tests/Chunking/test_hierarchical_grouping.py "backlog/tasks/task-13422 - Implement-Chunker-hierarchical-subsystem-refactor.md"
 git commit -m "refactor: extract hierarchical flattening"
 ```
+
+Task 7 progress (2026-10-02, HEAD `52abf0bc01`): direct missing-module RED
+stopped with the expected ImportError (12 warnings). Exact traversal extraction
+then passed all 36 direct cases (84 warnings). Before public/service wiring, the
+five active lookup/live-callback/guard tests failed as expected (66 deselected,
+22 warnings). After delegation, the direct and public/package contract files
+passed together: 125 passed, 262 warnings. The constructor, public signatures,
+flat composition, package helper exception tuple, and malformed/aliasing quirks
+are unchanged. Normalized AST comparison proves the moved traversal is identical
+after only callback lookup replacement; service construction/tree building and
+public tree/flat composition remain identical to the pinned baseline.
+
+Required 14-file run currently reports 346 passed, 1 established PyThaiNLP skip,
+2 failed, 711 warnings. Both failures are frozen Task 6 active lookup tests in
+`test_hierarchical_grouping.py`: they still patch the now-unused `chunker.py`
+helper imports. Narrow authorization to migrate those test lookups to
+`hierarchical.flatten` was requested because this test file is outside the Task 7
+allowlist. No workaround imports or assertion weakening applied. Steps 5-6 stay
+open; no commit made while the suite fails.
+
+Controller subsequently authorized the narrow seventh Python path before edits.
+The validated lookup issue was recorded through official TASK-13422 MCP first;
+the Task 6 test now patches `hierarchical.flatten`, still invokes public
+`Chunker.flatten_hierarchical`, and retains every frozen call/expected assertion.
+This is mandatory active wiring migration, not a behavior correction. The
+historical scope blocker above is resolved; fresh verification follows below.
+
+Current gates: Ruff passes on the six Python paths; Black passes on the five
+new/scoped files and changed chunker.py ranges 26 and 425-427, with no legacy
+whole-file formatting. Compileall passes on all six Python paths. Bandit scans
+1,682 touched production LOC with 0 findings/errors
+(`/tmp/bandit_TASK-13422_task7.json`). `git diff --check` passes. No Task 8 typing
+cleanup, main-checkout edits, fetch/rebase/push, or historical-task mutation.
+
+Task 7 final verification (2026-10-02) supersedes the interim failed suite:
+the exact required 14-file suite passes with 348 tests, 1 established PyThaiNLP
+skip, 0 failures, and 711 warnings in 3.20s (`/tmp/task7_final_green.log`).
+Ruff passes on all seven Python paths. Black checks pass on the six scoped
+new/test/service files and changed chunker.py ranges 26 and 425-427; no broad
+legacy formatting. Compileall passes on all seven paths. Final production
+Bandit scans 1,682 LOC with 0 findings/errors
+(`/tmp/bandit_TASK-13422_task7_final.json`). `git diff --check` passes.
+Fresh AST self-review proves exact traversal after callback-name substitution,
+unchanged public composition/package catches/service constructor and tree
+building, and identical frozen grouping test statements/assertions except
+import and public Chunker owner lookup; the rest of that test file is identical.
+No actionable extraction issue found. Existing warnings and the two deferred
+spans.py typing issues remain unchanged. Task 7 steps are finalized by
+`refactor: extract hierarchical flattening`; TASK-13422 remains In Progress
+for Task 8, later reviews, and the human PR Change summary. No Task 8 work done.
 
 ## Task 8: Enforce Boundaries, Verify, and Prepare the PR Handoff
 
