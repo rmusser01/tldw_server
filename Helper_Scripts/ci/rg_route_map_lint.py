@@ -63,7 +63,12 @@ def _allowlist() -> set[str]:
     return out
 
 
-def main() -> int:
+def load_inputs() -> tuple[Mapping[str, Any], list[Any]]:
+    """Build the fully enabled app and load the shipped policy file.
+
+    Returns:
+        The policy snapshot's ``route_map`` and the app's served routes.
+    """
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
     import asyncio
@@ -75,7 +80,12 @@ def main() -> int:
     app = load_app()
     loader = default_policy_loader()
     asyncio.run(loader.load_once())
-    problems = lint(loader.get_snapshot().route_map or {}, list(iter_served_routes(app.routes)), _allowlist())
+    return loader.get_snapshot().route_map or {}, list(iter_served_routes(app.routes))
+
+
+def main() -> int:
+    route_map, served = load_inputs()
+    problems = lint(route_map, served, _allowlist())
     for p in problems:
         print(p)
     return 1 if problems else 0

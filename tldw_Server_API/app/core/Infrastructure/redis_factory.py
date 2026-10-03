@@ -382,6 +382,7 @@ class _InMemoryRedisCore:
         self._group_last_ids: dict[tuple[str, str], str] = {}
         self._expiry: dict[str, float] = {}
         self._scripts: dict[str, str] = {}
+        self._zadd_calls_since_purge = 0
 
     # ------------------------------------------------------------------
     # Basic utilities
@@ -408,6 +409,11 @@ class _InMemoryRedisCore:
     def _check_expiry(self, key: str) -> None:
         expires_at = self._expiry.get(key)
         if expires_at is not None and expires_at <= self._now():
+            self._delete_internal(key)
+
+    def _purge_expired(self) -> None:
+        now = self._now()
+        for key in [k for k, expires_at in self._expiry.items() if expires_at <= now]:
             self._delete_internal(key)
 
     def _stream_id_tuple(self, entry_id: str) -> tuple[int, int]:
@@ -558,11 +564,20 @@ class _InMemoryRedisCore:
         return set(self._sets.get(key, set()))
 
     def zadd(self, key: str, mapping: dict[str, float]) -> None:
+        self._check_expiry(key)
         zset = self._sorted_sets.setdefault(key, {})
         for member, score in mapping.items():
             zset[str(member)] = float(score)
+        # ponytail: no reaper task in this stub, so sweep expired keys periodically
+        # here to bound memory; upgrade to a background task if zadd volume makes
+        # this sweep itself too costly.
+        self._zadd_calls_since_purge += 1
+        if self._zadd_calls_since_purge >= 256:
+            self._zadd_calls_since_purge = 0
+            self._purge_expired()
 
     def zrem(self, key: str, member: str) -> int:
+        self._check_expiry(key)
         zset = self._sorted_sets.get(key)
         if not zset:
             return 0
@@ -578,6 +593,7 @@ class _InMemoryRedisCore:
         return 0
 
     def zremrangebyscore(self, key: str, minimum: float, maximum: float) -> int:
+        self._check_expiry(key)
         zset = self._sorted_sets.get(key)
         if not zset:
             return 0
@@ -592,6 +608,7 @@ class _InMemoryRedisCore:
         return removed
 
     def zcard(self, key: str) -> int:
+        self._check_expiry(key)
         return len(self._sorted_sets.get(key, {}))
 
     def zrange(self, key: str, start: int, stop: int) -> list[str]:
@@ -599,6 +616,7 @@ class _InMemoryRedisCore:
 
         This is a minimal emulation adequate for tests that need to list ZSET members.
         """
+        self._check_expiry(key)
         z = self._sorted_sets.get(key, {})
         if not z:
             return []
@@ -714,6 +732,7 @@ class _InMemoryRedisCore:
     # Misc helpers
     # ------------------------------------------------------------------
     def scan(self, cursor: int, match: str | None, count: int | None) -> tuple[int, list[str]]:
+        self._purge_expired()
         keys = set(self._strings.keys()) | set(self._sets.keys()) | set(self._sorted_sets.keys()) | set(self._hashes.keys()) | set(self._streams.keys())
         if match:
             pattern = match
@@ -728,6 +747,7 @@ class _InMemoryRedisCore:
         return result
 
     def dbsize(self) -> int:
+        self._purge_expired()
         keys = set(self._strings.keys()) | set(self._sets.keys()) | set(self._sorted_sets.keys()) | set(self._hashes.keys()) | set(self._streams.keys())
         return len(keys)
 
@@ -761,10 +781,11 @@ class _InMemoryRedisCore:
             limit = int(args[1])
             window = int(args[2])
             current_time = float(args[3]) if len(args) > 3 else self._now()
-            return self._eval_rate_limiter(redis_key, limit, window, current_time)
+            ttl = int(args[4]) if len(args) > 4 else None
+            return self._eval_rate_limiter(redis_key, limit, window, current_time, ttl)
         raise RuntimeError("Unsupported script")
 
-    def _eval_rate_limiter(self, redis_key: str, limit: int, window: int, current_time: float) -> list[Any]:
+    def _eval_rate_limiter(self, redis_key: str, limit: int, window: int, current_time: float, ttl: int | None = None) -> list[Any]:
         zset = self._sorted_sets.setdefault(redis_key, {})
         cutoff = current_time - window
         for member in list(zset.keys()):
@@ -773,6 +794,9 @@ class _InMemoryRedisCore:
         if len(zset) < limit:
             member_id = f"{current_time}:{len(zset)+1}"
             zset[member_id] = current_time
+            if ttl is not None:
+                # Mirrors the RG tokens script's EXPIRE (ARGV[4]).
+                self.expire(redis_key, ttl)
             return [1, 0]
         oldest = min(zset.values()) if zset else current_time
         retry_after = int(max(0, oldest + window - current_time)) or window
