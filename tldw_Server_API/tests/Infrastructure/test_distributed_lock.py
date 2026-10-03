@@ -62,24 +62,50 @@ class TestFileLockAcquireRelease:
 
         assert lock_path.exists()
 
+    @pytest.mark.parametrize("contended_first_attempt", [False, True])
     def test_release_does_not_unlink_same_process_reacquired_lock(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
+        contended_first_attempt: bool,
     ) -> None:
-        """A prior owner cannot unlink a lock reacquired during its close path."""
+        """A prior owner cannot unlink a lock reacquired during its close path.
+
+        The contended case makes the reacquire's first lock attempt fail, so acquire closes
+        an fd that reuses the just-closed number. That re-entered the patched close and
+        flaked in CI as [True, False].
+        """
         lock_path = tmp_path / "same-process-reacquire.lock"
         first = FileLock(lock_path, timeout=2)
         second = FileLock(lock_path, timeout=2)
         assert first.acquire() is True
         first_fd = first._fd
         assert first_fd is not None
+        if contended_first_attempt:
+            real_lock = distributed_lock_module._acquire_platform_file_lock
+            lock_calls = 0
+
+            def _contended_once(fd: int) -> None:
+                nonlocal lock_calls
+                lock_calls += 1
+                if lock_calls == 1:
+                    raise OSError("simulated EWOULDBLOCK")
+                real_lock(fd)
+
+            monkeypatch.setattr(
+                distributed_lock_module, "_acquire_platform_file_lock", _contended_once
+            )
         reacquired: list[bool] = []
+        reacquire_started = False
         real_close = distributed_lock_module.os.close
 
         def _close_and_reacquire(fd: int) -> None:
+            # Set the flag before acquiring: acquire may reopen the lock file under the
+            # just-closed fd number and close it on a retry, re-entering this patch.
+            nonlocal reacquire_started
             real_close(fd)
-            if fd == first_fd and not reacquired:
+            if fd == first_fd and not reacquire_started:
+                reacquire_started = True
                 reacquired.append(second.acquire())
 
         monkeypatch.setattr(distributed_lock_module.os, "close", _close_and_reacquire)
@@ -87,6 +113,9 @@ class TestFileLockAcquireRelease:
             first.release()
             assert reacquired == [True]
             assert lock_path.exists()
+            if contended_first_attempt:
+                # The contended path ran: one refused attempt, then the successful one.
+                assert lock_calls == 2
         finally:
             second.release()
 

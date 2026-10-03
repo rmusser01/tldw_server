@@ -6,7 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-10-01 17:53'
-updated_date: '2026-10-02 02:23'
+updated_date: '2026-10-02 21:20'
 labels:
   - bug
   - database
@@ -31,6 +31,8 @@ tests/DB_Management/test_chacha_postgres_http_operation_lifecycle.py fails inter
 
 <!-- SECTION:NOTES:BEGIN -->
 Two causes, both confirmed locally. Docker Desktop was wedged (hung docker rm/ps), so tests ran against PostgreSQL 16 from pgserver binaries on :55433 using POSTGRES_TEST_DSN and TLDW_TEST_NO_DOCKER=1. (1) Product bug, fixed in PR #3082. Inside a request, a nested get_chacha_db_for_user_id/_for_owner call re-probed the cached instance, and that probe has a 1s deadline. When the probe was slow, the cache evicted the instance the request was already using. The nested lookup then got a new instance and a second checkout, which could not see the caller's pending write. CI run 36693239728 shows this: the dependency was called at 48.24s and the instance was evicted at 49.69s, which is the first probe plus the 1s nested deadline. The rebuild landing on SQLite was already fixed by 72c4e12da6. Forcing the nested probe to report unhealthy makes all 10 caller cases return 500 on dev, and all 10 pass with the fix. Fix: _get_or_init_db_instance skips the re-probe when the current operation already holds a connection to that instance (new helper current_operation_holds_connection). The first resolution still probes with the same deadline. SQLite and auth are unchanged. (2) The ACTIVE-after-close failures were not a leak. psycopg_pool resets a returned connection asynchronously on a pool worker (rollback, then RESET ROLE/SESSION AUTHORIZATION/ALL and COMMIT), and the old test read raw.info from another thread during that reset. The old file at 6110d2ae43 had 24 failures, 18 of them ACTIVE/INTRANS. With the pool reset forced inline, those 18 go away; the 6 that remain are that old file's unrelated 'request did not reach a database connection' failures. The pool republishes a connection only after verifying it is IDLE, and dev already snapshots at publication (2546cf484e). Forcing the first probe of every test to report unhealthy on dev gives 55 passes; the only failure is the test that stubs the probe itself. A latency-proxy run at about 9ms RTT was stopped after 25 of 25 passed.
+
+Qodo on #3082 (merged 2026-10-02 21:18Z): type hints, docstrings and the current_operation_holds_connection Args/Returns contract were addressed in the follow-up PR chore/followups-13410-13416. The probe-count assertion was kept deliberately: it verifies the nested lookup does not re-probe, which is the fix. Re-verified with Docker Postgres: the regression test plus test_chacha_operation_scope.py, 20 passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

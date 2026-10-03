@@ -155,6 +155,27 @@ async def test_hub_subscriber_attaching_before_dispatch_sees_each_frame_once() -
 
 
 @pytest.mark.unit
+@pytest.mark.asyncio
+async def test_drain_buffer_numbers_frames_in_publish_order() -> None:
+    """drain_buffer must not number a buffered frame ahead of an earlier queued heartbeat."""
+    from tldw_Server_API.app.core.Sandbox.streams import RunStreamHub
+
+    hub = RunStreamHub()
+    hub.set_loop(asyncio.get_running_loop())
+    run_id = f"run-drain-{uuid.uuid4().hex}"
+
+    # Dispatch is scheduled on this loop and cannot run until we await.
+    hub.publish_heartbeat(run_id)
+    hub.publish_stdout(run_id, b"A\n", max_log_bytes=1024)
+    drained: asyncio.Queue = asyncio.Queue()
+    hub.drain_buffer(run_id, drained)
+
+    frame = drained.get_nowait()
+    assert (frame["type"], frame["seq"]) == ("stdout", 2)
+    assert drained.empty()
+
+
+@pytest.mark.unit
 def test_hub_slow_fanout_on_one_run_does_not_block_other_runs() -> None:
     """A dispatcher stuck copying one run's frame must not stall other runs."""
     from tldw_Server_API.app.core.Sandbox.streams import RunStreamHub

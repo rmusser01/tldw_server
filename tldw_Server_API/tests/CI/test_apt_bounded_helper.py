@@ -26,7 +26,7 @@ case "$APT_STUB_MODE" in
   hang-once)
     if [ ! -f "$APT_STUB_STATE" ]; then touch "$APT_STUB_STATE"; exec sleep 30; fi
     echo "apt-get ok: $*" ;;
-  fail) exit 100 ;;
+  fail) echo "apt-get called"; exit 100 ;;
   hang) exec sleep 30 ;;
 esac
 """
@@ -74,7 +74,9 @@ def test_persistent_failure_stops_after_three_attempts(tmp_path: Path) -> None:
     result = _run_helper(tmp_path, "fail")
 
     assert result.returncode == 1
-    assert result.stdout.count("::warning::apt-get update attempt") == 3
+    assert result.stdout.count("apt-get called") == 3
+    # Only the first two failures announce a retry; the third ends with the error.
+    assert result.stdout.count("::warning::apt-get update attempt") == 2
     assert "::error::apt-get update failed within the apt time budget" in result.stdout
 
 

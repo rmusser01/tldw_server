@@ -161,6 +161,13 @@ def current_operation_holds_connection(database: Any) -> bool:
     """Whether the open current operation already holds a connection to ``database``.
 
     Read-only: unlike ``current_connection_state`` it never creates state.
+
+    Args:
+        database: The ChaCha database instance to look up in the current operation.
+
+    Returns:
+        True only when an operation is open in this context, is not closed, and has
+        checked out a connection for ``database``; False otherwise.
     """
     owner = _current_operation.get()
     if owner is None:
