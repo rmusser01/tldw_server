@@ -1381,7 +1381,7 @@ replace them.
 **Success Criteria:** Published-file parity and the strict MkDocs build pass
 without changing the accepted decision, production code, tests or build gates.
 **Tests:** Existing full Docs suite and public/private boundary checker.
-**Status:** In Progress (local candidate verified; current-head hosted CI pending).
+**Status:** Complete (local verification and hosted gate passed on `a3c8898e9d`).
 
 - Hosted run `37087339481`, job `111103298847`, reported 210 passes and two
   failures on `798609b7601d052f0b89a011d024fdce1cb3f044`: the generated ADR-058
@@ -1442,3 +1442,38 @@ without changing the accepted decision, production code, tests or build gates.
   neither prior-head CI nor local verification permits an early merge.
 - Recheck live `dev` and the remote PR head before the SHA-specific
   force-with-lease publication. Preserve the requester's verbatim summary.
+
+## Second Live Dev Rebase Verification: 2026-10-02
+
+**Goal:** Keep the focused fix based on live `dev` without altering its patches.
+**Success Criteria:** Fresh verification and guarded publication of the rebased PR.
+**Tests:** Full SQLite/PostgreSQL matrices, Docs suite and scoped quality gates.
+**Status:** In Progress (local verification complete; new-head hosted gates pending).
+
+- Live `dev` advanced to `7117efa8f09b4f856ae7006dea28b5f6f0eb134b`
+  through Resource Governance/Redis follow-ups in PR #3094. Inspected the
+  eighteen incoming paths and shared runtime changes; no Jobs path overlaps,
+  and the completion/worker paths do not import the changed Redis governor.
+- All eleven PR commits rebased without conflicts. `git range-diff` reports
+  every patch unchanged against the published `a3c8898e9d` series. Verified
+  rebased source head: `81ecd0e61593dc59ec58cb0b5b7bec4a7c82ad54`.
+- Fresh SQLite: 247 passed / 70 deselected / 1212 warnings. Required real
+  PostgreSQL: 90 passed / 76 deselected / 358 warnings, no skips, including
+  opt-in SSE/outbox. Docs: 212 passed / 440 existing warnings, including the
+  strict MkDocs build. XML artifacts: `/tmp/task13215_rebase_7117_sqlite.xml`,
+  `/tmp/task13215_rebase_7117_postgres.xml` and
+  `/tmp/task13215_rebase_7117_docs.xml`.
+- Ruff on all six touched Python files, new-module Black, compilation and
+  branch whitespace checks passed. Production/test Bandit baseline comparisons
+  contain no new findings or errors at
+  `/tmp/bandit_task_13215_rebase_7117_delta.json` and
+  `/tmp/bandit_task_13215_rebase_7117_tests_delta.json`; test B101 excluded,
+  inherited warnings unchanged.
+- All paginated discussions/reviews/inline comments are unchanged; the four
+  original review threads remain resolved. Qodo's completed review covers
+  unchanged source on the prior head; verify applicability after publication.
+  The requester summary is unchanged. All repository-required checks passed
+  on the prior head, but that does not satisfy the rebased head's gates.
+- Recheck live base and remote head before the explicit SHA-specific lease
+  push. Merge only after the published head's review, required checks and both
+  dedicated Jobs suites pass and GitHub reports merge-ready.
