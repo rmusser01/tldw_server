@@ -3,23 +3,21 @@ id: TASK-13245
 title: Persist Workspace Persona opt-out and conversation provenance
 status: In Progress
 assignee: []
-created_date: '2026-09-13 18:15'
-updated_date: '2026-09-27 18:17'
+created_date: 2026-09-13 18:15
+updated_date: 2026-10-01 10:18
 labels:
-  - persona
-  - workspaces
-  - parity
+- persona
+- workspaces
+- parity
 dependencies:
-  - TASK-13244
+- TASK-13244
 references:
-  - 'https://github.com/rmusser01/tldw_server/issues/2950'
+- https://github.com/rmusser01/tldw_server/issues/2950
 documentation:
-  - >-
-    Docs/superpowers/plans/2026-09-13-persona-workspace-parity-implementation-plan.md
-  - Docs/Design/2026-09-13-persona-workspace-choice-provenance-design.md
-  - Docs/Design/2026-09-27-persona-workspace-strict-startup-refresh.md
-  - >-
-    Docs/superpowers/plans/2026-09-27-persona-workspace-strict-startup-implementation-plan.md
+- Docs/superpowers/plans/2026-09-13-persona-workspace-parity-implementation-plan.md
+- Docs/Design/2026-09-13-persona-workspace-choice-provenance-design.md
+- Docs/Design/2026-09-27-persona-workspace-strict-startup-refresh.md
+- Docs/superpowers/plans/2026-09-27-persona-workspace-strict-startup-implementation-plan.md
 priority: high
 ---
 
@@ -37,7 +35,7 @@ Distinguish unset defaults from an explicit None choice, preserve creation-time 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 2 contract design underway in child TASK-13245.1; runtime not started. Corrected prior assessment: existing resolve_new_conversation_assistant already handles omitted identity inheritance and explicit-null opt-out;9 existing startup tests pass. Workspace chat create bypasses Sync v2; strict replay needs a DB-owned atomic path. Proposed design preserves legacy semantics and keeps Workspace Sync/Buddy/UI out of scope.
 
 Stage 2 prompt/memory baseline: 13 passed, 9 failed with HTTP 503 missing_provider_credentials before mocked dispatch. Persona fixture patches chat.API_KEYS but runtime now uses provider_credential_runtime.load_server_config_snapshot. Diagnostic-only in-memory fixture supplying the same dummy credential via that loader yielded 22 passed. No runtime/test edits made. Repair the existing fixture and rerun ordinary suites during implementation; tracked in the staged plan and design validation record.
@@ -55,8 +53,40 @@ Requester-requested second design review completed in TASK-13245.1/PR #2958. Ver
 Requester-approved TASK-13245.6 follow-up planning amendments cover strict transaction ownership/post-commit responses, backend-safe bounded text/body, immutable-owner admission and typed unavailable translation. Session preparation/preview/complete-v2 explicitly remain global-only; no Workspace session parity is claimed. Current refresh/executable plan and canonical documents carry the constraints and test gates; no Stage 2C runtime implementation in this amendment. TASK-13245.7 remains prerequisite; Stage 2C/2D and broader parity work remain open.
 
 TASK-13245.7 local prerequisite repair Done in e1d05ddca0 (codex/persona-workspace-cascade-retry, dev35d6dd90d4 base). Hard/soft cascade enumeration and message-page reads now settle their own PostgreSQL transactions; outermost guard, caller work and admission closure unchanged. Final affected verification 714 passes/four SQLite-only driver skips/no failures across 15 files, official isolated SQLite/livePG. Multi-page image failure confirms earlier deletes durable and immediate retry; independent review gap closed, Ruff/compile/scoped Bandit pass. Repair is local, not a hosted CI or merged delivery. Completed task plan retained in implementation commit and retired from active tree. Parent remains In Progress; Stage2C strict receipts/admission, Stage2D and broader profile/provisioning/Research work remain open; create separate execution task before strict runtime edits.
-<!-- SECTION:NOTES:END -->
+2026-10-01 bounded Stage2C delivered: strict Workspace Persona startup PR#3041 merged normally into dev at01:28:52Z, merge85ede1f1df10c03505c603e4183920edcb7cbfef from exact qualified head1a29adc0203fb674f4f7be204d23cb3144219c97. TASK13245.8 Done; seven current-head required gates including trusted dev license, fresh reviews and approved requester summary satisfied without bypass. Final focused source integration795passed/two existing Redis xfails; official SQLite/livePG available, production17-file Bandit clean. Exact-head Sync rerun2411passed/one skip and original bootstrap/apply/pull node passed, historical intermittent root not claimed repaired. Ancillary full-summary/rate-limit jobs pending at merge remain separately inspected. SQLite74/PostgreSQL78 durable receipts, ADR057 and offline runbook delivered without UI controls or legacy creation change. Tests/documentation child#3055 is rebased locally onto actual merged dev85ede; fresh qualification, dev retarget/exact-head hosted gates and normal merge remain pending underTASK13245.10/.14. Parent remains In Progress with broad AC unchecked; tool-profile, provisioning/backfill and Research Workspace adoption remain open, issue2950 stays open. Shared checkout/dependencies/other agents containers preserved.
+## Current Delivery Status (2026-10-01)
 
+This readable status supplements the compact historical entries above; those original records are preserved unchanged.
+
+PR #3041 merged normally into dev at 2026-10-01T01:28:52Z, merge 85ede1f1df10c03505c603e4183920edcb7cbfef, from qualified head 1a29adc0203fb674f4f7be204d23cb3144219c97. All seven required gates, fresh review and the approved requester summary were satisfied without administrator bypass. TASK-13245.8 is Done for bounded Stage 2C.
+
+The parent full-suite summary and Character Chat rate-limit checks were pending at merge, then passed on that exact parent head. CI run 36787709858 completed successfully at 01:49:21Z; post-merge outcome comment 5923186810 records these later results separately. Current-head Sync passed 2411 cases with one skip, including the original accepted-apply/recovery node; the historical intermittent root remains unreproduced, not repaired.
+
+PR #3055 already targets actual dev after nine patches replayed identically. Fresh affected qualification passed 252 unique cases, including 99 official PostgreSQL-labelled cases, with no failures/errors/skips. Separate prompt/Docs/workflow checks passed 266 unique cases; overlapping final Docs validation passed 212. The child requester summary is already approved and verbatim. Local qualification and retargeting are complete, while exact-head hosted CI/review, Cubic documentation corrections and normal child merge remain open under TASK-13245.10/.14.
+
+TASK-13245 remains In Progress and issue #2950 remains open. Stage 2D delivery and broader tool-profile, provisioning/backfill and Research adoption work are not claimed complete. Shared checkout, dependencies, other agents containers, recovery refs and stash backups are preserved.
+## Current Review And Integration Checkpoint (2026-10-01)
+
+This checkpoint supersedes the delivery-status paragraph above without replacing or deleting its history. Nine of the eleven original Cubic documentation corrections are completed and published in f3a977cc1eae09a730a9c5a1d6124ca48d6ee633. Only the two original historical-note formatting requests (threads PRRT_kwDOL1aGf86nxo4I and PRRT_kwDOL1aGf86nxo4b) still await the already-requested explicit formatting-only approval. Those original records remain unchanged. The additional current-status clarification in thread PRRT_kwDOL1aGf86nyJIW is addressed by this explicit distinction; publication and verified thread disposition remain pending.
+
+Actual dev advanced to b365af1827b607fc221f9bf31ca76dde881edb4f through RG/AuthNZ PR #3068. All twelve child commits replayed identically without conflicts onto that base at local checkpoint 9a70325818bc2e7b73bbc15fb36c9fdeafb56705, with recovery codex/persona-stage2d-pre-rg-policy-rebase-20261001 preserving f3a977. Fresh Persona and affected shared RG/AuthNZ qualification is in progress; this new base is not yet qualified or published. Exact-head hosted CI/review and normal child merge remain pending, and the two original formatting approvals still block merge. Prior f3a977 required-check successes are historical evidence only, not validation of the rebased head. The three separately triaged ancillary UX/MCP/Sandbox failures are not claimed repaired. TASK-13245 and issue #2950 remain open for broader Persona parity.
+RG-base qualification closeout at local checkpoint `9a70325818bc2e7b73bbc15fb36c9fdeafb56705` on dev `b365af1827b607fc221f9bf31ca76dde881edb4f`: the fresh 26-file matrix completed 634 passed, two existing Redis expected failures and nine warnings, with no failures/errors in 918.48s. All 252 child cases passed, including 99 official required isolated PostgreSQL-labelled cases plus SQLite. Separate prompt/Docs/workflow checks passed 266 cases. This supersedes the preceding checkpoint's in-progress qualification status, not its history. Final post-record Docs verification, publication, fresh new-head CI/review and normal child merge remain pending. Nine original Cubic corrections are complete; two original historical-note formatting approvals remain outstanding. The third current-status clarification is appended but not yet published/dispositioned. Original notes and TASK-13245.11 remain unchanged. Broader profile/provisioning/Research parity and issue #2950 remain open.
+## Readable RG-Base Closeout (2026-10-01)
+
+Local source checkpoint `9a70325818bc2e7b73bbc15fb36c9fdeafb56705` is rebased onto dev `b365af1827b607fc221f9bf31ca76dde881edb4f`. Fresh qualification completed 634 passed, two existing Redis expected failures and nine warnings, with no failures/errors in 918.48s. All 252 child cases passed, including 99 official required isolated PostgreSQL-labelled cases plus SQLite. Separate prompt/Docs/workflow checks passed 266 cases (nine warnings, 52.66s); final complete Docs verification passed 212 cases (eight warnings, 37.54s, seed 3105512003). These overlapping Docs runs are not summed. Logs/XML use /private/tmp/persona-pr3055-rg-rebase-{qualification,guards,docs-final}-20261001.
+
+Nine original Cubic corrections are complete. Only the two original historical-note formatting requests still await the already-requested approval. The additional current-status clarification is explicitly appended here but not yet published/dispositioned. Original historical notes and TASK-13245.11 remain unchanged. Whole-note update attempts did not succeed; no replacement or alternate write route was used to overwrite historical records. This append-only closeout supersedes prior in-progress qualification text without deleting it.
+
+Publication, fresh exact-head hosted dev CI/Qodo/trusted license, strict up-to-date and normal child merge remain open. The UX/MCP/Sandbox ancillary baseline findings are not repaired. Broader profile/provisioning/backfill/Research parity and issue #2950 remain open; shared checkout, dependencies, containers, recovery refs and stash backups are preserved.
+## Published Qualification And Review Checkpoint (2026-10-01 10:04Z)
+
+This dated checkpoint supersedes the earlier in-progress/publication-pending statements without replacing their history. Publication at e91f70622d166033c355b988c69191cd45105e02 and local qualification on dev b365af1827b607fc221f9bf31ca76dde881edb4f are complete. The 636-node source matrix contains 634 passed and two explicit, unchanged Redis xfails: no unexpected failures, zero ordinary JUnit failures/errors and no unavailable-backend skips. All 252 child cases passed, including 99 official required isolated PostgreSQL-labelled cases plus SQLite; mocked HTTP memory/provider evidence remains SQLite-only.
+
+Both earlier final Docs runs completed before publication: 212 passed/eight warnings/37.54s, seed3105512003, and identical-scope 212 passed/eight warnings/59.45s, seed3105512004. Their counts overlap and are not summed. Artifacts: /private/tmp/persona-pr3055-rg-rebase-docs-{final,publish}-20261001.log/xml. No remaining local Docs gate is inferred from historical pending clauses.
+
+All seven required contexts, trusted dev license and replacement license audit passed on exact e91f, but ancillary CI is not green. Seven documentation threads remain open: two original approval-dependent formatting requests plus five new Cubic requests. Append-only clarification does not insert the two requested separators into preserved notes or claim their resolution. The already-requested history-formatting approval remains unanswered; TASK-13245.11 and all original notes remain unchanged. After any record publication, fresh exact-head required/trusted checks, fresh review and every disposition, strict up-to-date and normal dev merge remain mandatory. Stage 2D delivery, parent TASK-13245 and issue #2950 stay open; broader profile/provisioning/backfill/Research parity is not complete.
+2026-10-01 documentation-checkpoint verification: complete prompt assembly/Docs/required-workflow scope passed 266 cases, seven warnings, no failures/errors/skips, 35.38s, seed3105514001; /private/tmp/persona-pr3055-doc-checkpoint-guards-20261001.log/xml. Both unchanged child tests pass no-cache Ruff and bytecode-free compilation. Fresh raw Bandit reports 246 B101 test assertions only and zero errors; /private/tmp/persona-pr3055-doc-checkpoint-bandit-20261001.json. This four-file documentation-only checkpoint has no new production Python target. A runnable read-only verifier confirms every original note byte-prefix, description/criteria/final-summary/DoD suffix and TASK-13245.11 unchanged, source bytes identical to e91f and qualified9a703, and exact Backlog configuration restoration; /private/tmp/persona-pr3055-doc-checkpoint-verify-20261001.py. Independent bounded diff/record review found no new actionable issue; it did not inspect hosted logs or run tests. The aggregate raw log now confirms only the failed shard-result gate, /private/tmp/persona-pr3055-e91f-full-suite-summary-20261001.log. The additional old current-status thread PRRT_kwDOL1aGf86nyJIW was automatically resolved at05:11:24Z as addressed in e91f; this is distinct from the seven still-open threads. Final publication-tree Docs validation is separate evidence, never added to overlapping counts. Publication of this new record checkpoint does not carry e91f hosted green checks onto a future head; fresh exact-head CI/review, every open disposition and normal merge remain required.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
