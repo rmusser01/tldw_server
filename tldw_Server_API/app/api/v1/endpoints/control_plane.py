@@ -5,6 +5,7 @@ function's globals retain every retired main app after a module reload.
 """
 
 from pathlib import Path
+from typing import Any
 
 from fastapi import HTTPException, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -31,7 +32,7 @@ _REQUEST_GUARD_EXCEPTIONS = (
 )
 
 
-async def serve_setup_page():
+async def serve_setup_page() -> Response:
     """Serve the first-time setup UI when required."""
     try:
         setup_required = needs_setup()
@@ -47,11 +48,13 @@ async def serve_setup_page():
     return FileResponse(SETUP_PAGE_PATH)
 
 
-async def favicon():
+async def favicon() -> FileResponse:
+    """Serve the bundled browser favicon."""
     return FileResponse(FAVICON_PATH, media_type="image/x-icon")
 
 
-async def root():
+async def root() -> Any:
+    """Return the welcome dictionary or redirect to required setup."""
     try:
         if needs_setup():
             try:
@@ -68,14 +71,15 @@ async def root():
     }
 
 
-async def metrics():
+async def metrics() -> Response:
+    """Return Prometheus exposition for the current metrics registry."""
     from tldw_Server_API.app.api.v1.endpoints.metrics import build_prometheus_metrics_response
 
     return await build_prometheus_metrics_response()
 
 
 @track_metrics(name="tldw_Server_API.app.main.api_metrics", labels={"endpoint": "metrics"})
-async def api_metrics():
+async def api_metrics() -> dict[str, dict[str, Any]]:
     """Get current metrics in JSON format."""
     registry = get_metrics_registry()
     return registry.get_all_metrics()
@@ -114,4 +118,5 @@ async def readiness_check(request: Request) -> JSONResponse:
 
 
 async def readiness_alias(request: Request) -> JSONResponse:
+    """Delegate the compatibility alias to operator readiness."""
     return await readiness_check(request)
