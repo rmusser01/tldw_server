@@ -12,12 +12,13 @@ that `Moderation/models.py` canonically owns `ModerationPolicy`, `PatternRule`,
 and `ModerationEvaluationResult`. Compiler and evaluator runtime logic will use
 their existing private canonical model aliases directly.
 
-This is a narrow structural refactor. Moderation decisions, policy assembly,
-scan geometry, redaction, exception behavior, model identity, service imports,
-and public endpoint contracts remain unchanged. The one intentional
-compatibility break is removal of the undocumented model-substitution hook:
-direct callers can no longer call `policy_types()`, and subclasses can no
-longer replace model classes by overriding it.
+This is a narrow structural refactor. Supported behavior through
+`ModerationService` and the runtime moderation paths, including policy
+assembly, scan geometry, redaction, exception behavior, model identity,
+service imports, and public endpoint contracts, remains unchanged. The
+intentional compatibility break is removal of the undocumented
+model-substitution hook: direct callers can no longer call `policy_types()`,
+and subclasses can no longer replace model classes by overriding it.
 
 ## Context And Audit Evidence
 
@@ -59,8 +60,9 @@ evaluator, model characterization, canonical-model, and model-import suites.
 4. Preserve compiler/evaluator runtime namespaces: public model names remain
    type-checking-only and absent at runtime.
 5. Preserve import isolation without relying on the retired hooks.
-6. Preserve all moderation policy, evaluation, redaction, exception, and
-   caller behavior.
+6. Preserve supported `ModerationService` callers and all runtime moderation
+   policy, evaluation, redaction, and exception behavior outside the explicit
+   hook-retirement boundary.
 7. Keep the change small enough for one reviewed implementation pull request.
 
 ## Non-Goals
@@ -171,6 +173,14 @@ The following behavior is intentionally removed:
 - calling `PolicyEvaluator.policy_types()`
 - overriding either method to substitute model classes
 - relying on the evaluator hook's cached tuple object identity
+
+Rebinding or monkeypatching the private runtime aliases `_ModerationPolicy`,
+`_PatternRule`, or `_ModerationEvaluationResult` is also outside the
+compatibility guarantee. In particular, the evaluator's current cached tuple
+can retain classes captured before a later private-alias rebind, while direct
+alias reads after retirement would observe the rebind. These underscore-prefixed
+module globals are implementation details and will not receive a compatibility
+shim or dedicated test contract.
 
 After implementation, compiler/evaluator internals always use the canonical
 classes imported from `Moderation/models.py`. A subclass may still override
@@ -289,8 +299,10 @@ Verification is compilation-first.
 8. Run Ruff on all touched Python files.
 9. Run Black checks without mass-formatting unrelated existing code.
 10. Run Bandit over the touched Moderation production modules.
-11. Run `git diff --check` and a source audit proving no production or test
-    references to the retired hooks remain.
+11. Run `git diff --check` and a source audit proving no production definition
+    or call to either retired hook remains. Test references must be limited to
+    the explicit regression fixtures proving that a legacy-named subclass hook
+    no longer controls model selection.
 12. Fetch current `origin/dev`, verify the branch merge-base is current, and
     rerun affected gates after any rebase.
 
@@ -302,13 +314,15 @@ This change introduces no input, output, authorization, persistence, file,
 network, regex, or logging path. It changes no exception boundary and adds no
 mutable state.
 
-Removing the evaluator's one-entry tuple cache removes only cached class-tuple
-allocation; evaluator operations already read the cached tuple per call. Direct
-private aliases avoid that lookup and do not add meaningful runtime cost.
+Removing the evaluator's one-entry tuple cache removes cached class-tuple
+allocation and one lookup from evaluator operations. Direct private aliases do
+not add meaningful runtime cost. The only observable difference involves later
+rebinding of underscore-prefixed module aliases, which is explicitly outside
+the compatibility guarantee.
 
-Concurrency behavior is unchanged because canonical classes are module-level
-immutable bindings for this purpose, and the retired tuple cache contains no
-request-specific state.
+Concurrency behavior for supported callers is unchanged because production
+code does not mutate the canonical private model bindings, and the retired
+tuple cache contains no request-specific state.
 
 ## Rollout And Rollback
 
@@ -327,8 +341,8 @@ compatibility without database or configuration repair.
 Risk: an external consumer may override `policy_types()` or call it directly.
 
 Mitigation: make the break explicit in the design and PR description, keep the
-production diff narrowly limited, and retain a one-commit revert path. The
-project has no documented or repository caller to migrate.
+production diff narrowly limited, and retain a one-PR revert path. The project
+has no documented or repository caller to migrate.
 
 ### Import-cycle regression
 
@@ -345,6 +359,16 @@ from compiler/evaluator modules or change type-hint resolution.
 
 Mitigation: use the existing underscore-prefixed runtime aliases, retain
 `TYPE_CHECKING` imports, and keep runtime namespace and type-hint tests.
+
+### Private runtime-alias rebinding
+
+Risk: removing evaluator tuple caching changes what happens when external test
+or extension code mutates an underscore-prefixed model alias after its first
+use.
+
+Mitigation: explicitly exclude private module-alias rebinding from the
+compatibility contract. Keep canonical output tests focused on supported model
+and service imports rather than preserving private monkeypatch timing.
 
 ### Tautological identity coverage
 
