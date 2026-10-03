@@ -21,7 +21,10 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_job_contracts import (
     CLAIMS_JOBS_DEFAULT_QUEUE,
     is_routable_claims_owner_id_text,
 )
-from tldw_Server_API.app.core.Claims_Extraction.claims_service import aggregate_claims_review_extractor_metrics_daily
+from tldw_Server_API.app.core.Claims_Extraction.claims_service import (
+    _parse_iso_date,
+    aggregate_claims_review_extractor_metrics_daily,
+)
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.DB_Manager import content_db_settings
@@ -29,6 +32,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.Jobs.operations.contracts import NoTransitionReason, OperationOutcome
+from tldw_Server_API.app.core.Utils.coercion import parse_bool
 
 
 @dataclass(frozen=True)
@@ -45,10 +49,6 @@ class ReviewMetricsSchedulerConfig:
 
 def _setting(key: str, default: Any, source: Mapping[str, Any]) -> Any:
     return os.environ.get(key, source.get(key, default))
-
-
-def _truthy(value: Any) -> bool:
-    return str(value).strip().lower() in {"true", "1", "yes", "y", "on"}
 
 
 def _positive_setting(key: str, default: int, source: Mapping[str, Any]) -> int:
@@ -68,7 +68,7 @@ def _positive_setting(key: str, default: int, source: Mapping[str, Any]) -> int:
 class _SafeIntervalTrigger(IntervalTrigger):
     """End recurring work safely at the datetime representability boundary."""
 
-    def get_next_fire_time(self, previous_fire_time, now):
+    def get_next_fire_time(self, previous_fire_time: datetime | None, now: datetime) -> datetime | None:
         try:
             return super().get_next_fire_time(previous_fire_time, now)
         except (OverflowError, ValueError, OSError):
@@ -88,7 +88,7 @@ def _interval_trigger(interval: int, now: datetime) -> IntervalTrigger:
 def resolve_scheduler_config(source: Mapping[str, Any] | None = None) -> ReviewMetricsSchedulerConfig:
     """Snapshot configuration with environment precedence and safe bounds."""
     source = settings if source is None else source
-    enabled = _truthy(_setting("CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED", False, source))
+    enabled = parse_bool(str(_setting("CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED", False, source)), default=False)
     interval = _positive_setting("CLAIMS_REVIEW_METRICS_INTERVAL_SEC", 86400, source)
     if interval < 60:
         interval = 60
@@ -108,8 +108,13 @@ def resolve_scheduler_config(source: Mapping[str, Any] | None = None) -> ReviewM
         logger.bind(setting="CLAIMS_REVIEW_METRICS_INTERVAL_SEC").warning(
             "Claims review metrics scheduler disabled: unsupported interval"
         )
-    global_jobs = _truthy(_setting("CLAIMS_JOBS_ENABLED", False, source))
-    metrics_jobs = _truthy(_setting("CLAIMS_REVIEW_METRICS_JOBS_ENABLED", False, source))
+    global_jobs = claims_jobs.claims_jobs_enabled({
+        "CLAIMS_JOBS_ENABLED": _setting("CLAIMS_JOBS_ENABLED", False, source),
+    })
+    metrics_jobs = claims_jobs.claims_review_metrics_jobs_enabled({
+        "CLAIMS_JOBS_ENABLED": True,
+        "CLAIMS_REVIEW_METRICS_JOBS_ENABLED": _setting("CLAIMS_REVIEW_METRICS_JOBS_ENABLED", False, source),
+    })
     if metrics_jobs and not global_jobs:
         logger.warning("Claims review metrics Jobs flag requires global Claims Jobs; using local mode")
     snapshot = {
@@ -191,20 +196,28 @@ async def _iter_owner_ids(
         return
     after = None
     found = False
+    page_number = 0
     while not stop_event.is_set():
         page = await asyncio.to_thread(_postgres_owner_page, start_date, end_date, after)
         if not page:
             break
+        page_number += 1
         if after is not None and page[-1] <= after:
             raise ValueError("owner discovery cursor did not advance")
-        for owner in page:
+        for owner_position, owner in enumerate(page, start=1):
             if stop_event.is_set():
                 return
             if is_routable_claims_owner_id_text(owner):
                 found = True
                 yield owner
             else:
-                logger.warning("Claims review metrics skipped invalid owner")
+                logger.bind(
+                    operation="discover_review_metrics_owners",
+                    start_date=start_date.isoformat(),
+                    end_date=end_date.isoformat(),
+                    page_number=page_number,
+                    owner_position=owner_position,
+                ).warning("Claims review metrics skipped invalid owner")
         after = page[-1]
         if len(page) < 100:
             break
@@ -252,8 +265,9 @@ async def run_claims_review_metrics_once(
     except (TypeError, ValueError):
         lookback = 2
     _, start, end = capture_window(datetime.now(timezone.utc), config.interval_seconds, lookback)
-    if report_date is not None:
-        start = end = date.fromisoformat(report_date)
+    parsed_report_date = _parse_iso_date(report_date)
+    if parsed_report_date is not None:
+        start = end = parsed_report_date
     written = 0
     try:
         async for owner in _iter_owner_ids(config, start, end, asyncio.Event()):
@@ -323,6 +337,10 @@ async def run_review_metrics_callback(
                     break
                 retryable = False
                 try:
+                    if job_manager is None:
+                        job_manager = await asyncio.to_thread(claims_jobs.jobs_manager_from_env)
+                    if stop.is_set():
+                        break
                     result = await asyncio.to_thread(
                         claims_jobs.enqueue_claims_review_metrics,
                         owner_user_id=owner,

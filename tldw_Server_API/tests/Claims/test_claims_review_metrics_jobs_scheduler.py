@@ -4,6 +4,7 @@ import asyncio
 import threading
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import get_type_hints
 
 import pytest
 from hypothesis import given
@@ -19,6 +20,7 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture(autouse=True)
 def clear_scheduler_environment(monkeypatch):
+    monkeypatch.setattr(service.claims_jobs, "jobs_manager_from_env", lambda: object())
     for name in (
         "CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED",
         "CLAIMS_REVIEW_METRICS_INTERVAL_SEC",
@@ -95,6 +97,14 @@ def test_window_floors_fractional_pre_epoch_timestamp():
     assert scheduled == "1969-12-31T23:59:00Z"
 
 
+def test_safe_interval_override_has_explicit_fire_time_types():
+    assert get_type_hints(service._SafeIntervalTrigger.get_next_fire_time) == {
+        "previous_fire_time": datetime | None,
+        "now": datetime,
+        "return": datetime | None,
+    }
+
+
 @given(
     st.datetimes(timezones=st.just(timezone.utc), min_value=datetime(2000, 1, 1), max_value=datetime(2100, 1, 1)),
     st.integers(min_value=60, max_value=86400 * 365),
@@ -111,6 +121,125 @@ def test_real_window_derivation(now, interval, lookback):
 async def owners(*args, **kwargs):
     for owner in ["42", "43"]:
         yield owner
+
+
+@pytest.mark.parametrize(
+    "report_date,explicit_date",
+    [("2026-09-07", date(2026, 9, 7)), ("2026-09-07T12:30:00+02:00", date(2026, 9, 7)), ("invalid", None)],
+)
+async def test_compatibility_run_preserves_legacy_report_date_parsing(monkeypatch, report_date, explicit_date):
+    windows = []
+    now = datetime(2026, 9, 8, 12, tzinfo=timezone.utc)
+    expected_start = explicit_date or now.date() - timedelta(days=2)
+    expected_end = explicit_date or now.date()
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now
+
+    async def discover(resolved, start, end, stop):
+        windows.append((start, end))
+        yield "42"
+
+    monkeypatch.setattr(service, "_iter_owner_ids", discover)
+    monkeypatch.setattr(service, "datetime", Clock)
+    monkeypatch.setattr(service, "_aggregate_owner", lambda *args, **kwargs: 1)
+    assert await service.run_claims_review_metrics_once(report_date=report_date, lookback_days=3) == 1
+    assert windows == [(expected_start, expected_end)]
+
+
+async def test_callback_builds_one_off_loop_manager_for_all_owners_and_retries(monkeypatch):
+    monkeypatch.setattr(service, "_iter_owner_ids", owners)
+    event_loop_thread = threading.get_ident()
+    built_on = []
+    manager = object()
+    admitted_with = []
+
+    def build_manager():
+        built_on.append(threading.get_ident())
+        return manager
+
+    def admit(**kwargs):
+        admitted_with.append(kwargs["job_manager"])
+        if len(admitted_with) == 1:
+            raise TimeoutError("private connection")
+        return AdmissionResult.applied(row={"id": 1})
+
+    monkeypatch.setattr(service.claims_jobs, "jobs_manager_from_env", build_manager)
+    monkeypatch.setattr(service.claims_jobs, "enqueue_claims_review_metrics", admit)
+    result = await service.run_review_metrics_callback(config())
+    assert result["accepted"] == 2
+    assert admitted_with == [manager, manager, manager]
+    assert len(built_on) == 1 and built_on[0] != event_loop_thread
+
+
+async def test_callback_retries_initialization_without_local_fallback(monkeypatch):
+    attempts = []
+    manager = object()
+
+    async def one_owner(*args):
+        yield "42"
+
+    def build_manager():
+        attempts.append("build")
+        if len(attempts) < 3:
+            raise TimeoutError("private DSN")
+        return manager
+
+    def admit(**kwargs):
+        assert kwargs["job_manager"] is manager
+        return AdmissionResult.applied(row={"id": 1})
+
+    monkeypatch.setattr(service, "_iter_owner_ids", one_owner)
+    monkeypatch.setattr(service.claims_jobs, "jobs_manager_from_env", build_manager)
+    monkeypatch.setattr(service.claims_jobs, "enqueue_claims_review_metrics", admit)
+    monkeypatch.setattr(service, "_aggregate_owner", lambda *args: pytest.fail("Jobs route ran locally"))
+    result = await service.run_review_metrics_callback(config())
+    assert attempts == ["build"] * 3 and result["accepted"] == 1
+
+
+async def test_callback_does_not_construct_manager_without_jobs_work(monkeypatch):
+    monkeypatch.setattr(service.claims_jobs, "jobs_manager_from_env", lambda: pytest.fail("unnecessary manager"))
+
+    async def no_owners(*args):
+        if False:
+            yield "42"
+
+    monkeypatch.setattr(service, "_iter_owner_ids", no_owners)
+    assert (await service.run_review_metrics_callback(config()))["discovered"] == 0
+
+
+async def test_shutdown_during_manager_initialization_prevents_admission(monkeypatch):
+    stop = asyncio.Event()
+    started = asyncio.Event()
+    release = threading.Event()
+    admitted = []
+    loop = asyncio.get_running_loop()
+
+    def build_manager():
+        loop.call_soon_threadsafe(started.set)
+        assert release.wait(2)
+        return object()
+
+    def admit(**kwargs):
+        admitted.append(kwargs)
+        return AdmissionResult.applied(row={"id": 1})
+
+    monkeypatch.setattr(service, "_iter_owner_ids", owners)
+    monkeypatch.setattr(service.claims_jobs, "jobs_manager_from_env", build_manager)
+    monkeypatch.setattr(service.claims_jobs, "enqueue_claims_review_metrics", admit)
+    callback = asyncio.create_task(service.run_review_metrics_callback(config(), stop_event=stop))
+    try:
+        await asyncio.wait_for(started.wait(), 1)
+        stop.set()
+        release.set()
+        result = await asyncio.wait_for(callback, 2)
+        assert not admitted
+        assert result["accepted"] == 0 and result["failed"] == 0
+    finally:
+        release.set()
+        await asyncio.wait_for(callback, 2)
 
 
 @pytest.mark.asyncio
@@ -268,6 +397,30 @@ async def test_postgres_keyset_fanout_skips_invalid_owners(monkeypatch):
     ]
     assert seen == page + ["200"]
     assert cursors == [None, "199"]
+
+
+async def test_invalid_owner_log_has_safe_window_and_page_context(monkeypatch):
+    records = []
+
+    class Logger:
+        def bind(self, **fields):
+            records.append(fields)
+            return self
+
+        def warning(self, message):
+            assert "private-owner" not in message
+
+    monkeypatch.setattr(service, "logger", Logger())
+    monkeypatch.setattr(service.content_db_settings, "backend_type", BackendType.POSTGRESQL)
+    monkeypatch.setattr(service, "_postgres_owner_page", lambda *args: ["42", "private-owner"])
+    seen = [
+        owner async for owner in service._iter_owner_ids(config(), date(2026, 9, 6), date(2026, 9, 7), asyncio.Event())
+    ]
+    assert seen == ["42"]
+    assert records == [{
+        "operation": "discover_review_metrics_owners", "start_date": "2026-09-06", "end_date": "2026-09-07",
+        "page_number": 1, "owner_position": 2,
+    }]
 
 
 @pytest.mark.parametrize("failure", [False, True])
