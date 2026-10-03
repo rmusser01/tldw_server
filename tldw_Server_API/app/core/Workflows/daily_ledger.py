@@ -100,3 +100,51 @@ async def record_workflow_run(
     except _WORKFLOWS_LEDGER_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - defensive
         logger.debug(f"Workflows: ledger.add failed for run_id={run_id}: {exc}")
         return False
+
+
+async def consume_workflow_run_if_within_cap(
+    *,
+    entity_scope: str,
+    entity_value: str,
+    run_id: str,
+    daily_cap: int | None,
+) -> tuple[bool, int]:
+    """Atomically admit and record one workflow run against the daily cap (Qodo Q17).
+
+    The admission check and the ledger write are the single atomic
+    ``ResourceDailyLedger.add_if_within_daily_cap`` operation, so two
+    concurrent runs cannot both pass against the same remaining slot.
+
+    ``daily_cap`` of ``None`` means unlimited: always admits, and still
+    records (gate the check, never the record). Fails open (admits, does
+    not record) when the ledger is unavailable or errors.
+
+    Returns ``(allowed, remaining)``: ``remaining`` is the cap headroom
+    after admission (or before, when refused), for 429 header reporting.
+    """
+    if ResourceDailyLedger is None or LedgerEntry is None:
+        return True, 0
+    ledger = await get_workflows_daily_ledger()
+    if ledger is None:
+        return True, 0
+
+    entry = LedgerEntry(  # type: ignore[call-arg]
+        entity_scope=str(entity_scope),
+        entity_value=str(entity_value),
+        category=_WORKFLOWS_CATEGORY,
+        units=1,
+        op_id=str(run_id),
+        occurred_at=datetime.now(timezone.utc),
+    )
+    if daily_cap is None:
+        try:
+            await ledger.add(entry)
+        except _WORKFLOWS_LEDGER_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - defensive
+            logger.debug(f"Workflows: ledger.add failed for run_id={run_id}: {exc}")
+        return True, 0
+    try:
+        allowed, remaining = await ledger.add_if_within_daily_cap(entry, int(daily_cap))
+        return bool(allowed), int(remaining)
+    except _WORKFLOWS_LEDGER_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug(f"Workflows: atomic cap consume failed for run_id={run_id}; failing open: {exc}")
+        return True, 0

@@ -81,7 +81,7 @@ async def test_workflows_cap_skipped_when_quotas_off(quotas_off: None) -> None:
             return None
 
     await workflows_ep._enforce_workflows_daily_cap(
-        request=_RecordingRequest(), current_user=SimpleNamespace(id=1), db=None
+        request=_RecordingRequest(), current_user=SimpleNamespace(id=1), db=None, run_id="unused-run-id"
     )
     assert accessed == []
 
