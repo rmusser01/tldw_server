@@ -14,6 +14,9 @@
 
 - Design: `Docs/superpowers/specs/2026-09-07-jobs-completion-row-identity-atomicity-design.md`
 - Tracking: `TASK-13215`
+- ADR check (2026-10-02): required yes; governing decision:
+  `Docs/ADR/058-jobs-completion-row-identity.md`, recording the approved optional
+  UUID precondition and locked completion transaction contract.
 - Follow-ups excluded from this implementation:
   - `TASK-13216`: migrate other acquired-job callers to `expected_uuid`
   - `TASK-13217`: assess historical completion bookkeeping drift
@@ -64,7 +67,7 @@ added.
 **Tests:** Existing completion, lifecycle, transaction-boundary, RLS, and
 WorkerSDK suites listed below.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 1: Refresh the branch and record the baseline
 
@@ -72,7 +75,7 @@ WorkerSDK suites listed below.
 - Modify: `backlog/tasks/task-13215 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md`
 - Modify: `Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md`
 
-- [ ] **Step 1: Verify the live remote `dev` tip explicitly**
+- [x] **Step 1: Verify the live remote `dev` tip explicitly**
 
 Run:
 
@@ -84,7 +87,7 @@ git rev-parse origin/dev
 
 Expected: the `ls-remote` and final `rev-parse` hashes are identical.
 
-- [ ] **Step 2: Rebase the isolated branch before implementation**
+- [x] **Step 2: Rebase the isolated branch before implementation**
 
 Run:
 
@@ -97,7 +100,7 @@ git status --short --branch
 Expected: rebase succeeds, the ancestry check exits zero, and only the plan or
 Backlog tracking files intentionally edited during execution are shown.
 
-- [ ] **Step 3: Run the focused SQLite baseline**
+- [x] **Step 3: Run the focused SQLite baseline**
 
 Run:
 
@@ -114,7 +117,7 @@ RUN_JOBS=1 python -m pytest -q \
 
 Expected: exit zero with no failures or errors.
 
-- [ ] **Step 4: Run the focused real-PostgreSQL baseline**
+- [x] **Step 4: Run the focused real-PostgreSQL baseline**
 
 Run:
 
@@ -132,13 +135,16 @@ TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 python -m pytest -q \
 Expected: exit zero; PostgreSQL tests execute rather than skip. If provisioning
 fails, stop and fix the environment rather than weakening the required flag.
 
-- [ ] **Step 5: Record exact baseline evidence**
+- [x] **Step 5: Record exact baseline evidence**
 
 Use the Backlog MCP task edit operation for `TASK-13215` to append the remote
 base hash, commands, pass counts, deselections, and warnings. Mark Stage 1
 `Complete` and Stage 2 `In Progress` in this plan.
 
 - [ ] **Step 6: Commit the refreshed planning checkpoint if tracking changed**
+
+Execution adjustment: consolidate this documentation checkpoint with Task 7.3
+after final verification; no implementation checkpoint will contain red tests.
 
 ```bash
 git add Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md \
@@ -160,14 +166,14 @@ tests either pass or identify a separately recorded defect.
 
 **Tests:** New focused module plus forced-RLS additions.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 2: Add deterministic SQLite and PostgreSQL race harnesses
 
 **Files:**
 - Create: `tldw_Server_API/tests/Jobs/test_jobs_completion_row_identity_atomicity.py`
 
-- [ ] **Step 1: Add backend-neutral completion-select detection and hook adapters**
+- [x] **Step 1: Add backend-neutral completion-select detection and hook adapters**
 
 Create the file with these imports and adapters. The hook fires once, after the
 database has produced the row but before `complete_job` can classify it:
@@ -262,7 +268,7 @@ class _PostgresCompletionHookCursor:
         return getattr(self._inner, name)
 ```
 
-- [ ] **Step 2: Add zero-timeout SQLite helpers and durable snapshots**
+- [x] **Step 2: Add zero-timeout SQLite helpers and durable snapshots**
 
 ```python
 def _zero_timeout_sqlite_connection(path: Any) -> sqlite3.Connection:
@@ -303,7 +309,7 @@ def _sqlite_event_types(jm: JobManager, job_id: int) -> list[str]:
         conn.close()
 ```
 
-- [ ] **Step 3: Write the failing SQLite initial-miss race**
+- [x] **Step 3: Write the failing SQLite initial-miss race**
 
 Use an empty database so both the absent target and the first concurrent create
 have numeric ID 1. The callback captures a zero-timeout busy error instead of
@@ -372,7 +378,7 @@ def test_sqlite_locked_miss_cannot_complete_concurrent_insert(
     assert _sqlite_event_types(manager, 1) == ["job.created"]
 ```
 
-- [ ] **Step 4: Run the SQLite miss test and preserve red evidence**
+- [x] **Step 4: Run the SQLite miss test and preserve red evidence**
 
 Run:
 
@@ -386,7 +392,7 @@ Expected before the fix: FAIL because current `complete_job` returns `True`,
 the concurrent insert succeeds, and that newly inserted row becomes completed.
 Append the exact assertion and durable counter/event snapshot to `TASK-13215`.
 
-- [ ] **Step 5: Add the SQLite delete/reinsert identity test**
+- [x] **Step 5: Add the SQLite delete/reinsert identity test**
 
 Create one queued `chatbooks` job. In the completion-select callback, use a raw
 zero-timeout connection to delete its event and row and insert a queued row
@@ -424,7 +430,7 @@ INSERT INTO jobs(
 Expected before the fix: FAIL because the callback replaces the row and the
 ID-only queued update completes `replacement-uuid`.
 
-- [ ] **Step 6: Add the normal PostgreSQL missing-row and existing-row lock tests**
+- [x] **Step 6: Add the normal PostgreSQL missing-row and existing-row lock tests**
 
 Use `jobs_pg_dsn`, two real `JobManager` instances, and a contextmanager around
 the target manager's original `_pg_cursor`. For the missing-row callback,
@@ -470,7 +476,7 @@ Import psycopg inside each PostgreSQL test with
 `psycopg = pytest.importorskip("psycopg")` so a minimal SQLite environment does
 not skip the complete module.
 
-- [ ] **Step 7: Run the PostgreSQL race tests and preserve red evidence**
+- [x] **Step 7: Run the PostgreSQL race tests and preserve red evidence**
 
 Run:
 
@@ -494,7 +500,7 @@ Do not commit while these tests are red.
 - Modify: `tldw_Server_API/tests/Jobs/test_jobs_rls_postgres.py`
 - Modify: `tldw_Server_API/tests/Jobs/test_jobs_lifecycle_hardening_regressions.py`
 
-- [ ] **Step 1: Add expected-UUID and legacy-value tests for both backends**
+- [x] **Step 1: Add expected-UUID and legacy-value tests for both backends**
 
 Use the established backend parametrization pattern:
 
@@ -548,7 +554,7 @@ Repeat completion with the same token and expected UUID, assert it returns
 `True`, and verify the lifecycle counter remains terminal and exactly one
 `job.completed` event exists.
 
-- [ ] **Step 2: Add queued completion-token guard coverage**
+- [x] **Step 2: Add queued completion-token guard coverage**
 
 Create an allowlisted queued job, set `completion_token='token-a'`, and call
 with `completion_token='token-b'` and `enforce=False`. This characterization
@@ -566,7 +572,7 @@ assert stored["completion_token"] == "token-a"
 Then call with `token-a` and assert one successful transition, one counter
 delta, and one `job.completed` event.
 
-- [ ] **Step 3: Add preflight precedence tests without freezing serialization defects**
+- [x] **Step 3: Add preflight precedence tests without freezing serialization defects**
 
 On SQLite, call a missing ID and an existing stale-UUID row while varying only
 the documented preflight error:
@@ -588,7 +594,7 @@ with pytest.raises(ValueError):
 
 Do not add a nonserializable-result test.
 
-- [ ] **Step 4: Add forced-RLS completion tests**
+- [x] **Step 4: Add forced-RLS completion tests**
 
 In `test_jobs_rls_postgres.py`, reuse `_dsn_or_skip`,
 `ensure_jobs_rls_policies_pg`, `_seed_processing_job`, and
@@ -626,7 +632,7 @@ completion SELECT. After it returns no row, insert an explicit visible
 Assert completion returns `False` and the admin read still sees `queued`.
 Always clear RLS context and close the competing connection in `finally`.
 
-- [ ] **Step 5: Strengthen concurrent same-token side-effect coverage**
+- [x] **Step 5: Strengthen concurrent same-token side-effect coverage**
 
 In
 `test_simultaneous_same_operation_finalizers_emit_one_durable_event`, retain
@@ -640,7 +646,7 @@ if operation == "complete":
 This proves the `True, True` applied-plus-replay result creates one durable
 event and one processing-counter decrement.
 
-- [ ] **Step 6: Prove SLA savepoint-control failures remain transaction-fatal**
+- [x] **Step 6: Prove SLA savepoint-control failures remain transaction-fatal**
 
 In `test_jobs_lifecycle_hardening_regressions.py`, add a connection/cursor
 adapter that replaces only `SAVEPOINT job_completion_sla` with a statement
@@ -679,7 +685,7 @@ For PostgreSQL, the cursor adapter calls
 connection adapter does the same through `inner.execute`. Delegate transaction
 entry/exit, commit, rollback, close, and all non-target statements unchanged.
 
-- [ ] **Step 7: Run the new contract tests before implementation**
+- [x] **Step 7: Run the new contract tests before implementation**
 
 Run the SQLite subset:
 
@@ -718,7 +724,7 @@ transaction, event, counter, SLA, and idempotency tests remain green.
 
 **Tests:** Stage 2 suites plus existing focused regressions.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 4: Implement locked identity in `JobManager.complete_job`
 
@@ -728,7 +734,7 @@ transaction, event, counter, SLA, and idempotency tests remain green.
 - Test: `tldw_Server_API/tests/Jobs/test_jobs_rls_postgres.py`
 - Test: `tldw_Server_API/tests/Jobs/test_jobs_lifecycle_hardening_regressions.py`
 
-- [ ] **Step 1: Add the optional public precondition without changing earlier validation order**
+- [x] **Step 1: Add the optional public precondition without changing earlier validation order**
 
 Add the keyword after `completion_token` and before `enforce`:
 
@@ -749,7 +755,7 @@ def complete_job(
 Do not normalize or validate `expected_uuid` before required-token,
 enforcement, maximum-size parsing, and result-size checks.
 
-- [ ] **Step 2: Replace PostgreSQL's initial read with the authoritative lock**
+- [x] **Step 2: Replace PostgreSQL's initial read with the authoritative lock**
 
 Use one projection containing all mutation and side-effect facts:
 
@@ -776,7 +782,7 @@ Classify terminal state immediately from this row. Preserve exact completed
 token replay and return `False` for failed, cancelled, quarantined, and
 mismatched completed states.
 
-- [ ] **Step 3: Branch directly from the locked PostgreSQL state**
+- [x] **Step 3: Branch directly from the locked PostgreSQL state**
 
 After domain-scoped encryption, serialize the final result once and initialize
 the transition flags:
@@ -816,7 +822,7 @@ id = %s AND uuid IS NOT DISTINCT FROM %s
 
 Do not issue the current secondary `SELECT domain FROM jobs`.
 
-- [ ] **Step 4: Scope PostgreSQL's defensive replay to the captured identity**
+- [x] **Step 4: Scope PostgreSQL's defensive replay to the captured identity**
 
 If the selected branch's update affects zero rows and a token was supplied,
 use:
@@ -841,7 +847,7 @@ Otherwise leave `ok=False`. Keep counter reconciliation, SLA savepoint work,
 completion outbox insertion, explicit commit, and post-commit callbacks under
 `if ok`, using the authoritative `base` facts.
 
-- [ ] **Step 5: Add SQLite's writer boundary and named authoritative row**
+- [x] **Step 5: Add SQLite's writer boundary and named authoritative row**
 
 At the start of the SQLite transaction, before the first job query:
 
@@ -870,7 +876,7 @@ Use `base` by field name throughout SQLite metrics, counters, SLA, and event
 construction. Do not retain positional `rowm[...]` accesses after adding UUID
 to the projection.
 
-- [ ] **Step 6: Apply SQLite's direct state branches and null-safe guards**
+- [x] **Step 6: Apply SQLite's direct state branches and null-safe guards**
 
 Use the same state decisions as PostgreSQL. Every SQLite update and defensive
 replay uses:
@@ -897,7 +903,7 @@ The queued branch reads only `base["domain"]` for the existing allowlist and
 must not query the jobs table again. Preserve `SELECT changes()` row-count
 handling unless a characterization test proves a backend issue.
 
-- [ ] **Step 7: Keep mandatory and optional transaction failures distinct**
+- [x] **Step 7: Keep mandatory and optional transaction failures distinct**
 
 Do not add exception suppression around counter updates, reconciliation,
 `job.completed` insertion, savepoint creation/release, or commit. Retain the
@@ -905,7 +911,7 @@ existing suppression inside `_stage_completion_sla_breach` only for statement
 failures after its savepoint exists. Queue and run observers only after a
 successful commit.
 
-- [ ] **Step 8: Run the complete red-to-green matrix**
+- [x] **Step 8: Run the complete red-to-green matrix**
 
 SQLite:
 
@@ -936,7 +942,7 @@ TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 python -m pytest -q \
 
 Expected: all selected tests pass; required PostgreSQL tests do not skip.
 
-- [ ] **Step 9: Review the diff for forbidden scope expansion**
+- [x] **Step 9: Review the diff for forbidden scope expansion**
 
 Run:
 
@@ -950,7 +956,7 @@ git diff -- tldw_Server_API/app/core/Jobs/manager.py \
 Expected: no schema, operation-module, unrelated lifecycle, serialization, or
 historical-repair changes.
 
-- [ ] **Step 10: Commit the green manager boundary**
+- [x] **Step 10: Commit the green manager boundary**
 
 ```bash
 git add tldw_Server_API/app/core/Jobs/manager.py \
@@ -976,7 +982,7 @@ through the new keyword and does not retry without it.
 
 **Tests:** Focused async WorkerSDK success and callback tests.
 
-**Status:** Not Started
+**Status:** Complete
 
 ### Task 5: Add and implement strict WorkerSDK UUID forwarding
 
@@ -984,7 +990,7 @@ through the new keyword and does not retry without it.
 - Modify: `tldw_Server_API/tests/Jobs/test_worker_sdk.py`
 - Modify: `tldw_Server_API/app/core/Jobs/worker_sdk.py:1019-1031`
 
-- [ ] **Step 1: Make the existing success spy enforce the exact keyword contract**
+- [x] **Step 1: Make the existing success spy enforce the exact keyword contract**
 
 In `test_run_success_completes_job`, replace the permissive `**kwargs` spy with
 an explicit keyword-only signature:
@@ -1030,7 +1036,7 @@ Add:
 assert calls[0]["expected_uuid"] == job["uuid"]
 ```
 
-- [ ] **Step 2: Run the strict WorkerSDK test red**
+- [x] **Step 2: Run the strict WorkerSDK test red**
 
 Run:
 
@@ -1043,7 +1049,7 @@ RUN_JOBS=1 python -m pytest -q \
 Expected before the WorkerSDK edit: FAIL because the strict spy requires
 `expected_uuid`; the worker must not silently recover by dropping it.
 
-- [ ] **Step 3: Pass the acquired UUID from the ordinary success path**
+- [x] **Step 3: Pass the acquired UUID from the ordinary success path**
 
 Add exactly one argument to the existing `self.jm.complete_job` call:
 
@@ -1054,7 +1060,7 @@ expected_uuid=str(job.get("uuid") or ""),
 Do not change `WorkerTerminalOutcome`, cancellation, failure, callback, or
 direct service-worker paths in this task.
 
-- [ ] **Step 4: Run WorkerSDK tests green**
+- [x] **Step 4: Run WorkerSDK tests green**
 
 Run:
 
@@ -1067,7 +1073,7 @@ RUN_JOBS=1 python -m pytest -q \
 
 Expected: all selected tests pass.
 
-- [ ] **Step 5: Commit WorkerSDK forwarding**
+- [x] **Step 5: Commit WorkerSDK forwarding**
 
 ```bash
 git add tldw_Server_API/app/core/Jobs/worker_sdk.py \
@@ -1091,7 +1097,7 @@ finds no unresolved in-scope issue; task evidence is current.
 
 **Tests:** Full commands below plus mandatory Jobs CI after PR creation.
 
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 6: Run full local verification and security checks
 
@@ -1100,7 +1106,7 @@ finds no unresolved in-scope issue; task evidence is current.
 - Verify: `tldw_Server_API/app/core/Jobs/worker_sdk.py`
 - Verify: `tldw_Server_API/tests/Jobs`
 
-- [ ] **Step 1: Run the full focused SQLite matrix fresh**
+- [x] **Step 1: Run the full focused SQLite matrix fresh**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -1119,7 +1125,7 @@ RUN_JOBS=1 python -m pytest -q \
 
 Expected: exit zero with no failures or errors.
 
-- [ ] **Step 2: Run the full focused required-PostgreSQL matrix fresh**
+- [x] **Step 2: Run the full focused required-PostgreSQL matrix fresh**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -1135,9 +1141,13 @@ TLDW_TEST_POSTGRES_REQUIRED=1 RUN_JOBS=1 python -m pytest -q \
   -m pg_jobs
 ```
 
+Set `RUN_PG_JOBS_TESTS=1` and `JOBS_SSE_TEST_MAX_SECONDS=0.5` for the existing
+opt-in outbox/SSE tests. Once the shared fixture's container is running,
+`TLDW_TEST_NO_DOCKER=1` avoids redundant provisioning.
+
 Expected: exit zero and no PostgreSQL test skips.
 
-- [ ] **Step 3: Run formatting, lint, and syntax checks**
+- [x] **Step 3: Run formatting, lint, and syntax checks**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -1161,7 +1171,7 @@ whitespace across the complete branch diff. Review changed hunks in the
 pre-existing files for local formatting consistency without reformatting
 untouched code.
 
-- [ ] **Step 4: Run scoped Bandit**
+- [x] **Step 4: Run scoped Bandit**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -1171,8 +1181,11 @@ python -m bandit -r \
   -f json -o /tmp/bandit_task_13215.json
 ```
 
-Expected: exit zero and the JSON report contains no new findings in changed
-code. Record the report path and summary in `TASK-13215`.
+Expected: the JSON report contains no new findings in changed code. Compare
+any finding against the identical scope archived from the base revision and
+run Bandit's `--baseline` check; require exit zero and no new results/errors.
+Record raw and delta report paths and summary in `TASK-13215`. Do not suppress
+an existing finding to claim that the raw scan is clean.
 
 - [ ] **Step 5: Inspect final scope and repository state**
 
@@ -1191,7 +1204,7 @@ Jobs tests are present; the worktree is clean after final tracking updates.
 - Modify: `backlog/tasks/task-13215 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md`
 - Modify: `Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md`
 
-- [ ] **Step 1: Perform the required code review**
+- [x] **Step 1: Perform the required code review**
 
 Invoke `superpowers:requesting-code-review`. Validate every finding against the
 current code and tests before editing. For any valid in-scope issue, use
@@ -1252,3 +1265,57 @@ PostgreSQL, keep enabled counters/outbox atomic, and pass acquired UUIDs from
 WorkerSDK. Preserve the public boolean facade and defer broad caller migration
 and historical repair to TASK-13216 and TASK-13217.
 ```
+
+## Execution Record: 2026-10-02
+
+- Rebased the three planning commits onto live dev
+  `9958110df2a9011e19f48b0eae821353e19d4af8` before implementation.
+- Baselines: SQLite 127 passed / 55 deselected; real PostgreSQL 67 passed /
+  56 deselected, including the newly added SLA control characterization.
+  Docker Desktop had to be started after the initial fixture setup failures.
+- Red evidence on unchanged code: SQLite miss and replacement tests both failed;
+  PostgreSQL miss and initial row-lock tests both failed; UUID contract tests
+  raised the expected unsupported-keyword errors. Forced RLS reproduced the
+  visible-row insertion race (`True` with a newly completed row). Strict worker
+  completion failed because the required UUID keyword was absent.
+- Implemented both database paths in the existing facade and forwarded the
+  acquired UUID from ordinary WorkerSDK success. No operation extraction or
+  broader caller migration was performed.
+- Expanded green matrices: SQLite 242 passed / 65 deselected; PostgreSQL 83
+  passed / 71 deselected, with two pre-existing opt-in SSE/outbox skips.
+  Reran those two with `RUN_PG_JOBS_TESTS=1` and the supported bounded-stream
+  setting `JOBS_SSE_TEST_MAX_SECONDS=0.5`: 2 passed, no skips.
+- WorkerSDK and prepared-worker suites: 132 passed. New atomicity module:
+  24 passed across SQLite and required PostgreSQL. Test output contains
+  existing project warnings; no selected test failure remains.
+- Black (new module), Ruff (all six touched Python files), runtime syntax
+  compilation, and whitespace checks passed. Scoped Bandit reported one
+  unchanged B608 warning in canonical webhook pruning outside this patch;
+  comparison against an archive of dev produced no new findings and no errors
+  (`/tmp/bandit_task_13215_delta.json`, exit zero).
+- Initial spec review found two test weaknesses, both addressed: the hidden-row
+  snapshot now includes result/token/completed-time/UUID, and concurrent replay
+  retains a second processing job to prove the exact counter change `2 -> 1`.
+- The final upstream update to `86e287fee7bfa1a1588639232e35db3666851ded`
+  changes only unrelated MCP gateway tests and their task record. Final rebase
+  and focused rerun are pending before PR creation.
+- ADR-058 records the approved durable completion contract under the current
+  repository ADR workflow. TASK-13216 and TASK-13217 remain separate follow-ups.
+- Final review added forced-RLS competing `NOWAIT` lock proof, missing-counter
+  reconciliation SQL-error rollback, both optional SLA write errors, and four
+  SLA control failure paths. The spec re-review confirmed every identified
+  coverage gap is closed. Runtime/worker quality review found no actionable
+  finding; the final lifecycle-test quality review also found no actionable issue.
+- Fresh integrated SQLite matrix: 247 passed / 70 deselected / 1212 warnings.
+  Ruff, new-module Black, runtime compilation, and the Bandit delta scan passed
+  again; the delta report has no results or errors.
+- Fresh integrated required PostgreSQL matrix: 90 passed / 76 deselected /
+  358 warnings, no skips. The two opt-in SSE tests ran in this matrix.
+- Test-scope Bandit (excluding pytest assertion warning B101) uses normalized
+  archived filenames and reports no new findings/errors in
+  `/tmp/bandit_task_13215_tests_delta.json`. Two new fixture-token warnings were
+  removed by reusing the acquired UUID and seeded lease value. Focused reruns
+  after that cleanup passed: SQLite 5 and PostgreSQL/RLS 8.
+- The green manager/test boundary and WorkerSDK forwarding were committed
+  separately, with references to TASK-13215 and this plan. Documentation and
+  baseline checkpoints are consolidated into the final verification record.

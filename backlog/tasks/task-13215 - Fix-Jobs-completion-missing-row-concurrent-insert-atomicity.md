@@ -16,7 +16,10 @@ references:
 documentation:
 - Docs/superpowers/specs/2026-09-07-jobs-completion-row-identity-atomicity-design.md
 - Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md
+- Docs/ADR/058-jobs-completion-row-identity.md
 modified_files:
+- Docs/ADR/058-jobs-completion-row-identity.md
+- Docs/ADR/README.md
 - Docs/superpowers/specs/2026-09-07-jobs-completion-row-identity-atomicity-design.md
 - Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicity-implementation-plan.md
 - backlog/tasks/task-13215 - Fix-Jobs-completion-missing-row-concurrent-insert-atomicity.md
@@ -24,8 +27,11 @@ modified_files:
 - backlog/tasks/task-13217 - Assess-historical-Jobs-completion-bookkeeping-drift.md
 - tldw_Server_API/app/core/Jobs/manager.py
 - tldw_Server_API/app/core/Jobs/worker_sdk.py
-- tldw_Server_API/tests/Jobs
-updated_date: 2026-09-07 20:41
+- tldw_Server_API/tests/Jobs/test_jobs_completion_row_identity_atomicity.py
+- tldw_Server_API/tests/Jobs/test_jobs_lifecycle_hardening_regressions.py
+- tldw_Server_API/tests/Jobs/test_jobs_rls_postgres.py
+- tldw_Server_API/tests/Jobs/test_worker_sdk.py
+updated_date: 2026-10-03 00:50
 ---
 
 ## Description
@@ -36,13 +42,13 @@ Blocking remediation required before strict complete_job extraction. A completio
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A deterministic SQLite regression reproduces the initial-miss/concurrent-insert race before the fix.
-- [ ] #2 A real-PostgreSQL regression validates whether the same race is possible under the configured isolation and RLS cursor path.
-- [ ] #3 No completion can commit successfully unless the operation has authoritative facts for the exact durable row identity established by its locked lookup.
-- [ ] #4 An applied completion updates or reconciles the correct lifecycle counter and writes job.completed atomically when the outbox is enabled.
-- [ ] #5 After the authoritative locked lookup begins, concurrent insert, delete/reinsert, and row-visibility changes cannot redirect completion to another row incarnation selected only by a reused numeric id; pre-call protection is asserted only when a usable expected_uuid is supplied.
-- [ ] #6 Normal processing completion, permitted queued completion, token replay, missing-row, failure precedence, and RLS behavior are explicitly characterized and intentionally updated where remediation requires it.
-- [ ] #7 Focused SQLite and required real-PostgreSQL tests, full relevant Jobs regressions, formatting/lint, and scoped Bandit pass.
+- [x] #1 A deterministic SQLite regression reproduces the initial-miss/concurrent-insert race before the fix.
+- [x] #2 A real-PostgreSQL regression validates whether the same race is possible under the configured isolation and RLS cursor path.
+- [x] #3 No completion can commit successfully unless the operation has authoritative facts for the exact durable row identity established by its locked lookup.
+- [x] #4 An applied completion updates or reconciles the correct lifecycle counter and writes job.completed atomically when the outbox is enabled.
+- [x] #5 After the authoritative locked lookup begins, concurrent insert, delete/reinsert, and row-visibility changes cannot redirect completion to another row incarnation selected only by a reused numeric id; pre-call protection is asserted only when a usable expected_uuid is supplied.
+- [x] #6 Normal processing completion, permitted queued completion, token replay, missing-row, failure precedence, and RLS behavior are explicitly characterized and intentionally updated where remediation requires it.
+- [x] #7 Focused SQLite and required real-PostgreSQL tests, full relevant Jobs regressions, formatting/lint, and scoped Bandit pass.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -57,6 +63,9 @@ Execute `Docs/superpowers/plans/2026-09-07-jobs-completion-row-identity-atomicit
 Validated on SQLite and real PostgreSQL 18 under READ COMMITTED, including forced RLS with a visible chatbooks/u1 row: after an initial missing SELECT, a concurrent queued insert with the same numeric id can be completed while only job.created exists and ready_count remains 1. The approved remediation loads the authoritative row under SELECT FOR UPDATE on PostgreSQL or BEGIN IMMEDIATE on SQLite, returns False on a locked miss, captures the raw stored UUID, and guards every mutation/replay query by id plus null-safe stored UUID. expected_uuid is optional and WorkerSDK supplies the acquired UUID; legacy null/empty UUIDs receive only in-operation replacement protection. Completion outbox and lifecycle counter bookkeeping are mandatory and atomic when enabled. SLA attachment/event statement failures remain best-effort only after a savepoint is established; savepoint-control failures propagate. Metrics and observers remain post-commit. The slides-specific terminal-result operation is not a suitable reuse target because it does not preserve general result or queued-completion semantics. Strict completion extraction stays paused until this blocker merges. The provisional TASK-13112.3 was not carried forward because current dev already assigns TASK-13112 to unrelated work. Second design review added stable database error-code/class assertions, bounded concurrency teardown, exact same-token side-effect coverage, explicit SQLite contention behavior, and tracked follow-ups TASK-13216 (direct-caller UUID adoption) and TASK-13217 (historical bookkeeping drift).
 Implementation plan drafted and self-reviewed on 2026-09-07. The plan keeps both backend behavior changes in one green commit, requires red evidence for the validated races, uses zero-timeout SQLite error codes and PostgreSQL LockNotAvailable rather than sleeps/messages, checks counter and outbox snapshots, exercises forced RLS and legacy UUID replay, preserves savepoint-control failure rollback, and requires fresh verification after the final dev rebase.
 Final plan review verified the live remote dev tip remains e3174f1ad9f6dd0b11e4ecb20d48c1c4090d3bfe after correcting a locally rewritten origin/dev ref. No requirement or test-coverage gaps remain. The review made the forced-RLS cursor wrapper/import explicit and scoped Black to the new test module because all five existing touched files already fail whole-file Black on the unchanged baseline; Ruff currently passes those files, and the plan retains Ruff, syntax, diff, and changed-hunk formatting checks across the full touched scope.
+2026-10-02 execution resumed using subagent-driven development. Rebased the three planning commits cleanly onto live dev 9958110df2a9011e19f48b0eae821353e19d4af8. Focused SQLite baseline: 127 passed, 55 deselected, 82 warnings. Latest dev changes RLS to transaction-local fail-closed context; tests retain the original cursor path. ADR assessment: required yes because the optional acquired-row identity precondition is a durable completion API rule; record ADR-058 from the already-approved design, with no renewed decision or scope change.
+2026-10-02 red/green evidence: two SQLite race failures (miss completed concurrent row; replacement-uuid completed), two PostgreSQL race failures (miss completed concurrent row; missing initial row lock); 13 SQLite UUID contract TypeErrors. Forced-RLS miss returned True/new row completed; strict WorkerSDK spy had no call because expected_uuid was absent. Fix implemented both backend locked lookups, immediate false on miss/stale UUID, captured raw UUID guards, direct state branches, authoritative bookkeeping, ordinary WorkerSDK UUID forwarding. Green expanded matrices: 242 SQLite passed / 65 deselected; 83 PostgreSQL passed / 71 deselected with 2 opt-in SSE skips. Explicit RUN_PG_JOBS_TESTS=1 and JOBS_SSE_TEST_MAX_SECONDS=0.5 rerun: both SSE tests passed. Worker suites 132 passed; new atomicity module 24 passed. Black new module, Ruff all touched Python files, py_compile runtime, diff check passed. Raw Bandit had one unchanged B608 warning in canonical webhook pruning; archived dev baseline comparison exit zero with no new results/errors at /tmp/bandit_task_13215_delta.json. Initial spec review findings fixed by full completion-field RLS snapshots and concurrent processing counter 2->1 with a retained sentinel. Final spec/quality review and final dev rebase remain in progress.
+Final integrated review/verification: spec re-review confirmed forced-RLS NOWAIT lock proof, missing-counter reconciliation real SQL failure rollback, optional SLA attachment/outbox failures, and creation/release/rollback-to savepoint-control failures all close the identified coverage gaps. Runtime/worker quality review reported no actionable findings; final lifecycle-test quality pass is pending. Fresh matrices: SQLite 247 passed / 70 deselected / 1212 warnings; required PostgreSQL 90 passed / 76 deselected / 358 warnings with no skips, including opt-in outbox tests using RUN_PG_JOBS_TESTS=1 and bounded SSE. Ruff all six touched Python files, Black new module, runtime py_compile, diff check, production Bandit delta passed. Full touched test-scope Bandit (B101 excluded for assertions) initially flagged two new literal fixture tokens; reused existing acquired UUID/seeded lease instead, delta comparison using normalized archived filenames now exit zero with no findings/errors at /tmp/bandit_task_13215_tests_delta.json. Final rebase/push/draft PR pending; no merge authorized in this task.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

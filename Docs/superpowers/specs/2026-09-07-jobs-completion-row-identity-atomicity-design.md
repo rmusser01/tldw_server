@@ -6,6 +6,11 @@ Status: Approved design
 Tracking: TASK-13215
 Base: `origin/dev` at `e3174f1ad9f6dd0b11e4ecb20d48c1c4090d3bfe`
 
+ADR check (2026-10-02): required yes. Governing decision:
+`Docs/ADR/058-jobs-completion-row-identity.md`. The optional acquired UUID
+precondition is a durable completion API contract; the ADR records the already
+approved decision.
+
 ## Objective
 
 Fix the validated race in `JobManager.complete_job` before resuming the strict
