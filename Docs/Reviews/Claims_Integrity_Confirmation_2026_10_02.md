@@ -12,7 +12,7 @@ This investigation confirmed gaps in verdict rules, selected-source enforcement,
 - Initial reviewed/executed product revision: `8140e493f2d0a79e2039084930151eba6565df82`.
 - Latest remote dev checked: `9958110df2a9011e19f48b0eae821353e19d4af8`.
 - The diff between those revisions is empty across Claims_Extraction, core RAG, unified RAG endpoints/schemas, shared UI, WebUI, and extension. Links below use latest checked dev.
-- This supplements the [NotebookLM capability review](NotebookLM_Thread_Capability_Review_2026_10_02.md). Strict evidence was accepted as the intended default for source-based research. Partial supported answers versus whole-answer refusal remains a design question.
+- This supplements the [NotebookLM capability review](NotebookLM_Thread_Capability_Review_2026_10_02.md). Subsequent brainstorming accepted strict evidence as the default for source-based research, supported partial answers with explicit gaps, and verification before display with progress during generation/checks. The ongoing design is tracked in [TASK-13423](../../backlog/tasks/task-13423%20-%20Design-strict-source-grounded-answers-before-display.md).
 
 **Imported-module probes** use the real Claims implementation with injected provider/NLI responses. **Isolated control-flow probes** select code from its syntax tree and stub dependencies. **Static traces** follow source and existing tests without executing the full flow. These are distinct evidence levels; none certifies a deployed API incident or live model accuracy.
 
@@ -147,13 +147,13 @@ Candidate discussion order:
 4. Choose first workflow: Workspace needs verification after its separate generation; Knowledge QA already displays the server RAG answer.
 5. Inspectable evidence tied to answer/source identity and retained through terminal streaming state and reload.
 
-These are findings and proposed discussion order, not approved behavior changes. Supported partial answers versus whole-answer refusal remains unresolved.
+These are findings and proposed discussion order, not approved implementation changes. The requester accepted supported facts with explicit gaps, declining when nothing useful is supported, and withholding draft answer text until verification completes while showing progress. Architecture, rollout scope, and the written spec remain under design review.
 
 ## ADR and change validation
 
 ADR required: **no** for investigation/documentation. Future evidence contracts, API/persistence changes, or default behavior decisions need their own assessment.
 
-Bandit is inapplicable to touched Markdown/JSON/tracking files; no Python/application code changed. Documentation verification passed for 53 immutable source paths/line anchors, three relative links, all eight saved observations, the imported-source checksum, JUnit counts, and current-dev source equivalence. The working diff passed whitespace checks; staged verification is recorded in the tracking task. The draft PR still requires the requester's human-written Change summary before merge.
+Bandit is inapplicable to touched Markdown/JSON/tracking files; no Python/application code changed. Documentation verification passed for 53 immutable source paths/line anchors, four relative links, all eight saved observations, the imported-source checksum, JUnit counts, and current-dev source equivalence. The working diff passed whitespace checks; staged verification is recorded in the tracking task. The draft PR still requires the requester's human-written Change summary before merge.
 
 [module]: https://github.com/rmusser01/tldw_server/blob/9958110df2a9011e19f48b0eae821353e19d4af8/tldw_Server_API/app/core/Claims_Extraction/README.md#L1
 [decision]: https://github.com/rmusser01/tldw_server/blob/9958110df2a9011e19f48b0eae821353e19d4af8/tldw_Server_API/app/core/Claims_Extraction/claims_engine.py#L447
