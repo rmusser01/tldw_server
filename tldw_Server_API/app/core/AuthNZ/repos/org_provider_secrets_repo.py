@@ -9,8 +9,13 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.exceptions import TransactionError
-from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import dollar, row_dict
 from tldw_Server_API.app.core.AuthNZ.repos.datetime_utils import _strip_tzinfo
+from tldw_Server_API.app.core.AuthNZ.repos.provider_scope_result import (
+    ProviderScopeResult,
+    ProviderScopeStatus,
+    _validate_positive_id,
+)
 from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
     fold_provider_credential_rows,
@@ -336,6 +341,100 @@ class AuthnzOrgProviderSecretsRepo:
                 "AuthnzOrgProviderSecretsRepo.fetch_secret failed"
             )
             raise
+
+    async def resolve_authorized_secret(
+        self,
+        scope_type: str,
+        scope_id: int,
+        user_id: int,
+        provider: str,
+        *,
+        active_team_id: int | None = None,
+        active_organization_id: int | None = None,
+    ) -> ProviderScopeResult:
+        """Resolve exact shared scope authorization and secrets in one snapshot.
+
+        Explicit active IDs are revalidated, including their memberships and
+        relationship. Omitted IDs never cause another scope to be inferred.
+        """
+        scope_norm = _normalize_scope_type(scope_type)
+        _validate_positive_id(scope_id, "scope_id")
+        _validate_positive_id(user_id, "user_id")
+        if active_team_id is not None:
+            _validate_positive_id(active_team_id, "active_team_id")
+        if active_organization_id is not None:
+            _validate_positive_id(active_organization_id, "active_organization_id")
+        canonical, *legacy_names = provider_lookup_names(provider)
+        providers = (canonical, *legacy_names)
+        params: list[Any] = [scope_id]
+        if scope_norm == "team":
+            joins = """
+                JOIN team_members tm
+                  ON tm.user_id = u.id AND tm.team_id = ? AND tm.status = 'active'
+                JOIN teams t ON t.id = tm.team_id AND t.is_active = TRUE
+                JOIN organizations o ON o.id = t.org_id AND o.is_active = TRUE
+            """
+            if active_organization_id is not None:
+                joins += """
+                    JOIN org_members om
+                      ON om.org_id = o.id AND om.user_id = u.id AND om.status = 'active'
+                """
+            entity = "t"
+        else:
+            joins = """
+                JOIN org_members om
+                  ON om.user_id = u.id AND om.org_id = ? AND om.status = 'active'
+                JOIN organizations o ON o.id = om.org_id AND o.is_active = TRUE
+            """
+            if active_team_id is not None:
+                joins += """
+                    JOIN team_members tm
+                      ON tm.user_id = u.id AND tm.team_id = ? AND tm.status = 'active'
+                    JOIN teams t
+                      ON t.id = tm.team_id AND t.org_id = o.id AND t.is_active = TRUE
+                """
+                params.append(active_team_id)
+            entity = "o"
+        placeholders = ", ".join("?" for _ in providers)
+        # Only fixed SQL and generated placeholder tokens are interpolated; values are bound.
+        sql = f"""
+            SELECT s.id, s.scope_type, s.scope_id, s.provider, s.encrypted_blob,
+                   s.key_hint, s.metadata, s.created_at, s.updated_at,
+                   s.last_used_at, s.created_by, s.updated_by, s.revoked_by, s.revoked_at
+            FROM users u
+            {joins}
+            LEFT JOIN org_provider_secrets s
+              ON s.scope_type = ? AND s.scope_id = {entity}.id
+             AND s.provider IN ({placeholders})
+            WHERE u.id = ? AND u.is_active = TRUE
+        """  # nosec B608
+        params.extend((scope_norm, *providers, user_id))
+        if active_team_id is not None and scope_norm == "team":
+            sql += " AND t.id = ?"
+            params.append(active_team_id)
+        if active_organization_id is not None:
+            sql += " AND o.id = ?"
+            params.append(active_organization_id)
+        try:
+            if getattr(self.db_pool, "pool", None) is not None:
+                rows = await self.db_pool.fetchall(dollar(sql), *params)
+            else:
+                rows = await self.db_pool.fetchall(sql, tuple(params))
+            if not rows:
+                return ProviderScopeResult(ProviderScopeStatus.UNAUTHORIZED)
+            records = [self._row_to_dict(row) for row in rows]
+            records = [row for row in records if row.get("id") is not None]
+            record = self._select_authoritative_row(records, canonical)
+            if record is None:
+                return ProviderScopeResult(ProviderScopeStatus.AUTHORIZED_ABSENT)
+            if record.get("revoked_at") is not None:
+                return ProviderScopeResult(ProviderScopeStatus.UNAUTHORIZED)
+            return ProviderScopeResult(ProviderScopeStatus.RESOLVED, record)
+        except ProviderCredentialAliasConflictError:
+            raise
+        except Exception:
+            logger.error("AuthnzOrgProviderSecretsRepo.resolve_authorized_secret unavailable")
+            return ProviderScopeResult(ProviderScopeStatus.UNAVAILABLE)
 
     async def fetch_authorized_secret_for_user(
         self,
