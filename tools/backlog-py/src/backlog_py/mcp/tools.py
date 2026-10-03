@@ -2,14 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from backlog_py.core.models import BacklogProject
 from backlog_py.core.documents import DocumentRecord, DocumentService
 from backlog_py.core.milestones import MilestoneRecord, MilestoneService
+from backlog_py.core.models import BacklogProject
 from backlog_py.core.repository import MutableRepository, ReadOnlyRepository, TaskRecord
 from backlog_py.storage.config import get_definition_of_done_defaults, load_config, replace_definition_of_done_defaults
-
-
-_MUTATION_NOT_IMPLEMENTED = "Task mutation MCP tools are not implemented until Task 7 for this argument shape."
 
 
 def task_search(project: BacklogProject, query: str, limit: int = 10) -> list[dict[str, Any]]:
@@ -45,26 +42,35 @@ def task_create(project: BacklogProject, **kwargs: Any) -> dict[str, Any]:
         )
         or False,
         dependencies=_optional_string_list(_get_alias(kwargs, "dependencies")),
+        labels=_optional_string_list(_get_alias(kwargs, "labels")),
+        notes=str(_get_alias(kwargs, "notes") or ""),
         on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
     )
     return _task_detail(project, task)
 
 
 def task_edit(project: BacklogProject, task_id: str, **kwargs: Any) -> dict[str, Any]:
-    """Edit supported task sections through the safe mutation repository."""
-    if "title" in kwargs:
-        raise NotImplementedError(_MUTATION_NOT_IMPLEMENTED)
+    """Edit supported task sections through the safe mutation repository.
+
+    Accepts the upstream Backlog.md MCP names (``notesSet``, ``acceptanceCriteriaAdd``,
+    ...) alongside the camelCase and snake_case spellings used here before.
+    """
     repository = MutableRepository(project)
     task = repository.edit_task(
         task_id,
+        title=_optional_string(kwargs.get("title")),
         description=_optional_string(kwargs.get("description")),
-        append_notes=_optional_string(_get_alias(kwargs, "appendNotes", "append_notes")),
+        notes=_optional_string(_get_alias(kwargs, "notesSet", "notes")),
+        append_notes=_optional_string(_get_alias(kwargs, "notesAppend", "appendNotes", "append_notes")),
         final_summary=_optional_string(_get_alias(kwargs, "finalSummary", "final_summary")),
-        check_ac=_int_list(_get_alias(kwargs, "checkAc", "check_ac")),
+        add_ac=_string_list(_get_alias(kwargs, "acceptanceCriteriaAdd", "addAc", "add_ac")),
+        remove_ac=_int_list(_get_alias(kwargs, "acceptanceCriteriaRemove", "removeAc", "remove_ac")),
+        check_ac=_int_list(_get_alias(kwargs, "acceptanceCriteriaCheck", "checkAc", "check_ac")),
         check_dod=_int_list(_get_alias(kwargs, "checkDod", "check_dod")),
-        uncheck_ac=_int_list(_get_alias(kwargs, "uncheckAc", "uncheck_ac")),
+        uncheck_ac=_int_list(_get_alias(kwargs, "acceptanceCriteriaUncheck", "uncheckAc", "uncheck_ac")),
         uncheck_dod=_int_list(_get_alias(kwargs, "uncheckDod", "uncheck_dod")),
         dependencies=_string_list(kwargs.get("dependencies")) if "dependencies" in kwargs else None,
+        labels=_string_list(kwargs.get("labels")) if "labels" in kwargs else None,
         status=_optional_string(kwargs.get("status")),
         on_status_change=_optional_bool(_get_alias(kwargs, "onStatusChange", "on_status_change")),
     )

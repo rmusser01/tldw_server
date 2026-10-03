@@ -24,30 +24,57 @@ def main(ctx: click.Context, cwd: Path | None) -> None:
 @click.argument("args", nargs=-1)
 @click.option("--plain", is_flag=True, help="Print plain text output.")
 @click.option("--id", "task_id", default=None, help="Task id for task creation.")
-@click.option("--status", default=None, help="Task status for create/edit.")
-@click.option("--description", default=None, help="Description for task creation.")
+@click.option("-t", "--title", default=None, help="Replace the task title (edit).")
+@click.option("-s", "--status", default=None, help="Task status for create/edit.")
+@click.option("-d", "--description", default=None, help="Task description for create/edit.")
+@click.option(
+    "-l", "--labels", "--label", "labels", multiple=True, help="Comma-separated labels; on edit, replaces the labels."
+)
+@click.option(
+    "--dep", "--depends-on", "dependencies", multiple=True, help="Comma-separated dependency task ids; on edit, replaces them."
+)
+@click.option("--ac", "add_ac", multiple=True, help="Add an acceptance criterion (repeatable).")
+@click.option("--remove-ac", multiple=True, type=int, help="Remove acceptance criterion by 1-based index (edit).")
+@click.option("--notes", default=None, help="Implementation notes; on edit, replaces them.")
 @click.option("--append-notes", default=None, help="Append text to implementation notes.")
-@click.option("--check-ac", multiple=True, type=int, help="Mark acceptance criteria index complete.")
+@click.option(
+    "--check-ac", multiple=True, type=int, help="Mark acceptance criteria index complete (after --remove-ac/--ac)."
+)
 @click.option("--check-dod", multiple=True, type=int, help="Mark Definition of Done index complete.")
 @click.option("--uncheck-ac", multiple=True, type=int, help="Mark acceptance criteria index incomplete.")
 @click.option("--uncheck-dod", multiple=True, type=int, help="Mark Definition of Done index incomplete.")
 @click.option("--final-summary", default=None, help="Replace the final summary section.")
+@click.option("--check", is_flag=True, help="normalize: list files that would change and exit 1 if any.")
 @click.pass_context
 def task_command(
     ctx: click.Context,
     args: tuple[str, ...],
     plain: bool,
     task_id: str | None,
+    title: str | None,
     status: str | None,
     description: str | None,
+    labels: tuple[str, ...],
+    dependencies: tuple[str, ...],
+    add_ac: tuple[str, ...],
+    remove_ac: tuple[int, ...],
+    notes: str | None,
     append_notes: str | None,
     check_ac: tuple[int, ...],
     check_dod: tuple[int, ...],
     uncheck_ac: tuple[int, ...],
     uncheck_dod: tuple[int, ...],
     final_summary: str | None,
+    check: bool,
 ) -> None:
-    """View tasks."""
+    """View, create, edit, or normalize tasks.
+
+    \b
+    task list | task TASK_ID
+    task create TITLE [options]
+    task edit TASK_ID [options]
+    task normalize [--check] [PATH...]
+    """
     if args and args[0] == "create":
         if len(args) != 2:
             raise click.UsageError("Usage: task create TITLE")
@@ -56,6 +83,10 @@ def task_command(
             task_id=task_id,
             status=status,
             description=description or "",
+            acceptance_criteria=add_ac,
+            dependencies=_split_csv(dependencies),
+            labels=_split_csv(labels),
+            notes=notes or "",
         )
         click.echo(_format_task_line(task_record, plain=plain))
         return
@@ -64,16 +95,30 @@ def task_command(
             raise click.UsageError("Usage: task edit TASK_ID")
         task_record = _mutable_repository(ctx).edit_task(
             args[1],
+            title=title,
             description=description,
             status=status,
+            notes=notes,
             append_notes=append_notes,
+            add_ac=add_ac,
+            remove_ac=remove_ac,
             check_ac=check_ac,
             check_dod=check_dod,
             uncheck_ac=uncheck_ac,
             uncheck_dod=uncheck_dod,
             final_summary=final_summary,
+            dependencies=_split_csv(dependencies) if dependencies else None,
+            labels=_split_csv(labels) if labels else None,
         )
         click.echo(_format_task_line(task_record, plain=plain))
+        return
+    if args and args[0] == "normalize":
+        repository = _mutable_repository(ctx)
+        changed = repository.normalize_tasks([Path(path) for path in args[1:]], check=check)
+        for path in changed:
+            click.echo(_display_path(repository.project, path))
+        if check and changed:
+            ctx.exit(1)
         return
     if args == ("list",):
         for task_record in _repository(ctx).list_tasks():
@@ -276,6 +321,16 @@ def _document_service(ctx: click.Context) -> DocumentService:
 
 def _milestone_service(ctx: click.Context) -> MilestoneService:
     return MilestoneService(_project(ctx))
+
+
+def _split_csv(values: tuple[str, ...]) -> list[str]:
+    return [part.strip() for value in values for part in value.split(",") if part.strip()]
+
+
+def _display_path(project: BacklogProject, path: Path) -> str:
+    resolved = path.resolve()
+    root = project.root.resolve()
+    return resolved.relative_to(root).as_posix() if resolved.is_relative_to(root) else str(path)
 
 
 def _format_task_line(task_record: TaskRecord, *, plain: bool) -> str:

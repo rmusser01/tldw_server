@@ -48,6 +48,25 @@ do not block the first local-file agent cutover candidate.
 | mcp:definition-of-done-defaults-get | implemented | definition_of_done_defaults_get(project) | mcp:definition-of-done-defaults-get |
 | mcp:definition-of-done-defaults-upsert | implemented | definition_of_done_defaults_upsert(project, items) | mcp:definition-of-done-defaults-upsert |
 
+## Task Option Coverage
+
+The `cli:task-create`, `cli:task-edit`, `mcp:task-create`, and `mcp:task-edit`
+rows cover these agent-used options (TASK-13440):
+
+| Option | CLI | MCP | Notes |
+| --- | --- | --- | --- |
+| labels | `-l/--labels/--label a,b` (repeatable) | `labels` | Stored as a frontmatter `labels:` list; on edit, replaces the list. |
+| acceptance criteria on create | `--ac` (repeatable) | `acceptanceCriteria` | Numbered `- [ ] #N`. |
+| add criterion on edit | `--ac` (repeatable) | `acceptanceCriteriaAdd` | Appended, then all criteria renumbered. |
+| remove criterion | `--remove-ac N` (repeatable) | `acceptanceCriteriaRemove` | 1-based; out of range is rejected before any write. |
+| retitle | `-t/--title` | `title` | Updates frontmatter and renames the task file. |
+| replace notes | `--notes` | `notesSet` | On create, sets the initial notes. |
+| dependencies | `--dep/--depends-on a,b` (repeatable) | `dependencies` | Missing or circular ids are rejected. |
+
+`task normalize [--check] [path...]` is a backlog-py maintenance command with no
+upstream equivalent, so it has no oracle fixture. It rewrites Node-format and
+nested sections into the canonical form described in the README.
+
 ## Explicit Deferred Blockers
 
 | Inventory item | Status | Expected behavior | Deferred reason |

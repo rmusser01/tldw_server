@@ -4,14 +4,13 @@ import shutil
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
-
 from backlog_py.cli.main import main
 from backlog_py.core.repository import MutableRepository, TaskMutationError
+from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.mcp.tools import task_create, task_edit
 from backlog_py.storage.config import replace_definition_of_done_defaults
 from backlog_py.storage.project import discover_project
-
+from click.testing import CliRunner
 
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "repos" / "basic"
 
@@ -387,3 +386,128 @@ def test_mcp_invalid_bool_string_is_rejected(tmp_path):
 
     with pytest.raises(TypeError, match="boolean"):
         task_create(project, title="Bad bool", onStatusChange="sometimes")
+
+
+def _frontmatter(path: Path) -> dict:
+    return parse_task_markdown(path.read_text(encoding="utf-8")).frontmatter
+
+
+def test_cli_create_accepts_labels_criteria_dependencies_and_notes(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "--cwd", str(repo), "task", "create", "Parity task", "--id", "TASK-2",
+            "-l", "backlog, tooling", "--labels", "cli",
+            "--ac", "First, with a comma", "--ac", "Second",
+            "--dep", "TASK-1",
+            "--notes", "Initial note.",
+            "--plain",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    path = _task_file(repo, "task-2")
+    frontmatter = _frontmatter(path)
+    assert frontmatter["labels"] == ["backlog", "tooling", "cli"]
+    assert frontmatter["dependencies"] == ["TASK-1"]
+    written = path.read_text(encoding="utf-8")
+    assert "- [ ] #1 First, with a comma\n- [ ] #2 Second\n" in written
+    assert "<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->\nInitial note.\n<!-- SECTION:IMPLEMENTATION_NOTES:END -->" in written
+
+
+def test_cli_edit_replaces_labels_title_and_notes_and_renames_file(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    old_path = _task_file(repo)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "--cwd", str(repo), "task", "edit", "TASK-1",
+            "-t", "Renamed example task",
+            "-l", "alpha,beta",
+            "--notes", "Replaced notes.",
+            "--plain",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "TASK-1 [In Progress] Renamed example task" in result.output
+    assert not old_path.exists()
+    path = _task_file(repo)
+    assert path.name == "task-1 - Renamed-example-task.md"
+    frontmatter = _frontmatter(path)
+    assert frontmatter["title"] == "Renamed example task"
+    assert frontmatter["labels"] == ["alpha", "beta"]
+    assert frontmatter["custom_field"] == "preserve-me"
+    notes = parse_task_markdown(path.read_text(encoding="utf-8")).sections["IMPLEMENTATION_NOTES"].content
+    assert notes == "Replaced notes.\n"
+
+
+def test_cli_edit_empty_labels_clears_them(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    result = CliRunner().invoke(main, ["--cwd", str(repo), "task", "edit", "TASK-1", "-l", ""])
+
+    assert result.exit_code == 0, result.output
+    assert _frontmatter(_task_file(repo))["labels"] == []
+
+
+def test_edit_removes_then_adds_criteria_and_renumbers(tmp_path):
+    repo = _copy_fixture(tmp_path)
+
+    _repository(repo).edit_task("TASK-1", remove_ac=[1], add_ac=["Added criterion"], check_ac=[3])
+
+    written = _task_file(repo).read_text(encoding="utf-8")
+    assert (
+        "<!-- AC:BEGIN -->\n"
+        "- [ ] #1 Preserve incomplete acceptance criteria raw line\n"
+        "- [ ] Plain checklist item without an id\n"
+        "- [x] #3 Added criterion\n"
+        "<!-- AC:END -->"
+    ) in written
+    assert "Preserve completed acceptance criteria raw line" not in written
+
+
+def test_out_of_range_remove_ac_is_rejected_before_write(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    before = _snapshot_tasks(repo)
+
+    with pytest.raises(TaskMutationError, match="AC checklist index 4"):
+        _repository(repo).edit_task("TASK-1", remove_ac=[4], add_ac=["Not written"])
+
+    assert _snapshot_tasks(repo) == before
+
+
+def test_empty_title_is_rejected_before_write(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    before = _snapshot_tasks(repo)
+
+    with pytest.raises(TaskMutationError, match="title must not be empty"):
+        _repository(repo).edit_task("TASK-1", title="  ")
+
+    assert _snapshot_tasks(repo) == before
+
+
+def test_mcp_create_and_edit_accept_labels_title_and_upstream_criteria_names(tmp_path):
+    repo = _copy_fixture(tmp_path)
+    project = _project(repo)
+
+    created = task_create(project, title="MCP parity", labels=["mcp"], acceptanceCriteria=["Keep", "Drop"])
+    edited = task_edit(
+        project,
+        task_id=created["id"],
+        title="MCP parity renamed",
+        labels=["mcp", "edited"],
+        acceptanceCriteriaRemove=[2],
+        acceptanceCriteriaAdd=["Added"],
+        notesSet="Set through MCP.",
+    )
+
+    assert edited["title"] == "MCP parity renamed"
+    assert edited["path"] == "backlog/tasks/task-2 - MCP-parity-renamed.md"
+    source = edited["raw_source"]
+    assert parse_task_markdown(source).frontmatter["labels"] == ["mcp", "edited"]
+    assert "- [ ] #1 Keep\n- [ ] #2 Added\n" in source
+    assert "Set through MCP." in source
