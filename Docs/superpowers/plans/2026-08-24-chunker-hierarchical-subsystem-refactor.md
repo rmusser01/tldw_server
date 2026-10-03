@@ -836,7 +836,7 @@ remains untouched; implementation awaits reviews with TASK-13215 In Progress.
 - Create `tldw_Server_API/tests/Chunking/test_hierarchical_grouping.py`
 - Modify `tldw_Server_API/app/core/Chunking/chunker.py`
 
-- [ ] **Step 1: Add failing grouping tests**
+- [x] **Step 1: Add failing grouping tests**
 
 Define these concrete helpers in the tests:
 
@@ -883,7 +883,7 @@ Cover:
 
 Run the new file and expect a missing module/symbol failure.
 
-- [ ] **Step 2: Move merge and grouping helpers exactly**
+- [x] **Step 2: Move merge and grouping helpers exactly**
 
 Implement the helpers in `grouping.py` by moving the three existing nested algorithms. Keep:
 
@@ -896,11 +896,11 @@ Implement the helpers in `grouping.py` by moving the three existing nested algor
 
 The module may import only `Any` and the shared noncritical exception policy from outside the standard library. It must not import service, builder, flatten, leaves, `Chunker`, or `process_text`.
 
-- [ ] **Step 3: Wire the active flatten implementation**
+- [x] **Step 3: Wire the active flatten implementation**
 
 Import the three helpers into `chunker.py`, delete their nested copies, and pass the current `method` explicitly at each call. Keep section traversal and header buffering in `Chunker.flatten_hierarchical(...)` until Task 7.
 
-- [ ] **Step 4: Run grouping and flatten compatibility tests**
+- [x] **Step 4: Run grouping and flatten compatibility tests**
 
 ```bash
 source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate
@@ -913,12 +913,38 @@ python -m pytest \
 
 Expected: all pass. In particular, no-space joins, invalid weights, and malformed-tree outcomes remain unchanged.
 
-- [ ] **Step 5: Commit the grouping extraction**
+- [x] **Step 5: Commit the grouping extraction**
 
 ```bash
 git add Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md tldw_Server_API/app/core/Chunking/hierarchical/grouping.py tldw_Server_API/app/core/Chunking/chunker.py tldw_Server_API/tests/Chunking/test_hierarchical_grouping.py "backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md"
 git commit -m "refactor: extract hierarchical grouping"
 ```
+
+Task 6 test-first evidence (2026-10-02): the direct test file first stopped
+with the expected missing `hierarchical.grouping` module (exit 2, 12 warnings).
+After moving the three algorithm bodies, 57 direct cases passed and the two
+active-wiring cases failed because `chunker.merge_texts` was absent. After
+wiring and scoped formatting, the required three-file suite passed with
+155 tests, 0 failures, and 328 warnings in 6.78s. The existing hierarchy
+refactor/import-boundary contracts additionally passed with 65 tests,
+0 failures, and 142 warnings in 1.43s.
+
+Task 6 gates: Ruff passed on all three touched Python files after correcting
+one new test import-order finding. Black checks passed for grouping.py and
+the direct tests, plus only changed chunker.py ranges 26-30, 495, and 551-564;
+the legacy file was not formatted wholesale. Compileall passed on all three
+Python files. Production Bandit scanned 1,849 LOC with 0 findings/errors.
+`git diff --check` passed. Read-only normalized AST comparison with baseline
+`b8d015c5821e23091023d70972f426953fdaa766` confirms exact algorithm bodies,
+operator precedence, offset catches, invalid-weight propagation, and unchanged
+remaining traversal/header buffering after only helper-name/explicit-method
+normalization. grouping.py imports only Any and the shared exception policy.
+Self-review found no actionable extraction issue. Existing weighted overlap
+advances by item count and may retain an overlap-only tail; this baseline
+behavior is preserved, not corrected. Controller-owned Backlog notes are
+preserved and the reported pre-Task 6 full run (669 passed, 1 PyThaiNLP skip,
+1747 warnings, 47.45s) is recorded there. Task 7 is untouched; TASK-13215
+remains In Progress. Commit subject: `refactor: extract hierarchical grouping`.
 
 ## Task 7: Extract Flattening and Complete Public Delegation
 
