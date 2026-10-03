@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -9,7 +10,14 @@ from tldw_Server_API.app.api.v1.schemas.user_keys import (
     ProviderKeyTestRequest,
     UserProviderKeyUpsertRequest,
 )
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    MembershipAuthority,
+    MembershipScopeNotFound,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+    ProviderCredentialAliasConflictError,
+)
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
 
 pytestmark = pytest.mark.unit
@@ -24,7 +32,7 @@ class _LoggerStub:
 
 
 class _SharedRepo:
-    async def fetch_secret(self, *_args):
+    async def fetch_secret_for_manager(self, **_kwargs):
         return {"encrypted_blob": "encrypted-shared-provider-secret"}
 
     async def touch_last_used(self, *_args):
@@ -73,6 +81,97 @@ async def _repo() -> _SharedRepo:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("scope", "expected_detail"),
+    (
+        ("org", "Organization not found"),
+        ("team", "Team not found"),
+    ),
+)
+async def test_scoped_shared_key_upsert_maps_stale_scope_to_sanitized_404(
+    monkeypatch,
+    scope: str,
+    expected_detail: str,
+) -> None:
+    sentinel = f"deleted {scope} leaked from repository"
+
+    class _MissingScopeRepo:
+        async def upsert_secret(self, **_kwargs):
+            failure = MembershipScopeNotFound()
+            failure.args = (sentinel,)
+            raise failure
+
+    async def _missing_scope_repo():
+        return _MissingScopeRepo()
+
+    async def _provider_ok(**_kwargs):
+        return "validated"
+
+    _install_common_patches(monkeypatch)
+    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(routes, "test_provider_credentials", _provider_ok)
+    monkeypatch.setattr(routes, "encrypt_byok_payload", lambda _payload: {})
+    monkeypatch.setattr(routes, "dumps_envelope", lambda _envelope: "encrypted")
+    monkeypatch.setattr(routes, "_get_shared_byok_repo", _missing_scope_repo)
+
+    endpoint = routes.upsert_org_shared_key if scope == "org" else routes.upsert_team_shared_key
+    kwargs = {"org_id": 42} if scope == "org" else {"team_id": 42}
+
+    with pytest.raises(HTTPException) as exc_info:
+        await endpoint(
+            **kwargs,
+            payload=UserProviderKeyUpsertRequest(
+                provider="openai",
+                api_key="sk-test",
+            ),
+            request=SimpleNamespace(),
+            principal=_principal(),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == expected_detail
+    assert sentinel not in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ("org", "team"))
+async def test_scoped_shared_key_upsert_maps_alias_conflict_to_409(
+    monkeypatch,
+    scope: str,
+) -> None:
+    class _AliasConflictRepo:
+        async def upsert_secret(self, **_kwargs):
+            raise ProviderCredentialAliasConflictError("sensitive alias detail")
+
+    async def _alias_conflict_repo():
+        return _AliasConflictRepo()
+
+    async def _provider_ok(**_kwargs):
+        return "validated"
+
+    _install_common_patches(monkeypatch)
+    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(routes, "test_provider_credentials", _provider_ok)
+    monkeypatch.setattr(routes, "encrypt_byok_payload", lambda _payload: {})
+    monkeypatch.setattr(routes, "dumps_envelope", lambda _envelope: "encrypted")
+    monkeypatch.setattr(routes, "_get_shared_byok_repo", _alias_conflict_repo)
+
+    endpoint = routes.upsert_org_shared_key if scope == "org" else routes.upsert_team_shared_key
+    kwargs = {"org_id": 42} if scope == "org" else {"team_id": 42}
+    with pytest.raises(HTTPException) as exc_info:
+        await endpoint(
+            **kwargs,
+            payload=UserProviderKeyUpsertRequest(provider="openai", api_key="sk-test"),
+            request=SimpleNamespace(),
+            principal=_principal(),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == "Conflicting provider credential aliases"
+    assert "sensitive alias detail" not in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
 async def test_require_org_manager_backend_failure_log_is_sanitized(monkeypatch) -> None:
     logger_stub = _LoggerStub()
 
@@ -106,6 +205,103 @@ async def test_require_team_manager_backend_failure_log_is_sanitized(monkeypatch
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "Team manager role required"
     _assert_sanitized_debug_log(logger_stub, "Team manager check failed")
+
+
+@pytest.mark.parametrize(
+    ("checker_name", "list_name", "identifier_name"),
+    (
+        ("_require_org_manager", "list_org_members", "org_id"),
+        ("_require_team_manager", "list_team_members", "team_id"),
+    ),
+)
+@pytest.mark.asyncio
+async def test_inactive_scope_manager_is_rejected(
+    monkeypatch,
+    checker_name: str,
+    list_name: str,
+    identifier_name: str,
+) -> None:
+    async def _inactive_members(*_args, **_kwargs):
+        return [{"user_id": 7, "role": "admin", "status": "inactive"}]
+
+    monkeypatch.setattr(routes, list_name, _inactive_members)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await getattr(routes, checker_name)(
+            _non_admin_principal(),
+            **{identifier_name: 42},
+        )
+
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.parametrize("scope", ("org", "team"))
+@pytest.mark.asyncio
+async def test_scoped_shared_key_upsert_passes_persisted_authorization_context(
+    monkeypatch,
+    scope: str,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class _CapturingRepo:
+        async def upsert_secret(self, **kwargs):
+            captured.update(kwargs)
+            return {"key_hint": "test", "updated_at": datetime.now(timezone.utc)}
+
+    async def _capturing_repo():
+        return _CapturingRepo()
+
+    async def _provider_ok(**_kwargs):
+        return "validated"
+
+    _install_common_patches(monkeypatch)
+    monkeypatch.setattr(routes, "validate_credential_fields", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(routes, "test_provider_credentials", _provider_ok)
+    monkeypatch.setattr(routes, "encrypt_byok_payload", lambda _payload: {})
+    monkeypatch.setattr(routes, "dumps_envelope", lambda _envelope: "encrypted")
+    monkeypatch.setattr(routes, "_get_shared_byok_repo", _capturing_repo)
+
+    endpoint = routes.upsert_org_shared_key if scope == "org" else routes.upsert_team_shared_key
+    kwargs = {"org_id": 42} if scope == "org" else {"team_id": 42}
+    await endpoint(
+        **kwargs,
+        payload=UserProviderKeyUpsertRequest(provider="openai", api_key="sk-test"),
+        request=SimpleNamespace(),
+        principal=_principal(),
+    )
+
+    context = captured["authorization_context"]
+    assert context.actor_user_id == 7
+    assert context.required_authority is MembershipAuthority.PLATFORM_ADMIN
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ("org", "team"))
+async def test_scoped_shared_key_list_uses_lock_bound_manager_read(
+    monkeypatch,
+    scope: str,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class _CapturingRepo:
+        async def list_secrets_for_manager(self, **kwargs):
+            captured.update(kwargs)
+            return []
+
+    async def _capturing_repo():
+        return _CapturingRepo()
+
+    _install_common_patches(monkeypatch)
+    monkeypatch.setattr(routes, "_get_shared_byok_repo", _capturing_repo)
+    endpoint = routes.list_org_shared_keys if scope == "org" else routes.list_team_shared_keys
+    kwargs = {"org_id": 42} if scope == "org" else {"team_id": 42}
+
+    response = await endpoint(**kwargs, principal=_principal())
+
+    assert response.items == []
+    assert captured["scope_type"] == scope
+    assert captured["scope_id"] == 42
+    assert captured["authorization_context"].actor_user_id == 7
 
 
 @pytest.mark.asyncio

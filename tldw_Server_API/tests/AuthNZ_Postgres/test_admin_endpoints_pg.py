@@ -6,6 +6,20 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
+async def _execute_membership_fixture_sql(pool, query: str, *args) -> None:
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        _execute_membership_scope_sql,
+    )
+
+    async with pool.transaction() as conn:
+        await _execute_membership_scope_sql(
+            conn,
+            query,
+            *args,
+            backend="postgres",
+        )
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_admin_endpoints_pg(test_db_pool):
@@ -19,6 +33,7 @@ async def test_admin_endpoints_pg(test_db_pool):
     # Disable CSRF for test client
     from tldw_Server_API.app.core.config import settings as app_settings
     from tldw_Server_API.app.main import app
+
     app_settings['CSRF_ENABLED'] = False
 
     # Ensure Postgres pool from fixture
@@ -99,7 +114,7 @@ async def test_admin_endpoints_pg(test_db_pool):
     await mgr.initialize()
 
     # Insert admin user
-    user_id = await ensure_test_user(pool, "pgadmin", "pgadmin@example.com")
+    user_id = await ensure_test_user(pool, "pgadmin", "pgadmin@example.com", role="admin")
 
     # Override AuthPrincipal to treat this user as admin for claim-first gates
     async def _principal_override(request: Request):  # type: ignore[override]
@@ -286,7 +301,7 @@ async def test_org_member_list_pagination_filters_pg(test_db_pool):
     )
 
     # Insert admin user and override principal for claim-first gates
-    admin_id = await ensure_test_user(pool, "pg-root-admin", "pg-root-admin@example.com")
+    admin_id = await ensure_test_user(pool, "pg-root-admin", "pg-root-admin@example.com", role="admin")
 
     async def _principal_override(request=None):  # type: ignore[override]
         principal = AuthPrincipal(
@@ -352,9 +367,12 @@ async def test_org_member_list_pagination_filters_pg(test_db_pool):
                 lead_invited_ids.add(user_id)
 
             added_at = base_ts + timedelta(seconds=idx)
-            await pool.execute(
+            await _execute_membership_fixture_sql(
+                pool,
                 """
-                INSERT INTO org_members (org_id, user_id, role, status, added_at)
+                INSERT INTO public.org_members (
+                    org_id, user_id, role, status, added_at
+                )
                 VALUES ($1, $2, $3, $4, $5)
                 """,
                 org_id, user_id, role, status, added_at,

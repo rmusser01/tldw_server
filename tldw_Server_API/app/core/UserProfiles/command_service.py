@@ -6,6 +6,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    MembershipAuthorizationError,
+)
 from tldw_Server_API.app.core.UserProfiles.contracts import ProfileUpdateCommand
 from tldw_Server_API.app.core.UserProfiles.effects import ProfileEffectDispatcher
 from tldw_Server_API.app.core.UserProfiles.error_mapping import (
@@ -43,6 +46,9 @@ class ProfileCommandService:
         db_conn: Any,
         scope: ProfileUpdateScope | None,
     ) -> LegacyProfileCommandResult:
+        membership_keys = tuple(
+            key for key, _value in command.updates if key.startswith("memberships.")
+        )
         current_version = None
         if command.expected_profile_version is not None:
             current_version = await self._profile_service.get_profile_version(
@@ -88,33 +94,53 @@ class ProfileCommandService:
                 skipped=(),
             )
 
-        if command.expected_profile_version is not None:
-            locked_version = await self._profile_service.get_profile_version(
-                user_id=command.target_user_id,
-                db_conn=db_conn,
-                lock_user=True,
+        if command.expected_profile_version is not None or membership_keys:
+            lock_user_ids = tuple(
+                sorted({command.actor_user_id, command.target_user_id})
             )
-            if not self._profile_service.versions_match(
-                locked_version,
-                command.expected_profile_version,
-            ):
-                return LegacyProfileCommandResult(
-                    status_code=409,
-                    profile_version=locked_version,
-                    error_code="profile_version_mismatch",
-                    detail="profile_version_mismatch",
-                    skipped=({"key": "profile_version", "message": "mismatch"},),
-                )
+            locked_versions = await self._profile_service.lock_profile_users(
+                user_ids=lock_user_ids,
+                db_conn=db_conn,
+            )
+            if command.expected_profile_version is not None:
+                locked_version = locked_versions[command.target_user_id]
+                if not self._profile_service.versions_match(
+                    locked_version,
+                    command.expected_profile_version,
+                ):
+                    return LegacyProfileCommandResult(
+                        status_code=409,
+                        profile_version=locked_version,
+                        error_code="profile_version_mismatch",
+                        detail="profile_version_mismatch",
+                        skipped=({"key": "profile_version", "message": "mismatch"},),
+                    )
 
-        result = await self._executor.apply_updates(
-            user_id=command.target_user_id,
-            updates=command.updates,
-            roles=set(command.roles),
-            dry_run=False,
-            db_conn=db_conn,
-            updated_by=command.actor_user_id,
-            scope=scope,
-        )
+        executor_kwargs = {
+            "user_id": command.target_user_id,
+            "updates": command.updates,
+            "roles": set(command.roles),
+            "dry_run": False,
+            "db_conn": db_conn,
+            "updated_by": command.actor_user_id,
+            "scope": scope,
+        }
+        if membership_keys:
+            try:
+                result = await self._executor.apply_updates(**executor_kwargs)
+            except MembershipAuthorizationError:
+                return LegacyProfileCommandResult(
+                    status_code=403,
+                    applied=(),
+                    skipped=tuple(
+                        {"key": key, "message": "forbidden"}
+                        for key in membership_keys
+                    ),
+                    error_code="profile_update_forbidden",
+                    detail="Caller cannot edit one or more fields",
+                )
+        else:
+            result = await self._executor.apply_updates(**executor_kwargs)
         current_version = await self._profile_service.get_profile_version(
             user_id=command.target_user_id,
             db_conn=db_conn,

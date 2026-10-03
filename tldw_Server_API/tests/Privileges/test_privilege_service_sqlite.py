@@ -18,6 +18,20 @@ from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 # These service fixtures never authenticate their seeded users.
 
 
+async def _execute_membership_fixture_sql(connection, query: str, parameters: tuple) -> None:
+    """Preserve exact membership states used by read/filter regressions."""
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        _execute_membership_scope_sql,
+    )
+
+    await _execute_membership_scope_sql(
+        connection,
+        query,
+        parameters,
+        backend="sqlite",
+    )
+
+
 async def _fetch_id(pool, query: str, value: str) -> int:
     result = await pool.fetchval(query, (value,))
     assert result is not None, f"Expected ID for query {query} with value {value}"
@@ -166,7 +180,8 @@ async def test_privilege_service_honors_authnz_role_mappings(tmp_path, monkeypat
 
     async with pool.transaction() as conn:
         for user_id in [admin_id, media_manager_id, analyst_id, researcher_id]:
-            await conn.execute(
+            await _execute_membership_fixture_sql(
+                conn,
                 """
                 INSERT OR IGNORE INTO org_members (org_id, user_id, role, status)
                 VALUES (?, ?, ?, ?)
@@ -186,7 +201,8 @@ async def test_privilege_service_honors_authnz_role_mappings(tmp_path, monkeypat
 
     async with pool.transaction() as conn:
         for user_id in [media_manager_id, researcher_id]:
-            await conn.execute(
+            await _execute_membership_fixture_sql(
+                conn,
                 """
                 INSERT OR REPLACE INTO team_members (team_id, user_id, role, status)
                 VALUES (?, ?, ?, ?)
@@ -378,28 +394,32 @@ async def test_privilege_service_org_filter_uses_org_members(tmp_path, monkeypat
     org2_id = await _fetch_id(pool, "SELECT id FROM organizations WHERE slug = ?", "org-two")
 
     async with pool.transaction() as conn:
-        await conn.execute(
+        await _execute_membership_fixture_sql(
+            conn,
             """
             INSERT OR IGNORE INTO org_members (org_id, user_id, role, status)
             VALUES (?, ?, ?, ?)
             """,
             (org1_id, user1_id, "member", "active"),
         )
-        await conn.execute(
+        await _execute_membership_fixture_sql(
+            conn,
             """
             INSERT OR IGNORE INTO org_members (org_id, user_id, role, status)
             VALUES (?, ?, ?, ?)
             """,
             (org1_id, user2_id, "member", "suspended"),
         )
-        await conn.execute(
+        await _execute_membership_fixture_sql(
+            conn,
             """
             INSERT OR IGNORE INTO org_members (org_id, user_id, role, status)
             VALUES (?, ?, ?, ?)
             """,
             (org1_id, user4_id, "member", "active"),
         )
-        await conn.execute(
+        await _execute_membership_fixture_sql(
+            conn,
             """
             INSERT OR IGNORE INTO org_members (org_id, user_id, role, status)
             VALUES (?, ?, ?, ?)
@@ -482,15 +502,18 @@ async def test_privilege_service_team_filter_uses_active_memberships_and_teams(t
     inactive_team_id = await _fetch_id(pool, "SELECT id FROM teams WHERE slug = ?", "inactive-team")
 
     async with pool.transaction() as conn:
-        await conn.execute(
+        await _execute_membership_fixture_sql(
+            conn,
             "INSERT OR IGNORE INTO team_members (team_id, user_id, role, status) VALUES (?, ?, ?, ?)",
             (active_team_id, user1_id, "member", "active"),
         )
-        await conn.execute(
+        await _execute_membership_fixture_sql(
+            conn,
             "INSERT OR IGNORE INTO team_members (team_id, user_id, role, status) VALUES (?, ?, ?, ?)",
             (active_team_id, user2_id, "member", "suspended"),
         )
-        await conn.execute(
+        await _execute_membership_fixture_sql(
+            conn,
             "INSERT OR IGNORE INTO team_members (team_id, user_id, role, status) VALUES (?, ?, ?, ?)",
             (inactive_team_id, user2_id, "member", "active"),
         )

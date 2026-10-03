@@ -313,7 +313,7 @@ async def test_active_user_secret_postgres_lookup_binds_owner_and_secret_in_one_
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("scope_type", "expected_membership_join"),
-    (("team", "JOIN team_members tm"), ("org", "JOIN org_members om")),
+    (("team", "JOIN public.team_members tm"), ("org", "JOIN public.org_members om")),
 )
 async def test_authorized_shared_secret_postgres_lookup_uses_portable_bindings(
     scope_type: str,
@@ -359,12 +359,15 @@ async def test_authorized_shared_secret_postgres_lookup_uses_portable_bindings(
     assert row is not None
     assert pool.calls == 1
     assert expected_membership_join in pool.query
-    assert "JOIN users u" in pool.query
+    assert "FROM public.org_provider_secrets s" in pool.query
+    assert "JOIN public.users u" in pool.query
     assert "COALESCE(" not in pool.query
     assert "u.is_active = TRUE" in pool.query
     assert "o.is_active = TRUE" in pool.query
     if scope_type == "team":
         assert "tm.status = 'active'" in pool.query
+        assert "om.status = 'active'" in pool.query
+        assert "JOIN public.org_members om" in pool.query
         assert "t.is_active = TRUE" in pool.query
     else:
         assert "om.status = 'active'" in pool.query

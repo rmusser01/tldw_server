@@ -224,15 +224,16 @@ async def test_chunking_real_byok_resolution_cannot_mix_config_generations(
             return None
 
     class SharedRepo:
-        async def fetch_secret(
+        async def fetch_authorized_secret_for_user(
             self,
             scope_type,
-            _scope_id,
-            _provider,
-            *,
-            include_revoked=False,
+            scope_id,
+            user_id,
+            provider,
         ):
-            assert include_revoked is True
+            assert scope_id == {"team": 11, "org": 13}[scope_type]
+            assert user_id == 7
+            assert provider == "openai"
             return row if scope_type == source else None
 
     async def get_user_repo():

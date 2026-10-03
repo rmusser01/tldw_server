@@ -30,18 +30,34 @@ Mocking Approach
 
 For integration tests with real database, see test_billing_endpoints_integration.py.
 """
-import pytest
-from datetime import datetime, timedelta
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from tldw_Server_API.app.services.org_invite_service import (
-    OrgInviteService,
-    InviteStatus,
-    InviteValidationResult,
-    RedemptionResult,
-    get_invite_service,
+import pytest
+
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    AnchorOwnership,
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+from tldw_Server_API.app.services import org_invite_service as invite_service_module
+from tldw_Server_API.app.services.org_invite_service import (
+    InviteStatus,
+    InviteValidationResult,
+    OrgInviteService,
+    RedemptionResult,
+)
+
+_REGISTRATION_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.REGISTRATION,
+)
 
 
 class TestInviteValidationResult:
@@ -331,7 +347,7 @@ class TestOrgInviteService:
 
         assert result.success is True
         assert result.was_already_member is True
-        mock_orgs_repo.add_org_member.assert_not_called()  # Should not try to add again
+        mock_orgs_repo.provision_org_membership_on_connection.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_redeem_invite_new_member(self, service, mock_invites_repo, mock_orgs_repo):
@@ -353,9 +369,127 @@ class TestOrgInviteService:
 
         assert result.success is True
         assert result.was_already_member is False
-        mock_orgs_repo.add_org_member.assert_called_once_with(org_id=1, user_id=100, role="member")
+        kwargs = mock_orgs_repo.provision_org_membership_on_connection.await_args.kwargs
+        assert kwargs["org_id"] == 1
+        assert kwargs["user_id"] == 100
+        assert kwargs["org_role"] == "member"
+        assert kwargs["context"] == _REGISTRATION_MEMBERSHIP_CONTEXT
         mock_invites_repo.record_redemption.assert_called_once()
         mock_invites_repo.increment_uses_count.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_redeem_invite_uses_registration_writer_on_caller_transaction(
+        self,
+        mock_invites_repo,
+        mock_orgs_repo,
+    ):
+        transaction_conn = object()
+
+        class _ObservedPool:
+            pool = None
+
+            def __init__(self) -> None:
+                self.transaction_count = 0
+
+            @asynccontextmanager
+            async def transaction(
+                self,
+                *,
+                acquire_timeout_seconds: float | None = None,
+            ):
+                assert acquire_timeout_seconds is not None
+                self.transaction_count += 1
+                yield transaction_conn
+
+        pool = _ObservedPool()
+        service = OrgInviteService(
+            db_pool=pool,
+            invites_repo=mock_invites_repo,
+            orgs_repo=mock_orgs_repo,
+        )
+        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        mock_invites_repo.get_invite_by_code.return_value = {
+            "id": 1,
+            "org_id": 1,
+            "org_name": "Test Org",
+            "team_id": 77,
+            "team_name": "Dev Team",
+            "is_active": True,
+            "expires_at": tomorrow,
+            "uses_count": 0,
+            "max_uses": 5,
+            "role_to_grant": "member",
+        }
+        mock_orgs_repo.get_org_member.return_value = None
+        mock_orgs_repo.provision_org_membership_on_connection.return_value = (
+            SimpleNamespace(team_membership_failed=False)
+        )
+
+        result = await service.redeem_invite(code="TEAMCODE", user_id=100)
+
+        assert result.success is True
+        assert pool.transaction_count == 1
+        kwargs = (
+            mock_orgs_repo.provision_org_membership_on_connection.await_args.kwargs
+        )
+        assert kwargs["conn"] is transaction_conn
+        assert kwargs["context"] == _REGISTRATION_MEMBERSHIP_CONTEXT
+        assert kwargs["anchor_ownership"] is AnchorOwnership.WRITER_OWNS_ANCHOR
+        assert kwargs["org_id"] == 1
+        assert kwargs["user_id"] == 100
+        assert kwargs["org_role"] == "member"
+        assert kwargs["team_id"] == 77
+        assert kwargs["team_role"] == "member"
+        assert kwargs["team_failure_is_best_effort"] is True
+        assert isinstance(kwargs["operation_time"], datetime)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "failure_type",
+        (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError),
+    )
+    async def test_redeem_invite_preserves_retryable_database_failures(
+        self,
+        failure_type: type[Exception],
+        mock_invites_repo,
+        mock_orgs_repo,
+    ) -> None:
+        class _BusyTransaction:
+            async def __aenter__(self):
+                raise failure_type()
+
+            async def __aexit__(self, *_args):
+                return False
+
+        class _BusyPool:
+            pool = None
+
+            def transaction(self, *, acquire_timeout_seconds=None):
+                assert acquire_timeout_seconds is not None
+                return _BusyTransaction()
+
+        service = OrgInviteService(
+            db_pool=_BusyPool(),
+            invites_repo=mock_invites_repo,
+            orgs_repo=mock_orgs_repo,
+        )
+        tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+        mock_invites_repo.get_invite_by_code.return_value = {
+            "id": 1,
+            "org_id": 1,
+            "org_name": "Test Org",
+            "is_active": True,
+            "expires_at": tomorrow,
+            "uses_count": 0,
+            "max_uses": 5,
+            "role_to_grant": "member",
+        }
+        mock_orgs_repo.get_org_member.return_value = None
+
+        with pytest.raises(failure_type):
+            await service.redeem_invite(code="VALIDCODE", user_id=100)
+
+        mock_invites_repo.record_redemption.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_redeem_invite_domain_allowlist_mismatch(self, service, mock_invites_repo, mock_orgs_repo):
@@ -382,7 +516,7 @@ class TestOrgInviteService:
 
         assert result.success is False
         assert "allowed email domain" in (result.message or "").lower()
-        mock_orgs_repo.add_org_member.assert_not_called()
+        mock_orgs_repo.provision_org_membership_on_connection.assert_not_awaited()
         reset_settings()
 
     @pytest.mark.asyncio
@@ -414,7 +548,7 @@ class TestOrgInviteService:
 
         assert result.success is False
         assert "allowed email domain" in (result.message or "").lower()
-        mock_orgs_repo.add_org_member.assert_not_called()
+        mock_orgs_repo.provision_org_membership_on_connection.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_redeem_invite_domain_allowlist_missing_email_fallback(
@@ -444,7 +578,10 @@ class TestOrgInviteService:
         )
 
         assert result.success is True
-        mock_orgs_repo.add_org_member.assert_called_once_with(org_id=1, user_id=100, role="member")
+        kwargs = mock_orgs_repo.provision_org_membership_on_connection.await_args.kwargs
+        assert kwargs["org_id"] == 1
+        assert kwargs["user_id"] == 100
+        assert kwargs["context"] == _REGISTRATION_MEMBERSHIP_CONTEXT
         monkeypatch.delenv("ORG_INVITE_ALLOW_MISSING_EMAIL", raising=False)
         reset_settings()
 
@@ -472,11 +609,15 @@ class TestOrgInviteService:
         )
 
         assert result.success is True
-        mock_orgs_repo.add_org_member.assert_called_once_with(org_id=1, user_id=100, role="member")
+        kwargs = mock_orgs_repo.provision_org_membership_on_connection.await_args.kwargs
+        assert kwargs["org_id"] == 1
+        assert kwargs["user_id"] == 100
+        assert kwargs["context"] == _REGISTRATION_MEMBERSHIP_CONTEXT
 
     @pytest.mark.asyncio
     async def test_redeem_invite_org_member_add_error_is_sanitized(
         self,
+        monkeypatch,
         service,
         mock_invites_repo,
         mock_orgs_repo,
@@ -494,9 +635,19 @@ class TestOrgInviteService:
             "role_to_grant": "member",
         }
         mock_orgs_repo.get_org_member.return_value = None
-        mock_orgs_repo.add_org_member.side_effect = RuntimeError(
+        mock_orgs_repo.provision_org_membership_on_connection.side_effect = RuntimeError(
             "org repo failed at /private/orgs.db"
         )
+
+        class _Logger:
+            def __init__(self) -> None:
+                self.errors: list[str] = []
+
+            def error(self, message: str, *args) -> None:
+                self.errors.append(message.format(*args))
+
+        logger_stub = _Logger()
+        monkeypatch.setattr(invite_service_module, "logger", logger_stub)
 
         result = await service.redeem_invite(code="VALIDCODE", user_id=100)
 
@@ -504,6 +655,7 @@ class TestOrgInviteService:
         assert result.message == "Failed to join organization"
         assert "org repo failed" not in (result.message or "")
         assert "/private/orgs.db" not in (result.message or "")
+        assert logger_stub.errors == ["Failed to add user to organization"]
         mock_invites_repo.record_redemption.assert_not_called()
         mock_invites_repo.increment_uses_count.assert_not_called()
 
@@ -529,8 +681,11 @@ class TestOrgInviteService:
 
         assert result.success is True
         assert result.team_id == 77
-        mock_orgs_repo.add_org_member.assert_called_once()
-        mock_orgs_repo.add_team_member.assert_called_once_with(team_id=77, user_id=100, role="member")
+        kwargs = mock_orgs_repo.provision_org_membership_on_connection.await_args.kwargs
+        assert kwargs["org_id"] == 1
+        assert kwargs["team_id"] == 77
+        assert kwargs["team_role"] == "member"
+        assert kwargs["team_failure_is_best_effort"] is True
 
     @pytest.mark.asyncio
     async def test_revoke_invite_success(self, service, mock_invites_repo):

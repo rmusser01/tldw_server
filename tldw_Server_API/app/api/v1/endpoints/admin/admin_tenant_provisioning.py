@@ -7,14 +7,25 @@ and role assignment into one atomic provisioning operation.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-from tldw_Server_API.app.core.AuthNZ.exceptions import DuplicateUserError
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+    DuplicateUserError,
+)
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    MembershipAuthorizationError,
+    MembershipTargetNotFound,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.tenant_provisioning import provision_tenant as create_tenant_records
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import get_authnz_transaction_policy
 
 router = APIRouter(prefix="/provisioning", tags=["admin-provisioning"])
 
@@ -31,10 +42,9 @@ class TenantProvisionRequest(BaseModel):
     email: str = Field(..., min_length=3, max_length=255)
     password: str = Field(..., min_length=8, max_length=128)
     org_name: str = Field(..., min_length=1, max_length=255)
-    role: str = Field(
+    role: Literal["owner"] = Field(
         default="owner",
-        pattern=r"^(owner|admin|lead|member)$",
-        description="Role to assign the user within the new org.",
+        description="The initial tenant user is always the organization owner.",
     )
 
 
@@ -69,6 +79,11 @@ async def provision_tenant(
     2. Create organisation
     3. Add user as org member with requested role
     """
+    if type(principal.user_id) is not int or principal.user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to provision tenants",
+        )
     try:
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
@@ -79,6 +94,7 @@ async def provision_tenant(
         try:
             user_id, org_id = await create_tenant_records(
                 pool,
+                actor_user_id=principal.user_id,
                 username=payload.username,
                 email=payload.email,
                 password_hash=get_password_service().hash_password(payload.password),
@@ -107,6 +123,21 @@ async def provision_tenant(
             role=payload.role,
         )
 
+    except (MembershipAuthorizationError, MembershipTargetNotFound):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to provision tenants",
+        ) from None
+    except (ConnectionPoolExhaustedError, DatabaseLockError, TimeoutError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication database is busy. Please retry shortly.",
+            headers={
+                "Retry-After": str(
+                    get_authnz_transaction_policy().busy_retry_after_seconds
+                ),
+            },
+        ) from exc
     except HTTPException:
         raise
     except Exception as exc:
