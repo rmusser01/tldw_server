@@ -142,6 +142,28 @@ async def test_workflows_cap_429_at_allowance(quota: dict, monkeypatch: pytest.M
     assert exc.value.status_code == 429
 
 
+async def test_workflows_daily_cap_records_when_quotas_off(quota: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Quotas off must never refuse AND must still record the run (gate the check, never the
+    record). _enforce_workflows_daily_cap used to return before ever calling
+    workflows_runs_consume when usage quotas were off, so run_saved/run_adhoc recorded
+    nothing while the scheduler (which has no such early return) still did (round 2)."""
+    monkeypatch.delenv("USAGE_QUOTAS_ENABLED", raising=False)
+    monkeypatch.delenv("LIMIT_ENFORCEMENT_ENABLED", raising=False)
+    await workflows_ep._enforce_workflows_daily_cap(
+        request=SimpleNamespace(), current_user=SimpleNamespace(id=7), db=None, run_id="run-quotas-off"
+    )
+    assert quota["recorded"] == [{"run_id": "run-quotas-off"}]
+
+
+async def test_workflows_runs_consume_admits_and_records_with_no_limit(quota: dict) -> None:
+    """The shared check+record call the scheduler already uses unconditionally: with no
+    configured daily cap (the same state quotas-off produces via user_quota), it admits
+    and still records. run_saved/run_adhoc now reach this same call (round 2)."""
+    decision = await quota_checks.workflows_runs_consume(7, "run-no-limit")
+    assert decision.allowed is True
+    assert quota["recorded"] == [{"run_id": "run-no-limit"}]
+
+
 async def test_workflows_runs_decision_allows_when_disabled_via_env_even_at_zero(
     quota: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
