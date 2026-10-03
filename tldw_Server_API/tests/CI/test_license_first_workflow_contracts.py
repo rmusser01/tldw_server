@@ -642,8 +642,10 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     assert combined_text.count("github.event.pull_request.number") == 27
     assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 54
     assert combined_text.count("github.event.pull_request.head.sha") == 51
-    assert combined_text.count("github.event.pull_request.base.sha") == 5
-    assert combined_text.count("needs.admission.outputs.base_sha") == 11
+    # +1 each: backend-required passes the admitted-or-PR base to the backlog
+    # task-format ratchet (TASK-13440), admission's base first, as the mypy step does.
+    assert combined_text.count("github.event.pull_request.base.sha") == 6
+    assert combined_text.count("needs.admission.outputs.base_sha") == 12
 
     for name, output_names in CHANGE_CLASSIFIER_OUTPUTS.items():
         changes_job = workflows[name][0]["jobs"]["changes"]
