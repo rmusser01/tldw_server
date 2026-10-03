@@ -812,10 +812,11 @@ test.describe('Smoke Tests - Wayfinding', () => {
 
   test('404 recovery controls keep predictable keyboard order', async ({ page, diagnostics }) => {
     test.setTimeout(ROUTE_TEST_TIMEOUT);
-    await page.goto(WAYFINDING_404_PATH, {
+    const response = await page.goto(WAYFINDING_404_PATH, {
       waitUntil: 'domcontentloaded',
       timeout: LOAD_TIMEOUT,
     });
+    expect(response?.status(), 'The deliberately missing document must return 404').toBe(404);
     await waitForAppShell(page, NETWORK_IDLE_TIMEOUT);
 
     const hasWayfindingPanel = (await page.getByTestId('not-found-recovery-panel').count()) > 0;
@@ -846,7 +847,15 @@ test.describe('Smoke Tests - Wayfinding', () => {
     await expect(page.getByTestId('not-found-open-research')).toBeFocused();
 
     const issues = getCriticalIssues(diagnostics);
-    const classifiedIssues = classifySmokeIssues(WAYFINDING_404_PATH, issues);
+    const classifiedIssues = classifySmokeIssues(WAYFINDING_404_PATH, {
+      ...issues,
+      consoleErrors: issues.consoleErrors.filter(
+        (entry) => !(
+          entry.location?.url === response?.url() &&
+          entry.text === 'Failed to load resource: the server responded with a status of 404 (Not Found)'
+        )
+      ),
+    });
     await assertNoRuntimeOverlay(page, issues, `wayfinding:${WAYFINDING_404_PATH}`);
     expect(
       issues.pageErrors,

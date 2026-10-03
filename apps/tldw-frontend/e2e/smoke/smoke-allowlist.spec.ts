@@ -1,10 +1,35 @@
 import { test, expect } from '@playwright/test';
 import { classifySmokeIssues, getCriticalIssues } from './smoke.setup';
 
+const missingRouteDocumentUrl = 'http://localhost:8080/__wayfinding-missing-route__';
 const optionalListUrl =
   'http://127.0.0.1:18323/api/v1/moderation/review/items?status=needs_review&sort=newest&limit=50';
 
 for (const scenario of [
+  {
+    name: 'ordinary classification rejects the deliberate missing-route document 404',
+    route: '/__wayfinding-missing-route__',
+    url: missingRouteDocumentUrl,
+    unexpected: 1,
+  },
+  {
+    name: 'rejects another resource miss on the wayfinding route',
+    route: '/__wayfinding-missing-route__',
+    url: 'http://127.0.0.1:18323/api/v1/auth/me',
+    unexpected: 1,
+  },
+  {
+    name: 'rejects an unlocated resource miss on the wayfinding route',
+    route: '/__wayfinding-missing-route__',
+    url: undefined,
+    unexpected: 1,
+  },
+  {
+    name: 'rejects the missing-route document 404 on another page',
+    route: '/unrelated-route',
+    url: missingRouteDocumentUrl,
+    unexpected: 1,
+  },
   {
     name: 'rejects an unstubbed moderation list miss',
     route: '/moderation',

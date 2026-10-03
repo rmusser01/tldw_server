@@ -157,6 +157,19 @@ def current_connection_state(database: Any) -> ConnectionState | None:
     return owner.state_for(database) if owner is not None else None
 
 
+def current_operation_holds_connection(database: Any) -> bool:
+    """Whether the open current operation already holds a connection to ``database``.
+
+    Read-only: unlike ``current_connection_state`` it never creates state.
+    """
+    owner = _current_operation.get()
+    if owner is None:
+        return False
+    with owner._lock:
+        state = None if owner._closed else owner._states.get(database)
+    return state is not None and state.conn is not None
+
+
 @contextmanager
 def chacha_operation(
     *, independent: bool = False, bindings: tuple[ExternalConnection, ...] = ()

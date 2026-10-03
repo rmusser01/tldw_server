@@ -4,7 +4,7 @@ title: Restore standalone documentation manifest and wait for its smoke response
 status: In Progress
 assignee: []
 created_date: 2026-10-01 08:10
-updated_date: 2026-10-03 01:02
+updated_date: 2026-10-03 01:22
 labels: []
 dependencies: []
 references:
@@ -41,13 +41,13 @@ Published reviewed fixes as d4693fefe37bc75d9d9b54026c77c12de3200c76 on codex/em
 
 Merge-gate audit correction: implementation and local verification are complete, but the repository-wide Definition of Done requires a human-written Change summary for this new AI-authored PR. PR3077 is draft and awaits that human input plus hosted CI. Restored In Progress with this explicit remaining DoD item; no source changes or repeat tests. The prior completed-plan snapshot is retained as /tmp/email_followup_plan_pre_gate_diagnostic_20261001.md, and the owned plan remains Stage3 In Progress until this requirement is satisfied. TASK13178 remains Done because its implementation PR2887 was already merged.
 2026-10-02: Requester supplied PR3077 Change summary directly in this chat; published verbatim. Human gate satisfied. Refreshing reviewed branch onto dev 86e287fee7bfa1a1588639232e35db3666851ded before hosted checks and actual merge. Earlier receipts retain original source/transitive/dependency bindings. Task remains In Progress pending refreshed verification and merge.
+Current-dev refresh verified 2026-10-02: fresh Node20.19.5 standalone build moved outside checkout returns manifest324serverdocs/AuthNZcontent200 and traversal/unsupportedsource400. Strict browser106passes include actual manifest AuthNZ entry, selected-document response/content/render, delayed500 negativecases and page-close handling; direct AuthNZ probe is separate. Unit84/8files/build/lint/types/diff pass. Native backend Python3.11.13/FastAPI0.142.1/Pydantic2.11.7 normal TEST_MODE0, isolated task data; startup guard rejection for outside-pytest TEST_MODE1 retained as setup diagnostic. Original certificates keep original inputs and environments. Ten source hashes/29frozen artifact hashes in /tmp/email_followup_devrefresh_receipt_20261002.json; independently clear source patch80ab627d9c43b712adacc18850159417e549ded2cabd8eda9341f65fec645c8b. Task-owned servers verified stopped; shared installations unchanged. Human Change summary supplied verbatim; source publication/hosted CI/actualmerge pending, task In Progress.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Restored standalone published-server documentation using traced source files and nearest-ancestor lookup. Smoke acceptance now waits for the manifest containing AuthNZ, selected document content and actual rendering; delayed manifest/content500 and page-close regressions fail before repair and pass afterward. Direct AuthNZ HTTP probe passes. Existing path/source/type guards preserved; extension source layout unchanged. Verification: 16 unit tests, 105 ordinary browser tests, 7 classifier cases, 16 development recovery cases; build/lint/types pass. Local scope and failed setup/runtime diagnostics retained. Draft PR3077 is published; merge and hosted checks remain separate, pending the human Change summary. Bandit N/A: no Python source change.
+Standalone published-server docs trace and nearest-ancestor lookup remain verified after current-dev refresh. Fresh moved Node20bundle: manifest324/AuthNZ200; traversal/source400. Browser106 and unit84/8files pass with build/lint/types/diff; selected browser doc is separate from direct AuthNZ HTTP probe. Error/path/source guards preserved; extension source layout unchanged. Human Change summary supplied verbatim on PR3077. Source publication, current-head hosted CI and actual merge pending; original certificates retain original bindings. Bandit N/A: no Python delta againstdev.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed

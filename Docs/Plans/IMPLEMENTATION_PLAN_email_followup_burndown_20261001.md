@@ -17,3 +17,5 @@
 **Success Criteria**: Appropriate lint/build/unit/browser checks pass; containment and hard gates retained; requester-written Change summary recorded and official tasks Done; only this plan retired.
 **Tests**: Fresh standalone build moved away from repository sources, manifest/content HTTP and browser acceptance; focused unit and strict smoke checks; diff check. Bandit is not applicable unless Python changes.
 **Status**: In Progress
+
+2026-10-02 refresh: requester Change summary supplied and published verbatim. Merge current dev86e287fee7bfa1a1588639232e35db3666851ded, preserve all upstream task notes and source fixes, and keep deliberate Wayfinding404 handling test-local after native RED/GREEN. Stage3 remains In Progress for refreshed verification, current-head hosted checks, review and actual merge. Earlier receipts retain original bindings.

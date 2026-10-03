@@ -76,6 +76,7 @@ from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
     authenticate_api_key_user,
     get_request_user,
     get_single_user_instance,
+    record_pending_api_key_usage,
     verify_jwt_and_fetch_user,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import (
@@ -1053,6 +1054,7 @@ async def get_current_user(
                         "Fast-path: unable to (re)establish content scope context: {}",
                         exc,
                     )
+                await record_pending_api_key_usage(request)
                 return safe_user
     except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS as exc:
         # Fall through to standard auth behavior if any issue occurs

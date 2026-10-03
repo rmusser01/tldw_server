@@ -87,3 +87,5 @@ Both gates are required quality signals for M5 UX governance in PR validation.
 - [ ] Rationale includes why warning is non-blocking today
 - [ ] Owner assigned
 - [ ] Follow-up remediation issue linked in PR or roadmap
+
+Current-dev integration (2026-10-02, TASK13406): the deliberate Wayfinding document 404 added by TASK13414 is handled only in its own recovery fixture. That test requires an actual navigation response of 404 and removes only the exact response URL and browser 404 console text from its diagnostics. Other console errors, requests and page errors remain intact. The general classifier rejects that document error, including on the missing-route path; the general allowlist remains empty. Upstream source repairs for both Writing drawers are retained.

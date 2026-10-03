@@ -8,7 +8,8 @@ vi.mock("@plasmohq/storage", () => ({
   Storage: vi.fn()
 }))
 
-vi.mock("@/utils/safe-storage", () => ({
+vi.mock("@/utils/safe-storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/utils/safe-storage")>()),
   createSafeStorage: () => ({
     get: vi.fn(async () => null),
     set: vi.fn(async () => undefined),
