@@ -16,18 +16,22 @@ pytestmark = pytest.mark.unit
 
 
 async def _wired() -> bool:
+    """A billing_repo_configured stand-in reporting a billing repository is wired."""
     return True
 
 
 async def _not_wired() -> bool:
+    """A billing_repo_configured stand-in reporting no billing repository is wired."""
     return False
 
 
 async def _must_not_resolve(*_args: object, **_kwargs: object) -> int:
+    """An org-resolution stand-in that fails the test if it is ever called."""
     raise AssertionError("org resolution must not run")
 
 
 def _principal() -> AuthPrincipal:
+    """A plain non-admin user principal for billing-gate checks."""
     return AuthPrincipal(kind="user", user_id=7, is_admin=False)
 
 
@@ -39,10 +43,12 @@ def _quotas_on(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def test_oss_skips_org_resolution_even_with_quotas_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With no billing repository wired, org resolution is skipped even though quotas are on."""
     monkeypatch.setattr(subscription_service, "billing_repo_configured", _not_wired)
     calls: list[tuple[object, ...]] = []
 
     async def _recording_resolve(*args: object, **kwargs: object) -> int:
+        """An org-resolution stand-in that records its calls and returns a fixed org id."""
         calls.append((args, kwargs))
         return 42
 
@@ -54,6 +60,7 @@ async def test_oss_skips_org_resolution_even_with_quotas_on(monkeypatch: pytest.
 
 
 async def test_orgless_multi_user_account_gets_no_403(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A multi-user account with no org and no billing repository passes limit and feature checks unlimited, without resolving an org."""
     monkeypatch.setattr(subscription_service, "billing_repo_configured", _not_wired)
     monkeypatch.setattr(billing_deps, "_allow_orgless_billing_access", lambda: False)
     monkeypatch.setattr(billing_deps, "_resolve_org_id", _must_not_resolve)
@@ -65,9 +72,11 @@ async def test_orgless_multi_user_account_gets_no_403(monkeypatch: pytest.Monkey
 
 
 async def test_hosted_path_still_resolves_the_org(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With a billing repository wired, the org id is still resolved."""
     monkeypatch.setattr(subscription_service, "billing_repo_configured", _wired)
 
     async def _org(*_args: object, **_kwargs: object) -> int:
+        """An org-resolution stand-in returning a fixed org id."""
         return 42
 
     monkeypatch.setattr(billing_deps, "_resolve_org_id", _org)
@@ -75,6 +84,7 @@ async def test_hosted_path_still_resolves_the_org(monkeypatch: pytest.MonkeyPatc
 
 
 async def test_hosted_with_quotas_off_warns_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hosted install with a billing repo wired but quotas off reports plan limits unenforced and logs that warning exactly once across repeated calls."""
     monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "0")
     monkeypatch.setattr(subscription_service, "billing_repo_configured", _wired)
     monkeypatch.setattr(enforcement, "_PLAN_LIMITS_UNENFORCED_WARNED", False)
@@ -89,6 +99,7 @@ async def test_hosted_with_quotas_off_warns_once(monkeypatch: pytest.MonkeyPatch
 
 
 async def test_rag_transport_check_skips_without_billing_repo(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The RAG transport's org-context limit check skips org resolution entirely when no billing repository is wired."""
     monkeypatch.setattr(subscription_service, "billing_repo_configured", _not_wired)
     monkeypatch.setattr(transport, "resolve_org_id_for_rag_context", _must_not_resolve)
     await transport.enforce_rag_query_limit_for_org_context(current_user=SimpleNamespace(id=7), units=1)

@@ -11,6 +11,7 @@ _POLICIES = Path(__file__).resolve().parents[2] / "Config_Files" / "resource_gov
 
 
 def test_stock_evaluation_policies_have_no_daily_caps() -> None:
+    """No evals.* policy in the stock resource-governor YAML defines a daily_cap."""
     policies = yaml.safe_load(_POLICIES.read_text())["policies"]
     offenders = [
         f"{pid}.{category}"

@@ -87,14 +87,17 @@ def test_stream_limits_off_path_through_real_app(monkeypatch):
     monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: None)
 
     async def _get_daily_minutes_used(user_id: int):
+        """A daily-minutes-used stand-in reporting none used."""
         _ = user_id
         return 0.0
 
     async def _active_streams_count(user_id: int):
+        """An active-streams-count stand-in reporting none active."""
         _ = user_id
         return 0
 
     async def _get_user_tier(user_id: int):
+        """A tier-lookup stand-in reporting the free tier."""
         _ = user_id
         return "free"
 

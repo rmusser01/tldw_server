@@ -35,6 +35,7 @@ def _media_request() -> SimpleNamespace:
 
 
 def test_media_budget_context_is_empty_when_quotas_off(quotas_off: None) -> None:
+    """With quotas off, the media budget context resolves to no governor, no policy and no entity, even though the app carries them."""
     gov, _policy_id, policy, entity = persistence._resolve_media_budget_context(
         request=_media_request(), current_user=SimpleNamespace(id=1)
     )
@@ -42,6 +43,7 @@ def test_media_budget_context_is_empty_when_quotas_off(quotas_off: None) -> None
 
 
 def test_media_budget_context_unchanged_when_quotas_on(quotas_on: None) -> None:
+    """With quotas on, the media budget context still resolves the app's governor, policy and per-user entity."""
     gov, _policy_id, policy, entity = persistence._resolve_media_budget_context(
         request=_media_request(), current_user=SimpleNamespace(id=1)
     )
@@ -54,6 +56,7 @@ def _full_storage_service(monkeypatch: pytest.MonkeyPatch) -> StorageQuotaServic
     service._initialized = True
 
     async def _info(_user_id: int) -> dict:
+        """A storage-info stand-in reporting usage exactly at the 5 GB quota."""
         return {"storage_used_mb": 5120.0, "storage_quota_mb": 5120}
 
     monkeypatch.setattr(service, "_get_user_storage_info", _info)
@@ -61,6 +64,7 @@ def _full_storage_service(monkeypatch: pytest.MonkeyPatch) -> StorageQuotaServic
 
 
 async def test_storage_never_raises_when_quotas_off(quotas_off: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With quotas off, a user already at the storage cap still passes both the plain and combined quota checks even with raise_on_exceed."""
     service = _full_storage_service(monkeypatch)
     has_quota, info = await service.check_quota(1, 1024 * 1024, raise_on_exceed=True)
     assert has_quota is True and info["has_quota"] is True
@@ -69,17 +73,21 @@ async def test_storage_never_raises_when_quotas_off(quotas_off: None, monkeypatc
 
 
 async def test_storage_still_enforced_when_quotas_on(quotas_on: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With quotas on, a user already at the storage cap fails the quota check."""
     service = _full_storage_service(monkeypatch)
     has_quota, _info = await service.check_quota(1, 1024 * 1024)
     assert has_quota is False
 
 
 def test_storage_pool_guard_disabled_when_quotas_off(quotas_off: None) -> None:
+    """The storage quota pool guard reports itself disabled when usage quotas are off."""
     assert storage_quota_guard._is_enabled() is False
 
 
 async def test_workflows_cap_skipped_when_quotas_off(quotas_off: None) -> None:
-    """Raising on attribute access doesn't work here: every lookup inside the
+    """With quotas off, the workflows daily cap check returns without inspecting the request, user or db it was given.
+
+    Raising on attribute access doesn't work here: every lookup inside the
     cap logic is wrapped in a try/except over `_WORKFLOWS_NONCRITICAL_EXCEPTIONS`,
     which includes `AssertionError`, so a raise is swallowed and the function
     falls through to its own unrelated early return either way. Recording the
@@ -92,6 +100,7 @@ async def test_workflows_cap_skipped_when_quotas_off(quotas_off: None) -> None:
         """Any attribute access is recorded; it never means the cap logic stopped."""
 
         def __getattr__(self, name: str) -> object:
+            """Record the accessed attribute name and return None."""
             accessed.append(name)
             return None
 
@@ -102,6 +111,7 @@ async def test_workflows_cap_skipped_when_quotas_off(quotas_off: None) -> None:
 
 
 def test_chatbooks_quotas_follow_the_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A QuotaManager's disabled flag tracks USAGE_QUOTAS_ENABLED as it's flipped off and on."""
     for name in ("CHATBOOKS_DISABLE_QUOTAS", "TEST_MODE", "TESTING", "PYTEST_CURRENT_TEST", "LIMIT_ENFORCEMENT_ENABLED"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "0")
