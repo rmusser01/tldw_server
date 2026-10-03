@@ -209,7 +209,8 @@ def test_nonoverlapping_element_groups_preserve_element_count(count, limit):
 
 @pytest.mark.parametrize("by_kind", [False, True])
 def test_flatten_uses_call_time_grouping_helpers(monkeypatch, by_kind):
-    from tldw_Server_API.app.core.Chunking import chunker as module
+    from tldw_Server_API.app.core.Chunking import Chunker
+    from tldw_Server_API.app.core.Chunking.hierarchical import flatten as module
 
     calls = []
 
@@ -231,7 +232,7 @@ def test_flatten_uses_call_time_grouping_helpers(monkeypatch, by_kind):
         "grouping": {"by_kind": by_kind, "element_weights": {"paragraph": 1}},
         "root": {"children": [{"kind": "section", "children": [{"chunks": [item("# h", "header_atx"), item("a")]}]}]},
     }
-    module.Chunker().flatten_hierarchical(tree)
+    Chunker().flatten_hierarchical(tree)
     assert calls == [
         ("merge", "structure_aware", "\n\n", "header_atx"),
         (

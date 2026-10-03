@@ -215,6 +215,52 @@ def test_builder_does_not_import_coordination_or_flattening() -> None:
     )
 
 
+def test_flatten_does_not_import_builder_or_coordination() -> None:
+    _assert_no_forbidden_resolved_imports(
+        _HIERARCHICAL_PACKAGE / "flatten.py",
+        _FORBIDDEN_HIERARCHICAL_IMPORTS
+        | {f"{_HIERARCHICAL_PACKAGE_NAME}.{name}" for name in ("service", "builder", "models", "leaves", "spans")},
+    )
+
+
+def test_public_flatten_uses_service_call_time_module_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    chunker = Chunker()
+    tree = {"root": {"chunks": []}}
+    sentinel = [{"text": "sentinel", "metadata": {}}]
+    calls = []
+
+    def callback(_value: Any) -> str:
+        return "sentinel"
+
+    def fake_flatten(tree_arg, normalize_arg):
+        calls.append((tree_arg, normalize_arg))
+        return sentinel
+
+    monkeypatch.setattr(chunker, "normalize_chunk_type", callback)
+    monkeypatch.setattr(service, "flatten_tree", fake_flatten)
+    assert chunker.flatten_hierarchical(tree) is sentinel
+    assert len(calls) == 1
+    assert calls[0][0] is tree
+    assert calls[0][1] is callback
+
+
+def test_service_flatten_observes_replaced_normalizer_each_call() -> None:
+    context = SimpleNamespace(normalize_chunk_type=lambda _value: "first")
+    coordinator = service.HierarchyService(context)
+    tree = {"root": {"chunks": [{"text": "body"}]}}
+    assert coordinator.flatten(tree)[0]["metadata"]["chunk_type"] == "first"
+    context.normalize_chunk_type = lambda _value: "second"
+    assert coordinator.flatten(tree)[0]["metadata"]["chunk_type"] == "second"
+    assert vars(coordinator) == {"_context": context}
+    assert not hasattr(coordinator, "build_flat")
+
+
+@pytest.mark.parametrize("tree", [None, "invalid", []])
+def test_service_flatten_non_dictionary_guard_precedes_callback_lookup(tree) -> None:
+    coordinator = service.HierarchyService(SimpleNamespace())
+    assert coordinator.flatten(tree) == []
+
+
 def test_hierarchical_modules_do_not_import_outer_owners() -> None:
     for module_path in sorted(_HIERARCHICAL_PACKAGE.glob("*.py")):
         _assert_no_forbidden_resolved_imports(module_path, _FORBIDDEN_HIERARCHICAL_IMPORTS)
