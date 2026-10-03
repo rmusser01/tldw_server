@@ -60,6 +60,8 @@ The consumer-side portrait/version fix is reviewed in local Chatbook commit 2094
 
 The human requested all recorded root causes be addressed in one PR before further UAT. TASK13260.281 and its four repair children own this work in PR3096, rebased without conflicts onto dev 6c5da178 after PR3092. All eleven repair commits are unchanged. Focused integrated Jobs completion/WorkerSDK/Chatbook checks passed 41 with 9 PostgreSQL cases deselected; this does not qualify PostgreSQL. Existing repair review/Bandit remains applicable to unchanged source. Reviewed fixes are published; UAT execution remains on hold for runtime readiness and browser direction. Source tests and UAT acceptance remain separate.
 
+Latest rebase: PR3096 now integrates dev29d8dbcc (PR2819). All thirteen prior commits are unchanged by range-diff; only ten upstream paths changed. The affected configuration/extraction suites collected 37 tests and exited 0 with normal logging; an initial operator ERROR setting suppressed an asserted INFO logging contract and was removed without code/test edits. Existing selected-source checks remain qualified as recorded above; fresh hosted gates remain pending.
+
 ## Current continuation
 
 Frozen UAT source: /private/tmp/tldw-uat-resumed-20261002-413c/sqlite-single-source at dev413c2c9123509f17d96d514a7722e076598ea28f. Do not edit or replace it with repair/advancing PR source. Existing profiles/data and pending test inputs remain in that run directory.
