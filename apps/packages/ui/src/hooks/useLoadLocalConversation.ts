@@ -37,21 +37,10 @@ export function useLoadLocalConversation(
   deps: LoadLocalConversationDeps,
   options: UseLoadLocalConversationOptions
 ) {
-  const {
-    setServerChatId,
-    setHistoryId,
-    setHistory,
-    setMessages,
-    setSelectedModel,
-    setSelectedSystemPrompt,
-    setSystemPrompt,
-    setContextFiles
-  } = deps
-
-  const { t, errorLogPrefix, errorDefaultMessage } = options
-
-  const { beginLoad, fence, loadConversation, getCurrent } =
-    useHistorySelectionContext() ?? {}
+  const selection = useHistorySelectionContext()
+  // Inline setters and controller state changes must not restart an effect-owned load.
+  const inputs = React.useRef({ deps, options, selection })
+  inputs.current = { deps, options, selection }
   const dbRef = React.useRef<PageAssistDatabase | null>(null)
   const mountedRef = React.useRef(false)
   const loadGenerationRef = React.useRef(0)
@@ -73,6 +62,21 @@ export function useLoadLocalConversation(
 
   return React.useCallback(
     async (conversationId: string): Promise<boolean> => {
+      const {
+        deps: {
+          setServerChatId,
+          setHistoryId,
+          setHistory,
+          setMessages,
+          setSelectedModel,
+          setSelectedSystemPrompt,
+          setSystemPrompt,
+          setContextFiles
+        },
+        options: { t, errorLogPrefix, errorDefaultMessage },
+        selection
+      } = inputs.current
+      const { beginLoad, fence, loadConversation, getCurrent } = selection ?? {}
       const generation = ++loadGenerationRef.current
       const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision
       if (!mountedRef.current) return false
@@ -165,23 +169,7 @@ export function useLoadLocalConversation(
         snapshot?.release()
       }
     },
-    [
-      beginLoad,
-      fence,
-      loadConversation,
-      getCurrent,
-      errorDefaultMessage,
-      errorLogPrefix,
-      setContextFiles,
-      setHistory,
-      setHistoryId,
-      setMessages,
-      setSelectedModel,
-      setSelectedSystemPrompt,
-      setServerChatId,
-      setSystemPrompt,
-      t
-    ]
+    []
   )
 }
 

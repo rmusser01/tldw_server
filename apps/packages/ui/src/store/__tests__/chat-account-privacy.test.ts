@@ -68,3 +68,24 @@ describe("Chat state when its route is unmounted", () => {
     expect(useStoreChatModelSettings.getState().getEffectiveSettings("llama:one").systemPrompt).toBe("ALICE MODEL SECRET")
   })
 })
+
+
+describe("saved server chat acceptance", () => {
+  beforeEach(() => useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true))
+
+  it("atomically retires temporary mode when accepting a saved target", () => {
+    useStoreMessageOption.setState({ temporaryChat: true })
+    const transitions: Array<{ id: string | null; temporary: boolean }> = []
+    const stop = useStoreMessageOption.subscribe(state => transitions.push({ id: state.serverChatId, temporary: state.temporaryChat }))
+    try {
+      useStoreMessageOption.getState().setServerChatId("saved-chat")
+      expect(transitions).toEqual([{ id: "saved-chat", temporary: false }])
+    } finally { stop() }
+  })
+
+  it("retains temporary mode when clearing a server target", () => {
+    useStoreMessageOption.setState({ temporaryChat: true })
+    useStoreMessageOption.getState().setServerChatId(null)
+    expect(useStoreMessageOption.getState().temporaryChat).toBe(true)
+  })
+})
