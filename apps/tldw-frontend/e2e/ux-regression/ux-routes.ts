@@ -11,10 +11,20 @@
  * context in the same "visited before" state, whatever ran earlier in the
  * worker.
  */
-import { expect, type Page } from "@playwright/test"
+import { expect, test, type Page } from "@playwright/test"
 import { waitForConnection } from "../utils/helpers"
 
 export const UX_ROUTE_TIMEOUT_MS = 45_000
+
+/**
+ * Extra time for the one test per worker whose priming compiles the routes.
+ * Cold `next dev` compiles of /notes and /chat took 27 s and 39 s on a loaded
+ * machine, on top of the backend warm-up (#3135), which pushed that test past
+ * the project timeout while every later test took under 70 s.
+ */
+const COLD_COMPILE_ALLOWANCE_MS = 180_000
+
+let routesCompiled = false
 
 export type UxRoute = "/notes" | "/chat"
 
@@ -49,9 +59,14 @@ export async function openUxRoute(page: Page, route: UxRoute, timeoutMs = UX_ROU
 
 /** Load /notes and /chat once in this page; see the module comment. */
 export async function primeUxRoutes(page: Page): Promise<void> {
+  if (!routesCompiled) {
+    const info = test.info()
+    info.setTimeout(info.timeout + COLD_COMPILE_ALLOWANCE_MS)
+  }
   for (const route of Object.keys(READY) as UxRoute[]) {
     // A cold `next dev` compile of a route can take well over a minute.
     await openUxRoute(page, route, UX_ROUTE_TIMEOUT_MS * 3)
   }
+  routesCompiled = true
   await page.goto("about:blank")
 }
