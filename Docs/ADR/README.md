@@ -112,7 +112,8 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-084](084-backlog-task-ids-unique-checked-on-every-pr.md) | Accepted | Every backlog task file has its own id; `backend-required`'s change-detection job, which runs on every PR, fails a PR that leaves two task files with one id. |
 | [ADR-085](085-authnz-membership-writer-transaction-and-version-ownership.md) | Accepted | Centralize runtime organization/team membership writes behind ordered locks, transaction-local authorization, and explicit profile-version ownership. |
 
-| [ADR-058](058-authoritative-provider-credential-scope.md) | Proposed | Resolve bounded MCP provider credentials from exact authenticated scope, advance only on authoritative absence, and freeze endpoint settings. |
-| [ADR-059](059-mcp-durable-provider-accounting.md) | Proposed | Reserve MCP provider exposure durably before dispatch and serialize conservative admission and settlement on explicit billing scope. |
+| [ADR-059](059-authoritative-provider-credential-scope.md) | Proposed | Resolve bounded MCP provider credentials from exact authenticated scope, advance only on authoritative absence, and freeze endpoint settings. |
+| [ADR-060](060-mcp-durable-provider-accounting.md) | Proposed | Reserve MCP provider exposure durably before dispatch and serialize conservative admission and settlement on explicit billing scope. |
+| [ADR-061](061-mcp-certified-completion-lifecycle.md) | Proposed | Certify one bounded native-async completion path and retain ownership through cancellation, abandonment, and shutdown. |
 
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.
