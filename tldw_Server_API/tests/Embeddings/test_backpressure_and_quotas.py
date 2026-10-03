@@ -139,6 +139,10 @@ async def test_tenant_quota_429(monkeypatch):
     monkeypatch.setattr(aioredis, "from_url", fake_from_url)
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("EMBEDDINGS_TENANT_RPS", "1")
+    # The multi-user check reads the cached AuthNZ settings, not the env (TASK-13420).
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+    reset_settings()
 
     user = User(
         id="tenant1",
@@ -149,8 +153,11 @@ async def test_tenant_quota_429(monkeypatch):
     )
     request = SimpleNamespace(state=SimpleNamespace())
 
-    assert await ep._check_backpressure_and_quotas(request, user) is None
-    second = await ep._check_backpressure_and_quotas(request, user)
+    try:
+        assert await ep._check_backpressure_and_quotas(request, user) is None
+        second = await ep._check_backpressure_and_quotas(request, user)
+    finally:
+        reset_settings()  # later tests rebuild settings from the restored env
 
     assert second is not None
     assert second.status_code == 429
