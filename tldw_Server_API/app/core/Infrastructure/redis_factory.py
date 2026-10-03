@@ -761,10 +761,11 @@ class _InMemoryRedisCore:
             limit = int(args[1])
             window = int(args[2])
             current_time = float(args[3]) if len(args) > 3 else self._now()
-            return self._eval_rate_limiter(redis_key, limit, window, current_time)
+            ttl = int(args[4]) if len(args) > 4 else None
+            return self._eval_rate_limiter(redis_key, limit, window, current_time, ttl)
         raise RuntimeError("Unsupported script")
 
-    def _eval_rate_limiter(self, redis_key: str, limit: int, window: int, current_time: float) -> list[Any]:
+    def _eval_rate_limiter(self, redis_key: str, limit: int, window: int, current_time: float, ttl: int | None = None) -> list[Any]:
         zset = self._sorted_sets.setdefault(redis_key, {})
         cutoff = current_time - window
         for member in list(zset.keys()):
@@ -773,6 +774,9 @@ class _InMemoryRedisCore:
         if len(zset) < limit:
             member_id = f"{current_time}:{len(zset)+1}"
             zset[member_id] = current_time
+            if ttl is not None:
+                # Mirrors the RG tokens script's EXPIRE (ARGV[4]).
+                self.expire(redis_key, ttl)
             return [1, 0]
         oldest = min(zset.values()) if zset else current_time
         retry_after = int(max(0, oldest + window - current_time)) or window
