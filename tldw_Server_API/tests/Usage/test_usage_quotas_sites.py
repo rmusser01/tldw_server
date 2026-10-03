@@ -60,16 +60,18 @@ def test_storage_pool_guard_disabled_when_quotas_off(quotas_off: None) -> None:
     assert storage_quota_guard._is_enabled() is False
 
 
-async def test_workflows_cap_skipped_when_quotas_off(quotas_off: None) -> None:
-    """With quotas off, the workflows daily cap check returns without inspecting the request, user or db it was given.
+async def test_workflows_cap_skipped_when_quotas_off(quotas_off: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """With quotas off, the workflows daily cap check never inspects the request or db it was
+    given, never refuses, and still records the run (gate the check, never the record; round 2).
 
     Raising on attribute access doesn't work here: every lookup inside the
     cap logic is wrapped in a try/except over `_WORKFLOWS_NONCRITICAL_EXCEPTIONS`,
-    which includes `AssertionError`, so a raise is swallowed and the function
-    falls through to its own unrelated early return either way. Recording the
+    which includes `AssertionError`, so a raise is swallowed. Recording the
     accessed names instead lets the test tell "never inspected" apart from
     "inspected, then the exception was swallowed".
     """
+    from tldw_Server_API.app.core.Workflows import daily_ledger
+
     accessed: list[str] = []
 
     class _RecordingRequest:
@@ -80,10 +82,26 @@ async def test_workflows_cap_skipped_when_quotas_off(quotas_off: None) -> None:
             accessed.append(name)
             return None
 
+    recorded: list[dict] = []
+
+    async def _fake_consume(
+        *, entity_scope: str, entity_value: str, run_id: str, daily_cap: int | None
+    ) -> tuple[bool, int]:
+        """Record the call; quotas-off must still reach this, with daily_cap=None."""
+        recorded.append(
+            {"entity_scope": entity_scope, "entity_value": entity_value, "run_id": run_id, "daily_cap": daily_cap}
+        )
+        return True, 0
+
+    monkeypatch.setattr(daily_ledger, "consume_workflow_run_if_within_cap", _fake_consume)
+
     await workflows_ep._enforce_workflows_daily_cap(
-        request=_RecordingRequest(), current_user=SimpleNamespace(id=1), db=None, run_id="unused-run-id"
+        request=_RecordingRequest(), current_user=SimpleNamespace(id=1), db=None, run_id="run-quotas-off"
     )
     assert accessed == []
+    assert recorded == [
+        {"entity_scope": "user", "entity_value": "1", "run_id": "run-quotas-off", "daily_cap": None}
+    ]
 
 
 def test_chatbooks_quotas_follow_the_switch(monkeypatch: pytest.MonkeyPatch) -> None:
