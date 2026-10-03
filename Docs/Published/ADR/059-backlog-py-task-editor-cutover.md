@@ -39,7 +39,7 @@ backlog-py already had the safe-mutation core, path containment, and Definition 
 - `tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py` runs in `backend-required`. It checks that every task file parses with backlog-py and that the count of files needing normalization stays at or below its baseline (2,308 at cutover). TASK-13441 normalizes the backlog and lowers the baseline to zero. backlog-py's own tests run in the same step, and changes under `tools/backlog-py/` trigger the gate.
 - Accepted gaps:
   - backlog-py has no browser UI, no `--plan`, priority, assignee, or parent options, and no MCP server adapter (its MCP tools are pure functions). Agents use the CLI.
-  - The ratchet runs only when `backend-required` sees backend changes, so a PR that changes only `backlog/` is not checked until a later backend PR runs.
+  - The ratchet runs only when `backend-required` sees backend changes. Backlog-only PRs are covered by the `backlog-task-format` pre-commit hook instead: it runs `backlog-py task normalize --check` on each changed `backlog/tasks/*.md` file, locally and in the (not required) `run-pre-commit` CI job, so a Node-format task file shows up red on the PR that adds it. Making that check required, or putting `backlog/tasks/**` in the backend gate, costs a full `backend-required` run on every task-only PR and was not chosen.
 - Id collisions are not solved by the tool. backlog-py's default next id sees only the local checkout, so AGENTS.md has agents check `origin/dev` and every open PR branch before choosing an id.
 
 ## Follow-up
