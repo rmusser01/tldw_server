@@ -43,6 +43,43 @@ async def test_daily_evaluation_token_cap(tmp_path) -> None:
     assert ok is False and meta["error"] == "Daily evaluation token limit exceeded"
 
 
+async def test_batch_of_four_is_refused_against_a_cap_of_three(tmp_path) -> None:
+    """A batch reserving 4 evaluations against a cap of 3 is refused (Qodo Q1)."""
+    limiter = _limiter(tmp_path)
+    config = await limiter._get_user_config("7")
+    ok, meta = await limiter._reserve_request_usage(
+        "7", "/e", 0, 0.0, config, max_evaluations_per_day=3, evaluations_requested=4
+    )
+    assert ok is False and meta["error"] == "Daily evaluation limit exceeded" and meta["limit"] == 3
+
+
+async def test_batch_of_three_is_admitted_and_records_three(tmp_path) -> None:
+    """A batch reserving 3 evaluations against a cap of 3 is admitted and counts as 3 (Qodo Q1)."""
+    limiter = _limiter(tmp_path)
+    config = await limiter._get_user_config("7")
+    ok, _meta = await limiter._reserve_request_usage(
+        "7", "/e", 0, 0.0, config, max_evaluations_per_day=3, evaluations_requested=3
+    )
+    assert ok is True
+    summary = await limiter.get_usage_summary("7")
+    assert summary["usage"]["today"]["evaluations"] == 3
+
+
+async def test_record_actual_usage_does_not_double_count_the_request(tmp_path) -> None:
+    """Reserving an estimate then recording the actual usage counts as one evaluation,
+    with total_tokens reflecting the actual count, not estimate-plus-actual (Qodo Q4)."""
+    limiter = _limiter(tmp_path)
+    user_id = "7"
+    allowed, _meta = await limiter.check_rate_limit(user_id, "/e", tokens_requested=500)
+    assert allowed is True
+
+    await limiter.record_actual_usage(user_id, "/e", tokens_used=120, reserved_tokens=500)
+
+    summary = await limiter.get_usage_summary(user_id)
+    assert summary["usage"]["today"]["evaluations"] == 1
+    assert summary["usage"]["today"]["tokens"] == 120
+
+
 class _Service(chatbook_service.ChatbookService):
     """A ChatbookService with the DB counters stubbed."""
 
