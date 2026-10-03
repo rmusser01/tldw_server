@@ -164,8 +164,11 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_review_metri
     count_claims_review_extractor_metrics_daily,
     get_claims_review_extractor_metrics_daily,
     get_claims_review_latency_stats,
+    get_claims_review_metrics_window_rows,
     list_claims_review_extractor_metrics_daily,
     list_claims_review_user_ids,
+    list_claims_review_user_ids_page,
+    lock_claims_review_metrics_owner,
     upsert_claims_review_extractor_metrics_daily,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.claims_review_read_ops import (
@@ -2148,6 +2151,9 @@ MediaDatabase.count_claims_review_extractor_metrics_daily = (
     count_claims_review_extractor_metrics_daily
 )
 MediaDatabase.list_claims_review_user_ids = list_claims_review_user_ids
+MediaDatabase.list_claims_review_user_ids_page = list_claims_review_user_ids_page
+MediaDatabase.get_claims_review_metrics_window_rows = get_claims_review_metrics_window_rows
+MediaDatabase.lock_claims_review_metrics_owner = lock_claims_review_metrics_owner
 MediaDatabase.get_claims_review_latency_stats = get_claims_review_latency_stats
 MediaDatabase.get_claim_clusters_by_ids = get_claim_clusters_by_ids
 MediaDatabase.get_claim_cluster_member_counts = get_claim_cluster_member_counts
