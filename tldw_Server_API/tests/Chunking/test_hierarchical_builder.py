@@ -490,8 +490,116 @@ def test_service_observes_mutated_defaults_and_replaced_method(monkeypatch: pyte
 
 
 @pytest.mark.parametrize("grouping", [{"by_kind": True, "element_weights": {"paragraph": 2}}, {}, None])
-def test_service_passes_through_present_template_grouping(monkeypatch: pytest.MonkeyPatch, grouping: Any) -> None:
-    monkeypatch.setattr(service, "compute_paragraph_spans", lambda *_args: [])
-    result = service.HierarchyService(FakeContext()).build_tree("raw", template={"hierarchy": {"grouping": grouping}})
-    assert "grouping" in result
-    assert result["grouping"] is grouping
+def test_service_ignores_present_template_grouping(monkeypatch: pytest.MonkeyPatch, grouping: Any) -> None:
+    template = {"hierarchy": {"grouping": grouping}}
+
+    def fixed_spans(text: str, supplied_template: Any) -> list[tuple[int, int, str]]:
+        assert text == "raw"
+        assert supplied_template is template
+        return [(0, 3, "paragraph")]
+
+    monkeypatch.setattr(service, "compute_paragraph_spans", fixed_spans)
+    result = service.HierarchyService(FakeContext()).build_tree("raw", template=template)
+    assert set(result) == {"type", "schema_version", "method", "language", "max_size", "overlap", "root"}
+    assert result == {
+        "type": "hierarchical",
+        "schema_version": 1,
+        "method": "structure_aware",
+        "language": "en",
+        "max_size": 10,
+        "overlap": 0,
+        "root": {
+            "kind": "root",
+            "level": 0,
+            "title": None,
+            "start_offset": 0,
+            "end_offset": 3,
+            "children": [
+                {
+                    "kind": "section",
+                    "level": 1,
+                    "title": None,
+                    "start_offset": 0,
+                    "end_offset": 3,
+                    "children": [
+                        {
+                            "kind": "paragraph",
+                            "start_offset": 0,
+                            "end_offset": 3,
+                            "children": [],
+                            "chunks": [
+                                {
+                                    "type": "text",
+                                    "text": "raw",
+                                    "metadata": {
+                                        "method": "structure_aware",
+                                        "start_offset": 0,
+                                        "end_offset": 3,
+                                        "language": "en",
+                                        "paragraph_kind": "paragraph",
+                                    },
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+
+
+def test_service_does_not_inspect_malformed_template_hierarchy(monkeypatch: pytest.MonkeyPatch) -> None:
+    class UnusedHierarchy:
+        def __bool__(self) -> bool:
+            pytest.fail("tree coordination must not evaluate template hierarchy")
+
+        def get(self, *_args: Any) -> Any:
+            pytest.fail("tree coordination must not inspect template hierarchy")
+
+    template = {"hierarchy": UnusedHierarchy()}
+
+    def fixed_spans(text: str, supplied_template: Any) -> list[tuple[int, int, str]]:
+        assert text == "raw"
+        assert supplied_template is template
+        return [(0, 3, "paragraph")]
+
+    monkeypatch.setattr(service, "compute_paragraph_spans", fixed_spans)
+    result = service.HierarchyService(FakeContext()).build_tree("raw", template=template)
+    assert set(result) == {"type", "schema_version", "method", "language", "max_size", "overlap", "root"}
+    assert result["root"] == {
+        "kind": "root",
+        "level": 0,
+        "title": None,
+        "start_offset": 0,
+        "end_offset": 3,
+        "children": [
+            {
+                "kind": "section",
+                "level": 1,
+                "title": None,
+                "start_offset": 0,
+                "end_offset": 3,
+                "children": [
+                    {
+                        "kind": "paragraph",
+                        "start_offset": 0,
+                        "end_offset": 3,
+                        "children": [],
+                        "chunks": [
+                            {
+                                "type": "text",
+                                "text": "raw",
+                                "metadata": {
+                                    "method": "structure_aware",
+                                    "start_offset": 0,
+                                    "end_offset": 3,
+                                    "language": "en",
+                                    "paragraph_kind": "paragraph",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
