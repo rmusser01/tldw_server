@@ -4,15 +4,15 @@ Task: TASK13260.281. Human authorized one repair PR for all recorded bugs before
 
 ## Stage 1: Trace and reproduce
 **Goal:** Identify the current source cause for each of the fifteen bug rows.
-**Success Criteria:** Causal regression fails before its correction; upstream corrections are distinguished.
+**Success Criteria:** Causal source regressions fail before correction; the small output-color repair uses the original observed failure and source inspection. Upstream corrections are distinguished.
 **Tests:** Existing actual service/component/SQLite test suites; no replay of failed live fixtures.
-**Status:** In Progress
+**Status:** Complete
 
 ## Stage 2: Correct and review
 **Goal:** Apply narrow corrections in the current-dev repair worktree.
 **Success Criteria:** Affected tests, formatting/lint/type checks, applicable Bandit, and independent source review; no auth/ownership or budget weakening.
 **Tests:** Domain regressions plus existing adjacent suites.
-**Status:** In Progress
+**Status:** Complete
 
 - TASK13260.280: Kanban list envelopes, item hydration and canonical mutation fields; ported correction passes14 tests on current dev.
 - TASK13260.281.1: Character backup image serialization/atomic failure, plaintext preservation, Prompt FTS failure boundary, supported Character generation metadata.
@@ -29,3 +29,5 @@ Task: TASK13260.281. Human authorized one repair PR for all recorded bugs before
 PR3084 remains the separate published app-lifetime correction. First-import/native and installer53/55/consumer56 causes are not accepted by these frontend/backend source checks. No repeated negative GC/native controls, speculative repairs or changes to CI budgets/cache/dependencies.
 
 Browser recovery is pending from the prior human question. UAT stays on hold under the new instruction until the repair work is addressed. No new browser/API/profile/model actions are authorized by publication. Keep concise bug/result notes; no evidence bundles.
+
+Final source review is clear. Affected checks pass342 distinct backend and241 frontend cases; Python Bandit0findings/0errors. Full frontend types remain blocked by inherited unrelated dependency/React diagnostics, with0touched-path diagnostics. Stage3 awaits final push and PR readback; live UAT/native/installer gates remain open.
