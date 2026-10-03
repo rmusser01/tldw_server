@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   coerceBooleanOrNull: vi.fn(),
   tldwInitialize: vi.fn(),
   ragSearch: vi.fn(),
+  bgRequest: vi.fn(),
+  stream: vi.fn(),
   maybeInjectActorMessage: vi.fn(),
   resolveApiProviderForModel: vi.fn(),
   runChatPipeline: vi.fn(),
@@ -34,43 +36,31 @@ vi.mock("@/utils/human-message", () => ({
     mocks.humanMessageFormatter(...args)
 }))
 
-vi.mock("@/libs/reasoning", () => ({
+vi.mock("@/libs/reasoning", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/libs/reasoning")>(),
   removeReasoning: (...args: unknown[]) => mocks.removeReasoning(...args)
+}))
+
+vi.mock("@/db/dexie/nickname", () => ({ getModelNicknameByID: vi.fn().mockResolvedValue(null) }))
+vi.mock("@/utils/mcp-disclosure", () => ({ applyMcpModuleDisclosureFromToolCalls: vi.fn() }))
+vi.mock("@/services/background-proxy", () => ({
+  bgRequest: (...args: unknown[]) => mocks.bgRequest(...args),
+  bgStream: vi.fn(),
+  bgUpload: vi.fn()
 }))
 
 vi.mock("@/utils/format-docs", () => ({
   formatDocs: (...args: unknown[]) => mocks.formatDocs(...args)
 }))
 
-vi.mock("@/services/app", () => ({
+vi.mock("@/services/app", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/app")>(),
   getNoOfRetrievedDocs: (...args: unknown[]) =>
     mocks.getNoOfRetrievedDocs(...args)
 }))
 
-vi.mock("@/services/rag/unified-rag", () => ({
-  DEFAULT_RAG_SETTINGS: {
-    collection_id: null,
-    include_note_ids: [],
-    include_media_ids: [],
-    ground_truth_doc_ids: [],
-    top_k: 8,
-    search_mode: "hybrid",
-    enable_generation: true,
-    enable_citations: true,
-    enable_intent_routing: true,
-    accumulation_time_budget_sec: null,
-    subquery_time_budget_sec: null,
-    subquery_doc_budget: null,
-    grading_model: null,
-    grading_provider: null,
-    fast_hallucination_provider: null,
-    fast_hallucination_model: null,
-    utility_grading_provider: null,
-    utility_grading_model: null
-  }
-}))
-
-vi.mock("@/services/settings/registry", () => ({
+vi.mock("@/services/settings/registry", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/settings/registry")>(),
   coerceBooleanOrNull: (...args: unknown[]) =>
     mocks.coerceBooleanOrNull(...args)
 }))
@@ -109,7 +99,8 @@ vi.mock("@/utils/resolve-api-provider", () => ({
   }
 }))
 
-vi.mock("../chatModePipeline", () => ({
+vi.mock("../chatModePipeline", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../chatModePipeline")>(),
   runChatPipeline: (...args: unknown[]) => mocks.runChatPipeline(...args),
   getRequiredServicePrompt: (snapshot: any, id: string) => {
     const resolved = snapshot?.definitions?.[id]
@@ -390,7 +381,7 @@ describe("ragMode sanitizer", () => {
     )
   })
 
-  it("sends raw generation_model when the selected RAG model is provider-qualified", async () => {
+  it("retrieves selected evidence without generating a discarded answer for a provider-qualified model", async () => {
     mocks.ragSearch.mockResolvedValue({
       documents: [
         {
@@ -418,11 +409,57 @@ describe("ragMode sanitizer", () => {
     expect(mocks.ragSearch).toHaveBeenCalledWith(
       "What phrase proves the selected source was used?",
       expect.objectContaining({
-        generation_model:
-          "gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf",
-        generation_provider: "llama.cpp"
+        enable_generation: false,
+        include_media_ids: [7, 8],
+        sources: ["media_db"]
       })
     )
+    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty("generation_model")
+    expect(mocks.ragSearch.mock.calls[0][1]).not.toHaveProperty("generation_provider")
+  })
+
+  it("sends retrieval-only RAG on the wire then streams one grounded answer with the same selected sources", async () => {
+    const { chatRagMethods } = await import("@/services/tldw/domains/chat-rag")
+    const { runChatPipeline } = await vi.importActual<typeof import("../chatModePipeline")>("../chatModePipeline")
+    const context = createRagContext()
+    mocks.ragSearch.mockImplementation((query, options) => chatRagMethods.ragSearch.call(
+      { normalizeRagQuery: (value: string) => value } as unknown as ThisParameterType<typeof chatRagMethods.ragSearch>, query, options
+    ))
+    mocks.bgRequest.mockResolvedValue({ documents: [{
+      content: "Larch is the selected source's marker.",
+      metadata: { title: "Selected Larch source", type: "text", source: "media_db" }
+    }] })
+    mocks.stream.mockImplementation(async function* () { yield { content: "The marker is Larch." } })
+    mocks.pageAssistModel.mockResolvedValue({ stream: mocks.stream })
+
+    const result = await runChatPipeline(__testing__.ragModeDefinition, context.message, "", false,
+      [], [], context.signal, context)
+
+    expect(result).toMatchObject({ status: "submitted" })
+    expect(mocks.bgRequest).toHaveBeenCalledTimes(1)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/rag/search",
+      method: "POST",
+      body: expect.objectContaining({
+        query: context.message,
+        enable_generation: false,
+        include_media_ids: [7, 8],
+        sources: ["media_db"],
+        top_k: 8,
+        enable_citations: true,
+        enable_intent_routing: false
+      })
+    }))
+    expect(mocks.stream).toHaveBeenCalledTimes(1)
+    expect(mocks.stream.mock.calls[0][0]).toEqual(expect.arrayContaining([
+      expect.objectContaining({ content: expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringContaining("Larch is the selected source's marker.") })
+      ]) })
+    ]))
+    expect(context.saveMessageOnSuccess).toHaveBeenCalledWith(expect.objectContaining({
+      fullText: "The marker is Larch.",
+      source: [expect.objectContaining({ name: "Selected Larch source", mode: "rag" })]
+    }))
   })
 
   it("handles selected-source RAG with no evidence without continuing as general chat", async () => {

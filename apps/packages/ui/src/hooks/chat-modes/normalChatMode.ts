@@ -14,8 +14,10 @@ import {
 import type { HistoryTurnRecovery } from "@/db/dexie/types"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useMcpToolsStore } from "@/store/mcp-tools"
+import { resolveChatToolRequest } from "@/utils/chat-tools"
 import { systemPromptForNonRagOption } from "~/services/tldw-server"
 import {
+  useStoreMessageOption,
   type ChatHistory,
   type Message,
   type MessageMetadataExtra,
@@ -707,12 +709,31 @@ const captureNormalHistoryTurn = async (
           validate_lease: authValid
         }
       : current.owner
-  const settings = useStoreChatModelSettings.getState()
-  const tools = useMcpToolsStore.getState()
+  // A Zustand publication replaces the store object even for loading flags or
+  // settings for another model. Bind the lease to dispatch inputs instead.
+  const dispatchSettings = () => {
+    const settings = useStoreChatModelSettings.getState()
+    const selection = useStoreMessageOption.getState()
+    const tools = useMcpToolsStore.getState()
+    const toolRequest = resolveChatToolRequest({
+      tools: tools.chatTools ?? tools.tools,
+      toolChoice: params.toolChoice ?? selection.toolChoice,
+      mcpHealthState: tools.healthState,
+      hasMcp: tools.healthState !== "unavailable"
+    })
+    return JSON.stringify({
+      settings: settings.getEffectiveSettings(),
+      settingsScope: settings.activeSettingsScope,
+      model: selection.selectedModel,
+      toolChoice: selection.toolChoice,
+      tools: toolRequest.tools,
+      requestToolChoice: toolRequest.toolChoice
+    })
+  }
+  const capturedDispatchSettings = dispatchSettings()
   const validateLease = () =>
     authValid() &&
-    useStoreChatModelSettings.getState() === settings &&
-    useMcpToolsStore.getState() === tools
+    dispatchSettings() === capturedDispatchSettings
   const canUpdateView = () => {
     const now = controller.getCurrent().view
     return (

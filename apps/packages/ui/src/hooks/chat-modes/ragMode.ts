@@ -15,10 +15,6 @@ import { coerceBooleanOrNull } from "@/services/settings/registry"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { ActorSettings } from "@/types/actor"
 import { maybeInjectActorMessage } from "@/utils/actor"
-import {
-  parseProviderQualifiedModelSelection,
-  resolveApiProviderForModel
-} from "@/utils/resolve-api-provider"
 import type { ChatModelSettings } from "@/store/model"
 import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
@@ -427,36 +423,19 @@ const buildRagOptions = async (
   )
   // Precedence for top_k: (1) ctx.ragTopK if valid > 0, (2) ragOptions.top_k if valid > 0,
   // (3) defaultTopK fallback. ctx.ragSearchMode always overrides ragOptions.search_mode.
-  // ctx.ragEnableGeneration/citations control presence of their flags, even if set.
+  // Chat generates its answer through the streaming completion below. RAG is
+  // retrieval only here; requesting another answer delays evidence and the
+  // backend answer is never consumed by this path.
   if (typeof ctx.ragTopK === "number" && ctx.ragTopK > 0) {
     ragOptions.top_k = ctx.ragTopK
   } else if (ragOptions.top_k == null) {
     ragOptions.top_k = top_k
   }
   ragOptions.search_mode = ctx.ragSearchMode
-  // Delete false flags so the backend can apply its default behavior.
-  if (ctx.ragEnableGeneration) {
-    ragOptions.enable_generation = true
-    const rawSelectedGenerationModel = ctx.selectedModel?.trim()
-    const selectedModelSelection = parseProviderQualifiedModelSelection(
-      rawSelectedGenerationModel
-    )
-    const selectedGenerationModel = (
-      selectedModelSelection.modelId || rawSelectedGenerationModel
-    )?.trim()
-    if (selectedGenerationModel) {
-      ragOptions.generation_model = selectedGenerationModel
-    }
-    const selectedGenerationProvider = await resolveApiProviderForModel({
-      modelId: rawSelectedGenerationModel,
-      explicitProvider: ctx.currentChatModelSettings?.apiProvider
-    })
-    if (selectedGenerationProvider) {
-      ragOptions.generation_provider = selectedGenerationProvider
-    }
-  } else {
-    delete ragOptions.enable_generation
-  }
+  ragOptions.enable_generation = false
+  delete ragOptions.generation_model
+  delete ragOptions.generation_provider
+  delete ragOptions.generation_prompt
   if (ctx.ragEnableCitations) {
     ragOptions.enable_citations = true
   } else {
