@@ -1,9 +1,12 @@
 from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 import tldw_Server_API.app.api.v1.endpoints.audio.audio_streaming as audio_streaming
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 
 
 @pytest.mark.unit
@@ -74,3 +77,41 @@ async def test_stream_limits_shape(monkeypatch):
     assert isinstance(limits["concurrent_streams"], int)
     assert isinstance(limits["concurrent_jobs"], int)
     assert isinstance(limits["max_file_size_mb"], int)
+
+
+@pytest.mark.unit
+def test_stream_limits_off_path_through_real_app(monkeypatch):
+    """OFF path (spec 2): with usage quotas off, GET /stream/limits returns null limits and can_start_stream=True."""
+    monkeypatch.delenv("USAGE_QUOTAS_ENABLED", raising=False)
+    monkeypatch.delenv("LIMIT_ENFORCEMENT_ENABLED", raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: None)
+
+    async def _get_daily_minutes_used(user_id: int):
+        _ = user_id
+        return 0.0
+
+    async def _active_streams_count(user_id: int):
+        _ = user_id
+        return 0
+
+    async def _get_user_tier(user_id: int):
+        _ = user_id
+        return "free"
+
+    monkeypatch.setattr(audio_streaming, "_get_daily_minutes_used", _get_daily_minutes_used)
+    monkeypatch.setattr(audio_streaming, "_active_streams_count", _active_streams_count)
+    monkeypatch.setattr(audio_streaming, "_get_user_tier", _get_user_tier)
+    # _get_limits_for_user is intentionally left unpatched: it must hit the real
+    # get_limits_for_user() and return the quotas-off unlimited dict.
+
+    app = FastAPI()
+    app.include_router(audio_streaming.router, prefix="/api/v1/audio")
+    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/audio/stream/limits")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert all(value is None for value in data["limits"].values())
+    assert data["can_start_stream"] is True

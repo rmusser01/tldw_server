@@ -40,9 +40,17 @@ def _quotas_on(monkeypatch: pytest.MonkeyPatch) -> None:
 
 async def test_oss_skips_org_resolution_even_with_quotas_on(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(subscription_service, "billing_repo_configured", _not_wired)
-    monkeypatch.setattr(billing_deps, "_resolve_org_id", _must_not_resolve)
+    calls: list[tuple[object, ...]] = []
+
+    async def _recording_resolve(*args: object, **kwargs: object) -> int:
+        calls.append((args, kwargs))
+        return 42
+
+    monkeypatch.setattr(billing_deps, "_resolve_org_id", _recording_resolve)
     assert await billing_deps.get_billing_org_id(principal=_principal(), x_tldw_org_id=None, org_id=None) is None
     assert await billing_deps.resolve_org_id_for_principal(_principal()) is None
+    await billing_deps.add_billing_headers(response=Response(), principal=_principal(), x_tldw_org_id=None, org_id=None)
+    assert calls == []
 
 
 async def test_orgless_multi_user_account_gets_no_403(monkeypatch: pytest.MonkeyPatch) -> None:
