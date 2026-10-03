@@ -1,32 +1,14 @@
-import { createReviewDraftsFromResults } from "./hooks/useIngestResults"
-import { quickIngestAuthority, useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Modal, Button } from "antd"
-import { useTranslation } from "react-i18next"
-import { useNavigate } from "react-router-dom"
-import { XCircle } from "lucide-react"
-import { useShallow } from "zustand/react/shallow"
-import { browser } from "wxt/browser"
 import {
-  IngestWizardProvider,
-  useIngestWizard,
-  type IngestWizardState,
-} from "./QuickIngest/IngestWizardContext"
-import { IngestWizardStepper } from "./QuickIngest/IngestWizardStepper"
-import { AddContentStep } from "./QuickIngest/AddContentStep"
-import { WizardConfigureStep } from "./QuickIngest/WizardConfigureStep"
-import { ReviewStep } from "./QuickIngest/ReviewStep"
-import { ProcessingStep } from "./QuickIngest/ProcessingStep"
-import { WizardResultsStep } from "./QuickIngest/WizardResultsStep"
-import { FloatingProgressWidget } from "./QuickIngest/FloatingProgressWidget"
-import {
-  cancelQuickIngestSession,
-  getQuickIngestAnalysisProviderWarning,
-  startQuickIngestSession,
-  submitQuickIngestBatch,
-} from "@/services/tldw/quick-ingest-batch"
-import { reattachQuickIngestSession } from "@/services/tldw/quick-ingest-session-reattach"
+  DOCUMENT_WORKSPACE_PATH,
+  buildMediaCollectionReviewPath,
+} from "@/routes/route-paths"
+import { setSetting } from "@/services/settings/registry"
+import { MEDIA_REVIEW_SELECTION_SETTING, MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING } from "@/services/settings/ui-settings"
+import { buildKnowledgeMediaScopePath } from "@/utils/knowledge-scope-handoff"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { type ConferenceRetryRequestItem,
+  buildConferenceRetryRequestItems
+} from "@/services/tldw/conference-collections"
 import {
   completedIngestJobIndicatesFailure,
   completedIngestJobIndicatesSkipped,
@@ -34,19 +16,55 @@ import {
   extractCompletedIngestJobMediaId,
   extractCompletedIngestJobWarning,
 } from "@/services/tldw/ingest-job-results"
+import { quickIngestAuthority, useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
 import {
-  DOCUMENT_WORKSPACE_PATH,
-  buildMediaCollectionReviewPath,
-} from "@/routes/route-paths"
+  cancelQuickIngestSession,
+  getQuickIngestAnalysisProviderWarning,
+  startQuickIngestSession,
+  submitQuickIngestBatch,
+} from "@/services/tldw/quick-ingest-batch"
+import { reattachQuickIngestSession } from "@/services/tldw/quick-ingest-session-reattach"
+import { useConnectionStore } from "@/store/connection"
+import { useQuickIngestStore } from "@/store/quick-ingest"
 import {
+  type PersistedQuickIngestTracking,
   type PersistedWizardQueueItem,
   type QuickIngestSessionLifecycle,
   type QuickIngestSessionRecord,
   useQuickIngestSessionStore,
 } from "@/store/quick-ingest-session"
-import { useQuickIngestStore } from "@/store/quick-ingest"
-import { useConnectionStore } from "@/store/connection"
 import { ConnectionPhase } from "@/types/connection"
+import { isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
+import { Button, Modal } from "antd"
+import { XCircle } from "lucide-react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useTranslation } from "react-i18next"
+import { useNavigate } from "react-router-dom"
+import { browser } from "wxt/browser"
+import { useShallow } from "zustand/react/shallow"
+import { AddContentStep } from "./QuickIngest/AddContentStep"
+import { FloatingProgressWidget } from "./QuickIngest/FloatingProgressWidget"
+import {
+  IngestWizardProvider,
+  type IngestWizardState,
+  useIngestWizard
+} from "./QuickIngest/IngestWizardContext"
+import { IngestWizardStepper } from "./QuickIngest/IngestWizardStepper"
+import { ProcessingStep } from "./QuickIngest/ProcessingStep"
+import { ReviewStep } from "./QuickIngest/ReviewStep"
+import { WizardConfigureStep } from "./QuickIngest/WizardConfigureStep"
+import { WizardResultsStep } from "./QuickIngest/WizardResultsStep"
+import {
+  DUPLICATE_SKIP_MESSAGE,
+  isDbMessageDuplicate,
+} from "./QuickIngest/constants"
+import {
+  DEFAULT_PRESET,
+  DEFAULT_PRESETS,
+  type PresetMap,
+} from "./QuickIngest/presets"
+import { getEligibleQueueItems, validateQueueItem } from "./QuickIngest/queue-items"
+import { canRetryWizardResult, getSavedMediaIds } from "./QuickIngest/result-actions"
 import type {
   CommonOptions,
   ConferenceBatchMetadata,
@@ -55,22 +73,11 @@ import type {
   ItemProgress,
   ItemProgressStatus,
   PlaylistQueueMetadata,
-  PersistedQuickIngestTracking,
   ReattachedQuickIngestJob,
   TypeDefaults,
   WizardQueueItem,
-  WizardResultItem,
-} from "./QuickIngest/types"
-import {
-  DUPLICATE_SKIP_MESSAGE,
-  isDbMessageDuplicate,
-} from "./QuickIngest/constants"
-import { isQuickIngestPlaylistPreflightDetail } from "@/utils/quick-ingest-open"
-import {
-  DEFAULT_PRESET,
-  DEFAULT_PRESETS,
-  type PresetMap,
-} from "./QuickIngest/presets"
+  WizardResultItem} from "./QuickIngest/types"
+import { createReviewDraftsFromResults } from "./hooks/useIngestResults"
 
 // ---------------------------------------------------------------------------
 // Props
@@ -96,6 +103,7 @@ type QuickIngestRequestPayload = {
     defaults?: TypeDefaults
     playlist?: PlaylistQueueMetadata
     conferenceOverride?: ConferenceItemMetadataOverride
+    processAgain?: boolean
   }>
   files: Array<{
     id: string
@@ -111,6 +119,7 @@ type QuickIngestRequestPayload = {
   advancedValues: Record<string, unknown>
   fileDefaults: TypeDefaults
   conferenceBatchMetadata?: ConferenceBatchMetadata | null
+  conferenceRetry?: { collectionId: string; items: ConferenceRetryRequestItem[] }
   __quickIngestSessionId?: string
 }
 
@@ -213,8 +222,9 @@ const normalizeWizardResult = (
         ? extractCompletedIngestJobError(item.data)
         : undefined
   const dataRecord = item.data != null && typeof item.data === "object"
-    ? item.data as Record<string, unknown>
-    : undefined
+    ? (item.data as Record<string, unknown>
+    )
+      : undefined
   const isDuplicate =
     derivedStatus === "ok" &&
     !item.outcome &&
@@ -244,8 +254,9 @@ const normalizeWizardResult = (
     title: item.title,
     durationMs: item.durationMs,
     mediaId:
-      item.mediaId ??
-      extractCompletedIngestJobMediaId(item.data),
+      item.mediaId !== undefined
+        ? item.mediaId
+        : extractCompletedIngestJobMediaId(item.data),
     persisted: item.persisted,
     collectionItemId: item.collectionItemId ?? null,
     retryAttempt: item.retryAttempt ?? null,
@@ -296,17 +307,28 @@ const buildTerminalProgress = (
 const buildFailureResults = (
   items: WizardQueueItem[],
   message: string,
-  outcome: "failed" | "cancelled"
+  outcome: "failed" | "cancelled",
+  retryItems?: ConferenceRetryRequestItem[]
 ): WizardResultItem[] =>
-  items.map((item) => ({
-    id: item.id,
-    status: "error",
-    outcome,
-    url: item.url,
-    fileName: item.fileName,
-    type: mapDetectedTypeToEntryType(item.detectedType),
-    error: message,
-  }))
+  items.map((item) => {
+    const retry = retryItems?.find((entry) => entry.resultId === item.id)
+    return {
+      id: item.id,
+      status: "error",
+      outcome,
+      url: item.url,
+      fileName: item.fileName,
+      type: mapDetectedTypeToEntryType(item.detectedType),
+      error: message,
+      ...(retry
+        ? {
+            collectionItemId: retry.collectionItemId,
+            retryAttempt: retry.retryAttempt,
+            idempotencyKey: retry.idempotencyKey
+          }
+        : {})
+    }
+  })
 
 const buildQueueFileKey = (item: WizardQueueItem): string | undefined => {
   if (item.fileStub?.key) return item.fileStub.key
@@ -336,6 +358,7 @@ const buildPersistedQueueItems = (
     validation: item.validation,
     playlist: item.playlist,
     conferenceOverride: item.conferenceOverride,
+    processAgain: item.processAgain,
     fileStub:
       item.file || item.fileStub
         ? {
@@ -464,6 +487,7 @@ const hydrateQueueItems = (
         validation: item.validation,
         playlist: item.playlist,
         conferenceOverride: item.conferenceOverride,
+        processAgain: item.processAgain,
       }
     }
 
@@ -486,6 +510,7 @@ const hydrateQueueItems = (
       },
       playlist: item.playlist,
       conferenceOverride: item.conferenceOverride,
+      processAgain: item.processAgain,
       fileStub: item.fileStub || {
         key: item.key,
         lastModified: item.lastModified,
@@ -639,7 +664,7 @@ const buildSessionPatchFromWizardState = (
     badge: {
       queueCount:
         lifecycle === "draft"
-          ? queueItems.filter((item) => item.validation.valid).length
+          ? getEligibleQueueItems(state.queueItems).length
           : 0,
       hasRecentFailure:
         lifecycle === "partial_failure" || lifecycle === "interrupted",
@@ -740,6 +765,9 @@ const buildResultsFromReattachedJobs = (
       job.jobId,
       index
     )
+    const retry = tracking?.retryItems?.find(
+      (entry) => entry.resultId === item?.id
+    )
     const jobStatus = String(job.status || "").trim().toLowerCase()
     const logicalFailure =
       jobStatus === "completed" && completedIngestJobIndicatesFailure(job.result)
@@ -749,10 +777,9 @@ const buildResultsFromReattachedJobs = (
     return {
       id: item?.id || `reattached-${job.jobId}`,
       status: resultStatus,
-      outcome:
-        isDuplicate
-          ? "skipped" as const
-          : resultStatus === "ok"
+      outcome: isDuplicate
+        ? ("skipped" as const)
+        : resultStatus === "ok"
             ? "processed"
             : jobStatus === "cancelled"
               ? "cancelled"
@@ -768,12 +795,15 @@ const buildResultsFromReattachedJobs = (
             `Quick ingest ${jobStatus || "failed"}.`,
       mediaId: extractCompletedIngestJobMediaId(job.result),
       warning: resultStatus === "ok" ? extractCompletedIngestJobWarning(job.result) : undefined,
-      collectionItemId: tracking?.jobIdToCollectionItemId?.[String(job.jobId)] ?? null,
-      retryAttempt: null,
-      idempotencyKey: null,
+      collectionItemId:
+        tracking?.jobIdToCollectionItemId?.[String(job.jobId)] ??
+        retry?.collectionItemId ??
+        null,
+      retryAttempt: retry?.retryAttempt ?? null,
+      idempotencyKey: retry?.idempotencyKey ?? null,
       title: job.result?.title ?? null,
       data: job.result,
-      message: isDuplicate ? DUPLICATE_SKIP_MESSAGE : undefined,
+      message: isDuplicate ? DUPLICATE_SKIP_MESSAGE : undefined
     }
   })
 
@@ -824,9 +854,7 @@ const buildQuickIngestPayload = async (
     typeDefaults: TypeDefaults
   }
 ): Promise<QuickIngestRequestPayload> => {
-  const validItems = items.filter(
-    (item) => item.validation.valid && item.conferenceOverride?.selected !== false
-  )
+  const validItems = getEligibleQueueItems(items)
   const entries = validItems
     .filter((item): item is WizardQueueItem & { url: string } => Boolean(item.url))
     .map((item) => ({
@@ -836,6 +864,7 @@ const buildQuickIngestPayload = async (
       defaults: buildDefaultsForQueueItem(item, options.typeDefaults),
       playlist: item.playlist,
       conferenceOverride: item.conferenceOverride,
+      processAgain: item.processAgain,
     }))
 
   const files = await Promise.all(
@@ -907,6 +936,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     updateItemProgress,
     updateProcessingState,
     setResults,
+    setQueueItems,
     goToStep,
     goNext,
   } = useIngestWizard()
@@ -922,12 +952,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const runStartedAtRef = useRef<number | null>(null)
   const cancelledSessionIdsRef = useRef<Set<string>>(new Set())
   const cancelRequestedRef = useRef(false)
+  const [retryIds, setRetryIds] = useState<string[] | null>(() =>
+    currentStep === 4 && processingState.perItemProgress.length
+      ? processingState.perItemProgress.map(item => item.id)
+      : null
+  )
+  const retryRequestsRef = useRef<ConferenceRetryRequestItem[]>(session.tracking?.retryItems ?? (session.tracking?.durableMode === "durable_collection" ? buildConferenceRetryRequestItems(results) : []))
+  const retryCollectionIdRef = useRef<string | undefined>(session.tracking?.collectionId)
   const validQueueItems = useMemo(
     () =>
-      queueItems.filter(
-        (item) => item.validation.valid && item.conferenceOverride?.selected !== false
-      ),
-    [queueItems]
+      getEligibleQueueItems(queueItems).filter(item => (!retryIds || retryIds.includes(item.id)) && !results.some(result => result.id === item.id && result.status === "ok")),
+    [queueItems, retryIds, results]
   )
   const trackedQueueItems = useMemo(
     () => resolveTrackedQueueItems(queueItems, session.tracking),
@@ -1102,12 +1137,16 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   useEffect(() => {
     const persistedTracking = persistedTrackingRef.current
     const reattachQueueItems = initialTrackedQueueItemsRef.current
+    // Recovery polls must not race the live executor's complete mixed result set.
+    // A freshly mounted/reloaded session has no local run and may reattach.
+    if (hasStartedRunRef.current) return
     if (!persistedReattachSignature || !persistedTracking) return
     if (activeReattachSignatureRef.current === persistedReattachSignature) return
     activeReattachSignatureRef.current = persistedReattachSignature
 
     const startedAt = persistedTracking.startedAt
-    if (typeof startedAt === "number" && Number.isFinite(startedAt)) {
+    if (typeof startedAt === "number" &&
+      Number.isFinite(startedAt)) {
       runStartedAtRef.current = startedAt
     }
     const sessionId = String(persistedTracking.sessionId || "").trim()
@@ -1155,11 +1194,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           : buildFailureResults(
               reattachQueueItems,
               snapshot.errorMessage || "Quick ingest could not reconnect to live job status.",
-              "failed"
+              "failed",
+              latestTracking.retryItems
             )
 
-      resultsRef.current = reattachedResults
-      setResults(reattachedResults)
+      const mergedResults = mergeWizardResults(resultsRef.current, reattachedResults)
+      resultsRef.current = mergedResults
+      setResults(mergedResults)
       updateProcessingState({
         status:
           snapshot.lifecycle === "completed"
@@ -1189,8 +1230,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       cancelled = true
       // A replacement effect (including StrictMode replay) must own a fresh poll.
       if (activeReattachSignatureRef.current === persistedReattachSignature) {
-        activeReattachSignatureRef.current = ""
-      }
+      activeReattachSignatureRef.current = ""
+    }
       if (persistedReattachTimerRef.current != null) {
         window.clearTimeout(persistedReattachTimerRef.current)
         persistedReattachTimerRef.current = null
@@ -1229,7 +1270,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       incomingResults: WizardResultItem[]
     ) => {
       syncElapsed()
-      applyResults(incomingResults)
+      const resolvedIds = new Set([...resultsRef.current, ...incomingResults].map(item => item.id))
+      applyResults([...incomingResults, ...buildFailureResults(validQueueItems.filter(item => !resolvedIds.has(item.id)), "The server returned no result for this input. Review the source and try again.", "failed", retryRequestsRef.current.length ? retryRequestsRef.current : persistedTrackingRef.current?.retryItems)])
       updateProcessingState({
         status: nextStatus,
         estimatedRemaining: 0,
@@ -1238,14 +1280,12 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       activeSessionIdRef.current = null
       goNext()
     },
-    [applyResults, goNext, syncElapsed, updateProcessingState]
+    [applyResults, goNext, syncElapsed, updateProcessingState, validQueueItems]
   )
 
   const finalizeFailure = useCallback(
     (message: string, outcome: "failed" | "cancelled") => {
-      const trackedEligibleItems = trackedQueueItems.filter(
-        (item) => item.validation.valid && item.conferenceOverride?.selected !== false
-      )
+      const trackedEligibleItems = getEligibleQueueItems(trackedQueueItems).filter(item => retryIds == null || retryIds.includes(item.id))
       const fallbackItems =
         trackedEligibleItems.length > 0 ? trackedEligibleItems : validQueueItems
       const existingResultIds = new Set(
@@ -1259,11 +1299,12 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       const fallbackResults = buildFailureResults(
         unresolvedFallbackItems,
         message,
-        outcome
+        outcome,
+        retryRequestsRef.current.length ? retryRequestsRef.current : persistedTrackingRef.current?.retryItems
       )
       finalizeRun(outcome === "cancelled" ? "cancelled" : "error", fallbackResults)
     },
-    [finalizeRun, trackedQueueItems, validQueueItems]
+    [finalizeRun, trackedQueueItems, validQueueItems, retryIds]
   )
 
   const handleCancelAll = useCallback(() => {
@@ -1294,16 +1335,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   const markRunActive = useCallback(() => {
     runStartedAtRef.current = Date.now()
-    for (const item of validQueueItems) {
-      updateItemProgress({
-        id: item.id,
-        status: "processing",
-        progressPercent: 0,
-        currentStage: "Waiting for server result",
-        estimatedRemaining: 0,
-      })
-    }
-  }, [updateItemProgress, validQueueItems])
+    updateProcessingState({ perItemProgress: validQueueItems.map(item => ({
+      id: item.id, status: "processing", progressPercent: 0,
+      currentStage: "Waiting for server result", estimatedRemaining: 0,
+    })) })
+  }, [updateProcessingState, validQueueItems])
 
   const handleRuntimeMessage = useCallback(
     (message: QuickIngestRuntimeMessage) => {
@@ -1380,6 +1416,12 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const startRun = useCallback(async () => {
     if (!operation.isCurrent() || hasStartedRunRef.current || validQueueItems.length === 0) return
     hasStartedRunRef.current = true
+    const attemptedIds = new Set(validQueueItems.map((item) => item.id))
+    const retained = resultsRef.current.filter(
+      (item) => !attemptedIds.has(item.id) || item.status === "ok"
+    )
+    resultsRef.current = retained
+    setResults(retained)
 
     try {
       try {
@@ -1401,6 +1443,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         }
       )
       if (!operation.isCurrent() || cancelRequestedRef.current) return
+      if (retryRequestsRef.current.length && retryCollectionIdRef.current) {
+        requestPayload.conferenceRetry = { collectionId: retryCollectionIdRef.current, items: retryRequestsRef.current }
+      }
 
       const providerWarning = getQuickIngestAnalysisProviderWarning({
         common: requestPayload.common,
@@ -1460,7 +1505,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       markProcessingTracking({
         mode: sessionId.startsWith("qi-direct-") ? "webui-direct" : "extension-runtime",
         sessionId,
-        startedAt: runStartedAtRef.current || Date.now(),
+        ...(requestPayload.conferenceRetry
+          ? {
+              collectionId: requestPayload.conferenceRetry.collectionId,
+              retryItems: requestPayload.conferenceRetry.items,
+              plannedItemIds: requestPayload.conferenceRetry.items.map(
+                (item) => item.collectionItemId
+              ),
+              durableMode: "durable_collection"
+            }
+          : {}),
+        startedAt: runStartedAtRef.current || Date.now()
       })
 
       if (!sessionId.startsWith("qi-direct-")) {
@@ -1519,6 +1574,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   }, [
     finalizeFailure,
     finalizeRun,
+    setResults,
     markRunActive,
     presetConfig.advancedValues,
     presetConfig.common,
@@ -1625,7 +1681,17 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       return
     }
     setAnalysisProviderWarning(null)
-    skipToProcessing()
+    if (retryIds) {
+      const retained = resultsRef.current.filter(item => !retryIds.includes(item.id))
+      resultsRef.current = retained
+      setResults(retained)
+      hasStartedRunRef.current = false
+      cancelRequestedRef.current = false
+      updateProcessingState({ status: "running", perItemProgress: [], estimatedRemaining: 0 })
+      goToStep(4)
+    } else {
+      skipToProcessing()
+    }
   }, [
     currentStep,
     goNext,
@@ -1636,6 +1702,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     presetConfig.common,
     qi,
     skipToProcessing,
+    retryIds,
+    setResults,
+    updateProcessingState,
     operation,
   ])
 
@@ -1664,8 +1733,101 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     validQueueItems.length,
   ])
 
+  const handleRetryItems = useCallback(
+    (itemIds: string[], requests?: ConferenceRetryRequestItem[]) => {
+      if (!operation.isCurrent() || !isOnlineForIngest || isCheckingConnection) return
+      const requested = new Set(requests?.map(item => item.resultId) ?? itemIds)
+      const failed = resultsRef.current.filter(item => requested.has(item.id) && canRetryWizardResult(item, queueItems))
+      if (!failed.length) return
+      const ids = failed.map((item) => item.id)
+      setRetryIds(ids)
+      retryRequestsRef.current = session.tracking?.durableMode === "durable_collection" ? buildConferenceRetryRequestItems(failed) : []
+      retryCollectionIdRef.current = session.tracking?.collectionId
+      // Remove only the failed attempt; successes remain available and survive reload.
+      const retained = resultsRef.current.filter(item => !ids.includes(item.id))
+      resultsRef.current = retained
+      setResults(retained)
+      cancelRequestedRef.current = false
+      hasStartedRunRef.current = false
+      activeSessionIdRef.current = null
+      runStartedAtRef.current = null
+      // Persist this attempt before upload/acknowledgment; old jobs must not be reattached.
+      markProcessingTracking({
+        mode: "webui-direct",
+        sessionId: `qi-direct-retry-${crypto.randomUUID()}`,
+        ...(retryCollectionIdRef.current && retryRequestsRef.current.length
+          ? {
+              collectionId: retryCollectionIdRef.current,
+              retryItems: retryRequestsRef.current,
+              durableMode: "durable_collection" as const
+            }
+          : {})
+      })
+      updateProcessingState({
+        status: "running",
+        perItemProgress: ids.map((id) => ({
+          id,
+          status: "queued",
+          progressPercent: 0,
+          currentStage: "",
+          estimatedRemaining: 0
+        })),
+        estimatedRemaining: 0
+      })
+      goToStep(4)
+    },
+    [goToStep, isCheckingConnection, isOnlineForIngest, operation, queueItems, session.tracking, setResults, markProcessingTracking, updateProcessingState]
+  )
+
+  const handleReattach = useCallback((id: string, file: File) => {
+    if (!operation.isCurrent()) return
+    setQueueItems(queueItems.map(item => {
+      if (item.id !== id) return item
+      if (file.name !== item.fileName || file.size !== item.fileSize) return { ...item, validation: { valid: false, errors: [qi("wizard.results.reattachMismatch", "Choose the original file with the same name and size.")] } }
+      const attached = { ...item, file, mimeType: file.type, fileSize: file.size }
+      return { ...attached, validation: validateQueueItem(attached) }
+    }))
+  }, [operation, qi, queueItems, setQueueItems])
+
+  const handleCorrectItems = useCallback((ids: string[]) => {
+    if (!operation.isCurrent()) return
+    setRetryIds(ids)
+    retryRequestsRef.current = session.tracking?.durableMode === "durable_collection" ? buildConferenceRetryRequestItems(resultsRef.current.filter(item => ids.includes(item.id))) : []
+    retryCollectionIdRef.current = session.tracking?.collectionId
+    goToStep(2)
+  }, [goToStep, operation, session.tracking, updateProcessingState])
+
   // Navigation callbacks for WizardResultsStep CTAs
-  const navigate = useNavigate()
+  const navigateInPlace = useNavigate()
+  const [navigationError, setNavigationError] = useState<string | null>(null)
+  const navigationMountedRef = useRef(false)
+  useEffect(() => {
+    navigationMountedRef.current = true
+    return () => { navigationMountedRef.current = false }
+  }, [])
+  const navigate = useCallback((route: string) => {
+    if (!operation.isCurrent()) return
+    if (window.location.pathname.endsWith("/sidepanel.html")) {
+      setNavigationError(null)
+      void (async () => {
+        try {
+          const url = browser.runtime.getURL(`/options.html#${route}`)
+          if (browser.tabs?.create) await browser.tabs.create({ url })
+          else if (!window.open(url, "_blank")) throw new Error("Workspace tab was blocked")
+          // The captured operation includes the session generation; the mount
+          // check also fences a replaced host with the same stored session.
+          if (navigationMountedRef.current && operation.isCurrent()) onClose()
+        } catch {
+          if (navigationMountedRef.current && operation.isCurrent()) {
+            setNavigationError(qi("workspaceOpenFailed", "Could not open the full-page workspace. Try the action again."))
+          }
+        }
+      })()
+      return
+    }
+    navigateInPlace(route)
+    onClose()
+  }, [navigateInPlace, onClose, operation, qi])
   const [reviewError, setReviewError] = useState<string | null>(null)
   const [reviewRetry, setReviewRetry] = useState(0)
   const reviewCreationRef = useRef<ReturnType<typeof createReviewDraftsFromResults> | null>(null)
@@ -1692,18 +1854,19 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     void reviewCreationRef.current.then(batch => {
       if (cancelled || !operation.isCurrent() || !batch) return
       navigate("/content-review?batch=" + encodeURIComponent(batch.batchId))
-      onClose()
     }).catch(error => {
       if (!cancelled && operation.isCurrent()) setReviewError(error instanceof Error ? error.message : "Failed to save review drafts.")
     })
     return () => { cancelled = true }
   }, [currentStep, navigate, onClose, open, operation, presetConfig, queueItems, results, reviewRetry, session.id])
 
-  const handleSearchKnowledge = useCallback(() => {
-    if (!operation.isCurrent()) return
-    navigate("/knowledge")
-    onClose()
-  }, [navigate, onClose, operation])
+  const handleSearchKnowledge = useCallback(
+    (mediaIds: number[]) => {
+      if (!operation.isCurrent()) return
+      navigate(buildKnowledgeMediaScopePath(mediaIds))
+    },
+    [navigate, operation],
+  )
 
   const handleIngestMore = useCallback(() => {
     if (!operation.isCurrent()) return
@@ -1719,9 +1882,8 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       } else {
         navigate(DOCUMENT_WORKSPACE_PATH)
       }
-      onClose()
     },
-    [navigate, onClose, operation]
+    [navigate, operation]
   )
 
   const handleOpenMedia = useCallback(
@@ -1732,19 +1894,41 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         ? `/media?id=${encodeURIComponent(String(mediaId))}`
         : "/media"
       navigate(mediaPath)
-      onClose()
     },
-    [navigate, onClose, operation]
+    [navigate, operation]
+  )
+
+  const handleReviewSavedItems = useCallback(
+    async (ids: Array<string | number>) => {
+      if (!operation.isCurrent()) return
+      const current = getSavedMediaIds(resultsRef.current)
+      const requested = new Set(ids.map(String))
+      const selected = current.filter((id) => requested.has(String(id)))
+      if (!selected.length) return
+      // This single record owns the handoff; a stale snapshot cannot relabel another owner's IDs.
+      await setSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, {
+      version: 1, authorityKey: operation.authorityKey, selectedIds: selected,
+    })
+      if (!operation.isCurrent()) return
+      try {
+      await setSetting(MEDIA_REVIEW_SELECTION_SETTING, selected)
+    } catch {
+      // Legacy readers receive a best-effort mirror; owned readers use the snapshot above.
+      console.warn("[media-review] Compatibility selection mirror could not be written.")
+    }
+      if (!operation.isCurrent()) return
+      navigate("/media-multi")
+    },
+    [navigate, operation]
   )
 
   const handleOpenCollection = useCallback(
     (collectionId: string) => {
       if (!operation.isCurrent()) return
       const collectionPath = buildMediaCollectionReviewPath(collectionId)
-      onClose()
       navigate(collectionPath)
     },
-    [navigate, onClose, operation]
+    [navigate, operation]
   )
 
   // Render the current step
@@ -1778,23 +1962,32 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           />
         )
       case 4:
-        return <ProcessingStep onCancelAll={handleCancelAll} onMinimize={onClose} />
+        return (
+          <ProcessingStep onCancelAll={handleCancelAll} onMinimize={onClose} />
+        )
       case 5:
         return (
           <>
-          {reviewError && <div role="alert">
-            <p>{reviewError}</p>
-            <Button onClick={() => { reviewCreationRef.current = null; setReviewRetry(value => value + 1) }}>
-              {qi("reviewDraftsRetry", "Retry saving review drafts")}
-            </Button>
-          </div>}
-          <WizardResultsStep
+            {navigationError && <div role="alert">{navigationError}</div>}
+            {reviewError && (
+              <div role="alert">
+                <p>{reviewError}</p>
+                <Button onClick={() => { reviewCreationRef.current = null; setReviewRetry(value => value + 1) }}>
+                  {qi("reviewDraftsRetry", "Retry saving review drafts")}
+                </Button>
+              </div>
+            )}
+            <WizardResultsStep
             onClose={onClose}
             onIngestMore={handleIngestMore}
             onOpenMedia={handleOpenMedia}
             onSearchKnowledge={handleSearchKnowledge}
             onOpenWorkspace={handleOpenWorkspace}
             onOpenCollection={handleOpenCollection}
+            onRetryItems={handleRetryItems}
+            onCorrectItems={handleCorrectItems}
+            onReattach={handleReattach}
+            onReviewSavedItems={handleReviewSavedItems}
           />
           </>
         )
@@ -1805,10 +1998,15 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     connectionRecoveryMessage,
     currentStep,
     reviewError,
+    navigationError,
     qi,
     handleCancelAll,
     handleOpenMedia,
     handleOpenCollection,
+    handleRetryItems,
+    handleCorrectItems,
+    handleReattach,
+    handleReviewSavedItems,
     handleOpenWorkspace,
     handleIngestMore,
     handleQuickProcess,
@@ -1881,10 +2079,40 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
       }))
     )
 
-  const initialState = useMemo(
-    () => (session ? buildInitialWizardState(session) : undefined),
-    [session]
-  )
+  // Keep attached files in this modal only; persisted stubs still require reattach after reload.
+  const liveQueueRef = useRef<{
+    authorityKey: string
+    sessionId: string
+    items: WizardQueueItem[]
+  } | null>(null)
+  const initialState = useMemo(() => {
+    if (!session) {
+      liveQueueRef.current = null
+      return undefined
+    }
+    const initial = buildInitialWizardState(session)
+    const live = liveQueueRef.current
+    if (
+      !live ||
+      live.authorityKey !== authorityKey ||
+      live.sessionId !== session.id
+    ) {
+      liveQueueRef.current = null
+      return initial
+    }
+    const attached = new Map(
+      live.items.filter((item) => item.file).map((item) => [item.id, item])
+    )
+    return {
+      ...initial,
+      queueItems: initial.queueItems.map((item) => {
+        const current = attached.get(item.id)
+        return current
+          ? { ...item, file: current.file, validation: current.validation }
+          : item
+      })
+    }
+  }, [authorityKey, session])
   const boundSessionId = session?.id
   const sessionRef = useRef(session)
   const lastPersistedSignatureRef = useRef<{
@@ -1909,13 +2137,16 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
   const persistWizardState = useCallback(
     (state: IngestWizardState) => {
       const currentSession = sessionRef.current
-      if (!currentSession || currentSession.id !== boundSessionId) return
-      const patch = buildSessionPatchFromWizardState(state, currentSession)
-      if (patch.completedAt == null) {
-        lastPersistedSignatureRef.current = null
-        upsertSession(patch)
-        return
+      if (
+        !authorityKey || !currentSession || currentSession.id !== boundSessionId ||
+        useQuickIngestSessionStore.getState().authorityKey !== authorityKey
+      ) return
+      liveQueueRef.current = {
+        authorityKey,
+        sessionId: currentSession.id,
+        items: state.queueItems,
       }
+      const patch = buildSessionPatchFromWizardState(state, currentSession)
       const signature = buildWizardPersistenceSignature(patch)
       // React may replay queued reducer updates after this synchronous Zustand
       // write rerenders the parent. Persist each semantic snapshot only once.
@@ -1931,7 +2162,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
       }
       upsertSession(patch)
     },
-    [boundSessionId, upsertSession]
+    [authorityKey, boundSessionId, upsertSession]
   )
 
   if (!authorityKey || !session || !initialState) return null

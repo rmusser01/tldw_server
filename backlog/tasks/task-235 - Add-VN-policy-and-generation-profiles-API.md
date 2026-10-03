@@ -38,9 +38,9 @@ Implement Task 3 of the VN platform API implementation plan. Scope: add backend-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Task 3 from Docs/superpowers/plans/2026-05-10-vn-platform-api-implementation-plan.md. Added global AuthNZ-backed VN policy/generation profile definitions, per-user immutable profile snapshots, safety metadata evaluation, VN policy API schemas/endpoints, router/capability/OpenAPI registration, and focused tests. Addressed review findings by allowing minor metadata for non-mature content, wrapping profile definition/version writes in one transaction, avoiding user ChaCha policy definition table creation for read-only list/read/evaluate paths, failing closed for unresolved custom runtime policy profiles, and honoring acknowledgement_required_for_warnings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

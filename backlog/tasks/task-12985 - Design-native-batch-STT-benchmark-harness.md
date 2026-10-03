@@ -38,11 +38,11 @@ Write the approved design to Docs/superpowers/specs/2026-07-22-native-batch-stt-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Approved design written and self-reviewed. No TODO/TBD placeholders remain. Architecture, dataset/scoring contracts, timing definitions, recovery, privacy, and regression policy are internally consistent. Upstream review is pinned to pipecat-ai/stt-benchmark commit 66f2cbf8. Verification: git diff --check passed. Bandit not applicable because only Markdown and Backlog records changed.
 
 Independent design review completed. Initial review found resume timing, cross-model compatibility, retry reduction, scoring determinism, comparison fairness, duration validation, and privacy gaps; all were resolved. Focused re-review confirmed no remaining Critical or Important issues and returned Ready to commit: Yes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -923,6 +923,26 @@ openai_tts_mappings = {
 
 
 # --- Helper Function (Optional but can keep dictionary creation clean) ---
+def _load_claims_review_metrics_settings(parser: configparser.ConfigParser | None) -> dict[str, Any]:
+    """Load Claims production flags while leaving numeric bounds to consumers."""
+    defaults = {
+        "CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED": "false",
+        "CLAIMS_REVIEW_METRICS_INTERVAL_SEC": "86400",
+        "CLAIMS_REVIEW_METRICS_LOOKBACK_DAYS": "2",
+        "CLAIMS_REVIEW_METRICS_JOBS_ENABLED": "false",
+        "CLAIMS_JOBS_ENABLED": "false",
+        "CLAIMS_JOBS_QUEUE": "default",
+        "CLAIMS_JOBS_MAX_RETRIES_REVIEW_METRICS": "3",
+    }
+    resolved: dict[str, Any] = {}
+    for key, default in defaults.items():
+        raw = os.getenv(key)
+        if raw is None:
+            raw = parser.get("ClaimsMonitoring", key, raw=True, fallback=default) if parser else default
+        resolved[key] = is_truthy(raw) if key.endswith("_ENABLED") else raw
+    return resolved
+
+
 def load_settings():
     """
     Assembles application configuration from environment variables and configuration files into a single mapping.
@@ -1826,6 +1846,7 @@ def load_settings():
         "CLAIMS_REBUILD_POLICY": os.getenv("CLAIMS_REBUILD_POLICY", "missing"),
         "CLAIMS_STALE_DAYS": int(os.getenv("CLAIMS_STALE_DAYS", "7")),
 
+        **_load_claims_review_metrics_settings(load_comprehensive_config()),
         # Claims monitoring (alerts/config)
         **(lambda: (
             (lambda _cp, _env: (
@@ -2867,6 +2888,38 @@ def rg_enabled(default: bool = True) -> bool:
                 _log_debug(f"rg_enabled: config read failed, falling back to default={default}: {exc}")
                 v = str(default)
     return _as_bool(v, default)
+
+
+_USAGE_QUOTAS_LEGACY_WARNED = False
+
+
+def usage_quotas_enabled() -> bool:
+    """
+    Master switch for usage quotas (Docs/Design/2026-10-02-usage-quota-posture-design.md §1).
+
+    Resolution order:
+      1) Env var USAGE_QUOTAS_ENABLED
+      2) Env var LIMIT_ENFORCEMENT_ENABLED, when explicitly set (legacy spelling; warns once)
+      3) [Usage-Quotas] enabled in config.txt
+      4) False: quotas are off unless an operator turns them on
+    """
+    global _USAGE_QUOTAS_LEGACY_WARNED
+    v = os.getenv("USAGE_QUOTAS_ENABLED")
+    if v is None:
+        legacy = os.getenv("LIMIT_ENFORCEMENT_ENABLED")
+        if legacy is not None:
+            if not _USAGE_QUOTAS_LEGACY_WARNED:
+                _USAGE_QUOTAS_LEGACY_WARNED = True
+                logger.warning("LIMIT_ENFORCEMENT_ENABLED is deprecated; set USAGE_QUOTAS_ENABLED instead")
+            v = legacy
+    if v is None:
+        try:
+            cp = load_comprehensive_config()
+            v = cp.get("Usage-Quotas", "enabled", fallback="false") if cp else "false"
+        except (FileNotFoundError, configparser.Error, KeyError, ValueError) as exc:
+            _log_debug(f"usage_quotas_enabled: config read failed, quotas stay off: {exc}")
+            v = "false"
+    return _as_bool(v, False)
 
 
 def get_llamacpp_handler_config() -> Optional["LlamaCppConfig"]:
@@ -4883,9 +4936,14 @@ def load_and_log_configs(
         def _section_items_dict(section_name: str) -> dict[str, Any]:
             try:
                 if hasattr(config_parser_object, "has_section") and config_parser_object.has_section(section_name):
-                    return dict(config_parser_object.items(section_name))
+                    sections = getattr(config_parser_object, "_sections", None)
+                    if isinstance(sections, Mapping):
+                        explicit_items = sections.get(section_name)
+                        if isinstance(explicit_items, Mapping):
+                            return {key: value for key, value in explicit_items.items() if key != "__name__"}
+                    return dict(config_parser_object.items(section_name, raw=True))
             except _CONFIG_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug("Failed to read config section '{}': {}", section_name, exc)
+                logger.debug("Failed to read config section '{}' ({})", section_name, type(exc).__name__)
             return {}
 
         from tldw_Server_API.app.core.config_sections.stt import load_stt_config
@@ -5642,6 +5700,7 @@ def load_and_log_configs(
                 'analyze_search_results_prompt': analyze_search_results_prompt,
             },
             'web_scraper':{
+                **_section_items_dict('Web-Scraper'),
                 'web_scraper_api_key': web_scraper_api_key,
                 'web_scraper_api_url': web_scraper_api_url,
                 'web_scraper_api_timeout': web_scraper_api_timeout,

@@ -39,9 +39,9 @@ Added Task 5.5 coverage and implementation for admin setup readiness route parit
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Shared the first-run readiness helpers with admin routes by adding allow_completed_when_disabled handling and routing admin endpoints through require_shared_audio_installer_access.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

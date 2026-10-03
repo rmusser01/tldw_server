@@ -29,7 +29,7 @@ Plan the implementation for the approved TASK-443 document-first Writing Playgro
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Planning completed for the document-first Writing Playground revision workflow implementation.
 
 Modified files:
@@ -46,7 +46,7 @@ Verification:
 - ASCII scan on plan/task paths: PASS (no matches).
 - Placeholder scan on plan: PASS (no TODO/TBD/FIXME/placeholders).
 - Bandit: skipped because this is documentation/planning only and no Python source was touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

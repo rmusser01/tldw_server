@@ -523,7 +523,7 @@ async def test_redis_tokens_window_holds_one_member_per_quantum(add_path, monkey
 
     assert allowed and handle
     if add_path == "lua":
-        limit, _window, units, csv = lua_argv[0][-4:]
+        limit, _window, units, _ttl, csv = lua_argv[0][-5:]
         assert (limit, units, len(csv.split(","))) == (1000, 50, 50)
     else:
         assert await _token_members(gov) == 50

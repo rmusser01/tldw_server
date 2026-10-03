@@ -28,6 +28,9 @@ apt_bounded() {
     if sudo timeout --kill-after=15s "$limit" apt-get "$@"; then
       return 0
     fi
+    if [ "$attempt" -eq 3 ]; then
+      break
+    fi
     echo "::warning::apt-get $1 attempt ${attempt} failed or timed out; retrying"
     limit=$(_apt_remaining_capped 60)
     if [ "$limit" -gt 0 ]; then

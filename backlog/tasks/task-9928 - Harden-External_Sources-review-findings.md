@@ -55,7 +55,7 @@ Completed; temporary implementation plan file removed after verification per rep
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Touched production files:
 - tldw_Server_API/app/core/External_Sources/connector_base.py
 - tldw_Server_API/app/core/External_Sources/connectors_service.py
@@ -70,17 +70,7 @@ Verification:
 - python -m bandit -r touched production files -f json -o /tmp/bandit_external_sources_9928.json (0 findings)
 
 Known skip: full default pytest import path timed out in unrelated optional-router app import; rerun used ULTRA_MINIMAL_APP=1 to keep verification scoped to these unit tests.
-<!-- SECTION:NOTES:END -->
 
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Hardened External_Sources review findings and addressed PR #2454 comments, including PR Compliance ID 224214 docstring cleanup for the Notion sanitization helpers and connector secret helper focus area. Verification includes AST docstring checks, compile, focused tests, and Bandit with 0 findings.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PR #2454 remediation started after automated review comments. Scope: rebase on latest origin/dev; handle Notion code literal rendering, safe URL parsing, SQLite commit fallback, docstrings/type hints/custom exception review items; refresh verification and push updated branch.
 PR #2454 remediation completed after rebasing on latest origin/dev. Addressed automated review comments by preserving literal Notion code block text, using collision-free inline code spans, guarding malformed Markdown image URLs, avoiding the missing-commit-method await failure, adding docstrings/type hints for touched helpers, and replacing connector-domain RuntimeError raises with ConnectorServiceError.
 
@@ -112,3 +102,9 @@ Verification for docstring follow-up:
 - ULTRA_MINIMAL_APP=1 focused pytest for test_connectors_service_sanitizers.py and test_notion_connector_sanitizers.py (12 passed)
 - Bandit JSON at /tmp/bandit_external_sources_docstrings_224214.json reported 0 findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Hardened External_Sources review findings and addressed PR #2454 comments, including PR Compliance ID 224214 docstring cleanup for the Notion sanitization helpers and connector secret helper focus area. Verification includes AST docstring checks, compile, focused tests, and Bandit with 0 findings.
+<!-- SECTION:FINAL_SUMMARY:END -->

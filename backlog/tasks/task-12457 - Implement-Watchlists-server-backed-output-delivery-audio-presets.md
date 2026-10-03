@@ -43,11 +43,11 @@ Implement durable per-user Watchlists presets for monitor output, delivery, and 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented per-user Watchlists output preset persistence in Watchlists DB with SQLite/PostgreSQL schema bootstrap, CRUD helpers, default exclusivity, user scoping, and server-side apply semantics. Added /api/v1/watchlists/job-output-presets CRUD/apply routes and schemas. Added shared UI types/services, a frontend merge helper aligned with backend behavior, and JobFormModal controls to load, save, apply, update, and delete presets inside /watchlists while preserving raw advanced output_prefs and leaving scope, filters, source rules, dedupe, and cadence unchanged. Self-review added regression coverage for legacy scalar nested output prefs and a confirmation gate before durable preset deletion.
 
 PR review follow-up: narrowed output preset row projection error handling to log and re-raise corrupt JSON/non-object prefs instead of silently returning an empty object; mapped DB unique-index races for output preset names back to output_preset_name_exists so API routes continue returning 409; changed the frontend preset clone helper to prefer structuredClone with JSON fallback; made apply requests reject explicit null base_output_prefs while still allowing omission; added regression tests for the review items. Verification: backend Watchlists DB/API pytest suite passed with 18 tests; frontend preset/service/modal Vitest suite passed with 36 tests; static guard passed with 3 tests; Bandit wrote /tmp/bandit_watchlists_output_presets_review.json with zero findings; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

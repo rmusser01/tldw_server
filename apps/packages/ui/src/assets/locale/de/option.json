@@ -514,7 +514,7 @@
     "emptyDescription": "Noch keine Entwürfe. Verwende Quick Ingest mit Review vor dem Speichern, um Entwürfe zu erstellen.",
     "openQuickIngest": "Quick Ingest öffnen",
     "storeAfterReview": "Nach Überprüfung speichern",
-    "reviewBeforeStorage": "Vor dem Speichern überprüfen",
+    "reviewBeforeStorage": "Extrahierte Inhalte vor dem Speichern prüfen",
     "reviewBeforeStorageHint": "Jetzt verarbeiten und Entwürfe lokal bearbeiten, bevor du sie auf deinen Server überträgst.",
     "reviewEnabled": "Überprüfungsmodus",
     "reviewStorageCap": "Lokale Entwürfe sind auf {{cap}} begrenzt.",

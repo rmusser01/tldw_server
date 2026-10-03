@@ -34,7 +34,7 @@ Align INV-027 with the documented LLM provider integration policy by rejecting r
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started in isolated worktree .worktrees/llm-local-url-override-policy from origin/dev. Root cause from TASK-2232 audit: Chat request extras can carry api_url/provider-specific *_api_url keys into local adapters, contradicting the documented config-only local endpoint policy. Plan: write failing tests for local override rejection, implement the minimal chat-service guard, update ADR inventory/audit notes if now backfillable, then run focused tests and Bandit.
 
 Implemented the local provider request URL override guard in chat_service before adapter dispatch. RED verification: the new local-provider override tests failed before the guard with 3 failed and 4 passed because ChatBadRequestError was not raised. GREEN verification: focused Chat/LLM regression suite passed with 22 passed and 5 warnings. Bandit on the touched Python files exited 0 with zero findings after annotating test assertions with nosec B101. Additional checks: git diff --check exited 0; reference scan across touched files found no absolute developer-machine paths or temporary Bandit report artifact names. Follow-up TASK-2310 was created for bounded INV-027 ADR backfill.
@@ -46,7 +46,7 @@ Rebased PR branch on latest origin/dev and addressed Gemini review threads by al
 Addressed the actionable CodeRabbit docstring warning by adding docstrings to the new chat-service helper functions. Re-ran focused verification after the docstring follow-up: Chat/LLM regression suite passed with 24 passed and 5 warnings; security scan on touched Python files exited 0 with zero findings; git diff --check exited 0; touched-file reference scan found no workstation-specific paths or temporary report artifact names. Remaining PR description warning requires the human-authored Change summary mandated by repository policy.
 
 Addressed the remaining actionable Qodo review threads: BYOK base_url allowlist entries are now canonicalized through the chat provider alias resolver, and local-provider detection now uses a registry-owned local provider predicate instead of a duplicated chat_service set. Added regression coverage for allowlisting the OpenAI alias oai. Verification after these changes: focused Chat/LLM regression suite passed with 25 passed and 5 warnings; security scan on touched Python files exited 0 with zero findings; git diff --check exited 0; touched-file reference scan found no workstation-specific paths or temporary report artifact names.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

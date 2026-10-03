@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { normalChatMode } from "@/hooks/chat-modes/normalChatMode"
 import type { BaseMessage } from "@/types/messages"
 import { CurrentChatModelSettings } from "../CurrentChatModelSettings"
+import { getAllModelSettings } from "@/services/model-settings"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useActorStore } from "@/store/actor"
 import { buildCockpitProviderRouteSummary } from "@/components/Option/Playground/playground-cockpit-summaries"
@@ -89,7 +90,7 @@ vi.mock("@/components/Common/Settings/LorebookDebugPanel", () => ({
 }))
 vi.mock("../tabs", async () => ({
   ConversationTab: (await import("../tabs/ConversationTab")).ConversationTab,
-  ModelBasicsTab: () => null,
+  ModelBasicsTab: (await import("../tabs/ModelBasicsTab")).ModelBasicsTab,
   ActorTab: () => null,
   AdvancedParamsTab: () => null,
 }))
@@ -189,6 +190,64 @@ describe("Conversation prompt editor through real model settings Save", () => {
     useStoreChatModelSettings.getState().setSystemPrompt(instruction)
     const { editor } = await mountSettings()
     expect(editor).toHaveValue(instruction)
+  })
+
+  it("keeps generation settings through a cached dialog remount and Save", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const first = await mountSettings(undefined, client)
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    fireEvent.change(screen.getByLabelText("modelSettings.form.numPredict.label"), {
+      target: { value: "48" },
+    })
+    fireEvent.change(screen.getByLabelText("modelSettings.form.temperature.label"), {
+      target: { value: "0.25" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(first.close).toHaveBeenCalledWith(false))
+    expect(useStoreChatModelSettings.getState().numPredict).toBe(48)
+    first.unmount()
+
+    const reopened = await mountSettings(undefined, client)
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    expect(screen.getByLabelText("modelSettings.form.numPredict.label")).toHaveValue("48")
+    expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.25")
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(reopened.close).toHaveBeenCalledWith(false))
+    expect(useStoreChatModelSettings.getState()).toMatchObject({
+      numPredict: 48,
+      temperature: 0.25,
+      apiProvider: "llama.cpp",
+    })
+  })
+
+  it("does not revive a cached default after explicitly clearing a numeric setting", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    await client.prefetchQuery({
+      queryKey: ["fetchModelConfig2", true, null],
+      queryFn: getAllModelSettings,
+    })
+    useStoreChatModelSettings.getState().setTemperature(0.25)
+    const clearing = await mountSettings(undefined, client)
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("0.25")
+    fireEvent.change(screen.getByLabelText("modelSettings.form.temperature.label"), {
+      target: { value: "" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() =>
+      expect(useStoreChatModelSettings.getState().temperature).toBeUndefined(),
+    )
+    clearing.unmount()
+    const reopened = await mountSettings(undefined, client)
+    fireEvent.click(screen.getByRole("tab", { name: "Model" }))
+    expect(screen.getByLabelText("modelSettings.form.temperature.label")).toHaveValue("")
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+    await waitFor(() => expect(reopened.close).toHaveBeenCalledWith(false))
+    expect(useStoreChatModelSettings.getState().temperature).toBeUndefined()
   })
 
   it.each(["saved", "reset-default", "reset-template", "owner-changed"])(

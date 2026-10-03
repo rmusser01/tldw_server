@@ -30,9 +30,9 @@ Continue #1116 Phase 2.2 by deferring basic core infrastructure router imports f
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: red focused infrastructure laziness test failed before implementation; green focused rerun passed 1 selected; full router group contract passed 57; main router contract passed 6; OpenAPI contract suite passed 69; Bandit core router group source reported 0 results and 0 errors; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

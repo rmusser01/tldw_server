@@ -128,4 +128,118 @@ describe("normalizeKnowledgeAnswerTrust", () => {
       }).state
     ).toBe("cited_answer")
   })
+  it.each([
+    {
+      name: "no visible citation",
+      citations: [],
+      results: [{ id: "source-1", content: "Evidence" }],
+      state: "uncited_degraded_answer",
+      reason: "missing_citations",
+    },
+    {
+      name: "citation outside returned scope",
+      citations: [{ index: 1, documentId: "hidden-source" }],
+      results: [{ id: "source-1", content: "Evidence" }],
+      state: "uncited_degraded_answer",
+      reason: "citation_source_not_returned",
+    },
+    {
+      name: "missing excerpt",
+      citations: [{ index: 1, documentId: "source-1" }],
+      results: [{ id: "source-1" }],
+      state: "no_answer_insufficient_evidence",
+      reason: "missing_inspectable_evidence",
+    },
+    {
+      name: "unavailable source",
+      citations: [{ index: 1, documentId: "source-1" }],
+      results: [
+        { id: "source-1", content: "Old evidence", sourceStatus: "deleted" },
+      ],
+      state: "no_answer_insufficient_evidence",
+      reason: "missing_inspectable_evidence",
+    },
+    {
+      name: "source with unavailable reason",
+      citations: [{ index: 1, documentId: "source-1" }],
+      results: [
+        {
+          id: "source-1",
+          excerpt: "Old evidence",
+          metadata: { unavailable_reason: "permission_denied" },
+        },
+      ],
+      state: "no_answer_insufficient_evidence",
+      reason: "missing_inspectable_evidence",
+    },
+  ])(
+    "qualifies backend cited trust when $name",
+    ({ citations, results, state, reason }) => {
+      expect(
+        normalizeKnowledgeAnswerTrust({
+          answer: "Answer [1]",
+          results,
+          citations,
+          backendTrust: {
+            state: "cited_answer",
+            reason_codes: ["web_fallback_used"],
+            evidence_origin: "mixed",
+          },
+        })
+      ).toEqual({
+        state,
+        reasonCodes: ["web_fallback_used", reason],
+        evidenceOrigin: "mixed",
+      })
+    }
+  )
+
+  it.each([
+    "uncited_degraded_answer",
+    "no_answer_insufficient_evidence",
+    "no_results",
+    "failed_search",
+    "unsynced_local_result",
+    "unknown_trust",
+  ] as const)(
+    "preserves authoritative %s even with inspectable citations",
+    (state) => {
+      expect(
+        normalizeKnowledgeAnswerTrust({
+          answer: "Answer [1]",
+          results: [{ id: "source-1", content: "Evidence" }],
+          citations: [{ index: 1, documentId: "source-1" }],
+          hasRequiredMetadata: true,
+          backendTrust: {
+            state,
+            reason_codes: ["server_qualification"],
+            evidence_origin: "web_fallback",
+          },
+        })
+      ).toEqual({
+        state,
+        reasonCodes: ["server_qualification"],
+        evidenceOrigin: "web_fallback",
+      })
+    }
+  )
+
+  it("retains backend cited trust with an inspectable returned answer citation", () => {
+    expect(
+      normalizeKnowledgeAnswerTrust({
+        answer: "Answer [1]",
+        results: [{ id: "source-1", excerpt: "Evidence" }],
+        citations: [{ index: 1, documentId: "source-1" }],
+        backendTrust: {
+          state: "cited_answer",
+          reason_codes: ["web_fallback_used"],
+          evidence_origin: "web_fallback",
+        },
+      })
+    ).toEqual({
+      state: "cited_answer",
+      reasonCodes: ["web_fallback_used"],
+      evidenceOrigin: "web_fallback",
+    })
+  })
 })

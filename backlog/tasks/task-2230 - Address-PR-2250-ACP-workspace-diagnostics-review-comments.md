@@ -23,9 +23,9 @@ priority: high
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented PR #2250 review fixes: logged bounded workspace-context registry enrichment failures, added get_session_metadata return typing, made ACP_E2E_WORKSPACE_ID required for workspace-live-e2e and added workspace_id_source evidence, and replaced optional OR list_sessions filters with fixed-column dynamic predicates so workspace_id queries can use indexes. Verification so far: focused RED tests failed before implementation; focused tests now pass; helper + ACP sessions DB suites pass with 98 passed; ACP endpoint suite passes with 27 passed. Bandit on helper + ACP endpoint exits 0. Bandit on helper + endpoint + ACP_Sessions_DB exits nonzero only on pre-existing findings elsewhere in ACP_Sessions_DB.py; new list_sessions SQL lines are nosec B608 with fixed-column/bound-param rationale and no longer reported.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

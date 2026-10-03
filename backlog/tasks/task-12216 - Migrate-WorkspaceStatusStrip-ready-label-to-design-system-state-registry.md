@@ -35,9 +35,9 @@ Replace the WorkspaceStatusStrip runtime ready label with the canonical design-s
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented WorkspaceStatusStrip ready status through getDesignSystemState('ready').label and added a partial design-system mock in its focused test. Removed canonical-state-label baseline entry for src/components/Option/ChatWorkspace/WorkspaceStatusStrip.tsx:Ready. While running verify:design-system-state, found a pre-existing blocked finding on src/components/PersonaGarden/VisualPackEditor.tsx caused by AntD Tag availability badges. Replaced those availability badges with token-backed spans preserving the visible lowercase copy. Bandit skipped because touched code is UI TypeScript/JSON/Backlog markdown with no Python execution surface.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -36,7 +36,7 @@ Create an implementation plan from the approved prototype workspace productioniz
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan Docs/superpowers/plans/2026-05-09-prototype-workspace-productionization-tracker-implementation-plan.md from the approved issue-tree spec. The plan covers contract matrix creation, draft GitHub issue body source, review gate before GitHub issue creation, child issue creation/linking, verification, Bandit disposition for doc-only changes, and closeout.
 
 Plan review loop completed. First review found execution-order blockers around clean worktree losing untracked source artifacts and final Backlog updates happening after commit. Revised the plan to keep work in this checkout unless artifacts are copied, move Backlog closeout before commit, and persist reviewed issue-body drafts before GitHub mutations. Second review approved the plan.
@@ -58,7 +58,7 @@ Task 6 closeout: no backend/frontend code modified. Bandit not run because chang
 After main-checkout commit was blocked by unrelated unmerged files, preserved the tracker artifacts in clean worktree /private/tmp/tldw-prototype-productionization-tracker-20260509 on branch codex/prototype-workspace-productionization-tracker-20260509. Created commit 8955efeb9 docs: add prototype workspace productionization tracker.
 
 Note: the earlier recorded 8955efeb9 hash was the pre-amend clean-worktree commit. The clean worktree branch tip should be treated as the source of truth for the committed tracker artifacts.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

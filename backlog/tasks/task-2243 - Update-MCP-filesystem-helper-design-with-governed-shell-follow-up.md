@@ -24,9 +24,9 @@ Revise the MCP filesystem helper spec and implementation plan to incorporate des
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Reviewed the existing RunCommandModule and command_runtime parser/adapter/registry against the pasted backend-lead note. The repo already has the safe shell-shaped execution model, so the plan now keeps typed filesystem helpers in the current slice and scopes bash/shell compatibility aliases to a separate governed runtime follow-up. Added requirements for traversal caps, regex pattern guards, explicit dot-segment hidden semantics, and symlink outside-workspace/loop coverage.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

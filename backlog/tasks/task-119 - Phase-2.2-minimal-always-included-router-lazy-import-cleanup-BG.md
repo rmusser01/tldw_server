@@ -36,7 +36,7 @@ PR #1370 review fix pass: verify each review finding against current code, fix o
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline selector passed before edits with 2 passed, 165 deselected, 6 warnings. RED selector failed as expected because iter_minimal_test_router_specs eagerly imported auth and the source still contained direct endpoint imports. GREEN selector passed with 5 passed, 165 deselected, 6 warnings after converting always-included minimal routers to required ImportedRouterSpec factories.
 
 Validation: full router group contracts passed with 170 passed, 30 warnings; main router contracts passed with 6 passed, 5 warnings; OpenAPI contracts passed with 69 passed, 24 warnings; Bandit on tldw_Server_API/app/api/v1/router_groups/minimal.py reported 0 results and 0 errors; git diff --check passed. No documentation change required for this internal router-registration cleanup.
@@ -44,7 +44,7 @@ Validation: full router group contracts passed with 170 passed, 30 warnings; mai
 Reopened for PR #1370 review comments. Gemini ModuleType import thread was invalid: from types import ModuleType already exists and the targeted test passes; replied and resolved. CodeRabbit's registry-path coverage comment is valid and will be handled with a minimal test-only update.
 
 PR #1370 review fix validation: focused pytest for test_iter_minimal_test_router_specs_propagates_runtime_import_failures passed with 1 passed, 169 deselected; full router group contract suite passed with 170 passed; Bandit on the touched test file with B101 skipped reported 0 results and 0 errors; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

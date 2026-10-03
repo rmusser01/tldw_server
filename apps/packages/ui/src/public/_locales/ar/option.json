@@ -1179,7 +1179,7 @@
     "message": "الحفظ بعد المراجعة"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "المراجعة قبل الحفظ"
+    "message": "مراجعة المحتوى المستخرج قبل الحفظ"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "قم بالمعالجة الآن ثم حرّر المسودات محليًا قبل اعتمادها على الخادم."
@@ -2731,5 +2731,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "الحفظ دون اتصال غير متاح حتى يتم تأكيد حسابك والتخزين المحلي. تبقى تغييراتك غير محفوظة."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

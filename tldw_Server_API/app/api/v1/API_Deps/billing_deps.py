@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.Billing.enforcement import (
     EnforcementAction,
     LimitCategory,
     LimitCheckResult,
+    billing_checks_active,
     enforcement_enabled,
     get_billing_enforcer,
 )
@@ -175,7 +176,7 @@ async def get_billing_org_id(
     or single-user mode is active.  Intended for handler bodies that
     need an org_id to create a ``LimitEnforcer`` context manager.
     """
-    if not enforcement_enabled():
+    if not await billing_checks_active():
         return None
     try:
         resolved = await _resolve_org_id(principal, org_id, x_tldw_org_id)
@@ -193,7 +194,7 @@ async def resolve_org_id_for_principal(principal: AuthPrincipal) -> int | None:
     Useful in WebSocket handlers where ``Depends()`` is unavailable.
     Returns None when enforcement is disabled or org context is absent.
     """
-    if not enforcement_enabled():
+    if not await billing_checks_active():
         return None
     try:
         return await _resolve_org_id(principal, None, None)
@@ -232,7 +233,7 @@ def require_within_limit(category: LimitCategory, units: int = 1):
         org_id: int | None = Query(None, description="Organization ID"),
     ) -> LimitCheckResult:
         # Skip enforcement if disabled
-        if not enforcement_enabled():
+        if not await billing_checks_active():
             return LimitCheckResult(
                 category=category.value,
                 action=EnforcementAction.ALLOW,
@@ -319,7 +320,7 @@ def require_feature(feature: str):
         org_id: int | None = Query(None, description="Organization ID"),
     ) -> bool:
         # Skip enforcement if disabled
-        if not enforcement_enabled():
+        if not await billing_checks_active():
             return True
 
         # Resolve org_id
@@ -398,7 +399,7 @@ async def add_billing_headers(
     Useful for endpoints that don't enforce limits but want to inform
     clients about their usage.
     """
-    if not enforcement_enabled():
+    if not await billing_checks_active():
         return
 
     org_id = await _resolve_org_id(principal, org_id, x_tldw_org_id)
@@ -444,7 +445,7 @@ class LimitEnforcer:
 
     async def __aenter__(self) -> LimitEnforcer:
         """Check limit on entry."""
-        if enforcement_enabled():
+        if await billing_checks_active():
             self._check_result = await self._enforcer.check_limit(
                 self.org_id,
                 self.category,

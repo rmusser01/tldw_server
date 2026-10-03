@@ -128,6 +128,15 @@ vi.mock("antd", async () => {
   const actual = await vi.importActual<typeof import("antd")>("antd")
   return {
     ...actual,
+    // Keep notification payload assertions without mounting auto-close timers.
+    notification: {
+      ...actual.notification,
+      open: vi.fn(),
+      success: vi.fn(),
+      info: vi.fn(),
+      warning: vi.fn(),
+      error: vi.fn()
+    },
     Skeleton: () => <div data-testid="prompts-loading-skeleton" />,
     Table: (props: any) => {
       const rows = Array.isArray(props?.dataSource) ? props.dataSource : []
@@ -701,7 +710,10 @@ describe("PromptBody server search and pagination", () => {
     })
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    await waitFor(() =>
+      expect(document.querySelector(".ant-notification-notice")).toBeNull()
+    )
     setViewportWidth(1280)
     vi.clearAllMocks()
     vi.restoreAllMocks()

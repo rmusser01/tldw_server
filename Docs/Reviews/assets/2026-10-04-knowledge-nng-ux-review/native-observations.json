@@ -1,0 +1,34 @@
+{
+  "baseCommit": "75ab224081bf140ef52017c1a9b0a04f6878d488",
+  "nativeExtensionBuild": "bun run build:chrome:dev, exit 0",
+  "nativeOptionsSetup": "Setup-required checklist observed; synthetic server credentials configured",
+  "nativeOptionsViewport": {
+    "desktop": {
+      "width": 1440,
+      "height": 900
+    },
+    "narrow": {
+      "width": 390,
+      "height": 844
+    }
+  },
+  "narrowWidths": {
+    "innerWidth": 390,
+    "scrollWidth": 390
+  },
+  "commandK": "Global command palette opened; Escape closed it",
+  "nativeSidepanel": "Companion home, Open Chat, and sidebar inspected; Knowledge retrieval assessed separately on shared WebUI",
+  "nativeContextCleanup": "All disposable Chromium contexts closed",
+  "browserLimitations": [
+    "Real website/context-menu capture not tested",
+    "Native extension retrieval not executed; shared WebUI retrieval completed"
+  ],
+  "runtimeCleanup": {
+    "status": "stopped",
+    "portsClosed": [
+      18921,
+      18922,
+      18923
+    ]
+  }
+}

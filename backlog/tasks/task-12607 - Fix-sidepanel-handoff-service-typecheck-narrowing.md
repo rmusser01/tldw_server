@@ -34,9 +34,9 @@ Fix TypeScript narrowing errors in the sidepanel chat handoff storage service so
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: TypeScript did not narrow optional Record<string, unknown> fields through conditional object spreads in parsePageContext, parseRouteIntent, and parsePackage, even though runtime guards were present. Fix: bind validated title, url, truncated, route character id, draft truncated, and consumedAt values into typed locals before returning normalized handoff shapes. Verification: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false passed from apps/packages/ui; focused handoff service/UI Vitest run passed with 24 tests; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

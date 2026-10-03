@@ -47,6 +47,7 @@ export type TldwRequestPayload = {
   timeoutMs?: number;
   abortSignal?: AbortSignal;
   responseType?: "json" | "text" | "arrayBuffer";
+  maxResponseBytes?: number;
   recipePersistence?: RecipePersistenceRequestPolicy;
 };
 
@@ -195,6 +196,45 @@ export const tldwRequest = async (
   }
 };
 
+const readBoundedArrayBuffer = async (response: Response, maxBytes: number, signal: AbortSignal): Promise<ArrayBuffer> => {
+  const tooLarge = () => Object.assign(new Error('Response exceeds the size limit.'), { code: 'RESPONSE_TOO_LARGE' });
+  if (Number(response.headers.get('content-length')) > maxBytes) {
+    void response.body?.cancel().catch(() => undefined);
+    throw tooLarge();
+  }
+  if (!response.body) return new ArrayBuffer(0);
+  const reader = response.body.getReader();
+  const cancel = () => { void reader.cancel().catch(() => undefined); };
+  signal.addEventListener('abort', cancel, { once: true });
+  let buffer = new Uint8Array(0);
+  let length = 0;
+  try {
+    if (signal.aborted) cancel();
+    signal.throwIfAborted();
+    while (true) {
+      const { done, value } = await reader.read();
+      signal.throwIfAborted();
+      if (done) break;
+      const nextLength = length + value.byteLength;
+      if (nextLength > maxBytes) {
+        cancel();
+        throw tooLarge();
+      }
+      if (nextLength > buffer.length) {
+        const grown = new Uint8Array(Math.min(maxBytes, Math.max(nextLength, buffer.length * 2, 64 * 1024)));
+        grown.set(buffer.subarray(0, length));
+        buffer = grown;
+      }
+      buffer.set(value, length);
+      length = nextLength;
+    }
+    return buffer.buffer.slice(0, length);
+  } finally {
+    signal.removeEventListener('abort', cancel);
+    reader.releaseLock();
+  }
+};
+
 const performTldwRequest = async (
   payload: TldwRequestPayload,
   runtime: TldwRequestRuntime,
@@ -212,11 +252,15 @@ const performTldwRequest = async (
     timeoutMs: overrideTimeoutMs,
     abortSignal,
     responseType,
+    maxResponseBytes,
   } = payload || {};
   // Extension IPC payloads are runtime input despite the TypeScript signature.
   // Coercing an array/object later would bypass the absolute-URL guard.
   if (typeof path !== "string") {
     return { ok: false, status: 400, error: "Request path must be a string" };
+  }
+  if (maxResponseBytes !== undefined && (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1)) {
+    return { ok: false, status: 400, error: 'Invalid response size limit.' };
   }
   const normalizedPath = normalizeKnownPathQuirks(path);
   const fetchFn = runtime.fetchFn || fetch;
@@ -688,9 +732,16 @@ const performTldwRequest = async (
       return await resp.text().catch(() => null);
     };
     if (responseType === "arrayBuffer") {
-      data = resp.ok
-        ? await resp.arrayBuffer().catch(() => null)
-        : await readDefaultBody();
+      if (maxResponseBytes !== undefined) {
+        const buffer = await readBoundedArrayBuffer(resp, maxResponseBytes, retryController?.signal ?? controller.signal);
+        if (resp.ok) data = buffer;
+        else {
+          const text = new TextDecoder().decode(buffer);
+          if (contentType.includes('application/json')) {
+            try { data = JSON.parse(text); } catch { data = null; }
+          } else data = text;
+        }
+      } else data = resp.ok ? await resp.arrayBuffer().catch(() => null) : await readDefaultBody();
     } else if (responseType === "json") {
       data = await resp.json().catch(() => null);
     } else if (responseType === "text") {
@@ -742,6 +793,9 @@ const performTldwRequest = async (
       retryAfterMs,
     };
   } catch (e: any) {
+    if (e?.code === 'RESPONSE_TOO_LARGE') {
+      return { ok: false, status: 0, error: e.message, code: 'RESPONSE_TOO_LARGE' };
+    }
     // Internal deadlines also raise AbortError; only the caller's signal marks
     // deliberate cancellation that should suppress connection/error feedback.
     if (abortSignal?.aborted) {

@@ -48,7 +48,7 @@ Found by the comprehensive core-module review (TASK-13293). All three defects in
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Superseded by TASK-13322, which was filed first and identifies a better root cause: the de-facto canonical is_truthy lives in core/testing.py, a module documented as test-mode detection, imported by 140 production files -- so engineers reasonably write their own rather than importing production flag semantics from testing.py. 13322 also found a defect this task missed: one truthy set lowercases without stripping, so a trailing space from a docker-compose environment: list flips DOTS_VLLM_USE_DATA_URL to False and sends a server-local path to a remote vLLM.
 
 The design doc Docs/Design/2026-09-21-scalar-and-env-coercion-consolidation-design.md remains the design of record and is now referenced from 13322. It contributes what 13322 does not carry: the three-way contract decision (truthy / falsy / unrecognised returns explicit default) with the argument for why the two-way contract is what makes the fail-open class expressible; the ratchet-over-mass-refactor decision; the TRUTHY/FALSY union derived so no currently-accepted spelling changes meaning; the five staged migration gates; and the explicit exclusions.
@@ -64,7 +64,7 @@ This task stays open until either the work is done or TASK-13322 actually lands 
 Reconciled 2026-09-28 against dev after #3011 merged TASK-13322 (Done). The Done status here contradicted the REOPENED note above; this task stays open for the work 13322 did not carry. Verified on dev: AC1: TTS audio_cpp_config._as_bool is gone, google_adapter._env_flag is env_bool(name, default=False), and request_resolution._is_truthy_value is parse_bool(..., default=False), all fail-closed via core/Utils/coercion. AC2: TTS_NEW/unit/adapters/test_audio_cpp_config.py::test_negative_or_unknown_allow_remote_tokens_keep_the_loopback_guard. AC3: core/Utils/coercion.py plus the 13322 table test. AC4 amended: core/testing re-exports and delegates, while MCP_unified/environment.is_truthy deliberately copies the vocabulary ('copied, not imported, for the standalone package boundary'), which is a recorded divergence, not a gap. Still open: AC5 (stage 4 private-coercion lint ratchet: tests/lint/test_private_coercion_ratchet.py does not exist on dev), AC6, AC7.
 
 Closed 2026-09-29 after #3049 merged. AC4: the ratchet is on dev and passes (4/4), enforced by backend-required's 'Enforce CI contracts and code ratchets' step. AC5 (Bandit): coercion.py 0 findings; only pytest asserts (B101) in the ratchet file. AC7 amended from 'no key resolves differently after any stage', which contradicted stage 1's intended fail-open fixes, to the design's actual rule: additive sets, and value changes stop and are recorded.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

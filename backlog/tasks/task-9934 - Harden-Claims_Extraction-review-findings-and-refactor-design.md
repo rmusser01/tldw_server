@@ -49,9 +49,11 @@ Verify and address validated Claims_Extraction review findings, then capture a f
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Spec follow-up review tightened implementation constraints for rebuild strictness, timeout worker bounds, analytics owner-scope SQL, and notification dispatcher saturation behavior.
-<!-- SECTION:NOTES:END -->
+
+Implemented validated Claims_Extraction hardening findings with failing-first tests: runtime max clamps, review email HTML escaping, FVA adjudication metrics, atomic rebuild replacement rollback, cancellation propagation, prompt LLM timeout executor shutdown, owner-scoped analytics aggregates, and bounded notification dispatch. Verification: targeted pytest suite `python -m pytest -q tldw_Server_API/tests/Claims/test_claims_rebuild_service_failure.py tldw_Server_API/tests/Claims/test_claims_runtime_config.py tldw_Server_API/tests/Claims/test_claims_review_notifications.py tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py tldw_Server_API/tests/Claims/test_claims_cancellation_and_timeout.py tldw_Server_API/tests/Claims_Extraction/test_fva_pipeline.py` passed with 43 passed, 152 warnings. Bandit command on touched Claims_Extraction files wrote `/tmp/bandit_claims_extraction_9934.json` and exited 0.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -64,10 +66,6 @@ Spec follow-up review tightened implementation constraints for rebuild strictnes
 <!-- DOD:END -->
 
 ## Verification Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implemented validated Claims_Extraction hardening findings with failing-first tests: runtime max clamps, review email HTML escaping, FVA adjudication metrics, atomic rebuild replacement rollback, cancellation propagation, prompt LLM timeout executor shutdown, owner-scoped analytics aggregates, and bounded notification dispatch. Verification: targeted pytest suite `python -m pytest -q tldw_Server_API/tests/Claims/test_claims_rebuild_service_failure.py tldw_Server_API/tests/Claims/test_claims_runtime_config.py tldw_Server_API/tests/Claims/test_claims_review_notifications.py tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py tldw_Server_API/tests/Claims/test_claims_cancellation_and_timeout.py tldw_Server_API/tests/Claims_Extraction/test_fva_pipeline.py` passed with 43 passed, 152 warnings. Bandit command on touched Claims_Extraction files wrote `/tmp/bandit_claims_extraction_9934.json` and exited 0.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

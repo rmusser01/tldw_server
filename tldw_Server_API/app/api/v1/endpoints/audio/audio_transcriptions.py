@@ -69,6 +69,7 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     get_limits_for_user,
     heartbeat_jobs,
     increment_jobs_started,
+    monthly_minutes_exhausted,
 )
 
 router = APIRouter(
@@ -206,6 +207,7 @@ def _audio_shim_attr(name: str):
         "can_start_job": can_start_job,
         "increment_jobs_started": increment_jobs_started,
         "finish_job": finish_job,
+        "monthly_minutes_exhausted": monthly_minutes_exhausted,
         "sf": sf,
     }
     default_value = defaults.get(name)
@@ -269,6 +271,19 @@ def _audio_shim_attr(name: str):
     if name in defaults:
         return defaults[name]
     raise NameError(name)
+
+
+def _max_upload_bytes(limits: dict[str, Any]) -> int:
+    """The user's upload cap from their audio limits, else [Media-Processing] max_audio_file_size_mb."""
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files as audio_files
+
+    cap_mb = limits.get("max_file_size_mb")
+    if cap_mb:
+        try:
+            return int(float(cap_mb) * 1024 * 1024)
+        except (TypeError, ValueError):
+            logger.warning("Could not parse max_file_size_mb {!r}; using the media-processing cap", cap_mb)
+    return int(audio_files.MAX_FILE_SIZE)
 
 
 async def _check_daily_minutes_allow(user_id: int, minutes: float):
@@ -621,27 +636,13 @@ async def create_transcription(
         limits = await _audio_shim_attr("get_limits_for_user")(current_user.id)
     except EXPECTED_DB_EXC as e:
         logger.exception(
-            'Failed to get limits for user {} during upload, using defaults: {}; request_id={}',
+            'Failed to get limits for user {} during upload; using the media-processing cap: {}; request_id={}',
             current_user.id,
             e,
             rid,
         )
-        limits = {
-            "daily_minutes": 30.0,
-            "concurrent_streams": 1,
-            "concurrent_jobs": 1,
-            "max_file_size_mb": 25,
-        }
-    try:
-        max_file_size = int((limits.get("max_file_size_mb") or 25) * 1024 * 1024)
-    except (ValueError, TypeError) as e:
-        logger.warning(
-            'Could not parse max_file_size_mb for user {}; defaulting to 25MB: {}; request_id={}',
-            current_user.id,
-            e,
-            rid,
-        )
-        max_file_size = 25 * 1024 * 1024
+        limits = {}
+    max_file_size = _max_upload_bytes(limits)
     upload_chunk_size = 1024 * 1024
 
     # Resolve default model from config when omitted.
@@ -921,12 +922,13 @@ async def create_transcription(
                 job_heartbeat_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await job_heartbeat_task
+            period = "monthly" if await _audio_shim_attr("monthly_minutes_exhausted")(current_user.id, minutes_est) else "daily"
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail=_dictation_error_detail(
                     http_status=status.HTTP_402_PAYMENT_REQUIRED,
                     detail_status="quota_exceeded",
-                    message="Transcription quota exceeded (daily minutes)",
+                    message=f"Transcription quota exceeded ({period} minutes)",
                 ),
             )
         # Secondary billing check with the real minute estimate (the dependency

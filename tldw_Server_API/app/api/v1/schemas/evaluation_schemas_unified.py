@@ -974,9 +974,9 @@ class WebhookTestResponse(BaseModel):
 class RateLimitStatusResponse(BaseModel):
     """Rate limit status response"""
     tier: str
-    limits: dict[str, int]
+    limits: dict[str, Optional[int]]
     usage: dict[str, int]
-    remaining: dict[str, int]
+    remaining: dict[str, Optional[int]]
     reset_at: datetime
 
 

@@ -45,13 +45,13 @@ Issue #1381 reports that setting CUSTOM_OPENAI_API_BASE in .env does not redirec
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented env-first custom OpenAI endpoint resolution in load_and_log_configs() using canonical variables CUSTOM_OPENAI_API_IP and CUSTOM_OPENAI2_API_IP, accepted CUSTOM_OPENAI_API_BASE and additional base-url aliases, and preserved CUSTOM_OPENAI_API_IP_1/_2 compatibility in config and adapter fallback paths.
 
 Verification: `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Config/test_config_precedence_contract.py tldw_Server_API/tests/LLM_Adapters/unit/test_custom_openai_native_http.py -q` passed 11 tests with 6 existing warnings. Smoke: `CUSTOM_OPENAI_API_BASE=http://127.0.0.1:9000/v1 ... load_and_log_configs()["custom_openai_api"]["api_ip"]` printed `http://127.0.0.1:9000/v1`.
 
 Bandit: `python -m bandit -r tldw_Server_API/app/core/config.py tldw_Server_API/app/core/LLM_Calls/providers/custom_openai_adapter.py -f json -o /tmp/bandit_custom_openai_env.json` exited 1 due to two pre-existing LOW B105 findings in config.py lines 581 and 641; no findings were reported for custom_openai_adapter.py or the new endpoint-resolution code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

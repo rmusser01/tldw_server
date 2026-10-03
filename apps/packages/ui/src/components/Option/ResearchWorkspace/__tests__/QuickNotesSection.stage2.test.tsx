@@ -65,9 +65,26 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
-    selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  useWorkspaceStore: Object.assign(
+    (selector: (state: typeof workspaceStoreState) => unknown) =>
+      selector(workspaceStoreState),
+    { getState: () => workspaceStoreState, subscribe: () => () => {} }
+  )
+}))
+
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async () => ({
+    requestScope: {
+      config: {
+        serverUrl: "https://research.example",
+        authMode: "single-user"
+      },
+      userId: null
+    },
+    scopeSignal: new AbortController().signal,
+    scopeInvalidatedSignal: new AbortController().signal,
+    release: () => {}
+  })
 }))
 
 vi.mock("@/services/background-proxy", () => ({

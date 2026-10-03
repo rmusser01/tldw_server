@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
 )
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     DuplicateUserError,
     RegistrationDisabledError,
@@ -37,6 +38,8 @@ from tldw_Server_API.app.core.AuthNZ.profile_version import (
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_profile
+from tldw_Server_API.app.core.Usage import quota_resolver
+from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 from tldw_Server_API.app.services import admin_scope_service
 from tldw_Server_API.app.services.admin_audit_service import (
     emit_admin_account_audit_event as _emit_admin_account_audit_event,
@@ -48,6 +51,10 @@ from tldw_Server_API.app.services.admin_data_ops_service import (
     build_users_json as svc_build_users_json,
 )
 from tldw_Server_API.app.services.admin_guardrails_service import verify_privileged_action
+from tldw_Server_API.app.services.storage_quota_service import (
+    STORAGE_QUOTA_KEY,
+    with_resolved_storage_quota,
+)
 
 
 def _generate_temporary_password(length: int = 20) -> str:
@@ -201,7 +208,7 @@ async def create_user(
                 detail="Failed to load created user",
             )
         logger.info("Admin created user {} (id={})", payload.username, user_info["user_id"])
-        return user
+        return await with_resolved_storage_quota(user)
     except DuplicateUserError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists.") from exc
     except WeakPasswordError as exc:
@@ -258,6 +265,10 @@ async def list_users(
             search=search,
             org_ids=org_ids,
         )
+        # ponytail: up to ~5 resolver queries per user on a cold 60 s cache when quotas are on
+        # (free when off); batch by user ids (one user_config_overrides IN-query plus the
+        # membership queries) if exports pass a few thousand users
+        users = [await with_resolved_storage_quota(u) for u in users]
         return users, total
     except Exception as e:
         logger.error(
@@ -298,6 +309,10 @@ async def export_users(
             search=search,
             org_ids=org_ids,
         )
+        # ponytail: up to ~5 resolver queries per user on a cold 60 s cache when quotas are on
+        # (free when off); batch by user ids (one user_config_overrides IN-query plus the
+        # membership queries) if exports pass a few thousand users
+        users = [await with_resolved_storage_quota(u) for u in users]
         if format == "json":
             content = svc_build_users_json(users, total=total, limit=limit, offset=offset)
             media_type = "application/json"
@@ -331,7 +346,7 @@ async def get_user_details(
         user_dict: dict[str, Any] = dict(user)
         user_dict.pop("password_hash", None)
 
-        return user_dict
+        return await with_resolved_storage_quota(user_dict)
     except UserNotFoundError as err:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -418,13 +433,9 @@ async def update_user(
                 params.append(0)
                 updates.append("locked_until = NULL")
 
-        if request.storage_quota_mb is not None:
-            param_count += 1
-            updates.append(f"storage_quota_mb = ${param_count}" if is_pg else "storage_quota_mb = ?")
-            params.append(request.storage_quota_mb)
-            profile_visible_fields.append("storage_quota_mb")
+        quota_requested = "storage_quota_mb" in request.model_fields_set
 
-        if not updates:
+        if not updates and not quota_requested:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No fields to update",
@@ -443,45 +454,64 @@ async def update_user(
                 is_pg=is_pg,
             )
 
-        param_count += 1
-        if is_pg:
-            updates.append("updated_at = CURRENT_TIMESTAMP")
-            params.append(user_id)
-            set_clause = ", ".join(updates)
-            update_user_sql_template = "UPDATE users SET {set_clause} WHERE id = ${param_count}"
-            query = update_user_sql_template.format_map(locals())  # nosec B608
-        else:
-            updates.append("updated_at = datetime('now')")
-            params.append(user_id)
-            set_clause = ", ".join(updates)
-            update_user_sql_template = "UPDATE users SET {set_clause} WHERE id = ?"
-            query = update_user_sql_template.format_map(locals())  # nosec B608
+        if updates:
+            param_count += 1
+            if is_pg:
+                updates.append("updated_at = CURRENT_TIMESTAMP")
+                params.append(user_id)
+                set_clause = ", ".join(updates)
+                update_user_sql_template = "UPDATE users SET {set_clause} WHERE id = ${param_count}"
+                query = update_user_sql_template.format_map(locals())  # nosec B608
+            else:
+                updates.append("updated_at = datetime('now')")
+                params.append(user_id)
+                set_clause = ", ".join(updates)
+                update_user_sql_template = "UPDATE users SET {set_clause} WHERE id = ?"
+                query = update_user_sql_template.format_map(locals())  # nosec B608
 
-        ownership = (
-            UserVersionOwnership.CALLER_OWNS_ANCHOR
-            if compound_floor is not None
-            else UserVersionOwnership.GATEWAY_OWNS_ANCHOR
-        )
-        write_result = await gateway.execute_update(
-            db,
-            user_id=user_id,
-            profile_visible_fields=tuple(profile_visible_fields),
-            statement=query,
-            parameters=tuple(params),
-            ownership=ownership,
-        )
-        if compound_floor is not None:
-            await gateway.final_touch(
+            ownership = (
+                UserVersionOwnership.CALLER_OWNS_ANCHOR
+                if compound_floor is not None
+                else UserVersionOwnership.GATEWAY_OWNS_ANCHOR
+            )
+            write_result = await gateway.execute_update(
                 db,
                 user_id=user_id,
-                version_floor=max(compound_floor, write_result.version_floor),
+                profile_visible_fields=tuple(profile_visible_fields),
+                statement=query,
+                parameters=tuple(params),
+                ownership=ownership,
             )
-        if reason is not None:
-            metadata: dict[str, Any] = {"reason": reason}
+            if compound_floor is not None:
+                await gateway.final_touch(
+                    db,
+                    user_id=user_id,
+                    version_floor=max(compound_floor, write_result.version_floor),
+                )
+
+        if quota_requested:
+            overrides = UserProfileOverridesRepo(await get_db_pool())
+            await overrides.ensure_tables(db_conn=db)
+            if request.storage_quota_mb is None:
+                await overrides.delete_override(user_id=int(user_id), key=STORAGE_QUOTA_KEY, db_conn=db)
+            else:
+                await overrides.upsert_override(
+                    user_id=int(user_id),
+                    key=STORAGE_QUOTA_KEY,
+                    value=int(request.storage_quota_mb),
+                    updated_by=int(principal.user_id) if principal.user_id is not None else None,
+                    db_conn=db,
+                )
+            quota_resolver.invalidate_user(int(user_id))
+
+        if reason is not None or quota_requested:
+            metadata: dict[str, Any] = {} if reason is None else {"reason": reason}
             if request.role is not None:
                 metadata["role"] = request.role
             if request.is_active is not None:
                 metadata["is_active"] = request.is_active
+            if quota_requested:
+                metadata["storage_quota_mb"] = request.storage_quota_mb
             await _emit_admin_account_audit_event(
                 actor_id=principal.user_id,
                 target_user_id=user_id,

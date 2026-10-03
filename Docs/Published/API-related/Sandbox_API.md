@@ -430,6 +430,8 @@ for display and operator diagnostics.
 WS `/api/v1/sandbox/runs/{id}/stream`
 - Optional query: `from_seq=<N>` (1.1 resume)
 - When signed URLs are enabled, include `token` and `exp` query params.
+- On connect the server replays up to the last 100 buffered frames, then streams live frames. With `from_seq=N`, only buffered frames with `seq >= N` are replayed. Heartbeats are live-only and are never replayed.
+- Each connection receives a frame at most once, in strictly increasing `seq` order. Gaps are expected: heartbeats sent before you connected, history older than the 100-frame buffer, or frames dropped when a slow client's queue overflows.
 Frames:
 - `{ "type": "event", "event": "start" }`
 - `{ "type": "stdout"|"stderr", "encoding": "utf8"|"base64", "data": "...", "seq": 123 }`

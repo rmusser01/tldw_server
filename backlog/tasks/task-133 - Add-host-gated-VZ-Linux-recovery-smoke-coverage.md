@@ -38,7 +38,7 @@ Extend the existing Apple Silicon host-gated VZ Linux operator/CI smoke path so 
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added explicit host-gated recovery smoke coverage after ephemeral execution and same-session reuse. The recovery smoke seeds only the isolated test store and verifies diagnostics plus `repair_macos_reconciliation(dry_run=true)`.
 - Addressed PR review comments by adding a `pytest.MonkeyPatch` type annotation and docstring to the new recovery test, using safe diagnostics `.get()` access with `_expect` failure messages, and refactoring the smoke script to run one registered `vz_linux_host_smoke` marker through a shared pytest/env helper.
 - Verification:
@@ -48,7 +48,7 @@ Extend the existing Apple Silicon host-gated VZ Linux operator/CI smoke path so 
   - `python -m pytest tldw_Server_API/tests/sandbox/test_vz_linux_real_host_e2e.py -m vz_linux_host_smoke -q` selected the three marked real-host smoke tests and skipped them on this host because real VZ E2E env was not enabled.
   - `git diff --check` passed.
   - Bandit over touched Python with only `B101` skipped reported pre-existing test-harness findings in `tools/vz-linux-image/tests/test_host_e2e_smoke_script.py` (`B404`, `B603`, `B108`) on unchanged lines. Re-run with those known test-harness checks also skipped exited 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

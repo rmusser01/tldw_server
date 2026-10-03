@@ -1,3 +1,8 @@
+import {
+  readKnowledgeNoteProvenance,
+  retainKnowledgeNoteProvenance,
+  stripKnowledgeNoteProvenance
+} from '@/utils/knowledge-note-provenance'
 import React from 'react'
 import type { InputRef } from 'antd'
 import { Button, Modal } from 'antd'
@@ -149,6 +154,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const authorityEpochRef = React.useRef(0)
   const authorityRequestsRef = React.useRef(new Set<AbortController>())
   const noteSelectionEpochRef = React.useRef(0)
+  const pendingSelectionEpochRef = React.useRef<number | null>(null)
   if (!connectionAuthoritiesMatch(connectionConfig, connectionConfigRef.current)) {
     connectionEpochRef.current += 1
     authorityEpochRef.current += 1
@@ -160,6 +166,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   React.useEffect(() => {
     const cancelRequests = () => {
       authorityEpochRef.current += 1
+      pendingSelectionEpochRef.current = null
       for (const controller of authorityRequestsRef.current) controller.abort()
       authorityRequestsRef.current.clear()
       activeSaveRef.current = null
@@ -181,8 +188,20 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   // ---- editor state ----
   const [selectedId, setSelectedId] = React.useState<string | number | null>(null)
+  const selectedIdRef = React.useRef(selectedId)
+  selectedIdRef.current = selectedId
   const [title, setTitle] = React.useState('')
   const [content, setContent] = React.useState('')
+  const setEditorTitle = React.useCallback((value: React.SetStateAction<string>) => {
+    if (pendingSelectionEpochRef.current == null || selectedIdRef.current == null) {
+      setTitle(value)
+    }
+  }, [])
+  const setEditorContent = React.useCallback((value: React.SetStateAction<string>) => {
+    if (pendingSelectionEpochRef.current == null || selectedIdRef.current == null) {
+      setContent(value)
+    }
+  }, [])
   const [loadingDetail, setLoadingDetail] = useNotesAuthorityState(authorityScope, false)
   const [saving, setSaving] = React.useState(false)
   const [saveIndicator, setSaveIndicator] = useNotesAuthorityState<SaveIndicatorState>(authorityScope, 'idle')
@@ -326,7 +345,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
               ? selectedVersion
               : null,
         title,
-        content,
+        content: retainKnowledgeNoteProvenance(content, originalMetadata),
         keywords: [...editorKeywords],
         metadata: originalMetadata ? { ...originalMetadata } : null,
         backlinkConversationId,
@@ -351,12 +370,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   const applyOfflineDraftToEditor = React.useCallback((draft: OfflineDraftEntry) => {
     setTitle(String(draft.title || ''))
-    setContent(String(draft.content || ''))
+    setContent(stripKnowledgeNoteProvenance(String(draft.content || '')))
     setEditorKeywords(Array.isArray(draft.keywords) ? [...draft.keywords] : [])
-    setOriginalMetadata(
-      draft.metadata && typeof draft.metadata === 'object'
-        ? { ...(draft.metadata as Record<string, any>) }
-        : null
+    const provenance = readKnowledgeNoteProvenance(String(draft.content || ''))
+    setOriginalMetadata(provenance
+      ? { ...(draft.metadata || {}), ...provenance, knowledge_provenance: provenance }
+      : draft.metadata && typeof draft.metadata === 'object' ? { ...draft.metadata } : null
     )
     setBacklinkConversationId(draft.backlinkConversationId)
     setBacklinkMessageId(draft.backlinkMessageId)
@@ -466,6 +485,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         provenance?: 'manual' | NotesAssistAction
       }
     ) => {
+      // Freeze an existing note during a switch; preserve edits to a new draft.
+      if (pendingSelectionEpochRef.current != null && selectedIdRef.current != null) {
+        return
+      }
       contentRef.current = nextContent
       setContent(nextContent)
       setIsDirty(true)
@@ -594,6 +617,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     const editRevision = savedEditRevision ?? editRevisionRef.current.revision
     const isCurrent = () => !ownedRequest?.abortSignal.aborted && authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === noteEpoch
     if (requestAuthorityScope === null) return false
+    pendingSelectionEpochRef.current = String(selectedIdRef.current) !== String(id) ? noteEpoch : null
     clearAssistUndoState()
     setLoadingDetail(true)
     try {
@@ -602,13 +626,16 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       const loadedTitle = String(d?.title || `Note ${id}`)
       setSelectedId(id)
       setTitle(String(d?.title || ''))
-      setContent(String(d?.content || ''))
+      setContent(stripKnowledgeNoteProvenance(String(d?.content || '')))
       setEditorKeywords(extractKeywords(d))
       setSelectedVersion(toNoteVersion(d))
       setSelectedLastSavedAt(toNoteLastModified(d))
       const rawMeta = d && typeof d === "object" ? (d as any).metadata : null
+      const provenance = readKnowledgeNoteProvenance(String(d?.content || ''))
       setOriginalMetadata(
-        rawMeta && typeof rawMeta === "object" ? { ...(rawMeta as Record<string, any>) } : null
+        provenance
+          ? { ...(rawMeta && typeof rawMeta === 'object' ? rawMeta : {}), ...provenance, knowledge_provenance: provenance }
+          : rawMeta && typeof rawMeta === "object" ? { ...(rawMeta as Record<string, any>) } : null
       )
       const rawStudio = d && typeof d === 'object' ? (d as any).studio : null
       setSelectedStudioSummary(
@@ -640,7 +667,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     } catch {
       if (isCurrent()) message.error('Failed to load note')
       return false
-    } finally { if (isCurrent()) setLoadingDetail(false) }
+    } finally {
+      if (pendingSelectionEpochRef.current === noteEpoch) pendingSelectionEpochRef.current = null
+      if (isCurrent()) setLoadingDetail(false)
+    }
   }, [applyOfflineDraftToEditor, authorityScope, clearAssistUndoState, clearTaskState, isOnline, message, refreshTaskStateForNote, rememberRecentNote, setEditorKeywords, setIsDirty, setLoadingDetail, setSaveIndicator, setMonitoringNotice])
 
   const dismissTaskActivity = React.useCallback(async (eventId: string) => {
@@ -663,6 +693,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   const resetEditor = React.useCallback(() => {
     noteSelectionEpochRef.current += 1
+    pendingSelectionEpochRef.current = null
     activeSaveRef.current?.abort()
     activeSaveRef.current = null
     savingInFlightRef.current = false
@@ -1089,6 +1120,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   // ---- save note ----
   const saveNote = React.useCallback(
     async ({ showSuccessMessage = true }: SaveNoteOptions = {}) => {
+      if (pendingSelectionEpochRef.current != null) return false
       if (saving || savingInFlightRef.current) return false
       const saveEpoch = ++saveEpochRef.current
       const savedEditRevision = editRevisionRef.current.revision
@@ -1222,7 +1254,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         if (backlinkMessageId) metadata.message_id = backlinkMessageId
         const payload: Record<string, any> = {
           title: title || undefined,
-          content,
+          content: retainKnowledgeNoteProvenance(content, originalMetadata),
           metadata,
           keywords: editorKeywords
         }
@@ -1249,6 +1281,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           setSaveRecoveryNotice(null)
           setRemoteVersionInfo(null)
           if (created?.id != null) {
+            // Hydration can start before React commits the acknowledged identity.
+            selectedIdRef.current = created.id
             setSelectedId(created.id)
             acknowledgeOfflineDraft(created.id, createdVersion)
           }
@@ -1455,7 +1489,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (draft.backlinkMessageId) metadata.message_id = draft.backlinkMessageId
       const payload: Record<string, any> = {
         title: draft.title || undefined,
-        content: draft.content,
+        content: retainKnowledgeNoteProvenance(draft.content, draft.metadata),
         metadata,
         keywords: draft.keywords
       }
@@ -2354,6 +2388,20 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   }, [selectedLastSavedAt, selectedVersion, t])
 
   const provenanceSummaryText = React.useMemo(() => {
+    if (originalMetadata?.origin === 'knowledge_qa') {
+      return [
+        t('option:notesSearch.provenanceKnowledgeQa', {
+          defaultValue: 'Origin: Knowledge QA',
+        }),
+        originalMetadata.trust_state,
+        originalMetadata.evidence_origin,
+        originalMetadata.thread_id
+          ? `Session: ${originalMetadata.thread_id}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    }
     if (editProvenance.mode === 'manual') {
       if (backlinkConversationId) {
         return t('option:notesSearch.provenanceChat', { defaultValue: 'Origin: Saved from Chat' })
@@ -2373,7 +2421,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       defaultValue: 'Origin: AI-generated'
     })
     return `${generatedPrefix} (${actionLabel} at ${generatedAt})`
-  }, [backlinkConversationId, editProvenance, t])
+  }, [backlinkConversationId, editProvenance, originalMetadata, t])
 
   const monitoringNoticeClasses = React.useMemo(() => {
     if (!monitoringNotice) return ''
@@ -2389,9 +2437,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   return {
     // state
     selectedId, setSelectedId,
-    title, setTitle,
-    content, setContent,
+    title, setTitle: setEditorTitle,
+    content, setContent: setEditorContent,
     loadingDetail,
+    loadingSelection: loadingDetail && pendingSelectionEpochRef.current != null,
     saving,
     saveIndicator, setSaveIndicator,
     saveRecoveryNotice,

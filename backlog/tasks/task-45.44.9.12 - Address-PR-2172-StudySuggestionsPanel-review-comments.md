@@ -35,7 +35,7 @@ Address the actionable PR #2172 review findings on StudySuggestionsPanel after t
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Reviewed Qodo feedback on PR #2172. Verified the pending/no-snapshot concern against StudySuggestionsPanel and useStudySuggestions: status can be pending while snapshot is null and isLoading is false, so the panel should continue to show loading feedback instead of the no-suggestions empty state.
 
 Added a RED regression test for status pending, snapshot null, and isLoading false. RED evidence: `bunx vitest run src/components/StudySuggestions/components/__tests__/StudySuggestionsPanel.test.tsx --reporter=dot` failed because LoadingState text was absent and EmptyState rendered instead.
@@ -43,7 +43,7 @@ Added a RED regression test for status pending, snapshot null, and isLoading fal
 Fixed StudySuggestionsPanel so pending/no-snapshot uses the design-system LoadingState branch, and tightened getStatusBadgeVariant to accept SuggestionStatus with the unreachable active case removed and an exhaustive switch default.
 
 GREEN evidence: `bunx vitest run src/components/StudySuggestions/components/__tests__/StudySuggestionsPanel.test.tsx --reporter=dot` passed 1 file / 10 tests. Type evidence: `env NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` passed. Design-system verifier evidence: `bun run verify:design-system-state` passed with 107 baseline exceptions. Whitespace evidence: `git diff --check` passed before task closeout. Bandit skipped because this review fix touched only frontend TypeScript/TSX and Backlog markdown.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

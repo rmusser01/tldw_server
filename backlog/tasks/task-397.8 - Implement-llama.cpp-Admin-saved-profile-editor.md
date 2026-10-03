@@ -38,11 +38,9 @@ Add a focused Admin WebUI profile editor slice for saved llama.cpp launch profil
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started from fresh origin/dev worktree codex/llamacpp-admin-profile-editor. Current inspection shows backend profile CRUD client methods already exist in apps/packages/ui/src/services/tldw/domains/models-audio.ts, so this slice can focus on a WebUI profile editor panel plus Admin page wiring and focused Vitest coverage.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

@@ -39,11 +39,11 @@ Convert the minimal-test privileges and tools optional router blocks from eager 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: pytest test_router_groups_contract.py -k 'privileges_tools and (attr_lookup or missing_import_failures or runtime_import_failures)' failed with three expected failures against eager privileges/tools imports. GREEN: the same selector passed after the minimal.py change. Broader validation: router_groups_contract 116 passed, main_lifecycle_contract 54 passed, openapi_contracts 69 passed, Bandit results 0, git diff --check clean. No documentation change needed because this is an internal router registration cleanup. No known blockers.
 
 Opened PR #1345 against dev: https://github.com/rmusser01/tldw_server/pull/1345
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

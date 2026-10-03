@@ -523,6 +523,7 @@ jobs:
        needs.changes.outputs.backend_changed == 'true')
     strategy:
       fail-fast: false
+      max-parallel: 20
       matrix:
         shard:
           - name: gap-verified-1
@@ -1537,6 +1538,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
+              tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -2171,6 +2173,7 @@ jobs:
       github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
+      max-parallel: 20
       matrix:
         shard:
           - name: gap-verified-1
@@ -3188,6 +3191,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
+              tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -3755,6 +3759,7 @@ jobs:
       github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
+      max-parallel: 20
       matrix:
         shard:
           - name: core-server-smoke
@@ -4676,6 +4681,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
+              tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -5154,6 +5160,7 @@ jobs:
       github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
+      max-parallel: 20
       matrix:
         shard:
           - name: core-server-smoke
@@ -6075,6 +6082,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
+              tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -6543,6 +6551,7 @@ jobs:
       github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
+      max-parallel: 20
       matrix:
         os: [windows-latest, macos-latest]
         shard:
@@ -7465,6 +7474,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
+              tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py

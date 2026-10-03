@@ -37,17 +37,15 @@ Implement Task 6 from the MCP effective permission explain implementation plan: 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Task 6 implementation under the approved subagent-driven workflow. Scope: public gateway exports, minimal smoke test, and packaged README/user-guide documentation for the policy explain and profile tool preview surfaces.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Review follow-up addressed the remaining spec gap by documenting remote CLI preview-profile-tools usage in both packaged docs and tightened the public export smoke test to assert gateway.__all__ includes the policy explain API exports.
 
 Reviews: final spec follow-up reported no Critical or Important issues and marked spec ready; final code-quality follow-up reported no Critical or Important issues and ready-to-merge.
 
 Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/MCP_unified/test_standalone_policy_explain_service.py -v -> 39 passed, 7 warnings; /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py -v -> 34 passed, 5 warnings; /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r mcp_unified/gateway/__init__.py tldw_Server_API/tests/MCP_unified/test_standalone_policy_explain_service.py -s B101 -f json -o /tmp/bandit_task2375.json -> 0 results; git diff --check -> clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -47,7 +47,7 @@ Implement the axios replacement slice from the approved WebUI dependency trimmin
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan for axios replacement in Docs/superpowers/plans/2026-05-08-webui-axios-fetch-replacement-implementation-plan.md. Scope is first-party WebUI fetch client, local request config types, ElevenLabs external-origin fetch helper, manifest/lockfile axios removal, and focused compatibility verification.
 
 Implemented fetch-backed first-party WebUI API client and local request config types; preserved baseURL defaults mutation, auth/API key/session/CSRF headers, credentials overrides, timeout/signal handling, response parsing, request history, retry-after mapping, and 401/403 normalization.
@@ -63,7 +63,7 @@ Changed-test sweep note: NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bunx vitest r
 Bandit skipped because this slice touches TypeScript, package manifests, lockfile, Backlog task metadata, and plan documentation only; no Python files changed.
 
 Draft PR opened: https://github.com/rmusser01/tldw_server/pull/1375.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -35,7 +35,7 @@ Implement the next Ingestion/Library design-system migration slice by turning th
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Ingestion/Library design-system slice from current origin/dev. Scope: adapt Common/FeatureEmptyState to canonical EmptyState as a compatibility layer before high-volume Media/Review/Knowledge empty-state migrations.
 
 Implemented FeatureEmptyState as a compatibility adapter over components/ui/feedback/EmptyState, preserving legacy action/title/className/icon behavior. Added focused adapter coverage, MediaTrashPage consumer coverage, and a product-state guard regression for canonical EmptyState adapters. Baseline cleanup removes migrated/stale local-empty-state entries and reconciles existing MonitoringDashboard stale IDs found by the verifier.
@@ -47,7 +47,7 @@ PR review pass started for PR #1341. Actionable findings: Qodo guard suppression
 PR review fixes: scoped canonical EmptyState guard suppression to the owner component instead of a file-wide flag, added the sibling LegacyEmptyState regression, and moved MonitoringDashboard canonical-state-label baseline entries into the canonical-label group.
 
 Review-fix verification: bunx vitest run src/components/Common/__tests__/FeatureEmptyState.test.tsx src/components/Review/__tests__/MediaTrashPage.connection.test.tsx src/design-system/__tests__/product-state-guard.test.ts --maxWorkers=1 --reporter=dot passed 44/44; bun run verify:design-system-state exited 0 with 525 allowed legacy exceptions; git diff --check exited 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

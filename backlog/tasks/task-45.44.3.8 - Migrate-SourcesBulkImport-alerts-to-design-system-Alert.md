@@ -47,11 +47,11 @@ Replace the Watchlists SourcesBulkImport AntD Alert product-state callouts with 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD red/green completed. Added focused SourcesBulkImport assertions requiring the preflight summary and import summary banners to be wrapped in data-ds-component="Alert"; the red run failed on the missing design-system Alert marker for the preflight banner. Replaced the SourcesBulkImport AntD Alert callouts with the shared design-system Alert primitive, preserved loading/preflight/import summary copy and info/warning/error/success semantics, and removed the single SourcesBulkImport baseline exception. Verification: focused SourcesBulkImport preflight/commit test passed 5/5; product-state guard passed 54/54; bun run verify:design-system-state passed with 256 total baseline exceptions and 21 Jobs/Scheduler/Watchlists exceptions; SourcesBulkImport target rows 1 -> 0; git diff --check passed. Bandit skipped because this slice touched frontend TSX/test/JSON/Backlog markdown only.
 
 TypeScript: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false still exits 2 on 347 existing diagnostics; no diagnostics mention SourcesBulkImport, SourcesBulkImport.preflight-commit, the baseline, or TASK-45.44.3.8.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -2624,6 +2624,7 @@ def migration_015_create_llm_usage_tables(conn: sqlite3.Connection) -> None:
     # Helpful indexes for common queries
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_ts ON llm_usage_log(ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user ON llm_usage_log(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_provider_model ON llm_usage_log(provider, model)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_op_ts ON llm_usage_log(operation, ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_remote_ip_ts ON llm_usage_log(remote_ip, ts)")
@@ -6503,6 +6504,16 @@ def get_authnz_migrations() -> list[Migration]:
             "Add and backfill sessions.last_activity",
             migration_098_add_session_last_activity,
         ),
+        Migration(
+            99,
+            "Add llm_usage_log user_id + ts index",
+            migration_099_add_llm_usage_log_user_ts_index,
+        ),
+        Migration(
+            100,
+            "Copy users.storage_quota_mb into limits.storage_quota_mb overrides",
+            migration_100_copy_storage_quotas_to_user_overrides,
+        ),
     ]
 
 
@@ -6550,6 +6561,75 @@ def migration_098_add_session_last_activity(conn: sqlite3.Connection) -> None:
         the migration runner owns the transaction and its commit or rollback.
     """
     ensure_sqlite_session_last_activity(conn)
+
+
+def migration_100_copy_storage_quotas_to_user_overrides(conn: sqlite3.Connection) -> None:
+    """Copy users.storage_quota_mb into limits.storage_quota_mb user overrides (spec 2 §8).
+
+    Values equal to 5120 or to the configured DEFAULT_STORAGE_QUOTA_MB can't be told
+    apart from "never set", so they are dropped. An existing override is never replaced.
+    """
+    from tldw_Server_API.app.core.AuthNZ.storage_quota_backfill import STORAGE_QUOTA_KEY, skip_values
+
+    if not _sqlite_table_exists(conn, "users"):
+        logger.info("Migration 100: users table not present; skipping storage quota copy")
+        return
+    if "storage_quota_mb" not in {row[1] for row in conn.execute("PRAGMA table_info(users)")}:
+        logger.info("Migration 100: users.storage_quota_mb not present; skipping storage quota copy")
+        return
+    # Ensure the table without calling migration 047, which commits inside the runner's transaction.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_config_overrides (
+            user_id INTEGER NOT NULL,
+            key TEXT NOT NULL,
+            value_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_by INTEGER,
+            updated_by INTEGER,
+            PRIMARY KEY (user_id, key),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """
+    )
+    skip = skip_values()
+    placeholders = ",".join("?" for _ in skip)
+    cur = conn.execute(
+        f"""
+        INSERT INTO user_config_overrides (user_id, key, value_json, created_at, updated_at, created_by, updated_by)
+        SELECT id, ?, CAST(storage_quota_mb AS TEXT), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL
+        FROM users
+        WHERE storage_quota_mb IS NOT NULL AND storage_quota_mb NOT IN ({placeholders})
+        ON CONFLICT(user_id, key) DO NOTHING
+        """,  # nosec B608 - only "?" placeholders are interpolated
+        (STORAGE_QUOTA_KEY, *skip),
+    )
+    logger.info("Migration 100: copied {} storage quota(s) to limits.storage_quota_mb", cur.rowcount)
+
+
+def migration_099_add_llm_usage_log_user_ts_index(conn: sqlite3.Connection) -> None:
+    """Add the (user_id, ts) composite index on llm_usage_log (spec 2 §4) for legacy databases.
+
+    Migration 015 (already applied on existing databases) only indexed
+    user_id and ts separately; per-user monthly token lookups need the
+    composite index too.
+
+    Some synthetic/legacy databases reach this migration without ever having
+    run migration 015 (fixtures that seed ``schema_migrations`` starting at a
+    later version carry no llm_usage_log table at all); skip rather than
+    error for those, instead of suppressing a real failure.
+    """
+    table_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='llm_usage_log'"
+    ).fetchone()
+    if table_exists is None:
+        logger.info("Migration 099: llm_usage_log table not present; skipping index")
+        return
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)"
+    )
+    logger.info("Migration 099: Added llm_usage_log user_id + ts index")
 
 
 def apply_authnz_migrations(db_path: Path, target_version: int = None) -> None:

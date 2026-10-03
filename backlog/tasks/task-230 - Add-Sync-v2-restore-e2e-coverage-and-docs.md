@@ -33,9 +33,9 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added a server e2e restore roundtrip covering device A registration dataset enrollment encrypted note chat workspace source-ref and source-cache envelope push duplicate idempotency device B restore manifest selected pull key recovery readiness and private plaintext exclusion. The red run failed because SyncRestoreManifestDataset dropped attachment_availability at the API schema boundary; implementation preserved that service-computed field in the response schema. Added Sync v2 API/design docs and expanded the core Sync README with protocol invariants restore conflict privacy and operational-limit details.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -6,6 +6,11 @@ on:
       - main
       - dev
   workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Exact base commit for change detection (the merge queue passes dev's tip)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -101,12 +106,54 @@ jobs:
   coverage-required:
     name: coverage-required
     runs-on: ubuntu-latest
-    needs: [changes]
+    needs: [changes, admission, await_license]
+    # Runs whenever change detection was admitted, not only when it succeeded,
+    # and also when the license wait did not pass: in both cases this job used
+    # to be skipped, and GitHub counts a skipped required job as satisfied. It
+    # now runs and its first steps fail it (TASK-13462, TASK-13502). Only the
+    # workflow_run path with admission declined still skips it, as before.
     if: >-
       always() && !cancelled() &&
-      needs.changes.result == 'success'
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
+        )
+      )
     timeout-minutes: 30
     steps:
+      - name: Require the license audit to have passed
+        if: >-
+          github.event_name != 'workflow_run' &&
+          needs.await_license.result != 'skipped' &&
+          needs.await_license.outputs.license_passed != 'true'
+        run: |
+          echo "::error::License audit did not pass for this PR head, so the gates were not run. Fix the licence policy failure and re-run."
+          exit 1
+
+      # Stays directly after the license refusal: no later step uses a status
+      # function, so none runs once either has failed.
+      - name: Require change detection to have succeeded
+        if: needs.changes.result != 'success'
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+        run: |
+          echo "::error::Change detection (the 'changes' job) ended as '${CHANGES_RESULT}', not 'success', so this gate cannot tell what the head changed and ran nothing. Re-run the workflow."
+          exit 1
+
       - name: No-op pass (coverage not required)
         if: needs.changes.outputs.coverage_required != 'true'
         run: echo "No backend paths changed; coverage-required passed by policy."
@@ -115,7 +162,7 @@ jobs:
         if: needs.changes.outputs.coverage_required == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
@@ -180,3 +227,48 @@ jobs:
           pytest -q --disable-warnings -p pytest_cov -p pytest_asyncio.plugin -p timeout --timeout=120 \
             tldw_Server_API/tests/AuthNZ_SQLite \
             --cov=tldw_Server_API/app/core/AuthNZ --cov-report=term --cov-fail-under=35
+
+  # Wakes the merge queue when the gate above fails (TASK-13462, section 4.6 of
+  # Docs/superpowers/specs/2026-10-04-merge-queue-design.md). A red gate causes
+  # none of the events merge-queue.yml listens for, so without this a failed
+  # front PR would never be retried or removed from the line.
+  #
+  # Not required and in no job's `needs`, so it cannot turn the required check
+  # red. Skipped on every run while the repository variable MERGE_QUEUE is unset
+  # or off, and for fork PRs. It checks out dev, never the PR, so the queue
+  # script that runs with these write permissions is dev's copy.
+  queue-tick:
+    name: Merge queue tick
+    needs: [coverage-required]
+    if: >-
+      always() && !cancelled() &&
+      needs.coverage-required.result == 'failure' &&
+      (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
+      (
+        github.event_name == 'workflow_dispatch' ||
+        (
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        )
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # write: rebase the front PR's branch, comment and disarm, dispatch/cancel/delete runs.
+      contents: write
+      pull-requests: write
+      actions: write
+      # read: the six required check runs and the license commit status on the front PR's head.
+      checks: read
+      statuses: read
+    steps:
+      - name: Checkout dev
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: dev
+          persist-credentials: false
+      - name: Advance the queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGE_QUEUE: ${{ vars.MERGE_QUEUE }}
+        run: python3 -m Helper_Scripts.ci.merge_queue

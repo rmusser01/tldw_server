@@ -64,9 +64,12 @@ vi.mock("react-i18next", () => ({
       typeof fallback === "string" ? fallback : key,
   }),
 }))
-vi.mock("react-router-dom", () => ({
+vi.mock("react-router-dom", async (importOriginal) => ({
+  ...await importOriginal<typeof import("react-router-dom")>(),
   Link: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useNavigate: () => vi.fn(),
+  useBlocker: () => ({ state: "unblocked", proceed: undefined, reset: undefined }),
+  unstable_usePrompt: vi.fn(),
 }))
 
 import { TldwSettings } from "../tldw"
@@ -77,7 +80,9 @@ const target: TldwConfig = {
 }
 let storage: Storage
 let saved: TldwConfig | null
+let loginButton: HTMLElement | undefined
 beforeEach(async () => {
+  loginButton = undefined
   localStorage.clear()
   sessionStorage.clear()
   vi.clearAllMocks()
@@ -116,7 +121,16 @@ const fillCredentials = async () => {
     target: { value: "synthetic-password" },
   })
 }
-const login = () => screen.getByRole("button", { name: "Login" })
+const login = () => {
+  if (!loginButton?.isConnected) {
+    loginButton = screen.getByRole("button", { name: "Login" })
+  }
+  expect(loginButton).toHaveRole("button")
+  expect(loginButton).toHaveAccessibleName("Login")
+  expect(loginButton).toBeVisible()
+  expect(loginButton.closest('[aria-hidden="true"]')).toBeNull()
+  return loginButton
+}
 
 it("blocks all three auth actions against an unsaved full base URL", async () => {
   mount()
@@ -131,8 +145,14 @@ it("blocks all three auth actions against an unsaved full base URL", async () =>
   fireEvent.click(login())
   expect(mocks.login).not.toHaveBeenCalled()
   fireEvent.click(screen.getByText("Magic link", { exact: true }))
-  expect(screen.getByRole("button", { name: "Send magic link" })).toBeDisabled()
-  expect(screen.getByRole("button", { name: "Verify & Login" })).toBeDisabled()
+  for (const name of ["Send magic link", "Verify & Login"]) {
+    const button = screen.getByText(name, { exact: true }).closest("button")
+    expect(button).toHaveRole("button")
+    expect(button).toHaveAccessibleName(name)
+    expect(button).toBeVisible()
+    expect(button?.closest('[aria-hidden="true"]')).toBeNull()
+    expect(button).toBeDisabled()
+  }
 })
 
 it("enables sign-in only after an explicit successful Save", async () => {
@@ -144,7 +164,11 @@ it("enables sign-in only after an explicit successful Save", async () => {
   })
   expect(login()).toBeDisabled()
   fireEvent.click(screen.getByRole("button", { name: "common:save" }))
-  await waitFor(() => expect(login()).toBeEnabled())
+  await waitFor(() => {
+    const loginButton = login()
+    expect(loginButton).toBeInTheDocument()
+    expect(loginButton).toBeEnabled()
+  })
   fireEvent.click(login())
   await waitFor(() =>
     expect(mocks.login).toHaveBeenCalledWith(

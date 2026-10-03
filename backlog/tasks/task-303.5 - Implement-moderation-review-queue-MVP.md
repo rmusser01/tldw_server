@@ -49,7 +49,7 @@ Implement Stage 5 of the moderation review/rules remediation plan. Build the /mo
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Implemented Stage 5 review queue MVP in the WebUI/extension shared ModerationReview surface. The queue now has service functions for list/detail/decision/undo/bulk/audit endpoints, queue state, supported filters, local sort, selected item detail, decision controls, undo affordance, state panels, compact mode, and focused tests.
 - Kept Stage 5 aligned with the actual Stage 4 backend contract: date filters are not exposed in the UI because the backend review list endpoint does not support date_from/date_to yet. Date/audit filters remain later-stage scope.
 - Verification 2026-05-12: `bunx vitest run src/components/Option/ModerationReview/__tests__/ModerationReviewShell.test.tsx src/components/Option/ModerationReview/__tests__/review-utils.test.ts src/services/__tests__/moderation.service.contract.test.ts` passed, 3 files and 13 tests.
@@ -61,7 +61,7 @@ Implement Stage 5 of the moderation review/rules remediation plan. Build the /mo
 - Bandit: not run because this Stage 5 slice only touches frontend TypeScript/TSX, E2E specs, docs, and Backlog metadata.
 - Known baseline issue: `bun run verify:design-system-state` still exits 1 because of existing stale AntD product-state baseline entries in AgentRegistry and AgentTasks, not Stage 5 ModerationReview files. Stage 5 labels were moved through `getDesignSystemState` where applicable.
 - Known baseline issue: `bunx tsc -p tsconfig.json --noEmit` still exits 2 with repo-wide pre-existing TypeScript errors in audio/chat/flashcards/playground/etc.; visible output did not implicate Stage 5 ModerationReview files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -71,9 +71,12 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("react-router-dom", () => ({
+vi.mock("react-router-dom", async (importOriginal) => ({
+  ...await importOriginal<typeof import("react-router-dom")>(),
   Link: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-  useNavigate: () => vi.fn()
+  useNavigate: () => vi.fn(),
+  useBlocker: () => ({ state: "unblocked", proceed: undefined, reset: undefined }),
+  unstable_usePrompt: vi.fn()
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => ({

@@ -30,9 +30,9 @@ Follow-up fixes for the chat page/webui cockpit: remove the top rail, place the 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Removed the shell-level cockpit header, moved the focus/cockpit control into the chat utility row immediately before Shortcuts, made assistant/character picker popups use opaque themed surfaces, and split the mobile composer so the send control no longer steals textarea width.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

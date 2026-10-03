@@ -36,13 +36,13 @@ Implement the #1478 reviewer-agent loop and durable review/triage history in the
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented reviewer-agent dispatch loop on top of the structured completion signal gate. Added review-decision parsing, reviewer prompts, reviewer ACP sessions/runs, durable review persistence, task-detail review exposure, and retry/triage behavior for rejected reviews.
 
 Verification: `python -m pytest tldw_Server_API/tests/Agent_Orchestration -q` -> 148 passed, 5 warnings; Bandit on touched backend files -> 0 findings; `git diff --check` -> clean.
 
 GitHub update: https://github.com/rmusser01/tldw_server/issues/1478#issuecomment-4414162916
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

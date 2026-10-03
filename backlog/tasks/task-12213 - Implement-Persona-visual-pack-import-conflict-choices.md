@@ -41,13 +41,13 @@ Plan: Docs/superpowers/plans/2026-05-10-persona-visual-import-conflicts.md. V1 a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented preview-backed Persona visual import conflict choices for target title matches. Backend preview reports allowed choices; commit requires explicit target mode for conflicted previews; replace_draft is limited to reviewed draft/review/failed target packs and leaves active packs unchanged. Persona Garden now shows conflict choices and disables commit until a user selects a policy. Verification: pytest persona visual portability/worker/jobs/API suite passed with 57 tests; VisualPackEditor Vitest passed with 21 tests; git diff --check passed; Bandit on touched backend production files wrote /tmp/bandit_persona_visual_import_conflicts.json with zero findings.
 
 PR #1492 review pass started. Actionable review items: missing helper docstrings, import-commit idempotency should include conflict-choice fields, import commit should gate on revalidated conflicts, and replace_draft failure should not leave an extra imported draft.
 
 PR #1492 review fixes implemented: added helper docstrings, expanded import-commit idempotency to include trust/target/title/conflict-choice intent, switched commit conflict gating to the revalidated current target state, and made replace_draft deletion guarded by target status/version with cleanup of the newly imported pack on replacement failure. Verification: focused red tests failed before the fix, then passed; persona visual focused suite passed (59 tests); git diff --check passed; Bandit on touched production files reported zero findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

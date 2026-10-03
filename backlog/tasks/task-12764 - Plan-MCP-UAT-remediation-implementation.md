@@ -30,11 +30,9 @@ Create the implementation plan for the approved MCP UAT JSON-RPC and transport r
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation plan written at Docs/superpowers/plans/2026-06-19-mcp-uat-jsonrpc-transport-remediation.md and references approved spec Docs/superpowers/specs/2026-06-19-mcp-uat-jsonrpc-transport-remediation-design.md. Plan maps file responsibilities before task breakdown, uses TDD-friendly task steps with commands and expected outcomes, covers mounted and standalone UAT validation including live HTTP/WebSocket/stdio plus Bandit, and completed the plan review loop. First review found three issues; plan was patched for standalone live HTTP/WebSocket smoke, mounted WebSocket JWT smoke, and non-forgeable trusted auth metadata. Second review approved. Verification: git diff --check passed for plan file. Bandit skipped because this is docs/task-record only.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

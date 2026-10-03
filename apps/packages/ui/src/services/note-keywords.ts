@@ -25,7 +25,7 @@ const allInFlight = new Map<number, Promise<string[]>>()
 const allStatsCache = new Map<number, KeywordStatsCacheEntry>()
 const allStatsInFlight = new Map<number, Promise<NoteKeywordStat[]>>()
 
-const normalizeKeyword = (value: any): string | null => {
+export const normalizeNoteKeyword = (value: any): string | null => {
   const raw =
     value?.keyword ??
     value?.keyword_text ??
@@ -89,7 +89,7 @@ export const getNoteKeywords = async (limit = 200): Promise<string[]> => {
     })
     const arr = Array.isArray(abs)
       ? abs
-          .map((item: any) => normalizeKeyword(item))
+          .map((item: any) => normalizeNoteKeyword(item))
           .filter(Boolean) as string[]
       : []
     const deduped = dedupeKeywords(arr)
@@ -155,7 +155,7 @@ export const getAllNoteKeywordStats = async (pageSize = 1000): Promise<NoteKeywo
       const arr = Array.isArray(abs)
         ? abs
             .map((item: any) => {
-              const keyword = normalizeKeyword(item)
+              const keyword = normalizeNoteKeyword(item)
               if (!keyword) return null
               return {
                 keyword,
@@ -198,7 +198,7 @@ export const searchNoteKeywords = async (
   })
   const arr = Array.isArray(abs)
     ? abs
-        .map((item: any) => normalizeKeyword(item))
+        .map((item: any) => normalizeNoteKeyword(item))
         .filter(Boolean) as string[]
     : []
   return dedupeKeywords(arr)

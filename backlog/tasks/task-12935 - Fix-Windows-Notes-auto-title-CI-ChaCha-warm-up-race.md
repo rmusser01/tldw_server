@@ -22,18 +22,16 @@ Main CI run 28994210037 job 86048011704 failed on windows-latest/Python 3.12 pro
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: on Windows CI, single-user startup scheduled a best-effort ChaChaNotes warm-up while TEST_MODE was active. Schema initialization exceeded the 30s warm-up timeout, leaving the worker thread initializing the DB while the first Notes request attempted another initialization. Fix: skip speculative ChaCha warm-up in TEST_MODE while preserving normal single-user warm-up behavior outside tests.
 
 Documentation update not needed; this is a test-startup behavior fix. Known hold: branch remains intentionally unpushed until the monitored main CI run completes, per user instruction.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Prepared unpushed local commit for main CI product-notes-persona failure. Added a regression test for TEST_MODE warm-up skipping and changed startup_chacha_warmup to skip ChaChaNotes warm-up when core testing.is_test_mode() is true. Verification: startup warm-up unit test file passed; Notes auto-title integration file passed under TEST_MODE; git diff --check passed; Bandit on startup_chacha_warmup.py reported 0 findings.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

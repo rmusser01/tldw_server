@@ -34,11 +34,11 @@ Defer content knowledge/query router imports for claims, text2sql, and email aft
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red/green verified the new knowledge router laziness contract: initial focused run failed because claims, text2sql, and email resolved router attrs during iter_content_router_specs; after converting those three to ImportedRouterSpec, the focused test passed.
 
 Verification: focused knowledge_router_attr_lookup passed; full router_groups_contract passed 50 tests; main_router_contract passed 6 tests; openapi_contracts passed 69 tests; Bandit content.py JSON reported 0 results and 0 errors; git diff --check was clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

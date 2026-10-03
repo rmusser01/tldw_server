@@ -30,9 +30,9 @@ Address the PR #1250 review finding that ImportedRouterSpec missing-attribute fa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review thread verified via gh: Qodo reported missing module path in ImportedRouterSpec missing-attribute logs. Added a red regression by changing missing-attr expectations from bare attr name to module.attr, then updated append_imported_router_spec to raise AttributeError with import_path.attr_name while preserving the original AttributeError as cause.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

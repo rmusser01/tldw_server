@@ -25,9 +25,9 @@ workflows_webhook_dlq_service writes next_attempt_at via isoformat() ('T' separa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed in 29f3e3bf24: SQLite due query uses datetime(next_attempt_at). Test red on HEAD, green now; tests/Workflows 1599 passed. Postgres column is TIMESTAMPTZ, unaffected. Bandit: SQL literal change only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

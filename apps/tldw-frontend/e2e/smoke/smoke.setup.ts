@@ -463,6 +463,10 @@ export async function seedAuth(
   )
   if (shouldInstallSmokeApiStubs()) {
     await stubCompletedFirstRunSetup(page)
+    await page.route(/\/api\/v1\/moderation\/review\/items(?:\?.*)?$/, async (route) => {
+      if (route.request().method() !== "GET") return route.fallback()
+      await fulfillSmokeJson(route, 200, { items: [], next_cursor: null, total: 0 })
+    })
   }
 }
 
@@ -522,83 +526,7 @@ export const BENIGN_PATTERNS = [
  * Temporary allowlist for non-fatal console/request noise observed in full all-pages smoke.
  * These entries are intentionally narrow and route-scoped where possible.
  */
-export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = [
-  {
-    id: "m5-wayfinding-missing-route-document-404",
-    scope: "console",
-    pattern:
-      /^https?:\/\/[^/\s]+\/__wayfinding-missing-route__\s+Failed to load resource: the server responded with a status of 404\b/i,
-    rationale:
-      "The Wayfinding 404-recovery test requests a deliberately missing route, so its own document 404 is expected. TASK-13414 re-observed it; TASK-13406 owns the policy for deliberate fixture emissions.",
-    owner: "WebUI",
-    expiresOn: "2026-10-31",
-    routes: ["/__wayfinding-missing-route__"]
-  },
-  {
-    id: "m5-optional-resource-404-noise",
-    scope: "console",
-    pattern: /\/api\/v1\/moderation\/review\/items(?:\?[^ ]*)?\s+Failed to load resource: the server responded with a status of 404\b/i,
-    rationale:
-      "The minimal smoke backend omits moderation review items. /moderation requests it on mount, so a 404 that lands before the console snapshot is expected and the route stays recoverable. TASK-13406 owns adding the endpoint or retiring this rule.",
-    owner: "WebUI",
-    expiresOn: "2026-10-31",
-    routes: ["/moderation"]
-  },
-  {
-    id: "m5-route-boundary-forced-react-overlay-warning",
-    scope: "console",
-    pattern: /The above error occurred in the <ForcedRouteErrorProbe> component/i,
-    rationale:
-      "Expected React error-overlay emission from deliberate route-boundary fixtures (development runtime only). TASK-13414 re-observed it; TASK-13406 owns the policy for deliberate fixture emissions.",
-    owner: "WebUI",
-    expiresOn: "2026-10-31",
-    routes: [
-      "/admin/server",
-      "/admin/llamacpp",
-      "/admin/mlx",
-      "/content-review",
-      "/data-tables",
-      "/kanban",
-      "/chunking-playground",
-      "/moderation",
-      "/moderation/rules",
-      "/collections",
-      "/world-books",
-      "/dictionaries",
-      "/characters",
-      "/items",
-      "/document-workspace",
-      "/speech"
-    ]
-  },
-  {
-    id: "m5-route-boundary-forced-error-log",
-    scope: "console",
-    pattern: /\[RouteErrorBoundary:[^\]]+\]\s+Error:\s+Forced route boundary error/i,
-    rationale:
-      "Deliberate route-boundary fixture logs confirm the recovery branch (development runtime only). TASK-13414 re-observed it; TASK-13406 owns the policy for deliberate fixture emissions.",
-    owner: "WebUI",
-    expiresOn: "2026-10-31",
-    routes: [
-      "/admin/server",
-      "/admin/llamacpp",
-      "/admin/mlx",
-      "/content-review",
-      "/data-tables",
-      "/kanban",
-      "/chunking-playground",
-      "/moderation",
-      "/moderation/rules",
-      "/collections",
-      "/world-books",
-      "/dictionaries",
-      "/characters",
-      "/items",
-      "/document-workspace",
-      "/speech"
-    ]
-  }
-]
+export const SMOKE_HARD_GATE_ALLOWLIST: SmokeHardGateAllowlistRule[] = []
 
 const ALLOWLIST_GLOBAL_RATIONALE_PATTERN =
   /\b(all-pages|all routes|cross-route|dense|dev runtime|global|parallel|route boundary|runtime)\b/i

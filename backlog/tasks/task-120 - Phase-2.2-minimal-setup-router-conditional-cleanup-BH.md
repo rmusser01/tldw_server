@@ -36,13 +36,13 @@ PR #1371 review fix pass: strengthen the setup-import regression contracts only.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: added a main source assertion for the remaining direct endpoints.setup import and verified it failed in test_main_source_delegates_minimal_optional_llm_routers_to_group. GREEN: removed the unused MINIMAL_TEST_APP setup_router import block from app/main.py and tightened the main import contract so direct setup imports raise AssertionError. Validation: focused router contract selector passed with 2 passed; focused main router selector passed with 1 passed; full router group contract suite passed with 170 passed; main router contracts passed with 6 passed; OpenAPI contracts passed with 69 passed; git diff --check passed. Bandit on app/main.py reported 0 results and 0 errors. Broader touched-scope Bandit reported pre-existing test-file B404/B603 findings on subprocess import/call lines outside this patch's changed lines; no new security findings introduced.
 
 Reopened for PR #1371 review comments. Qodo and CodeRabbit both found the same valid reliability gap: current tests reject only one exact setup import spelling. Plan is to strengthen tests without changing production behavior.
 
 PR #1371 review fix: replaced the brittle setup import substring assertion with an AST scan that catches Import, ImportFrom, and direct dynamic import calls for tldw_Server_API.app.api.v1.endpoints.setup. Broadened the runtime builtins.__import__ guard to reject direct setup module imports, setup submodule imports, and from tldw_Server_API.app.api.v1.endpoints import setup. Validation: focused router setup contract passed; focused main setup guard passed; full router group contracts passed with 170 passed; main router contracts passed with 6 passed; OpenAPI contracts passed with 69 passed; git diff --check passed; Bandit app/main.py passed with 0 results; filtered test Bandit passed with expected pre-existing B404/B603 skipped after unfiltered run showed only those existing subprocess-test findings outside this patch's changed lines.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

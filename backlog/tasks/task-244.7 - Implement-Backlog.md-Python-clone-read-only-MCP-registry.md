@@ -47,7 +47,6 @@ Implement Task 6 from the Backlog.md Python compatibility clone implementation p
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - MCP SDK availability was supplied by the controller as unavailable (`importlib.util.find_spec("mcp") is not None` printed `False`), so no dependency or pyproject changes were made.
 - TDD red step: `source .venv/bin/activate && python -m pytest tools/backlog-py/tests/test_mcp_resources.py -v` failed during collection with `ModuleNotFoundError: No module named 'backlog_py.mcp'`.
@@ -59,7 +58,6 @@ Implement Task 6 from the Backlog.md Python compatibility clone implementation p
   - `source .venv/bin/activate && python -m bandit -r tools/backlog-py/src -f json -o /tmp/bandit_backlog_py_task6.json` -> exit 0; JSON summary results 0, errors 0.
   - `git diff --check` -> exit 0.
 - Known skips/blockers: no live MCP stdio server adapter was implemented because the MCP SDK is unavailable and Task 6 is intentionally pure/read-only.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Controller verification 2026-05-10:
 - Confirmed pyproject.toml has no diff; no MCP dependency was added because the SDK check returned False.
@@ -71,7 +69,7 @@ Controller verification 2026-05-10:
 - Re-ran git diff --check -> exit 0.
 
 Two-stage review completed 2026-05-10: spec compliance reviewer approved the staged Task 6 scope, confirmed no MCP dependency was added, and found tests sufficient for this stage. Code-quality reviewer approved with no findings and confirmed the MCP package remains pure/read-only without importing mcp at module import time.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

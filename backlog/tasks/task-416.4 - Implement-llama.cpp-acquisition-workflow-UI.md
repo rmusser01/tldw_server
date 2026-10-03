@@ -56,9 +56,9 @@ Follow Task 4 in Docs/superpowers/plans/2026-05-16-llamacpp-model-acquisition-im
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added llama.cpp acquisition API client types and methods, converted Admin asset folder import to preview then explicit confirm, added a compact remote download queue/status/cancel workflow, and refresh asset inventory once per newly completed download job. Download handling deliberately does not create saved profiles, start runtime profiles, or wire Chat. Verification: focused Vitest passed 28 tests; git diff --check passed; broad tsc remains blocked by unrelated repo-wide baseline type errors; Bandit not run because this slice touches only TypeScript/TSX and Backlog metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

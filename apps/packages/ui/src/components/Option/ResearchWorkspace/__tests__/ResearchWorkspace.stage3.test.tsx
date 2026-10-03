@@ -68,6 +68,7 @@ const testState = {
   workspaceName: "New Research",
   workspaceTag: "workspace:test",
   initializeWorkspace: vi.fn(),
+  restoreServerWorkspace: vi.fn(),
   createNewWorkspace: vi.fn(),
   addSources: vi.fn(),
   setSelectedSourceIds: vi.fn(),
@@ -125,7 +126,8 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useMobile: () => testState.isMobile
 }))
 
-vi.mock("@/store/workspace", () => ({
+vi.mock("@/store/workspace", async original => ({
+  ...await original<typeof import("@/store/workspace")>(),
   useWorkspaceStore: (selector: (state: typeof testState) => unknown) =>
     selector(testState),
   createWorkspaceStorage: () => ({
@@ -158,12 +160,29 @@ vi.mock("@/services/background-proxy", () => ({
 }))
 
 vi.mock("@/store/workspace-migration", () => ({
-  runResearchWorkspaceMigration: mockRunResearchWorkspaceMigration
+  runResearchWorkspaceMigration: mockRunResearchWorkspaceMigration,
+  RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX: "tldw:research-workspace:migration:tombstone"
 }))
 
-vi.mock("@/utils/research-workspace-prefill", () => ({
-  consumeResearchWorkspacePrefill: vi.fn().mockResolvedValue(null),
-  buildKnowledgeQaSeedNote: vi.fn().mockReturnValue("")
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async (_ids: unknown, options: { signal: AbortSignal }) => ({
+    scopeKey: "workspace-alice",
+    requestScope: { config: { serverUrl: "https://workspace.test", authMode: "multi-user" }, userId: "alice" },
+    scopeSignal: options.signal,
+    scopeInvalidatedSignal: options.signal,
+    release: vi.fn()
+  })
+}))
+
+vi.mock("@/utils/use-research-workspace-prefill", () => ({
+  useResearchWorkspacePrefill: () => ({
+    attached: 0,
+    pending: 0,
+    failed: 0,
+    importing: false,
+    error: null,
+    retry: vi.fn(),
+  }),
 }))
 
 vi.mock("../undo-manager", () => ({
@@ -373,6 +392,66 @@ const createDeferred = <T,>() => {
 }
 
 describe("ResearchWorkspace stage 3 global navigation", () => {
+  const migrationReceipt = () => {
+    testState.workspaceId = ""
+    localStorage.setItem("tldw:research-workspace:migration:tombstone:workspace-original", JSON.stringify({
+      legacyWorkspaceId: "workspace-original", serverWorkspaceId: "workspace-original",
+      migrationId: "migration-original", contentRetained: false, deletedAt: "2026-10-03T00:00:00Z",
+      serverScopeKey: "workspace-alice"
+    }))
+  }
+
+  it("restores migrated server identity and sources before creating a workspace on reload", async () => {
+    migrationReceipt()
+    mockBgRequest.mockImplementation(async ({ path }: { path: string }) => path.endsWith("/context") ? {
+      workspace_id: "workspace-original",
+      workspace: { id: "workspace-original", name: "Saved Research", created_at: "2026-10-01T00:00:00Z", version: 1 },
+      sources: { items: [{ id: "source-original", workspace_id: "workspace-original", media_id: 7, title: "Larch", source_type: "text", selected: true, added_at: "2026-10-01T00:00:00Z" }] },
+      partial_errors: []
+    } : [])
+    render(<ResearchWorkspace />)
+    await waitFor(() => expect(testState.restoreServerWorkspace).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace-original", workspaceName: "Saved Research",
+      sources: [expect.objectContaining({ id: "source-original", mediaId: 7 })], selectedSourceIds: ["source-original"]
+    })))
+    expect(testState.initializeWorkspace).not.toHaveBeenCalled()
+  })
+
+  it("shows recovery after a migrated server read fails without creating a replacement", async () => {
+    migrationReceipt()
+    mockBgRequest.mockRejectedValue(new Error("Workspace unavailable"))
+    render(<ResearchWorkspace />)
+    expect(await screen.findByRole("alert")).toHaveTextContent("Unable to restore your Research Workspace")
+    expect(testState.initializeWorkspace).not.toHaveBeenCalled()
+    expect(testState.restoreServerWorkspace).not.toHaveBeenCalled()
+  })
+
+  it("starts a separate workspace only on explicit recovery action and retains the saved receipt", async () => {
+    migrationReceipt()
+    const key = "tldw:research-workspace:migration:tombstone:workspace-original"
+    const savedReceipt = localStorage.getItem(key)
+    mockBgRequest.mockRejectedValue(new Error("Temporary outage"))
+    render(<ResearchWorkspace />)
+    await screen.findByRole("alert")
+    expect(testState.createNewWorkspace).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Start new workspace" }))
+    expect(testState.createNewWorkspace).toHaveBeenCalledOnce()
+    expect(localStorage.getItem(key)).toBe(savedReceipt)
+  })
+
+  it("initializes normally when an unbound receipt is absent from the current account's server list", async () => {
+    migrationReceipt()
+    const key = "tldw:research-workspace:migration:tombstone:workspace-original"
+    const receipt = JSON.parse(localStorage.getItem(key)!)
+    delete receipt.serverScopeKey
+    localStorage.setItem(key, JSON.stringify(receipt))
+    mockBgRequest.mockResolvedValue({ items: [] })
+    render(<ResearchWorkspace />)
+    await waitFor(() => expect(testState.initializeWorkspace).toHaveBeenCalledOnce())
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    expect(testState.restoreServerWorkspace).not.toHaveBeenCalled()
+  })
+
   const originalMatchMedia = window.matchMedia
 
   beforeAll(() => {

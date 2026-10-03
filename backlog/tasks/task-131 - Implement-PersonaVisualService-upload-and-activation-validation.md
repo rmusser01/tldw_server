@@ -46,7 +46,7 @@ Implementation plan:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py -q --tb=short` failed during collection with `ModuleNotFoundError: No module named 'tldw_Server_API.app.core.Persona.visual_service'`.
 
 Green run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py -q --tb=short` passed 6 tests.
@@ -54,7 +54,7 @@ Green run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/ac
 Regression run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_service.py tldw_Server_API/tests/Persona/test_persona_visuals_core.py tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py -q --tb=short` passed 22 tests.
 
 Whitespace/security checks: `git diff --check` passed; `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Persona/visual_service.py tldw_Server_API/app/core/Persona/visuals.py -f json -o /tmp/bandit_persona_visual_service.json` exited 0 with no results/errors.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

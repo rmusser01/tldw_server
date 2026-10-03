@@ -64,9 +64,9 @@ Found by the comprehensive core-module review; independently reproduced by the o
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Duplicate of TASK-13302 (filed twice during the 2026-09-22 review). Work and status are tracked there.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

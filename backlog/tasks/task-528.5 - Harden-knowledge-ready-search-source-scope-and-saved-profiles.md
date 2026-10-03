@@ -41,13 +41,9 @@ See Docs/superpowers/plans/2026-06-07-knowledge-ready-search-source-scope-plan.m
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implemented ready-search source-scope hardening. Saved profiles persist and restore exact media/note filters; compact/simple toolbar shows exact selected counts; answer-model menu now exposes provider loading/error recovery while preserving server-default and manual model entry; user-facing preset naming is Fast/Balanced/Deep/Custom while keeping the internal thorough id. Verification: focused Knowledge QA Vitest suite passed (8 files, 93 tests), git diff --check passed, scope grep found no flashcard/deck/spaced repetition/study set terminology in touched Knowledge QA files, and Bandit is not applicable because no Python files were touched. Known skip: route fixture e2e was not rerun because the previously recorded Chromium launch/WXT build blockers remain from TASK-528.4/TASK-306.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

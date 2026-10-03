@@ -2,18 +2,20 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
+from typing import Any
 
 import pytest
-from click.testing import CliRunner
-
 from backlog_py.cli.main import main
 from backlog_py.core.repository import MutableRepository, TaskMutationError
+from backlog_py.markdown.task_parser import parse_task_markdown
 from backlog_py.mcp.tools import task_create, task_edit
 from backlog_py.storage.config import replace_definition_of_done_defaults
 from backlog_py.storage.project import discover_project
-
+from click.testing import CliRunner
 
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "repos" / "basic"
+
+pytestmark = pytest.mark.unit
 
 
 def _copy_fixture(tmp_path: Path) -> Path:
@@ -387,3 +389,197 @@ def test_mcp_invalid_bool_string_is_rejected(tmp_path):
 
     with pytest.raises(TypeError, match="boolean"):
         task_create(project, title="Bad bool", onStatusChange="sometimes")
+
+
+def _frontmatter(path: Path) -> dict[str, Any]:
+    return parse_task_markdown(path.read_text(encoding="utf-8")).frontmatter
+
+
+def test_cli_create_accepts_labels_criteria_dependencies_and_notes(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "--cwd", str(repo), "task", "create", "Parity task", "--id", "TASK-2",
+            "-l", "backlog, tooling", "--labels", "cli",
+            "--ac", "First, with a comma", "--ac", "Second",
+            "--dep", "TASK-1",
+            "--notes", "Initial note.",
+            "--plain",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    path = _task_file(repo, "task-2")
+    frontmatter = _frontmatter(path)
+    assert frontmatter["labels"] == ["backlog", "tooling", "cli"]
+    assert frontmatter["dependencies"] == ["TASK-1"]
+    written = path.read_text(encoding="utf-8")
+    assert "- [ ] #1 First, with a comma\n- [ ] #2 Second\n" in written
+    assert "<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->\nInitial note.\n<!-- SECTION:IMPLEMENTATION_NOTES:END -->" in written
+
+
+def test_cli_edit_replaces_labels_title_and_notes_and_renames_file(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+    old_path = _task_file(repo)
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "--cwd", str(repo), "task", "edit", "TASK-1",
+            "-t", "Renamed example task",
+            "-l", "alpha,beta",
+            "--notes", "Replaced notes.",
+            "--plain",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "TASK-1 [In Progress] Renamed example task" in result.output
+    assert not old_path.exists()
+    path = _task_file(repo)
+    assert path.name == "task-1 - Renamed-example-task.md"
+    frontmatter = _frontmatter(path)
+    assert frontmatter["title"] == "Renamed example task"
+    assert frontmatter["labels"] == ["alpha", "beta"]
+    assert frontmatter["custom_field"] == "preserve-me"
+    notes = parse_task_markdown(path.read_text(encoding="utf-8")).sections["IMPLEMENTATION_NOTES"].content
+    assert notes == "Replaced notes.\n"
+
+
+def test_cli_edit_empty_labels_clears_them(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+
+    result = CliRunner().invoke(main, ["--cwd", str(repo), "task", "edit", "TASK-1", "-l", ""])
+
+    assert result.exit_code == 0, result.output
+    assert _frontmatter(_task_file(repo))["labels"] == []
+
+
+def test_edit_removes_then_adds_criteria_and_renumbers(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+
+    _repository(repo).edit_task("TASK-1", remove_ac=[1], add_ac=["Added criterion"], check_ac=[3])
+
+    written = _task_file(repo).read_text(encoding="utf-8")
+    assert (
+        "<!-- AC:BEGIN -->\n"
+        "- [ ] #1 Preserve incomplete acceptance criteria raw line\n"
+        "- [ ] Plain checklist item without an id\n"
+        "- [x] #3 Added criterion\n"
+        "<!-- AC:END -->"
+    ) in written
+    assert "Preserve completed acceptance criteria raw line" not in written
+
+
+def test_out_of_range_remove_ac_is_rejected_before_write(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+    before = _snapshot_tasks(repo)
+
+    with pytest.raises(TaskMutationError, match="AC checklist index 4"):
+        _repository(repo).edit_task("TASK-1", remove_ac=[4], add_ac=["Not written"])
+
+    assert _snapshot_tasks(repo) == before
+
+
+def test_empty_title_is_rejected_before_write(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+    before = _snapshot_tasks(repo)
+
+    with pytest.raises(TaskMutationError, match="title must not be empty"):
+        _repository(repo).edit_task("TASK-1", title="  ")
+
+    assert _snapshot_tasks(repo) == before
+
+
+def test_mcp_create_and_edit_accept_labels_title_and_upstream_criteria_names(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+    project = _project(repo)
+
+    created = task_create(project, title="MCP parity", labels=["mcp"], acceptanceCriteria=["Keep", "Drop"])
+    edited = task_edit(
+        project,
+        task_id=created["id"],
+        title="MCP parity renamed",
+        labels=["mcp", "edited"],
+        acceptanceCriteriaRemove=[2],
+        acceptanceCriteriaAdd=["Added"],
+        notesSet="Set through MCP.",
+    )
+
+    assert edited["title"] == "MCP parity renamed"
+    assert edited["path"] == "backlog/tasks/task-2 - MCP-parity-renamed.md"
+    source = edited["raw_source"]
+    assert parse_task_markdown(source).frontmatter["labels"] == ["mcp", "edited"]
+    assert "- [ ] #1 Keep\n- [ ] #2 Added\n" in source
+    assert "Set through MCP." in source
+
+
+def test_multiline_criterion_is_removed_with_its_continuation_lines(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+    repository = _repository(repo)
+
+    repository.edit_task("TASK-1", add_ac=["Wrapped criterion\nsecond line of it"])
+    added = _task_file(repo).read_text(encoding="utf-8")
+    assert "- [ ] #4 Wrapped criterion\n  second line of it\n<!-- AC:END -->" in added
+
+    repository.edit_task("TASK-1", remove_ac=[4])
+
+    removed = _task_file(repo).read_text(encoding="utf-8")
+    assert "Wrapped criterion" not in removed
+    assert "second line of it" not in removed
+
+
+def test_removing_an_existing_wrapped_criterion_drops_its_indented_lines(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+    path = _task_file(repo)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "- [ ] #2 Preserve incomplete acceptance criteria raw line\n",
+            "- [ ] #2 Preserve incomplete acceptance criteria raw line\n  wrapped onto a second line\n",
+        ),
+        encoding="utf-8",
+    )
+
+    _repository(repo).edit_task("TASK-1", remove_ac=[2])
+
+    written = path.read_text(encoding="utf-8")
+    assert "wrapped onto a second line" not in written
+    assert "Preserve incomplete acceptance criteria raw line" not in written
+    assert "- [ ] Plain checklist item without an id" in written
+
+
+def test_cli_append_notes_is_repeatable_in_order(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+
+    result = CliRunner().invoke(
+        main,
+        ["--cwd", str(repo), "task", "edit", "TASK-1", "--append-notes", "First.", "--append-notes", "Second."],
+    )
+
+    assert result.exit_code == 0, result.output
+    notes = parse_task_markdown(_task_file(repo).read_text(encoding="utf-8")).sections["IMPLEMENTATION_NOTES"].content
+    assert notes.endswith("- Keep unknown body text stable.\nFirst.\nSecond.\n")
+
+
+def test_mcp_list_valued_notes_are_written_as_text(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+    project = _project(repo)
+
+    edited = task_edit(project, task_id="TASK-1", notesAppend=["First.", "Second."], finalSummary=["Done.", "Really."])
+
+    source = edited["raw_source"]
+    assert "[" not in parse_task_markdown(source).sections["IMPLEMENTATION_NOTES"].content
+    assert "- Keep unknown body text stable.\nFirst.\nSecond.\n" in source
+    assert "<!-- SECTION:FINAL_SUMMARY:BEGIN -->\nDone.\nReally.\n" in source
+
+
+def test_mcp_rejects_non_text_values_instead_of_writing_their_repr(tmp_path: Path) -> None:
+    repo = _copy_fixture(tmp_path)
+    before = _snapshot_tasks(repo)
+
+    with pytest.raises(TypeError, match="description must be text"):
+        task_edit(_project(repo), task_id="TASK-1", description=["not", "a", "string"])
+
+    assert _snapshot_tasks(repo) == before

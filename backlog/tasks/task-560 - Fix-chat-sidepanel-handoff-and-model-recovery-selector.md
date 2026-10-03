@@ -31,9 +31,9 @@ Track the focused /chat UX follow-up: route extension sidepanel full-screen and 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation completed and rebased onto origin/dev during the work. RED/GREEN evidence: initial focused test run failed exactly on missing openModelSelector export, banner still falling back to Health diagnostics for open-model-selector, PlaygroundForm lacking OPEN_MODEL_SELECTOR_EVENT listener, and chat-error-message lacking selector recovery metadata. GREEN verification passed: bun run test src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx src/components/Sidepanel/Chat/__tests__/ControlRow.chat-handoff.test.tsx src/components/Sidepanel/Chat/__tests__/ControlRow.role-play-handoff.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-regression.guard.test.ts src/components/Option/Playground/__tests__/playground-cockpit-actions.test.ts src/components/Option/Playground/__tests__/PlaygroundChatErrorBanner.test.tsx src/utils/__tests__/chat-error-message.test.ts (7 files, 42 tests). Browser smoke with local Next dev server on http://127.0.0.1:18001 verified /chat loads with cockpit rails and dispatching tldw:open-model-selector opens and focuses the existing composer model selector. Extension package inspection showed WXT builds options.html and sidepanel.html, not a bare /chat entrypoint; sidepanel full-app actions therefore use options.html#/chat as the packaged carrier for the WebUI /chat route. Packaged extension smoke target was attempted with escalation; the local mock server could bind only outside the sandbox, but the headed extension launch still skipped with browserType.launchPersistentContext timeout after Chromium launched, so packaged runtime remains an environment skip rather than passing evidence. Bandit skipped: frontend TypeScript/TSX and Backlog-only changes; no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -57,7 +57,7 @@ Follow-up spec hardening approved by user after design review: fix the incorrect
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created for the approved workflow-first MCP Hub UX design. User selected the heavier redesign direction over a staged control-center overlay or light copy/empty-state polish.
 
 Spec review loop completed after three passes. First pass approved with advisory clarifications; second pass found planning ambiguities in readiness staging and binding inputs; third pass approved after those were fixed. Placeholder scan found no TODO/TBD/FIXME/PLACEHOLDER markers. Bandit is not applicable because only Markdown design/task files were changed.
@@ -65,7 +65,7 @@ Spec review loop completed after three passes. First pass approved with advisory
 Reopened for a documentation-only follow-up based on review findings before implementation continues. Scope remains the design spec and Backlog task only.
 
 Follow-up spec hardening completed. The design now uses the actual audit findings endpoint, removes Stage 1 readiness ambiguity, names the shared route-state shim constraint, calls out page-object migration, and includes a focused workflow-config unit-test command. Verification: spec stale-term scan has no matches in the design doc for governance-audit or first implementation ambiguity; git diff --check passed for touched spec/task files. Bandit remains not applicable because only Markdown files changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

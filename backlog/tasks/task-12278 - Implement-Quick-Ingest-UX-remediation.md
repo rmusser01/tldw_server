@@ -35,13 +35,13 @@ Parent tracking task for executing the approved Quick Ingest UX remediation impl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Tracker mirror retained for PR visibility. The authoritative parent closeout record is `backlog/completed/task-394 - Implement-Quick-Ingest-UX-remediation.md`.
 
 Implementation is complete across TASK-394.1 through TASK-394.7. Current final verification on latest dev after PR #2114: `bun run test src/components/Common/QuickIngest/__tests__ src/services/__tests__/quick-ingest-batch.test.ts src/services/__tests__/quick-ingest-session-reattach.test.ts --maxWorkers=1 --no-file-parallelism` passed with 17 files / 208 tests. `npx playwright test e2e/workflows/media-ingest.spec.ts --grep "Quick Ingest" --project=chromium --reporter=line` passed with 13 tests in 4.8m. `git diff --check` passed after this Backlog-only closeout edit.
 
 Bandit remains not applicable for this closeout because no Python code was touched. Known residual risk: focused extension Playwright execution is still blocked by the extension globalSetup/build harness before specs start, as documented in TASK-394.6; the shared WebUI sweep includes the extension playlist handoff scenario.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

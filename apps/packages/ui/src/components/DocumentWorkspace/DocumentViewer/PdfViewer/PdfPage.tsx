@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react"
+import React, { useCallback, useState, useRef, useEffect } from "react"
 import { Page } from "react-pdf"
 import { Spin } from "antd"
 import { PageNoteButton } from "../PageNoteButton"
@@ -12,14 +12,29 @@ interface PdfPageProps {
   onSetRef?: (element: HTMLDivElement | null) => void
   /** Hide the page note button (e.g., in thumbnail view) */
   hidePageNote?: boolean
+  lazy?: boolean
+  placeholderSize?: { width: number; height: number }
 }
 
 export const PdfPage: React.FC<PdfPageProps> = ({
   pageNumber,
   scale,
   onSetRef,
-  hidePageNote = false
+  hidePageNote = false,
+  lazy = false,
+  placeholderSize
 }) => {
+  const pageRef = useRef<HTMLDivElement | null>(null)
+  const [visible, setVisible] = useState(!lazy)
+  useEffect(() => {
+    if (!lazy || !pageRef.current) return
+    const observer = new IntersectionObserver(entries => {
+      setVisible(entries.some(entry => entry.isIntersecting))
+    }, { rootMargin: '400px' })
+    observer.observe(pageRef.current)
+    return () => observer.disconnect()
+  }, [lazy])
+
   const [loading, setLoading] = useState(true)
 
   const handleRenderSuccess = useCallback(() => {
@@ -30,31 +45,37 @@ export const PdfPage: React.FC<PdfPageProps> = ({
     setLoading(false)
   }, [])
 
+  const handleTextLayerReady = useCallback(() => {
+    pageRef.current?.dispatchEvent(new Event("pdf-text-layer-rendered", { bubbles: true }))
+  }, [])
+
   return (
     <div
-      ref={onSetRef}
+      ref={element => { pageRef.current = element; onSetRef?.(element) }}
+      style={visible ? undefined : placeholderSize ?? { width: 800 * scale, height: 1100 * scale }}
       data-page-number={pageNumber}
       className="group relative bg-surface shadow-lg"
     >
-      {loading && (
+      {visible && loading && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-surface/80">
           <Spin size="small" />
         </div>
       )}
       {/* Page note button - appears on hover */}
-      {!hidePageNote && !loading && (
+      {visible && !hidePageNote && !loading && (
         <PageNoteButton pageNumber={pageNumber} />
       )}
-      <Page
+      {visible && <Page
         pageNumber={pageNumber}
         scale={scale}
         onRenderSuccess={handleRenderSuccess}
         onRenderError={handleRenderError}
+        onRenderTextLayerSuccess={handleTextLayerReady}
         loading=""
         renderTextLayer={true}
         renderAnnotationLayer={true}
         className="pdf-page"
-      />
+      />}
     </div>
   )
 }

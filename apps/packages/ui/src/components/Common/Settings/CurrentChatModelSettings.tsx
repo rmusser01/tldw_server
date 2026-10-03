@@ -887,7 +887,7 @@ export const CurrentChatModelSettings = ({
           <Form
             form={form}
             // A remounted dialog may reuse cached config without rerunning its query.
-            initialValues={{ systemPrompt: systemPrompt ?? "" }}
+            initialValues={buildBaseValues()}
             layout="vertical"
             onFinish={(values) => {
               saveSettings({

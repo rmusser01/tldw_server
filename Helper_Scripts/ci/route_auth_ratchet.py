@@ -219,6 +219,13 @@ def load_app() -> Any:
     # resolver checks first, so this must win over whatever TLDW_CONFIG_FILE,
     # TLDW_CONFIG_PATH or TLDW_CONFIG_DIR a caller environment already set.
     os.environ["TLDW_CONFIG_FILE"] = str(_ratchet_config_file())
+    # Outside pytest, importing config.py reads and caches config.txt. A caller
+    # that imported any app module first (the RG route_map lint imports the
+    # policy loader) has cached the real file, so route_enabled() would ignore
+    # the copy above and every force-enabled router would vanish (TASK-13417).
+    config_module = sys.modules.get("tldw_Server_API.app.core.config")
+    if config_module is not None:
+        config_module.clear_config_cache()
     os.environ.setdefault("AUTH_MODE", "single_user")
     # Config validation refuses to build without one. The app is inspected, never
     # served, so this value authenticates nothing.

@@ -110,6 +110,7 @@ async def test_resolve_org_id_for_rag_context_verifies_metadata_hint(monkeypatch
     ) is None
 
 
+@pytest.mark.usefixtures("billing_repo_wired")
 async def test_enforce_rag_query_limit_for_org_context_uses_rag_daily_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
@@ -139,6 +140,7 @@ async def test_enforce_rag_query_limit_for_org_context_uses_rag_daily_limit(monk
     }
 
 
+@pytest.mark.usefixtures("billing_repo_wired")
 async def test_enforce_rag_query_limit_for_org_context_raises_when_blocked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

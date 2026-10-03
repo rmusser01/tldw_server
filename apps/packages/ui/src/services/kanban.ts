@@ -27,7 +27,8 @@ import type {
   Checklist,
   ChecklistItem,
   ChecklistWithItems,
-  Comment
+  Comment,
+  PaginationInfo
 } from "@/types/kanban"
 
 // Re-export types that consumers import from this module
@@ -350,7 +351,9 @@ export async function unarchiveCard(cardId: number): Promise<Card> {
 // Export API
 // =============================================================================
 
-export async function exportBoard(boardId: number): Promise<Record<string, any>> {
+export async function exportBoard(
+  boardId: number
+): Promise<Record<string, any>> {
   return await bgRequest<Record<string, any>>({
     path: `/api/v1/kanban/boards/${boardId}/export`,
     method: "GET"
@@ -451,33 +454,66 @@ export async function searchCards(params: {
 // Checklist API
 // =============================================================================
 
-export async function listChecklists(cardId: number): Promise<ChecklistWithItems[]> {
-  return await bgRequest<ChecklistWithItems[]>({
+// The API uses name for checklist/item text; components use title/content.
+type ApiChecklist = Omit<Checklist, "title"> & { name: string }
+type ApiChecklistItem = Omit<ChecklistItem, "content"> & { name: string }
+type ApiChecklistWithItems = ApiChecklist & { items: ApiChecklistItem[] }
+
+function toChecklist({ name, ...checklist }: ApiChecklist): Checklist {
+  return { ...checklist, title: name }
+}
+
+function toChecklistItem({ name, ...item }: ApiChecklistItem): ChecklistItem {
+  return { ...item, content: name }
+}
+
+export async function listChecklists(
+  cardId: number
+): Promise<ChecklistWithItems[]> {
+  const response = await bgRequest<{ checklists: ApiChecklist[] }>({
     path: `/api/v1/kanban/cards/${cardId}/checklists`,
     method: "GET"
   })
+  // The list endpoint returns metadata only. Detail responses include the items
+  // needed for rendering each checklist and calculating its progress.
+  return await Promise.all(
+    response.checklists.map(async (checklist) => {
+      const detail = await bgRequest<ApiChecklistWithItems>({
+        path: `/api/v1/kanban/checklists/${checklist.id}`,
+        method: "GET"
+      })
+      return {
+        ...toChecklist(detail),
+        items: detail.items.map(toChecklistItem)
+      }
+    })
+  )
 }
 
 export async function createChecklist(
   cardId: number,
   data: { title: string; client_id: string }
 ): Promise<Checklist> {
-  return await bgRequest<Checklist>({
+  const { title, ...rest } = data
+  const response = await bgRequest<ApiChecklist>({
     path: `/api/v1/kanban/cards/${cardId}/checklists`,
     method: "POST",
-    body: data
+    body: { ...rest, name: title }
   })
+  return toChecklist(response)
 }
 
 export async function updateChecklist(
   checklistId: number,
   data: { title?: string }
 ): Promise<Checklist> {
-  return await bgRequest<Checklist>({
+  const { title, ...rest } = data
+  const response = await bgRequest<ApiChecklist>({
     path: `/api/v1/kanban/checklists/${checklistId}`,
     method: "PATCH",
-    body: data
+    body: { ...rest, ...(title !== undefined ? { name: title } : {}) }
   })
+  return toChecklist(response)
 }
 
 export async function deleteChecklist(checklistId: number): Promise<void> {
@@ -491,22 +527,26 @@ export async function createChecklistItem(
   checklistId: number,
   data: { content: string; client_id: string }
 ): Promise<ChecklistItem> {
-  return await bgRequest<ChecklistItem>({
+  const { content, ...rest } = data
+  const response = await bgRequest<ApiChecklistItem>({
     path: `/api/v1/kanban/checklists/${checklistId}/items`,
     method: "POST",
-    body: data
+    body: { ...rest, name: content }
   })
+  return toChecklistItem(response)
 }
 
 export async function updateChecklistItem(
   itemId: number,
   data: { content?: string; checked?: boolean }
 ): Promise<ChecklistItem> {
-  return await bgRequest<ChecklistItem>({
+  const { content, ...rest } = data
+  const response = await bgRequest<ApiChecklistItem>({
     path: `/api/v1/kanban/checklist-items/${itemId}`,
     method: "PATCH",
-    body: data
+    body: { ...rest, ...(content !== undefined ? { name: content } : {}) }
   })
+  return toChecklistItem(response)
 }
 
 export async function deleteChecklistItem(itemId: number): Promise<void> {
@@ -521,10 +561,27 @@ export async function deleteChecklistItem(itemId: number): Promise<void> {
 // =============================================================================
 
 export async function listComments(cardId: number): Promise<Comment[]> {
-  return await bgRequest<Comment[]>({
-    path: `/api/v1/kanban/cards/${cardId}/comments`,
-    method: "GET"
-  })
+  const comments: Comment[] = []
+  let offset = 0
+
+  while (true) {
+    const response = await bgRequest<{
+      comments: Comment[]
+      pagination: PaginationInfo
+    }>({
+      path: `/api/v1/kanban/cards/${cardId}/comments?limit=100&offset=${offset}`,
+      method: "GET"
+    })
+    comments.push(...response.comments)
+    if (!response.pagination.has_more) return comments
+    if (
+      response.comments.length === 0 ||
+      response.pagination.offset !== offset
+    ) {
+      throw new Error("Comment pagination did not advance")
+    }
+    offset += response.comments.length
+  }
 }
 
 export async function createComment(

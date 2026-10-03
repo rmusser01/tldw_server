@@ -37,7 +37,7 @@ Migrate the Watchlists run-status tag adapter from AntD Tag to the shared design
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red evidence: after removing the AntD Tag mock, the focused StatusTag accessibility test failed because StatusTag did not render a shared Badge marker yet.
 
 Implementation: StatusTag now maps Watchlists run statuses through getDesignSystemState before choosing shared Badge variants, preserves known/unknown labels and icons, forwards aria-label/title through Badge, and removes the StatusTag local-status-badge baseline exception.
@@ -47,7 +47,7 @@ Verification: bunx vitest run src/components/Option/Watchlists/shared/__tests__/
 TypeScript caveat: bunx tsc --noEmit --pretty false still fails on the existing repo-wide frontend baseline, but a filtered tsc pass for StatusTag, Badge, VisualPackEditor, and design-system-product-state-baseline produced no touched-file errors.
 
 Bandit: skipped because this slice only changes TypeScript, JSON, and Backlog task metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

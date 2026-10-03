@@ -287,8 +287,11 @@ async def test_require_within_limit_rejects_orgless_multi_user(monkeypatch) -> N
     async def _fake_resolve_org_id(principal, org_id=None, x_tldw_org_id=None):
         return None
 
+    async def _active() -> bool:
+        return True
+
     monkeypatch.setattr(billing_deps, "_resolve_org_id", _fake_resolve_org_id, raising=False)
-    monkeypatch.setattr(billing_deps, "enforcement_enabled", lambda: True, raising=False)
+    monkeypatch.setattr(billing_deps, "billing_checks_active", _active, raising=False)
     monkeypatch.setattr(billing_deps, "_allow_orgless_billing_access", lambda: False, raising=False)
 
     dependency = billing_deps.require_within_limit(LimitCategory.API_CALLS_DAY, units=1)
@@ -307,8 +310,11 @@ async def test_require_within_limit_allows_orgless_single_user(monkeypatch) -> N
     async def _fake_resolve_org_id(principal, org_id=None, x_tldw_org_id=None):
         return None
 
+    async def _active() -> bool:
+        return True
+
     monkeypatch.setattr(billing_deps, "_resolve_org_id", _fake_resolve_org_id, raising=False)
-    monkeypatch.setattr(billing_deps, "enforcement_enabled", lambda: True, raising=False)
+    monkeypatch.setattr(billing_deps, "billing_checks_active", _active, raising=False)
     monkeypatch.setattr(billing_deps, "_allow_orgless_billing_access", lambda: True, raising=False)
 
     dependency = billing_deps.require_within_limit(LimitCategory.API_CALLS_DAY, units=1)
@@ -326,8 +332,11 @@ async def test_require_feature_rejects_orgless_multi_user(monkeypatch) -> None:
     async def _fake_resolve_org_id(principal, org_id=None, x_tldw_org_id=None):
         return None
 
+    async def _active() -> bool:
+        return True
+
     monkeypatch.setattr(billing_deps, "_resolve_org_id", _fake_resolve_org_id, raising=False)
-    monkeypatch.setattr(billing_deps, "enforcement_enabled", lambda: True, raising=False)
+    monkeypatch.setattr(billing_deps, "billing_checks_active", _active, raising=False)
     monkeypatch.setattr(billing_deps, "_allow_orgless_billing_access", lambda: False, raising=False)
 
     dependency = billing_deps.require_feature("advanced_analytics")

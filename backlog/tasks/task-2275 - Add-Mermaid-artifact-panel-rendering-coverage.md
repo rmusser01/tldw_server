@@ -33,9 +33,9 @@ Cover the remaining Mermaid chat card follow-up from the design spec: verify Art
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added a focused jsdom component test for ArtifactsPanel diagram artifacts. The test opens a kind: diagram artifact through the real artifact store, verifies the shared Mermaid renderer receives the Mermaid source, and verifies Jump to source scrolls the matching artifact-origin element, closes the panel, and does not dispatch the fallback latest-message event.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

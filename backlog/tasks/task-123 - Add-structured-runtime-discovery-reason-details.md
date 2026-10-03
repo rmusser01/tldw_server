@@ -44,7 +44,7 @@ Close the sandbox Phase 3 runtime discovery gap by exposing structured metadata 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented structured runtime discovery reason details. Red test run failed with missing normalized_reason_details schema/payload fields, missing RUNTIME_REASON_METADATA, missing runtime_reason_details helper, and docs gap still present. Green verification passed after implementation.
 
 Verification:
@@ -70,7 +70,7 @@ Review follow-up verification:
 - Bandit production touched Python scan -> 0 results in /tmp/bandit_runtime_reason_details_prod.json.
 - Bandit touched tests with B101 skipped -> 0 results in /tmp/bandit_runtime_reason_details_tests.json.
 - git diff --check -> passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

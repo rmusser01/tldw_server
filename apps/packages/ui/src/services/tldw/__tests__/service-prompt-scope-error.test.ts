@@ -1,3 +1,7 @@
+import {
+  buildChatSurfaceScopeKeyFromConfig,
+  deriveSingleUserApiKeyCredentialScope,
+} from "@/services/chat-surface-scope"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -6,11 +10,6 @@ import {
   servicePromptSingleUserApiKeyScopeMatches,
   servicePromptTargetsMatch
 } from "../service-prompt-scope-error"
-import {
-  buildChatSurfaceScopeKeyFromConfig,
-  deriveSingleUserApiKeyCredentialScope,
-} from "@/services/chat-surface-scope"
-
 describe("Service Prompt scope policy", () => {
   it.each([
     ["/api/v1/media/389", "PUT", true],
@@ -66,10 +65,13 @@ describe("Service Prompt scope policy", () => {
   })
   it.each([
     ["/api/v1/notes/", "POST", true],
+    ["/api/v1/notes/search/?tokens=workspace%3Aowned", "GET", true],
+    ["/api/v1/notes/search/", "POST", false],
+    ["/api/v1/notes/search/extra", "GET", false],
     ["/api/v1/notes/private-note", "GET", true],
     ["/api/v1/notes/private-note", "PUT", true],
     ["/api/v1/notes/", "GET", false],
-    ["/api/v1/notes/private-note", "DELETE", false],
+    ["/api/v1/notes/private-note", "DELETE", true],
     ["/api/v1/notes/private-note", "PATCH", false],
     ["/api/v1/notes/private-note/attachments", "POST", false],
     ["/api/v1/notes/%2e%2e", "PUT", false],
@@ -262,4 +264,75 @@ it.each([
   ["/api/v1/chats/child%2fother/settings", "GET", false]
 ])("scoped chat path %s %s has exact access %s", (path, method, expected) => {
   expect(isServicePromptRequestPath(path, method)).toBe(expected)
+})
+
+
+it.each([
+  ['/api/v1/media/7', 'DELETE', true],
+  ['/api/v1/media/7/keywords', 'PATCH', true],
+  ['/api/v1/media/bulk/keyword-update', 'POST', true],
+  ['/api/v1/media/7/keywords', 'DELETE', false],
+  ['/api/v1/media/7/keywords/extra', 'PATCH', false],
+  ['/api/v1/media/7/keywords/', 'PATCH', false],
+  ['/api/v1/media/7%2fother', 'DELETE', false],
+  ['/api/v1/media/%2e%2e', 'DELETE', false],
+  ['/api/v1/media/7/permanent', 'DELETE', false],
+  ['/api/v1/media/7/extra', 'DELETE', false],
+  ['/api/v1/media/bulk/keyword-update/extra', 'POST', false],
+  ['/api/v1/media/bulk/keyword-update', 'DELETE', false],
+] as const)('bounds owned Review action %s %s', (path, method, allowed) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+})
+
+it.each([
+  ['/api/v1/users/storage', 'GET', true],
+  ['/api/v1/users/storage', 'POST', false],
+  ['/api/v1/users/storage/other', 'GET', false],
+  ['/api/v1/notes/7', 'DELETE', true],
+  ['/api/v1/notes/a9b7-uuid', 'DELETE', true],
+  ['/api/v1/notes/a9b7-uuid/restore?expected_version=8', 'POST', true],
+  ['/api/v1/media/7/restore', 'POST', true],
+  ['/api/v1/notes/tasks', 'DELETE', false],
+  ['/api/v1/notes/collections', 'DELETE', false],
+  ['/api/v1/notes/trash', 'DELETE', false],
+  ['/api/v1/notes/tasks/restore', 'POST', false],
+  ['/api/v1/notes/collections/restore', 'POST', false],
+  ['/api/v1/notes/7/permanent', 'DELETE', false],
+  ['/api/v1/notes/7/restore', 'DELETE', false],
+  ['/api/v1/media/word/restore', 'POST', false],
+  ['/api/v1/media/7/permanent', 'DELETE', false],
+] as const)('bounds Inspector recovery %s %s', (path, method, allowed) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+})
+it.each([
+  ["/api/v1/media/ingest/jobs?batch_id=known", "GET", true],
+  ["/api/v1/media/ingest/jobs", "DELETE", false],
+  ["/api/v1/media/ingest/jobs/", "GET", false],
+  ["/api/v1/media/ingest/jobs/extra", "GET", false],
+  ["/api/v1/media/ingest/jobs%2fextra", "GET", false]
+] as const)("bounds recent import reads %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+
+describe("exact registered Media listing route variants", () => {
+  it.each(["/api/v1/media?page=2", "/api/v1/media/?page=2"])(
+    "accepts GET %s",
+    (path) => {
+      expect(isServicePromptRequestPath(path, "GET")).toBe(true)
+    }
+  )
+  it.each([
+    "/api/v1/media//",
+    "/api/v1/media/%2e%2e",
+    "/api/v1/media/unrelated",
+    "/api/v1/media/%2F"
+  ])("rejects GET %s", (path) => {
+    expect(isServicePromptRequestPath(path, "GET")).toBe(false)
+  })
+  it.each(["POST", "DELETE", "PATCH", "PUT"])(
+    "rejects %s listing",
+    (method) => {
+      expect(isServicePromptRequestPath("/api/v1/media/", method)).toBe(false)
+    }
+  )
 })

@@ -783,7 +783,7 @@
     "message": "Navigerer til side {{page}}"
   },
   "mediaPage_spreadMode": {
-    "message": "Sammenlign"
+    "message": "Side ved side"
   },
   "mediaPage_listMode": {
     "message": "Fokus"
@@ -792,13 +792,13 @@
     "message": "Stabel"
   },
   "mediaPage_spreadModeTooltip": {
-    "message": "Vis valgte elementer side om side for sammenligning"
+    "message": "Plasser valgte elementer side ved side"
   },
   "mediaPage_listModeTooltip": {
     "message": "Vis ett element om gangen med navigasjon"
   },
   "mediaPage_allModeTooltip": {
-    "message": "Vis alle valgte elementer i en rullbar liste"
+    "message": "Vis gjeldende lesevindu i en rullbar stabel"
   },
   "mediaPage_copyContentLabel": {
     "message": "Kopier innhold"
@@ -837,19 +837,19 @@
     "message": "Velg elementer"
   },
   "mediaPage_firstUseStep1Desc": {
-    "message": "Klikk på elementer i venstre panel for å legge dem til i visningen."
+    "message": "Velg med avkrysningsbokser og trykk Les valgte. Klikk eller Enter forhåndsviser."
   },
   "mediaPage_firstUseStep2": {
     "message": "Velg en visning"
   },
   "mediaPage_firstUseStep2Desc": {
-    "message": "Bruk \"Sammenlign\" for side om side, \"Fokus\" for ett om gangen, eller \"Stabel\" for å se alle."
+    "message": "Side ved side er oppsett; Fokus viser ett element; Stabel viser lesevinduet. Sammenlign innhold sammenligner tekst."
   },
   "mediaPage_firstUseStep3": {
     "message": "Naviger"
   },
   "mediaPage_firstUseStep3Desc": {
-    "message": "Bruk Forrige/Neste-knapper eller tastatur (Tab + Enter) for å gå gjennom elementene."
+    "message": "Forrige/Neste eller j/k navigerer i aktiv kontekst. Tab og mellomrom velger en boks."
   },
   "mediaPage_gotIt": {
     "message": "Skjønner"
@@ -1330,5 +1330,11 @@
   },
   "mediaPage_analysisProviderRequired": {
     "message": "Velg en analyseleverandør, og prøv analysen på nytt."
+  },
+  "mediaPage_resultsHint": {
+    "message": "Klikk eller Enter forhåndsviser. Mellomrom i avkrysningsboks velger. Shift+klikk velger et område."
+  },
+  "mediaPage_viewerAll": {
+    "message": "Lesevindu (stabel)"
   }
 }

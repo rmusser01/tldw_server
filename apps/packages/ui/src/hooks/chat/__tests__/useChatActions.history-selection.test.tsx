@@ -46,6 +46,7 @@ const {
 const messageStoreState = vi.hoisted(() => ({
   value: {
     selectedModel: "deepseek-chat" as string | null,
+    toolChoice: "auto" as "auto" | "none" | "required",
     serverChatId: null as string | null,
     serverChatCharacterId: null as string | number | null,
     serverChatAssistantKind: null as "character" | "persona" | null,
@@ -267,6 +268,7 @@ const createHookOptions = () => ({
 })
 
 const h1 = vi.hoisted(() => ({
+  connected: false,
   create: vi.fn(),
   live: vi.fn(() => {
     throw new Error("live card deleted")
@@ -280,7 +282,11 @@ const h1 = vi.hoisted(() => ({
   saveHistory: vi.fn(),
   localCapture: vi.fn(),
   localAppend: vi.fn(),
-  localSettle: vi.fn()
+  localSettle: vi.fn(),
+  beforeModel: vi.fn()
+}))
+vi.mock("@/store/connection", () => ({
+  useConnectionStore: { getState: () => ({ state: { isConnected: h1.connected, phase: "connected", mode: "normal" } }) }
 }))
 vi.mock("@/hooks/chat/useHistorySelection", async (original) => ({
   ...(await original<any>()),
@@ -325,8 +331,9 @@ vi.mock("@/utils/actor", () => ({
 vi.mock("@/models", async () => {
   const { ChatTldw } = await import("@/models/ChatTldw")
   return {
-    pageAssistModel: async (options: any) =>
-      new ChatTldw({
+    pageAssistModel: async (options: any) => {
+      await h1.beforeModel()
+      return new ChatTldw({
         ...options,
         temperature: 0.23,
         supportsMultimodal: true,
@@ -334,6 +341,7 @@ vi.mock("@/models", async () => {
           await import("@/store/model")
         ).useStoreChatModelSettings.getState().slashCommandInjectionMode
       })
+    }
   }
 })
 vi.mock("@/hooks/utils/messageHelpers", async (original) => original())
@@ -437,7 +445,11 @@ const makeController = () => {
 }
 
 beforeEach(async () => {
+  h1.connected = false
   vi.clearAllMocks()
+  h1.beforeModel.mockReset()
+  messageStoreState.value.selectedModel = "deepseek-chat"
+  messageStoreState.value.toolChoice = "auto"
   h1.auth = new AbortController()
   const actual = await vi.importActual<any>("@/hooks/chat-modes/normalChatMode")
   normalChatModeMock.mockImplementation(actual.normalChatMode)
@@ -590,6 +602,36 @@ it("mounted ordinary submit sends the selected A1 and settles once under its pre
   expect(addChatMessageMock).toHaveBeenCalledTimes(2)
 })
 
+it.each(["model", "tools"])("rejects an ordinary playground send after its global %s selector changes during preparation", async changed => {
+  const { result } = renderHook(() => useChatActions(ordinaryOptions() as any))
+  h1.beforeModel.mockImplementation(() => {
+    if (changed === "model") messageStoreState.value.selectedModel = "changed-model"
+    else messageStoreState.value.toolChoice = "none"
+  })
+  await act(async () => { await result.current.onSubmit({ message: "next", image: "" }) })
+  expect(addChatMessageMock).not.toHaveBeenCalled()
+  expect(h1.wire).not.toHaveBeenCalled()
+})
+
+it.each(["model", "tools"])("keeps an explicit playground %s override after its unrelated global selector changes", async overridden => {
+  const { result } = renderHook(() => useChatActions(ordinaryOptions() as any))
+  h1.beforeModel.mockImplementation(() => {
+    if (overridden === "model") messageStoreState.value.selectedModel = "changed-model"
+    else messageStoreState.value.toolChoice = "required"
+  })
+  await act(async () => {
+    await result.current.onSubmit({
+      message: "next", image: "",
+      requestOverrides: overridden === "model"
+        ? { selectedModel: "fixed-model" }
+        : { toolChoice: "none" }
+    })
+  })
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.wire.mock.calls[0][0].model).toBe(overridden === "model" ? "fixed-model" : "deepseek-chat")
+  expect(addChatMessageMock).toHaveBeenCalledTimes(2)
+})
+
 it("mounted native character sends A1 selection and only new input, following the owner ACK", async () => {
   const options = createHookOptions()
   h1.wire.mockImplementation(async function* (request) {
@@ -707,6 +749,42 @@ it("unknown admission after navigation retains immutable original intent and dis
     request_context_digest: expect.any(String)
   })
   expect(addChatMessageMock).toHaveBeenCalledTimes(1)
+})
+
+it("connected fresh saved normal send adopts a verified native owner before admission", async () => {
+  h1.connected = true
+  const options = { ...ordinaryOptions(), historyId: null, serverChatId: null, messages: [], history: [] }
+  let current: any = { owner: null, view: null, status: "idle" }
+  h1.controller = {
+    getCurrent: () => current,
+    fence: () => { const origin = current; return () => current === origin },
+    loadConversation: vi.fn(async (target, _reference, onLoaded) => {
+      expect(target).toMatchObject({ serverChatId: "tracked-chat-1" })
+      expect(options.setServerChatId).not.toHaveBeenCalled()
+      current = makeController().getCurrent()
+      current.view = { ...current.view, cursor: { kind: "empty" } }
+      current.capture = captureFor(current.view)
+      onLoaded({ owner: current.owner, view: current.view })
+      return true
+    }),
+    followResult: vi.fn(async () => true)
+  }
+  createChatMock.mockResolvedValue({ id: "tracked-chat-1" })
+  options.setServerChatId.mockImplementation(() => {
+    expect(current.owner.kind).toBe("native")
+  })
+  h1.wire.mockImplementation(async function* (request) {
+    expect(addChatMessageMock).toHaveBeenCalledOnce()
+    expect(request.save_to_db).toBe(false)
+    yield { choices: [{ delta: { content: "new answer" } }] }
+  })
+  const hook = renderHook(() => useChatActions(options as any))
+  await act(async () => { expect(await hook.result.current.onSubmit({ message: "first", image: "" })).toEqual({ status: "submitted" }) })
+  expect(createChatMock).toHaveBeenCalledOnce()
+  expect(options.setServerChatId).toHaveBeenCalledWith("tracked-chat-1")
+  expect(h1.saveHistory).not.toHaveBeenCalled()
+  expect(addChatMessageMock).toHaveBeenCalledTimes(2)
+  expect(h1.wire).toHaveBeenCalledOnce()
 })
 
 it("first durable ordinary send creates its local owner and admits before inference without a server conversation", async () => {

@@ -33,7 +33,7 @@ Implement the reviewed and planned MCP Unified Stage 4M gateway external registr
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 complete: storage contract and SQLite atomic create implemented in commit 7bf79af640. Spec review passed; code-quality review approved. Focused storage tests passed per worker/reviewer evidence.
 
 Task 2 complete: GatewayExternalRegistryManager implemented through commits 3a5bcd1e7a, de11d9e748, and a136f60633. Spec review passed after stale-delete regression; code-quality review requested list normalization, which was fixed and re-approved. Manager tests passed per worker/reviewer evidence.
@@ -45,7 +45,7 @@ Task 4 complete: FastAPI external registry routes implemented through commits 18
 Task 5 complete: CLI external registry commands implemented through commits 5d4ca8df and a2471e7306. Spec review passed; code-quality review requested memory-config reason-code payload, which was fixed and re-approved. Full CLI test file passed per worker/reviewer evidence.
 
 Final review fixes complete in commit 77741b9ac7: real SQLite profile bootstraps now expose an external registry manager, credential grant lookup failures map to credential_grant_store_unavailable, and PATCH uses update-if-present semantics to avoid stale recreation. Final reviewer found no blocking issues; residual noted that external/custom ExternalRegistryStore implementations need the new update_server method.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

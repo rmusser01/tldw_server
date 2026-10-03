@@ -671,7 +671,8 @@ async def owner_processing_summary(
             limit = None
         else:
             try:
-                limit = int(limits.get("concurrent_jobs") or 0)
+                raw_limit = limits.get("concurrent_jobs")
+                limit = None if raw_limit is None else int(raw_limit)
             except (ValueError, TypeError) as e:
                 get_ps_logger(
                     request_id=rid,
@@ -704,7 +705,8 @@ class SetUserTierRequest(BaseModel):
 @router.get(
     "/jobs/admin/tiers/{user_id}",
     response_model=UserTierResponse,
-    summary="Get user's audio tier (admin)",
+    summary="Get user's audio tier (admin) (deprecated: the tier no longer affects any limit; set limits.audio_* instead)",
+    deprecated=True,
     dependencies=_ADMIN_DEPS,
 )
 async def get_user_tier_admin(user_id: int):
@@ -721,7 +723,8 @@ async def get_user_tier_admin(user_id: int):
 @router.put(
     "/jobs/admin/tiers/{user_id}",
     response_model=UserTierResponse,
-    summary="Set user's audio tier (admin)",
+    summary="Set user's audio tier (admin) (deprecated: the tier no longer affects any limit; set limits.audio_* instead)",
+    deprecated=True,
     dependencies=_ADMIN_DEPS,
 )
 async def set_user_tier_admin(user_id: int, req: SetUserTierRequest):

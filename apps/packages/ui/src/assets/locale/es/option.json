@@ -514,7 +514,7 @@
     "emptyDescription": "Aún no hay borradores. Usa Quick Ingest con Revisar antes de guardar para crear borradores.",
     "openQuickIngest": "Abrir Quick Ingest",
     "storeAfterReview": "Guardar después de revisar",
-    "reviewBeforeStorage": "Revisar antes de guardar",
+    "reviewBeforeStorage": "Revisar el contenido extraído antes de guardar",
     "reviewBeforeStorageHint": "Procesa ahora y luego edita los borradores localmente antes de confirmarlos en tu servidor.",
     "reviewEnabled": "Modo de revisión",
     "reviewStorageCap": "Los borradores locales están limitados a {{cap}}.",

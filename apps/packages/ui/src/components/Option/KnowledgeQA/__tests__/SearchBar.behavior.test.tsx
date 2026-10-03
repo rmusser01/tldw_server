@@ -1,3 +1,4 @@
+import React, { createContext, useContext, useEffect, useState } from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SearchBar } from "../SearchBar"
@@ -23,8 +24,14 @@ const state = {
   updateSetting: vi.fn(),
 }
 
+type StatefulKnowledge = Omit<typeof state, "setQuery" | "clearResults"> & {
+  setQuery: (query: string) => void
+  clearResults: () => void
+}
+const StatefulKnowledgeContext = createContext<StatefulKnowledge | null>(null)
+
 vi.mock("../KnowledgeQAProvider", () => ({
-  useKnowledgeQA: () => ({
+  useKnowledgeQA: () => useContext(StatefulKnowledgeContext) ?? ({
     query: state.query,
     setQuery: state.setQuery,
     search: state.search,
@@ -44,6 +51,60 @@ vi.mock("../KnowledgeQAProvider", () => ({
 vi.mock("@/utils/knowledge-qa-search-metrics", () => ({
   trackKnowledgeQaSearchMetric: (...args: unknown[]) => trackMetricMock(...args),
 }))
+
+function GlobalShortcutOwner() {
+  const [open, setOpen] = useState(false)
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(true)
+      }
+    }
+    // Matches the global palette's capture-phase ownership, including input focus.
+    window.addEventListener("keydown", onKeyDown, true)
+    return () => window.removeEventListener("keydown", onKeyDown, true)
+  }, [])
+  return (
+    <output aria-label="Global command palette">
+      {open ? "Open" : "Closed"}
+    </output>
+  )
+}
+
+function StatefulSearch({
+  withGlobalOwner = false,
+}: {
+  withGlobalOwner?: boolean
+}) {
+  const [query, setQuery] = useState("existing query")
+  const [results, setResults] = useState([{ id: "retained source" }])
+  return (
+    <StatefulKnowledgeContext.Provider
+      value={{
+        ...state,
+        query,
+        setQuery,
+        results,
+        clearResults: () => setResults([]),
+      }}
+    >
+      <SearchBar autoFocus={false} />
+      <ul aria-label="Retrieved sources">
+        {results.map((result) => (
+          <li key={result.id}>{result.id}</li>
+        ))}
+      </ul>
+      {withGlobalOwner && <GlobalShortcutOwner />}
+    </StatefulKnowledgeContext.Provider>
+  )
+}
+
+const shortcutModifiers = [
+  { label: "Cmd", key: "metaKey" },
+  { label: "Ctrl", key: "ctrlKey" },
+] as const
 
 describe("SearchBar behavior", () => {
   beforeEach(() => {
@@ -178,37 +239,57 @@ describe("SearchBar behavior", () => {
     expect(document.activeElement).toBe(input)
   })
 
-  it("runs clear-full shortcut with Cmd/Ctrl+K", () => {
-    state.query = "existing query"
-    state.results = [{ id: "r1" }]
-
-    render(<SearchBar autoFocus={false} />)
-
-    fireEvent.keyDown(window, { key: "k", metaKey: true })
-    expect(state.clearResults).toHaveBeenCalledTimes(1)
-    expect(state.setQuery).toHaveBeenCalledWith("")
-
-    vi.clearAllMocks()
-    fireEvent.keyDown(window, { key: "k", ctrlKey: true })
-    expect(state.clearResults).toHaveBeenCalledTimes(1)
-    expect(state.setQuery).toHaveBeenCalledWith("")
+  it("demonstrates that explicit New search clears the stateful question and results", () => {
+    render(<StatefulSearch />)
+    fireEvent.click(screen.getByRole("button", { name: "New search" }))
+    expect(
+      screen.getByRole("textbox", { name: "Search your knowledge base" })
+    ).toHaveValue("")
+    expect(screen.queryByText("retained source")).toBeNull()
   })
 
-  it("runs clear-full shortcut when the knowledge search input itself has focus", () => {
-    state.query = "existing query"
-    state.results = [{ id: "r1" }]
+  it.each(shortcutModifiers)(
+    "retains question and results when $label+K starts outside the question",
+    ({ key }) => {
+      render(<StatefulSearch />)
+      fireEvent.keyDown(window, { key: "k", [key]: true })
+      expect(
+        screen.getByRole("textbox", { name: "Search your knowledge base" })
+      ).toHaveValue("existing query")
+      expect(screen.getByText("retained source")).toBeInTheDocument()
+    }
+  )
 
-    render(<SearchBar autoFocus={false} />)
+  it.each(shortcutModifiers)(
+    "retains question and results when $label+K starts in the question",
+    ({ key }) => {
+      render(<StatefulSearch />)
+      const input = screen.getByRole("textbox", {
+        name: "Search your knowledge base",
+      })
+      input.focus()
+      fireEvent.keyDown(input, { key: "k", [key]: true })
+      expect(input).toHaveValue("existing query")
+      expect(screen.getByText("retained source")).toBeInTheDocument()
+    }
+  )
 
-    const input = screen.getByRole("textbox", {
-      name: "Search your knowledge base",
-    })
-    input.focus()
-    fireEvent.keyDown(input, { key: "k", metaKey: true })
-
-    expect(state.clearResults).toHaveBeenCalledTimes(1)
-    expect(state.setQuery).toHaveBeenCalledWith("")
-  })
+  it.each(shortcutModifiers)(
+    "lets the global owner open its palette with $label+K while retaining question and results",
+    ({ key }) => {
+      render(<StatefulSearch withGlobalOwner />)
+      const input = screen.getByRole("textbox", {
+        name: "Search your knowledge base",
+      })
+      input.focus()
+      fireEvent.keyDown(input, { key: "k", [key]: true })
+      expect(screen.getByLabelText("Global command palette")).toHaveTextContent(
+        "Open"
+      )
+      expect(input).toHaveValue("existing query")
+      expect(screen.getByText("retained source")).toBeInTheDocument()
+    }
+  )
 
   it("does not clear the active session when Cmd/Ctrl+K originates from another editable control", () => {
     state.query = "existing query"
@@ -250,6 +331,14 @@ describe("SearchBar behavior", () => {
     expect(state.setQuery).not.toHaveBeenCalledWith("")
   })
 
+  it("does not move focus from a dialog Close button on slash", () => {
+    render(<><div role="dialog" aria-modal="true"><button>Close dialog</button></div><SearchBar autoFocus={false} /></>)
+    const close = screen.getByRole("button", { name: "Close dialog" })
+    close.focus()
+    fireEvent.keyDown(close, { key: "/" })
+    expect(close).toHaveFocus()
+  })
+
   it("shows stop action during search and triggers cancellation", () => {
     state.query = "active query"
     state.isSearching = true
@@ -285,6 +374,22 @@ describe("SearchBar behavior", () => {
     })
 
     expect(input).toHaveAttribute("placeholder", "Compare the conclusions across my PDFs")
+  })
+
+  it("identifies the active suggestion while keeping keyboard focus in the question", () => {
+    state.query = "comp"
+    state.searchHistory = [{ query: "Compare findings across reports" }]
+    render(<SearchBar autoFocus={false} />)
+    const input = screen.getByRole("textbox", { name: "Search your knowledge base" })
+    act(() => input.focus())
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    const active = screen.getAllByRole("option").find(option => option.getAttribute("aria-selected") === "true")!
+    expect(active.id).not.toBe("")
+    expect(input).toHaveAttribute("aria-activedescendant", active.id)
+    expect(input).toHaveFocus()
+    expect(input.closest("form")).toHaveTextContent(/Cmd\/Ctrl\+K opens the command palette/i)
+    fireEvent.keyDown(input, { key: "Escape" })
+    expect(input).not.toHaveAttribute("aria-activedescendant")
   })
 
   it("shows query suggestions and applies selection", () => {

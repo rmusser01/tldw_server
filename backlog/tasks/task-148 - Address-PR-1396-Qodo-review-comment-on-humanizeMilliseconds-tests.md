@@ -36,11 +36,11 @@ Address the actionable Qodo review thread on PR #1396 by restructuring the human
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified the Qodo finding against the test file and addressed it by changing the threshold coverage to table-driven Vitest cases. Each generated test case has one assertion and failures are localized per threshold scenario. The dayjs source guard remains as a separate test.
 
 Verification: bunx vitest run src/utils/__tests__/humanize-milliseconds.test.ts exited 0 from apps/packages/ui; git diff --check exited 0; bun run lint exited 0 from apps/tldw-frontend with existing unrelated warnings only. Bandit skipped because no Python files changed. PR review thread will be answered and resolved after the fix is pushed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

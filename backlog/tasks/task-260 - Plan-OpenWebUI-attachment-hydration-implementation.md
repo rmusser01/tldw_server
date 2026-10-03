@@ -31,7 +31,7 @@ Create the implementation plan for the reviewed OpenWebUI attachment hydration d
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/plans/2026-05-11-openwebui-attachment-hydration-implementation-plan.md with staged backend, API, Jobs, DB helper, ChaCha image, Media DB, frontend, docs, and verification work.
 
 Plan incorporates the reviewed guardrails: deep OpenWebUI metadata merge, message-image source-key limitations, owner-aware Media DB binary registration, dedicated hydration job type, hydration-specific file schema validation, preserved source chat ids for DB fallback, preserved-reference limits, and byte-level file classification.
@@ -39,7 +39,7 @@ Plan incorporates the reviewed guardrails: deep OpenWebUI metadata merge, messag
 Verification: git diff --check passed; targeted rg confirmed required plan header, stages, TDD commands, reviewed guardrails, openwebui_attachment_hydration job type, pytest/Vitest commands, and Bandit gate. Bandit skipped because this change is a planning document/task metadata only.
 
 Known skip: plan-review subagent was not dispatched because this session requires explicit user permission before spawning delegated agents; manual review was performed instead.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
