@@ -4,6 +4,7 @@ title: Design strict source-grounded answers before display
 status: In Progress
 assignee: []
 created_date: '2026-10-03 00:13'
+updated_date: '2026-10-03 00:30'
 labels: []
 dependencies: []
 references:
@@ -40,11 +41,11 @@ Brainstorm the evidence-integrity workstream using confirmed server, WebUI, and 
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Stage 1 In Progress: requirements and approach selection. Stage 2 Not Started: sectioned design and scope review. Stage 3 Not Started: written spec, ADR assessment, self-review, commit, and requester review before writing-plans.
+Stage 1 Complete: context, accepted answer/display policies, and architecture approach chosen. Stage 2 In Progress: review architecture boundaries, rollout scope, verdicts, client flow, failures, and acceptance cases. Stage 3 Not Started: written spec and ADR assessment, self-review, commit, and requester review before writing-plans.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-User confirmed strict evidence as the default for source-based research; partially supported questions return supported facts with explicit gaps; verify before displaying the answer and show progress while generation/checks run. If no useful answer is supported, decline. Confirmed Claims verdict, corpus-scope, final-answer, streaming, and persistence gaps must be addressed by the design. Proposed architecture is not yet approved. ADR required: yes for the eventual durable verification/default and API or persistence contract; draft after approach/design review, reuse accepted ADR-007 and assess applicable ownership/governance rules. No product edits or tests are part of this design task yet.
+Accepted policies: strict evidence by default for source-based research; return supported facts with explicit gaps; decline when no useful answer is supported; verify before displaying answer text and show progress during generation/checks. On October 2, 2026 (America/Los_Angeles), user selected a shared server verification step while preserving existing generation, rather than moving Workspace generation into unified RAG. Detailed architecture, initial workflow scope, report/persistence, and failure semantics remain under sectioned design review. Reuse core Claims foundations after correcting confirmed verdict/scope/final-answer gaps; no generic final-answer verification HTTP contract currently exists. ADR required: yes for the eventual durable verification/default and API or persistence contract; draft with the written spec and assess accepted ADR-007 plus applicable ownership/governance rules. This is design/tracking only; no product edits, installs, or implementation tests yet. Written spec review and implementation-plan review remain separate prerequisites.
 <!-- SECTION:NOTES:END -->
