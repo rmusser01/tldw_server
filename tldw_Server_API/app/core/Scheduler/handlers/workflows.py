@@ -106,6 +106,10 @@ async def workflow_run(payload: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("workflow_run: resume run not found")
         db.update_run_metadata(resume_run_id, metadata)
     else:
+        from tldw_Server_API.app.core.Usage.quota_checks import workflows_runs_decision
+
+        if not (await workflows_runs_decision(user_id)).allowed:
+            raise RuntimeError("Daily workflow run quota exceeded")
         try:
             db.create_run(
                 run_id=run_id,
