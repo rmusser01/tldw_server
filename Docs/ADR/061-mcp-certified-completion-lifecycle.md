@@ -35,9 +35,13 @@ Bounded JSON reads propagate the captured endpoint scope through each byte-strea
 
 Output normalization requires exactly one textual choice, rejects tool-call fields and disallowed controls, validates strict UTF-8, and changes only CRLF/CR to LF. Character and byte overflow rejects the whole output, never truncates it. Optional provider counts are trusted only within integer/request accounting bounds; invalid usage retains conservative estimates.
 
-HTTP status and provider content failures are breaker neutral. Shared failures require explicit provenance from the frozen transport or required shared services. Arbitrary exceptions are detached from sanitized port failures; credentials, prompts, completion bodies, and endpoint queries are excluded from operational logging and persistent accounting.
+HTTP status, egress-policy denial, and provider content failures are breaker neutral. Shared failures require explicit provenance from the frozen transport or required shared services. Arbitrary exceptions are detached from sanitized port failures; credentials, prompts, completion bodies, and endpoint queries are excluded from operational logging and persistent accounting.
+
+Owned cancellation draining must also contain the event-loop exception channel. On Python 3.14, cancelling `asyncio.shield()` can install a callback that logs a later private child exception even when the owner subsequently retrieves it. Wait for the owned task without that callback, preserve native caller cancellation, and consume every terminal result or exception. Tests capture both the event-loop handler and default asyncio logger, in addition to application logging.
 
 Valid output survives post-success accounting or credential-usage persistence failure. Native cancellation still propagates, and the reservation remains conservative when the outcome is unknown. The adapter stays unavailable when any required capability is missing.
+
+The shared HTTP client's certificate-pinning preflight currently opens a synchronous TLS socket. The bounded MCP transport cannot certify native cancellation when pins apply to its selected endpoint. It rejects that configuration without bypassing operator pins, and rechecks the fresh client's pin state before dispatch to contain later configuration changes. Pins for unrelated hosts do not invalidate the selected path. Supporting selected-endpoint pinning requires a separately certified native-async implementation.
 
 ## Follow-Up
 
