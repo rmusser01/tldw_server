@@ -2,6 +2,7 @@
 
 **Status:** Approved for implementation planning
 **Date:** 2026-09-07
+**Revised:** 2026-10-02 after review against current `dev`
 **Backlog:** TASK-9935.1
 **Parent design:** `2026-06-24-claims-jobs-operational-control-plane-design.md`
 
@@ -47,7 +48,8 @@ timezone, and the persistence helper is vulnerable to concurrent insert races.
 1. Preserve the existing interval and rolling-lookback configuration contract.
 2. Use a thin APScheduler producer rather than event-driven aggregation or a
    coordinator Job.
-3. Enqueue one owner-scoped Job per eligible owner and normalized run slot.
+3. Enqueue one owner-scoped Job per eligible owner and execution window, defined
+   by `(slot_epoch, start_date, end_date)`.
 4. Persist explicit UTC date bounds in every Job payload.
 5. Keep all queue lifecycle and administration in the existing Jobs module.
 6. Keep Claims as the source of truth for metric data and aggregation outcomes.
@@ -130,6 +132,10 @@ and values immutable until restart.
 - Positive intervals below `60` seconds are raised to `60` with a warning.
 - Intervals of `60` seconds or more are preserved; there is no upper clamp that
   could make work run more frequently than configured.
+- Before registration, verify that APScheduler can represent the interval and
+  calculate its first and next fire times. An out-of-range numeric interval
+  disables this scheduler with a sanitized configuration warning; it is never
+  replaced by a shorter interval. Recheck subsequent date overflow safely.
 - Missing, non-numeric, or non-positive lookback values use `2` with a warning.
 - Lookback is capped at `366` days with a warning to bound query and retry cost.
 
@@ -142,7 +148,8 @@ The service uses an APScheduler interval trigger with:
 
 - `max_instances=1`
 - coalesced misfires
-- a `300`-second misfire grace period
+- unlimited misfire grace (`misfire_grace_time=None`), so an event-loop stall
+  coalesces into a recent-window repair instead of discarding the callback
 - explicit UTC scheduling
 
 Startup registers one interval Job with its first run due after
@@ -174,8 +181,12 @@ The producer creates one Job per canonical positive-integer owner identifier.
 - SQLite discovers sorted per-user directories that contain the Media DB file.
   If none exist, it preserves the single-user fallback.
 - PostgreSQL obtains distinct owner identifiers with Claims review-log activity
-  through the package-owned Media DB helper. If none exist, it preserves the
-  single-user fallback.
+  in the captured UTC date window through a package-owned Media DB helper. Use
+  deterministic keyset pagination with pages of at most 100 owners, rather than
+  loading all historical owners into memory. A new owner appearing behind the
+  cursor is repaired by the next rolling-window callback.
+- The fixed-user fallback applies only in single-user authentication mode.
+  An empty multi-user discovery result creates no Jobs.
 - Invalid owner identifiers are skipped with sanitized diagnostics.
 - Duplicate identifiers are removed before enqueue.
 - Failure to enqueue one owner never stops later owners in the same callback.
@@ -185,6 +196,22 @@ The producer creates one Job per canonical positive-integer owner identifier.
 The producer reports owners discovered, accepted, deduplicated, and failed. It
 does not persist its own fan-out state. Shared Jobs idempotency makes concurrent
 application schedulers and restarts converge on the same Jobs rows.
+
+PostgreSQL discovery runs inside an explicit `scoped_context(user_id=None,
+is_admin=True)` maintenance context because the owner join traverses forced Media
+RLS. Aggregation also uses a narrowly bounded privileged maintenance context with
+the validated owner and an explicit SQL owner predicate; this includes the
+owner's team/org and soft-deleted media consistently with historical aggregation.
+Never inherit request org/team membership or expose this scope through an API.
+Create, use, and close each Media DB session inside that scope before restoring
+the prior context, and test scope cleanup on failure and pooled reuse. Jobs RLS
+uses its existing separate worker/admission controls.
+
+Filesystem discovery, each database page, and each Jobs admission execute in a
+worker thread. Async callbacks yield between pages and owners and check a
+shutdown event before discovery, each admission, and each retry delay. This
+keeps API readiness and the event loop responsive without a producer cursor
+ledger or coordinator Job.
 
 ## Job Contract
 
@@ -271,7 +298,10 @@ The existing Claims Jobs worker dispatches the new type through WorkerSDK.
 The handler:
 
 1. Validates the payload and asserts Jobs-row/payload owner equality.
-2. Opens the owner Media DB through `managed_media_database`.
+2. Opens the owner Media DB through `managed_media_database`. SQLite uses the
+   new opt-in `existing_only=True` contract in the shared Media DB layer, backed
+   by a dedicated `mode=rw` backend, with no directory creation or schema
+   initialization. It must never reuse a creating backend from the registry.
 3. Derives a SQLite path only for SQLite routing; PostgreSQL uses the configured
    shared backend plus explicit owner scoping.
 4. Calls the Claims aggregation function in a worker thread with the payload's
@@ -315,6 +345,11 @@ canonical owner identifier into daily rows.
 Reason-code count JSON is serialized with stable ordering and compact separators.
 Jobs results contain only the number of metric groups written and the date range.
 
+Move aggregate SQL into package-owned Media DB operations. Compute metric totals
+and reason-code counts in one source statement (a shared filtered CTE plus
+`UNION ALL` result kinds) so both observe one PostgreSQL statement snapshot at
+READ COMMITTED. Do not assume two SELECTs in a transaction share a snapshot.
+
 ## Persistence Correctness
 
 `aggregate_claims_review_metrics_window` performs its source reads and all daily
@@ -326,7 +361,7 @@ metric writes inside one Media DB transaction for the target owner and window.
 - The lock is per owner, so unrelated PostgreSQL owners remain concurrent while
   overlapping windows for one owner are serialized.
 
-The source query runs after this serialization boundary is acquired. This is
+The single source statement runs after this serialization boundary is acquired. This is
 required because an atomic row upsert alone can still allow a calculation that
 read older source data to overwrite a later calculation's newer counts.
 
@@ -350,7 +385,8 @@ metadata; replacement would be a separate data-model and audit-semantics change.
 If a source query or multi-group write fails, the transaction rolls back the
 complete owner window. WorkerSDK retries only when the error is classified as
 transient. The default two-day window, the 366-day hard cap, and the existing
-review-log date index bound lock duration; operational documentation warns that
+review-log date index reduce query cost; they do not impose a runtime timeout.
+Operational documentation warns that
 large lookbacks increase SQLite writer contention.
 
 ## Results, Errors, And Cancellation
@@ -382,15 +418,26 @@ An SQLite owner database removed between discovery and execution is skipped as
 `owner_database_missing`. A PostgreSQL owner with no matching activity is
 `no_activity`.
 
+Only positively verified filesystem absence (`FileNotFoundError`/`ENOENT`) can
+produce `owner_database_missing`; permission errors, malformed databases, and
+ambiguous open failures remain failures under the storage classifier. An
+existence precheck alone does not prevent a deletion/open race: the actual SQLite
+connection must use `mode=rw`. Suppressing initialization errors is prohibited.
+
 Retryable failures are limited to explicit temporary database, lock, connection,
 timeout, and filesystem signals. Invalid payloads, owner mismatches, unsupported
 versions, schema defects, query/programming errors, and unclassified exceptions
-are non-retryable. Public messages and logs never include raw exception text,
-paths, SQL, or database connection details.
+are non-retryable. Claims producer/handler diagnostics and persisted Jobs errors
+never include raw exception text, paths, SQL, or database connection details.
+Existing shared Media DB logs are outside this scoped logging guarantee; do not
+promise global log sanitization without a separate shared-layer change.
 
 The export-specific storage classifier in the current handler is
 generalized into a shared Claims storage-failure classifier and reused by both
 export and review-metrics handlers. This avoids divergent retry policy.
+Preserve export behavior through a table-driven compatibility matrix covering
+every current SQLite code/message, PostgreSQL SQLSTATE, OS errno, connection/
+timeout signal, wrapped cause, and generic non-retryable exception.
 
 Jobs excludes already-cancelled queued work from acquisition and owns the
 terminal cancellation transition. The current Claims worker does not wire
@@ -461,6 +508,9 @@ application readiness. Shutdown stops new APScheduler callbacks, prevents new
 fan-out, and awaits or cancels the scheduler wrapper through the existing
 lifecycle manager. Jobs already accepted remain owned by Jobs and are not
 cancelled by scheduler shutdown.
+Stop fan-out cooperatively between pages, owners, and retry delays. An admission
+already running in a worker thread may commit after cancellation; retain its
+identity and never substitute local execution.
 
 ## Observability
 
@@ -502,12 +552,16 @@ dashboard, or administration surface is added.
 
 - Cover the complete flag matrix and immutable startup-mode resolution.
 - Verify default, invalid, minimum-interval, and maximum-lookback normalization.
+- Verify out-of-range numeric intervals disable only this scheduler safely.
 - Verify immediate catch-up does not block startup.
 - Verify UTC slot normalization and date-window derivation from one captured
   timestamp.
 - Add property-based coverage for slot and date-window invariants, including UTC
   midnight boundaries and leap years.
 - Verify `max_instances=1`, coalescing, misfire behavior, and clean shutdown.
+- Verify a stall longer than 300 seconds still performs one coalesced repair.
+- Verify bounded window-filtered owner pages and nonblocking database/admission
+  calls, plus shutdown during a page, owner boundary, and retry delay.
 - Verify deterministic owner sorting/deduplication and per-owner failure isolation.
 - Verify stable idempotency across duplicate callbacks and process instances.
 - Verify transient admission retries reuse one idempotency key and never trigger
@@ -517,6 +571,11 @@ dashboard, or administration surface is added.
 
 - Dispatch the new type through the existing Claims worker.
 - Verify SQLite owner-path routing and PostgreSQL shared-backend owner scoping.
+- Verify missing SQLite paths are not recreated, including deletion between the
+  precheck and actual open; permission/open errors are not successful skips.
+- Use the official PostgreSQL fixture with a non-BYPASSRLS role to prove
+  multi-owner discovery, team/org/deleted-media aggregation, explicit owner
+  filtering, scope restoration, and safe pooled connection reuse.
 - Verify exact payload dates reach the aggregation function after delayed
   execution.
 - Verify `ok`, `no_activity`, and `owner_database_missing` outcomes.
@@ -526,6 +585,7 @@ dashboard, or administration surface is added.
 - Verify overlapping jobs for one owner cannot let an older source snapshot
   overwrite a newer result, while separate PostgreSQL owners remain independent.
 - Verify a partial multi-group failure rolls back the complete owner window.
+- Verify totals and reason counts use one snapshot under concurrent review writes.
 - Verify explicit UTC PostgreSQL grouping and SQLite/PostgreSQL result parity.
 - Preserve current reason-code and extractor aggregate behavior.
 
@@ -540,6 +600,7 @@ dashboard, or administration surface is added.
 - Verify auxiliary startup registration and shutdown.
 - Run existing Claims Jobs, analytics export, Jobs manager, lifecycle, and OpenAPI
   regressions affected by shared handler or startup changes.
+- Run the complete storage-classifier compatibility matrix for analytics exports.
 
 ### Quality Gates
 
@@ -555,9 +616,11 @@ dashboard, or administration surface is added.
 - Owner identity is validated at enqueue and execution boundaries.
 - Jobs row owner and payload owner must match before DB resolution.
 - SQLite paths are derived from canonical owner IDs and never accepted in payloads.
-- PostgreSQL aggregation always includes the target owner predicate.
+- PostgreSQL maintenance scope is local to trusted background database work;
+  aggregation always includes the target owner predicate and resets scope after
+  closing its session.
 - Payload and result data is bounded, versioned, non-sensitive, and strict.
-- Logs and Jobs errors are sanitized and never expose SQL, paths, connection
+- Claims producer/handler diagnostics and Jobs errors never expose SQL, paths, connection
   strings, review text, or raw exceptions.
 - Queue controls continue to use existing Jobs RBAC.
 
