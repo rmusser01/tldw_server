@@ -341,6 +341,51 @@ class TestChatSessionEndpoints:
         assert delete_response.status_code == 204  # No Content status
         # 204 No Content doesn't have a response body
 
+    # CS-N2 (#3104): delete_chat_session soft-deletes every message (character_chat_sessions.py:7983-8037); restore (:8102 -> conversation_store.py:1481-1490) only undeletes the conversation row.
+    @pytest.mark.integration
+    @pytest.mark.xfail(strict=True, reason="CS-N2 (#3104): restoring a chat from trash leaves its messages soft-deleted")
+    def test_restore_chat_from_trash_restores_its_messages(self, test_client, auth_headers):
+        """UX review 2026-10 contract reproduction: Trash -> Restore must bring the messages back."""
+        char_response = test_client.post(
+            "/api/v1/characters/",
+            json={
+                'name': 'Restore Test',
+                'description': 'Test',
+                'personality': 'Test',
+                'first_message': 'Hi!'
+            },
+            headers=auth_headers
+        )
+        assert char_response.status_code == 201, char_response.text
+        chat_response = test_client.post(
+            "/api/v1/chats/",
+            json={'character_id': char_response.json()['id'], 'title': 'To Restore'},
+            headers=auth_headers
+        )
+        assert chat_response.status_code == 201, chat_response.text
+        chat_id = chat_response.json()['id']
+        for index, role in enumerate(('user', 'assistant', 'user')):
+            sent = test_client.post(
+                f"/api/v1/chats/{chat_id}/messages",
+                json={'role': role, 'content': f'Restore message {index}'},
+                headers=auth_headers
+            )
+            assert sent.status_code == 201, sent.text
+
+        before = test_client.get(f"/api/v1/chats/{chat_id}/messages", headers=auth_headers)
+        assert before.status_code == 200, before.text
+        message_ids_before = [message['id'] for message in before.json()['messages']]
+        assert len(message_ids_before) >= 3
+
+        deleted = test_client.delete(f"/api/v1/chats/{chat_id}", headers=auth_headers)
+        assert deleted.status_code == 204, deleted.text
+        restored = test_client.post(f"/api/v1/chats/{chat_id}/restore", headers=auth_headers)
+        assert restored.status_code == 200, restored.text
+
+        after = test_client.get(f"/api/v1/chats/{chat_id}/messages", headers=auth_headers)
+        assert after.status_code == 200, after.text
+        assert [message['id'] for message in after.json()['messages']] == message_ids_before
+
 
 class TestWorldBookEndpoints:
     """World book endpoint coverage."""
