@@ -70,6 +70,7 @@ import {
   toAttachmentMarkdown,
 } from '../notes-manager-utils'
 import type { NoteStudioDocumentSummary } from '../notes-studio-types'
+import { buildSingleNoteCopyText } from '../export-utils'
 import { notesAuthoritySetting } from '../notes-authority-storage'
 import { useNotesAuthorityState } from './useNotesAuthorityState'
 import { createNotesGraphAuthorityScope } from './useNotesGraphAuthorityScope'
@@ -113,6 +114,23 @@ export interface UseNotesEditorStateDeps {
 
 const noteResourcePath = (id: string | number) =>
   `/api/v1/notes/${encodeURIComponent(String(id))}`
+
+/**
+ * Copy text to the clipboard, reporting whether it worked. Call it before the
+ * first `await` of a click handler: browsers only allow the write while the
+ * click's user activation is still active.
+ */
+const writeClipboardText = async (text: string): Promise<boolean> => {
+  try {
+    if (typeof navigator === 'undefined' || typeof navigator.clipboard?.writeText !== 'function') {
+      return false
+    }
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return false
+  }
+}
 
 export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const {
@@ -204,6 +222,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [selectedVersion, setSelectedVersion] = React.useState<number | null>(null)
   const [selectedLastSavedAt, setSelectedLastSavedAt] = React.useState<string | null>(null)
   const [isDirty, setIsDirtyState] = React.useState(false)
+  const isDirtyRef = React.useRef(isDirty)
+  isDirtyRef.current = isDirty
   const dirtyRevisionRef = React.useRef(0)
   const setIsDirty = React.useCallback((value: React.SetStateAction<boolean>) => {
     if (value !== false) dirtyRevisionRef.current += 1
@@ -879,21 +899,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     )
   }, [])
 
-  const reloadNotes = React.useCallback(async (noteId?: string | number | null) => {
-    await refetch()
-    const target = noteId ?? selectedId
-    if (target == null) return
-    try {
-      const detail = await bgRequest<any>({ path: noteResourcePath(target) as any, method: 'GET' as any })
-      const version = toNoteVersion(detail)
-      if (version != null) setSelectedVersion(version)
-      setSelectedLastSavedAt(toNoteLastModified(detail))
-      setRemoteVersionInfo(null)
-    } catch {
-      // Ignore refresh errors for reload action
-    }
-  }, [refetch, selectedId])
-
   const reloadSelectedNoteAfterConflict = React.useCallback(async () => {
     if (selectedId == null) return
     const ok = await confirmDanger({
@@ -917,6 +922,56 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       setSaveRecoveryNotice(null)
     }
   }, [confirmDanger, loadDetail, selectedId, t])
+
+  // "Reload notes" from the conflict toast. The editor's base version must
+  // never move without the content it belongs to: if it did, the next autosave
+  // would send the stale text with the new version and overwrite the other
+  // tab's change (NS-N1). The toast keeps an old copy of this callback, so the
+  // live editor state is read from refs.
+  const reloadNotes = React.useCallback(async (noteId?: string | number | null) => {
+    const currentId = selectedIdRef.current
+    const target = noteId ?? currentId
+    if (target == null || currentId == null || String(target) !== String(currentId)) {
+      // The conflict was on another note: refresh the list, leave the editor alone.
+      await refetch()
+      return
+    }
+    clearAutosaveTimeout()
+    const hadLocalEdits = isDirtyRef.current
+    if (hadLocalEdits) {
+      // Keep the unsaved text recoverable before the server copy replaces it.
+      // This must run before any other await (see writeClipboardText).
+      const local = editRevisionRef.current
+      const copied = await writeClipboardText(
+        buildSingleNoteCopyText(
+          { id: currentId, title: local.title, content: local.content, keywords: local.editorKeywords },
+          'markdown'
+        )
+      )
+      if (!copied) {
+        message.warning(
+          t('option:notesSearch.reloadConflictCopyFailed', {
+            defaultValue: 'Could not copy your unsaved edits to the clipboard.'
+          })
+        )
+        // Fall back to the explicit "your edits will be discarded" confirm.
+        await reloadSelectedNoteAfterConflict()
+        await refetch()
+        return
+      }
+    }
+    const loaded = await loadDetail(target)
+    await refetch()
+    if (loaded && hadLocalEdits) {
+      message.info({
+        content: t('option:notesSearch.reloadConflictCopied', {
+          defaultValue:
+            'Loaded the latest version from the server. Your unsaved edits were copied to the clipboard.'
+        }),
+        duration: 8
+      })
+    }
+  }, [clearAutosaveTimeout, loadDetail, message, refetch, reloadSelectedNoteAfterConflict, t])
 
   const handleVersionConflict = React.useCallback((noteId?: string | number | null) => {
     message.error({
