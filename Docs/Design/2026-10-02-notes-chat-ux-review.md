@@ -44,6 +44,7 @@
   - [8.2 Next (weeks)](#82-next-weeks)
   - [8.3 Strategic bets (larger redesigns)](#83-strategic-bets-larger-redesigns)
   - [8.4 Sequencing and dependencies](#84-sequencing-and-dependencies)
+  - [8.5 Enhancement audit addendum (2026-10-03)](#85-enhancement-audit-addendum-2026-10-03)
 - [9. Strengths to preserve](#9-strengths-to-preserve)
   - [9.1 Notes data safety and recovery](#91-notes-data-safety-and-recovery)
   - [9.2 Performance and robustness](#92-performance-and-robustness)
@@ -63,6 +64,7 @@
 - [11. Suggested remediation roadmap](#11-suggested-remediation-roadmap)
 - [Appendix A. Findings rejected during verification](#appendix-a-findings-rejected-during-verification)
 - [Appendix B. Evidence index](#appendix-b-evidence-index)
+- [Appendix C. Enhancement traceability](#appendix-c-enhancement-traceability)
 
 ---
 
@@ -2301,6 +2303,86 @@ Each bet gets a *First slice*, a small piece that delivers value alone and lower
 
 ---
 
+### 8.5 Enhancement audit addendum (2026-10-03)
+
+After the issues were filed, an audit checked that no enhancement was lost. It traced all 68 raw reviewer ideas to the canonical ideas (Appendix C) and swept every defect recommendation, reviewer note and verification note for suggestions that never became ideas.
+
+- **Nothing was dropped outright.** Every raw idea maps to at least one canonical idea.
+- **12 raw ideas lost details** in consolidation. The 30 details are restored below and on the enhancement group issues.
+- **5 suggestions never became ideas.** They are added as Q16, Q17 and N29–N31.
+- **4 design conflicts between reviewers** were settled without discussion. They are now pending decisions D8–D11.
+
+**New ideas**
+
+| Code | Idea | Page | Group | Sketch |
+|---|---|---|---|---|
+| N29 (IDEA-50) | Graph view at library scale | notes | E7 (#3131) | Cluster nodes by tag; filter by degree or tag; load progressively past 100 nodes; label nodes on hover and at higher zoom levels. |
+| N30 (IDEA-51) | Knowledge panel as a retrieval workbench | chat | E3 (#3127) | Multi-select chunks and insert them together; Enter inserts the focused chunk; an explicit "Generate answer" action instead of an automatic one; relevance shown as a percentage or bar. |
+| Q16 (IDEA-52) | Configurable side-panel start page | sidepanel-chat | E6 (#3130) | Setting: "Side panel opens to: Chat | Companion | Last used" (default Chat). |
+| N31 (IDEA-53) | Compare models in the side panel | sidepanel-chat | E5 (#3129) | Once Compare passes verification (D4), offer it in the side panel with a stacked layout instead of columns. |
+| Q17 (IDEA-54) | Ctrl/Cmd+Enter sends when "Send on Enter" is off | chat | E4 (#3128) | Verify first; if missing, Ctrl/Cmd+Enter sends from the composer on all surfaces and the shortcut sheet lists it. |
+
+Trash retention with auto-purge, also found by the sweep, is covered by decision D3 (NL-06).
+
+**Restored details**
+
+- **N5 · Universal Cmd/Ctrl+K quick switcher for notes, chats, prompts, characters and models** (E4, #3128)
+  - Cmd/Ctrl+P and Cmd/Ctrl+O open the switcher filtered to notes and chats (ft-notes#5, pu-notes#1).
+  - Match on tags as well as titles and content; fuzzy title search runs server-side (ft-notes#5, pu-notes#1).
+  - Result rows show chat state, e.g. "💬 RAG chunking strategy · resolved" (lens-visual#5).
+  - Enter acts by type: open a note or chat, apply a prompt, switch to a model, start a chat with a character (pu-chat#1).
+- **N1 · Answer → Notes with smart defaults, append mode and provenance** (E3, #3127)
+  - The save toast offers "Open note" and "Undo" (pu-cross#1).
+  - Saving the same message again offers the existing note ("Already saved") instead of creating a duplicate (pu-cross coverage gaps).
+  - The saved message shows a "Saved" chip that links to the note (pu-cross#1; see also XP-03).
+- **S1 · One unified, searchable chat history across devices and surfaces** (E2, #3126)
+  - Side panel shows the last 10 server chats with state and topic chips, "Load more", and a collapsible section (pu-ext#3).
+  - Cmd/Ctrl+1–9 switches open side-panel tabs (pu-ext#3).
+  - History search matches character and participant names, not only titles (pu-ext journey step 2).
+- **N6 · Single 'Open in full page' hand-off with round-trip** (E2, #3126)
+  - "Open in WebUI" is a second hand-off target besides the extension full page (report §8 N6, XP-09).
+- **N12 · Composer restructure: one row of intent, Casual/Pro governs density** (E5, #3129)
+  - A first-run hint offers "Switch to Pro anytime" (ft-chat#5).
+- **N14 · Single sync and status centre (one chip per surface)** (E2, #3126)
+  - Settings links "Export all notes (Markdown zip)" next to where notes are stored (ft-notes#7).
+- **S5 · Single block editor with Markdown shortcuts and a slash menu** (E7, #3131)
+  - The "Markdown + LaTeX supported" hint opens a Markdown cheatsheet popover (NE-06).
+- **Q11 · Task-based first-run checklist instead of an area tour (Notes)** (E6, #3130)
+  - Offer the task-based "Get started" checklist on /chat as well as Notes (report §10.6).
+- **N7 · Visible context strip above the composer (this page, notes, system prompt, model)** (E3, #3127)
+  - History-scope chip "History: 2 of 6 messages · Reset" and a per-message "Start fresh from here…" with an Undo toast (report §8 N7, CC-04, §10.3).
+  - "+ Add context ▾" menu (Note, Tag, Media, This page, Prompt) and a [Model ▾] chip; chips toggle from suggestion chips and /search (report §8 N7).
+  - Bring a folder, a tag or a multi-note selection into chat as context, including a bulk-bar "Chat about these notes" (report §8.0, XP-04).
+  - Composer "@" mentions attach notes, media, chats and prompts; slash commands /prompt, /note and /new, plus server-provided commands (CC-11, CC-05, XP-04; `/api/v1/chat/commands` currently returns an empty list).
+- **Q6 · Code block toolbar with copy, wrap, save to note and open in workspace** (E3, #3127)
+  - Code-block toolbar also offers "Open in Document Workspace" and "Run in sandbox" where available (canonical sketch; missing from §8 Q6).
+- **N21 · One platform-aware, context-aware keyboard shortcut registry and sheet** (E4, #3128)
+  - Controls show their shortcut in tooltips (ft-ext#6).
+  - The command palette and Help print the real, current bindings, including remapped ones (pu-ext#6).
+- **Q9 · Reduce Tab burden in the notes list** (E4, #3128)
+  - In the notes list, j/k as well as ↑/↓ move between rows, and "e" focuses the editor (ft-notes#5).
+- **Q14 · Terminology glossary and copy lint** (E8, #3132)
+  - One shared helper maps runtime error codes (e.g. `request_config_scope_changed`) to plain copy for every error toast (CM-01, CS-06, NS-02, §10.4).
+  - A user-facing glossary in the Help modal (XP-12).
+- **N25 · One typographic and control scale, enforced by lint** (E8, #3132)
+  - Lint fails on Tailwind colour classes that are not defined in the theme (CC-12).
+- **N26 · Single Markdown renderer and plain-text preview utility** (E8, #3132)
+  - Below 400px, markdown tables reflow into stacked label:value cards (XS-14).
+- **N27 · Visual-regression and accessibility gates in CI** (E1, #3125)
+  - Run the axe gate in both light and dark themes (lens-a11y#1).
+  - Add a manual VoiceOver/NVDA smoke step to the release checklist (AX-11, lens-a11y and ft-notes coverage gaps).
+- **N28 · Typed API client and contract tests for Notes and Chat** (E1, #3125)
+  - Seed fixtures spread over realistic dates; the API or import path accepts `created_at`, and import preserves original note dates (pu-notes and pu-chat coverage gaps).
+
+**Pending decisions**
+
+| # | Question | Options | Recommendation |
+|---|---|---|---|
+| D8 | Which shortcut opens the quick switcher? | (a) Cmd/Ctrl+K is one universal switcher for content and commands, with a ">" prefix for commands (canonical IDEA-01). (b) Cmd/Ctrl+P (and Cmd/Ctrl+O) open a content switcher and Cmd/Ctrl+K stays the command palette (lens-visual#5, pu-notes#1). | (a) with aliases: the header already advertises "Search ⌘K", so users expect to find things there (XP-06). Cmd/Ctrl+P and Cmd/Ctrl+O open the same switcher pre-filtered to notes and chats. |
+| D9 | What does Pro mode add to the composer? | (a) The full toolbar plus rails and token chip (canonical IDEA-11, ft-chat#5). (b) A persistent right panel instead of more toolbar buttons (lens-visual#4). | (b): adding buttons recreates the toolbar overload in CO-03 and CO-06; one right panel can absorb today's cockpit rails (CO-04). |
+| D10 | How many rows does the Casual composer use? | (a) Two rows: input + Send, then attach / Knowledge / Web / Model / More chips (lens-visual#4, canonical). (b) One row: +, input, model chip, Send (ft-chat#5). | (a) on desktop, so Knowledge and Web stay one click away; (b) on phones and the narrow side panel, together with the bottom-sheet composer (N13). |
+| D11 | What does Cmd/Ctrl+Enter do on a switcher result? | (a) Open in a new tab or split view (canonical IDEA-01, lens-visual#5). (b) Open the note in the Notes Dock beside the current page (pu-notes#1). | Open beside the current page: notes in the Notes Dock now, chats in split view once S4 lands; Shift+Enter opens a new browser tab. |
+
 ## 9. Strengths to preserve
 
 These work well today. Each group ends with a **Guardrail**: what any change from §8 must keep, and which patterns should become the template for the rest of the app.
@@ -2712,3 +2794,78 @@ No finding was rejected outright. Claims that verification narrowed are noted in
 - Prior chat review (June 2026): `Docs/Design/2026-06-13-chat-page-uat-review.md`
 
 **Test data left on the shared backend.** Reviewer-created items have titles prefixed with the reviewer tag (for example `[ft-notes]`, `[pu-chat]`, `[verify-NS]`). The exceptions are server-titled items: a "Snippet: Explain LoRA fine-tuning" note from pu-cross and a "Forked conversation" chat from pu-chat. pu-ext appended 4 `[pu-ext]` messages to the seeded chat "Prepare for a system design interview", which forked it. Seeded items were otherwise not modified.
+
+## Appendix C. Enhancement traceability
+
+Every raw improvement idea from the ten reviewers, and where it landed. "Details restored" means a detail was missing from the canonical idea and is now listed in §8.5 and on the group issue.
+
+| Raw idea | Title | Canonical idea(s) | Status |
+|---|---|---|---|
+| ft-notes#1 | Block editor, Markdown shortcuts, slash menu | IDEA-21 (S5) | intact |
+| ft-notes#2 | Local draft journal | IDEA-20 (Q4) | intact |
+| ft-notes#3 | Task-based first-run checklist | IDEA-29 (Q11) | intact |
+| ft-notes#4 | Click-to-create unresolved links | IDEA-22 (N19) | intact |
+| ft-notes#5 | Quick switcher + keyboard list navigation | IDEA-01 (N5), IDEA-40 (Q9), IDEA-05 (N4) | details restored |
+| ft-notes#6 | Progressive disclosure | IDEA-28 (Q10) | intact |
+| ft-notes#7 | Show where notes live | IDEA-18 (N14) | details restored |
+| ft-ext#1 | Side-panel first-run coachmarks | IDEA-30 (Q12) | intact |
+| ft-ext#2 | Selection mini-toolbar | IDEA-32 (Q5) | intact |
+| ft-ext#3 | Unified "Recent" list | IDEA-06 (S1), IDEA-01 (N5) | intact |
+| ft-ext#4 | "Ask about this page" context chip | IDEA-33 (N7) | intact |
+| ft-ext#5 | Glossary-driven copy pass | IDEA-43 (Q14) | intact |
+| ft-ext#6 | Side-panel keyboard layer | IDEA-37 (N21) | details restored |
+| ft-chat#1 | "Pick a model that works" handshake | IDEA-10 (Q2) | intact |
+| ft-chat#2 | One searchable chat history | IDEA-06 (S1), IDEA-01 (N5) | intact |
+| ft-chat#3 | Answer → Notes with provenance | IDEA-02 (N1) | intact |
+| ft-chat#4 | Stopped/variant states | IDEA-13 (N8), IDEA-15 (N10) | intact |
+| ft-chat#5 | Casual/Pro governs composer density | IDEA-11 (N12) | details restored; conflict D9, D10 |
+| ft-chat#6 | Example prompts | IDEA-31 (Q1) | intact |
+| ft-chat#7 | Code-block toolbar | IDEA-34 (Q6) | intact |
+| ft-chat#8 | Mobile bottom-sheet composer | IDEA-12 (N13) | intact |
+| lens-visual#1 | Terminology glossary (19 rows) | IDEA-43 (Q14); rows in report §10 | intact |
+| lens-visual#2 | Type/control scale + lint | IDEA-44 (N25) | intact |
+| lens-visual#3 | Shared "object page" layout | IDEA-45 (S6) | intact |
+| lens-visual#4 | Composer restructure | IDEA-11 (N12) | conflict D9, D10 |
+| lens-visual#5 | Quick switcher (Ctrl/Cmd+P) | IDEA-01 (N5) | details restored; conflict D8, D11 |
+| lens-visual#6 | Single Markdown renderer | IDEA-46 (N26) | intact |
+| lens-visual#7 | Visual-regression gate | IDEA-47 (N27) | intact |
+| pu-notes#1 | Quick Open (Mod+P/Mod+O) | IDEA-01 (N5) | details restored; conflict D8, D11 |
+| pu-notes#2 | Version history, diff, restore | IDEA-19 (N15) | intact |
+| pu-notes#3 | Row context menu | IDEA-25 (Q8) | intact |
+| pu-notes#4 | Search syntax + saved searches | IDEA-26 (N17) | intact |
+| pu-notes#5 | Backlinks with context, unlinked mentions | IDEA-22 (N19) | intact |
+| pu-notes#6 | Outline rail, zen mode | IDEA-23 (N20) | intact |
+| pu-notes#7 | Folder tree | IDEA-27 (N18) | intact |
+| lens-a11y#1 | Accessibility gate in CI | IDEA-47 (N27) | details restored |
+| lens-a11y#2 | MenuButton/Combobox/Announcer | IDEA-41 (N24) | intact |
+| lens-a11y#3 | Respect OS preferences | IDEA-42 (Q3) | intact |
+| lens-a11y#4 | Generated shortcut sheet | IDEA-37 (N21) | intact |
+| lens-a11y#5 | Screen-reader chat reading model | IDEA-39 (N23), IDEA-38 (N22) | intact |
+| lens-a11y#6 | Reduce Tab burden | IDEA-40 (Q9) | intact |
+| pu-cross#1 | Save-to-Notes dialog, append mode | IDEA-02 (N1) | details restored |
+| pu-cross#2 | Universal Cmd+K | IDEA-01 (N5) | intact |
+| pu-cross#3 | Side-by-side research mode | IDEA-04 (S4) | intact |
+| pu-cross#4 | Two-way chat↔note backlinks | IDEA-03 (N2) | intact |
+| pu-cross#5 | Addressable routes | IDEA-05 (N4) | intact |
+| pu-cross#6 | Responsive long-note ergonomics | IDEA-23 (N20) | intact |
+| lens-states#1 | Sync/status centre | IDEA-18 (N14) | intact |
+| lens-states#2 | Note version history | IDEA-19 (N15) | intact |
+| lens-states#3 | Server-side resumable generation | IDEA-16 (S3) | intact |
+| lens-states#4 | Typed API client + contract tests | IDEA-48 (N28) | intact |
+| lens-states#5 | Request budget in CI | IDEA-49 (Q15) | intact |
+| lens-states#6 | Honest pending-send queue | IDEA-17 (N11) | intact |
+| pu-chat#1 | ⌘K "Jump to" | IDEA-01 (N5) | details restored |
+| pu-chat#2 | Deep-linkable chats | IDEA-05 (N4) | intact |
+| pu-chat#3 | "Regenerate with…" + model chip | IDEA-14 (N9) | intact |
+| pu-chat#4 | Branch map | IDEA-15 (N10) | intact |
+| pu-chat#5 | Keyboard message navigation | IDEA-38 (N22) | intact |
+| pu-chat#6 | Save to Notes with destination | IDEA-02 (N1) | intact |
+| pu-chat#7 | Pinned context strip | IDEA-33 (N7) | intact |
+| pu-chat#8 | History density/grouping | IDEA-07 (Q7) | intact |
+| pu-ext#1 | One conversation model | IDEA-08 (S2) | intact |
+| pu-ext#2 | "Open in full page" round-trip | IDEA-09 (N6) | intact |
+| pu-ext#3 | Recent server chats in side panel | IDEA-06 (S1) | details restored |
+| pu-ext#4 | Notes mini-surface in side panel | IDEA-35 (N3) | intact |
+| pu-ext#5 | Adaptive knowledge search | IDEA-36 (Q13) | intact |
+| pu-ext#6 | Platform-aware, remappable keyboard layer | IDEA-37 (N21) | details restored |
+| pu-ext#7 | Notes browsing past 100 | IDEA-24 (N16) | intact |

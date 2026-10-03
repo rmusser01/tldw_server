@@ -4,7 +4,7 @@
 **Source review:** `Docs/Design/2026-10-02-notes-chat-ux-review.md` (PR #3100). Machine-readable list: `Docs/Design/2026-10-02-notes-chat-ux-review.issues.json`
 **Tracking:** #3101 (epic). Defect groups #3102–#3124 (G01–G23); enhancement groups #3125–#3132 (E1–E8). Label: `ux-review-2026-10`
 **Scope:** `/notes` and `/chat` on the WebUI, the extension options page and the extension side panel. Shared UI lives in `apps/packages/ui/src`; backend changes are called out per item.
-**Goal:** Resolve all 151 verified issues (P0 22 · P1 9 · P2 97 · P3 23) and sequence the 49 improvement ideas. Order of work: stop data loss and false status first, then repair broken core flows, then first-run clarity, then power-user scale and cross-surface continuity, then accessibility and polish.
+**Goal:** Resolve all 151 verified issues (P0 22 · P1 9 · P2 97 · P3 23) and schedule all 54 improvement ideas (49 from the review plus 5 added by the 2026-10-03 enhancement audit). Order of work: stop data loss and false status first, then repair broken core flows, then first-run clarity, then power-user scale and cross-surface continuity, then accessibility and polish.
 
 Each stage can ship on its own and has testable exit criteria. Within a stage, the groups (GitHub issues) bundle issues that share a root cause, and each group is cut into PR-sized slices listed in dependency order.
 
@@ -63,6 +63,17 @@ Two P0s sit in later-stage groups: NE-04 (Print, G16) and CC-05 (server prompt l
 | D5 | Interim WYSIWYG mode while NE-01 is open? | G01 | **Hide until fixed.** Hide the WYSIWYG toggle in the first Stage 1 PR and restore it with the NE-01 fix. |
 | D6 | A full Notes surface in the side panel (N3)? | G08, E3 | **Decide after the D7 spike.** Ship the quick-save improvements (XS-13) now. |
 | D7 | When to run the design spike for one conversation model (S1/S2) and server-side, resumable generation (S3)? | E2 | **During Stage 2**, so Stage 4 builds on a decided model. The spike's output also settles D6. |
+
+### Pending decisions (proposed 2026-10-03)
+
+The enhancement audit found design conflicts between reviewers that consolidation settled without discussion. They need owner decisions before the Stage 3–4 work that depends on them.
+
+| # | Question | Affects | Options | Recommendation |
+|---|---|---|---|---|
+| D8 | Which shortcut opens the quick switcher? | E4 (IDEA-01) | (a) Cmd/Ctrl+K is one universal switcher for content and commands, with a ">" prefix for commands (canonical IDEA-01). (b) Cmd/Ctrl+P (and Cmd/Ctrl+O) open a content switcher and Cmd/Ctrl+K stays the command palette (lens-visual#5, pu-notes#1). | (a) with aliases: the header already advertises "Search ⌘K", so users expect to find things there (XP-06). Cmd/Ctrl+P and Cmd/Ctrl+O open the same switcher pre-filtered to notes and chats. |
+| D9 | What does Pro mode add to the composer? | E5 (IDEA-11) | (a) The full toolbar plus rails and token chip (canonical IDEA-11, ft-chat#5). (b) A persistent right panel instead of more toolbar buttons (lens-visual#4). | (b): adding buttons recreates the toolbar overload in CO-03 and CO-06; one right panel can absorb today's cockpit rails (CO-04). |
+| D10 | How many rows does the Casual composer use? | E5 (IDEA-11, IDEA-12) | (a) Two rows: input + Send, then attach / Knowledge / Web / Model / More chips (lens-visual#4, canonical). (b) One row: +, input, model chip, Send (ft-chat#5). | (a) on desktop, so Knowledge and Web stay one click away; (b) on phones and the narrow side panel, together with the bottom-sheet composer (N13). |
+| D11 | What does Cmd/Ctrl+Enter do on a switcher result? | E4 (IDEA-01) | (a) Open in a new tab or split view (canonical IDEA-01, lens-visual#5). (b) Open the note in the Notes Dock beside the current page (pu-notes#1). | Open beside the current page: notes in the Notes Dock now, chats in split view once S4 lands; Shift+Enter opens a new browser tab. |
 
 ---|---|---|---|
 | D1 | Should WebUI and side-panel chats save to the server by default, or stay local-first with explicit promotion? | G03, G04, E2 | Save to the server by default when connected; keep "Temporary chat" local. Ship honest labels ("Saved on this device") immediately either way. |
@@ -227,6 +238,22 @@ Two P0s sit in later-stage groups: NE-04 (Print, G16) and CC-05 (server prompt l
 
 ---
 
+## Stage 6: Strategic bets — E2 #3126, E3 #3127, E7 #3131, E8 #3132
+
+**Goal:** Deliver the larger redesigns the review proposed, each starting from a design spike so the build follows a decided model.
+
+**Work items (in order):**
+1. **S1, S2, S3 (E2) — build on the D7 spike from Stage 2.** One searchable chat history across devices and surfaces, one conversation model across the side panel, extension full page and WebUI, and server-side resumable generation. N10 (branch map) and N3 (Notes inside the side panel, per D6) follow the spike's decisions.
+2. **S4 (E3) — side-by-side research mode (chat + note).** Design spike after N2 two-way links and XP-05 routes land, then build.
+3. **S5 (E7) — one block editor with Markdown shortcuts and a slash menu.** Design spike after NE-01 and N20 land, then build; keeps Markdown as the storage format.
+4. **S6 (E8) — shared "object page" layout for Notes and Chat.** Design spike after N4 routes and N12 composer restructure, then migrate both pages.
+5. **N31 (E5) — Compare models in the side panel**, once Compare passes verification (D4).
+
+**Success criteria:** Each bet has an approved design doc before build; each build ships behind a flag with the UX harness scenarios passing on all three surfaces.
+**Status:** Not Started
+
+---
+
 ## Quick-win track (ship anytime)
 
 Small (S), self-contained fixes that don't wait for their stage. Good first issues; each is one PR. Tick the item in its group issue.
@@ -257,6 +284,67 @@ Enhancement quick wins from §8.1: Q2 working model on first run (E6), Q3 OS pre
 | E7 Notes at scale | #3131 | Stage 4 | G01, G02, G09, G15 |
 | E2 One conversation model | #3126 | Design spike during Stage 2 (D7), build in Stage 4 | G03, G04, D1 |
 
+### Enhancement schedule (every idea)
+
+Every idea has an explicit slot. Codes match report §8 (Q16, Q17 and N29–N31 come from the §8.5 audit addendum); details restored by the audit are listed on each group issue.
+
+| Code | Idea | Group | Stage | Slot | Depends on |
+|---|---|---|---|---|---|
+| Q1 | Example prompts in the chat empty state | E6 #3130 | 3 | with G10 / G12 (chat empty state) | CO-02 |
+| Q2 | First-run 'pick a model that works' handshake | E6 #3130 | 3 | with G10 slice (first send works) | CC-01 |
+| Q3 | Respect OS preferences by default (theme, reduced motion, contrast) | E6 #3130 | Quick win | anytime; pairs with AX-19 (G23) | — |
+| Q4 | Local draft journal with restore banner | E7 #3131 | 1 → 2 | follow-on to the G01 save state machine (local draft journal) | G01 slice 5 |
+| Q5 | Selection mini-toolbar inside answers | E3 #3127 | 4 | selection mini-toolbar inside answers | N1 |
+| Q6 | Code block toolbar with copy, wrap, save to note and open in workspace | E3 #3127 | Quick win | anytime; with CM-07 (G17) | — |
+| Q7 | Density, grouping and filters for the chat history list | E5 #3129 | 2 | with G07 (CS-08 density, date groups, filters) | CS-02 |
+| Q8 | Row context menu and inline row actions in the notes list | E7 #3131 | 4 | with G15 (row context menu) | — |
+| Q9 | Reduce Tab burden in the notes list | E4 #3128 | 2–3 | with AX-03 (G21, P1 — started early) | — |
+| Q10 | Progressive disclosure of advanced Notes views and AI actions | E6 #3130 | 3 | with G13 (Views and AI actions) | NL-12 |
+| Q11 | Task-based first-run checklist instead of an area tour (Notes) | E6 #3130 | 3 | with G13 (replaces the area tour once NO-N1 lands) | NO-N1 |
+| Q12 | Three-step sidepanel first-run coachmarks | E6 #3130 | 3 | with G10 (XS-17 side panel opens on Chat) | XS-02, XS-17 |
+| Q13 | Adaptive knowledge search for servers without embeddings | E3 #3127 | 4 | adaptive knowledge search defaults | — |
+| Q14 | Terminology glossary and copy lint | E8 #3132 | 3 | with G14 (glossary + copy lint) | — |
+| Q15 | Performance and request budget in CI | E1 #3125 | 0 | Stage 0 item 5 (request budget) | — |
+| Q16 | Configurable side-panel start page | E6 #3130 | 3 | with XS-17 (G10) | XS-17 |
+| Q17 | Ctrl/Cmd+Enter sends when "Send on Enter" is off | E4 #3128 | 3 | with G11 (verify, then fix) | — |
+| N1 | Answer → Notes with smart defaults, append mode and provenance | E3 #3127 | 4 | with G08 follow-up (answer → note with append mode and provenance) | XP-02, XP-03 |
+| N2 | Bidirectional chat↔note backlinks | E3 #3127 | 2 → 4 | "Chat about this note" in Stage 2 (XP-04); two-way backlinks in Stage 4 | XP-04, XP-05 |
+| N3 | Notes mini-surface in the side panel | E3 #3127 | after D7 | decided by the D7 spike (D6) | D6, D7 |
+| N4 | Addressable routes and per-entity titles everywhere | E4 #3128 | 4 | G18 slice 1 (XP-05 addressable routes and per-item titles) | — |
+| N5 | Universal Cmd/Ctrl+K quick switcher for notes, chats, prompts, characters and models | E4 #3128 | 4 | with G18 (XP-06 universal quick switcher) | N4 |
+| N6 | Single 'Open in full page' hand-off with round-trip | E2 #3126 | 4 | with G19 (XP-09 single hand-off with a way back) | XP-09 |
+| N7 | Visible context strip above the composer (this page, notes, system prompt, model) | E3 #3127 | 4 | visible context strip above the composer | N12 |
+| N8 | Stopped, interrupted and variant states as first-class message states | E5 #3129 | 2 | with G06 (Stopped / Interrupted / Variant as real message states) | CC-02, CM-N2 |
+| N9 | 'Regenerate with…' and a per-message model chip | E5 #3129 | 4 | with G17 (per-message model chip after CM-04 persists model metadata) | CM-04 |
+| N10 | Branch map using the server /conversations/{id}/tree endpoint | E5 #3129 | 4 | after D7 spike (branch map on the server tree endpoint) | CM-12, D7 |
+| N11 | Honest pending-send queue (offline/connecting) | E2 #3126 | 3 | with G10 / G19 (honest pending-send queue: CC-03, XS-10) | CC-03 |
+| N12 | Composer restructure: one row of intent, Casual/Pro governs density | E5 #3129 | 3 | with G12 (composer restructure; absorbs CO-03, CO-06, CC-07, CC-09) | G11 slice 2 |
+| N13 | Mobile composer as a bottom sheet | E5 #3129 | 3 | with G12 (CO-01, CO-N1 mobile) | N12 |
+| N14 | Single sync and status centre (one chip per surface) | E2 #3126 | 3 | with G14 (one sync/status chip per surface, after D1 lands) | D1, CS-03 |
+| N15 | Note version history with diff and restore | E7 #3131 | 4 | note version history with diff and restore | G01 |
+| N16 | Notes browsing that scales past 100 (virtualized list, true totals, jump to month) | E7 #3131 | 4 | with G15 (browsing beyond 100, virtualized list) | NL-01 |
+| N17 | Search query syntax and saved smart views | E7 #3131 | 4 | with G15 (search syntax and saved smart views) | NL-07 |
+| N18 | Folder tree with drag-and-drop matching the server model | E7 #3131 | 4 | with G15 (NL-10 folder tree) | NL-01 |
+| N19 | Wikilinks done right: click-to-create unresolved links, backlinks with context and unlinked mentions | E7 #3131 | 4 | after G09 (click-to-create, backlinks with context, unlinked mentions) | NE-02, D2 |
+| N20 | Outline rail, focus mode and responsive ergonomics for long notes | E7 #3131 | 4 | with G16 (NE-03 outline rail, focus mode) | — |
+| N21 | One platform-aware, context-aware keyboard shortcut registry and sheet | E4 #3128 | 4 | with G18 (XP-07, XP-10 one shortcut registry) | — |
+| N22 | Keyboard message navigation in chat | E4 #3128 | 4 | keyboard navigation between chat messages | N21 |
+| N23 | Screen-reader-friendly chat reading model | E8 #3132 | 5 | with G22 (AX-11 screen-reader transcript) | N24 |
+| N24 | Shared accessible primitives: MenuButton, Combobox, Announcer | E8 #3132 | 3 → 5 | start in Stage 3 (needed by AX-01, AX-02, AX-12) | — |
+| N25 | One typographic and control scale, enforced by lint | E8 #3132 | 3 | with G14 (type and control scale lint; XP-15, XP-20 tokens) | — |
+| N26 | Single Markdown renderer and plain-text preview utility | E8 #3132 | 4 | with G17 (CM-07, CM-08) and AX-10 (single Markdown renderer) | — |
+| N27 | Visual-regression and accessibility gates in CI | E1 #3125 | 0 → 5 | Stage 0 item 5 (axe as warning) → Stage 5 gate switch + visual-regression baselines | — |
+| N28 | Typed API client and contract tests for Notes and Chat | E1 #3125 | 0 | Stage 0 item 3 (contract tests, generated API types) | — |
+| N29 | Graph view at library scale | E7 #3131 | 4 | after NL-11 (G09) and NL-01 (G02) | NL-11, NL-01 |
+| N30 | Knowledge panel as a retrieval workbench | E3 #3127 | 4 | with CC-10 follow-up (G11) and N7 | CC-10, N7 |
+| N31 | Compare models in the side panel | E5 #3129 | 4+ | after Compare is verified (D4) | D4 |
+| S1 | One unified, searchable chat history across devices and surfaces | E2 #3126 | 4+ | build after D7 spike (one searchable history across surfaces) | D7 |
+| S2 | One conversation model across side panel, extension full page and webui | E2 #3126 | 4+ | build after D7 spike (one conversation model) | D7 |
+| S3 | Server-side, resumable reply generation | E2 #3126 | 4+ | build after D7 spike (server-side resumable generation) | D7 |
+| S4 | Side-by-side research mode (chat + note) | E3 #3127 | 6 | Stage 6 design spike, then build (side-by-side chat + note) | N2, XP-05 |
+| S5 | Single block editor with Markdown shortcuts and a slash menu | E7 #3131 | 6 | Stage 6 design spike, then build (single block editor) | NE-01, N20 |
+| S6 | Shared 'object page' layout for Notes and Chat | E8 #3132 | 6 | Stage 6 design spike, then build (shared object-page layout) | N4, N12 |
+
 ---
 
 ## Risks and mitigations
@@ -285,3 +373,4 @@ Enhancement quick wins from §8.1: Q2 working model on first run (E6), Q3 OS pre
 | 3 First run | G10–G14 #3111–#3115 (+E5, E6) | Not Started |
 | 4 Scale and continuity | G15–G20 #3116–#3121 (+E2, E3, E4, E7) | Not Started |
 | 5 Accessibility and polish | G21–G23 #3122–#3124 (+E8) | Not Started |
+| 6 Strategic bets | S1–S6, N31 (E2, E3, E5, E7, E8) | Not Started |

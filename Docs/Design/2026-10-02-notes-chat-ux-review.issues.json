@@ -5164,7 +5164,14 @@
     "number": 3128,
     "title": "Power-user navigation and keyboard workflows",
     "url": "https://github.com/rmusser01/tldw_server/issues/3128"
-   }
+   },
+   "restored_details": [
+    "Cmd/Ctrl+P and Cmd/Ctrl+O open the switcher filtered to notes and chats (ft-notes#5, pu-notes#1).",
+    "Match on tags as well as titles and content; fuzzy title search runs server-side (ft-notes#5, pu-notes#1).",
+    "Result rows show chat state, e.g. \"💬 RAG chunking strategy · resolved\" (lens-visual#5).",
+    "Enter acts by type: open a note or chat, apply a prompt, switch to a model, start a chat with a character (pu-chat#1)."
+   ],
+   "code": "N5"
   },
   {
    "id": "IDEA-02",
@@ -5183,7 +5190,13 @@
     "number": 3127,
     "title": "Capture ↔ converse knowledge loop between chat and notes",
     "url": "https://github.com/rmusser01/tldw_server/issues/3127"
-   }
+   },
+   "restored_details": [
+    "The save toast offers \"Open note\" and \"Undo\" (pu-cross#1).",
+    "Saving the same message again offers the existing note (\"Already saved\") instead of creating a duplicate (pu-cross coverage gaps).",
+    "The saved message shows a \"Saved\" chip that links to the note (pu-cross#1; see also XP-03)."
+   ],
+   "code": "N1"
   },
   {
    "id": "IDEA-03",
@@ -5200,7 +5213,8 @@
     "number": 3127,
     "title": "Capture ↔ converse knowledge loop between chat and notes",
     "url": "https://github.com/rmusser01/tldw_server/issues/3127"
-   }
+   },
+   "code": "N2"
   },
   {
    "id": "IDEA-04",
@@ -5217,7 +5231,8 @@
     "number": 3127,
     "title": "Capture ↔ converse knowledge loop between chat and notes",
     "url": "https://github.com/rmusser01/tldw_server/issues/3127"
-   }
+   },
+   "code": "S4"
   },
   {
    "id": "IDEA-05",
@@ -5235,7 +5250,8 @@
     "number": 3128,
     "title": "Power-user navigation and keyboard workflows",
     "url": "https://github.com/rmusser01/tldw_server/issues/3128"
-   }
+   },
+   "code": "N4"
   },
   {
    "id": "IDEA-06",
@@ -5254,7 +5270,13 @@
     "number": 3126,
     "title": "One conversation model and history across webui, extension and devices",
     "url": "https://github.com/rmusser01/tldw_server/issues/3126"
-   }
+   },
+   "restored_details": [
+    "Side panel shows the last 10 server chats with state and topic chips, \"Load more\", and a collapsible section (pu-ext#3).",
+    "Cmd/Ctrl+1–9 switches open side-panel tabs (pu-ext#3).",
+    "History search matches character and participant names, not only titles (pu-ext journey step 2)."
+   ],
+   "code": "S1"
   },
   {
    "id": "IDEA-07",
@@ -5271,7 +5293,8 @@
     "number": 3129,
     "title": "Chat composer, message states and branching",
     "url": "https://github.com/rmusser01/tldw_server/issues/3129"
-   }
+   },
+   "code": "Q7"
   },
   {
    "id": "IDEA-08",
@@ -5288,7 +5311,8 @@
     "number": 3126,
     "title": "One conversation model and history across webui, extension and devices",
     "url": "https://github.com/rmusser01/tldw_server/issues/3126"
-   }
+   },
+   "code": "S2"
   },
   {
    "id": "IDEA-09",
@@ -5305,7 +5329,11 @@
     "number": 3126,
     "title": "One conversation model and history across webui, extension and devices",
     "url": "https://github.com/rmusser01/tldw_server/issues/3126"
-   }
+   },
+   "restored_details": [
+    "\"Open in WebUI\" is a second hand-off target besides the extension full page (report §8 N6, XP-09)."
+   ],
+   "code": "N6"
   },
   {
    "id": "IDEA-10",
@@ -5322,7 +5350,8 @@
     "number": 3130,
     "title": "First-run experience for notes, chat and the side panel",
     "url": "https://github.com/rmusser01/tldw_server/issues/3130"
-   }
+   },
+   "code": "Q2"
   },
   {
    "id": "IDEA-11",
@@ -5340,7 +5369,11 @@
     "number": 3129,
     "title": "Chat composer, message states and branching",
     "url": "https://github.com/rmusser01/tldw_server/issues/3129"
-   }
+   },
+   "restored_details": [
+    "A first-run hint offers \"Switch to Pro anytime\" (ft-chat#5)."
+   ],
+   "code": "N12"
   },
   {
    "id": "IDEA-12",
@@ -5357,7 +5390,8 @@
     "number": 3129,
     "title": "Chat composer, message states and branching",
     "url": "https://github.com/rmusser01/tldw_server/issues/3129"
-   }
+   },
+   "code": "N13"
   },
   {
    "id": "IDEA-13",
@@ -5374,7 +5408,8 @@
     "number": 3129,
     "title": "Chat composer, message states and branching",
     "url": "https://github.com/rmusser01/tldw_server/issues/3129"
-   }
+   },
+   "code": "N8"
   },
   {
    "id": "IDEA-14",
@@ -5391,7 +5426,8 @@
     "number": 3129,
     "title": "Chat composer, message states and branching",
     "url": "https://github.com/rmusser01/tldw_server/issues/3129"
-   }
+   },
+   "code": "N9"
   },
   {
    "id": "IDEA-15",
@@ -5408,7 +5444,8 @@
     "number": 3129,
     "title": "Chat composer, message states and branching",
     "url": "https://github.com/rmusser01/tldw_server/issues/3129"
-   }
+   },
+   "code": "N10"
   },
   {
    "id": "IDEA-16",
@@ -5425,7 +5462,8 @@
     "number": 3126,
     "title": "One conversation model and history across webui, extension and devices",
     "url": "https://github.com/rmusser01/tldw_server/issues/3126"
-   }
+   },
+   "code": "S3"
   },
   {
    "id": "IDEA-17",
@@ -5442,7 +5480,8 @@
     "number": 3126,
     "title": "One conversation model and history across webui, extension and devices",
     "url": "https://github.com/rmusser01/tldw_server/issues/3126"
-   }
+   },
+   "code": "N11"
   },
   {
    "id": "IDEA-18",
@@ -5460,7 +5499,11 @@
     "number": 3126,
     "title": "One conversation model and history across webui, extension and devices",
     "url": "https://github.com/rmusser01/tldw_server/issues/3126"
-   }
+   },
+   "restored_details": [
+    "Settings links \"Export all notes (Markdown zip)\" next to where notes are stored (ft-notes#7)."
+   ],
+   "code": "N14"
   },
   {
    "id": "IDEA-19",
@@ -5478,7 +5521,8 @@
     "number": 3131,
     "title": "Notes at scale: browsing, organization, linking and long-form editing",
     "url": "https://github.com/rmusser01/tldw_server/issues/3131"
-   }
+   },
+   "code": "N15"
   },
   {
    "id": "IDEA-20",
@@ -5495,7 +5539,8 @@
     "number": 3131,
     "title": "Notes at scale: browsing, organization, linking and long-form editing",
     "url": "https://github.com/rmusser01/tldw_server/issues/3131"
-   }
+   },
+   "code": "Q4"
   },
   {
    "id": "IDEA-21",
@@ -5512,7 +5557,11 @@
     "number": 3131,
     "title": "Notes at scale: browsing, organization, linking and long-form editing",
     "url": "https://github.com/rmusser01/tldw_server/issues/3131"
-   }
+   },
+   "restored_details": [
+    "The \"Markdown + LaTeX supported\" hint opens a Markdown cheatsheet popover (NE-06)."
+   ],
+   "code": "S5"
   },
   {
    "id": "IDEA-22",
@@ -5530,7 +5579,8 @@
     "number": 3131,
     "title": "Notes at scale: browsing, organization, linking and long-form editing",
     "url": "https://github.com/rmusser01/tldw_server/issues/3131"
-   }
+   },
+   "code": "N19"
   },
   {
    "id": "IDEA-23",
@@ -5548,7 +5598,8 @@
     "number": 3131,
     "title": "Notes at scale: browsing, organization, linking and long-form editing",
     "url": "https://github.com/rmusser01/tldw_server/issues/3131"
-   }
+   },
+   "code": "N20"
   },
   {
    "id": "IDEA-24",
@@ -5565,7 +5616,8 @@
     "number": 3131,
     "title": "Notes at scale: browsing, organization, linking and long-form editing",
     "url": "https://github.com/rmusser01/tldw_server/issues/3131"
-   }
+   },
+   "code": "N16"
   },
   {
    "id": "IDEA-25",
@@ -5582,7 +5634,8 @@
     "number": 3131,
     "title": "Notes at scale: browsing, organization, linking and long-form editing",
     "url": "https://github.com/rmusser01/tldw_server/issues/3131"
-   }
+   },
+   "code": "Q8"
   },
   {
    "id": "IDEA-26",
@@ -5599,7 +5652,8 @@
     "number": 3131,
     "title": "Notes at scale: browsing, organization, linking and long-form editing",
     "url": "https://github.com/rmusser01/tldw_server/issues/3131"
-   }
+   },
+   "code": "N17"
   },
   {
    "id": "IDEA-27",
@@ -5616,7 +5670,8 @@
     "number": 3131,
     "title": "Notes at scale: browsing, organization, linking and long-form editing",
     "url": "https://github.com/rmusser01/tldw_server/issues/3131"
-   }
+   },
+   "code": "N18"
   },
   {
    "id": "IDEA-28",
@@ -5633,7 +5688,8 @@
     "number": 3130,
     "title": "First-run experience for notes, chat and the side panel",
     "url": "https://github.com/rmusser01/tldw_server/issues/3130"
-   }
+   },
+   "code": "Q10"
   },
   {
    "id": "IDEA-29",
@@ -5650,7 +5706,11 @@
     "number": 3130,
     "title": "First-run experience for notes, chat and the side panel",
     "url": "https://github.com/rmusser01/tldw_server/issues/3130"
-   }
+   },
+   "restored_details": [
+    "Offer the task-based \"Get started\" checklist on /chat as well as Notes (report §10.6)."
+   ],
+   "code": "Q11"
   },
   {
    "id": "IDEA-30",
@@ -5667,7 +5727,8 @@
     "number": 3130,
     "title": "First-run experience for notes, chat and the side panel",
     "url": "https://github.com/rmusser01/tldw_server/issues/3130"
-   }
+   },
+   "code": "Q12"
   },
   {
    "id": "IDEA-31",
@@ -5684,7 +5745,8 @@
     "number": 3130,
     "title": "First-run experience for notes, chat and the side panel",
     "url": "https://github.com/rmusser01/tldw_server/issues/3130"
-   }
+   },
+   "code": "Q1"
   },
   {
    "id": "IDEA-32",
@@ -5701,7 +5763,8 @@
     "number": 3127,
     "title": "Capture ↔ converse knowledge loop between chat and notes",
     "url": "https://github.com/rmusser01/tldw_server/issues/3127"
-   }
+   },
+   "code": "Q5"
   },
   {
    "id": "IDEA-33",
@@ -5719,7 +5782,14 @@
     "number": 3127,
     "title": "Capture ↔ converse knowledge loop between chat and notes",
     "url": "https://github.com/rmusser01/tldw_server/issues/3127"
-   }
+   },
+   "restored_details": [
+    "History-scope chip \"History: 2 of 6 messages · Reset\" and a per-message \"Start fresh from here…\" with an Undo toast (report §8 N7, CC-04, §10.3).",
+    "\"+ Add context ▾\" menu (Note, Tag, Media, This page, Prompt) and a [Model ▾] chip; chips toggle from suggestion chips and /search (report §8 N7).",
+    "Bring a folder, a tag or a multi-note selection into chat as context, including a bulk-bar \"Chat about these notes\" (report §8.0, XP-04).",
+    "Composer \"@\" mentions attach notes, media, chats and prompts; slash commands /prompt, /note and /new, plus server-provided commands (CC-11, CC-05, XP-04; `/api/v1/chat/commands` currently returns an empty list)."
+   ],
+   "code": "N7"
   },
   {
    "id": "IDEA-34",
@@ -5736,7 +5806,11 @@
     "number": 3127,
     "title": "Capture ↔ converse knowledge loop between chat and notes",
     "url": "https://github.com/rmusser01/tldw_server/issues/3127"
-   }
+   },
+   "restored_details": [
+    "Code-block toolbar also offers \"Open in Document Workspace\" and \"Run in sandbox\" where available (canonical sketch; missing from §8 Q6)."
+   ],
+   "code": "Q6"
   },
   {
    "id": "IDEA-35",
@@ -5753,7 +5827,8 @@
     "number": 3127,
     "title": "Capture ↔ converse knowledge loop between chat and notes",
     "url": "https://github.com/rmusser01/tldw_server/issues/3127"
-   }
+   },
+   "code": "N3"
   },
   {
    "id": "IDEA-36",
@@ -5770,7 +5845,8 @@
     "number": 3127,
     "title": "Capture ↔ converse knowledge loop between chat and notes",
     "url": "https://github.com/rmusser01/tldw_server/issues/3127"
-   }
+   },
+   "code": "Q13"
   },
   {
    "id": "IDEA-37",
@@ -5789,7 +5865,12 @@
     "number": 3128,
     "title": "Power-user navigation and keyboard workflows",
     "url": "https://github.com/rmusser01/tldw_server/issues/3128"
-   }
+   },
+   "restored_details": [
+    "Controls show their shortcut in tooltips (ft-ext#6).",
+    "The command palette and Help print the real, current bindings, including remapped ones (pu-ext#6)."
+   ],
+   "code": "N21"
   },
   {
    "id": "IDEA-38",
@@ -5806,7 +5887,8 @@
     "number": 3128,
     "title": "Power-user navigation and keyboard workflows",
     "url": "https://github.com/rmusser01/tldw_server/issues/3128"
-   }
+   },
+   "code": "N22"
   },
   {
    "id": "IDEA-39",
@@ -5823,7 +5905,8 @@
     "number": 3132,
     "title": "Design-system and accessibility foundations",
     "url": "https://github.com/rmusser01/tldw_server/issues/3132"
-   }
+   },
+   "code": "N23"
   },
   {
    "id": "IDEA-40",
@@ -5840,7 +5923,11 @@
     "number": 3128,
     "title": "Power-user navigation and keyboard workflows",
     "url": "https://github.com/rmusser01/tldw_server/issues/3128"
-   }
+   },
+   "restored_details": [
+    "In the notes list, j/k as well as ↑/↓ move between rows, and \"e\" focuses the editor (ft-notes#5)."
+   ],
+   "code": "Q9"
   },
   {
    "id": "IDEA-41",
@@ -5857,7 +5944,8 @@
     "number": 3132,
     "title": "Design-system and accessibility foundations",
     "url": "https://github.com/rmusser01/tldw_server/issues/3132"
-   }
+   },
+   "code": "N24"
   },
   {
    "id": "IDEA-42",
@@ -5874,7 +5962,8 @@
     "number": 3130,
     "title": "First-run experience for notes, chat and the side panel",
     "url": "https://github.com/rmusser01/tldw_server/issues/3130"
-   }
+   },
+   "code": "Q3"
   },
   {
    "id": "IDEA-43",
@@ -5892,7 +5981,12 @@
     "number": 3132,
     "title": "Design-system and accessibility foundations",
     "url": "https://github.com/rmusser01/tldw_server/issues/3132"
-   }
+   },
+   "restored_details": [
+    "One shared helper maps runtime error codes (e.g. `request_config_scope_changed`) to plain copy for every error toast (CM-01, CS-06, NS-02, §10.4).",
+    "A user-facing glossary in the Help modal (XP-12)."
+   ],
+   "code": "Q14"
   },
   {
    "id": "IDEA-44",
@@ -5909,7 +6003,11 @@
     "number": 3132,
     "title": "Design-system and accessibility foundations",
     "url": "https://github.com/rmusser01/tldw_server/issues/3132"
-   }
+   },
+   "restored_details": [
+    "Lint fails on Tailwind colour classes that are not defined in the theme (CC-12)."
+   ],
+   "code": "N25"
   },
   {
    "id": "IDEA-45",
@@ -5926,7 +6024,8 @@
     "number": 3132,
     "title": "Design-system and accessibility foundations",
     "url": "https://github.com/rmusser01/tldw_server/issues/3132"
-   }
+   },
+   "code": "S6"
   },
   {
    "id": "IDEA-46",
@@ -5943,7 +6042,11 @@
     "number": 3132,
     "title": "Design-system and accessibility foundations",
     "url": "https://github.com/rmusser01/tldw_server/issues/3132"
-   }
+   },
+   "restored_details": [
+    "Below 400px, markdown tables reflow into stacked label:value cards (XS-14)."
+   ],
+   "code": "N26"
   },
   {
    "id": "IDEA-47",
@@ -5961,7 +6064,12 @@
     "number": 3125,
     "title": "Quality gates: contract tests, UX regression harness and CI budgets",
     "url": "https://github.com/rmusser01/tldw_server/issues/3125"
-   }
+   },
+   "restored_details": [
+    "Run the axe gate in both light and dark themes (lens-a11y#1).",
+    "Add a manual VoiceOver/NVDA smoke step to the release checklist (AX-11, lens-a11y and ft-notes coverage gaps)."
+   ],
+   "code": "N27"
   },
   {
    "id": "IDEA-48",
@@ -5978,7 +6086,11 @@
     "number": 3125,
     "title": "Quality gates: contract tests, UX regression harness and CI budgets",
     "url": "https://github.com/rmusser01/tldw_server/issues/3125"
-   }
+   },
+   "restored_details": [
+    "Seed fixtures spread over realistic dates; the API or import path accepts `created_at`, and import preserves original note dates (pu-notes and pu-chat coverage gaps)."
+   ],
+   "code": "N28"
   },
   {
    "id": "IDEA-49",
@@ -5995,6 +6107,105 @@
     "number": 3125,
     "title": "Quality gates: contract tests, UX regression harness and CI budgets",
     "url": "https://github.com/rmusser01/tldw_server/issues/3125"
+   },
+   "code": "Q15"
+  },
+  {
+   "id": "IDEA-50",
+   "code": "N29",
+   "title": "Graph view at library scale",
+   "page": "notes",
+   "persona": "power-user",
+   "rationale": "The graph caps at 100 nodes with unlabeled nodes; at library scale it shows noise rather than structure. NL-14 only adds newcomer labels and a legend, and IDEA-24 scales the list and Timeline, not the Graph.",
+   "sketch": "Cluster nodes by tag; filter by degree or tag; load progressively past 100 nodes; label nodes on hover and at higher zoom levels.",
+   "sources": [
+    "NL-11 recommendation (c)",
+    "pu-notes raw finding",
+    "pu-notes journey step 8"
+   ],
+   "added": "2026-10-03 enhancement audit",
+   "group": {
+    "key": "E7",
+    "number": 3131,
+    "title": "Notes at scale: browsing, organization, linking and long-form editing",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3131"
+   }
+  },
+  {
+   "id": "IDEA-51",
+   "code": "N30",
+   "title": "Knowledge panel as a retrieval workbench",
+   "page": "chat",
+   "persona": "power-user",
+   "rationale": "Fixing CC-10 moves the panel and puts source chunks first, but power users also want to curate what goes into the chat rather than accept an automatic answer.",
+   "sketch": "Multi-select chunks and insert them together; Enter inserts the focused chunk; an explicit \"Generate answer\" action instead of an automatic one; relevance shown as a percentage or bar.",
+   "sources": [
+    "CC-10 recommendation",
+    "pu-chat journey step 15"
+   ],
+   "added": "2026-10-03 enhancement audit",
+   "group": {
+    "key": "E3",
+    "number": 3127,
+    "title": "Capture ↔ converse knowledge loop between chat and notes",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3127"
+   }
+  },
+  {
+   "id": "IDEA-52",
+   "code": "Q16",
+   "title": "Configurable side-panel start page",
+   "page": "sidepanel-chat",
+   "persona": "both",
+   "rationale": "XS-17 opens the side panel on Chat by default, but people who use Companion daily need a way back.",
+   "sketch": "Setting: \"Side panel opens to: Chat | Companion | Last used\" (default Chat).",
+   "sources": [
+    "XS-17 recommendation"
+   ],
+   "added": "2026-10-03 enhancement audit",
+   "group": {
+    "key": "E6",
+    "number": 3130,
+    "title": "First-run experience for notes, chat and the side panel",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3130"
+   }
+  },
+  {
+   "id": "IDEA-53",
+   "code": "N31",
+   "title": "Compare models in the side panel",
+   "page": "sidepanel-chat",
+   "persona": "power-user",
+   "rationale": "Compare is offered only on the full page (report §3.7 parity table: \"Not offered\" in the side panel). One conversation model (S2) unifies data, not features.",
+   "sketch": "Once Compare passes verification (D4), offer it in the side panel with a stacked layout instead of columns.",
+   "sources": [
+    "Report §3.7 parity table"
+   ],
+   "added": "2026-10-03 enhancement audit",
+   "group": {
+    "key": "E5",
+    "number": 3129,
+    "title": "Chat composer, message states and branching",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3129"
+   }
+  },
+  {
+   "id": "IDEA-54",
+   "code": "Q17",
+   "title": "Ctrl/Cmd+Enter sends when \"Send on Enter\" is off",
+   "page": "chat",
+   "persona": "both",
+   "rationale": "With Send on Enter disabled there may be no keyboard way to send (the code map says it isn't implemented; not tested live).",
+   "sketch": "Verify first; if missing, Ctrl/Cmd+Enter sends from the composer on all surfaces and the shortcut sheet lists it.",
+   "sources": [
+    "pu-chat coverage_gaps"
+   ],
+   "added": "2026-10-03 enhancement audit",
+   "group": {
+    "key": "E4",
+    "number": 3128,
+    "title": "Power-user navigation and keyboard workflows",
+    "url": "https://github.com/rmusser01/tldw_server/issues/3128"
    }
   }
  ],
@@ -6031,5 +6242,48 @@
   "number": 3101,
   "url": "https://github.com/rmusser01/tldw_server/issues/3101"
  },
- "plan": "Docs/superpowers/plans/2026-10-03-notes-chat-ux-remediation-plan.md"
+ "plan": "Docs/superpowers/plans/2026-10-03-notes-chat-ux-remediation-plan.md",
+ "pending_decisions": [
+  {
+   "id": "D8",
+   "group": "E4",
+   "ideas": [
+    "IDEA-01"
+   ],
+   "question": "Which shortcut opens the quick switcher?",
+   "options": "(a) Cmd/Ctrl+K is one universal switcher for content and commands, with a \">\" prefix for commands (canonical IDEA-01). (b) Cmd/Ctrl+P (and Cmd/Ctrl+O) open a content switcher and Cmd/Ctrl+K stays the command palette (lens-visual#5, pu-notes#1).",
+   "recommendation": "(a) with aliases: the header already advertises \"Search ⌘K\", so users expect to find things there (XP-06). Cmd/Ctrl+P and Cmd/Ctrl+O open the same switcher pre-filtered to notes and chats."
+  },
+  {
+   "id": "D9",
+   "group": "E5",
+   "ideas": [
+    "IDEA-11"
+   ],
+   "question": "What does Pro mode add to the composer?",
+   "options": "(a) The full toolbar plus rails and token chip (canonical IDEA-11, ft-chat#5). (b) A persistent right panel instead of more toolbar buttons (lens-visual#4).",
+   "recommendation": "(b): adding buttons recreates the toolbar overload in CO-03 and CO-06; one right panel can absorb today's cockpit rails (CO-04)."
+  },
+  {
+   "id": "D10",
+   "group": "E5",
+   "ideas": [
+    "IDEA-11",
+    "IDEA-12"
+   ],
+   "question": "How many rows does the Casual composer use?",
+   "options": "(a) Two rows: input + Send, then attach / Knowledge / Web / Model / More chips (lens-visual#4, canonical). (b) One row: +, input, model chip, Send (ft-chat#5).",
+   "recommendation": "(a) on desktop, so Knowledge and Web stay one click away; (b) on phones and the narrow side panel, together with the bottom-sheet composer (N13)."
+  },
+  {
+   "id": "D11",
+   "group": "E4",
+   "ideas": [
+    "IDEA-01"
+   ],
+   "question": "What does Cmd/Ctrl+Enter do on a switcher result?",
+   "options": "(a) Open in a new tab or split view (canonical IDEA-01, lens-visual#5). (b) Open the note in the Notes Dock beside the current page (pu-notes#1).",
+   "recommendation": "Open beside the current page: notes in the Notes Dock now, chats in split view once S4 lands; Shift+Enter opens a new browser tab."
+  }
+ ]
 }
