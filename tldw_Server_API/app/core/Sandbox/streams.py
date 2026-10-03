@@ -389,12 +389,12 @@ class RunStreamHub:
             buf = self._buffers.get(run_id) or []
             if not buf:
                 return
-            # Emit up to the last 100 buffered frames with seq stamped
+            # Number queued frames in publish order first, as subscribe does, so a
+            # buffered frame never takes a seq ahead of an earlier queued heartbeat.
+            self._stamp_pending_locked(run_id)
+            import copy as _copy
             for frame in buf[-100:]:
                 try:
-                    if isinstance(frame, dict) and "seq" not in frame:
-                        frame["seq"] = self._next_seq(run_id)
-                    import copy as _copy
                     q.put_nowait(_copy.deepcopy(frame))
                 except _SANDBOX_STREAMS_NONCRITICAL_EXCEPTIONS:
                     break
