@@ -15,8 +15,8 @@ Owner decision (2026-10-03): tools/backlog-py replaces the Node Backlog.md CLI/M
 <!-- AC:BEGIN -->
 - [x] #1 backlog-py CLI and MCP support labels on create/edit, acceptance criteria on create, adding/removing criteria and retitling on edit, with tests
 - [x] #2 A backlog-py normalize command rewrites SECTION:NOTES, nested NOTES/IMPLEMENTATION_NOTES and duplicated FINAL_SUMMARY markers into one canonical form, idempotently, with tests on real mixed fixtures
-- [x] #3 A CI-enforced test checks every backlog task file parses with backlog-py and the count of Node-style sections does not exceed a recorded baseline
-- [x] #4 AGENTS.md and tools/backlog-py/README.md direct agents to backlog-py (command name backlog-py; explicit-id creation guidance), and a new ADR records the cutover
+- [x] #3 AGENTS.md and tools/backlog-py/README.md direct agents to backlog-py (command name backlog-py; explicit-id creation guidance), and a new ADR records the cutover
+- [x] #4 A CI-enforced test checks that every task file the PR adds or edits parses with backlog-py and is canonical (per-PR diff; replaced the global-baseline design in review)
 <!-- AC:END -->
 
 ## Implementation Notes
