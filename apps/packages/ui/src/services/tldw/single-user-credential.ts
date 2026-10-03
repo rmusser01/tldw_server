@@ -423,7 +423,34 @@ export const resolveEffectiveTldwConfig = async (
       apiKeyServerOrigin: _apiKeyServerOrigin,
       ...safe
     } = cookieSession
-    return safe
+    const timeoutKeys = [
+      "requestTimeoutMs",
+      "streamIdleTimeoutMs",
+      "chatRequestTimeoutMs",
+      "chatStartupTimeoutMs",
+      "chatStreamIdleTimeoutMs",
+      "ragRequestTimeoutMs",
+      "mediaRequestTimeoutMs",
+      "uploadRequestTimeoutMs"
+    ] as const
+    const savedTimeouts: Partial<Record<typeof timeoutKeys[number], number>> = {}
+    if (
+      stored &&
+      isExactOriginCookieSessionConfig(stored, cookie?.expectedCookieOrigin)
+    ) {
+      const preferences = stored as TldwConfig & Partial<Record<typeof timeoutKeys[number], unknown>>
+      for (const key of timeoutKeys) {
+        const value = preferences[key]
+        if (
+          (typeof value === "number" || typeof value === "string") &&
+          Number.isFinite(Number(value)) &&
+          Number(value) > 0
+        ) {
+          savedTimeouts[key] = Math.min(2_147_483_000, Number(value))
+        }
+      }
+    }
+    return { ...safe, ...savedTimeouts }
   }
 
   if (!stored || typeof stored !== "object") return null

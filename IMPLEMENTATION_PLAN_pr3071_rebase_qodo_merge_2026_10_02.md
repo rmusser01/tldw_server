@@ -25,7 +25,7 @@ all protected services/data, historical evidence and the human Change summary.
 inspect all overlapping upstream paths; retain topology and compare the rebased
 tree with an independently reconciled expected integration tree.
 **Tests**: Ancestry, tree/range comparisons and focused conflict regressions.
-**Status**: In Progress
+**Status**: Complete
 
 Integration findings: retain unconditional retrieval-only RAG from dev while
 preserving the PR's protected admission tests. The real pipeline exposed a stale
@@ -40,8 +40,9 @@ Four initial restoration regressions and three fallback cases failed before thei
 fixes. The confirmation's initial declaration-order failure is retained separately.
 Fresh combined frontend295 tests pass, including mounted real-store StrictMode
 switch/unmount/account/success and canonical note-domain regressions; these are
-unit/integration doubles, not UAT. CI-helper/route-auth29 pass. Incoming backend
-qualification remains running; no current-base live acceptance is claimed yet.
+unit/integration doubles, not UAT. CI-helper/route-auth29 pass. The requested
+topology-preserving rebase finishes at0126148, exactly equal to independently
+reconciled d7fc3cc/tree54432; dev4c4f197f ancestry and all69stashes are preserved.
 The incoming Redis window-growth reload limitation is already documented under
 TASK-13430 Known limits; it is not new to this PR and is not claimed remediated.
 
@@ -53,6 +54,29 @@ databases, Gemma and embeddings without mocks or automatic resends.
 **Tests**: Durable chat, RAG/history/prompt recovery, Research hydration and
 workspace switching, desktop/mobile send/stream/stop/reload/source handling.
 **Status**: In Progress
+
+Incoming backend485pass/5backend-specific skips includes all57 PostgreSQL HTTP
+lifecycle cases unskipped. Owning527pass/1inheritedskip includes six durable
+PostgreSQL cases; realRedis4 and docs212 pass. Production TypeScript exits0;
+actual ESLint has0errors/34warnings; production build/token/budget checks pass
+without raised budgets; fourteen backend/helper production files have Bandit0.
+These results qualify tree54432, not subsequent frontend changes.
+
+Fresh native Chrome exposed a cookie-session timeout preference bug: actual
+Settings Save persisted60000ms, but reload resolved the default10000ms because
+cookie authority omitted saved preferences. Bounded corrective scope copies only
+the eight existing positive finite timeout fields from exact same-origin cookie
+configuration, retaining credential precedence and rejecting foreign/manual
+authority. Independent review verifies number-only consumers and native timer
+overflow: normalize numeric strings and use the existing Settings2147483000ms
+ceiling. These regressions produce expectedRED4 before their correction. Expanded
+owning tests expose stale whole-router fixtures in two Settings suites; reuse the
+actual neighboring data-router pattern. All14 owning suites289pass with a20-second
+runner budget and unchanged assertions; production typecheck0, actual four-file
+ESLint0errors/0warnings/0ignored, and fresh fourteen-file production Bandit0.
+Initial failed runs, five-second runner expirations and ignored-path lint are
+preserved. Fresh cookie-aware build and complete live Chrome UAT remain required;
+no current-head acceptance or merge is claimed yet.
 
 ### Stage C: Review and Hosted CI
 **Goal**: Publish only a verified integration and address actual final-head review.
