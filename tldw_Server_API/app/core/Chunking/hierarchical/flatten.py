@@ -46,8 +46,8 @@ def flatten_tree(
             starts: list[int] = []
             ends: list[int] = []
             for h in header_buffer:
-                txt = h.get("text") if isinstance(h, dict) else str(h)
-                md_h = h.get("metadata") if isinstance(h, dict) else {}
+                txt: Any = h.get("text") if isinstance(h, dict) else str(h)
+                md_h: Any = h.get("metadata") if isinstance(h, dict) else {}
                 s = md_h.get("start_offset")
                 e = md_h.get("end_offset")
                 parts.append((txt, dict(md_h) if isinstance(md_h, dict) else {}))
@@ -57,7 +57,7 @@ def flatten_tree(
                     ends.append(e)
             header_buffer = []
 
-            t_txt = target_item.get("text") if isinstance(target_item, dict) else str(target_item)
+            t_txt: Any = target_item.get("text") if isinstance(target_item, dict) else str(target_item)
             md_target = dict(target_item.get("metadata") or {}) if isinstance(target_item, dict) else {}
             s_t = md_target.get("start_offset")
             e_t = md_target.get("end_offset")
@@ -117,9 +117,9 @@ def flatten_tree(
         if kind == "section" and method == "structure_aware" and isinstance(sa_max, int) and sa_max > 0:
             section_items = _gather_section_items(node)
             # Optional grouping configuration carried in tree
-            grouping_cfg = tree.get("grouping") if isinstance(tree.get("grouping"), dict) else {}
+            grouping_cfg: Any = tree.get("grouping") if isinstance(tree.get("grouping"), dict) else {}
             by_kind = bool(grouping_cfg.get("by_kind", False))
-            weights = (
+            weights: Any = (
                 grouping_cfg.get("element_weights")
                 if isinstance(grouping_cfg.get("element_weights"), dict)
                 else {
