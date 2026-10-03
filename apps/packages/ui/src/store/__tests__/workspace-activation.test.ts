@@ -68,6 +68,19 @@ describe("canonical server workspace activation (unit regression)", () => {
     expect(useWorkspaceStore.getState().workspaceSnapshots["server-research"]).toBeUndefined()
   })
 
+  it.each(["dirty", "title", "content", "keywords"])("preserves an empty-ID %s note rather than automatically adopting it", async kind => {
+    useWorkspaceStore.getState().setCurrentNote({
+      title: kind === "title" ? "Retained title" : "",
+      content: kind === "content" ? "Retained content" : "",
+      keywords: kind === "keywords" ? ["retained-keyword"] : [],
+      isDirty: kind === "dirty",
+    })
+    const before = useWorkspaceStore.getState()
+    const hydrated = await hydrateWorkspaceFromServer("server-research", { fetch: async () => serverWorkspacePayload() })
+    expect(before.installServerWorkspace(hydrated, { scopeKey: "owner-a", expectedWorkspaceId: "" })).toBe(false)
+    expect(useWorkspaceStore.getState()).toBe(before)
+  })
+
   it("retains local pane state and native chat reference when refreshing an owned target", async () => {
     const hydrated = await hydrateWorkspaceFromServer("server-research", { fetch: async () => serverWorkspacePayload() })
     useWorkspaceStore.getState().installServerWorkspace(hydrated, { scopeKey: "owner-a", expectedWorkspaceId: useWorkspaceStore.getState().workspaceId })
