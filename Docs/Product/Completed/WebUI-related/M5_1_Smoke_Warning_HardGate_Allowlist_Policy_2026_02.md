@@ -56,17 +56,13 @@ Baseline run used for triage:
 - Result: `165 passed`
 - Date: February 13, 2026
 
-Allowlisted classes now tracked:
+The February baseline above is historical. TASK13406 retired the final four general exceptions on October 1, 2026:
 
-- Rate-limit noise (`429`, chat history bursts)
-- React key-prop spread warning on settings/connectors surfaces
-- React `defaultProps` and non-boolean attribute warnings in flashcards path
-- `rc-collapse` deprecation warning in quick ingest settings
-- Known max-update-depth warning in media/content-review surfaces
-- Optional `404` resource misses on selected routes (including wayfinding test-only 404 route)
-- Optional admin `500` endpoint misses in minimal backend profile
-- Llama.cpp `503` unconfigured backend state
-- Forced route-boundary fixture console emissions for route-boundary contract tests
+- Kanban's archive drawer uses the supported `size` prop and retains its 400px width.
+- The minimal smoke profile supplies an explicit empty moderation review list; live-tier UAT continues to use the backend.
+- Deliberate route-boundary tests require the exact route-specific forced-error log and handle its React component report only inside that test. The same emissions on ordinary routes fail the hard gate.
+
+The general allowlist is empty. Ownership, expiry and unexpected-error guards remain active for any future exception. Synthetic metadata tests use their own rules, independently of whether production exceptions exist.
 
 ## 5) CI Policy
 
@@ -91,3 +87,5 @@ Both gates are required quality signals for M5 UX governance in PR validation.
 - [ ] Rationale includes why warning is non-blocking today
 - [ ] Owner assigned
 - [ ] Follow-up remediation issue linked in PR or roadmap
+
+Current-dev integration (2026-10-02, TASK13406): the deliberate Wayfinding document 404 added by TASK13414 is handled only in its own recovery fixture. That test requires an actual navigation response of 404 and removes only the exact response URL and browser 404 console text from its diagnostics. Other console errors, requests and page errors remain intact. The general classifier rejects that document error, including on the missing-route path; the general allowlist remains empty. Upstream source repairs for both Writing drawers are retained.

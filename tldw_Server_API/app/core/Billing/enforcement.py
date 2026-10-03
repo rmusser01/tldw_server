@@ -973,6 +973,31 @@ billing_enabled = is_billing_enabled
 
 
 def enforcement_enabled() -> bool:
-    """Check if limit enforcement is enabled (can be separate from billing)."""
-    # Can have enforcement without Stripe billing (e.g., for usage caps)
-    return os.environ.get("LIMIT_ENFORCEMENT_ENABLED", "true").lower() == "true"
+    """The usage-quota master switch; this name is kept for existing imports (config.usage_quotas_enabled)."""
+    from tldw_Server_API.app.core.config import usage_quotas_enabled
+
+    return usage_quotas_enabled()
+
+
+_PLAN_LIMITS_UNENFORCED_WARNED = False
+
+
+async def billing_checks_active() -> bool:
+    """
+    True when org billing-plan limits apply: usage quotas are on and a billing repository
+    is wired (the hosted product). OSS installs wire none, so billing checks, org
+    resolution and usage aggregation never run there (spec 2 §6).
+    """
+    global _PLAN_LIMITS_UNENFORCED_WARNED
+    from tldw_Server_API.app.core.Billing.subscription_service import billing_repo_configured
+
+    repo_wired = await billing_repo_configured()
+    if enforcement_enabled():
+        return repo_wired
+    if repo_wired and not _PLAN_LIMITS_UNENFORCED_WARNED:
+        _PLAN_LIMITS_UNENFORCED_WARNED = True
+        logger.warning(
+            "A billing repository is configured but usage quotas are off: plan limits are NOT enforced. "
+            "Set USAGE_QUOTAS_ENABLED=true to enforce them."
+        )
+    return False

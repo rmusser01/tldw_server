@@ -30,6 +30,7 @@ async def initialize_auth_runtime_services(
             raise AuthStartupError("AUTHNZ_DB_POOL_STARTUP_RETURNED_NONE")
         handles.db_pool = db_pool
         await _init_resource_governor(app)
+        await _warn_if_plan_limits_unenforced()
         _validate_auth_rg_startup_guards(app)
         handles.session_manager = await _get_session_manager()
         logger.info("App Startup: Session manager initialized")
@@ -64,6 +65,13 @@ async def _init_resource_governor(app: Any) -> None:
     )
 
     await init_resource_governor(app)
+
+
+async def _warn_if_plan_limits_unenforced() -> None:
+    """Log at startup when a billing repository is wired but usage quotas are off (spec 2 §1)."""
+    from tldw_Server_API.app.core.Billing.enforcement import billing_checks_active
+
+    await billing_checks_active()
 
 
 def _validate_auth_rg_startup_guards(app: Any) -> None:

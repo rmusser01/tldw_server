@@ -271,6 +271,19 @@ def _audio_shim_attr(name: str):
     raise NameError(name)
 
 
+def _max_upload_bytes(limits: dict[str, Any]) -> int:
+    """The user's upload cap from their audio limits, else [Media-Processing] max_audio_file_size_mb."""
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files as audio_files
+
+    cap_mb = limits.get("max_file_size_mb")
+    if cap_mb:
+        try:
+            return int(float(cap_mb) * 1024 * 1024)
+        except (TypeError, ValueError):
+            logger.warning("Could not parse max_file_size_mb {!r}; using the media-processing cap", cap_mb)
+    return int(audio_files.MAX_FILE_SIZE)
+
+
 async def _check_daily_minutes_allow(user_id: int, minutes: float):
     return await _audio_shim_attr("check_daily_minutes_allow")(user_id, minutes)
 
@@ -621,27 +634,13 @@ async def create_transcription(
         limits = await _audio_shim_attr("get_limits_for_user")(current_user.id)
     except EXPECTED_DB_EXC as e:
         logger.exception(
-            'Failed to get limits for user {} during upload, using defaults: {}; request_id={}',
+            'Failed to get limits for user {} during upload; using the media-processing cap: {}; request_id={}',
             current_user.id,
             e,
             rid,
         )
-        limits = {
-            "daily_minutes": 30.0,
-            "concurrent_streams": 1,
-            "concurrent_jobs": 1,
-            "max_file_size_mb": 25,
-        }
-    try:
-        max_file_size = int((limits.get("max_file_size_mb") or 25) * 1024 * 1024)
-    except (ValueError, TypeError) as e:
-        logger.warning(
-            'Could not parse max_file_size_mb for user {}; defaulting to 25MB: {}; request_id={}',
-            current_user.id,
-            e,
-            rid,
-        )
-        max_file_size = 25 * 1024 * 1024
+        limits = {}
+    max_file_size = _max_upload_bytes(limits)
     upload_chunk_size = 1024 * 1024
 
     # Resolve default model from config when omitted.

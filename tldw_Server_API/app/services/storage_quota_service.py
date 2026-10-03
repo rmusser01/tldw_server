@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
+from tldw_Server_API.app.core.config import usage_quotas_enabled
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 
@@ -232,7 +233,8 @@ class StorageQuotaService:
         # Calculate new usage
         new_mb = new_bytes / (1024 * 1024)
         projected_mb = current_mb + new_mb
-        has_quota = projected_mb <= quota_mb
+        # Usage quotas off (spec 2): report usage, never block.
+        has_quota = projected_mb <= quota_mb or not usage_quotas_enabled()
 
         quota_info = {
             "user_id": user_id,
@@ -733,7 +735,7 @@ class StorageQuotaService:
             org_info["reason"] = reason
 
         # Combined check
-        has_quota = has_user_quota and has_team_quota and has_org_quota
+        has_quota = (has_user_quota and has_team_quota and has_org_quota) or not usage_quotas_enabled()
 
         combined_info = {
             "user_id": user_id,
