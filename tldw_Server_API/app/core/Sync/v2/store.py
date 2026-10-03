@@ -1495,6 +1495,20 @@ class SyncV2Store:
             connection=self._connection,
         )
 
+    def has_pending_personal_context_authority(
+        self,
+        dataset_id: str,
+        *,
+        profile_id: str,
+    ) -> bool:
+        """Return whether the relay left a staged authority row of the profile unfinished."""
+
+        return self.db.has_pending_personal_context_authority(
+            dataset_id,
+            profile_id=profile_id,
+            connection=self._connection,
+        )
+
     def discard_pending_personal_context_authority(
         self,
         **identity: Any,

@@ -244,7 +244,27 @@ def linked_activation(
 ) -> tuple[PersonalContextService, SyncV2Service]:
     """Create a reviewed first link through actual canonical and Sync services."""
 
+    return _link(*production_factories)
+
+
+@pytest.fixture(params=["sqlite", "postgres"])
+def linked_activation_on_each_store(
+    production_factories: tuple[PersonalContextService, SyncV2Service],
+    request: pytest.FixtureRequest,
+) -> tuple[PersonalContextService, SyncV2Service]:
+    """Create the same first link with Sync on SQLite or the shared PostgreSQL fixture."""
+
     canonical, service = production_factories
+    if request.param == "postgres":
+        backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
+        request.addfinalizer(backend.get_pool().close_all)
+        service.store = SyncV2Store(SyncDatabase(backend=backend))
+    return _link(canonical, service)
+
+
+def _link(canonical: PersonalContextService, service: SyncV2Service) -> tuple[PersonalContextService, SyncV2Service]:
+    """Link one registered device to a new canonical profile."""
+
     canonical.create_profile(runtime_enabled=False)
     _register_device(service)
     initial = service.bootstrap_personal_context(user_id=_USER_ID, device_id=_DEVICE_ID)
@@ -651,3 +671,148 @@ def test_push_after_commit_relay_does_not_wait_for_installers_profile_lease(
             (payload["record_id"],),
         ).fetchall()
     assert [row[0] for row in rows] == ["acknowledged"]
+
+
+@pytest.mark.parametrize("failing_step", ["acknowledge", "finalize"])
+def test_activation_cannot_strand_a_staged_authority_row_left_unfinished(
+    linked_activation_on_each_store, monkeypatch: pytest.MonkeyPatch, failing_step: str
+) -> None:
+    """A relay failure after staging must not outlive the batch's activation coverage.
+
+    No relay revisits a covered batch, so a hidden pending authority row left
+    there would block every later projection in the dataset for good.
+    """
+    import hashlib
+    import hmac
+
+    from tldw_profile_core.canonical import canonical_json_bytes
+
+    from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+        PersonalContextPublicationRelayStore,
+    )
+    from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelopeCreate
+    from tldw_Server_API.app.core.Sync.v2.personal_context_ongoing_contract import PersonalContextExchangeProof
+    from tldw_Server_API.tests.Personalization.personal_context_test_support import preference_record
+    from tldw_Server_API.tests.Sync.test_sync_v2_personal_context_certification import _seed_exchange
+
+    canonical, service = linked_activation_on_each_store
+    manifest = canonical.get_manifest()
+    dataset = service.store.personal_context_dataset_for_profile(user_id=_USER_ID, profile_id=manifest.profile_id)
+    relay = service.personal_context_relay
+    monkeypatch.setattr(relay, "clock_ns", lambda: 0)
+    injected: list[str] = []
+
+    def fail_once(original):
+        def step(*args, **kwargs):
+            if not injected:
+                injected.append(failing_step)
+                raise RuntimeError(f"injected {failing_step} failure")
+            return original(*args, **kwargs)
+
+        return step
+
+    if failing_step == "acknowledge":
+        monkeypatch.setattr(
+            PersonalContextPublicationRelayStore,
+            "acknowledge_row",
+            fail_once(PersonalContextPublicationRelayStore.acknowledge_row),
+        )
+    else:
+        monkeypatch.setattr(relay, "finalize_authority", fail_once(relay.finalize_authority))
+
+    proof = None
+    for _attempt in range(2):  # A client restarts an activation that must wait for the relay.
+        try:
+            proof = _seed_exchange(service, dataset.dataset_id)
+            break
+        except SyncStoreError as exc:
+            assert str(exc) == "personal_context_activation_required"
+    assert injected == [failing_step]
+    assert proof is not None
+
+    key_id, key = canonical.sync_integrity_key(manifest.profile_id)
+    payload = {
+        **preference_record(manifest.profile_id, record_id="after-coverage-record").model_dump(mode="json"),
+        "scope_id": canonical.list_scopes()[0].scope_id,
+    }
+    clear = canonical_json_bytes(payload)
+    result = service.push(
+        user_id=_USER_ID,
+        dataset_id=dataset.dataset_id,
+        device_id=_DEVICE_ID,
+        envelopes=[
+            SyncEnvelopeCreate(
+                dataset_id=dataset.dataset_id,
+                client_envelope_id="after-coverage-push",
+                device_id=_DEVICE_ID,
+                domain="personal_context.record",
+                operation="upsert",
+                object_id=payload["record_id"],
+                parent_id=payload["scope_id"],
+                adapter_version=1,
+                schema_version=1,
+                payload=payload,
+                payload_hash="hmac-sha256-v1:" + hmac.new(key, clear, hashlib.sha256).hexdigest(),
+                payload_size_bytes=len(clear),
+                entity_version=payload["version_id"],
+                routing_metadata={"integrity_key_id": key_id, "profile_id": manifest.profile_id, "purge_generation": 0},
+                encryption_metadata={"policy": "server_trusted_v1"},
+            )
+        ],
+        personal_context_exchange=PersonalContextExchangeProof.model_validate(proof),
+    )
+
+    assert not result.rejected
+    assert [item.apply_status for item in result.accepted] == ["applied"], result.accepted
+    assert canonical.get_record(payload["record_id"]).payload == preference_record().payload
+
+
+def test_install_refuses_coverage_when_a_racing_relay_left_a_row_unfinished(
+    linked_activation_on_each_store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The lease-held install check catches a relay failure that lands after the first check."""
+    from tldw_Server_API.app.core.Personalization.personal_context_activation import PersonalContextActivationService
+    from tldw_Server_API.app.core.Personalization.personal_context_publication import (
+        PersonalContextPublicationRelayStore,
+    )
+    from tldw_Server_API.tests.Personalization.personal_context_test_support import preference_record
+
+    canonical, service = linked_activation_on_each_store
+    profile_id = canonical.get_manifest().profile_id
+    dataset = service.store.personal_context_dataset_for_profile(user_id=_USER_ID, profile_id=profile_id)
+    relay = service.personal_context_relay
+    monkeypatch.setattr(relay, "clock_ns", lambda: 0)
+    acknowledge = PersonalContextPublicationRelayStore.acknowledge_row
+    prepare = PersonalContextActivationService.prepare
+    racing: list[bool] = []
+
+    def acknowledge_unless_racing(self, *args, **kwargs):
+        if racing:
+            raise RuntimeError("injected acknowledge failure")
+        return acknowledge(self, *args, **kwargs)
+
+    def racing_relay_then_prepare(self, *args, **kwargs):
+        racing.append(True)
+        try:
+            record = preference_record(profile_id, record_id="racing-record")
+            canonical.create_record(record.model_copy(update={"scope_id": canonical.list_scopes()[0].scope_id}))
+            relay.relay_profile(
+                user_id=_USER_ID, profile_id=profile_id, dataset_id=dataset.dataset_id, after_server_cursor=None
+            )
+        finally:
+            racing.clear()
+        return prepare(self, *args, **kwargs)
+
+    monkeypatch.setattr(PersonalContextPublicationRelayStore, "acknowledge_row", acknowledge_unless_racing)
+    monkeypatch.setattr(PersonalContextActivationService, "prepare", racing_relay_then_prepare)
+
+    with pytest.raises(SyncStoreError, match="personal_context_activation_required"):
+        service.prepare_personal_context_activation(user_id=_USER_ID, device_id=_DEVICE_ID)
+
+    assert service.store.has_pending_personal_context_authority(dataset.dataset_id, profile_id=profile_id)
+    assert service.store.db.execute("SELECT * FROM sync_personal_context_activations").rows == []
+    with canonical._repository.database.transaction() as connection:
+        covered = connection.execute(
+            "SELECT COUNT(*) FROM personal_context_publication_batches WHERE status = 'covered_by_activation'"
+        ).fetchone()[0]
+    assert covered == 0
