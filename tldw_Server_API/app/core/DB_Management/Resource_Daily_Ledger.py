@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-import hashlib
 from typing import Any
 
 from loguru import logger
@@ -244,6 +244,64 @@ class ResourceDailyLedger:
             inserted = (self._affected_rows(result) or 0) > 0
             used_after = used + units if inserted else int(await self._fetchval_from_conn(conn, total_q, *params, is_pg=False) or used)
             return DailyCapConsumeResult(allowed=True, used=used_after, inserted=inserted)
+
+    async def adjust_downward(self, entry: LedgerEntry, *, day_utc: str | None = None) -> bool:
+        """Set an existing operation's units to a non-negative, lower value.
+
+        The full daily operation identity is preserved, including zero-unit
+        rows, so replaying consumption cannot restore a released charge.
+        Returns False for an unknown identity and True for an update or an
+        identical replay. Increasing the current charge raises ValueError.
+        """
+        units = int(entry.units)
+        if units < 0:
+            raise ValueError("Ledger adjustment units must be non-negative")
+        if not self._initialized:
+            await self.initialize()
+
+        day = str(day_utc or self._to_day_utc(entry.occurred_at))
+        is_pg = await self._using_postgres_backend()
+        increase = False
+        async with self.db_pool.transaction() as conn:
+            if is_pg:
+                await conn.execute(
+                    "SELECT pg_advisory_xact_lock($1)",
+                    self._advisory_lock_key(day, entry.entity_scope, entry.entity_value, entry.category),
+                )
+                params = (date.fromisoformat(day), entry.entity_scope, entry.entity_value, entry.category, entry.op_id)
+                existing_q = (
+                    "SELECT units FROM resource_daily_ledger "
+                    "WHERE day_utc = $1 AND entity_scope = $2 AND entity_value = $3 AND category = $4 AND op_id = $5 "
+                    "FOR UPDATE"
+                )
+                update_q = (
+                    "UPDATE resource_daily_ledger SET units = $6 "
+                    "WHERE day_utc = $1 AND entity_scope = $2 AND entity_value = $3 AND category = $4 AND op_id = $5"
+                )
+            else:
+                params = (day, entry.entity_scope, entry.entity_value, entry.category, entry.op_id)
+                existing_q = (
+                    "SELECT units FROM resource_daily_ledger "
+                    "WHERE day_utc = ? AND entity_scope = ? AND entity_value = ? AND category = ? AND op_id = ?"
+                )
+                update_q = (
+                    "UPDATE resource_daily_ledger SET units = ? "
+                    "WHERE day_utc = ? AND entity_scope = ? AND entity_value = ? AND category = ? AND op_id = ?"
+                )
+
+            existing = await self._fetchval_from_conn(conn, existing_q, *params, is_pg=is_pg)
+            if existing is None:
+                return False
+            increase = units > int(existing)
+            if not increase and units != int(existing):
+                update_params = (*params, units) if is_pg else (units, *params)
+                await conn.execute(update_q, *update_params)
+
+        # DatabasePool translates body exceptions; reject outside the transaction
+        # so callers receive a validation error, not a database-outage error.
+        if increase:
+            raise ValueError("Ledger adjustment cannot increase consumption")
+        return True
 
     async def add(self, entry: LedgerEntry) -> bool:
         """
