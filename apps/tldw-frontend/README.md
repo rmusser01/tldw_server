@@ -126,7 +126,7 @@ The production profile forces the quickstart WebUI path. The development profile
 
 ### Standalone documentation
 
-Ship the complete `.next/standalone` directory. The documentation API traces markdown from `Docs/Published` and `Docs/User_Documentation` into that bundle and locates the nearest parent containing `Docs/Published` at runtime. Copy `public` and `.next/static` into the standalone app as usual; copying only `server.js` or the nested app directory omits required runtime files.
+Ship the complete `.next/standalone` directory. The documentation API traces markdown from `Docs/Published` and the optional `Docs/User_Documentation` root into that bundle. It checks the runtime cwd and at most two parent levels, matching `<bundle>/apps/tldw-frontend`, and fails when published documentation is absent from that layout. The WebUI Docker builder copies published documentation before the Next build so tracing can include it. Copy `public` and `.next/static` into the standalone app as usual; copying only `server.js` or the nested app directory omits required runtime files.
 
 The all-pages smoke gate waits for `/api/documentation/manifest`, the selected document response and rendered content. A manifest or content HTTP500 fails the check, including responses that finish after the initial page shell appears.
 

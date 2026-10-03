@@ -19,3 +19,7 @@
 **Status**: In Progress
 
 2026-10-02 refresh: requester Change summary supplied and published verbatim. Merge current dev86e287fee7bfa1a1588639232e35db3666851ded, preserve all upstream task notes and source fixes, and keep deliberate Wayfinding404 handling test-local after native RED/GREEN. Stage3 remains In Progress for refreshed verification, current-head hosted checks, review and actual merge. Earlier receipts retain original bindings.
+
+2026-10-03 Qodo follow-up under TASK13407: verify missing WebUI Docker build inputs and unbounded host-ancestor discovery with native RED evidence. Use only the supported cwd through two-parent repository/standalone layout, copy required Docs/Published before Docker build, retain optional extension-root semantics, and split async filesystem cases. Actual image manifest/content and focused guards must pass before refreshed independent review/publication.
+
+Qodo follow-up verified: native host-fallback RED2/GREEN9; actual baseline Docker production runtime manifest500/docsabsent, repaired non-root runtime324docs/AuthNZ200 and traversal/filetype/source400. Four-file source independently clear; exactownedcontainers stopped and frozen evidence preserved. Source receipt /tmp/email_followup_qodo_receipt_20261003.json. Earlier31f8/browser/unit receipts keep original bindings. Publication/new-head CI/review/actualmerge pending; Stage3 remains InProgress.
