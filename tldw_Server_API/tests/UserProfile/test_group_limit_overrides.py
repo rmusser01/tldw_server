@@ -70,6 +70,13 @@ def test_deleting_team_override_falls_back_to_org(auth_headers: dict) -> None:
         assert client.put(f"/api/v1/admin/teams/{team_id}/profile/overrides/{KEY}", headers=auth_headers, json={"value": None}).status_code == 200
         assert _resolve(user_id) == 100
 
+        # Clean up the org override: the AuthNZ test DB is session-scoped, and the
+        # single-user admin stays a member of this org for the rest of the test
+        # session, so leaving this set would leak a 100 limit into any later test
+        # that checks this same user/key for an unlimited (None) result.
+        assert client.delete(f"/api/v1/admin/orgs/{org_id}/profile/overrides/{KEY}", headers=auth_headers).status_code == 200
+        assert _resolve(user_id) is None
+
 
 def test_group_override_rejects_bad_input(auth_headers: dict) -> None:
     """Unknown keys, storage, non-limits keys, invalid values and missing groups are refused."""

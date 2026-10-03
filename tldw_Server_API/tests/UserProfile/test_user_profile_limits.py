@@ -38,8 +38,18 @@ def _quotas_on(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _user_id(client: TestClient, auth_headers: dict) -> int:
-    """The single user's id."""
-    resp = client.get("/api/v1/users/me/profile", headers=auth_headers)
+    """The single user's id.
+
+    Scoped to ``sections=identity`` so this lookup doesn't also build the
+    profile's "quotas" section -- that section calls the audio quota helpers,
+    which call ``quota_resolver.user_quota`` and would otherwise prime the
+    resolver's 60s cache for this user before a test's own setup runs.
+    """
+    resp = client.get(
+        "/api/v1/users/me/profile",
+        params={"sections": "identity"},
+        headers=auth_headers,
+    )
     assert resp.status_code == 200
     return int(resp.json()["user"]["id"])
 
@@ -113,4 +123,14 @@ def test_profile_view_shows_most_generous_team_value(auth_headers: dict) -> None
 
         effective = asyncio.run(_setup())
         assert effective["limits.workflows_runs_per_day"] == {"value": 50, "source": "team"}
+
+        # These team overrides were written directly through the repo (there is
+        # no per-user key to invalidate), the same way the platform-admin
+        # team/org override endpoint writes them in production
+        # (admin_profiles_service.set_group_limit_override calls
+        # invalidate_all_quotas() right after its own repo upsert). Without this,
+        # the resolver's 60s cache -- already primed empty for this user by the
+        # _user_id() lookup above, before these teams/overrides existed -- would
+        # make the read below flake between a stale empty result and 50.
+        quota_resolver.invalidate_all()
         assert asyncio.run(quota_resolver.user_quota(user_id, "limits.workflows_runs_per_day")) == 50
