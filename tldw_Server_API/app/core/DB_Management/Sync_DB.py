@@ -8933,7 +8933,20 @@ class SyncDatabase:
         profile_id: str,
         connection: Any | None = None,
     ) -> bool:
-        """Return whether a staged home-authority row of the profile awaits finalization."""
+        """Return whether a staged home-authority row of the profile awaits finalization.
+
+        Args:
+            dataset_id: Sync dataset bound to the profile.
+            profile_id: Canonical profile whose relayed authority rows count.
+            connection: Optional open connection, so a caller already inside a
+                Sync transaction reads its own state; the caller keeps
+                ownership. Without one, the backend runs this single read on
+                a connection of its own.
+
+        Returns:
+            True when an accepted server-origin home-authority envelope for the
+            profile is still ``pending``; False otherwise.
+        """
 
         rows = self.execute(
             """SELECT routing_metadata_json FROM sync_envelopes
