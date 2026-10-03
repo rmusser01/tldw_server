@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.tenant_provisioning import provision_tenant as create_tenant_records
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import get_authnz_transaction_policy
 
 router = APIRouter(prefix="/provisioning", tags=["admin-provisioning"])
 
@@ -93,6 +94,7 @@ async def provision_tenant(
         try:
             user_id, org_id = await create_tenant_records(
                 pool,
+                actor_user_id=principal.user_id,
                 username=payload.username,
                 email=payload.email,
                 password_hash=get_password_service().hash_password(payload.password),

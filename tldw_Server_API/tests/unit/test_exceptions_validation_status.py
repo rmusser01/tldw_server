@@ -67,3 +67,7 @@ def test_user_profile_exceptions_are_centrally_owned_and_compatibly_reexported()
         core_exceptions.ProviderCredentialAliasConflictError.__module__
         == core_exceptions.__name__
     )
+    assert issubclass(
+        core_exceptions.ProviderCredentialAliasConflictError,
+        core_exceptions.TransactionPassthroughError,
+    )

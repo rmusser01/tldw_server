@@ -586,8 +586,8 @@ async def test_gateway_byok_endpoints_sqlite(tmp_path, monkeypatch):
         decrypt_byok_payload,
         loads_envelope,
     )
-    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
     from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
     from tldw_Server_API.app.main import app
 
     specs = {

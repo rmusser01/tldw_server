@@ -7,6 +7,10 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from tldw_Server_API.app.core.AuthNZ.platform_admin import (
+    PLATFORM_ADMIN_PERMISSIONS,
+    PLATFORM_ADMIN_ROLES,
+)
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     _execute_membership_scope_sql,
 )
@@ -1820,11 +1824,7 @@ class MembershipWriter:
         if actor is None or not _is_active(actor.get("is_active")):
             raise MembershipAuthorizationError()
         role = str(actor.get("role") or "").strip().lower()
-        legacy_admin = bool(actor.get("is_superuser")) or role in {
-            "owner",
-            "super_admin",
-            "admin",
-        }
+        legacy_admin = bool(actor.get("is_superuser")) or role in PLATFORM_ADMIN_ROLES
         if not legacy_admin and not await self._has_persisted_platform_admin(
             conn,
             actor_user_id,
@@ -1914,8 +1914,8 @@ class MembershipWriter:
                     permissions.add(permission)
                 else:
                     permissions.discard(permission)
-            return bool(role_names & {"owner", "super_admin", "admin"}) or bool(
-                permissions & {"*", "system.configure"}
+            return bool(role_names & PLATFORM_ADMIN_ROLES) or bool(
+                permissions & PLATFORM_ADMIN_PERMISSIONS
             )
         else:
             role_rows = await _sqlite_fetchall(
@@ -1957,8 +1957,8 @@ class MembershipWriter:
                 permissions.add(permission)
             else:
                 permissions.discard(permission)
-        return bool(role_names & {"owner", "super_admin", "admin"}) or bool(
-            permissions & {"*", "system.configure"}
+        return bool(role_names & PLATFORM_ADMIN_ROLES) or bool(
+            permissions & PLATFORM_ADMIN_PERMISSIONS
         )
 
     async def has_persisted_platform_admin(

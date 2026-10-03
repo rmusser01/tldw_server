@@ -1156,6 +1156,37 @@ async def test_writer_path_rejects_claim_only_platform_admin(monkeypatch, postgr
 
 
 @pytest.mark.parametrize("postgres", [False, True])
+@pytest.mark.parametrize("grant_source", ["role", "direct"])
+@pytest.mark.asyncio
+async def test_writer_path_accepts_canonical_admin_permission(
+    monkeypatch, postgres, grant_source,
+) -> None:
+    kwargs = (
+        {"role_permission_rows": ({"name": "admin"},)}
+        if grant_source == "role"
+        else {"direct_rows": ({"name": "admin", "granted": True},)}
+    )
+    result, _conn = await _apply_as_persisted_platform_admin(
+        monkeypatch, postgres=postgres, **kwargs,
+    )
+    assert result.mutation_results[0].found is True
+
+
+@pytest.mark.parametrize("postgres", [False, True])
+@pytest.mark.asyncio
+async def test_writer_path_honors_direct_deny_of_admin_permission(
+    monkeypatch, postgres,
+) -> None:
+    with pytest.raises(MembershipAuthorizationError):
+        await _apply_as_persisted_platform_admin(
+            monkeypatch,
+            postgres=postgres,
+            role_permission_rows=({"name": "admin"},),
+            direct_rows=({"name": "admin", "granted": False},),
+        )
+
+
+@pytest.mark.parametrize("postgres", [False, True])
 @pytest.mark.parametrize("actor_state", ["missing", "inactive"])
 @pytest.mark.asyncio
 async def test_organization_creation_authorization_rejects_unusable_actor(

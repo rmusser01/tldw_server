@@ -34,6 +34,7 @@ from tldw_Server_API.app.core.AuthNZ.membership_writer import (
     MembershipScopeNotFound,
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_members, list_team_members
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
     AuthnzOrgProviderSecretsRepo,
@@ -50,7 +51,6 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 router = APIRouter(prefix="", tags=["org-team-keys"])
 _ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
