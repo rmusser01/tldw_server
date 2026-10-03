@@ -1,5 +1,6 @@
 import pytest
 
+import tldw_Server_API.app.core.http_client as http_client_module
 from tldw_Server_API.app.core.Web_Scraping import WebSearch_APIs as ws
 from tldw_Server_API.app.core.WebSearch import Web_Search as legacy_ws
 
@@ -81,12 +82,17 @@ def test_brave_smoke_debug_logs_are_redacted_and_lazy(monkeypatch):
         },
     )
 
-    ws.test_search_brave()
+    result = ws.perform_websearch("brave", "cake", "US", "en", "en", 10)
 
     rendered = "\n".join(logger.debug_messages)
     assert "api_key=secret" not in rendered
     assert "token=secret" not in rendered
-    assert logger.lazy_calls >= 2
+    # Results themselves must pass through unredacted.
+    rendered_results = "\n".join(
+        str(item) for item in (result.get("results") or [])
+    )
+    assert "api_key=secret" in rendered_results
+    assert "token=secret" in rendered_results
 
 
 def test_duckduckgo_smoke_debug_logs_are_redacted(monkeypatch):
@@ -104,39 +110,56 @@ def test_duckduckgo_smoke_debug_logs_are_redacted(monkeypatch):
         ],
     )
 
-    ws.test_search_duckduckgo()
+    result = ws.perform_websearch("duckduckgo", "cake", "US", "en", "en", 10)
 
     rendered = "\n".join(logger.debug_messages)
     assert "token=secret" not in rendered
     assert "api_key=secret" not in rendered
+    # Results themselves must pass through unredacted.
+    rendered_results = "\n".join(
+        str(item) for item in (result.get("results") or [])
+    )
+    assert "token=secret" in rendered_results
+    assert "api_key=secret" in rendered_results
 
 
-@pytest.mark.parametrize(
-    ("helper_name", "provider_label"),
-    [
-        ("test_perform_websearch_google", "google"),
-        ("test_perform_websearch_brave", "brave"),
-        ("test_perform_websearch_ddg", "duckduckgo"),
-        ("test_perform_websearch_kagi", "kagi"),
-        ("test_perform_websearch_serper", "serper"),
-        ("test_perform_websearch_tavily", "tavily"),
-        ("test_perform_websearch_searx", "searx"),
-        ("test_perform_websearch_yandex", "yandex"),
-    ],
-)
-def test_provider_search_helpers_sanitize_logs(monkeypatch, capsys, helper_name, provider_label):
-    def fail_search(*_args, **_kwargs):
-        raise RuntimeError(_LEAKY_ERROR)
-
-    logger = _FakeLogger()
+def test_google_parse_lazy_debug_logs_are_redacted(monkeypatch):
+    """parse_google_results lazy-logs raw results; the lazy rendering must redact."""
+    logger = _FakeLazyLogger()
     monkeypatch.setattr(ws, "logging", logger)
-    monkeypatch.setattr(ws, "perform_websearch", fail_search)
+    monkeypatch.setattr(ws, "get_loaded_config", lambda: {
+        "search_engines": {
+            "google_search_api_url": "https://www.googleapis.com/customsearch/v1",
+            "google_search_api_key": "test-key",
+            "google_search_engine_id": "test-cx",
+            "google_simp_trad_chinese": "1",
+            "limit_google_search_to_country": False,
+            "google_safe_search": "off",
+        }
+    })
+    monkeypatch.setattr(ws, "_enforce_provider_outbound_policy", lambda *a, **k: None)
 
-    getattr(ws, helper_name)()
+    def _fake_fetch_json(*, method, url, params, timeout):
+        return {
+            "items": [
+                {
+                    "title": "T",
+                    "link": "https://example.com/path?api_key=secret",
+                    "snippet": "token=secret",
+                }
+            ]
+        }
 
-    assert capsys.readouterr().out == ""
-    assert logger.errors == [f"Error performing {provider_label} searches"]
-    _assert_safe_text(logger.errors[0])
+    monkeypatch.setattr(http_client_module, "fetch_json", _fake_fetch_json)
+
+    result = ws.perform_websearch("google", "cake", "US", "en", "en", 10)
+
+    assert result.get("processing_error") is None
+    assert logger.lazy_calls >= 1
+    rendered = "\n".join(logger.debug_messages)
+    assert "api_key=secret" not in rendered
+    assert "token=secret" not in rendered
+    assert "[REDACTED]" in rendered
 
 
 @pytest.mark.parametrize(
