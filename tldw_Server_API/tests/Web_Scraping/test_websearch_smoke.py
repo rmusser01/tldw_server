@@ -12,6 +12,7 @@ to live inside tldw_Server_API/app/core/Web_Scraping/WebSearch_APIs.py.
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import pytest
@@ -105,6 +106,10 @@ def test_google_sort_request_is_not_sent_as_unknown_param(captured_google_params
 
 
 @pytest.mark.external_api
+@pytest.mark.skipif(
+    os.getenv("RUN_EXTERNAL_API_TESTS", "0") != "1",
+    reason="External API tests disabled. Set RUN_EXTERNAL_API_TESTS=1 to enable.",
+)
 @pytest.mark.parametrize(
     "engine,kwargs",
     [

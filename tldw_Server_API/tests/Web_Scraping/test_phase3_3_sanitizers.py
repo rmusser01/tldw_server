@@ -62,7 +62,10 @@ class _FakeLazyLogger(_FakeLogger):
         self._lazy = False
 
 
-def test_brave_smoke_debug_logs_are_redacted_and_lazy(monkeypatch):
+def test_brave_smoke_debug_logs_are_redacted(monkeypatch):
+    # Tripwire: the brave path emits no debug logging today; if someone adds
+    # raw-result debug logs, they must not leak query-string secrets.
+    # (Lazy redaction is covered by the google parse test below.)
     logger = _FakeLazyLogger()
     monkeypatch.setattr(ws, "logging", logger)
     monkeypatch.setattr(

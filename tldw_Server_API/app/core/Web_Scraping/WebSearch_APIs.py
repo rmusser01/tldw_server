@@ -2318,10 +2318,11 @@ def search_web_google(
         if siteSearchFilter:
             params["siteSearchFilter"] = siteSearchFilter
         if sort_results_by:
-            # Google Custom Search JSON API has no `sort` parameter; sending
-            # one fails the whole request with HTTP 400. Drop it explicitly
-            # rather than returning an error for the entire search.
-            logging.debug("Ignoring sort_results_by=%r: not supported by Google CSE", sort_results_by)
+            # Google CSE only accepts date-based sort expressions (e.g.
+            # "date", "date:r:YYYYMMDD:YYYYMMDD"); arbitrary configured
+            # values such as "relevance" fail the whole request with
+            # HTTP 400. Drop rather than risk failing the search.
+            logging.debug("Ignoring sort_results_by=%r: not a valid Google CSE sort expression", sort_results_by)
 
         logging.info(
             f"Prepared parameters for Google Search: {_redact_websearch_log_value(params)}"
