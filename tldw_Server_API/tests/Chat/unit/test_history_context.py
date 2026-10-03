@@ -84,6 +84,33 @@ def test_saved_materialized_custom_preset_and_sampling_supersede_base():
     assert context["history_sampling"] == {"temperature": 0.2}
 
 
+def test_saved_generation_extensions_use_authoritative_snapshot_sampling():
+    from tldw_Server_API.app.core.Chat.history_context import project_history_context
+
+    captured = state()
+    participant = captured["behavior_snapshot"]["payload"]["participants"][0]
+    participant["prompt"]["prompt_relevant_extensions"]["character_extensions"] = {
+        "tldw": {"generation": {"temperature": "0.9", "stopStrings": ["END"]}}
+    }
+    participant["generation_defaults"]["sampling"] = {"temperature": 0.25, "stop": ["SAVED"]}
+
+    _card, _character_id, context = project_history_context(captured)
+
+    assert context["history_sampling"] == {"temperature": 0.25, "stop": ["SAVED"]}
+
+
+@pytest.mark.parametrize("generation", [{"future_effect": True}, "not a mapping", None])
+def test_saved_generation_extensions_reject_unknown_or_invalid_carriers(generation):
+    from tldw_Server_API.app.core.Chat.history_context import project_history_context
+
+    captured = state()
+    participant = captured["behavior_snapshot"]["payload"]["participants"][0]
+    participant["prompt"]["prompt_relevant_extensions"]["character_extensions"] = {"tldw": {"generation": generation}}
+
+    with pytest.raises(HistorySelectionError, match="character_extensions"):
+        project_history_context(captured)
+
+
 @pytest.mark.asyncio
 async def test_current_input_image_loss_is_rejected_before_admission():
     from fastapi import HTTPException

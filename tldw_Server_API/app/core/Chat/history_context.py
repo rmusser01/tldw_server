@@ -10,6 +10,9 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from tldw_Server_API.app.core.Character_Chat.modules.character_generation_presets import (
+    supports_saved_character_extensions,
+)
 from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
     ST_DEFAULT_PROMPT_PRESET,
     build_character_system_prompt,
@@ -138,10 +141,7 @@ def project_history_context(
     if set(extensions) - {"prompt_preset", "character_extensions"}:
         _unsupported("prompt_extensions")
     card_extensions = extensions.get("character_extensions") or {}
-    if set(card_extensions) - {"prompt_preset", "promptPreset", "tldw"} or set(card_extensions.get("tldw") or {}) - {
-        "prompt_preset",
-        "promptPreset",
-    }:
+    if not supports_saved_character_extensions(card_extensions):
         _unsupported("character_extensions")
     card = deepcopy({key: value for key, value in prompt.items() if key != "prompt_relevant_extensions"})
     card["name"] = participant["identity"]["name"]
