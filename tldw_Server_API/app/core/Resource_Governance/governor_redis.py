@@ -558,9 +558,11 @@ class RedisResourceGovernor(ResourceGovernor):
 
     async def _add_members(self, *, key: str, members: list[str], now: float, window: int) -> None:
         client = await self._client_get()
-        with contextlib.suppress(_RG_NONCRITICAL_EXCEPTIONS):
+        try:
             await client.zadd(key, dict.fromkeys(members, now))
             await client.expire(key, _window_ttl(window))
+        except _RG_NONCRITICAL_EXCEPTIONS:
+            logger.debug("RG window add/expire failed for key={}", key, exc_info=True)
 
     async def _zrem_members(self, *, key: str, members: list[str]) -> None:
         client = await self._client_get()

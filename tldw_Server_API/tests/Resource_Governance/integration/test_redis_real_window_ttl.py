@@ -8,7 +8,7 @@ import pytest
 from tldw_Server_API.app.core.Resource_Governance import RedisResourceGovernor, RGRequest, governor_redis
 from tldw_Server_API.app.core.Resource_Governance.governor_redis import _WINDOW_TTL_MARGIN_S, _window_ttl
 
-pytestmark = pytest.mark.rate_limit
+pytestmark = [pytest.mark.integration, pytest.mark.rate_limit]
 
 _REQ = RGRequest(entity="user:idle", categories={"requests": {"units": 1}, "tokens": {"units": 1}}, tags={"policy_id": "pttl"})
 

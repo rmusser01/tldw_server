@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timezone
 
 import pytest
-pytestmark = pytest.mark.rate_limit
+pytestmark = [pytest.mark.rate_limit, pytest.mark.unit]
 
 from tldw_Server_API.app.core.Resource_Governance import RedisResourceGovernor, RGRequest
 from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import ResourceDailyLedger, LedgerEntry
