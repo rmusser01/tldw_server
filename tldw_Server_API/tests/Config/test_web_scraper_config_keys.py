@@ -1,5 +1,9 @@
 import configparser
 
+import pytest
+
+pytestmark = pytest.mark.unit
+
 
 def test_web_scraper_router_config_keys(monkeypatch, tmp_path):
     from tldw_Server_API.app.core import config as cfg
@@ -91,7 +95,8 @@ def test_web_scraper_transport_uses_supplied_environment(monkeypatch, tmp_path):
     assert data["web_scraper"]["web_browser_transport_mode"] == "auto"
 
 
-def test_web_scraper_preflight_config_keys_are_retained(monkeypatch):
+def test_web_scraper_preflight_config_keys_are_retained(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Retain every explicit preflight analyzer option in the scraper mapping."""
     from tldw_Server_API.app.core import config as cfg
 
     configured = {
@@ -113,7 +118,8 @@ def test_web_scraper_preflight_config_keys_are_retained(monkeypatch):
     assert {key: web_scraper[key] for key in configured} == configured
 
 
-def test_web_scraper_absent_external_tools_config_remains_absent(monkeypatch):
+def test_web_scraper_absent_external_tools_config_remains_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Do not invent the optional external-tools setting when it is absent."""
     from tldw_Server_API.app.core import config as cfg
 
     parser = configparser.ConfigParser()
@@ -125,7 +131,10 @@ def test_web_scraper_absent_external_tools_config_remains_absent(monkeypatch):
     assert "web_scraper_preflight_enable_external_tools" not in web_scraper
 
 
-def test_web_scraper_raw_section_values_do_not_break_preflight_config(monkeypatch):
+def test_web_scraper_raw_section_values_do_not_break_preflight_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Preserve raw percent-bearing section values without interpolation errors."""
     from tldw_Server_API.app.core import config as cfg
 
     parser = configparser.ConfigParser()
@@ -140,7 +149,8 @@ def test_web_scraper_raw_section_values_do_not_break_preflight_config(monkeypatc
     assert web_scraper["web_scraper_future_secret"] == "100%private"
 
 
-def test_web_scraper_config_excludes_default_only_options(monkeypatch):
+def test_web_scraper_config_excludes_default_only_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exclude ConfigParser defaults that are not explicit scraper options."""
     from tldw_Server_API.app.core import config as cfg
 
     parser = configparser.ConfigParser(defaults={"unrelated_default_secret": "do-not-export"})
@@ -152,7 +162,8 @@ def test_web_scraper_config_excludes_default_only_options(monkeypatch):
     assert "unrelated_default_secret" not in web_scraper
 
 
-def test_web_scraper_config_retains_explicit_override_of_default(monkeypatch):
+def test_web_scraper_config_retains_explicit_override_of_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep an explicit scraper value when it overrides a parser default."""
     from tldw_Server_API.app.core import config as cfg
 
     parser = configparser.ConfigParser(defaults={"web_scraper_preflight_scan_depth": "normal"})

@@ -490,9 +490,11 @@ def test_default_regex_result_survives_later_failure(monkeypatch: pytest.MonkeyP
     ]
 
 
+@pytest.mark.unit
 def test_default_regex_cannot_become_primary_when_no_later_strategy_runs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Treat inferred regex matches as enrichment even when no fallback runs."""
     regex_result = _result(
         success=True,
         content="email",
