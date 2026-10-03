@@ -217,8 +217,8 @@ Months are calendar months in UTC.
 ## Known defects outside this spec
 
 These were found during review. They are pre-existing bugs on the hosted billing path and are filed as separate backlog tasks:
-- **Transcription minutes are never counted at org level.** `_get_transcription_minutes_month` reads ledger `org/minutes`, which nothing writes (transcription writes `org/cost_units` and `user/minutes`). The monthly limit only sees the 60 s in-memory delta.
-- **LLM token usage probably reads 0 on Postgres.** `_get_llm_tokens_month` passes a tz-aware datetime to a `TIMESTAMP` column. asyncpg raises `DataError`, which is swallowed as noncritical.
+- **TASK-13432: transcription minutes are never counted at org level.** `_get_transcription_minutes_month` reads ledger `org/minutes`, which nothing writes (transcription writes `org/cost_units` and `user/minutes`). The monthly limit only sees the 60 s in-memory delta.
+- **TASK-13433: LLM token usage probably reads 0 on Postgres.** `_get_llm_tokens_month` passes a tz-aware datetime to a `TIMESTAMP` column. asyncpg raises `DataError`, which is swallowed as noncritical.
 
 ## Testing
 
