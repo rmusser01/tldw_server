@@ -6,10 +6,13 @@ unlimited users cost no query. Sites raise their own existing errors.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+from loguru import logger
 
 from tldw_Server_API.app.core.Usage.quota_resolver import user_quota
 
@@ -46,7 +49,13 @@ async def check_usage(
     limit = await user_quota(user_id, key)
     if limit is None:
         return UNLIMITED
-    used = float(await counter())
+    try:
+        used = float(await counter())
+    except Exception:  # noqa: BLE001 - a counter failure must not block requests (spec 2 §2)
+        logger.opt(exception=True).warning(
+            "Usage quota counter failed for key={} user_id={}; treating as unlimited", key, user_id
+        )
+        return UNLIMITED
     return QuotaDecision(allowed=used + float(requested) <= float(limit), limit=limit, used=used)
 
 
@@ -61,12 +70,35 @@ def _utc_today() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
-async def _ledger() -> Any:
-    from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import ResourceDailyLedger
+_cached_ledger: Any | None = None
+_cached_ledger_lock = asyncio.Lock()
 
-    ledger = ResourceDailyLedger()
-    await ledger.initialize()
-    return ledger
+
+async def _ledger() -> Any:
+    """The shared, lazily-initialized ResourceDailyLedger (cached at module level).
+
+    Re-running ``initialize()`` (DDL in a write transaction, plus an INFO log)
+    on every call was wasteful; cache one instance, the way
+    ``Workflows.daily_ledger.get_workflows_daily_ledger`` does.
+    """
+    global _cached_ledger
+    if _cached_ledger is not None:
+        return _cached_ledger
+    async with _cached_ledger_lock:
+        if _cached_ledger is not None:
+            return _cached_ledger
+        from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import ResourceDailyLedger
+
+        ledger = ResourceDailyLedger()
+        await ledger.initialize()
+        _cached_ledger = ledger
+        return _cached_ledger
+
+
+def reset_ledger_cache() -> None:
+    """Test hook: drop the cached ledger instance so a new DB target takes effect."""
+    global _cached_ledger
+    _cached_ledger = None
 
 
 async def ledger_used_today(entity_value: str, category: str) -> float:
