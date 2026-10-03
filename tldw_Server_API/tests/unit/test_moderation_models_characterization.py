@@ -251,10 +251,14 @@ def test_compiler_ignores_legacy_model_type_hook():
         def __init__(self, **values):
             self.values = values
 
+    class ReplacementRule:
+        def __init__(self, **values):
+            self.values = values
+
     class ReplacementCompiler(PolicyCompiler):
         @staticmethod
         def policy_types():
-            return ReplacementPolicy, PatternRule
+            return ReplacementPolicy, ReplacementRule
 
     compiler = ReplacementCompiler()
     global_result = compiler.compile_global(
@@ -290,6 +294,10 @@ def test_compiler_ignores_legacy_model_type_hook():
 
 
 def test_evaluator_ignores_legacy_model_type_hook():
+    class ReplacementRule:
+        def __init__(self, **values):
+            self.values = values
+
     class ReplacementResult:
         def __init__(self, **values):
             self.__dict__.update(values)
@@ -297,25 +305,42 @@ def test_evaluator_ignores_legacy_model_type_hook():
     class ReplacementEvaluator(PolicyEvaluator):
         @staticmethod
         def policy_types():
-            return ModerationPolicy, PatternRule, ReplacementResult
+            return ModerationPolicy, ReplacementRule, ReplacementResult
 
-    result = ReplacementEvaluator().evaluate_text(
+    rule = PatternRule(
+        regex=re.compile("secret"),
+        action="redact",
+        replacement="[RULE]",
+        phase="input",
+        categories={"confidential"},
+    )
+    policy = ModerationPolicy(enabled=True, block_patterns=[rule])
+    evaluator = ReplacementEvaluator()
+
+    snippet = evaluator.build_sanitized_snippet(
         "secret",
-        ModerationPolicy(
-            enabled=True,
-            block_patterns=[
-                PatternRule(
-                    regex=re.compile("secret"),
-                    action="block",
-                    phase="input",
-                    categories={"confidential"},
-                )
-            ],
-        ),
+        policy,
+        (0, 6),
+        pattern="secret",
+    )
+    redacted = evaluator.redact_text("secret", policy, "input", _LIMITS)
+    redacted_with_count = evaluator.redact_text_with_count(
+        "secret",
+        policy,
         "input",
         _LIMITS,
-        include_redacted_text=False,
+    )
+    result = evaluator.evaluate_text(
+        "secret",
+        policy,
+        "input",
+        _LIMITS,
+        include_redacted_text=True,
     )
 
+    assert snippet == "[RULE]"
+    assert redacted == "[RULE]"
+    assert redacted_with_count == ("[RULE]", 1)
     assert type(result) is ModerationEvaluationResult
-    assert result.action == "block"
+    assert result.action == "redact"
+    assert result.redacted_text == "[RULE]"
